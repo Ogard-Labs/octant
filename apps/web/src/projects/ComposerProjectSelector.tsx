@@ -1,7 +1,15 @@
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type { ProjectId } from "@octant/contracts/projects";
-import { ArrowLeft, Check, FolderGit2, FolderOpen, FolderPlus, Search } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  FolderGit2,
+  FolderOpen,
+  FolderPlus,
+  Network,
+  Search,
+} from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -39,6 +47,14 @@ export type ComposerProjectEntry =
     }
   | { readonly kind: "unfiled" }
   | { readonly kind: "add-folder" }
+  /** A Code Project bound to a folder on one of the person's servers, listed with where it is. */
+  | {
+      readonly kind: "server-project";
+      readonly projectId: ProjectId;
+      readonly displayName: string;
+      /** `alias:folder`. */
+      readonly location: string;
+    }
   | {
       readonly kind: "default-folder";
       readonly rootPath: string;
@@ -117,6 +133,16 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
           entry.rootPath.toLowerCase().includes(trimmed)),
     );
   }, [props.entries, query]);
+  const serverEntries = useMemo(() => {
+    const trimmed = query.trim().toLowerCase();
+    return props.entries.filter(
+      (entry): entry is Extract<ComposerProjectEntry, { kind: "server-project" }> =>
+        entry.kind === "server-project" &&
+        (trimmed === "" ||
+          entry.displayName.toLowerCase().includes(trimmed) ||
+          entry.location.toLowerCase().includes(trimmed)),
+    );
+  }, [props.entries, query]);
   const actionEntries = useMemo((): ReadonlyArray<MenuEntry> => {
     const actions: MenuEntry[] = props.entries.filter(
       (entry) =>
@@ -126,8 +152,8 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
     return actions;
   }, [github, props.entries]);
   const flatEntries = useMemo(
-    (): ReadonlyArray<MenuEntry> => [...savedEntries, ...actionEntries],
-    [actionEntries, savedEntries],
+    (): ReadonlyArray<MenuEntry> => [...savedEntries, ...serverEntries, ...actionEntries],
+    [actionEntries, savedEntries, serverEntries],
   );
 
   const selectionLabel =
@@ -311,11 +337,11 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
               </label>
               <div aria-label="Project options" id={listboxId} role="listbox">
                 <div className="composer-folder-selector__saved">
-                  {savedEntries.length === 0 ? (
+                  {savedEntries.length === 0 && serverEntries.length === 0 ? (
                     <p className="octant-popover-empty" role="status">
                       {query.trim() === "" ? "No Projects yet." : "No Projects match your search."}
                     </p>
-                  ) : (
+                  ) : savedEntries.length === 0 ? null : (
                     <p aria-hidden="true" className="octant-popover-group">
                       Projects
                     </p>
@@ -358,10 +384,53 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                     );
                   })}
                 </div>
+                {serverEntries.length === 0 ? null : (
+                  <div className="composer-folder-selector__saved">
+                    <p aria-hidden="true" className="octant-popover-group">
+                      On your servers
+                    </p>
+                    {serverEntries.map((entry, offset) => {
+                      const index = savedEntries.length + offset;
+                      const isSelected =
+                        String(entry.projectId) === String(props.selection?.projectId);
+                      return (
+                        <OctantButton
+                          aria-selected={isSelected}
+                          className={optionClass(index)}
+                          id={`${listboxId}-option-${index}`}
+                          key={String(entry.projectId)}
+                          onClick={() => activate(entry)}
+                          role="option"
+                          title={entry.location}
+                          type="button"
+                          variant="ghost"
+                        >
+                          <Network aria-hidden="true" size={14} strokeWidth={1.8} />
+                          <span className="composer-folder-selector__option-copy">
+                            <span className="composer-folder-selector__option-name">
+                              {entry.displayName}
+                            </span>
+                            <span className="composer-folder-selector__option-path">
+                              {entry.location}
+                            </span>
+                          </span>
+                          {isSelected ? (
+                            <Check
+                              aria-hidden="true"
+                              className="octant-popover-option__check"
+                              size={14}
+                              strokeWidth={2}
+                            />
+                          ) : null}
+                        </OctantButton>
+                      );
+                    })}
+                  </div>
+                )}
                 {actionEntries.length === 0 ? null : (
                   <div className="composer-folder-selector__actions">
                     {actionEntries.map((entry, offset) => {
-                      const index = savedEntries.length + offset;
+                      const index = savedEntries.length + serverEntries.length + offset;
                       const isSelected = entry.kind === "unfiled" && props.selection === undefined;
                       const label =
                         entry.kind === "add-github"

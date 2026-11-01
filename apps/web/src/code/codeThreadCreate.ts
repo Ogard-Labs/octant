@@ -51,6 +51,18 @@ export type CodeThreadCreatePlan =
 export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCreatePlan {
   const workspace: CodeNewThreadWorkspace = input.composer.workspace;
   const deliveryTarget = { ...input.composer.deliveryTarget, confirmedAt: input.timestamp };
+  const remoteRoot = input.prepared.checkout.kind === "remote-root";
+
+  // A remote root is a folder on a server: a managed worktree would be created
+  // by this host's Git in a folder of its own, so the thread works in the bound
+  // folder instead.
+  if (remoteRoot && workspace === "managed-worktree") {
+    return {
+      kind: "rejected",
+      message:
+        "A thread in a Project on a server works in the folder bound there. Choose Current checkout to start it.",
+    };
+  }
 
   if (workspace === "managed-worktree") {
     return {
@@ -89,10 +101,12 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
     };
   }
 
-  // A server-admitted plain folder has no Git head. Detached repository heads
-  // still cannot supply the checked-out branch required for Git delivery.
+  // A server-admitted plain folder has no Git head, and a remote root has none
+  // this host reads. Detached repository heads still cannot supply the
+  // checked-out branch required for Git delivery.
   if (
     input.prepared.checkout.kind !== "plain-folder" &&
+    !remoteRoot &&
     input.prepared.checkout.head.kind !== "branch"
   ) {
     return {

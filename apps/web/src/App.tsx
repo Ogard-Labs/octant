@@ -318,6 +318,11 @@ import { useProjectController } from "./projects/useProjectController";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import { runProjectAction as runSavedProjectAction } from "./projects/runProjectAction";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
+import {
+  ServerCodeProjectsContext,
+  serverCodeProjectFor,
+  useServerCodeProjectsSource,
+} from "./projects/serverProjectEntries";
 import { useProviderController } from "./providers/useProviderController";
 import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
@@ -1529,6 +1534,12 @@ function LaunchedShell(
     workTurnClient,
   } = launchedClients;
   const machineChanges = useMachineChangeFeed(machineChangeClient);
+  // Code Projects on the person's servers live in their own catalog, not the
+  // Project catalog the sidebar and the composer otherwise read.
+  const serverCodeProjects = useServerCodeProjectsSource(
+    launchedClients.serverProjectsClient,
+    launchedClients.shieldServersClient,
+  );
   // The auxiliary readers' revision context must not change identity on a
   // navigation or text notice, so it memoizes the four topics on its own.
   const threadActivityRevisions = useMemo(
@@ -2572,8 +2583,23 @@ function LaunchedShell(
     hasWrittenDocument: dockHasWrittenDocument,
   } = observedDockToolCapabilities;
   const writtenCanvasKind = writtenCanvasForDock?.kind;
+  // A thread in a server Project keeps only the dock tools that act on nothing
+  // of this host; the host refuses the rest for it.
+  const dockServerCheckout =
+    activeMode === "code" &&
+    activeCodeThreadId !== undefined &&
+    serverCodeProjectFor(
+      serverCodeProjects.projects,
+      codeController.activeView !== undefined &&
+        String(codeController.activeView.thread.id) === String(activeCodeThreadId)
+        ? codeController.activeView.thread.projectId
+        : codeController.bootstrap?.threads.find(
+            (thread) => String(thread.id) === String(activeCodeThreadId),
+          )?.projectId,
+    ) !== undefined;
   const dockToolCapabilities = useMemo<DockToolCapabilities>(
     () => ({
+      ...(dockServerCheckout ? { serverCheckout: true } : {}),
       addAgentInvoked: dockAddAgentInvoked,
       hasAppleSimulator: dockHasAppleSimulator,
       hasCanvasDocument: writtenCanvasKind === "canvas" ? true : dockHasCanvasDocument,
@@ -2592,6 +2618,7 @@ function LaunchedShell(
       dockHasExistingThread,
       dockHasPlanArtifact,
       dockHasWrittenDocument,
+      dockServerCheckout,
       writtenCanvasKind,
     ],
   );
@@ -5455,6 +5482,11 @@ function LaunchedShell(
   }
 
   async function openDraftInProject(projectId: ProjectId) {
+    const serverProject = serverCodeProjectFor(serverCodeProjects.projects, projectId);
+    if (serverProject !== undefined) {
+      await openDraftInKnownProject(serverProject.projectId, "code", serverProject.name);
+      return;
+    }
     const project = projectController.allProjects.find((candidate) => candidate.id === projectId);
     if (project === undefined || project.lifecycle !== "active") return;
     await openDraftInKnownProject(project.id, project.type, project.name);
@@ -5901,23 +5933,32 @@ function LaunchedShell(
         onRefuse: (reason) => setDraftError(reason),
       });
       if (destinationHostId === undefined) return false;
-      const resolution = resolveDraftProject({
-        draftProjectId,
-        candidates: projectController.projects,
-        activeProject: projectController.activeProject,
-      });
-      if (resolution.kind === "unresolved-selection") {
+      // A server Project is not in the Project catalog. The host prepares its
+      // checkout and creates its thread through the same Code commands, and
+      // refuses whatever the composer should not have offered.
+      const serverProject = serverCodeProjectFor(serverCodeProjects.projects, draftProjectId);
+      const resolution =
+        serverProject === undefined
+          ? resolveDraftProject({
+              draftProjectId,
+              candidates: projectController.projects,
+              activeProject: projectController.activeProject,
+            })
+          : undefined;
+      if (resolution?.kind === "unresolved-selection") {
         setDraftError(UNRESOLVED_DRAFT_PROJECT_MESSAGE);
         return false;
       }
-      const localProject = resolution.project;
+      const localProject = resolution?.project;
       const project =
-        localProject?.type === "code"
-          ? {
-              id: localProject.id,
-              name: localProject.name,
-            }
-          : undefined;
+        serverProject !== undefined
+          ? { id: serverProject.projectId, name: serverProject.name }
+          : localProject?.type === "code"
+            ? {
+                id: localProject.id,
+                name: localProject.name,
+              }
+            : undefined;
       if (project === undefined) {
         setDraftError("Choose a Code Project before starting a thread.");
         return false;
@@ -7405,7 +7446,11 @@ function LaunchedShell(
                                     client={launchedClients.providerUsageLimitsClient}
                                   >
                                     <HostPlatformContext.Provider value={hostPlatform}>
-                                      {shell}
+                                      <ServerCodeProjectsContext.Provider
+                                        value={serverCodeProjects}
+                                      >
+                                        {shell}
+                                      </ServerCodeProjectsContext.Provider>
                                     </HostPlatformContext.Provider>
                                   </PlanUsageProvider>
                                 </HostFederationStackContext.Provider>

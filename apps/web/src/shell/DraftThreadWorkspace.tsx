@@ -109,6 +109,11 @@ import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { HomeDashboard } from "../home/HomeDashboard";
 import type { HomeCardDefinition } from "../home/homeCards";
 import type { OctantHostBridge } from "./hostBridge";
+import {
+  serverCodeProjectFor,
+  serverProjectEntries,
+  useServerCodeProjects,
+} from "../projects/serverProjectEntries";
 import { WorkKindSwitch } from "./WorkKindSwitch";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
@@ -553,12 +558,24 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const selectedProject = compatibleProjects.find(
     (project) => String(project.id) === String(selectedProjectId),
   );
+  // A server Project is the server catalog's, not the Project catalog's. Only
+  // Code offers one.
+  const serverCodeProjects = useServerCodeProjects().projects;
+  const offeredServerProjects = props.mode === "code" ? serverCodeProjects : [];
+  const selectedServerProject =
+    selectedProject === undefined
+      ? serverCodeProjectFor(offeredServerProjects, selectedProjectId)
+      : undefined;
   const projectSelection =
     selectedProjectId === undefined
       ? undefined
       : {
           projectId: selectedProjectId,
-          displayName: selectedProject?.name ?? selectedProjectLabel ?? "Selected Project",
+          displayName:
+            selectedProject?.name ??
+            selectedServerProject?.name ??
+            selectedProjectLabel ??
+            "Selected Project",
         };
   const defaultFolderEntry =
     props.defaultFolder !== undefined && props.onEnsureDefaultProject !== undefined
@@ -577,6 +594,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         } satisfies ComposerProjectEntry)
       : undefined;
   const projectEntries: ReadonlyArray<ComposerProjectEntry> = [
+    ...serverProjectEntries(offeredServerProjects),
     ...compatibleProjects.map(
       (project): ComposerProjectEntry => ({
         kind: "saved-project",
@@ -593,13 +611,17 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         ]),
   ];
   const selectedProjectName =
-    selectedProjectId === undefined ? undefined : (selectedProject?.name ?? selectedProjectLabel);
+    selectedProjectId === undefined
+      ? undefined
+      : (selectedProject?.name ?? selectedServerProject?.name ?? selectedProjectLabel);
   const selectedProjectRoot =
     selectedProjectId === undefined
       ? undefined
-      : selectedProject === undefined || selectedProject.type === "chat"
-        ? props.projectRoot
-        : selectedProject.binding.canonicalRoot;
+      : selectedServerProject !== undefined
+        ? selectedServerProject.location
+        : selectedProject === undefined || selectedProject.type === "chat"
+          ? props.projectRoot
+          : selectedProject.binding.canonicalRoot;
   const connectedBaseRepository =
     selectedProject?.type === "code" && selectedProject.connectedRepository !== undefined
       ? `${selectedProject.connectedRepository.owner}/${selectedProject.connectedRepository.repository}`
@@ -616,7 +638,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     ...(props.codeExecute === undefined ? {} : { execute: props.codeExecute }),
     ...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId }),
     enabled:
-      props.mode === "code" && selectedProjectId !== undefined && props.codeExecute !== undefined,
+      props.mode === "code" &&
+      selectedProjectId !== undefined &&
+      selectedServerProject === undefined &&
+      props.codeExecute !== undefined,
   });
 
   // A GitHub repository becomes a Project through the Project menu's "New
@@ -671,7 +696,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         entries={projectEntries}
         onAddFolder={addFolder}
         onSelect={(entry) => {
-          if (entry.kind === "saved-project") {
+          if (entry.kind === "saved-project" || entry.kind === "server-project") {
             selectProject(entry.projectId);
             setSelectedProjectLabel(entry.displayName);
           } else if (entry.kind === "unfiled") {
@@ -802,7 +827,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(promptRequest === undefined ? {} : { promptRequest })}
         {...hostSelectorBinding}
         {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
-        projectAvailable={selectedProject !== undefined}
+        projectAvailable={selectedProject !== undefined || selectedServerProject !== undefined}
+        {...(selectedServerProject === undefined
+          ? {}
+          : { server: { location: selectedServerProject.location } })}
         {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
         {...(selectedProjectRoot === undefined ? {} : { projectRoot: selectedProjectRoot })}
         {...(connectedBaseRepository === undefined

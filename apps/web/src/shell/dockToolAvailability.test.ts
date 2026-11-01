@@ -111,4 +111,25 @@ describe("which live tools the dock may offer", () => {
       }),
     ).toBe(true);
   });
+
+  it("keeps only the tools that act on nothing of this host for a thread in a server Project", () => {
+    const capabilities = {
+      hasPlanArtifact: true,
+      hasDelivery: true,
+      hasCanvasDocument: true,
+      hasWrittenDocument: true,
+      hasAppleSimulator: true,
+      hasChildRuns: true,
+      addAgentInvoked: true,
+      hasExistingThread: true,
+      serverCheckout: true,
+    } as const;
+    for (const surface of ["plan", "canvas", "document", "side-chat", "agents"] as const) {
+      expect(isDockToolLaunchable(surface, capabilities)).toBe(true);
+    }
+    for (const surface of ["delivery", "ios-simulator", "terminal", "browser"] as const) {
+      expect(isDockToolLaunchable(surface as never, capabilities)).toBe(false);
+      expect(isDockToolStillOpenable(surface as never, capabilities)).toBe(false);
+    }
+  });
 });
