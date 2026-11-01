@@ -301,7 +301,7 @@ export function redactedBrowserUrl(value: string): string {
     const url = new URL(value);
     url.username = "";
     url.password = "";
-    for (const key of [...url.searchParams.keys()]) {
+    for (const key of Array.from(url.searchParams.keys())) {
       if (/(?:token|secret|password|passcode|code|key|credential|auth)/i.test(key)) {
         url.searchParams.set(key, "redacted");
       }
