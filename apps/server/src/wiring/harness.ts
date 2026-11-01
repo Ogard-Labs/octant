@@ -6,6 +6,7 @@ import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHar
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
+import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import { createRuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
@@ -14,6 +15,7 @@ import {
   type CodeThread,
   decodeCodeThreadId,
   decodeNativeHarnessTurnId,
+  decodeWorkThreadId,
   LOCAL_HOST_ID,
   type OctantMode,
   type ProviderInstanceId,
@@ -85,15 +87,18 @@ import {
   readRunbookFile,
   ShieldServerStore,
 } from "../shield/shieldServerStore";
+import { awsCliEnvironment } from "../secretStores/awsCliEnvironment";
+import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 
-export type HarnessDependencies = Pick<ServerStart, "persistence"> &
+export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
     | "agentRunParentAuthority"
     | "agentRunPersistence"
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
+    | "personMemory"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -171,6 +176,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessRoutingStore,
     nativeHarnessSessions,
     nativeHarnessTranscripts,
+    options,
     persistence,
     providerDataDirectory,
     runningWorkTurnAccess,
@@ -181,6 +187,7 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     workThreadProjection,
     workTurnProjection,
+    personMemory,
   } = deps;
 
   // Octant Shield's server registry: SSH to these servers is judged by their
@@ -195,6 +202,16 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   shieldServerStore.load();
   const sshAgentSocket = () => personSshAgentSocket(process.env.SSH_AUTH_SOCK);
+  // The AWS command line's short-lived session, when the person pointed its
+  // key pair at a linked secret store; the long-lived pair stays in the broker.
+  const secretStoreBroker =
+    options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+      ? undefined
+      : makeSecretStoreBrokerClient({
+          url: options.credentialBrokerUrl,
+          token: options.credentialBrokerToken,
+        });
+  const cloudCliEnvironment = () => awsCliEnvironment(secretStoreBroker);
   const shieldServerRoutes = createShieldServerRouteHandler({
     windowAuthorityStore,
     store: shieldServerStore,
@@ -295,6 +312,7 @@ export function wireHarness(deps: HarnessDependencies) {
             process: harnessProcessPort,
             scriptDirectory: harnessScriptDirectory,
             sshAgentSocket,
+            cloudCliEnvironment,
             // Below Full access a command reaches a registered server only
             // through the host's relays and agent socket: ports Seatbelt
             // opens on macOS, sockets the capsule's forwarder dials on Linux.
@@ -669,6 +687,39 @@ export function wireHarness(deps: HarnessDependencies) {
     scratchRoot: harnessWorkDirectory,
   });
   shieldHolder.port = hostShield;
+  const personMemorySweep = createPersonMemorySweep({
+    persistence,
+    store: personMemory,
+    workThreads: {
+      list: () =>
+        workThreadProjection.list().map((thread) => ({
+          id: String(thread.id),
+          title: thread.title,
+          projectId: String(thread.projectId),
+          providerInstanceId: thread.providerInstanceId,
+          modelId: thread.modelId,
+          completedAt: thread.completedAt,
+        })),
+    },
+    // What the person wrote: each turn's prompt, leaving out the turns the
+    // host accepted to deliver a subagent's result.
+    workPersonMessages: (threadId, limit) =>
+      workTurnProjection
+        .listForThread(decodeWorkThreadId(threadId))
+        .filter((turn) => turn.delivery === undefined)
+        .map((turn) => turn.prompt)
+        .slice(-limit),
+    codePersonMessages: (threadId, limit) =>
+      codeBoardEventStore
+        .personPromptsForThread(decodeCodeThreadId(threadId), limit)
+        .flatMap((prompt) => {
+          const text = codeEvidence.read(prompt);
+          return text === undefined ? [] : [text];
+        }),
+    resolveDriver: resolveConfiguredDriver,
+    scratchRoot: harnessWorkDirectory,
+    protectedSecretPath: (path) => isProtectedSecretPath(path),
+  });
   // A provider runtime's own shell reports a command only as it starts, so
   // its pushes and pull-request changes are recorded, never stopped.
   const runtimeForgeChanges = createRuntimeForgeChangeObserver({
@@ -758,16 +809,19 @@ export function wireHarness(deps: HarnessDependencies) {
       process: harnessProcessPort,
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
+      cloudCliEnvironment,
     }),
     offlineShell: createNativeHarnessShell({
       process: harnessOfflineProcessPort,
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
+      cloudCliEnvironment,
     }),
     fullAccessShell: createNativeHarnessShell({
       process: harnessFullAccessProcessPort,
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
+      cloudCliEnvironment,
     }),
     ...(harnessProxiedShell === undefined
       ? {}
@@ -826,6 +880,7 @@ export function wireHarness(deps: HarnessDependencies) {
   // what later areas add.
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   return {
+    personMemorySweep,
     runtimeForgeChanges,
     followUpCreation,
     restartContinuation,

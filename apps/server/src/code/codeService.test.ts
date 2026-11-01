@@ -4108,6 +4108,53 @@ describe("CodeService.watchFiles", () => {
     expect(watch).not.toHaveBeenCalled();
   });
 
+  it("watches an extra folder from its own root when the authority places the request there", async () => {
+    const watch = vi.fn(() => (async function* (): AsyncGenerator<never> {})());
+    const fixture = serviceFixture({ watcher: { watch } });
+    fixture.roots.resolve.mockResolvedValue({
+      fileId: ids.file,
+      rootPath: "/private/extra",
+      rootIdentity: { device: "7", inode: "9" },
+      folderRoot: true,
+    } as never);
+
+    await fixture.service.watchFiles(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+      folder: "/private/extra" as never,
+    });
+
+    expect(fixture.roots.resolve).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      "/private/extra",
+    );
+    expect(watch).toHaveBeenCalledWith(expect.objectContaining({ rootPath: "/private/extra" }));
+  });
+
+  it("refuses to watch a path the authority does not place at the root of an extra folder", async () => {
+    const watch = vi.fn();
+    const fixture = serviceFixture({ watcher: { watch } });
+    // A path inside an extra folder, or one the authority resolved into the
+    // checkout, is not a folder to watch.
+    fixture.roots.resolve.mockResolvedValue({
+      fileId: ids.file,
+      rootPath: "/private/extra",
+      rootIdentity: { device: "7", inode: "9" },
+      relativePath: "src",
+    } as never);
+
+    await expect(
+      fixture.service.watchFiles(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        folder: "/private/extra/src" as never,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(watch).not.toHaveBeenCalled();
+  });
+
   it("ends the watches a revoked window left open", async () => {
     let observed: AbortSignal | undefined;
     const fixture = serviceFixture({

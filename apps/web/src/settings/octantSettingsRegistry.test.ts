@@ -28,6 +28,7 @@ describe("octantSettingsRegistry", () => {
       "linear",
       "permissions",
       "access",
+      "memory",
       "secret-stores",
       "data",
       "sync",
@@ -91,7 +92,13 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("secret-stores")?.label).toBe("Secret stores");
     expect(section("secret-stores")?.scope).toBe("host");
-    expect(ids("secret-stores")).toEqual(["secret-store-link", "secret-store-check"]);
+    expect(ids("secret-stores")).toEqual([
+      "secret-store-link",
+      "secret-store-check",
+      "secret-store-aws-cli",
+      "secret-store-aws-cli-key-id",
+      "secret-store-aws-cli-secret",
+    ]);
     expect(section("data")?.label).toBe("Data & storage");
     expect(section("data")?.scope).toBe("host");
     expect(ids("data")).toEqual([

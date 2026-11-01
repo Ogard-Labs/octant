@@ -39,9 +39,14 @@ export type WorkTurnContextPlan =
 
 export interface WorkTurnContextContribution {
   readonly text: string;
-  readonly sourceKind: "message" | "file" | "instruction" | "summary";
+  readonly sourceKind: "message" | "file" | "instruction" | "summary" | "memory";
   readonly referenceId: string;
-  readonly category: "conversation" | "current-request" | "workspace-context" | "octant-policy";
+  readonly category:
+    | "conversation"
+    | "current-request"
+    | "workspace-context"
+    | "octant-policy"
+    | "person-memory";
   readonly posture: "required" | "compressible";
   readonly block: ProviderContextBlock;
   /**
@@ -93,6 +98,7 @@ export function planWorkTurnContext(input: {
         "current-request": "Current request",
         "workspace-context": "Workspace context",
         "octant-policy": "Work instructions",
+        "person-memory": "Person memory",
       }[contribution.category],
       eligibility: {
         providerInstanceId,

@@ -33,6 +33,8 @@ export interface CodeSearchRequestQuery {
 export interface CodeFileWatchQuery {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
+  /** One of the Project's extra folders, by absolute path, in place of the checkout. */
+  readonly folder?: string | undefined;
 }
 
 export interface CodeFileListingClient {
@@ -142,6 +144,7 @@ export function createCodeFileListingClient(
       const url = new URL("/api/code/files/watch", options.baseUrl);
       url.searchParams.set("threadId", String(query.threadId));
       url.searchParams.set("checkoutId", String(query.checkoutId));
+      if (query.folder !== undefined) url.searchParams.set("folder", query.folder);
       return readNoticeStream(
         fetch(url.toString(), {
           method: "GET",

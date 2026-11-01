@@ -880,6 +880,71 @@ describe("CodeTerminalPane", () => {
     );
   });
 
+  it("restarts the terminal in one of the Project's extra folders the person picks", async () => {
+    const client = codeClient({ evidence: "ready" });
+    const operationIds = [
+      "70000000-0000-4000-8000-000000000002",
+      "70000000-0000-4000-8000-000000000003",
+    ];
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => operationIds.shift() as never}
+        executionPolicy="full-access"
+        restart={{
+          columns: 120,
+          createTerminalId: () => "80000000-0000-4000-8000-000000000002" as never,
+          credentialRefs: [],
+          folders: ["/Users/me/notes"],
+          rows: 40,
+        }}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restart in notes" }));
+
+    await waitFor(() =>
+      expect(client.executeOperation).toHaveBeenCalledWith({
+        kind: "start-terminal",
+        operationId: "70000000-0000-4000-8000-000000000003",
+        terminalId: "80000000-0000-4000-8000-000000000002",
+        columns: 120,
+        rows: 40,
+        credentialRefs: [],
+        folder: "/Users/me/notes",
+        ...scope,
+      }),
+    );
+    expect(client.executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "stop-terminal", terminalId: ids.terminal }),
+    );
+  });
+
+  it("offers no folder pick when the Project has no extra folder", async () => {
+    render(
+      <CodeTerminalPane
+        client={codeClient({ evidence: "ready" })}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        restart={{
+          columns: 120,
+          createTerminalId: () => "80000000-0000-4000-8000-000000000002" as never,
+          credentialRefs: [],
+          rows: 40,
+        }}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    await screen.findByRole("menuitem", { name: "Stop terminal" });
+    expect(screen.queryByRole("menuitem", { name: /Restart in/ })).not.toBeInTheDocument();
+  });
+
   it("adds the text selected in the terminal to the chat, fenced", async () => {
     const onAddSelectionToChat = vi.fn();
     const runtime = xtermRuntime("error: missing token\n");

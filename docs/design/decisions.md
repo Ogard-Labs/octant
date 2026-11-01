@@ -37,7 +37,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [App-managed tools](#app-managed-tools)                                               | 2         | 2       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 13        | 10      | 3            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 10      | 4            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 4       | 0            | 0                   |
@@ -149,7 +149,7 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Built in Work: Auto, Ask first, Accept edits and Full access, set from Settings › Work and the composer, with the one-time warning; Work has no Plan.
 - Built in both: a Work Project and a Code Project can override the mode new threads start in; the first-run answer sets the default for new Work threads as well as Code; the thread header shows the level in force and the scope it came from; every level lowered at the global, Project or thread scope is journaled with who, when, from which level (absent when a Project override replaced the default it followed) and which scope.
 - Computer and Browser keep their ask at the first action in each app at every level, Full access included, by a separate maintainer decision.
-- Built in Code: Mistral Vibe's auto-approve mode, the one ACP profile that declares its own reviewer. Not built yet: an own reviewer for any other ACP agent.
+- Built in Code: Mistral Vibe's auto-approve mode, the one ACP profile that declares its own reviewer. Every other ACP agent reports no reviewer of its own, and its capability report says so; a profile gains one by declaring the mode that answers its prompts.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -165,8 +165,9 @@ Below Full access, secret files stay out of every agent's reach by an operating-
 - A refused read by Octant's or Claude Code's file tools names the rule and the channel to use, at every level.
 - Known key formats and broker-issued values are redacted from runtime output, transcripts, the journal, exports and the service log, at every level.
 - Octant Shield's Judge sends a command that reaches a secret file to the person and refuses one that reads secrets then sends something off the computer; it reads the person's protected list beside its own patterns.
-- Built: the Watcher's `secret-path-read` label on every call of Octant's own tools that names a protected path, refused or not; the Judge reading the list in force; a journaled `reads-secrets-then-egress` tag on an Octant Harness command at Full access.
-- Not built yet: short-lived cloud credentials from the broker, and the Watcher flagging a printed secret-holding environment variable.
+- Built: the Watcher's `secret-path-read` label on every call of Octant's own tools that names a protected path, refused or not; the Watcher's `secret-env-print` label on a call of Octant's own shell that prints an environment variable whose name says it holds a secret, by the name alone; the Judge reading the list in force; a journaled `reads-secrets-then-egress` tag on an Octant Harness command at Full access.
+- Built: the AWS command line in Octant's own shell gets a one-hour session the broker makes with AWS STS from a key pair the person pointed at a linked store; the pair never leaves the broker.
+- Not built yet: short-lived credentials for the Google Cloud and Azure command lines.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Secret guard](../architecture.md#secret-guard).
 
@@ -221,11 +222,12 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - A release with Shield requires measuring its false-allow rate on a fixture set of known-safe and known-unsafe calls.
 - Build order: the native harness, every runtime's approval path, the picker and Settings, the Watcher, safe networks, then the server registry and SSH.
 - Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the approvals of the Octant Harness, Claude Code, Codex, OpenCode, ACP agents and Pi on a Code thread or a Work thread in Auto where Shield is the reviewer, and their subagents', each decision journaled and shown on the transcript (on a Work thread, a review row among the turn's tool steps, the Octant Harness's included, which an older client reads as an ordinary step); Auto offered in the picker wherever a reviewer can run; Settings › Code › Access Auto reviewer and Shield model with a Code Project override of the reviewer; the fixture set with a test of the rule stages and a false-allow measurement script.
-- Built: the Watcher, deterministic detectors with no model, over every app-managed tool result and plugin MCP result before the model reads it; each label is journaled as an outside-content source that marks the thread, reaches the Judge as a kind, tags the Code tool row (quietly at Full access) and marks the Code board card; where an adapter sees what a runtime's own web search or fetch returned (an ACP agent's content items), the Watcher reads that text too, and Chat and Work tool rows carry the same tag as Code's.
+- Built: the Watcher, deterministic detectors with no model, over every app-managed tool result and plugin MCP result before the model reads it; each label is journaled as an outside-content source that marks the thread, reaches the Judge as a kind, tags the Code tool row (quietly at Full access) and marks the Code board card; where an adapter sees what a runtime's own web search or fetch returned (an ACP agent's content items, Codex's standalone search results, OpenCode's web tool text items), the Watcher reads that text too, and Chat and Work tool rows carry the same tag as Code's.
 - Built: the server registry in Settings › Access › Servers (alias, user, Read-only, Operate or Admin profile, described deploys, runbook path), journaled and replayed, local window only; the Judge's SSH rules (a plain ssh call to a registered server as its user passes within its profile, an unregistered host, a key path, a tunnelling option, a lock-out or destructive remote command, or a remote secret read goes to the person or is refused) checked on a real-world command set; every Octant Harness `ssh` command journaled with host and exit status at every level; the person's SSH agent socket handed to harness shells; runbooks given to harness turns as notes that grant nothing.
 - Built: the secret guard's list handed to the Watcher and the Judge, and a journaled tag for a secret-then-network command at Full access.
+- Not readable: a web search Codex's model provider runs itself reports no results, so it is marked but not read.
 - Built: the Judge's fast allow for egress to a safe network, for a call that names its destinations (never a shell command), only while Network limits are on and only on an untainted thread.
-- Not built yet: a confined command reaching a registered server on Linux (macOS only) and a provider runtime's own confined commands reaching one; the credential broker for SSH; the Watcher reading a runtime's own web result where the runtime does not expose it (Codex, OpenCode); the false-allow rate of a real model is unmeasured.
+- Not built yet: a confined command reaching a registered server on Linux (macOS only) and a provider runtime's own confined commands reaching one; the credential broker for SSH; the false-allow rate of a real model is unmeasured.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
 
@@ -495,7 +497,7 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - Chat and Work can be switched off in Settings; Code is always available, and disabling a mode never deletes its data.
 - A new-thread composer chooses Chat (no folder) or In a folder (a Work thread bound to a Project root). The choice only selects the create command, and nothing converts a thread between Chat and Work.
 - Chat binds a virtual, memory-scoped Project or none; Work binds exactly one OS-confined root; Code binds exactly one directory and selects a checkout inside it.
-- Memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. _Here only._
+- Project memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. Person memory, beside it, crosses Projects ([Person memory across Projects](#person-memory-across-projects)). _Here only._
 - Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -516,9 +518,23 @@ Chat's missing file and shell authority is withheld by rule, not only in today's
 - Provider runtimes launch confined with exec and fork denied or with no execution environment, and a sandbox that only blocks writes is not enough because reads never escalate.
 - Octant-managed tools (research, Canvas) are unaffected because they run on the host.
 - A person's own tool servers stay off in Chat until the person lets the provider run as itself for the account (built for Codex), or for one thread with its own-setup choice.
-- Provider-owned memory stays off in every mode, because a provider's global memory reaches across Projects.
+- Provider-owned memory stays off in every mode, because a provider's global memory follows its own rules into every Project, outside Octant's controls. Octant's own person memory is the cross-Project layer.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Person memory across Projects
+
+Octant keeps a memory of the person beside Project memory: after a thread ends it learns preferences, how the person works and what they did, and every new Chat, Work and Code thread on every provider starts with it. It is on by default with no per-entry prompt, and the person can turn it off.
+
+- Distilled once per thread the person put away after memory began, from the thread's title and the person's own messages only, never agent answers, tool output or files; secrets are redacted before the model call and before storage, and an entry naming a protected path is dropped.
+- One tool-less model call per ended thread on the thread's provider and its smallest model unless Settings picks another, recorded as a `person-memory` usage row, behind the one seam `personMemoryDistillationAllowed`. Open risk: whether background calls on subscription sign-ins fit each provider's terms is being checked.
+- The block is placed after Octant's instructions, holds only entries older than the thread so its text is stable for prompt caching, is capped at 2,000 characters and is framed as data, not instructions.
+- `octant_past_threads` searches remembered digests and entries only and returns at most five excerpts with their source; it reads no transcript or file and grants no authority.
+- Settings › Memory: one switch for everything, one for searching past threads, Projects kept out (not learned from, not shown, no block or tool in them), threads that leave no trace (set from the thread menu), each entry editable and deletable with its sources, and Forget everything. Deleting erases the events from the journal; a thread purge removes what came only from it.
+- Only a turn a window on this host started gets the block or the tool: not a paired device, a routine or other host-started turn, or a subagent. Memory is never synced to a hub, spoke or peer host. First run says in one sentence that it is on and where to turn it off.
+- Export my data carries person memory: not built yet.
+
+Status: Partly built. Since: 2026-11-01. Detail: [Architecture: Person memory](../architecture.md#person-memory).
 
 ### Default Projects
 
@@ -629,9 +645,9 @@ A Work or Code Project has one main folder plus extra folders the person adds; e
 - The `@file` picker (Work and Code) lists and reads a file in an extra folder by its absolute path, only inside one of the Project's current extra folders; Code search covers the extra folders and marks each match with its folder; the harness shell and the ACP client file and terminal tools reach every Project folder.
 - The Code editor and the Files explorer open, read and save a file in an extra folder, named by its absolute path and placed by the same root authority; each extra folder is its own tree beneath the checkout's, and a search match there opens.
 - A Work artifact the host creates for a thread is placed in that thread's working directory, read from the thread and never from the request, and stays in the main folder without a thread; no thread works in an extra folder, so an artifact never lands in one.
-- Not built yet: the Terminal tab's control to start a thread terminal in an extra folder, and a live file watch of an extra folder in the explorer.
+- The Terminal tab's menu restarts a thread terminal in a listed extra folder, and the explorer watches the first two extra folders live (the rest relist on Refresh), placed by the same root authority and refused for any path that is not the root of a current extra folder.
 
-Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
+Status: Built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
 
 ## Agents and delegation
 
@@ -968,6 +984,7 @@ API keys live in the host credential store and are reached only through the loop
 - Changing an endpoint's base URL, or switching its key and sign-in binding, deletes the stored credential before the change is journaled.
 - Directory sign-in and cloud request signing run through the broker. The server never holds a signing key, and the broker signs only inside the scope stored at sign-in.
 - A person may link a secret store they already use, and the broker resolves it at use by opaque reference; Octant keeps only the store name and item address.
+- The AWS command line's key pair may point at two items in a linked store; Octant's own shell then gets only a short-lived session the broker makes from it.
 
 Status: Built. Since: 2026-10-26. Detail: [Architecture: Providers](../architecture.md#providers) and [Enterprise provider identity](enterprise-provider-identity.md).
 

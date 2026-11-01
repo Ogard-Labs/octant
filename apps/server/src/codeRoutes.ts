@@ -246,6 +246,8 @@ export interface CodeSearchFilesInput {
 export interface CodeFileWatchInput {
   readonly threadId: CodeThreadId;
   readonly checkoutId: typeof CodeCheckoutId.Type;
+  /** An extra folder of the Project, by absolute path, in place of the checkout. */
+  readonly folder?: CodeRelativePath | undefined;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -2508,18 +2510,26 @@ function decodeFileSearchQuery(url: URL): Omit<CodeSearchFilesInput, "signal"> {
   }
 }
 
-/** Decode a watch query. A watch is scoped to the whole checkout, so it names
- * only the thread and its checkout — there is no directory to narrow. */
+/** Decode a watch query. A watch is scoped to the whole checkout, or to one of
+ * the Project's extra folders named by absolute path — there is no directory
+ * to narrow. */
 function decodeFileWatchQuery(url: URL): Omit<CodeFileWatchInput, "signal"> {
   const threadId = url.searchParams.get("threadId");
   const checkoutId = url.searchParams.get("checkoutId");
-  if (threadId === null || checkoutId === null || url.searchParams.size > 2) {
+  const folder = url.searchParams.get("folder");
+  if (
+    threadId === null ||
+    checkoutId === null ||
+    url.searchParams.size > (folder === null ? 2 : 3)
+  ) {
     throw new CodeRouteRejected("Code file watch query is invalid.", 400);
   }
   try {
+    if (folder !== null && !folder.startsWith("/")) throw new Error("not absolute");
     return {
       threadId: decodeCodeThreadId(threadId),
       checkoutId: decodeCheckoutId(checkoutId),
+      ...(folder === null ? {} : { folder: decodeCodeProjectFilePath(folder) }),
     };
   } catch {
     throw new CodeRouteRejected("Code file watch query is invalid.", 400);

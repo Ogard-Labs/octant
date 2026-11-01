@@ -71,6 +71,7 @@ import {
   formatProbeTimestamp,
   incompatibleReadinessFacts,
   protocolLabel,
+  ownReviewerLabel,
   reviewVerdictsLabel,
   providerDetectionBlockedReason,
   providerProcessDiagnosticFacts,
@@ -1784,6 +1785,18 @@ function ProviderRow(props: ProviderRowProps) {
                           <dd>{titleCase(props.observed!.capabilities[key] ?? "unsupported")}</dd>
                         </div>
                       ))}
+                      {ownReviewerLabel(props.instance.driverKind, props.observed.capabilities) ===
+                      undefined ? null : (
+                        <div>
+                          <dt>Own reviewer</dt>
+                          <dd>
+                            {ownReviewerLabel(
+                              props.instance.driverKind,
+                              props.observed.capabilities,
+                            )}
+                          </dd>
+                        </div>
+                      )}
                       {reviewVerdictsLabel(props.observed.capabilities) === undefined ? null : (
                         <div>
                           <dt>Reviewer verdicts</dt>

@@ -41,7 +41,8 @@ function fakeClient(
   const client: SecretStoresClient = {
     read: vi.fn(async () => initial),
     execute: vi.fn(async (command) => {
-      commands.push(command);
+      // Reading the AWS command line's items is a read, kept out like `read`.
+      if (command.kind !== "read-aws-cli-key") commands.push(command);
       return answer(command);
     }),
   };
@@ -49,6 +50,66 @@ function fakeClient(
 }
 
 describe("SecretStoresSettingsSection", () => {
+  it("points the AWS command line at two items, shows where its key comes from, and removes it", async () => {
+    const pointer = {
+      store: "onepassword" as const,
+      accessKeyIdReference: "op://Private/AWS/access key id",
+      secretAccessKeyReference: "op://Private/AWS/secret access key",
+    };
+    let current: typeof pointer | null = null;
+    const { client, commands } = fakeClient(viewOf(true), (command) => {
+      if (command.kind === "point-aws-cli-key") current = pointer;
+      if (command.kind === "clear-aws-cli-key") current = null;
+      return decodeSecretStoresResult({ kind: "secret-stores-aws-cli-key", reference: current });
+    });
+    const user = userEvent.setup();
+    render(<SecretStoresSettingsSection client={client} />);
+
+    expect(
+      await screen.findByText("Not set. Commands get no AWS credentials from Octant."),
+    ).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Access key ID item"), pointer.accessKeyIdReference);
+    await user.type(
+      screen.getByLabelText("Secret access key item"),
+      pointer.secretAccessKeyReference,
+    );
+    await user.click(screen.getByRole("button", { name: "Use these items" }));
+
+    expect(
+      await screen.findByText(
+        `Set. The key ID comes from ${pointer.accessKeyIdReference} and the secret key from ${pointer.secretAccessKeyReference}.`,
+      ),
+    ).toBeInTheDocument();
+    expect(commands).toContainEqual({ kind: "point-aws-cli-key", ...pointer });
+
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    expect(
+      await screen.findByText("Not set. Commands get no AWS credentials from Octant."),
+    ).toBeInTheDocument();
+  });
+
+  it("says why the AWS command line's items were refused", async () => {
+    const { client } = fakeClient(viewOf(true), (command) =>
+      command.kind === "read-aws-cli-key"
+        ? decodeSecretStoresResult({ kind: "secret-stores-aws-cli-key", reference: null })
+        : decodeSecretStoresResult({
+            kind: "secret-stores-refused",
+            reason: "item-missing",
+            message: "No item with that reference was found in the secret store.",
+          }),
+    );
+    const user = userEvent.setup();
+    render(<SecretStoresSettingsSection client={client} />);
+
+    await user.type(await screen.findByLabelText("Access key ID item"), "op://Private/AWS/id");
+    await user.type(screen.getByLabelText("Secret access key item"), "op://Private/AWS/gone");
+    await user.click(screen.getByRole("button", { name: "Use these items" }));
+
+    expect(
+      await screen.findByText("No item with that reference was found in the secret store."),
+    ).toBeInTheDocument();
+  });
+
   it("says linking happens on the host when this client is not on it", () => {
     render(<SecretStoresSettingsSection client={undefined} />);
     expect(

@@ -107,6 +107,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "liveTurns"
     | "machineChangeFeed"
     | "windowAuthorityStore"
+    | "personMemoryAccess"
   > &
   Pick<
     AgentRunsWiring,
@@ -205,6 +206,7 @@ export function wireChat(deps: ChatDependencies) {
     workThreadService,
     workTurnService,
     workRequestRuntime,
+    personMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
     let threadDialogueService: ThreadDialogueService | undefined;
@@ -379,6 +381,14 @@ export function wireChat(deps: ChatDependencies) {
     };
     const chatService = new ChatService({
       liveTurns,
+      personMemoryBlock: ({ thread, windowId }) =>
+        personMemoryAccess.blockFor({
+          mode: "chat",
+          threadId: String(thread.id),
+          projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+          createdAt: thread.createdAt,
+          windowId,
+        }),
       awaitsHarnessApproval: threadAwaitsHarnessApproval,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       outsideContentMarks: runtimeOutsideContentMarks,
@@ -506,6 +516,15 @@ export function wireChat(deps: ChatDependencies) {
             windowId,
             thread,
             port: canvasAgentToolPort,
+          }),
+          // Outside the taint wrapper too: what it returns is memory Octant
+          // wrote from the person's own messages, not outside content.
+          personMemoryAccess.toolsFor({
+            mode: "chat",
+            threadId: String(thread.id),
+            projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+            createdAt: thread.createdAt,
+            windowId,
           }),
           // Host-internal: its results are Octant's own answers, not external
           // content, and `delegate` itself refuses while the thread is tainted.
