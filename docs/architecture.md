@@ -8244,8 +8244,16 @@ mechanisms are:
   provider's hosted service included. A review reply posted under the
   person's name still asks at every level.
   Built in Code for Mistral Vibe's auto-approve mode, the one ACP profile that
-  declares its own reviewer; allowed, not built yet: an own reviewer for any
-  other ACP agent.
+  declares its own reviewer. Every other ACP agent reports
+  `harnessAutoReview` `unsupported`, and Settings › Providers › Capabilities
+  says "Own reviewer: None. Octant Shield reviews at Auto." A profile gains a
+  reviewer by declaring `ownReviewer` and the mode that answers its prompts;
+  none is declared without that mode being confirmed on the agent.
+  _Rationale:_ the other profiles' modes either ask for every call or approve
+  every call without review (`auto-edit`, `yolo`, `bypass`), and Goose's
+  `smart_approve` is already the mode its Guarded level uses, so offering it as
+  a reviewer would make Reviewed and Guarded the same thing. Naming a mode as a
+  reviewer without evidence would claim a review that does not happen.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
