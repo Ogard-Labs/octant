@@ -4084,8 +4084,12 @@ export class ChatService {
       });
     }
     let nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
+    // Chat keeps its own edit and is never rewound, so a rewind handoff is a
+    // broken invariant here rather than a case a person could reach.
+    if (sessionDecision.kind === "new-session-with-handoff" && sessionDecision.reason === "rewind")
+      throw new Error("A Chat turn cannot hand over a rewound conversation.");
     const handoff =
-      sessionDecision.kind === "new-session-with-handoff"
+      sessionDecision.kind === "new-session-with-handoff" && sessionDecision.reason !== "rewind"
         ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, {
             // A handoff that never completed is made again from the provider
             // the conversation came from, not the one that may not have got it.

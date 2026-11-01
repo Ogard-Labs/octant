@@ -165,7 +165,8 @@ fork, once its own turns are all shown, Load earlier continues with the thread
 it was forked from, starting at the reply you forked from. The usage and
 context figures always cover the whole thread, and a restore's **Undo restore**
 stays offered however far back the restore was. Find in page searches the turns
-loaded so far. Export always covers the whole thread.
+loaded so far. Export always covers the whole thread, except messages a
+rewind removed.
 
 The phone app opens a Code thread on its newest 20 turns and says so when
 earlier ones exist; it has no Load earlier, so read those on the desktop.
@@ -291,6 +292,40 @@ refusal. A restore is also refused while another restore of the same folder is
 still running. A thread on its own worktree is not held up by other threads.
 
 A checkpoint marker stays on the turn only when that point is marked.
+
+Fork from here is on your messages too: there it forks through the reply
+before that message. Your first message has no Fork from here, because
+nothing comes before it; start a new thread instead.
+
+## Rewind to here
+
+You cannot edit a message you already sent in a Code thread. **Rewind to
+here…** in a message's More actions menu takes the thread back instead, in
+the same thread. On your message it removes that message and everything
+after it; on a reply it removes everything after the reply.
+
+The dialog shows how many messages leave and which files differ from the
+point you go back to, and lets you choose **Conversation and files**,
+**Conversation only**, or **Files only**. Nothing changes until you press
+**Rewind** (or **Rewind and restore files**). Putting files back still goes
+through the thread's approval path, and **Undo restore** stays offered
+afterwards. Your message comes back to the composer so you can change it and
+send it again.
+
+The removed messages no longer reach the model. The Octant Harness continues
+its own session cut back to the last reply you kept. Other providers cannot
+cut their sessions back, which their capability report says (**Session
+rollback: None**), so your next message starts a fresh session with the kept
+messages handed over as text; that reply says so. The removed messages stay in
+Octant's record but leave the transcript and export, and the thread's usage
+figure counts only the messages it keeps; the Usage dashboard still counts
+everything that ran.
+
+Octant refuses a rewind while a turn of the thread runs. It refuses to put
+files back while another thread has a turn writing in the same checkout, and
+when a turn after that point wrote files without a recorded checkpoint; the
+conversation can still be rewound on its own. A thread in a Project on a
+server, or in Plan, rewinds the conversation only and says why.
 
 ## Attaching images
 

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  WORK_TURN_CAPABILITIES,
   decodeContextCompactionId,
   decodeContextSubjectRef,
   decodeProviderRuntimeEvent,
@@ -3345,6 +3346,218 @@ describe("WorkTurnService", () => {
     },
   );
 
+  describe("rewinding a Work thread in place", () => {
+    const secondRequest = decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+    const thirdRequest = decodeWorkTurnRequestId("99999999-9999-4999-8999-999999999999");
+    const secondCommand = () => ({
+      ...startCommand(),
+      requestId: secondRequest,
+      turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+      prompt: "Make it longer",
+    });
+    const thirdCommand = () => ({
+      ...startCommand(),
+      requestId: thirdRequest,
+      turnId: decodeWorkTurnId("88888888-8888-4888-8888-888888888888"),
+      prompt: "Make it shorter instead",
+    });
+    const rewindFrom = (fromRequestId: typeof ids.request) => ({
+      kind: "rewind-work-thread",
+      rewindId: decodeWorkTurnRequestId("77777777-7777-4777-8777-777777777777"),
+      threadId: ids.thread,
+      fromRequestId,
+    });
+
+    /** Two finished turns, each with a reply of its own. */
+    async function twoTurns(keepsSession: boolean) {
+      let runs = 0;
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        input.onSessionReady?.({
+          sessionId: input.providerSessionId,
+          resumeCursor: { driverKind: "pi", value: `native-${String(input.providerSessionId)}` },
+        });
+        runs += 1;
+        return { kind: "completed" as const, response: `Reply number ${runs}` };
+      });
+      const fixture = serviceFixture({
+        turnRuntime: { run },
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          conversationOwnership: keepsSession ? "provider" : "host",
+        }),
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      await fixture.service.startFirstTurn(ids.window, secondCommand());
+      await fixture.waitForIdle(secondRequest);
+      return { fixture, run };
+    }
+
+    const journaledPayloads = (fixture: ReturnType<typeof serviceFixture>) =>
+      fixture.persistence.journal.append.mock.calls
+        .flatMap(([request]) => request.events)
+        .map((event: { readonly payload: unknown }) => event.payload);
+
+    it("removes the turns, returns the removed prompt, and hands only the kept turns to a fresh session", async () => {
+      const { fixture, run } = await twoTurns(true);
+
+      await expect(
+        fixture.service.rewindThread(ids.window, rewindFrom(secondRequest)),
+      ).resolves.toEqual({
+        kind: "thread-rewound",
+        threadId: ids.thread,
+        fromRequestId: secondRequest,
+        removedTurns: 1,
+        prompt: "Make it longer",
+      });
+      expect(
+        (await fixture.service.transcript(ids.window, ids.thread)).turns.map(
+          (turn) => turn.requestId,
+        ),
+      ).toEqual([ids.request]);
+
+      await fixture.service.startFirstTurn(ids.window, thirdCommand());
+      await fixture.waitForIdle(thirdRequest);
+      const third = run.mock.calls[2]?.[0];
+      // The session the removed turn ran on is never resumed.
+      expect(third?.resumeCursor).toBeUndefined();
+      expect(third?.providerSessionId).not.toBe(run.mock.calls[1]?.[0].providerSessionId);
+      const context = JSON.stringify(third?.context);
+      expect(context).toContain("the person rewound the thread");
+      expect(context).toContain("Summarize the brief");
+      expect(context).toContain("Reply number 1");
+      expect(context).not.toContain("Make it longer");
+      expect(context).not.toContain("Reply number 2");
+      expect(
+        (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1)?.handoff,
+      ).toMatchObject({ reason: "rewind", messages: 2 });
+    });
+
+    it("tells every open view of the thread to read the transcript again", async () => {
+      const { fixture } = await twoTurns(true);
+      const { liveCursor } = await fixture.service.transcript(ids.window, ids.thread);
+      const controller = new AbortController();
+      const stream = fixture.service.subscribe(
+        ids.window,
+        ids.thread,
+        liveCursor,
+        controller.signal,
+      );
+      const next = stream.next();
+
+      await fixture.service.rewindThread(ids.window, rewindFrom(secondRequest));
+      await expect(next).resolves.toMatchObject({
+        value: { kind: "snapshot-required", threadId: ids.thread },
+      });
+      controller.abort();
+    });
+
+    it("rebuilds from the kept turns alone on a provider that keeps no session", async () => {
+      const { fixture, run } = await twoTurns(false);
+      await fixture.service.rewindThread(ids.window, rewindFrom(secondRequest));
+
+      await fixture.service.startFirstTurn(ids.window, thirdCommand());
+      await fixture.waitForIdle(thirdRequest);
+      const context = JSON.stringify(run.mock.calls[2]?.[0].context);
+      expect(context).toContain("Reply number 1");
+      expect(context).not.toContain("Make it longer");
+      expect(context).not.toContain("Reply number 2");
+    });
+
+    it("keeps the removal after a restart replays the journal, and answers a retried rewind from it", async () => {
+      const { fixture } = await twoTurns(true);
+      await fixture.service.rewindThread(ids.window, rewindFrom(secondRequest));
+
+      const rebuilt = new WorkTurnProjection();
+      for (const payload of journaledPayloads(fixture)) rebuilt.apply(payload as never);
+      expect(rebuilt.listForThread(ids.thread).map((turn) => turn.requestId)).toEqual([
+        ids.request,
+      ]);
+      expect(rebuilt.rewoundSinceLatest(ids.thread)).toBe(true);
+
+      const appends = fixture.persistence.journal.append.mock.calls.length;
+      await expect(
+        fixture.service.rewindThread(ids.window, rewindFrom(secondRequest)),
+      ).resolves.toMatchObject({ removedTurns: 1, prompt: "Make it longer" });
+      expect(fixture.persistence.journal.append.mock.calls).toHaveLength(appends);
+    });
+
+    it("refuses to rewind while a turn of the thread runs, and keeps every turn", async () => {
+      let release: () => void = () => undefined;
+      const run = vi.fn(
+        (input: Parameters<WorkTurnRuntimePort["run"]>[0]) =>
+          new Promise<{ readonly kind: "completed"; readonly response: string }>((resolve) => {
+            input.onSessionReady?.({ sessionId: input.providerSessionId });
+            release = () => resolve({ kind: "completed", response: "Done" });
+          }),
+      );
+      const fixture = serviceFixture({ turnRuntime: { run } });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+
+      await expect(
+        fixture.service.rewindThread(ids.window, rewindFrom(ids.request)),
+      ).rejects.toThrow("A turn is running in this thread");
+      expect((await fixture.service.transcript(ids.window, ids.thread)).turns).toHaveLength(1);
+      release();
+      await fixture.waitForIdle();
+    });
+  });
+
+  it("starts a fork's first own turn in a new session with its carried turns as text", async () => {
+    const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+      input.onSessionReady?.({
+        sessionId: input.providerSessionId,
+        resumeCursor: { driverKind: "pi", value: "fork-session" },
+      });
+      return { kind: "completed" as const, response: "Fork reply" };
+    });
+    const fixture = serviceFixture({
+      turnRuntime: { run },
+      resolveDriver: (_id, fallback) => ({ ...fallback, conversationOwnership: "provider" }),
+    });
+    const carried = decodeWorkTurnRequestId("66666666-6666-4666-8666-666666666666");
+    const carriedTurn = decodeWorkTurnId("55555555-5555-4555-8555-555555555555");
+    fixture.projection.apply({
+      kind: "turn-accepted",
+      requestId: carried,
+      threadId: ids.thread,
+      turnId: carriedTurn,
+      projectId: ids.project,
+      authority: startCommand().authority as never,
+      providerSessionId: ids.session as never,
+      carriedFrom: {
+        threadId: decodeWorkThreadId("72000000-0000-4000-8000-000000000044"),
+        requestId: decodeWorkTurnRequestId("44444444-4444-4444-8444-444444444444"),
+      },
+      prompt: "Draft the source brief",
+      capabilities: WORK_TURN_CAPABILITIES,
+      acceptedAt: "2026-07-01T00:00:00.000Z" as never,
+    });
+    fixture.projection.apply({
+      kind: "turn-updated",
+      requestId: carried,
+      threadId: ids.thread,
+      turnId: carriedTurn,
+      status: "completed",
+      response: "The source's draft",
+      updatedAt: "2026-07-01T00:00:00.000Z" as never,
+    });
+
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    const first = run.mock.calls[0]?.[0];
+    // The carried turn ran in the source; its session is never the fork's.
+    expect(first?.resumeCursor).toBeUndefined();
+    const context = JSON.stringify(first?.context);
+    expect(context).toContain("this thread was forked from");
+    expect(context).toContain("Draft the source brief");
+    expect(context).toContain("The source's draft");
+    expect(
+      (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1)?.handoff,
+    ).toMatchObject({ reason: "fork", messages: 2 });
+  });
+
   describe("moving a Work conversation to another provider", () => {
     const nextProvider = decodeProviderInstanceId("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
     const followUpCommand = () => ({
@@ -4163,10 +4376,10 @@ function serviceFixture(
       : {
           selectConversationHandoff:
             options.selectConversationHandoff ??
-            ((thread) =>
+            ((thread, purpose) =>
               admittedParentWorkContext({
                 threadId: thread.id,
-                purpose: "provider-switch",
+                purpose,
                 externalContentIngested: options.externalContentIngested === true,
                 readThread: () => thread,
                 readTurns: (id) => projection.listForThread(id),

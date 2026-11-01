@@ -798,6 +798,8 @@ function queueScopeForEvent(
       return scope("work", eventField(payload, "threadId"));
     case "work.turn-updated@1": {
       const status = eventField(payload, "status");
+      // A fork's carried copy of a source turn is not a turn that settled here.
+      if (eventField(payload, "carried") === true) return undefined;
       return status === "completed" || status === "cancelled" || status === "failed"
         ? scope("work", eventField(payload, "threadId"))
         : undefined;

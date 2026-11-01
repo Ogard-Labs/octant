@@ -316,7 +316,11 @@ describe("work turn contracts", () => {
       }).status,
     ).toBe("completed");
 
-    expect(WORK_TURN_EVENT_NAMES).toEqual(["work.turn-accepted@1", "work.turn-updated@1"]);
+    expect(WORK_TURN_EVENT_NAMES).toEqual([
+      "work.turn-accepted@1",
+      "work.turn-updated@1",
+      "work.thread-rewound@1",
+    ]);
   });
 
   it("decodes a transcript window with its bounds and refuses a field it does not name", () => {

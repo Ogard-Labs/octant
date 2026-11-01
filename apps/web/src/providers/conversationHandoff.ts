@@ -1,4 +1,4 @@
-import type { ChatAttemptHandoff } from "@octant/contracts";
+import type { ChatAttemptHandoff, WorkTurnHandoff } from "@octant/contracts";
 import { providerKeepsConversation, type PickerGroup } from "@octant/domain";
 import {
   conversationHandoffDisclosure,
@@ -18,10 +18,24 @@ function count(value: number, one: string, many: string): string {
  * replies did not come with it.
  */
 export function threadHandoffDisclosure(
-  handoff: ChatAttemptHandoff,
+  handoff: ChatAttemptHandoff | WorkTurnHandoff,
   label: (selection: { readonly providerInstanceId: string; readonly modelId: string }) => string,
 ): string {
   if (handoff.reason === "provider-switch") return conversationHandoffDisclosure(handoff, label);
+  if (handoff.reason === "rewind")
+    return [
+      `After the rewind, a fresh session started with ${count(handoff.messages, "recent message", "recent messages")} of the kept conversation as text.`,
+      omissionsDisclosure(handoff),
+      handoff.externalContentIngested ? " This thread has taken in outside content." : "",
+      " The removed turns, hidden reasoning, tool activity and the previous session did not transfer.",
+    ].join("");
+  if (handoff.reason === "fork")
+    return [
+      `Forked with ${count(handoff.messages, "recent message", "recent messages")} of the source conversation as text, up to the reply it was forked from.`,
+      omissionsDisclosure(handoff),
+      handoff.externalContentIngested ? " This thread has taken in outside content." : "",
+      " Hidden reasoning, tool activity, the source's session and its later replies did not transfer.",
+    ].join("");
   return [
     `Branched with ${count(handoff.messages, "recent message", "recent messages")} of the original conversation as text, up to the reply it was branched from.`,
     omissionsDisclosure(handoff),

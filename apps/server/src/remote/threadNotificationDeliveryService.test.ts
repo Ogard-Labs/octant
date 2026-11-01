@@ -200,6 +200,14 @@ const facts = {
       turnId: "f0000000-0000-4000-8000-000000000001",
       status: "failed",
     } satisfies Shape<WorkTurnUpdated>),
+  workCarried: () =>
+    committed("work.turn-updated@1", {
+      kind: "turn-updated",
+      carried: true,
+      threadId: workThread,
+      turnId: "f0000000-0000-4000-8000-000000000002",
+      status: "completed",
+    } satisfies Shape<WorkTurnUpdated>),
   workApproval: () =>
     committed("work.request-recorded@1", {
       kind: "requested",
@@ -347,6 +355,16 @@ describe("ordinary-thread notifications", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(first.receipts()).toHaveLength(4);
     expect(first.transport?.sent).toHaveLength(4);
+  });
+
+  it("sends nothing for the finished turns a Work fork copies from its source", async () => {
+    const fixture = host();
+    fixture.register(phone);
+    fixture.service.onCommittedAppend(facts.workCarried());
+    fixture.service.onCommittedAppend(facts.workFailed());
+    await vi.waitFor(() => expect(fixture.receipts()).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fixture.receipts()).toHaveLength(1);
   });
 
   it("notifies each approval and question a Code turn asks, not only its first", async () => {

@@ -133,6 +133,13 @@ export interface ReadCodeConversationInput {
    * a replay-only caller can know.
    */
   readonly providerInstanceId?: ProviderInstanceId;
+  /**
+   * Keep turns a rewind removed. Only readers that place files or a copied
+   * provider session by the order turns really ran in ask for them; the
+   * thread's conversation, and everything that reaches a model, leaves them
+   * out.
+   */
+  readonly includeRewound?: boolean;
 }
 
 export interface ReadCodeConversationWindowInput {
@@ -160,6 +167,8 @@ export const CODE_CONVERSATION_WINDOW_BYTES = 2 * 1024 * 1024;
 const MAX_WINDOW_LIMIT_REPORTS = 256;
 /** Restore results read per batch while looking for the newest one that ran. */
 const MAX_RESTORE_RESULTS_PER_READ = 64;
+/** Rewind results, and newer turn starts, read per batch. */
+const MAX_REWIND_RESULTS_PER_READ = 64;
 
 export type CodeOperationEventReplay =
   | {
@@ -588,6 +597,12 @@ export class CodeOperationEventStore {
          * A compaction journaled after it is ordered by this, not by clocks.
          */
         readonly priorTurnReportSequence?: number;
+        /**
+         * The newest rewind of the conversation journaled after `session`
+         * was recorded. That session still holds the removed turns, so it is
+         * never simply resumed.
+         */
+        readonly rewoundAfterSession?: { readonly fromOperationId: CodeOperationId };
       }
     | { readonly status: "rebuild-required" } {
     try {
@@ -618,7 +633,14 @@ export class CodeOperationEventStore {
           });
       const read = (kind: string, limit: number) =>
         recorded(kind, limit).map((entry) => entry.frame);
-      const session = read("provider-session-ready", 1)[0]?.event;
+      const sessionRecord = recorded("provider-session-ready", 1)[0];
+      const session = sessionRecord?.frame.event;
+      const rewind = this.#rewinds(threadId, 1)[0];
+      const rewoundAfterSession =
+        rewind !== undefined &&
+        (sessionRecord === undefined || rewind.sequence > sessionRecord.globalSequence)
+          ? { fromOperationId: rewind.fromOperationId }
+          : undefined;
       const priorStart = read("conversation-turn-started", 2).find(
         (frame) => String(frame.operationId) !== String(operationId),
       );
@@ -652,6 +674,7 @@ export class CodeOperationEventStore {
         ...(priorTurnBreakdown === undefined || priorUsageRecord === undefined
           ? {}
           : { priorTurnBreakdown, priorTurnReportSequence: priorUsageRecord.globalSequence }),
+        ...(rewoundAfterSession === undefined ? {} : { rewoundAfterSession }),
       };
     } catch {
       return { status: "rebuild-required" };
@@ -782,6 +805,65 @@ export class CodeOperationEventStore {
     this.#histories.frames -= remembered.frames.length;
   }
 
+  /**
+   * The thread's rewinds that took back conversation, newest first, at most
+   * `limit` of them. Each is the rewind's own completed result, which is the
+   * record that removed turns; a refused rewind journals no such result.
+   */
+  #rewinds(
+    threadId: CodeThreadId,
+    limit: number,
+  ): ReadonlyArray<{ readonly sequence: number; readonly fromOperationId: CodeOperationId }> {
+    const rewinds: Array<{ readonly sequence: number; readonly fromOperationId: CodeOperationId }> =
+      [];
+    let beforeSequence: number | undefined;
+    for (;;) {
+      const batch = this.#journal.latestThreadResults({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        resultKind: "thread-rewound",
+        limit: MAX_REWIND_RESULTS_PER_READ,
+        ...(beforeSequence === undefined ? {} : { beforeSequence }),
+      });
+      for (const envelope of batch) {
+        beforeSequence = envelope.globalSequence;
+        const frame = ownFrame(envelope, threadId);
+        if (
+          frame?.event.kind !== "operation-result" ||
+          frame.event.result.kind !== "thread-rewound" ||
+          frame.event.result.scope === "files"
+        )
+          continue;
+        rewinds.push({
+          sequence: envelope.globalSequence,
+          fromOperationId: frame.event.result.fromOperationId,
+        });
+        if (rewinds.length >= limit) return rewinds;
+      }
+      if (batch.length < MAX_REWIND_RESULTS_PER_READ) return rewinds;
+    }
+  }
+
+  /**
+   * Whether a turn that started at a journal position was removed by a
+   * rewind: it started at or after a rewind's first removed turn and before
+   * that rewind was journaled. Turns sent after a rewind are the thread's own
+   * again, so a later rewind is the only thing that removes them.
+   */
+  #rewoundTurns(threadId: CodeThreadId): (startSequence: number) => boolean {
+    const ranges = this.#rewinds(threadId, Number.MAX_SAFE_INTEGER).flatMap((rewind) => {
+      const start = this.#journal.firstAggregateEvent({
+        aggregateType: "code-operation",
+        aggregateId: String(rewind.fromOperationId),
+        kind: "conversation-turn-started",
+      });
+      return start === undefined ? [] : [{ from: start.globalSequence, to: rewind.sequence }];
+    });
+    if (ranges.length === 0) return () => false;
+    return (startSequence) =>
+      ranges.some((range) => startSequence >= range.from && startSequence < range.to);
+  }
+
   conversation(input: ReadCodeConversationInput): CodeConversationPage {
     let threadId: CodeThreadId;
     try {
@@ -799,6 +881,7 @@ export class CodeOperationEventStore {
       throw new CodeOperationEventStoreError("invalid", "Code conversation request is invalid.");
     }
 
+    const rewound = input.includeRewound === true ? () => false : this.#rewoundTurns(threadId);
     const turns: Array<CodeConversationBuilder> = [];
     const byOperation = new Map<string, CodeConversationBuilder>();
     const limits = new Map<
@@ -860,6 +943,7 @@ export class CodeOperationEventStore {
           frame.event.kind === "conversation-turn-started" &&
           envelope.globalSequence > input.afterCursor
         ) {
+          if (rewound(envelope.globalSequence)) continue;
           if (turns.length === input.limit) {
             hasMore = true;
             continue;
@@ -967,6 +1051,7 @@ export class CodeOperationEventStore {
       return ownFrame(envelope, threadId);
     };
 
+    const rewound = this.#rewoundTurns(threadId);
     const anchorId = request.before ?? request.through;
     let below: number | undefined;
     let anchorSequence: number | undefined;
@@ -977,7 +1062,11 @@ export class CodeOperationEventStore {
         kind: "conversation-turn-started",
       });
       const frame = anchor === undefined ? undefined : decode(anchor);
-      if (anchor === undefined || frame?.event.kind !== "conversation-turn-started") {
+      if (
+        anchor === undefined ||
+        frame?.event.kind !== "conversation-turn-started" ||
+        rewound(anchor.globalSequence)
+      ) {
         return { status: "anchor-not-found" };
       }
       anchorSequence = anchor.globalSequence;
@@ -1003,6 +1092,7 @@ export class CodeOperationEventStore {
       });
       for (const envelope of batch) {
         cursor = envelope.globalSequence;
+        if (rewound(envelope.globalSequence)) continue;
         const frame = decode(envelope);
         if (frame?.event.kind !== "conversation-turn-started") continue;
         starts.push({
@@ -1033,13 +1123,16 @@ export class CodeOperationEventStore {
     let hasLater = false;
     if (request.before !== undefined) hasLater = true;
     else if (anchorSequence !== undefined) {
-      const newest = this.#journal.latestThreadEvents({
+      // Only a turn the thread still shows counts as later.
+      const newer = this.#journal.latestThreadEvents({
         aggregateType: "code-operation",
         threadId: String(threadId),
         kind: "conversation-turn-started",
-        limit: 1,
-      })[0];
-      hasLater = newest !== undefined && newest.globalSequence > anchorSequence;
+        limit: MAX_REWIND_RESULTS_PER_READ,
+      });
+      hasLater = newer.some(
+        (envelope) => envelope.globalSequence > anchorSequence && !rewound(envelope.globalSequence),
+      );
     }
 
     const earlierUsage =
@@ -1423,6 +1516,7 @@ function conversationHandoff(
 ): CodeConversationTurnHandoff {
   switch (event.reason) {
     case "provider-switch":
+    case "rewind":
       return {
         reason: event.reason,
         previousProviderInstanceId: event.previousProviderInstanceId,
@@ -1442,6 +1536,12 @@ function conversationHandoff(
       };
     case "fork-native-session":
       return { reason: event.reason, forkedFrom: event.forkedFrom };
+    case "rewind-native-session":
+      return {
+        reason: event.reason,
+        previousSessionId: event.previousSessionId,
+        throughOperationId: event.throughOperationId,
+      };
   }
 }
 
