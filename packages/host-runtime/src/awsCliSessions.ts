@@ -79,7 +79,9 @@ export function createAwsCliSessions(options: {
   const issue = async (pointer: AwsCliPointer, key: string): Promise<AwsCliSessionResult> => {
     const started = generation;
     const result = await attempt(pointer);
-    if (started !== generation) return result;
+    // The pointer changed while AWS answered: the session belongs to items the
+    // person no longer points at, so no command gets it.
+    if (started !== generation) return { status: "none" };
     if (result.status === "issued") {
       const endsAt = Date.parse(result.expiration);
       if (Number.isFinite(endsAt)) held = { key, session: result, endsAt };

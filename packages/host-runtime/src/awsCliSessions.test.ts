@@ -238,7 +238,7 @@ describe("AWS command-line sessions from a linked store", () => {
     expect(h.requests).toHaveLength(2);
   });
 
-  it("keeps no session from a request that was in flight when the pointer was cleared", async () => {
+  it("hands out no session from a request that was in flight when the pointer was cleared", async () => {
     const h = await linkedHarness();
     await h.post("/v1/cloud-cli/aws/point", pointer);
     let release = () => {};
@@ -250,7 +250,7 @@ describe("AWS command-line sessions from a linked store", () => {
     await h.post("/v1/cloud-cli/aws/clear");
     await h.post("/v1/cloud-cli/aws/point", pointer);
     release();
-    await inFlight;
+    expect(JSON.parse((await inFlight).text)).toEqual({ status: "none" });
     h.sts.gate = undefined;
 
     await h.post("/v1/cloud-cli/aws/session");
