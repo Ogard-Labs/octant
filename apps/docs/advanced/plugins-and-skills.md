@@ -31,7 +31,22 @@ schema, or tool context.
 
 ## Settings → Skills & Extensions
 
-The **Skills & Extensions** section has two tabs.
+The **Skills & Extensions** section opens on the **Library**, then has
+**Installed**, **Marketplace** and **Connectors**.
+
+### Library
+
+The **Library** shows connectors, plugins, skills and MCP servers together in
+one grid. Search by name or by what it does, narrow by kind, state or
+provider, and open any card to see where it came from, what it can do and
+what it costs in authority (low, medium or high, from the capabilities it
+declares). A card shows how far along it is: not installed, needs trust, off,
+or on. **Trust this source** and **Turn on** are separate clicks, and
+installing never does either for you; a connector is the one exception, since
+you confirm it once and it installs, trusts and turns on together. To install,
+the card opens **Marketplace**, **Connectors** or **Installed**, where you
+review the package first. The Library fetches nothing, and it works with
+**Marketplace fetches** off.
 
 ### Installed
 

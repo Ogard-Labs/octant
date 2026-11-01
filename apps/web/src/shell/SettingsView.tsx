@@ -189,6 +189,7 @@ import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import "../styles/settings.css";
 import "../styles/settings-specialty.css";
 import "../styles/extensions-settings.css";
+import "../styles/extension-library.css";
 
 export interface SettingsViewProps {
   readonly chatController?: ChatController;
