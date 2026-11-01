@@ -527,6 +527,17 @@ export const AutomationRunLevel = Schema.Literal(
 );
 export type AutomationRunLevel = typeof AutomationRunLevel.Type;
 
+/**
+ * A person's per-routine choice, made when the routine is created or revised,
+ * to let a Code run merge the pull request its own thread opened (with the
+ * head and required checks still enforced by the host). Absent means a merge
+ * asks for each act, as it always did. Only a person at a window on this host
+ * sets it; a routine an agent proposed never has it. It is part of the
+ * definition, so every change to it is journaled.
+ */
+export const AutomationAgentMerge = Schema.Literal("allowed");
+export type AutomationAgentMerge = typeof AutomationAgentMerge.Type;
+
 export const AutomationDefinitionDraft = Schema.Struct({
   displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
   taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
@@ -543,6 +554,7 @@ export const AutomationDefinitionDraft = Schema.Struct({
   targetPolicy: AutomationTargetPolicy,
   projectLevel: Schema.optional(AutomationProjectLevel),
   runLevel: Schema.optional(AutomationRunLevel),
+  agentMerge: Schema.optional(AutomationAgentMerge),
 }).annotations(strict);
 export type AutomationDefinitionDraft = typeof AutomationDefinitionDraft.Type;
 
@@ -582,6 +594,7 @@ function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinition
     (definition.mode === "chat" &&
       (definition.projectLevel !== undefined ||
         definition.runLevel !== undefined ||
+        definition.agentMerge !== undefined ||
         definition.targetPolicy === "same-thread" ||
         !automationAuthorityIsChat(definition.authorityProfile.requested) ||
         !automationAuthorityIsChat(definition.authorityProfile.effective)))

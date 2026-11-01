@@ -261,6 +261,8 @@ export interface AutomationDraftFormInput {
    * use. Absent asks first. A Chat routine has none.
    */
   readonly runLevel?: AutomationRunLevelChoice;
+  /** The person's choice to let a Code run merge the pull request its thread opened. */
+  readonly mergesItsPullRequests?: boolean;
   readonly previousDeliveryTargetRevision?: number;
   readonly actorId: string;
   /** Strict UTC timestamp used as the confirmation instant. */
@@ -402,6 +404,9 @@ export function buildAutomationDraft(input: AutomationDraftFormInput): Automatio
       : input.runLevel === "project"
         ? { projectLevel: "opted-in" }
         : { runLevel: input.runLevel }),
+    ...(input.mergesItsPullRequests === true && input.mode === "code"
+      ? { agentMerge: "allowed" }
+      : {}),
   };
   try {
     return { kind: "valid", draft: decodeAutomationDefinitionDraft(candidate) };

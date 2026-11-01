@@ -179,6 +179,7 @@ export function automationRunForDefinition(
       targetPolicy: definition.targetPolicy,
       ...(definition.projectLevel === undefined ? {} : { projectLevel: definition.projectLevel }),
       ...(definition.runLevel === undefined ? {} : { runLevel: definition.runLevel }),
+      ...(definition.agentMerge === undefined ? {} : { agentMerge: definition.agentMerge }),
     },
     authoritySnapshot: {
       profileId: definition.authorityProfile.profileId,

@@ -267,6 +267,16 @@ export const CodeProjectPullRequestBackgroundRefresh = Schema.Literal("enabled",
 export type CodeProjectPullRequestBackgroundRefresh =
   typeof CodeProjectPullRequestBackgroundRefresh.Type;
 
+/**
+ * Whether a Code agent may merge the pull request its thread owns without the
+ * per-merge approval a request in the turn needs. Absent means disabled: the
+ * agent merges only on the person's request, with that act's approval. Only a
+ * window on the host sets it, and every merge it allows is journaled as
+ * allowed by the Project.
+ */
+export const CodeProjectAgentMerge = Schema.Literal("enabled", "disabled");
+export type CodeProjectAgentMerge = typeof CodeProjectAgentMerge.Type;
+
 export const ProjectActionId = brandedUuid("ProjectActionId");
 export type ProjectActionId = typeof ProjectActionId.Type;
 
@@ -361,6 +371,7 @@ export const CodeProject = Schema.Struct({
    */
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
+  agentMerge: Schema.optional(CodeProjectAgentMerge),
   /**
    * The mode this Project's new threads start in, overriding Settings. Absent
    * follows Settings, except that a Project which remembered Full access
@@ -413,6 +424,7 @@ const CodeProjectSummary = Schema.Struct({
   codeAccessPersistence: CodeAccessPersistence,
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
+  agentMerge: Schema.optional(CodeProjectAgentMerge),
   defaultPermissionMode: Schema.optional(PermissionMode),
   autoReviewer: Schema.optional(AutoReviewer),
   desktopRecipe: Schema.optional(DesktopRecipe),
@@ -647,6 +659,11 @@ export const ProjectCommand = Schema.Union(
     pullRequestBackgroundRefresh: CodeProjectPullRequestBackgroundRefresh,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-code-project-agent-merge"),
+    ...ProjectCommandFields,
+    agentMerge: CodeProjectAgentMerge,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-code-project-actions"),
     ...ProjectCommandFields,
     /** The whole list; an empty list removes every action. */
@@ -747,6 +764,10 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("code-project-pull-request-background-refresh-changed"),
+    project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-project-agent-merge-changed"),
     project: CodeProject,
   }).annotations(strict),
   Schema.Struct({
@@ -922,6 +943,11 @@ export const CodeProjectPullRequestBackgroundRefreshChanged = Schema.Struct({
 }).annotations(strict);
 export type CodeProjectPullRequestBackgroundRefreshChanged =
   typeof CodeProjectPullRequestBackgroundRefreshChanged.Type;
+/** Journaled once per change so the standing permission survives a restart and shows who set it. */
+export const CodeProjectAgentMergeChanged = Schema.Struct({ project: CodeProject }).annotations(
+  strict,
+);
+export type CodeProjectAgentMergeChanged = typeof CodeProjectAgentMergeChanged.Type;
 /** Journaled once per save so every window and a restarted host see the same list. */
 export const CodeProjectActionsChanged = Schema.Struct({ project: CodeProject }).annotations(
   strict,
@@ -1043,6 +1069,9 @@ export const decodeCodeProjectNewThreadWorkspaceChanged = Schema.decodeUnknownSy
 );
 export const decodeCodeProjectPullRequestBackgroundRefreshChanged = Schema.decodeUnknownSync(
   CodeProjectPullRequestBackgroundRefreshChanged,
+);
+export const decodeCodeProjectAgentMergeChanged = Schema.decodeUnknownSync(
+  CodeProjectAgentMergeChanged,
 );
 export const decodeCodeProjectActionsChanged = Schema.decodeUnknownSync(CodeProjectActionsChanged);
 export const decodeProjectProviderPolicyChanged = Schema.decodeUnknownSync(

@@ -113,6 +113,8 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
     confirm: useId(),
     runLevel: useId(),
     runLevelNote: useId(),
+    merge: useId(),
+    mergeNote: useId(),
   };
 
   const [displayName, setDisplayName] = useState(
@@ -148,6 +150,9 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   const [targetSummary, setTargetSummary] = useState(initial?.deliveryTarget.summary ?? "");
   // Editing always requires an explicit fresh confirmation; never carry it over.
   const [targetConfirmed, setTargetConfirmed] = useState(false);
+  const [mergesItsPullRequests, setMergesItsPullRequests] = useState(
+    initial?.agentMerge === "allowed",
+  );
   const [runLevel, setRunLevel] = useState<RunLevelOption>(
     initial?.projectLevel === "opted-in"
       ? "project"
@@ -270,6 +275,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       deliveryTargetSummary: targetSummary,
       deliveryTargetConfirmed: targetConfirmed,
       ...(runLevel === "" ? {} : { runLevel }),
+      mergesItsPullRequests,
       ...(initial === undefined
         ? {}
         : { previousDeliveryTargetRevision: initial.deliveryTarget.revision }),
@@ -518,6 +524,24 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           </p>
         </div>
       )}
+
+      {mode === "code" ? (
+        <>
+          <div className="automation-editor__field automation-editor__confirmation">
+            <OctantCheckbox
+              aria-describedby={ids.mergeNote}
+              checked={mergesItsPullRequests}
+              id={ids.merge}
+              onChange={(event) => setMergesItsPullRequests(event.target.checked)}
+            />
+            <label htmlFor={ids.merge}>Merge the pull requests it opens</label>
+          </div>
+          <p className="automation-editor__note" id={ids.mergeNote}>
+            A run may merge the pull request its own thread opened, with nobody asked, once GitHub
+            shows its required checks passing on the head the run saw. Off, a merge always asks.
+          </p>
+        </>
+      ) : null}
 
       <div className="automation-editor__field automation-editor__confirmation">
         <OctantCheckbox

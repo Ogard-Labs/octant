@@ -392,6 +392,25 @@ async function handleCommand(
       origin,
     );
   }
+  // Letting a routine merge the pull requests it opens is the person's standing
+  // permission for work nobody watches, so only a window on this host grants it.
+  if (
+    context.principal.kind === "remote-device" &&
+    (body.kind === "create-automation" || body.kind === "update-automation") &&
+    isRecord(body.definition) &&
+    body.definition.agentMerge !== undefined
+  ) {
+    return jsonResponse(
+      decodeAutomationCommandResult({
+        kind: "automation-command-failed",
+        reason: "unauthorized",
+        message:
+          "Letting a routine merge its pull requests is chosen in the Octant window on this host.",
+      }),
+      200,
+      origin,
+    );
+  }
   const accessible = await accessibleProjects(dependencies, context);
   const denial = authorizeCommandProject(dependencies, body, accessible);
   if (denial !== undefined) {

@@ -48,6 +48,7 @@ import {
   type AutoReviewer,
   type ShieldDecision,
   type ComputerUseDestinationSelection,
+  type CodeMergeStandingSource,
   type CodeThreadId,
   type EventActor,
   type PendingRequest,
@@ -331,6 +332,8 @@ export interface CodeOperationRuntimeOptions {
   readonly resolvePullRequestTarget: (
     threadId: CodeThreadId,
   ) => Promise<GhDeliveryTarget | undefined>;
+  /** The standing merge permissions the person has stored for a thread; absent reads none. */
+  readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
   readonly reviewFiles: ReviewFindingFilePort;
   readonly evidence: CodeOperationEvidencePort;
   /** The images Code threads have staged for their next turn. */
@@ -1072,6 +1075,9 @@ export function createCodeOperationRuntime(
     ...(scaffolds === undefined ? {} : { scaffolds }),
     git,
     pullRequests,
+    ...(options.standingMergeAllowance === undefined
+      ? {}
+      : { standingMergeAllowance: options.standingMergeAllowance }),
     reviewFindings: {
       create: (windowId, input) => reviewFindings.create(windowId, input),
       changeState: (windowId, input) =>
@@ -3769,6 +3775,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           },
           pullRequestApproval: {
             request: (command, signal) => this.#askPullRequestApproval(active, command, signal),
+          },
+          standingMerge: () => {
+            const current = this.#effectiveThread(active.windowId, active.thread.id);
+            return current === undefined
+              ? undefined
+              : this.#options.standingMergeAllowance?.(current)[0];
           },
           terminalApproval: {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),

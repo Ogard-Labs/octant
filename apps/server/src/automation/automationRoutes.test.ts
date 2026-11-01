@@ -589,14 +589,14 @@ describe("automation routes", () => {
     expect(harness.projection.getDefinition(automationId("b302"))?.projectLevel).toBe("opted-in");
   });
 
-  it("refuses a paired device picking a level on a routine, and lets a local window", async () => {
+  it("refuses a paired device letting a routine merge its pull requests, and lets a local window", async () => {
     const harness = createHarness();
     const create = (id: string) =>
       postCommand({
         kind: "create-automation",
         automationId: automationId(id),
         expectedVersion: 0,
-        definition: { ...automationDefinitionDraftFixture(), runLevel: "full-access" },
+        definition: { ...automationDefinitionDraftFixture(), agentMerge: "allowed" },
       });
     const remote = create("b311");
     bindPrincipalRouteContext(remote, {
@@ -620,7 +620,7 @@ describe("automation routes", () => {
 
     const local = decodeAutomationCommandResult(await json(await harness.handler(create("b312"))));
     expect(local.kind).not.toBe("automation-command-failed");
-    expect(harness.projection.getDefinition(automationId("b312"))?.runLevel).toBe("full-access");
+    expect(harness.projection.getDefinition(automationId("b312"))?.agentMerge).toBe("allowed");
   });
 
   it("rejects a remote-device principal from another host and allows the owning host", async () => {

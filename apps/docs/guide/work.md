@@ -215,7 +215,11 @@ mode than its Project's new threads start in, so a pick can lower a run but
 not raise it. Full access means no sandbox and no prompts, so those runs
 change files and run commands with nobody asked. Only a window on this
 computer can set it, and the change is recorded with the routine; a routine
-an agent proposed never has it until you set it. It appears under Routines in the thread's
+an agent proposed never has it until you set it. A Code routine also has **Merge the
+pull requests it opens**: when it is on, the run's agent may merge the pull
+request its own thread opened without asking, once the head it saw is still
+current and the repository's required checks have passed. It is off by default
+and set the same way, from a window on this computer. It appears under Routines in the thread's
 Environment. That list shows every active and paused routine of the
 Project, not only this thread's: this thread's follow-ups first, then the
 routines made from this thread, then the rest. Each can be paused, resumed, or

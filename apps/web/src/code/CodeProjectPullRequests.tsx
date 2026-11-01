@@ -48,6 +48,15 @@ export interface CodeProjectPullRequestsProps {
     readonly enabledFor: (projectId: ProjectId) => boolean;
     readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   };
+  /**
+   * Present on a local window, which alone may let a Project's agents merge
+   * without asking each time. The server owns the setting and refuses a paired
+   * device.
+   */
+  readonly agentMerge?: {
+    readonly enabledFor: (projectId: ProjectId) => boolean;
+    readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  };
 }
 
 type WorkspaceState =
@@ -309,6 +318,9 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                   {...(props.backgroundRefresh === undefined || dock
                     ? {}
                     : { backgroundRefresh: props.backgroundRefresh })}
+                  {...(props.agentMerge === undefined || dock
+                    ? {}
+                    : { agentMerge: props.agentMerge })}
                   {...(backgroundRefreshState === undefined ? {} : { backgroundRefreshState })}
                   {...(props.onSelectRow === undefined ? {} : { onSelectRow: props.onSelectRow })}
                   {...(props.selectedRowKey === undefined
@@ -350,11 +362,16 @@ function ProjectGroup(props: {
     readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   };
   readonly backgroundRefreshState?: CodeProjectPullRequestBackgroundRefreshState;
+  readonly agentMerge?: {
+    readonly enabledFor: (projectId: ProjectId) => boolean;
+    readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  };
 }) {
   const repositories = groupByRepository(props.rows);
   const backgroundRefresh =
     props.project.kind === "connected" ? props.backgroundRefresh : undefined;
   const backgroundRefreshEnabled = backgroundRefresh?.enabledFor(props.project.projectId) ?? false;
+  const agentMerge = props.project.kind === "connected" ? props.agentMerge : undefined;
   return (
     <section
       aria-label={`Project ${props.project.projectName}`}
@@ -381,6 +398,19 @@ function ProjectGroup(props: {
                 label={`Auto-refresh ${props.project.projectName} pull requests`}
                 onCheckedChange={(enabled) =>
                   void backgroundRefresh.setEnabled(props.project.projectId, enabled)
+                }
+              />
+            </div>
+          )}
+          {agentMerge === undefined ? null : (
+            <div className="code-project-pull-requests__auto-refresh">
+              <span>Agents may merge</span>
+              <OctantSwitch
+                checked={agentMerge.enabledFor(props.project.projectId)}
+                disabled={props.busy}
+                label={`Let agents merge ${props.project.projectName} pull requests`}
+                onCheckedChange={(enabled) =>
+                  void agentMerge.setEnabled(props.project.projectId, enabled)
                 }
               />
             </div>
