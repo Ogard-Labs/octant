@@ -511,6 +511,26 @@ describe("a Project's own call on the server its folder is on", () => {
     expect(judge("cat /etc/shadow", [], at("admin"))).toMatchObject({ rule: "secret-path" });
   });
 
+  it("asks before a protected path however the command quotes or names it", () => {
+    const listed = at("read-only", {
+      protectedSecretPath: (path) => /(^|\/)private notes\.txt$|(^|\/)token$/.test(path),
+    });
+    for (const command of [
+      'cat "/srv/private notes.txt"',
+      "cat 'private notes.txt'",
+      "cat tok'en'",
+      "cat token",
+      "grep --file=token x",
+      "grep -ftoken x",
+    ]) {
+      expect(judge(command, [], listed), command).toMatchObject({
+        verdict: "ask",
+        rule: "secret-path",
+      });
+    }
+    expect(judge("cat README.md", [], listed)).toMatchObject({ verdict: "allow" });
+  });
+
   it("treats an edit in the folder as a configuration change", () => {
     expect(judgeEdit("read-only")).toMatchObject({ rule: "beyond-server-profile" });
     expect(judgeEdit("operate")).toMatchObject({ rule: "beyond-server-profile" });

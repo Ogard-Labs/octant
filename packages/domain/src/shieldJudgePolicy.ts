@@ -462,7 +462,7 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
 
   // A Project's folder on a server: its profile caps what follows.
   if (input.rootServer !== undefined) {
-    const capped = judgeCallOnRootServer(input.rootServer, call, command, input.tainted);
+    const capped = judgeCallOnRootServer(input.rootServer, call, command, input);
     if (capped !== undefined) return capped;
   }
 
@@ -662,7 +662,7 @@ function judgeCallOnRootServer(
   server: ShieldServerRule,
   call: ShieldCall,
   command: string | undefined,
-  tainted: boolean,
+  input: Pick<ShieldRuleInput, "tainted" | "protectedSecretPath">,
 ): ShieldRuleOutcome | undefined {
   const beyond = decided(
     "ask",
@@ -672,7 +672,7 @@ function judgeCallOnRootServer(
   );
   if (call.kind === "edit") return profileAllows(server.profile, "admin") ? undefined : beyond;
   if (call.kind !== "command" || command === undefined || command.length === 0) return undefined;
-  const { tier: placed, words } = classifyRemoteCommand(command, server.deployCommands);
+  const { tier: placed, words, wordList } = classifyRemoteCommand(command, server.deployCommands);
   if (placed === "lockout") {
     return decided(
       "ask",
@@ -681,7 +681,19 @@ function judgeCallOnRootServer(
       `The command can lock the person out of ${server.alias} or destroy data on it, so the person decides.`,
     );
   }
-  if ([command, words].some((text) => SERVER_SECRET_PATH.test(text))) {
+  // Each word as the server receives it, so quoting cannot split a path or hide
+  // it, and relative to the folder, so a bare `notes.txt` is read as a path too.
+  const protectedWord = (word: string) =>
+    [word, word.replace(/^[^=]*=/u, ""), word.replace(/^-[A-Za-z]/u, "")].some(
+      (form) =>
+        form.length > 0 &&
+        (input.protectedSecretPath?.(form) === true ||
+          input.protectedSecretPath?.(resolveFrom(form, call.workingDirectory)) === true),
+    );
+  if (
+    [command, words].some((text) => SERVER_SECRET_PATH.test(text)) ||
+    wordList.some(protectedWord)
+  ) {
     return decided(
       "ask",
       "deny-rule",
@@ -691,7 +703,7 @@ function judgeCallOnRootServer(
   }
   const tier = placed === "unknown" && isReadOnlyGit(command) ? "read" : placed;
   if (tier === "unknown") return server.profile === "read-only" ? beyond : undefined;
-  if (tainted && tier !== "read") {
+  if (input.tainted && tier !== "read") {
     return decided(
       "ask",
       "taint-limit",
