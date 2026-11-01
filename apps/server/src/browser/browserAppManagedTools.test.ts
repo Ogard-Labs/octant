@@ -885,3 +885,162 @@ describe("octant_browser profile argument", () => {
     ).toMatchObject({ isError: true, result: { error: "invalid-browser-input" } });
   });
 });
+
+describe("octant_browser resize and device emulation", () => {
+  const running = snapshot({
+    status: "running",
+    context: {
+      contextId: "50000000-0000-4000-8000-000000000001" as never,
+      threadId,
+      actionId: "60000000-0000-4000-8000-000000000001" as never,
+      correlationId: "70000000-0000-4000-8000-000000000001" as never,
+      authority,
+      policy: {
+        profileMode: "isolated" as const,
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 8,
+        sessionTimeoutMs: 600_000,
+      },
+      state: "active" as const,
+      createdAt: "2026-09-09T10:00:00.000Z" as never,
+    },
+    observation: {
+      revision: 3,
+      emulation: {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 3,
+        touch: true,
+        colorScheme: "dark",
+      },
+    } as never,
+  });
+
+  function resizeWith(
+    input: Record<string, unknown>,
+    executionPolicy: "approval-gated" | "plan" = "approval-gated",
+  ) {
+    const act = vi.fn(async () => running);
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy,
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => running,
+        create: vi.fn(async () => running),
+        act,
+        releaseThread: vi.fn(async () => running),
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    return {
+      act,
+      result: tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({ operation: "resize", ...input }),
+      }),
+    };
+  }
+
+  function requested(act: ReturnType<typeof resizeWith>["act"]) {
+    return (act.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+  }
+
+  it.each([
+    [
+      "phone",
+      { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, mobile: true, touch: true },
+    ],
+    [
+      "phone-landscape",
+      { viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, mobile: true, touch: true },
+    ],
+    [
+      "tablet",
+      { viewport: { width: 820, height: 1180 }, deviceScaleFactor: 2, mobile: true, touch: true },
+    ],
+    [
+      "desktop",
+      { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, mobile: false, touch: false },
+    ],
+  ])(
+    "turns the %s preset into a size, a pixel ratio, a mobile flag, and touch",
+    async (preset, expected) => {
+      const { act, result } = resizeWith({ preset });
+      expect(await result).toMatchObject({ isError: false });
+      expect(requested(act)).toMatchObject({ request: { kind: "resize", ...expected } });
+    },
+  );
+
+  it("lets touch and color scheme override a preset, and reports what the page now sees", async () => {
+    const { act, result } = resizeWith({ preset: "phone", touch: false, colorScheme: "dark" });
+    expect(await result).toMatchObject({
+      result: {
+        page: {
+          emulation: {
+            width: 390,
+            height: 844,
+            deviceScaleFactor: 3,
+            touch: true,
+            colorScheme: "dark",
+          },
+        },
+      },
+    });
+    expect(requested(act)).toMatchObject({
+      request: { kind: "resize", touch: false, colorScheme: "dark", mobile: true },
+    });
+  });
+
+  it("changes only the fields named, and restores all with none", async () => {
+    const dark = resizeWith({ colorScheme: "dark" });
+    await dark.result;
+    const request = (requested(dark.act) as { request: Record<string, unknown> }).request;
+    expect(request).toMatchObject({ kind: "resize", colorScheme: "dark" });
+    expect(request).not.toHaveProperty("viewport");
+    expect(request).not.toHaveProperty("touch");
+
+    const restore = resizeWith({});
+    await restore.result;
+    const restoring = (requested(restore.act) as { request: Record<string, unknown> }).request;
+    for (const field of ["viewport", "touch", "colorScheme", "deviceScaleFactor", "mobile"]) {
+      expect(restoring).not.toHaveProperty(field);
+    }
+
+    const sized = resizeWith({ width: 600, height: 900, touch: true });
+    await sized.result;
+    const plain = (requested(sized.act) as { request: Record<string, unknown> }).request;
+    expect(plain).toMatchObject({ viewport: { width: 600, height: 900 }, touch: true });
+    expect(plain).not.toHaveProperty("deviceScaleFactor");
+  });
+
+  it.each([
+    ["an unknown preset", { preset: "watch" }],
+    ["a prototype name as a preset", { preset: "constructor" }],
+    ["a preset beside a width", { preset: "phone", width: 400 }],
+    ["a preset beside a height", { preset: "phone", height: 800 }],
+    ["a width without a height", { width: 400 }],
+    ["a size under the bound", { width: 100, height: 100 }],
+    ["a touch that is not a boolean", { touch: "yes" }],
+    ["an unknown color scheme", { colorScheme: "sepia" }],
+    ["a pixel ratio the agent picks", { preset: "phone", deviceScaleFactor: 9 }],
+    ["a mobile flag the agent picks", { width: 400, height: 800, mobile: true }],
+  ])("refuses %s before any page is touched", async (_label, input) => {
+    const { act, result } = resizeWith(input);
+    expect((await result).result).toEqual({ error: "invalid-browser-input" });
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("refuses emulation in Plan mode like any other operation", async () => {
+    const { act, result } = resizeWith({ preset: "phone", colorScheme: "dark" }, "plan");
+    expect((await result).result).toEqual({ error: "plan-mode-read-only" });
+    expect(act).not.toHaveBeenCalled();
+  });
+});

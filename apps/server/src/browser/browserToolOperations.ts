@@ -4,9 +4,12 @@ import type {
   ProviderToolImage,
 } from "@octant/contracts";
 import {
+  BROWSER_DEVICE_PRESETS,
   BROWSER_RESIZE_BOUNDS,
+  BrowserColorScheme,
   MAX_BROWSER_UPLOAD_FILES,
   MAX_BROWSER_WAIT_MS,
+  type BrowserDevicePreset,
   type BrowserWaitCondition,
   type BrowserWaitFor,
 } from "@octant/contracts";
@@ -61,6 +64,10 @@ export type BrowserToolInput = {
   | {
       readonly operation: "resize";
       readonly viewport?: { readonly width: number; readonly height: number };
+      readonly deviceScaleFactor?: number;
+      readonly mobile?: boolean;
+      readonly touch?: boolean;
+      readonly colorScheme?: BrowserColorScheme;
     }
   | { readonly operation: "press"; readonly key: string }
   | ({ readonly operation: "type"; readonly text: string } & BrowserToolTarget)
@@ -191,9 +198,37 @@ function parseBrowserToolRecord(
     if (waitFor === null) return undefined;
     if (waitFor !== undefined) return { ...common, operation, waitFor };
   }
-  if (operation === "resize" && only("width", "height")) {
-    if (record.width === undefined && record.height === undefined) return { ...common, operation };
-    const { width, height } = record;
+  if (operation === "resize" && only("preset", "width", "height", "touch", "colorScheme")) {
+    const { preset, width, height, touch, colorScheme } = record;
+    if (touch !== undefined && typeof touch !== "boolean") return undefined;
+    if (
+      colorScheme !== undefined &&
+      !(BrowserColorScheme.literals as ReadonlyArray<unknown>).includes(colorScheme)
+    )
+      return undefined;
+    const emulated = {
+      ...(touch === undefined ? {} : { touch }),
+      ...(colorScheme === undefined ? {} : { colorScheme: colorScheme as BrowserColorScheme }),
+    };
+    if (preset !== undefined) {
+      // A name stands for a whole device; a size beside it would be a second,
+      // conflicting answer to the same question.
+      if (width !== undefined || height !== undefined) return undefined;
+      if (typeof preset !== "string" || !Object.hasOwn(BROWSER_DEVICE_PRESETS, preset))
+        return undefined;
+      const device = BROWSER_DEVICE_PRESETS[preset as BrowserDevicePreset];
+      return {
+        ...common,
+        operation,
+        viewport: { width: device.width, height: device.height },
+        deviceScaleFactor: device.deviceScaleFactor,
+        mobile: device.mobile,
+        // A mobile device is a touch device unless the call says otherwise.
+        touch: device.mobile,
+        ...emulated,
+      };
+    }
+    if (width === undefined && height === undefined) return { ...common, operation, ...emulated };
     if (
       typeof width !== "number" ||
       typeof height !== "number" ||
@@ -205,7 +240,7 @@ function parseBrowserToolRecord(
       height > BROWSER_RESIZE_BOUNDS.maxHeight
     )
       return undefined;
-    return { ...common, operation, viewport: { width, height } };
+    return { ...common, operation, viewport: { width, height }, ...emulated };
   }
   if ((operation === "click" || operation === "wait") && only("selector", "ref")) {
     const named = target();
@@ -470,6 +505,12 @@ export function browserToolAction(
         ...base,
         kind: "resize",
         ...(input.viewport === undefined ? {} : { viewport: input.viewport }),
+        ...(input.deviceScaleFactor === undefined
+          ? {}
+          : { deviceScaleFactor: input.deviceScaleFactor }),
+        ...(input.mobile === undefined ? {} : { mobile: input.mobile }),
+        ...(input.touch === undefined ? {} : { touch: input.touch }),
+        ...(input.colorScheme === undefined ? {} : { colorScheme: input.colorScheme }),
       };
     case "wait":
       if ("waitFor" in input) return { ...base, kind: "wait", waitFor: input.waitFor };
@@ -649,6 +690,7 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.title === undefined ? {} : { title: observation.title }),
               ...(observation.change === undefined ? {} : { changed: observation.change }),
               ...(observation.snapshot === undefined ? {} : { snapshot: observation.snapshot }),
+              ...(observation.emulation === undefined ? {} : { emulation: observation.emulation }),
               ...(observation.tabs === undefined ? {} : { tabs: observation.tabs }),
               ...(observation.dialogs === undefined ? {} : { dialogs: observation.dialogs }),
               ...(bounded === undefined

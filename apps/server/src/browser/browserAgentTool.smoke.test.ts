@@ -64,6 +64,19 @@ const pages: Record<string, string> = {
     <fieldset disabled><input id="locked" aria-label="Locked"></fieldset>
     <p>Width <span id="width"></span></p>
     <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
+  "/device": `<!doctype html><title>Device</title><meta name="viewport" content="width=device-width, initial-scale=1">
+    <button id="tap" style="width:120px;height:48px">Tap</button>
+    <p id="log"></p>
+    <script>
+      const log = (what) => { document.getElementById('log').textContent += what + ' '; };
+      addEventListener('touchstart', () => log('touchstart'));
+      document.getElementById('tap').addEventListener('click', () => log('click'));
+      const report = () => log('w' + innerWidth + ' coarse=' + matchMedia('(pointer: coarse)').matches + ' dark=' + matchMedia('(prefers-color-scheme: dark)').matches);
+      report();
+      addEventListener('resize', report);
+      matchMedia('(prefers-color-scheme: dark)').addEventListener('change', report);
+      matchMedia('(pointer: coarse)').addEventListener('change', report);
+    </script>`,
   "/noisy": `<!doctype html><title>Noisy</title>
     <script>console.warn("careful"); console.error("boom"); fetch("/missing-data?token=s3cret");</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
@@ -656,6 +669,59 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     await tool.stop();
   });
 
+  it("emulates a phone, touch, and dark mode on the agent's page and restores all three", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/device` });
+    // The page's own color scheme follows the machine, so it is read, not assumed.
+    const baseline = (await tool.call({ operation: "resize" })).result.page?.emulation;
+    expect(baseline).toMatchObject({ width: 1280, touch: false });
+    const phone = await tool.call({
+      operation: "resize",
+      preset: "phone",
+      colorScheme: "dark",
+    });
+    expect(phone.result.page?.emulation).toEqual({
+      width: 390,
+      height: 844,
+      deviceScaleFactor: 3,
+      touch: true,
+      colorScheme: "dark",
+    });
+    // The page's own code saw the same: a tap arrives as touch, then a click.
+    const tapped = await tool.call({
+      operation: "click",
+      selector: "#tap",
+      include: ["text"],
+    });
+    expect(tapped.result.page?.text).toContain("w390 coarse=true dark=true");
+    expect(tapped.result.page?.text).toMatch(/touchstart click/);
+    // Each field changes only what it names.
+    const light = await tool.call({
+      operation: "resize",
+      colorScheme: "light",
+    });
+    expect(light.result.page?.emulation).toMatchObject({
+      width: 390,
+      touch: true,
+      colorScheme: "light",
+    });
+    const mouse = await tool.call({ operation: "resize", touch: false });
+    expect(mouse.result.page?.emulation).toMatchObject({
+      width: 390,
+      touch: false,
+    });
+    // A plain size of the same width drops the phone's pixel ratio.
+    const plain = await tool.call({ operation: "resize", width: 390, height: 844 });
+    expect(plain.result.page?.emulation).toMatchObject({ width: 390, deviceScaleFactor: 1 });
+    const restored = await tool.call({
+      operation: "resize",
+      include: ["text"],
+    });
+    expect(restored.result.page?.emulation).toEqual(baseline);
+    expect(restored.result.page?.text).toContain("w1280 coarse=false");
+    await tool.stop();
+  });
+
   it("hands the page to the person to sign in, holds the agent, and resumes with a fresh snapshot", async () => {
     let tool: ReturnType<typeof agentTool> | undefined;
     let duringHandOff: unknown;
@@ -747,7 +813,9 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       "url",
     ]);
     const withWarnings = (await tool.call({ operation: "diagnostics", warnings: true })).result
-      .page as { readonly consoleWarnings?: ReadonlyArray<{ readonly text: string }> };
+      .page as {
+      readonly consoleWarnings?: ReadonlyArray<{ readonly text: string }>;
+    };
     expect(withWarnings.consoleWarnings?.map((entry) => entry.text)).toEqual(["careful"]);
     const after = (
       await tool.call({ operation: "diagnostics", since: first.diagnosticsCursor ?? 0 })

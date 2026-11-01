@@ -5,6 +5,7 @@ import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/con
 import {
   BROWSER_RESIZE_BOUNDS,
   BrowserActionKind,
+  BrowserColorScheme,
   BrowserObservationPart,
   decodeBrowserWaitFor,
   decodeImportedCookie,
@@ -366,6 +367,10 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "tabId",
     "waitFor",
     "viewport",
+    "deviceScaleFactor",
+    "mobile",
+    "touch",
+    "colorScheme",
     "diagnosticsSince",
     "diagnosticsWarnings",
   ]);
@@ -395,6 +400,17 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
       (Number.isSafeInteger(value.diagnosticsSince) && (value.diagnosticsSince as number) >= 0)) &&
     (value.diagnosticsWarnings === undefined || typeof value.diagnosticsWarnings === "boolean") &&
     (value.viewport === undefined || isViewportSize(value.viewport)) &&
+    (value.deviceScaleFactor === undefined ||
+      (typeof value.deviceScaleFactor === "number" &&
+        value.deviceScaleFactor > 0 &&
+        value.deviceScaleFactor <= 4)) &&
+    (value.mobile === undefined || typeof value.mobile === "boolean") &&
+    // A pixel ratio or mobile flag belongs to a device size, never alone.
+    ((value.deviceScaleFactor === undefined && value.mobile === undefined) ||
+      value.viewport !== undefined) &&
+    (value.touch === undefined || typeof value.touch === "boolean") &&
+    (value.colorScheme === undefined ||
+      (BrowserColorScheme.literals as ReadonlyArray<unknown>).includes(value.colorScheme)) &&
     (value.tabId === undefined ||
       (typeof value.tabId === "string" && /^t[1-9][0-9]{0,3}$/.test(value.tabId))) &&
     (value.include === undefined ||

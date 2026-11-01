@@ -49,6 +49,14 @@ const pages: Record<string, string> = {
     <button id="ask" onclick="const ok = confirm('Delete everything?'); alert(ok ? 'deleted' : 'kept'); document.title = ok ? 'Deleted' : 'Kept'">Ask</button>
     <p>Width <span id="width"></span></p>
     <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
+  "/device": `<!doctype html><title>Device</title><meta name="viewport" content="width=device-width, initial-scale=1">
+    <button id="tap" style="width:120px;height:48px">Tap</button>
+    <p id="log"></p>
+    <script>
+      const log = (what) => { document.getElementById('log').textContent += what + ' '; };
+      addEventListener('touchstart', () => log('touchstart'));
+      document.getElementById('tap').addEventListener('click', () => log('click'));
+    </script>`,
   "/html-drag": `<!doctype html><title>Drag</title>
     <div id="card" draggable="true" style="width:60px;height:30px" ondragstart="event.dataTransfer.setData('text', 'card')">Card</div>
     <div id="done" style="width:60px;height:30px;margin-top:40px" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>`,
@@ -81,11 +89,20 @@ afterAll(async () => {
 /** A WebContentsView port backed by one real page. */
 async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }> {
   if (browser === undefined) throw new Error("No Chromium.");
-  const page = await browser.newPage();
+  // An Electron view has no color scheme of its own: it follows the machine.
+  const page = await (await browser.newContext({ colorScheme: null })).newPage();
   let title = "";
   let session: CDPSession | undefined;
   let attached = false;
   const messageListeners = new Set<(event: unknown, method: string, params: unknown) => void>();
+  // Electron applies a device change synchronously; this stand-in finishes it
+  // before the page is next read, which is the same order of events.
+  let deviceChange: Promise<void> = Promise.resolve();
+  let deviceSessionOpened: Promise<CDPSession> | undefined;
+  const deviceSession = () => {
+    deviceSessionOpened ??= page.context().newCDPSession(page);
+    return deviceSessionOpened;
+  };
   const openSession = async (): Promise<CDPSession> => {
     if (session !== undefined) return session;
     const opened = await page.context().newCDPSession(page);
@@ -131,9 +148,31 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
         on: (_event, listener) => void messageListeners.add(listener),
         removeListener: (_event, listener) => void messageListeners.delete(listener),
       },
-      enableDeviceEmulation: (parameters) => void page.setViewportSize(parameters.viewSize),
-      disableDeviceEmulation: () => void page.setViewportSize({ width: 1280, height: 720 }),
+      // Electron's device emulation lives in the view, not in the debugger
+      // session, so it has a session of its own that the host's debugger
+      // attach and detach never touch.
+      enableDeviceEmulation: (parameters) => {
+        deviceChange = (async () => {
+          await (
+            await deviceSession()
+          ).send("Emulation.setDeviceMetricsOverride", {
+            width: parameters.viewSize.width,
+            height: parameters.viewSize.height,
+            deviceScaleFactor: parameters.deviceScaleFactor,
+            mobile: parameters.screenPosition === "mobile",
+          });
+        })();
+      },
+      disableDeviceEmulation: () => {
+        deviceChange = (async () => {
+          await (await deviceSession()).send("Emulation.clearDeviceMetricsOverride");
+          // Playwright sends nothing for a size it already holds.
+          await page.setViewportSize({ width: 1280, height: 721 });
+          await page.setViewportSize({ width: 1280, height: 720 });
+        })();
+      },
       executeJavaScriptInIsolatedWorld: async (_world, scripts) => {
+        await deviceChange;
         const answer = await page.evaluate(scripts[0]?.code ?? "undefined");
         await refreshTitle();
         return answer;
@@ -149,7 +188,10 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
       mainFrame: {
         get framesInSubtree() {
           return page.frames().map((frame) => ({
-            executeJavaScript: (code: string) => frame.evaluate(code),
+            executeJavaScript: async (code: string) => {
+              await deviceChange;
+              return frame.evaluate(code);
+            },
           }));
         },
       },
@@ -178,7 +220,8 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
 async function surface(path: string, views = 1) {
   const pool = await Promise.all(Array.from({ length: views }, () => pageView()));
   const page = pool[0]?.page;
-  if (page === undefined) throw new Error("No page.");
+  const view = pool[0]?.view;
+  if (page === undefined || view === undefined) throw new Error("No page.");
   let next = 0;
   const host = createBrowserSurfaceHost({
     createView: () => {
@@ -200,8 +243,11 @@ async function surface(path: string, views = 1) {
       sessionTimeoutMs: 300_000,
     },
   });
-  const opened = await host.act(contextId, { kind: "navigate", target: `${origin}${path}` });
-  return { host, contextId, page, opened };
+  const opened = await host.act(contextId, {
+    kind: "navigate",
+    target: `${origin}${path}`,
+  });
+  return { host, contextId, page, opened, view };
 }
 
 function entry(
@@ -349,6 +395,94 @@ describe.skipIf(chrome === undefined)(
         destination: "#done",
       });
       expect(dragged.title).toBe("Dropped card");
+      await page.close();
+    });
+
+    it("emulates a phone, touch, and a color scheme on the agent's view and restores all three", async () => {
+      const { host, contextId, page } = await surface("/device");
+      // The page's color scheme follows the machine, so it is read, not assumed.
+      const baseline = (await host.act(contextId, { kind: "resize" })).emulation;
+      expect(baseline).toMatchObject({ width: 1280, touch: false });
+      const phone = await host.act(contextId, {
+        kind: "resize",
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 3,
+        mobile: true,
+        touch: true,
+        colorScheme: "dark",
+      });
+      expect(phone.emulation).toEqual({
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 3,
+        touch: true,
+        colorScheme: "dark",
+      });
+      expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(
+        true,
+      );
+      // The touch and color scheme outlive the action's own debugger attach.
+      const tapped = await host.act(contextId, {
+        kind: "click",
+        target: "#tap",
+        include: ["text"],
+      });
+      expect(tapped.extractedText).toMatch(/touchstart click/);
+      expect(tapped.emulation).toBeUndefined();
+      const light = await host.act(contextId, {
+        kind: "resize",
+        colorScheme: "light",
+      });
+      expect(light.emulation).toMatchObject({
+        width: 390,
+        touch: true,
+        colorScheme: "light",
+      });
+      const restored = await host.act(contextId, { kind: "resize" });
+      expect(restored.emulation).toEqual(baseline);
+      expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(false);
+      await page.close();
+    });
+
+    it("forgets touch the page lost when its debugger attachment was dropped", async () => {
+      const { host, contextId, page, view } = await surface("/device");
+      await host.act(contextId, { kind: "resize", touch: true });
+      // Developer tools opening on the view replace the agent's attachment.
+      view.webContents.debugger.detach();
+      // This stand-in ends the protocol session asynchronously; Electron's is immediate.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const clicked = await host.act(contextId, {
+        kind: "click",
+        target: "#tap",
+        include: ["text"],
+      });
+      expect(clicked.extractedText).toMatch(/click/);
+      expect(clicked.extractedText).not.toMatch(/touchstart/);
+      const again = await host.act(contextId, { kind: "resize", touch: true });
+      expect(again.emulation).toMatchObject({ touch: true });
+      await host.act(contextId, { kind: "resize" });
+      expect(view.webContents.debugger.isAttached()).toBe(false);
+      await page.close();
+    });
+
+    it("leaves device emulation alone when someone else's developer tools hold the page", async () => {
+      const { host, contextId, page, view } = await surface("/device");
+      // Someone else's debugger: attached before the agent's action begins.
+      view.webContents.debugger.attach("1.3");
+      await expect(host.act(contextId, { kind: "resize", touch: true })).rejects.toThrow(
+        /already in use/,
+      );
+      await expect(host.act(contextId, { kind: "resize", colorScheme: "dark" })).rejects.toThrow(
+        /already in use/,
+      );
+      expect(view.webContents.debugger.isAttached()).toBe(true);
+      expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(false);
+      // A size needs no debugger, so it still applies.
+      const sized = await host.act(contextId, {
+        kind: "resize",
+        viewport: { width: 600, height: 800 },
+      });
+      expect(sized.emulation).toMatchObject({ width: 600 });
       await page.close();
     });
 

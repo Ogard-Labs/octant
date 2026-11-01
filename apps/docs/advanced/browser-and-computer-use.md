@@ -220,8 +220,17 @@ The agent can wait for text to appear, an address to change, or a button to
 become enabled, for at most 30 seconds, and every action waits a moment for the
 page to settle before it reports back. If a page shows its own alert, Octant
 accepts it; if it asks to confirm something or to type an answer, Octant
-declines. The agent is told about each one. The agent can also resize its page,
-for example to phone width, and set it back.
+declines. The agent is told about each one.
+
+The agent can also test how a page looks on another device. It can resize its
+page to a phone, a phone held sideways, a tablet, or a desktop, or to a size it
+picks. On a phone or tablet the page also sees a touch screen, and the agent's
+clicks reach it as taps. It can turn touch on or off by itself, and switch the
+page between light and dark mode. When it is done, one resize with nothing
+else puts the size, touch, and color scheme back. This changes only the agent's
+own page. Your own Browser window and your other pages keep their size and
+look, and a page you opened developer tools on keeps its touch and color
+scheme as they are. The agent is told what the page now reports.
 
 When a page needs you to sign in, the agent can hand it to you instead of
 giving up. A card in the thread says which site and why, with **Continue** and

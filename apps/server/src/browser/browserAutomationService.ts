@@ -632,6 +632,7 @@ export class BrowserAutomationService {
           ? {}
           : { screenshotDataUrl: observed.screenshotDataUrl }),
         ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
+        ...(observed.emulation === undefined ? {} : { emulation: observed.emulation }),
         ...(observed.tabs === undefined ? {} : { tabs: observed.tabs }),
         ...(observed.dialogs === undefined || observed.dialogs.length === 0
           ? {}
