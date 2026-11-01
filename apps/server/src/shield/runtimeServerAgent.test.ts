@@ -7,7 +7,9 @@ import {
   startThrowawaySshd,
   type ThrowawaySshd,
 } from "../serverProjects/throwawaySshd.test-support";
+import { openRuntimeServerAccess } from "./runtimeServerAccess";
 import { openRuntimeServerAgent, type RuntimeAgentServer } from "./runtimeServerAgent";
+import { resolveWithPersonConfig } from "./serverSshAccess";
 
 describe.skipIf(!canRunThrowawaySshd)("a provider runtime's own ssh signing in", () => {
   let sshd: ThrowawaySshd;
@@ -107,4 +109,62 @@ describe.skipIf(!canRunThrowawaySshd)("a provider runtime's own ssh signing in",
     expect(listed.stdout.trim().split("\n")).toHaveLength(1);
     expect(() => readFileSync(agent.socketPath)).toThrow();
   }, 30_000);
+});
+
+describe.skipIf(!canRunThrowawaySshd)("a provider runtime's own ssh through its server folder", () => {
+  let sshd: ThrowawaySshd;
+  let socketParent = "";
+
+  beforeAll(async () => {
+    sshd = await startThrowawaySshd();
+    socketParent = realpathSync(mkdtempSync("/tmp/octant-runtime-access-"));
+  }, 30_000);
+
+  afterAll(() => {
+    sshd.stop();
+    rmSync(socketParent, { recursive: true, force: true });
+  });
+
+  // The runtime's command, with only what the launch hands it: no person's config or key.
+  const runtimeCommand = (environment: Readonly<Record<string, string>>, command: string) =>
+    new Promise<{ readonly code: number | null; readonly output: string }>((done) => {
+      const child = spawn("/bin/sh", ["-c", command], {
+        env: { ...environment, HOME: socketParent },
+      });
+      let output = "";
+      child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+      child.on("close", (code) => done({ code, output }));
+    });
+
+  it("reaches a registered server by its alias, and nothing else", async () => {
+    const access = await openRuntimeServerAccess(
+      () => [{ serverId: "5e7e0000-0000-4000-8000-0000000000d1" as never, alias: sshd.alias, user: sshd.user }],
+      {
+        personAgentSocket: () => sshd.agentSocket,
+        resolve: (alias) => resolveWithPersonConfig(alias, sshd.configFile),
+        socketParent,
+      },
+    );
+    if (access === undefined) throw new Error("Expected access.");
+    const environment = {
+      PATH: `${access.binDirectory}:/usr/bin:/bin`,
+      SSH_AUTH_SOCK: access.agentSocket,
+    };
+    try {
+      const reached = await runtimeCommand(environment, `ssh ${sshd.alias} echo runtime-alias`);
+      expect(reached.output).toContain("runtime-alias");
+      expect(reached.code).toBe(0);
+      // An alias the folder does not name, and the server's address by hand.
+      for (const command of [
+        `ssh ${sshd.unknownHostAlias} echo runtime-alias`,
+        `ssh -o StrictHostKeyChecking=no -p 1 127.0.0.1 echo runtime-alias`,
+      ]) {
+        const refused = await runtimeCommand(environment, command);
+        expect(refused.output, command).not.toContain("runtime-alias\n");
+      }
+    } finally {
+      await access.close();
+    }
+  }, 60_000);
 });

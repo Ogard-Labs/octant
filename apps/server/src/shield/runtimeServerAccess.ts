@@ -31,8 +31,10 @@ import type { ServerSshKeys } from "./sshKeyBrokerClient";
 export interface RuntimeServerAccess {
   /** The private folder: a read root for the launch. */
   readonly folder: string;
-  /** `SSH_AUTH_SOCK` and a `PATH` with the wrappers first. */
-  readonly environment: Readonly<Record<string, string>>;
+  /** The wrappers, to go first on the launch's `PATH`. */
+  readonly binDirectory: string;
+  /** The launch's `SSH_AUTH_SOCK`. */
+  readonly agentSocket: string;
   readonly close: () => Promise<void>;
 }
 
@@ -49,6 +51,9 @@ export interface RuntimeServerAccessOptions {
 
 type AccessServer = Pick<ShieldServer, "serverId" | "alias" | "user" | "signIn">;
 
+/** A name or address `ssh -G` printed that a config line can carry as it is. */
+const PLAIN_HOSTNAME = /^[A-Za-z0-9._:%-]+$/;
+
 /**
  * Opens the folder for the servers `servers()` names now. The agent reads the
  * list again at each connection, so a server removed while the runtime runs
@@ -56,7 +61,6 @@ type AccessServer = Pick<ShieldServer, "serverId" | "alias" | "user" | "signIn">
  */
 export async function openRuntimeServerAccess(
   servers: () => ReadonlyArray<AccessServer>,
-  path: string | undefined,
   options: RuntimeServerAccessOptions,
 ): Promise<RuntimeServerAccess | undefined> {
   const now = servers();
@@ -72,7 +76,9 @@ export async function openRuntimeServerAccess(
     const resolved = await resolve(server.alias).catch(() => undefined);
     // A jump host or proxy program would run a program the runtime chose;
     // that server gets no entry, as it gets no relay for a harness command.
-    if (resolved === undefined || resolved.proxied) continue;
+    if (resolved === undefined || resolved.proxied || !PLAIN_HOSTNAME.test(resolved.hostname)) {
+      continue;
+    }
     const lines = await knownHostLines(resolved.hostKeyName, resolved.knownHostsFiles).catch(
       () => [],
     );
@@ -83,7 +89,9 @@ export async function openRuntimeServerAccess(
   for (const { server } of prepared) {
     if (server.signIn !== "octant-key" || options.keys === undefined) continue;
     const line = await options.keys.publicKey(String(server.serverId));
-    if (line !== undefined) octantKeys.set(String(server.serverId), Buffer.from(line.split(" ")[1] ?? "", "base64"));
+    if (line !== undefined) {
+      octantKeys.set(String(server.serverId), Buffer.from(line.split(" ")[1] ?? "", "base64"));
+    }
   }
   const agentServers = (): ReadonlyArray<RuntimeAgentServer> => {
     const registered = new Set(servers().map((server) => String(server.serverId)));
@@ -100,7 +108,10 @@ export async function openRuntimeServerAccess(
               // A server registered to sign in with Octant's key never signs
               // in with the person's agent, here as for a harness command.
               ...(server.signIn === "octant-key"
-                ? { octantKey: octantKeys.get(String(server.serverId)) ?? Buffer.alloc(0), octantOnly: true }
+                ? {
+                    octantKey: octantKeys.get(String(server.serverId)) ?? Buffer.alloc(0),
+                    octantOnly: true,
+                  }
                 : {}),
             },
           ]
@@ -116,6 +127,7 @@ export async function openRuntimeServerAccess(
   if (agent === undefined) return undefined;
   try {
     const folder = agent.socketDirectory;
+    if (/["'\\$`\s]/.test(folder)) throw new Error("The folder cannot be written into a config.");
     const binDirectory = join(folder, "bin");
     await mkdir(binDirectory, { mode: 0o700 });
     const knownHosts = prepared.flatMap(({ server, lines }) =>
@@ -135,14 +147,7 @@ export async function openRuntimeServerAccess(
       { mode: 0o600 },
     );
     await writeSshWrappers(binDirectory, join(folder, "config"));
-    return {
-      folder,
-      environment: {
-        SSH_AUTH_SOCK: agent.socketPath,
-        PATH: [binDirectory, ...(path === undefined || path === "" ? [] : [path])].join(":"),
-      },
-      close: agent.close,
-    };
+    return { folder, binDirectory, agentSocket: agent.socketPath, close: agent.close };
   } catch {
     await agent.close();
     return undefined;

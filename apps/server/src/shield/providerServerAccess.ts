@@ -9,21 +9,14 @@ import type { RuntimeServerAccess } from "./runtimeServerAccess";
  */
 export interface ProviderServerAccessPort {
   /**
-   * Opens the launch's server folder for the Project that owns `root`, with
-   * `path` (the launch's own `PATH`) after the wrappers. Undefined when the
-   * Project has no server a runtime can reach.
+   * Opens the launch's server folder for the Project that owns `root`.
+   * Undefined when the Project has no server a runtime can reach.
    */
-  readonly open: (input: {
-    readonly root: string;
-    readonly path: string | undefined;
-  }) => Promise<RuntimeServerAccess | undefined>;
+  readonly open: (root: string) => Promise<RuntimeServerAccess | undefined>;
 }
 
-/** What a launch adds: the folder to read and the variables to set. */
-export interface ProviderServerAccess {
-  readonly folder: string;
-  readonly environment: Readonly<Record<string, string>>;
-}
+/** What a launch adds: a folder to read, wrappers first on `PATH`, and its agent socket. */
+export type ProviderServerAccess = Pick<RuntimeServerAccess, "folder" | "binDirectory" | "agentSocket">;
 
 /**
  * Opens the folder for the life of the launch's scope, below Full access
@@ -32,23 +25,43 @@ export interface ProviderServerAccess {
  */
 export function acquireProviderServerAccess(
   port: ProviderServerAccessPort | undefined,
-  input: {
-    readonly root: string;
-    readonly executionPolicy: ProviderExecutionPolicy;
-    readonly path: string | undefined;
-  },
+  input: { readonly root: string; readonly executionPolicy: ProviderExecutionPolicy },
 ): Effect.Effect<ProviderServerAccess | undefined, never, Scope.Scope> {
-  if (port === undefined || input.executionPolicy === "full-access" || input.root === "") {
+  // Plan runs no shell on any runtime, so it gets nothing to reach a server with.
+  if (
+    port === undefined ||
+    input.executionPolicy === "full-access" ||
+    input.executionPolicy === "plan" ||
+    input.root === ""
+  ) {
     return Effect.succeed(undefined);
   }
   return Effect.acquireRelease(
-    Effect.promise(() =>
-      port.open({ root: input.root, path: input.path }).catch(() => undefined),
-    ),
+    Effect.promise(() => port.open(input.root).catch(() => undefined)),
     (opened) => (opened === undefined ? Effect.void : Effect.promise(() => opened.close())),
   ).pipe(
     Effect.map((opened) =>
-      opened === undefined ? undefined : { folder: opened.folder, environment: opened.environment },
+      opened === undefined
+        ? undefined
+        : {
+            folder: opened.folder,
+            binDirectory: opened.binDirectory,
+            agentSocket: opened.agentSocket,
+          },
     ),
   );
+}
+
+/** The launch's environment with the wrappers first on its `PATH` and the agent socket set. */
+export function withServerAccess(
+  environment: NodeJS.ProcessEnv,
+  servers: ProviderServerAccess | undefined,
+): NodeJS.ProcessEnv {
+  if (servers === undefined) return environment;
+  const path = environment.PATH;
+  return {
+    ...environment,
+    PATH: path === undefined || path === "" ? servers.binDirectory : `${servers.binDirectory}:${path}`,
+    SSH_AUTH_SOCK: servers.agentSocket,
+  };
 }

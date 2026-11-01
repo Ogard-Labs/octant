@@ -772,10 +772,7 @@ describe("Codex launch confinement", () => {
         },
       },
       platform: "darwin",
-      servers: {
-        folder,
-        environment: { SSH_AUTH_SOCK: `${folder}/agent`, PATH: `${folder}/bin:/usr/bin:/bin` },
-      },
+      servers: { folder, binDirectory: `${folder}/bin`, agentSocket: `${folder}/agent` },
     });
     expect(captured?.readRoots).toContain(folder);
     expect(captured?.privateHomeAllowPaths).toContain(folder);

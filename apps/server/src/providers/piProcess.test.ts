@@ -465,6 +465,33 @@ describe("Pi process boundary", () => {
     expect(launch.environment.HTTPS_PROXY).toBe("http://octant:token@127.0.0.1:47006");
   });
 
+  it("lets Pi's own ssh read the Project's server folder and use its agent socket", async () => {
+    const f = fixture();
+    const folder = join(f.base, "server-folder");
+    mkdirSync(join(folder, "bin"), { recursive: true });
+    const launch = await Effect.runPromise(
+      makePiConfinementLive({
+        platform: "darwin",
+        sandboxPath: f.sandbox,
+        temporaryDirectory: f.base,
+      }).prepare({
+        binaryPath: f.binary,
+        root: f.root,
+        piHome: f.home,
+        sessionDirectory: join(f.home, "sessions"),
+        sessionId: "servers-1",
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, f.home),
+        tools: [],
+        servers: { folder, binDirectory: join(folder, "bin"), agentSocket: join(folder, "agent") },
+      }),
+    );
+    expect(launch.args[1]).toContain(folder);
+    expect(launch.environment.SSH_AUTH_SOCK).toBe(join(folder, "agent"));
+    expect(launch.environment.PATH).toBe(`${join(folder, "bin")}:/usr/bin`);
+  });
+
   it("maps modes to the minimum Pi tools and keeps full access genuine", async () => {
     expect(piArguments("/bridge.ts", "/sessions", "chat-1", "chat", "approval-gated")).toContain(
       "--no-tools",

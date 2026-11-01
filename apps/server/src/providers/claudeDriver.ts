@@ -90,6 +90,11 @@ import {
   acquireProviderRuntimeNetwork,
   type ProviderRuntimeNetworkPort,
 } from "../network/providerRuntimeNetwork";
+import {
+  acquireProviderServerAccess,
+  withServerAccess,
+  type ProviderServerAccessPort,
+} from "../shield/providerServerAccess";
 
 const CLAUDE_TOOLS = [
   "Read",
@@ -592,6 +597,13 @@ export interface ClaudeDriverOptions {
   readonly sdk: ClaudeAgentSdkPort;
   /** Where the command sandbox sends its network below Full access; absent keeps the sandbox's own rules. */
   readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
+  /**
+   * The Project's registered servers, for the commands Claude runs outside
+   * its own sandbox below Full access. Its sandbox reads only the Project and
+   * reaches the network only through its proxy, so `ssh` stays out of reach
+   * there, as in Claude's own app.
+   */
+  readonly serverAccess?: ProviderServerAccessPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly resumeIdentityPort: ClaudeResumeIdentityPort;
@@ -1882,6 +1894,13 @@ function makeConnection(
           }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
+        const servers = await runSetupEffect(
+          acquireProviderServerAccess(options.serverAccess, {
+            root: projectRoot,
+            executionPolicy: input.executionPolicy,
+          }).pipe(Effect.provideService(Scope.Scope, scope)),
+          signal,
+        );
         const runtimeVersion = await runSetupEffect(
           options.process.probeVersion(options.binaryPath),
           signal,
@@ -2350,11 +2369,14 @@ function makeConnection(
               binaryPath: options.binaryPath,
               projectRoot,
               ...(extraFolders.length === 0 ? {} : { additionalDirectories: extraFolders }),
-              authEnvironment: claudeNativeLaunchEnvironment(
-                offersArtifacts
-                  ? claudeArtifactLaunchEnvironment(environment.environment)
-                  : environment.environment,
-                nativeSetup,
+              authEnvironment: withServerAccess(
+                claudeNativeLaunchEnvironment(
+                  offersArtifacts
+                    ? claudeArtifactLaunchEnvironment(environment.environment)
+                    : environment.environment,
+                  nativeSetup,
+                ),
+                servers,
               ),
               ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
               model: input.modelId,

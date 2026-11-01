@@ -27,6 +27,7 @@ import { codexAccountProcessEnvironment } from "./codexProcess";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
 import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
+import type { ProviderServerAccessPort } from "../shield/providerServerAccess";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import { makeCodexDriver } from "./codexDriver";
 import type { CodexProcessPort } from "./codexProcess";
@@ -68,6 +69,7 @@ export interface ProviderDriverFactoryOptions {
   readonly claudeSdk?: ClaudeAgentSdkPort;
   /** Where Claude's command sandbox sends its network below Full access. */
   readonly claudeRuntimeNetwork?: ProviderRuntimeNetworkPort;
+  readonly claudeServerAccess?: ProviderServerAccessPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
@@ -264,6 +266,9 @@ export function makeProviderDriver(
         ...(options.claudeRuntimeNetwork === undefined
           ? {}
           : { runtimeNetwork: options.claudeRuntimeNetwork }),
+        ...(options.claudeServerAccess === undefined
+          ? {}
+          : { serverAccess: options.claudeServerAccess }),
         runtimeRegistry: options.runtimeRegistry,
         resumeIdentityPort: options.claudeResumeIdentityPort,
         permissionPersistence: options.permissionPersistence,

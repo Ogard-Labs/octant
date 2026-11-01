@@ -1,4 +1,6 @@
-import { createPublicKey, verify, type JsonWebKey } from "node:crypto";
+import { createPublicKey, verify, type webcrypto } from "node:crypto";
+
+type JsonWebKey = webcrypto.JsonWebKey;
 
 /**
  * Reading OpenSSH's `session-bind@openssh.com` agent extension, which `ssh`

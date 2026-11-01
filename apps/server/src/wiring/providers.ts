@@ -91,6 +91,11 @@ import { type ClaudeAgentSdkPort, makeClaudeAgentSdkPort } from "../providers/cl
 import type { ClaudeResumeIdentityPort } from "../providers/claudeDriver";
 import { type ClaudeProcessPort, makeClaudeProcessLive } from "../providers/claudeProcess";
 import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
+import type { ProviderServerAccessPort } from "../shield/providerServerAccess";
+import { openRuntimeServerAccess } from "../shield/runtimeServerAccess";
+import { personSshAgentSocket } from "../shield/shieldServerStore";
+import { makeServerSshKeysBrokerClient } from "../shield/sshKeyBrokerClient";
+import { resolveRuntimeProject } from "./runtimeNetwork";
 import { ClaudeResumeIdentityJournal } from "../providers/claudeResumeIdentityJournal";
 import { ClaudeResumeIdentityStore } from "../providers/claudeResumeIdentityStore";
 import { type CodexProcessPort, makeCodexProcessLive } from "../providers/codexProcess";
@@ -219,6 +224,8 @@ export interface ConfiguredProviderDriverOptions {
   readonly claudeSdk?: ClaudeAgentSdkPort;
   /** Where Claude's command sandbox sends its network below Full access. */
   readonly claudeRuntimeNetwork?: ProviderRuntimeNetworkPort;
+  /** The Project's registered servers, for Claude's own `ssh` below Full access. */
+  readonly claudeServerAccess?: ProviderServerAccessPort;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
@@ -357,6 +364,9 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeRuntimeNetwork === undefined
         ? {}
         : { claudeRuntimeNetwork: options.claudeRuntimeNetwork }),
+      ...(options.claudeServerAccess === undefined
+        ? {}
+        : { claudeServerAccess: options.claudeServerAccess }),
       ...(options.claudeResumeIdentityPort === undefined
         ? {}
         : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
@@ -520,7 +530,7 @@ export type ProvidersDependencies = Pick<
     | "managedWorktreeReceipts"
     | "nativeHarnessRouter"
   > &
-  Pick<HarnessStateWiring, "nativeHarnessSessions"> &
+  Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverRegistry"> &
   Pick<IntegrationsWiring, "githubExtensionSnapshot" | "providerRuntimeNetwork"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
@@ -544,6 +554,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     processAuthorityNow,
     providerRuntimeNetwork,
     providerRuntimeRegistry,
+    serverRegistry,
     version,
     windowAuthorityStore,
     workThreadProjection,
@@ -586,11 +597,31 @@ export function wireProviders(deps: ProvidersDependencies) {
     // Below Full access each runtime reaches only its provider's endpoints,
     // its Project's egress rules, and the person's safe networks.
     const runtimeNetwork = providerRuntimeNetwork;
-    const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive({ runtimeNetwork });
+    // Below Full access a runtime's own `ssh` reaches the Project's registered
+    // servers through a folder of its own, and signs in only to them.
+    const serverSshKeys =
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeServerSshKeysBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          });
+    const serverAccess: ProviderServerAccessPort = {
+      open: (root) => {
+        const projectId = resolveRuntimeProject(persistence, root);
+        return openRuntimeServerAccess(() => serverRegistry.serversFor?.(projectId) ?? [], {
+          personAgentSocket: () => personSshAgentSocket(process.env.SSH_AUTH_SOCK),
+          keys: serverSshKeys,
+        });
+      },
+    };
+    const openCodeProcess =
+      options.openCodeProcess ?? makeOpenCodeProcessLive({ runtimeNetwork, serverAccess });
     const codexProcess =
-      options.codexProcess ?? makeCodexProcessLive({ octantVersion: version, runtimeNetwork });
-    const acpProcess = options.acpProcess ?? makeAcpProcessLive({ runtimeNetwork });
-    const piProcess = options.piProcess ?? makePiProcessLive({ runtimeNetwork });
+      options.codexProcess ??
+      makeCodexProcessLive({ octantVersion: version, runtimeNetwork, serverAccess });
+    const acpProcess = options.acpProcess ?? makeAcpProcessLive({ runtimeNetwork, serverAccess });
+    const piProcess = options.piProcess ?? makePiProcessLive({ runtimeNetwork, serverAccess });
     const ohMyPiProcess = options.ohMyPiProcess ?? makeOhMyPiProcessLive();
     // An outside driver runs on the runtime that runs this server and on
     // nothing else: Bun in development, Electron's Node in the packaged app.
@@ -1394,6 +1425,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             claudeProcess,
             claudeSdk,
             claudeRuntimeNetwork: runtimeNetwork,
+            claudeServerAccess: serverAccess,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
             isProjectConfinedPath,
             get claudeInstances() {
@@ -1587,6 +1619,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       claudeProcess,
       claudeSdk,
       claudeRuntimeNetwork: runtimeNetwork,
+      claudeServerAccess: serverAccess,
       claudeResumeIdentityPort: claudeResumeIdentityStore,
       isProjectConfinedPath,
       runtimeRegistry: providerRuntimeRegistry,

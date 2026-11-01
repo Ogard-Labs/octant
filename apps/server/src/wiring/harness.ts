@@ -214,6 +214,7 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   // Code Projects bound to a folder on one of those servers.
   serverRegistry.servers = () => shieldServerStore.servers();
+  serverRegistry.serversFor = (projectId) => shieldServerStore.serversFor(projectId);
   const serverProjectRoutes = createServerProjectRouteHandler({
     windowAuthorityStore,
     store: serverProjectStore,

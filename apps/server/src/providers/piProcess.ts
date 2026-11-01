@@ -49,6 +49,12 @@ import {
   type ProviderRuntimeNetworkPort,
   type ProviderRuntimeProxiedNetwork,
 } from "../network/providerRuntimeNetwork";
+import {
+  acquireProviderServerAccess,
+  withServerAccess,
+  type ProviderServerAccess,
+  type ProviderServerAccessPort,
+} from "../shield/providerServerAccess";
 
 export type PiSessionMode = "chat" | "work" | "code";
 
@@ -63,6 +69,8 @@ export interface PiConfinementPort {
   readonly prepare: (input: {
     /** The launch's own egress proxy below Full access; absent keeps open network. */
     readonly network?: ProviderRuntimeProxiedNetwork;
+    /** The folder through which Pi's own `ssh` reaches the Project's registered servers. */
+    readonly servers?: ProviderServerAccess;
     readonly binaryPath: string;
     readonly root: string;
     /** The Project's extra folders, granted what `root` is granted. */
@@ -124,6 +132,8 @@ export interface PiProcessOptions {
   readonly versionTimeoutMs?: number;
   /** Routes the runtime through its own egress proxy below Full access. */
   readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
+  /** The Project's registered servers, for the runtime's own `ssh` below Full access. */
+  readonly serverAccess?: ProviderServerAccessPort;
 }
 
 const SIDE_EFFECT_TOOLS = ["bash", "edit", "write"] as const;
@@ -683,6 +693,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 ...(packageRoot === undefined ? [] : [packageRoot]),
                 temporaryDirectoryPath,
                 ...credentialPaths,
+                ...(input.servers === undefined ? [] : [input.servers.folder]),
               ],
               privateHomeAllowPaths: [
                 root,
@@ -691,6 +702,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 configuredBinaryDirectory,
                 ...(packageRoot === undefined ? [] : [packageRoot]),
                 ...credentialPaths,
+                ...(input.servers === undefined ? [] : [input.servers.folder]),
               ],
               ...(bridgeRule === undefined ? {} : { extraRules: [bridgeRule] }),
               ...(linuxBridgeRelay.length === 0 ? {} : { loopbackRelayPorts: linuxBridgeRelay }),
@@ -709,10 +721,12 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           command: launch.command,
           args: launch.args,
           cwd: root,
-          environment:
+          environment: withServerAccess(
             input.network === undefined
               ? environment
               : { ...environment, ...input.network.environment },
+            input.servers,
+          ),
         };
       }),
   };
@@ -805,10 +819,15 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
                   loopbackPorts: loopbackPortOf(input.toolBridge),
                   environment: baseEnvironment,
                 });
+          const servers = yield* acquireProviderServerAccess(options.serverAccess, {
+            root: input.root,
+            executionPolicy: input.executionPolicy,
+          });
           const launch = yield* confinement.prepare({
             ...input,
             environment: baseEnvironment,
             ...(network === undefined ? {} : { network }),
+            ...(servers === undefined ? {} : { servers }),
           });
           const versionProbe = prepareConfinedVersionProbe({
             binaryPath: input.binaryPath,

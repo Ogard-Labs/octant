@@ -217,7 +217,7 @@ export async function openServerSshAccess(
           identityAgent = keySocket;
         }
       }
-      entries.push(configEntry(server, port, sshDirectory, identityAgent));
+      entries.push(sshConfigEntry(server, "127.0.0.1", port, sshDirectory, identityAgent));
     }
     if (relayPorts.length + relaySockets.length === 0) {
       await close();
@@ -229,10 +229,7 @@ export async function openServerSshAccess(
     await writeFile(join(sshDirectory, "known_hosts"), `${knownHosts.join("\n")}\n`, {
       mode: 0o600,
     });
-    const config = join(sshDirectory, "config");
-    await writeWrapper(binDirectory, "ssh", `exec ${SSH} -F '${config}' "$@"`);
-    await writeWrapper(binDirectory, "scp", `exec ${SCP} -F '${config}' "$@"`);
-    await writeWrapper(binDirectory, "rsync", `exec ${RSYNC} --rsh="${SSH} -F '${config}'" "$@"`);
+    await writeSshWrappers(binDirectory, join(sshDirectory, "config"));
     return {
       binDirectory,
       relayPorts,
@@ -257,16 +254,22 @@ function quotable(path: string): boolean {
   return !/["'\\$`\n\r]/.test(path) && !path.includes("\u0000");
 }
 
-function configEntry(
+/**
+ * One server's entry: its alias at `hostname` and `port` (a relay's, for a
+ * harness command), the registered user, the host keys in `sshDirectory`'s
+ * known-hosts file, and `identityAgent` as its only way to sign in.
+ */
+export function sshConfigEntry(
   server: Pick<ShieldServer, "alias" | "user">,
-  relayPort: number,
+  hostname: string,
+  port: number,
   sshDirectory: string,
   agentSocket: string | undefined,
 ): string {
   return [
     `Host ${server.alias}`,
-    "  HostName 127.0.0.1",
-    `  Port ${String(relayPort)}`,
+    `  HostName ${hostname}`,
+    `  Port ${String(port)}`,
     `  User ${server.user}`,
     // Keys are checked under the alias, since the relay's address says
     // nothing about which server answers.
@@ -288,6 +291,13 @@ function configEntry(
     "  ControlPath none",
     "  BatchMode yes",
   ].join("\n");
+}
+
+/** `ssh`, `scp`, and `rsync` wrappers in `directory` that use only `config`. */
+export async function writeSshWrappers(directory: string, config: string): Promise<void> {
+  await writeWrapper(directory, "ssh", `exec ${SSH} -F '${config}' "$@"`);
+  await writeWrapper(directory, "scp", `exec ${SCP} -F '${config}' "$@"`);
+  await writeWrapper(directory, "rsync", `exec ${RSYNC} --rsh="${SSH} -F '${config}'" "$@"`);
 }
 
 async function writeWrapper(directory: string, name: string, line: string): Promise<void> {
@@ -362,7 +372,7 @@ export async function resolveWithPersonConfig(
 }
 
 /** The person's recorded keys for a host, hashed entries included, read by `ssh-keygen -F`. */
-async function readKnownHostLines(
+export async function readKnownHostLines(
   hostKeyName: string,
   files: ReadonlyArray<string>,
 ): Promise<ReadonlyArray<string>> {

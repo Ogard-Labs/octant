@@ -35,6 +35,7 @@ import {
 } from "../network/providerRuntimeNetwork";
 import {
   acquireProviderServerAccess,
+  withServerAccess,
   type ProviderServerAccess,
   type ProviderServerAccessPort,
 } from "../shield/providerServerAccess";
@@ -752,12 +753,10 @@ export function prepareCodexLaunch(input: {
               : resolveProbeEgressPolicy(),
           )
         : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
-    const environment: NodeJS.ProcessEnv = {
-      ...input.environment,
-      ...input.network?.environment,
-      ...input.servers?.environment,
-      TMPDIR: temporaryDirectory,
-    };
+    const environment: NodeJS.ProcessEnv = withServerAccess(
+      { ...input.environment, ...input.network?.environment, TMPDIR: temporaryDirectory },
+      input.servers,
+    );
     const serverFolder = input.servers === undefined ? [] : [input.servers.folder];
     const launch = input.confinement.prepare({
       executable: input.binaryPath,
@@ -1046,7 +1045,6 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                 ? yield* acquireProviderServerAccess(options.serverAccess, {
                     root: authority.root,
                     executionPolicy: runtimePolicy,
-                    path: appServerEnvironment.PATH,
                   })
                 : undefined;
             const prepared = prepareCodexLaunch({
