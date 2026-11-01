@@ -296,4 +296,28 @@ describe("ComposerProjectSelector", () => {
       screen.queryByRole("option", { name: "New Project from GitHub repository…" }),
     ).not.toBeInTheDocument();
   });
+
+  it("offers a server Project with where it is and selects it like a saved one", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const serverEntry: ComposerProjectEntry = {
+      kind: "server-project",
+      projectId: "00000000-0000-0000-0000-000000000002" as ProjectId,
+      displayName: "Service",
+      location: "devbox:/home/build/service",
+    };
+    render(
+      <ComposerProjectSelector
+        entries={[serverEntry, { kind: "add-folder" }]}
+        onAddFolder={() => {}}
+        onSelect={onSelect}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    expect(screen.queryByText("No Projects yet.")).toBeNull();
+    const option = screen.getByRole("option", { name: /^Service/ });
+    expect(option).toHaveTextContent("devbox:/home/build/service");
+    await user.click(option);
+    expect(onSelect).toHaveBeenCalledWith(serverEntry);
+  });
 });

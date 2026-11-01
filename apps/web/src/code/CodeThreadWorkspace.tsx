@@ -47,6 +47,8 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { CodeCheckoutBar } from "./CodeCheckoutBar";
+import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
+import { serverCodeThreadProviderGroups } from "./composer/serverCodeComposer";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards } from "../agents/ChildResultCards";
@@ -257,6 +259,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       ? props.controller.activeView
       : undefined;
   const profileName = useAgentProfileName(view?.thread.profileId);
+  // A thread whose checkout is a folder on a server. The host runs only its
+  // Octant Harness turns; every control below that would act on a folder of
+  // this host (checkpoints, rewind, forks, changed files, path mentions,
+  // connectors) is left out, and the host refuses each anyway.
+  const serverCheckout = view?.checkout.kind === "remote-root";
+  const serverCodeProjects = useServerCodeProjects().projects;
+  const serverProject = serverCheckout
+    ? serverCodeProjectFor(serverCodeProjects, view?.thread.projectId)
+    : undefined;
   const displayReady = props.controller.conversationHistory === "loaded";
   const firstPromptInFlight = props.controller.firstPromptInFlight;
   // A thread whose first prompt is on its way is not empty: asking the host
@@ -271,7 +282,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // the count, and querying every open conversation would rescan every worktree.
   const changedFiles = useObservedChangedFiles({
     client: props.controller.client,
-    enabled: displayReady && view !== undefined && plan != null && plan.status !== "withdrawn",
+    enabled:
+      displayReady &&
+      view !== undefined &&
+      !serverCheckout &&
+      plan != null &&
+      plan.status !== "withdrawn",
     projectId: view?.thread.projectId,
     threadId: props.threadId,
   });
@@ -307,7 +323,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     view?.thread.providerInstanceId,
   );
   const extensionDraft = useExtensionDraftSelections({
-    ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
+    ...(props.extensionClient === undefined || serverCheckout
+      ? {}
+      : { client: props.extensionClient }),
     mode: "code",
     projectId: view?.thread.projectId ?? null,
     threadId: view === undefined ? props.threadId : view.thread.id,
@@ -371,7 +389,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     { readonly messageId: string; readonly kind: "mark" | "restore" } | undefined
   >();
   const checkpoints = useThreadCheckpoints({
-    enabled: displayReady && props.controller.conversation.length > 0,
+    enabled: displayReady && !serverCheckout && props.controller.conversation.length > 0,
     threadId: String(props.threadId),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -384,7 +402,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     };
   }, []);
   const scaffolds = useScaffoldCatalog({
-    enabled: emptyConversation,
+    enabled: emptyConversation && !serverCheckout,
     threadId: String(props.threadId),
     checkoutId: String(view?.checkout.id ?? ""),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -393,7 +411,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The preset needs the checkout the thread is bound to. A thread without one
   // yet has nothing to arrange around, so the picker offers nothing.
   const presets = useWorkspacePresets({
-    enabled: emptyConversation,
+    enabled: emptyConversation && !serverCheckout,
     threadId: props.threadId,
     ...(view === undefined ? {} : { checkoutId: view.checkout.id }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -505,7 +523,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The path travels as ordinary prompt text; the host still decides what the
   // turn may read, so naming a file here reaches nothing on its own.
   const pathMentions = useCodePathMentions({
-    ...(props.fileListingClient === undefined ? {} : { client: props.fileListingClient }),
+    ...(props.fileListingClient === undefined || serverCheckout
+      ? {}
+      : { client: props.fileListingClient }),
     threadId: props.threadId,
     checkoutId: view?.checkout.id,
     draft,
@@ -728,7 +748,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         modelId: thread.modelId,
       })
     : providerGroups;
-  const threadModelGroups = sessionModelGroups;
+  const threadModelGroups = serverCheckout
+    ? serverCodeThreadProviderGroups(sessionModelGroups)
+    : sessionModelGroups;
   // The provider the conversation's session lives on is the one the last
   // finished reply came from, or the one a switching turn's journaled handoff
   // opened a session on even if that turn then stopped: the host records the
@@ -1451,12 +1473,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     <TurnActionMenu
                       actions={codeTurnActions({
                         canFork:
+                          !serverCheckout &&
                           message.role === "assistant" &&
                           message.operationId !== undefined &&
                           message.status === "completed" &&
                           props.onOpenCodeThread !== undefined,
                         // A fork's own finished replies; inherited ones are the source's.
                         canMergeBack:
+                          !serverCheckout &&
                           view?.thread.forkedFrom !== undefined &&
                           message.sourceThreadId === undefined &&
                           message.role === "assistant" &&
@@ -1468,12 +1492,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                           message.status === "completed" &&
                           message.text.trim().length > 0,
                         canCheckpoint:
+                          !serverCheckout &&
                           message.sourceThreadId === undefined &&
                           message.role === "assistant" &&
                           message.operationId !== undefined &&
                           message.status === "completed" &&
                           checkpoints.available,
                         canRestoreFiles:
+                          !serverCheckout &&
                           message.sourceThreadId === undefined &&
                           message.role === "user" &&
                           message.checkpoint !== undefined &&
@@ -1805,9 +1831,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         {...(threadDropKey === undefined ? {} : { threadDropKey })}
         context={
           <CodeCheckoutBar
-            {...(props.onCreatePullRequest === undefined
+            {...(props.onCreatePullRequest === undefined || serverCheckout
               ? {}
               : { onCreatePullRequest: props.onCreatePullRequest })}
+            {...(serverProject === undefined ? {} : { serverLocation: serverProject.location })}
           />
         }
         className="thread-composer code-thread-workspace__composer thread-column"

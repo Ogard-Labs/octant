@@ -1,5 +1,7 @@
-import { LOCAL_HOST_ID } from "@octant/contracts";
+import { Schema } from "effect";
+import { LOCAL_HOST_ID, ToolRootId, ToolWorktreeId } from "@octant/contracts";
 import type {
+  CodeThread,
   OctantMode,
   WorkAccess,
   ThreadExternalContentTaint,
@@ -11,6 +13,9 @@ import { ServerBrowserAuthorityResolver } from "../browser/browserAuthorityResol
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { WorkThreadProjection } from "../work/workThreadProjection";
+
+const decodeToolRootId = Schema.decodeUnknownSync(ToolRootId);
+const decodeToolWorktreeId = Schema.decodeUnknownSync(ToolWorktreeId);
 
 export interface NativeHarnessAuthorityOptions {
   readonly hostId: ToolHostId;
@@ -26,6 +31,12 @@ export interface NativeHarnessAuthorityOptions {
    */
   readonly runningWorkTurnAccess?: (threadId: string) => WorkAccess | undefined;
   readonly readThreadTaint: (threadId: string) => ThreadExternalContentTaint;
+  /**
+   * Whether a Code thread runs in a server Project, on the checkout that
+   * Project derives. Such a Project lives in its own catalog, not in the
+   * Project catalog the resolver reads.
+   */
+  readonly holdsServerCodeThread?: (thread: CodeThread) => boolean;
   readonly clock?: () => string;
 }
 
@@ -55,8 +66,28 @@ export function createNativeHarnessAuthority(
   // Chat resolves through the same resolver as Work and Code. A Chat thread
   // needs no Project to hold authority: most new Chat threads have none, and
   // requiring one refused every harness tool call on them as stale.
+  // A server thread holds its Project's authority as a local thread holds
+  // its own: active thread, enabled provider, and the root and checkout its
+  // Project derives. Its tools act only on the server.
+  const serverCodeAuthority = (threadId: string): ToolActionAuthority | undefined => {
+    const thread = options.persistence.readCodeThread(threadId as never);
+    if (thread === undefined || thread.lifecycle !== "active") return undefined;
+    if (options.holdsServerCodeThread?.(thread) !== true) return undefined;
+    const provider = options.persistence.readProviderInstance(thread.providerInstanceId);
+    if (provider?.enabled !== true) return undefined;
+    return {
+      hostId: options.hostId,
+      mode: "code",
+      projectId: thread.projectId,
+      rootId: decodeToolRootId(thread.bindingRevisionId),
+      worktreeId: decodeToolWorktreeId(thread.checkoutId),
+      providerInstanceId: thread.providerInstanceId,
+      extension: { kind: "core" },
+    };
+  };
   const resolve = (threadId: string, mode: OctantMode): ToolActionAuthority | undefined =>
-    resolver.resolve(threadId as never, mode);
+    resolver.resolve(threadId as never, mode) ??
+    (mode === "code" ? serverCodeAuthority(threadId) : undefined);
   const service = new ToolCallAuthorityService({
     resolveGrantedAuthority: (threadId, mode) => resolve(threadId, mode),
     resolveLiveFacts: ({ threadId, mode }) => {

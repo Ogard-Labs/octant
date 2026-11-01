@@ -94,6 +94,8 @@ import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
 import { ReviewFindingServiceError } from "./reviewFindingService";
 
+import type { ServerTerminalLogin } from "../serverProjects/serverTerminal";
+
 type Awaitable<T> = T | Promise<T>;
 
 /**
@@ -102,6 +104,26 @@ type Awaitable<T> = T | Promise<T>;
  */
 const REMOTE_FOLDER_UNAVAILABLE =
   "This thread's checkout is a folder on a remote machine, which Octant no longer supports.";
+
+/**
+ * The operations a server Project's thread runs: its turns, whose tools act
+ * on the server, and its terminals, which are logins there.
+ */
+const SERVER_THREAD_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
+  "start-provider-turn",
+  "answer-provider-input",
+  "answer-provider-approval",
+  "cancel-provider-turn",
+  "start-terminal",
+  "attach-terminal",
+  "write-terminal",
+  "resize-terminal",
+  "stop-terminal",
+]);
+const SERVER_OPERATION_UNAVAILABLE =
+  "This is not available for a Project on a server yet. Ask the thread to do it there, or use a terminal on the server.";
+const SERVER_CONNECTORS_UNAVAILABLE =
+  "Connectors and plugins run on this computer, so a thread in a Project on a server does not offer them. Send the message without them.";
 
 export interface CodeOperationAuthorityPort {
   readonly readThread: (threadId: CodeOperationCommand["threadId"]) => CodeThread | undefined;
@@ -947,6 +969,14 @@ export interface CodeOperationServiceOptions {
   readonly pinnedExtensionIds?: (projectId: string) => ReadonlyArray<string>;
   readonly authority: CodeOperationAuthorityPort;
   /**
+   * Whether a thread runs in a server Project, on the checkout that Project
+   * derives. Its turns run with the server's tools; nothing else here acts
+   * on its folder. Absent, every `remote-root` thread is refused.
+   */
+  readonly holdsServerThread?: (thread: CodeThread) => boolean;
+  /** The login a server thread's terminal opens on its server, or undefined when it has none now. */
+  readonly serverTerminalLogin?: (thread: CodeThread) => ServerTerminalLogin | undefined;
+  /**
    * Runs after the command has passed thread, checkout, lifecycle, and Project
    * scope checks, but before operation approval or any side effect. Runtime
    * work uses this seam so an inaccessible command cannot leave a durable
@@ -1175,11 +1205,31 @@ export class CodeOperationService {
     }
     const scope = await this.#scope(windowId, command);
     if ("failure" in scope) return this.#failed(command.operationId, scope.failure, scope.message);
-    // Every operation here (turns, terminals, tests, Git, files, pull
-    // requests) would act on a folder of this host, so each is refused
-    // before any root is resolved.
+    // A `remote-root` checkout is never a folder of this host. A server
+    // Project's thread runs its turns there, with the server's tools; every
+    // other operation here (terminals, tests, Git, files, pull requests)
+    // would act on this host, so it is refused before any root is resolved.
+    // A thread the retired SSH target build left runs nothing.
     if (scope.checkout.kind === "remote-root") {
-      return this.#failed(command.operationId, "unavailable", REMOTE_FOLDER_UNAVAILABLE);
+      if (this.#options.holdsServerThread?.(scope.thread) !== true) {
+        return this.#failed(command.operationId, "unavailable", REMOTE_FOLDER_UNAVAILABLE);
+      }
+      if (!SERVER_THREAD_OPERATIONS.has(command.kind)) {
+        return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
+      }
+      if (
+        command.kind === "start-provider-turn" &&
+        command.extensionSelections?.some(
+          (selection) => !isBrowserUseSelection(selection) && !isComputerUseSelection(selection),
+        ) === true
+      ) {
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          SERVER_CONNECTORS_UNAVAILABLE,
+          "refused",
+        );
+      }
     }
     if (command.kind === "start-provider-turn" && command.delivery !== undefined) {
       const delivery = this.#agentResultDelivery(command);
@@ -1421,11 +1471,12 @@ export class CodeOperationService {
                 recordedStart === undefined &&
                 turnRefusal === undefined
               ) {
-                const checkpoint = await this.#checkpoint(
-                  turnThread,
-                  scope.checkout.id,
-                  root.checkoutRoot,
-                );
+                // A server folder is no folder of this host: Git here never
+                // captures a path that only names it there.
+                const checkpoint =
+                  scope.checkout.kind === "remote-root"
+                    ? undefined
+                    : await this.#checkpoint(turnThread, scope.checkout.id, root.checkoutRoot);
                 // Check again after the asynchronous checkpoint so a changed generation or
                 // an intervening parent admission cannot acquire a stale delivery mark.
                 const afterCheckpoint = this.#agentResultDelivery(command);
@@ -2048,7 +2099,10 @@ export class CodeOperationService {
       checkoutId: thread.checkoutId,
     });
     if ("failure" in scope) return false;
-    return scope.checkout.kind !== "remote-root";
+    return (
+      scope.checkout.kind !== "remote-root" ||
+      this.#options.holdsServerThread?.(scope.thread) === true
+    );
   }
 
   async listPendingForWindow(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>> {
@@ -2463,6 +2517,22 @@ export class CodeOperationService {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
     switch (command.kind) {
       case "start-terminal": {
+        // A server thread's terminal is a login on its server, in its folder,
+        // with nothing of this host's: no credentials, no Browser grant, no
+        // other folder. Plan starts no terminal there either.
+        let serverLogin: ServerTerminalLogin | undefined;
+        if (checkout.kind === "remote-root") {
+          serverLogin = this.#options.serverTerminalLogin?.(thread);
+          if (
+            serverLogin === undefined ||
+            command.browserGrant === "on" ||
+            command.credentialRefs.length > 0 ||
+            command.folder !== undefined ||
+            thread.executionPolicy === "plan"
+          ) {
+            return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
+          }
+        }
         const allowed = new Set(command.credentialRefs);
         const credentialReferences = root.credentialReferences.filter((credential) =>
           allowed.has(credential.environmentName),
@@ -2557,6 +2627,7 @@ export class CodeOperationService {
           ...(browserGrant?.kind === "granted" && browserGrant.launcher !== undefined
             ? { launcher: browserGrant.launcher }
             : {}),
+          ...(serverLogin === undefined ? {} : { server: serverLogin }),
           executionPolicy: thread.executionPolicy,
         });
         owner.starting = starting;
@@ -4010,7 +4081,12 @@ export class CodeOperationService {
       command.extensionSelections?.filter(
         (selection) => !isBrowserUseSelection(selection) && !isComputerUseSelection(selection),
       ) ?? [];
-    const pinnedExtensionIds = this.#options.pinnedExtensionIds?.(String(thread.projectId)) ?? [];
+    // A server thread's turn has only the harness's tools on the server, so
+    // no pinned extension is started for it.
+    const serverThread = this.#options.holdsServerThread?.(thread) === true;
+    const pinnedExtensionIds = serverThread
+      ? []
+      : (this.#options.pinnedExtensionIds?.(String(thread.projectId)) ?? []);
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
     let extensionTools: AppManagedToolSet | undefined;
     if (selections.length > 0 || pinnedExtensionIds.length > 0) {

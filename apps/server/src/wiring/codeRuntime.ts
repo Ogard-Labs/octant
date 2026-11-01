@@ -221,7 +221,16 @@ function withCodeBoard(
   };
 }
 
+import {
+  bindServerCodeTurn,
+  serverCodeCheckoutRoot,
+  serverProjectOf,
+} from "../serverProjects/serverProjectThreads";
+import { serverTerminalLogin } from "../serverProjects/serverTerminal";
+
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
+  Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -388,6 +397,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     runtimeOutsideContentMarks,
     selectCodeConversation,
     siblingThreadsService,
+    serverConnection,
+    serverProjectStore,
+    shieldServerStore,
     sideTasks,
     simulatorInputGrants,
     spendCeiling,
@@ -586,8 +598,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
         resolveCheckoutRoot: async (windowId, thread, checkout) => {
-          // A remote root names a folder on another machine, never one here.
-          if (checkout.kind === "remote-root") return undefined;
+          // A remote root names a folder on another machine, never one here:
+          // a server Project's is named, never resolved, and only the turn's
+          // server tools act on it. Any other remote root resolves nothing.
+          if (checkout.kind === "remote-root")
+            return serverCodeCheckoutRoot(serverProjectStore, thread);
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
           if (root === undefined) return undefined;
           const workingDirectory = await resolveThreadWorkingDirectory(
@@ -635,6 +650,27 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
+        holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
+        serverTerminalLogin: (thread) => {
+          const project = serverProjectOf(serverProjectStore, thread);
+          if (project === undefined) return undefined;
+          const address = serverProjectStore.addressOf(String(project.id));
+          return address.kind === "address"
+            ? serverTerminalLogin(serverConnection, address.server, project.folder)
+            : undefined;
+        },
+        serverCodeTurn: (input) =>
+          serverProjectOf(serverProjectStore, input.thread) === undefined
+            ? undefined
+            : bindServerCodeTurn(
+                {
+                  store: serverProjectStore,
+                  connection: serverConnection,
+                  composition: nativeHarnessComposition,
+                  record: (record) => shieldServerStore.recordServerCommand(record),
+                },
+                input,
+              ),
         readProjectExtraFolders: (projectId) => {
           const project = persistence.readProject(projectId);
           return project === undefined || project.type === "chat"

@@ -46,7 +46,8 @@ import {
 } from "@octant/domain/code-worktree-source-policy";
 import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Network } from "lucide-react";
+import { serverCodeSelectionRefusal, serverCodeThreadProviderGroups } from "./serverCodeComposer";
 import {
   useCallback,
   useContext,
@@ -189,6 +190,16 @@ export interface CodeComposerAdapterProps {
   readonly windowCapability?: string;
   readonly hostBridge?: OctantHostBridge;
   readonly extensionClient?: ExtensionClient;
+  /**
+   * The selected Project is bound to a folder on one of the person's servers.
+   * The composer then offers what the host runs there: the Octant Harness
+   * alone, the bound folder alone, any access level, and no connector or
+   * plugin. The host still decides each of these itself.
+   */
+  readonly server?: {
+    /** `alias:folder`, as the server Project names it. */
+    readonly location: string;
+  };
 }
 
 export interface CodeComposerSuggestion {
@@ -237,7 +248,12 @@ const LAST_RESORT_BASE_BRANCH = "development";
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const suggestionDescriptionId = useId();
-  const providerGroups = props.providerGroups;
+  const server = props.server;
+  const isServer = server !== undefined;
+  const providerGroups = useMemo(
+    () => (isServer ? serverCodeThreadProviderGroups(props.providerGroups) : props.providerGroups),
+    [props.providerGroups, isServer],
+  );
   const [prompt, setPrompt] = useNewTaskPrompt();
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
@@ -258,7 +274,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
   const selectedFamily = providerFamilyForThread(providerGroups, props.selectedProviderInstanceId);
   const extensionDraft = useExtensionDraftSelections({
-    ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
+    // A thread on a server carries none of Octant's connectors or plugins, so
+    // with no client a reference stays blocked rather than selected.
+    ...(props.extensionClient === undefined || isServer ? {} : { client: props.extensionClient }),
     mode: "code",
     projectId: props.projectId ?? null,
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
@@ -410,8 +428,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [workspaceOverride, setWorkspaceOverride] = useState<CodeNewThreadWorkspace | undefined>(
     storedCheckout?.workspaceOverride ?? handedWorkspace,
   );
-  const workspace: CodeNewThreadWorkspace =
-    workspaceOverride ?? props.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE;
+  // A thread on a server works in the bound folder: a managed worktree would
+  // be made by this host's Git in a folder of its own.
+  const workspace: CodeNewThreadWorkspace = isServer
+    ? "current-checkout"
+    : (workspaceOverride ?? props.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE);
   const startFromOrigin = startFromOriginOverride ?? defaultStartFromOrigin(worktreeRemoteFacts);
   const [worktreeRemote, setWorktreeRemote] = useState<string | undefined>(
     storedCheckout?.worktreeRemote ??
@@ -452,6 +473,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     startFromOrigin,
     remoteName: resolvedWorktreeRemote,
     enabled:
+      !isServer &&
       props.projectId !== undefined &&
       props.execute !== undefined &&
       resolvedBaseBranch !== undefined,
@@ -471,7 +493,25 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [sendNotice, setSendNotice] = useState<string>();
   // A notice about the Project no longer applies once another is chosen.
   useEffect(() => setSendNotice(undefined), [props.projectId]);
-  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !atMenu.resolving;
+  // Whether the chosen model is one the server runs. Neither this nor the
+  // menu grants anything: the host admits the turn itself.
+  const serverRefusal = isServer
+    ? serverCodeSelectionRefusal(
+        providerGroups,
+        props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+          ? undefined
+          : {
+              providerInstanceId: props.selectedProviderInstanceId,
+              modelId: props.selectedModelId,
+            },
+      )
+    : undefined;
+  const canSubmit =
+    trimmed.length > 0 &&
+    !props.creating &&
+    !submitting &&
+    !atMenu.resolving &&
+    serverRefusal === undefined;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -561,9 +601,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // before the reader opens the picker. Loaded only on open, the tray showed
   // its fallback until someone happened to look at the list.
   useEffect(() => {
-    if (projectId === undefined) return;
+    // A server folder's branches are on the server; this host lists none.
+    if (projectId === undefined || isServer) return;
     loadWorktreeRefs();
-  }, [loadWorktreeRefs, projectId]);
+  }, [loadWorktreeRefs, projectId, isServer]);
   useEffect(() => {
     if (baseBranchChosen.current || worktreeRefs === undefined) return;
     const current =
@@ -613,7 +654,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           modelOptionValues,
           ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
           executionPolicy,
-          permissionPersistence,
+          // Nothing about a thread on a server is remembered for the Project.
+          permissionPersistence: isServer ? "current-session" : permissionPersistence,
           ...(autoApprove ? { autoApprove: true } : {}),
           deliveryTarget: {
             branchIntent: defaultDeliveryBranchIntent(submittedBaseBranch, shortId),
@@ -645,6 +687,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     executionPolicy,
     autoApprove,
     permissionPersistence,
+    isServer,
     workspace,
     baseRepository,
     baseBranch,
@@ -697,23 +740,29 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // A branch names a Project's checkout. With no Project chosen, a static
   // "Default branch" chip named a branch of nothing and sat between the
   // person and the prompt.
-  const branchControl = hasProject ? (
-    <CodeBranchSelector
-      key={String(props.projectId)}
-      branch={resolvedBaseBranch ?? "Default branch"}
-      loading={refsLoading}
-      onOpen={loadWorktreeRefs}
-      onSelectRef={handleSelectRef}
-      onStartFromOriginChange={setStartFromOriginOverride}
-      remoteName={resolvedWorktreeRemote}
-      startFromOrigin={startFromOrigin}
-      startFromOriginAvailable={
-        preferredRemote.status === "selected" || worktreeRemote !== undefined
-      }
-      {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
-      {...(props.creating === true ? { disabled: true } : {})}
-    />
-  ) : null;
+  const branchControl =
+    hasProject && server !== undefined ? (
+      <span className="composer-tray__item" title={`On a server: ${server.location}`}>
+        <Network aria-hidden="true" size={12} strokeWidth={1.8} />
+        <span>{server.location}</span>
+      </span>
+    ) : hasProject ? (
+      <CodeBranchSelector
+        key={String(props.projectId)}
+        branch={resolvedBaseBranch ?? "Default branch"}
+        loading={refsLoading}
+        onOpen={loadWorktreeRefs}
+        onSelectRef={handleSelectRef}
+        onStartFromOriginChange={setStartFromOriginOverride}
+        remoteName={resolvedWorktreeRemote}
+        startFromOrigin={startFromOrigin}
+        startFromOriginAvailable={
+          preferredRemote.status === "selected" || worktreeRemote !== undefined
+        }
+        {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
+        {...(props.creating === true ? { disabled: true } : {})}
+      />
+    ) : null;
   const environmentControl = (
     <HostSelector
       presentation="environment"
@@ -762,7 +811,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   {environmentControl}
                 </div>
                 <div className="composer-tray__trailing">
-                  {hasProject ? (
+                  {hasProject && !isServer ? (
                     <CodeWorkspaceSelector
                       onChange={setWorkspaceOverride}
                       value={workspace}
@@ -954,6 +1003,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           <OctantAlert className="code-composer-adapter__error" tone="danger">
             {sendNotice}
           </OctantAlert>
+        ) : null}
+
+        {serverRefusal !== undefined && props.errorMessage === undefined ? (
+          <p className="code-composer-adapter__notice" role="status">
+            {serverRefusal}
+          </p>
         ) : null}
 
         {props.projectSetup}

@@ -1,3 +1,4 @@
+import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, relative, sep } from "node:path";
 import {
@@ -537,6 +538,24 @@ export interface CodeOperationRuntimeOptions {
     /** The turn's resolved credential values, which a journal read redacts. */
     readonly secrets: ReadonlyArray<string>;
   }) => AppManagedToolSet | undefined;
+  /**
+   * A turn of a thread in a server Project: the native harness's tools with
+   * its file tools and shell on the server, or why the thread cannot run
+   * there. Undefined means the thread is not a server Project's (a thread the
+   * retired SSH target build left), which runs nothing.
+   */
+  /** Whether a thread runs in a server Project, on the checkout that Project derives. */
+  readonly holdsServerThread?: (thread: CodeThread) => boolean;
+  /** The login a server thread's terminal opens on its server. */
+  readonly serverTerminalLogin?: CodeOperationServiceOptions["serverTerminalLogin"];
+  readonly serverCodeTurn?: (input: {
+    readonly thread: CodeThread;
+    readonly windowId: WindowId;
+    readonly secrets: ReadonlyArray<string>;
+  }) =>
+    | { readonly status: "bound"; readonly tools: AppManagedToolSet }
+    | { readonly status: "refused"; readonly message: string }
+    | undefined;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
@@ -1061,6 +1080,12 @@ export function createCodeOperationRuntime(
   };
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    ...(options.holdsServerThread === undefined
+      ? {}
+      : { holdsServerThread: options.holdsServerThread }),
+    ...(options.serverTerminalLogin === undefined
+      ? {}
+      : { serverTerminalLogin: options.serverTerminalLogin }),
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
@@ -2168,6 +2193,12 @@ interface ActiveTurn {
   readonly computerUseDestination?: ComputerUseDestinationSelection;
   /** The selected MCP servers' tools, resolved when the turn was accepted. */
   readonly extensionTools?: AppManagedToolSet;
+  /**
+   * A server Project's turn: the harness's tools on the server, bound when
+   * the turn was taken on. They are the turn's whole tool set; nothing of
+   * this host's checkout tools joins them.
+   */
+  readonly serverTools?: AppManagedToolSet;
   readonly extensionSelections?: ReadonlyArray<
     import("@octant/contracts/extensions").ExtensionSelection
   >;
@@ -2511,9 +2542,23 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         "The task's previous turn stopped before the provider started. Retry that message, or start a new task.",
       );
     const driver = resolvedDriver;
-    // A thread from a build that could run on a remote machine keeps its
-    // remote folder, which this host cannot run a turn in.
-    if (this.#isRemoteThread(input.thread)) return failStart(REMOTE_FOLDER_UNSUPPORTED);
+    // A `remote-root` thread runs only as a server Project's, with the
+    // server's tools; a thread the retired SSH target build left runs
+    // nothing. Browser, Computer, and a fork's session seeding act on this
+    // host, so a server thread is offered none of them.
+    const remoteThread = this.#isRemoteThread(input.thread);
+    if (remoteThread) {
+      if (this.#options.serverCodeTurn === undefined) return failStart(REMOTE_FOLDER_UNSUPPORTED);
+      if (
+        command.computerUseSelection !== undefined ||
+        command.extensionSelections?.some(isBrowserUseSelection) === true
+      )
+        return failStart(
+          "Browser and Computer act on this computer, so a thread in a Project on a server does not offer them. Send the message without them.",
+        );
+      if (input.thread.forkedFrom !== undefined)
+        return failStart("A thread in a Project on a server cannot start from a fork.");
+    }
     // Computer is offered on every eligible turn, so a send names only where
     // it acts. A desktop destination the send cannot bind is refused rather
     // than quietly falling back to this Mac. A Computer selection from an
@@ -2661,8 +2706,27 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
       return failStart(FORK_MERGE_UNREADABLE);
     }
+    // A server thread's tools are bound last, before anything launches, so
+    // no refusal after this point leaves them behind. The provider is
+    // checked here too: only the Octant Harness runs on a server.
+    let serverTools: AppManagedToolSet | undefined;
+    if (remoteThread) {
+      const bound = this.#options.serverCodeTurn?.({
+        thread: input.thread,
+        windowId: input.windowId,
+        secrets,
+      });
+      if (bound === undefined || bound.status === "refused") {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(bound?.message ?? REMOTE_FOLDER_UNSUPPORTED);
+      }
+      serverTools = bound.tools;
+      // Extensions' tools act on this host; the server tool set is the turn's whole set.
+      await input.extensionTools?.close?.().catch(() => undefined);
+    }
     // Driver, credentials, and fork preparation may outlive the host's admission.
     if (input.admissionCurrent?.() === false) {
+      await serverTools?.close?.().catch(() => undefined);
       return refuseRevokedAdmission();
     }
     // Feedback stays pending through every preparation refusal. Consuming it
@@ -2691,7 +2755,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           : {}),
       ...(forkMerges.records.length === 0 ? {} : { pendingForkMerges: forkMerges.records }),
       ...(computerUseDestination === undefined ? {} : { computerUseDestination }),
-      ...(input.extensionTools === undefined ? {} : { extensionTools: input.extensionTools }),
+      ...(input.extensionTools === undefined || serverTools !== undefined
+        ? {}
+        : { extensionTools: input.extensionTools }),
+      ...(serverTools === undefined ? {} : { serverTools }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}
         : { extensionSelections: command.extensionSelections }),
@@ -3776,6 +3843,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   #appManagedTools(active: ActiveTurn): AppManagedToolSet | undefined {
+    if (active.serverTools !== undefined) {
+      // The turn's whole tool set: every other set reads or acts on a folder
+      // or a device of this host. The runner closes it when the turn ends.
+      const tools = active.serverTools;
+      const standing = this.#options.windowAccess.standingAuthority;
+      return { ...tools, execute: (input) => standing(() => tools.execute(input)) };
+    }
     const supportsAppManagedTools = this.#options.supportsAppManagedTools?.(active.thread) === true;
     const supportsAcpClientCapabilities =
       this.#options.supportsAcpClientCapabilities?.(active.thread) === true;
@@ -4195,6 +4269,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             }),
           reconcileObservation: ({ claim }) =>
             Effect.promise(async () => {
+              // A server folder is no folder of this host, so no local Git
+              // process may observe a path that only names it.
+              if (active.serverTools !== undefined) {
+                return {
+                  status: "not-confirmed" as const,
+                  summary: "The checkout is on a server; this host does not observe it.",
+                };
+              }
               if (claim.kind === "file-change" || claim.kind === "diff") {
                 const observation = await this.#git.observe(active.checkoutRoot);
                 return observation.status === "ready"

@@ -1095,4 +1095,127 @@ describe("CodeComposerAdapter interactions", () => {
 
     expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Plan");
   });
+
+  describe("in a Project on a server", () => {
+    const pickerGroup = (
+      id: string,
+      displayName: string,
+      runtime: PickerGroup["runtime"],
+      modelName: string,
+    ): PickerGroup => ({
+      instance: decodeProviderInstance({
+        id,
+        displayName,
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: "2026-09-15T10:00:00.000Z",
+        updatedAt: "2026-09-15T10:00:00.000Z",
+      }),
+      runtime,
+      readiness: "ready",
+      driverLabel: displayName,
+      endpointHost: undefined,
+      executionHost: "Local host",
+      sections: [
+        {
+          id: "all-models",
+          label: "Models",
+          models: [
+            {
+              model: {
+                id: decodeProviderModelId(modelName),
+                displayName: modelName,
+                reasoning: "unsupported",
+                inputModalities: ["text"],
+                source: "discovered",
+                verification: "verified",
+                options: [],
+              },
+              badges: [],
+              toolCapable: true,
+            },
+          ],
+        },
+      ],
+    });
+    const harness = pickerGroup(
+      "80000000-0000-4000-8000-0000000000b1",
+      "Octant",
+      "octant-harness",
+      "harness-model",
+    );
+    const cli = pickerGroup(
+      "80000000-0000-4000-8000-0000000000b2",
+      "Local Codex",
+      "provider",
+      "cli-model",
+    );
+    const serverProps = {
+      ...defaultProps,
+      projectName: "Service",
+      providerGroups: [harness, cli],
+      selectedProviderInstanceId: harness.instance.id,
+      selectedModelId: decodeProviderModelId("harness-model"),
+      server: { location: "devbox:/home/build/service" },
+    };
+
+    it("names the folder, offers no branch or worktree, and starts in the bound folder at any access level", async () => {
+      const user = userEvent.setup();
+      const onCreateThread = vi.fn();
+      render(
+        <CodeComposerAdapter
+          {...serverProps}
+          defaultPermissionMode="full-access"
+          defaultPermissionPersistence="project-default"
+          onCreateThread={onCreateThread}
+        />,
+      );
+
+      expect(screen.getByText("devbox:/home/build/service")).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Workspace" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /branch/i })).toBeNull();
+      expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Full access");
+      await user.click(screen.getByRole("button", { name: "Mode" }));
+      const levels = (await screen.findAllByRole("menuitemradio")).map((item) => item.textContent);
+      expect(levels.length).toBeGreaterThan(2);
+      await user.keyboard("{Escape}");
+
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+      await user.click(screen.getByRole("button", { name: "Create thread" }));
+      await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+      expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
+        executionPolicy: "full-access",
+        permissionPersistence: "current-session",
+        workspace: "current-checkout",
+      });
+      expect(onCreateThread.mock.calls[0]?.[0]).not.toHaveProperty("computerUseSelection");
+      expect(onCreateThread.mock.calls[0]?.[0]).not.toHaveProperty("extensionSelections");
+    });
+
+    it("lists other providers unavailable with the reason, and starts nothing on one", async () => {
+      const user = userEvent.setup();
+      const onCreateThread = vi.fn();
+      render(
+        <CodeComposerAdapter
+          {...serverProps}
+          selectedProviderInstanceId={cli.instance.id}
+          selectedModelId={decodeProviderModelId("cli-model")}
+          onCreateThread={onCreateThread}
+        />,
+      );
+
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+      expect(screen.getByRole("button", { name: "Create thread" })).toBeDisabled();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Runs on this computer's files; a Project on a server runs on the Octant Harness only.",
+      );
+      await user.click(screen.getByRole("button", { name: "Provider and model" }));
+      await user.click(screen.getByRole("option", { name: "Local Codex" }));
+      expect(screen.getByRole("option", { name: "cli-model" })).toBeDisabled();
+      expect(onCreateThread).not.toHaveBeenCalled();
+    });
+  });
 });

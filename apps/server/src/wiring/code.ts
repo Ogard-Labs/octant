@@ -84,6 +84,9 @@ import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
 import type { FoundationsWiring } from "./foundations";
 
+import type { HarnessStateWiring } from "./harnessState";
+import { withServerCodeCheckouts } from "../serverProjects/serverProjectThreads";
+
 export function createExistingWorktreeCodeFileRootAuthority(options: {
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly readProject: PersistenceService["readProject"];
@@ -515,6 +518,7 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
 }
 
 export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<HarnessStateWiring, "serverProjectStore"> &
   Pick<
     AuthorityWiring,
     | "bindingReceiptStore"
@@ -586,6 +590,7 @@ export function wireCode(deps: CodeDependencies) {
     projectService,
     refreshStandaloneSkills,
     selectCodeConversation,
+    serverProjectStore,
     windowAuthorityStore,
   } = deps;
   return Effect.gen(function* () {
@@ -647,9 +652,14 @@ export function wireCode(deps: CodeDependencies) {
       requireGitRepository: () =>
         persistence.readCodeSettings()?.settings.requireGitRepository ?? true,
     });
-    const checkouts = localCheckouts;
+    // A server Project's checkout is the folder it names on the server,
+    // derived from the Project alone: nothing here observes a folder of this
+    // host for it, and no local root resolves it.
+    const checkouts = withServerCodeCheckouts(serverProjectStore, localCheckouts);
+    const isServerCodeProject = (projectId: ProjectId) =>
+      serverProjectStore.project(String(projectId)) !== undefined;
     const isCodeProject = (projectId: ProjectId) =>
-      projectService.hasActiveProject(projectId, "code");
+      projectService.hasActiveProject(projectId, "code") || isServerCodeProject(projectId);
     const roots = createExistingWorktreeCodeFileRootAuthority({
       projects: projectService,
       readProject: persistence.readProject,
@@ -724,6 +734,9 @@ export function wireCode(deps: CodeDependencies) {
       readonly providerInstanceId: ProviderInstance["id"];
       readonly modelId: ProviderModel["id"];
     }): boolean => {
+      // A server Project has no provider policy of its own; its turn admits
+      // only the Octant Harness, which the runtime checks before it binds.
+      if (isServerCodeProject(input.projectId)) return true;
       const project = persistence.readProject(input.projectId);
       if (project?.type !== "code") return false;
       return isProjectPolicyTargetAllowed(project, input.providerInstanceId, input.modelId);

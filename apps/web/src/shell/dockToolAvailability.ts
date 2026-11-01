@@ -42,7 +42,26 @@ export interface DockToolCapabilities {
   readonly addAgentInvoked: boolean;
   /** An existing Chat, Work, or Code thread, including one with zero children. */
   readonly hasExistingThread: boolean;
+  /**
+   * The thread is a Code thread in a Project on one of the person's servers.
+   * Absent for every other thread.
+   */
+  readonly serverCheckout?: boolean;
 }
+
+/**
+ * The tools a thread in a server Project keeps. Every other tool reads or acts
+ * on a folder, a browser, a device, or a desktop of this host, which the host
+ * refuses for such a thread, so the dock does not offer them.
+ */
+const SERVER_CHECKOUT_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
+  "side-chat",
+  "document",
+  "canvas",
+  "plan",
+  "agents",
+  "terminal",
+]);
 
 /**
  * Capability-gated tools stay off the launcher until the host says they exist.
@@ -52,6 +71,7 @@ export function isDockToolLaunchable(
   surface: RightUtilityDockSurfaceId,
   capabilities: DockToolCapabilities,
 ): boolean {
+  if (capabilities.serverCheckout === true && !SERVER_CHECKOUT_TOOLS.has(surface)) return false;
   if (surface === "plan") return capabilities.hasPlanArtifact === true;
   if (surface === "delivery") return capabilities.hasDelivery === true;
   if (surface === "canvas") return capabilities.hasCanvasDocument === true;
@@ -71,6 +91,7 @@ export function isDockToolStillOpenable(
   surface: RightUtilityDockSurfaceId,
   capabilities: DockToolCapabilities,
 ): boolean {
+  if (capabilities.serverCheckout === true && !SERVER_CHECKOUT_TOOLS.has(surface)) return false;
   if (surface === "plan") return capabilities.hasPlanArtifact !== false;
   if (surface === "delivery") return capabilities.hasDelivery !== false;
   if (surface === "canvas") return capabilities.hasCanvasDocument !== false;

@@ -1183,5 +1183,7 @@ function compactUnavailableLabel(reason: string | undefined): string {
   if (/tool calling/i.test(reason)) return "Chat only";
   if (/no longer listed/i.test(reason)) return "Unavailable";
   if (/not available/i.test(reason)) return "Unavailable";
+  // A Project on a server refuses such a model outright, so none is partly usable.
+  if (/Octant Harness only/.test(reason)) return "Unavailable";
   return "Limited";
 }

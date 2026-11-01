@@ -76,9 +76,8 @@ import type { WorkspaceWiring } from "./workspace";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import { createShieldServerRouteHandler } from "../shield/shieldServerRoutes";
-import { ServerConnection } from "../serverProjects/serverConnection";
 import { createServerProjectRouteHandler } from "../serverProjects/serverProjectRoutes";
-import { ServerProjectStore } from "../serverProjects/serverProjectStore";
+import { serverProjectOf } from "../serverProjects/serverProjectThreads";
 import { openServerSshAccessFor } from "../shield/serverSshAccess";
 import { RuntimeRemoteCommands } from "../shield/runtimeRemoteCommands";
 import {
@@ -123,6 +122,8 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     HarnessStateWiring,
     | "agentRunInteractions"
+    | "serverProjectStore"
+    | "serverRegistry"
     | "shieldHolder"
     | "nativeHarnessApprovals"
     | "nativeHarnessQuestions"
@@ -146,6 +147,8 @@ export function wireHarness(deps: HarnessDependencies) {
     agentRunAdmission,
     agentRunEligibleTargets,
     agentRunInteractions,
+    serverProjectStore,
+    serverRegistry,
     agentRunOrchestration,
     agentRunPersistence,
     codeBoardEventStore,
@@ -198,18 +201,8 @@ export function wireHarness(deps: HarnessDependencies) {
     sshAgentAvailable: () => sshAgentSocket() !== undefined,
     projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
   });
-  // Code Projects bound to a folder on one of those servers, reached with
-  // this host's own ssh and the person's agent.
-  const serverConnection = new ServerConnection({ agentSocket: sshAgentSocket });
-  const serverProjectStore = new ServerProjectStore({
-    journal: persistence.journal,
-    personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-    uuid: randomUUID,
-    clock: () => new Date().toISOString(),
-    servers: () => shieldServerStore.servers(),
-    connection: serverConnection,
-  });
-  serverProjectStore.load();
+  // Code Projects bound to a folder on one of those servers.
+  serverRegistry.servers = () => shieldServerStore.servers();
   const serverProjectRoutes = createServerProjectRouteHandler({
     windowAuthorityStore,
     store: serverProjectStore,
@@ -753,6 +746,7 @@ export function wireHarness(deps: HarnessDependencies) {
       runningWorkTurnAccess,
       readThreadTaint: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId),
+      holdsServerCodeThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
     }),
     isHarnessProvider: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);
@@ -839,6 +833,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessEgressRoutes,
     nativeHarnessRoutingRoutes,
     shieldServerRoutes,
+    shieldServerStore,
     serverProjectRoutes,
     nativeHarnessHooks,
     nativeHarnessSessionRoutes,

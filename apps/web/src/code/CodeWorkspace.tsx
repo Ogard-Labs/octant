@@ -67,6 +67,7 @@ import { AppleWorkbenchPane, type AppleWorkbenchIntent } from "../apple/AppleWor
 import { useAppleSimulatorScreen } from "../apple/useAppleSimulatorScreen";
 import { useAppleSimulatorLiveScreen } from "../apple/useAppleSimulatorLiveScreen";
 import { useAppleWorkbench } from "../apple/useAppleWorkbench";
+import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 
 const MonacoEditorPane = lazy(() =>
   import("./MonacoEditorPane").then((module) => ({ default: module.MonacoEditorPane })),
@@ -191,6 +192,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     () => props.createUuid?.() ?? globalThis.crypto.randomUUID(),
     [props.createUuid],
   );
+  const serverCodeProjects = useServerCodeProjects().projects;
   const view =
     props.controller.activeView?.thread.id === props.tab.threadId
       ? props.controller.activeView
@@ -266,6 +268,24 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         nextUuid={nextUuid}
         operationClient={props.client}
         threadId={props.tab.threadId}
+      />
+    );
+  }
+
+  // A thread in a server Project keeps its files, Git, and tests on the
+  // server, which this host does not read yet, so the tab says so. Its
+  // terminal is a login on the server and opens as any terminal does.
+  if (
+    view.checkout.kind === "remote-root" &&
+    props.tab.kind !== "code-terminal" &&
+    serverCodeProjectFor(serverCodeProjects, view.thread.projectId) !== undefined
+  ) {
+    return (
+      <ShellState
+        eyebrow="On a server"
+        message="This is not available for a Project on a server yet."
+        state="neutral"
+        title={`${props.tab.title} is not available here`}
       />
     );
   }

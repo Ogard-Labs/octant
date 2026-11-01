@@ -326,6 +326,50 @@ export class ShieldServerStore {
   }
 
   /**
+   * Journals one command a server Project's thread ran on its server, which
+   * the command itself does not name: the thread's hands are on that server.
+   */
+  recordServerCommand(input: {
+    readonly threadId: string;
+    readonly serverId: string;
+    readonly alias: string;
+    readonly command: string;
+    readonly status: ShieldRemoteCommandStatus;
+    readonly exitCode?: number | undefined;
+  }): "recorded" | "unavailable" {
+    const redacted = redactSecretShaped(input.command.trim());
+    let threadId: AggregateId;
+    let serverId: AggregateId;
+    try {
+      threadId = decodeAggregateId(input.threadId);
+      serverId = decodeAggregateId(input.serverId);
+    } catch {
+      return "unavailable";
+    }
+    const payload = {
+      threadId,
+      ...(ALIAS.test(input.alias) ? { host: input.alias } : {}),
+      serverId,
+      command:
+        redacted.length > MAX_SHIELD_REMOTE_COMMAND_LENGTH
+          ? `${redacted.slice(0, MAX_SHIELD_REMOTE_COMMAND_LENGTH - 1)}…`
+          : redacted,
+      status: input.status,
+      ...(input.exitCode === undefined ? {} : { exitCode: input.exitCode }),
+      ranAt: this.#options.clock(),
+    };
+    return this.#append(
+      SHIELD_REMOTE_COMMANDS_AGGREGATE,
+      String(threadId),
+      SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran,
+      payload,
+      this.#hostActor,
+    )
+      ? "recorded"
+      : "unavailable";
+  }
+
+  /**
    * Journals a tag Shield put on a command it did not judge (Full access),
    * under the thread, with the command redacted and cut. The tag changes
    * nothing about the command; `unavailable` means it could not be kept.

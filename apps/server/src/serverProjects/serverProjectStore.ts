@@ -170,6 +170,11 @@ export class ServerProjectStore {
     if (call.exitCode !== 0) return refused("folder-not-found");
     const folder = decodeFolder(call.output.toString("utf8").replace(/\n$/, ""));
     if (folder._tag === "None") return refused("folder-not-found");
+    // A Project folder is a folder inside the server, never all of it: the
+    // file tools judge every path as inside or outside it.
+    if (folder.value === "/") {
+      return refused("folder-not-found", "Choose a folder inside the server, not its root.");
+    }
     // The check above waited on the server, so the limit and the registry are
     // read again: another bind may have filled the catalog, or the server may
     // have been removed, in the meantime.

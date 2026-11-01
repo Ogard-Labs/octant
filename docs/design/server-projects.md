@@ -7,9 +7,11 @@ person's registered servers, reached over SSH. Architecture owns the boundary
 [Current Release Boundary](../architecture.md#current-release-boundary)).
 
 **Delivery state.** Built: the server Project catalog, its journal and replay,
-the SSH connection, and the folder check at binding (`/api/server-projects`).
-Not built yet: Code threads that run there, terminals there, and the windows
-that bind and open one. Each later slice moves its part to built here.
+the SSH connection, and the folder check at binding (`/api/server-projects`);
+Code threads there on the Octant Harness, with file tools, commands, and Git
+on the server at every level; thread terminals there; and the Code sidebar,
+composer, and thread view that open them. Not built yet: the items under
+[Not built yet](#not-built-yet).
 
 ## Outcome
 
@@ -120,9 +122,18 @@ hands are on the server.
   command. Every command is journaled on the thread as
   `shield-remote-commands.ran@1` with the server, the redacted command, and
   how it ended, at every level.
-- **Terminals.** A terminal in a server Project is an SSH login shell in the
-  folder, through the same connection rules. When the connection drops the
-  terminal ends and says so; it is never restarted on this host.
+- **Terminals.** A thread terminal in a server Project is an SSH login shell
+  in the folder, through the same connection rules, started on a
+  pseudo-terminal here that runs only `ssh`. It carries no credential, Browser
+  grant, or other folder from this host, and Plan starts none. When the
+  connection drops the terminal ends; it is never restarted on this host.
+- **Fail closed in a turn.** A file call that cannot reach the server is
+  refused `target-unavailable` and a command reports the shell unavailable;
+  the next call tries the server again. Nothing a server thread asks for runs
+  on this host.
+- **Windows.** A window binds a server Project with no folder of this host
+  (`boundRoot: null`), so Files, Browser, and every root-backed surface fail
+  closed, and a server thread opens only its own view.
 - **Checkpoints.** A turn on a server takes no checkpoint, so rewind and
   restore are not offered there; Git on the server is the way back.
 
@@ -131,6 +142,8 @@ hands are on the server.
 - Work Projects on a server, and extra folders in a server Project.
 - Host-side Git panels, the file browser, tests, managed worktrees, and pull
   request delivery for a server Project.
+- The Project terminal (the thread-less one) for a server Project; thread
+  terminals are built.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Linux hosts are untested; the connection uses only `ssh` options both

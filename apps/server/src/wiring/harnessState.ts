@@ -15,6 +15,10 @@ import {
 } from "../harness/nativeHarnessQuestions";
 import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import type { ShieldServer } from "@octant/contracts/shield-servers";
+import { ServerConnection } from "../serverProjects/serverConnection";
+import { ServerProjectStore } from "../serverProjects/serverProjectStore";
+import { personSshAgentSocket } from "../shield/shieldServerStore";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -122,8 +126,28 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
       threadId,
     );
 
+  // Code Projects on a registered server. Windows, Code, and the harness all
+  // read them, so they are built here; the registry they name is Octant
+  // Shield's, which the harness wiring hands over once it is built.
+  const serverRegistry: { servers?: () => ReadonlyArray<ShieldServer> } = {};
+  const serverConnection = new ServerConnection({
+    agentSocket: () => personSshAgentSocket(process.env.SSH_AUTH_SOCK),
+  });
+  const serverProjectStore = new ServerProjectStore({
+    journal: persistence.journal,
+    personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    servers: () => serverRegistry.servers?.() ?? [],
+    connection: serverConnection,
+  });
+  serverProjectStore.load();
+
   return {
     agentRunInteractions,
+    serverConnection,
+    serverProjectStore,
+    serverRegistry,
     shieldHolder,
     nativeHarnessApprovals,
     nativeHarnessQuestions,

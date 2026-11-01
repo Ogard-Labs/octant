@@ -85,4 +85,17 @@ describe("CodeCheckoutBar", () => {
     );
     expect(screen.queryByRole("button", { name: "Create pull request" })).not.toBeInTheDocument();
   });
+
+  it("names where a server Project's thread runs instead of a branch, with no pull request action", () => {
+    render(
+      <CodeCheckoutProvider observation={facts()}>
+        <CodeCheckoutBar
+          onCreatePullRequest={vi.fn()}
+          serverLocation="devbox:/home/build/service"
+        />
+      </CodeCheckoutProvider>,
+    );
+    expect(screen.getByLabelText("Checkout")).toHaveTextContent("devbox:/home/build/service");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
 });

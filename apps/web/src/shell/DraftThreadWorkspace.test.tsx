@@ -13,6 +13,7 @@ import {
   NewTaskDraftScopeContext,
 } from "../composer/useNewTaskPrompt";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
+import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
 import { OctantCommandProvider } from "../palette/CommandRegistry";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
@@ -710,6 +711,49 @@ describe("DraftThreadWorkspace", () => {
       screen.getByRole("status", { name: "Environment: This Mac · Connected" }).firstChild,
     ).toHaveClass("host-selector__environment-icon");
     expect(screen.queryByRole("combobox", { name: "Environment" })).not.toBeInTheDocument();
+  });
+
+  it("offers a server Project and, once chosen, the composer that thread can start in", async () => {
+    const user = userEvent.setup();
+    const serverId = "77777777-7777-4777-8777-777777777777" as ProjectId;
+    const onSelectProject = vi.fn();
+    const serverProjects = {
+      projects: [{ projectId: serverId, name: "Service", location: "devbox:/home/build/service" }],
+      refresh: () => undefined,
+    };
+    const { rerender } = render(
+      <ServerCodeProjectsContext.Provider value={serverProjects}>
+        <DraftThreadWorkspace
+          {...baseProps}
+          mode="code"
+          projectId={codeProjectId}
+          projects={projects}
+          onSelectProject={onSelectProject}
+        />
+      </ServerCodeProjectsContext.Provider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Project: Octant" }));
+    await user.click(screen.getByRole("option", { name: /Service/ }));
+    expect(onSelectProject).toHaveBeenCalledWith(serverId);
+
+    rerender(
+      <ServerCodeProjectsContext.Provider value={serverProjects}>
+        <DraftThreadWorkspace
+          {...baseProps}
+          mode="code"
+          projectId={serverId}
+          projects={projects}
+          onSelectProject={onSelectProject}
+        />
+      </ServerCodeProjectsContext.Provider>,
+    );
+    expect(screen.getByRole("button", { name: "Project: Service" })).toBeVisible();
+    expect(screen.getByText("devbox:/home/build/service")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Workspace" })).toBeNull();
+    expect(
+      screen.queryByText("The selected Project is unavailable. Choose another Project."),
+    ).toBeNull();
   });
 
   it("does not show branch for non-code modes", () => {
