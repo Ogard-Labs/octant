@@ -7,6 +7,7 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
 import type { Event } from "@opencode-ai/sdk/v2/types";
 import { outputStopReason } from "./outputStopReason";
 import { outsideContentTarget } from "./outsideContentRead";
@@ -24,7 +25,21 @@ export interface OpenCodeEventContext {
    * completed event can carry it. Absent in a one-shot map.
    */
   readonly stopMemory?: { current: ProviderOutputStopReason | undefined };
+  /**
+   * The calls of outside-content tools still running, by call id, so their
+   * success can hand the Watcher what they returned. Absent in a one-shot map,
+   * where a read is marked but not read.
+   */
+  readonly outsideContentCalls?: Map<string, OutsideContentCall>;
 }
+
+export interface OutsideContentCall {
+  readonly toolName: string;
+  readonly source: "web-search" | "web-fetch" | "hosted-tool";
+}
+
+/** Most outside-content calls a session remembers at once; a call past it is marked, not read. */
+const MAX_OUTSIDE_CONTENT_CALLS = 1024;
 
 /**
  * 2.0.22 ends a turn with `session.execution.interrupted` for a person's Stop
@@ -231,6 +246,24 @@ function providerExecuted(properties: object): boolean {
   );
 }
 
+/**
+ * The text items of a tool's result, bounded, for the Watcher only: OpenCode
+ * hands the model the same items (opencode 2.2.0 `Tool.Content`). A file item
+ * names a file, not its contents, and is left out.
+ */
+function toolContentText(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  let text = "";
+  for (const item of content) {
+    if (typeof item !== "object" || item === null) continue;
+    if (!("type" in item) || item.type !== "text" || !("text" in item)) continue;
+    if (typeof item.text !== "string") continue;
+    text += `${text === "" ? "" : "\n"}${item.text}`;
+    if (text.length >= OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS) break;
+  }
+  return text.slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
+}
+
 function assertNever(value: never): never {
   void value;
   throw new Error("Unsupported provider event.");
@@ -268,6 +301,9 @@ export function mapOpenCodeEvent(
           ? { source: "hosted-tool" as const, targetKey: "query" }
           : undefined);
       if (outsideContent === undefined) return [start];
+      if ((context.outsideContentCalls?.size ?? 0) < MAX_OUTSIDE_CONTENT_CALLS) {
+        context.outsideContentCalls?.set(toolCallId, { toolName, source: outsideContent.source });
+      }
       const requested = event.properties.input[outsideContent.targetKey];
       const target = outsideContentTarget(typeof requested === "string" ? requested : undefined);
       return [
@@ -299,18 +335,26 @@ export function mapOpenCodeEvent(
     }
     case "session.next.tool.success": {
       const toolCallId = normalizeText(event.properties.callID);
-      return toolCallId === undefined
-        ? []
-        : [
-            mappedEvent(context, {
-              kind: "tool-success",
-              toolCallId,
-              summary: "Tool completed.",
-            }),
-          ];
+      if (toolCallId === undefined) return [];
+      const success = { kind: "tool-success" as const, toolCallId, summary: "Tool completed." };
+      const call = context.outsideContentCalls?.get(toolCallId);
+      context.outsideContentCalls?.delete(toolCallId);
+      const text = call === undefined ? "" : toolContentText(event.properties.content);
+      if (call === undefined || text.trim() === "") return [mappedEvent(context, success)];
+      return [
+        mappedEvent(context, {
+          kind: "outside-content-result",
+          toolCallId,
+          toolName: call.toolName,
+          source: call.source,
+          text,
+        }),
+        mappedEvent(context, success, 1),
+      ];
     }
     case "session.next.tool.failed": {
       const toolCallId = normalizeText(event.properties.callID);
+      if (toolCallId !== undefined) context.outsideContentCalls?.delete(toolCallId);
       return toolCallId === undefined
         ? []
         : [
@@ -478,6 +522,8 @@ export function mapOpenCodeEvent(
           return assertNever(event.properties.status);
       }
     case "session.idle":
+      // A call the turn left without an outcome never reports one now.
+      context.outsideContentCalls?.clear();
       return [completed(context, event.properties.sessionID)];
     case "session.error":
       return [mapProviderError(context, event.properties.error)];
