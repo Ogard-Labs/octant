@@ -90,8 +90,10 @@ import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { type ClaudeAgentSdkPort, makeClaudeAgentSdkPort } from "../providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "../providers/claudeDriver";
 import { type ClaudeProcessPort, makeClaudeProcessLive } from "../providers/claudeProcess";
-import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
-import type { ProviderServerAccessPort } from "../shield/providerServerAccess";
+import {
+  type ProviderRuntimeNetworkPort,
+  type ProviderServerAccessPort,
+} from "../network/providerRuntimeNetwork";
 import { openRuntimeServerAccess } from "../shield/runtimeServerAccess";
 import { personSshAgentSocket } from "../shield/shieldServerStore";
 import { makeServerSshKeysBrokerClient } from "../shield/sshKeyBrokerClient";

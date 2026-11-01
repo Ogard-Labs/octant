@@ -89,12 +89,10 @@ import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 import {
   acquireProviderRuntimeNetwork,
   type ProviderRuntimeNetworkPort,
-} from "../network/providerRuntimeNetwork";
-import {
   acquireProviderServerAccess,
   withServerAccess,
   type ProviderServerAccessPort,
-} from "../shield/providerServerAccess";
+} from "../network/providerRuntimeNetwork";
 
 const CLAUDE_TOOLS = [
   "Read",

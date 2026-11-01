@@ -8,7 +8,7 @@ import {
   type ThrowawaySshd,
 } from "../serverProjects/throwawaySshd.test-support";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
-import { serverAccessSeatbeltRules } from "./providerServerAccess";
+import { serverAccessSeatbeltRules } from "../network/providerRuntimeNetwork";
 import { openRuntimeServerAccess } from "./runtimeServerAccess";
 import { openRuntimeServerAgent, type RuntimeAgentServer } from "./runtimeServerAgent";
 import { resolveWithPersonConfig } from "./serverSshAccess";
@@ -92,6 +92,27 @@ describe.skipIf(!canRunThrowawaySshd)("a provider runtime's own ssh signing in",
     }
   }, 30_000);
 
+  it("lets the key ssh offers pick among registrations for one machine and user", async () => {
+    // The first registration signs in only with an Octant key the server never
+    // saw; the person's key belongs to the second.
+    const agent = await agentFor([
+      {
+        serverId: "s0",
+        user: sshd.user,
+        hostKeys: [hostKey],
+        // A real key the server does not accept: the server's own host key.
+        octantKey: hostKey,
+        octantOnly: true,
+      },
+      { serverId: "s1", user: sshd.user, hostKeys: [hostKey] },
+    ]);
+    try {
+      expect((await runtimeSsh(agent.socketPath, sshd.alias)).output).toContain("runtime-reached");
+    } finally {
+      await agent.close();
+    }
+  }, 30_000);
+
   it("signs nothing for a host that is not a registered server, or for another user", async () => {
     const otherKey = Buffer.from(
       readFileSync(join(sshd.root, "userkey.pub"), "utf8").split(" ")[1] ?? "",
@@ -165,13 +186,10 @@ describe.skipIf(!canRunThrowawaySshd)(
       });
 
     it("reaches a registered server by its alias, and nothing else", async () => {
+      let user = sshd.user;
       const access = await openRuntimeServerAccess(
         () => [
-          {
-            serverId: "5e7e0000-0000-4000-8000-0000000000d1" as never,
-            alias: sshd.alias,
-            user: sshd.user,
-          },
+          { serverId: "5e7e0000-0000-4000-8000-0000000000d1" as never, alias: sshd.alias, user },
         ],
         {
           personAgentSocket: () => sshd.agentSocket,
@@ -228,6 +246,10 @@ describe.skipIf(!canRunThrowawaySshd)(
           const refused = await runtimeCommand(environment, command);
           expect(refused.output, command).not.toContain("runtime-alias\n");
         }
+        // A registration changed while the runtime runs signs nothing more under its old terms.
+        user = "someone-else";
+        const changed = await runtimeCommand(environment, `ssh ${sshd.alias} echo runtime-alias`);
+        expect(changed.output).not.toContain("runtime-alias\n");
       } finally {
         await access.close();
       }

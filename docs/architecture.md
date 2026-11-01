@@ -11461,11 +11461,15 @@ Claude Code gets instead, for its life, from the host
   key Octant keeps it offers that key and has the credential broker sign,
   and never signs for it with the person's agent. Several registered
   servers on one machine share its host key; the login's user picks among
-  them. It reads the Project's
-  list again at each binding, so a server removed meanwhile signs nothing;
+  them, and so does the key `ssh` offers. It reads the Project's list again
+  at each binding, so a server removed meanwhile, or whose alias, user, or
+  sign-in changed, signs nothing more in that launch;
 - on macOS, the user-database lookup `ssh` makes for the person's own
   account, in the runtime's profile.
 
+A launch receives the folder through the runtime network seam
+(`ProviderServerAccessPort` in `apps/server/src/network/providerRuntimeNetwork.ts`),
+which the host fills, so no driver reaches the server registry itself.
 Claude Code's own process runs outside Octant's profile below Full access,
 so a command it runs outside its own sandbox could rewrite the folder; the
 agent socket's host-key check, which lives on the host, still decides what

@@ -250,8 +250,8 @@ async function signLogin(
   if (sessionId === undefined || !sessionId.equals(bound.binding.sessionId)) return failure();
   if (login.byte() !== USERAUTH_REQUEST) return failure();
   const user = login.string()?.toString("utf8");
-  const server = bound.servers.find((candidate) => candidate.user === user);
-  if (server === undefined) return failure();
+  const candidates = bound.servers.filter((candidate) => candidate.user === user);
+  if (candidates.length === 0) return failure();
   if (login.string()?.toString("latin1") !== "ssh-connection") return failure();
   const method = login.string()?.toString("latin1");
   if (method !== "publickey" && method !== HOSTBOUND_PUBLICKEY) return failure();
@@ -263,6 +263,13 @@ async function signLogin(
     return failure();
   }
   if (!login.done()) return failure();
+  // Aliases on one machine for one user may each have their own Octant key:
+  // the key ssh offers picks the registration, else one that signs in with
+  // the person's agent.
+  const server =
+    candidates.find((candidate) => candidate.octantKey?.equals(blob) === true) ??
+    candidates.find((candidate) => candidate.octantOnly !== true);
+  if (server === undefined) return failure();
   if (server.octantKey?.equals(blob) === true) {
     const signature = await options.signWithOctantKey(server.serverId, data);
     return signature === undefined

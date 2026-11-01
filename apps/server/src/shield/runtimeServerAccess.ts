@@ -94,9 +94,20 @@ export async function openRuntimeServerAccess(
     }
   }
   const agentServers = (): ReadonlyArray<RuntimeAgentServer> => {
-    const registered = new Set(servers().map((server) => String(server.serverId)));
+    // A server keeps signing only while its registration reads as it did
+    // when the folder was written: a changed user, alias, or sign-in keeps
+    // its id, so the id alone would carry the old authority on.
+    const current = servers();
+    const unchanged = (server: AccessServer) =>
+      current.some(
+        (now) =>
+          String(now.serverId) === String(server.serverId) &&
+          now.alias === server.alias &&
+          now.user === server.user &&
+          (now.signIn ?? "ssh-agent") === (server.signIn ?? "ssh-agent"),
+      );
     return prepared.flatMap(({ server, lines }) =>
-      registered.has(String(server.serverId))
+      unchanged(server)
         ? [
             {
               serverId: String(server.serverId),

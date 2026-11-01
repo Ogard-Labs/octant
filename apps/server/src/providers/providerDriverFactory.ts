@@ -26,8 +26,10 @@ import {
 import { codexAccountProcessEnvironment } from "./codexProcess";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
-import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
-import type { ProviderServerAccessPort } from "../shield/providerServerAccess";
+import {
+  type ProviderRuntimeNetworkPort,
+  type ProviderServerAccessPort,
+} from "../network/providerRuntimeNetwork";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import { makeCodexDriver } from "./codexDriver";
 import type { CodexProcessPort } from "./codexProcess";

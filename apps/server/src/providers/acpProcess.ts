@@ -41,14 +41,12 @@ import {
   acquireProviderRuntimeNetwork,
   type ProviderRuntimeNetworkPort,
   type ProviderRuntimeProxiedNetwork,
-} from "../network/providerRuntimeNetwork";
-import {
   acquireProviderServerAccess,
   serverAccessSeatbeltRules,
   withServerAccess,
   type ProviderServerAccess,
   type ProviderServerAccessPort,
-} from "../shield/providerServerAccess";
+} from "../network/providerRuntimeNetwork";
 
 export type { AcpSessionMode } from "./acpProfiles";
 
