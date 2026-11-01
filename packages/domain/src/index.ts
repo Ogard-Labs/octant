@@ -2,6 +2,7 @@ export * from "./browserAutomationPolicy";
 export * from "./browserDownloadPolicy";
 export * from "./browserPageSnapshot";
 export * from "./browserCapturePolicy";
+export * from "./browserProofPolicy";
 export * from "./browserProfilePolicy";
 export * from "./browserExtensionPolicy";
 export * from "./computerUsePolicy";

@@ -51,6 +51,7 @@ export * from "./browserProfiles";
 export * from "./browserExtensions";
 export * from "./browserCapture";
 export * from "./browserDownload";
+export * from "./browserFlows";
 export * from "./canvas";
 export * from "./canvasActions";
 export * from "./canvasContext";

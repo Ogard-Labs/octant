@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import type { BrowserThreadId, ToolActionAuthority, WindowId } from "@octant/contracts";
+import { BrowserAutomationService } from "./browser/browserAutomationService";
+import { createBrowserAutomationRouteHandler } from "./browserAutomationRoutes";
+import { WindowAuthorityStore } from "./windowAuthorityStore";
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import {
@@ -68,33 +72,45 @@ describe("authenticated product route dispatch", () => {
     ).toBe("project.overview.read");
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/chat/attachments", { method: "POST" }),
+        new Request("https://octant.example/api/chat/attachments", {
+          method: "POST",
+        }),
       ),
     ).toBe("chat.send-turn");
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/code/evidence", { method: "PUT" }),
+        new Request("https://octant.example/api/code/evidence", {
+          method: "PUT",
+        }),
       ),
     ).toBe("code.plan-turn");
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/code/board", { method: "POST" }),
+        new Request("https://octant.example/api/code/board", {
+          method: "POST",
+        }),
       ),
     ).toBe("project.overview.read");
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/code/evidence/batch", { method: "POST" }),
+        new Request("https://octant.example/api/code/evidence/batch", {
+          method: "POST",
+        }),
       ),
     ).toBe("project.overview.read");
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/work/board", { method: "POST" }),
+        new Request("https://octant.example/api/work/board", {
+          method: "POST",
+        }),
       ),
     ).toBe("project.overview.read");
     // Local servers is its own catalogued authority, not a Code turn.
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/code/local-servers/commands", { method: "POST" }),
+        new Request("https://octant.example/api/code/local-servers/commands", {
+          method: "POST",
+        }),
       ),
     ).toBe("code.local-servers.list");
     // A person's Desktop tab, its frames included, is its own action.
@@ -124,18 +140,24 @@ describe("authenticated product route dispatch", () => {
     }
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/code/debug/commands", { method: "POST" }),
+        new Request("https://octant.example/api/code/debug/commands", {
+          method: "POST",
+        }),
       ),
     ).toBeUndefined();
     // Approving a server that runs the repository's tooling has no remote action.
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/code/language/approvals", { method: "POST" }),
+        new Request("https://octant.example/api/code/language/approvals", {
+          method: "POST",
+        }),
       ),
     ).toBeUndefined();
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/providers/commands", { method: "POST" }),
+        new Request("https://octant.example/api/providers/commands", {
+          method: "POST",
+        }),
       ),
     ).toBeUndefined();
     expect(
@@ -143,17 +165,23 @@ describe("authenticated product route dispatch", () => {
     ).toBe("project.overview.read");
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/automations/commands", { method: "POST" }),
+        new Request("https://octant.example/api/automations/commands", {
+          method: "POST",
+        }),
       ),
     ).toBe("automation.manage");
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/automations/list", { method: "POST" }),
+        new Request("https://octant.example/api/automations/list", {
+          method: "POST",
+        }),
       ),
     ).toBeUndefined();
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/diagnostics/export", { method: "POST" }),
+        new Request("https://octant.example/api/diagnostics/export", {
+          method: "POST",
+        }),
       ),
     ).toBe("diagnostics.export");
     expect(
@@ -161,7 +189,9 @@ describe("authenticated product route dispatch", () => {
     ).toBeUndefined();
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/threads/export", { method: "POST" }),
+        new Request("https://octant.example/api/threads/export", {
+          method: "POST",
+        }),
       ),
     ).toBe("project.overview.read");
   });
@@ -391,7 +421,9 @@ describe("authenticated product route dispatch", () => {
   it("classifies a Canvas share read as a read and leaves minting and revoking denied", () => {
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/canvas/share-access", { method: "POST" }),
+        new Request("https://octant.example/api/canvas/share-access", {
+          method: "POST",
+        }),
       ),
     ).toBe("project.overview.read");
     // A share names a paired device as its audience, so opening one must reach
@@ -493,6 +525,7 @@ describe("authenticated product route dispatch", () => {
       "/api/browser/scope",
       "/api/browser/contexts/current",
       "/api/browser/contexts/inspect",
+      "/api/browser/project-agent-pages",
     ]) {
       expect(
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
@@ -500,7 +533,9 @@ describe("authenticated product route dispatch", () => {
     }
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/browser/actions", { method: "POST" }),
+        new Request("https://octant.example/api/browser/actions", {
+          method: "POST",
+        }),
       ),
     ).toBe("browser.interact");
     // Opening, releasing, cancelling, and stopping a browser session decide
@@ -516,11 +551,13 @@ describe("authenticated product route dispatch", () => {
       ).toBeUndefined();
     }
     // A kept screenshot is a picture of a page on the host, so reading or taking
-    // one stays with the host's own window.
+    // one stays with the host's own window, and so does the step list that
+    // names the pages and elements beside it.
     for (const path of [
       "/api/browser/captures",
       "/api/browser/captures/image",
       "/api/browser/captures/take",
+      "/api/browser/steps",
     ]) {
       expect(
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
@@ -541,6 +578,118 @@ describe("authenticated product route dispatch", () => {
       expect((await product(handoff(path, "POST")))?.status).toBe(403);
     }
     expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("lists a Project's agent pages for a paired device with a signed-in page withheld", async () => {
+    // A paired device's pages live under the scope its principal resolves to.
+    const windowId = authenticateRouteWindowId({
+      request: handoff("/api/browser/project-agent-pages", "POST").request,
+      principal,
+    });
+    const authority = {
+      hostId: "40000000-0000-4000-8000-000000000001",
+      mode: "work",
+      projectId: "50000000-0000-4000-8000-000000000001",
+      rootId: "60000000-0000-4000-8000-000000000001",
+      providerInstanceId: "70000000-0000-4000-8000-000000000001",
+      extension: { kind: "core" },
+    } as unknown as ToolActionAuthority;
+    const privateThread = "20000000-0000-4000-8000-00000000000a" as BrowserThreadId;
+    const signedInThread = "20000000-0000-4000-8000-00000000000b" as BrowserThreadId;
+    let counter = 0;
+    const service = new BrowserAutomationService({
+      runtime: {
+        available: async () => true,
+        nativeAvailable: async () => true,
+        createContext: async () => undefined,
+        inspectTarget: async () => ({ sensitive: false }),
+        act: async () => ({
+          url: "https://secret.example/account?x=1",
+          title: "Account of Ada",
+        }),
+        closeContext: async () => undefined,
+        closeAll: async () => undefined,
+      },
+      authority: { canAccessWindow: () => true, resolve: () => authority },
+      uuid: () => `80000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`,
+      clock: () => new Date().toISOString(),
+      now: () => Date.now(),
+    });
+    const open = async (threadId: BrowserThreadId, profile?: { kind: "personal" }) => {
+      const created = await service.create({
+        windowId,
+        threadId,
+        action: {
+          actionId: `81000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`,
+          correlationId: `82000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`,
+          capability: { id: "browser-automation", version: 1 },
+          authority,
+          intent: "Open a page.",
+          approval: { kind: "not-required" },
+        } as never,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://secret.example"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+          ...(profile === undefined ? {} : { profile }),
+        },
+      });
+      await service.act({
+        windowId,
+        threadId,
+        request: {
+          actionId: created.context?.actionId,
+          correlationId: created.context?.correlationId,
+          authority,
+          contextId: created.context?.contextId,
+          kind: "navigate",
+          target: "https://secret.example/account",
+        } as never,
+      });
+    };
+    await open(privateThread);
+    await open(signedInThread, { kind: "personal" });
+
+    const routes = createBrowserAutomationRouteHandler({
+      service,
+      authority: { canAccessWindow: () => true, resolve: () => authority },
+      projectAgentPages: {
+        windowCanOpenProject: async () => true,
+        threadTitle: (id) => (id === privateThread ? "Public research" : "Check my account"),
+      },
+      windowAuthorityStore: new WindowAuthorityStore(),
+      maxRequestBodySize: 64_000,
+    });
+    const dispatch = vi.fn(async (request: Request) => {
+      const context = readPrincipalRouteContext(request);
+      const bound = new Request(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body: JSON.stringify({ projectId: authority.projectId, mode: "work" }),
+      });
+      if (context !== undefined) {
+        const { bindPrincipalRouteContext } = await import("./principalRouteContext");
+        bindPrincipalRouteContext(bound, context);
+      }
+      return (await routes(bound)) ?? new Response("missing", { status: 404 });
+    });
+    const product = createAuthenticatedProductDispatch({ dispatch });
+    const response = await product(handoff("/api/browser/project-agent-pages", "POST"));
+    expect(response?.status).toBe(200);
+    const body = (await response?.json()) as {
+      pages: ReadonlyArray<Record<string, unknown>>;
+    };
+    const signedIn = body.pages.find((page) => page.threadTitle === "Check my account");
+    expect(signedIn).toMatchObject({ signedIn: true });
+    expect(signedIn?.title).toBeUndefined();
+    expect(signedIn?.host).toBeUndefined();
+    expect(body.pages.find((page) => page.threadTitle === "Public research")).toMatchObject({
+      title: "Account of Ada",
+      host: "secret.example",
+    });
+    expect(JSON.stringify(body)).not.toContain("?x=1");
   });
 
   it("classifies the POST-only Usage reads as reads and leaves the ledger purges denied", () => {
@@ -588,7 +737,9 @@ describe("authenticated product route dispatch", () => {
     }
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/context/inspect", { method: "POST" }),
+        new Request("https://octant.example/api/context/inspect", {
+          method: "POST",
+        }),
       ),
     ).toBe("project.overview.read");
     // A thread's compaction state is a read; the route itself refuses a paired
@@ -614,7 +765,9 @@ describe("authenticated product route dispatch", () => {
     }
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/extensions/tool-approvals", { method: "POST" }),
+        new Request("https://octant.example/api/extensions/tool-approvals", {
+          method: "POST",
+        }),
       ),
     ).toBe("extension.tool-call.answer-once");
     expect(
@@ -622,7 +775,9 @@ describe("authenticated product route dispatch", () => {
     ).toBe("project.overview.read");
     expect(
       classifyProductAction(
-        new Request("https://octant.example/api/projects/project-id/memory", { method: "POST" }),
+        new Request("https://octant.example/api/projects/project-id/memory", {
+          method: "POST",
+        }),
       ),
     ).toBeUndefined();
   });

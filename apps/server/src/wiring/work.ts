@@ -168,7 +168,10 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<
     BrowserWiring,
-    "browserAutomationService" | "browserToolApprovalService" | "windowHoldsProject"
+    | "browserAutomationService"
+    | "browserFlows"
+    | "browserToolApprovalService"
+    | "windowHoldsProject"
   > &
   Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
   Pick<
@@ -202,6 +205,7 @@ export function wireWork(deps: WorkDependencies) {
     browserAutomationService,
     browserCaptures,
     browserModelBindings,
+    browserFlows,
     browserToolApprovalService,
     canAccessCodeProject,
     canvasAgentToolPort,
@@ -434,7 +438,10 @@ export function wireWork(deps: WorkDependencies) {
                   browserAutomationService.releaseThread(ownerWindowId, threadId),
                 holdForPerson: (ownerWindowId, threadId) =>
                   browserAutomationService.holdForPerson(ownerWindowId, threadId),
+                snapshotRefs: (ownerWindowId, threadId) =>
+                  browserAutomationService.snapshotRefs(ownerWindowId, threadId),
               },
+              flows: browserFlows,
               approvals: browserToolApprovalService,
               uploadRoot: () => input.projectRoot,
               uuid: randomUUID,

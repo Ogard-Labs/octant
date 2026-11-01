@@ -183,6 +183,7 @@ import {
 import { createBrowserLaunchLink } from "./browserLaunchLink";
 import { createLocalPluginFolderPicker } from "./localPluginFolderPicker";
 import { createRuntimeBinaryPicker } from "./runtimeBinaryPicker";
+import { createBrowserProofSaver } from "./browserProofSaver";
 import { createSupportBundleSaver } from "./supportBundleSaver";
 import {
   createSingleFlight,
@@ -1323,6 +1324,7 @@ interface DesktopWindowContext extends DesktopWindowIdentity {
   readonly localPluginFolderPicker: ReturnType<typeof createLocalPluginFolderPicker>;
   readonly runtimeBinaryPicker: ReturnType<typeof createRuntimeBinaryPicker>;
   readonly supportBundleSaver: ReturnType<typeof createSupportBundleSaver>;
+  readonly browserProofSaver: ReturnType<typeof createBrowserProofSaver>;
   readonly presentationController: WindowPresentationController;
   readonly refreshAuthorityAfterHostRestart: (host: LocalHostDescriptor) => Promise<void>;
 }
@@ -2357,6 +2359,24 @@ async function createWindow(): Promise<void> {
         },
         serverUrl,
       });
+      const browserProofSaver = createBrowserProofSaver<BrowserWindow>({
+        dialog: {
+          showOpenDialog: async (owner, options) => {
+            const chosen = await dialog.showOpenDialog(owner, {
+              title: options.title,
+              buttonLabel: options.buttonLabel,
+              defaultPath: options.defaultPath,
+              properties: [...options.properties],
+            });
+            return { canceled: chosen.canceled, filePaths: chosen.filePaths };
+          },
+        },
+        defaultDirectory: app.getPath("downloads"),
+        resolveOwnedWindow: (sender) => {
+          const owner = BrowserWindow.fromWebContents(sender as Electron.WebContents);
+          return owner !== null && owner === window ? owner : undefined;
+        },
+      });
       let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
       let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
       const controller = createWindowPresentationController({
@@ -2396,6 +2416,7 @@ async function createWindow(): Promise<void> {
         localPluginFolderPicker,
         runtimeBinaryPicker,
         supportBundleSaver,
+        browserProofSaver,
         presentationController: controller,
         refreshAuthorityAfterHostRestart: createProjectWindowAuthorityRefresh(
           host.instanceId,
@@ -2627,6 +2648,24 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           },
           serverUrl,
         });
+        const browserProofSaver = createBrowserProofSaver<BrowserWindow>({
+          dialog: {
+            showOpenDialog: async (owner, options) => {
+              const chosen = await dialog.showOpenDialog(owner, {
+                title: options.title,
+                buttonLabel: options.buttonLabel,
+                defaultPath: options.defaultPath,
+                properties: [...options.properties],
+              });
+              return { canceled: chosen.canceled, filePaths: chosen.filePaths };
+            },
+          },
+          defaultDirectory: app.getPath("downloads"),
+          resolveOwnedWindow: (sender) => {
+            const owner = BrowserWindow.fromWebContents(sender as Electron.WebContents);
+            return owner !== null && owner === window ? owner : undefined;
+          },
+        });
         let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
         let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
         const controller = createWindowPresentationController({
@@ -2669,6 +2708,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           localPluginFolderPicker,
           runtimeBinaryPicker,
           supportBundleSaver,
+          browserProofSaver,
           presentationController: controller,
           refreshAuthorityAfterHostRestart: createProjectWindowAuthorityRefresh(
             initialAuthorityInstanceId,
@@ -3793,6 +3833,9 @@ function installIpcHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.saveSupportBundle, async (event) => {
     return await ownedWindowContext(event).supportBundleSaver(event);
+  });
+  ipcMain.handle(IPC_CHANNELS.saveBrowserProofScreenshots, async (event, pictures: unknown) => {
+    return await ownedWindowContext(event).browserProofSaver(event, pictures);
   });
   ipcMain.handle(IPC_CHANNELS.sidebarMaterialPreference, (event, preference: unknown) => {
     const context = ownedWindowContext(event);

@@ -2627,3 +2627,16 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .guardrail-level[data-mode="full-access"] .guardrail-level__mode {
   color: var(--oct-danger-fg);
 }
+
+/* The pull request form's choice about attaching the thread's Browser proof. */
+.code-pr-pane__proof {
+  display: grid;
+  gap: var(--oct-space-2);
+  justify-items: start;
+}
+
+.code-pr-pane__proof-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}

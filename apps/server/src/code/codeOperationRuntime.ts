@@ -467,6 +467,8 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
+  /** The Project's Browser flows and the recorder; see the Code Browser tool. */
+  readonly browserFlows?: CodeAppManagedToolsOptions["browserFlows"];
   /**
    * Whether an origin already holds a remembered "always allow" grant. Read
    * live so a grant forgotten in Settings stops satisfying it at once.
@@ -4145,6 +4147,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.browserAutomation === undefined
             ? {}
             : { browser: this.#options.browserAutomation }),
+          ...(this.#options.browserFlows === undefined
+            ? {}
+            : { browserFlows: this.#options.browserFlows }),
           ...(this.#options.appleToolchain === undefined
             ? {}
             : { apple: this.#options.appleToolchain }),

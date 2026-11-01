@@ -912,6 +912,7 @@ describe("Code app-managed tools", () => {
     expect(pressed.isError).toBe(false);
     expect(act).toHaveBeenLastCalledWith({
       windowId,
+      threadId: expect.any(String),
       capturedBy: "agent",
       refuseStaleRevision: true,
       request: expect.objectContaining({
@@ -926,6 +927,7 @@ describe("Code app-managed tools", () => {
     });
     expect(act).toHaveBeenLastCalledWith({
       windowId,
+      threadId: expect.any(String),
       capturedBy: "agent",
       refuseStaleRevision: true,
       request: expect.objectContaining({ kind: "scroll", deltaX: 100, deltaY: -500 }),
@@ -2424,8 +2426,11 @@ describe("Code tool families", () => {
     // and height arguments added about 240 bytes.
     // The sign-in operation and its reason added about 60 bytes.
     // The diagnostics cursor and warnings arguments added about 70 bytes.
+    // The three flow operations and their name argument added about 65 bytes.
+    // Device emulation's preset, touch, and colorScheme arguments added about
+    // 305 bytes, most of it their two short value lists.
     // The download-save operation and its downloadId added about 45 bytes.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(5_590);
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(5_970);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(

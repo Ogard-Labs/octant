@@ -8,12 +8,20 @@ import {
   browserToolWantsScreenshot,
   parseBrowserToolInput,
   handBrowserToPerson,
+  isBrowserToolFlowInput,
   runBrowserToolSteps,
   signInPageRefusal,
   type BrowserToolAnswer,
   type BrowserToolInput,
 } from "../browser/browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "../browser/browserToolDefinition";
+import {
+  browserFlowAgentActor,
+  runBrowserFlowOperation,
+  runRecordingFlow,
+  type BrowserFlowRefs,
+  type BrowserFlowToolPort,
+} from "../browser/browserFlows";
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
@@ -483,6 +491,7 @@ export interface CodeAppManagedToolsOptions {
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
+      readonly threadId?: BrowserThreadId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
@@ -513,12 +522,16 @@ export interface CodeAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => Promise<BrowserAutomationSnapshot>;
+    /** What the latest snapshot's refs name; flows read it to describe and find elements. */
+    readonly snapshotRefs?: (windowId: WindowId, threadId: BrowserThreadId) => BrowserFlowRefs;
     /** Marks the page as the person's to sign in on; see the service. */
     readonly holdForPerson?: (
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => (() => void) | undefined;
   };
+  /** The Project's flows and the recorder of this host; absent, flows are unavailable. */
+  readonly browserFlows?: BrowserFlowToolPort;
   /**
    * Asks the person to sign in on the thread's page, through the same Browser
    * approval the Work thread uses, and says who may not be asked. Absent, a
@@ -1153,6 +1166,10 @@ function terminalHasCompletionMarker(
   );
 }
 
+function browserThreadIdOf(options: CodeAppManagedToolsOptions): BrowserThreadId {
+  return options.thread.id as unknown as BrowserThreadId;
+}
+
 async function browserTool(
   options: CodeAppManagedToolsOptions,
   input: BrowserToolInput | undefined,
@@ -1162,7 +1179,48 @@ async function browserTool(
   if (input.operation === "steps") {
     return runBrowserToolSteps(input.steps, (step) => browserTool(options, step, signal));
   }
-  const threadId = options.thread.id as unknown as BrowserThreadId;
+  const browser = options.browser;
+  const threadId = browserThreadIdOf(options);
+  const flows = browser.snapshotRefs === undefined ? undefined : options.browserFlows;
+  const refs = (): BrowserFlowRefs => browser.snapshotRefs?.(options.windowId, threadId) ?? [];
+  const contextId = (): string | undefined => {
+    const context = browser.inspectThread(options.windowId, threadId).context;
+    return context?.state === "active" ? String(context.contextId) : undefined;
+  };
+  if (isBrowserToolFlowInput(input)) {
+    if (flows === undefined) return failure("browser-flows-unavailable");
+    const flowAuthority = browser.resolveAuthority(threadId, "code");
+    if (flowAuthority === undefined) return failure("browser-authority-unavailable");
+    const flowPosture = browserAuthorityFailure(options);
+    if (flowPosture !== undefined) return failure(flowPosture);
+    return runBrowserFlowOperation(input, {
+      flows,
+      projectId: flowAuthority.projectId,
+      caller: flows.caller(options.windowId),
+      actor: () => browserFlowAgentActor(flowAuthority, String(threadId)),
+      contextId,
+      refs,
+      run: (step) => browserTool(options, step, signal),
+    });
+  }
+  // Every operation of the agent passes here, so a flow records what ran and a
+  // replay runs each step exactly as a call of its own would.
+  return runRecordingFlow({
+    step: input,
+    flows,
+    refs,
+    contextId,
+    run: () => browserToolOne(options, input, signal),
+  });
+}
+
+async function browserToolOne(
+  options: CodeAppManagedToolsOptions,
+  input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
+  signal?: AbortSignal,
+): Promise<BrowserToolAnswer> {
+  if (options.browser === undefined) return failure("invalid-browser-input");
+  const threadId = browserThreadIdOf(options);
   const authority = options.browser.resolveAuthority(threadId, "code");
   if (authority === undefined) return failure("browser-authority-unavailable");
   if (input.operation === "stop") {
@@ -1256,7 +1314,7 @@ async function browserTool(
           signIn: input.reason === undefined ? {} : { reason: input.reason },
           ...(signal === undefined ? {} : { signal }),
         }),
-      snapshotAfter: () => browserTool(options, { operation: "snapshot" }, signal),
+      snapshotAfter: () => browserToolOne(options, { operation: "snapshot" }, signal),
     });
   }
   if (input.operation === "download-save") {
@@ -1312,6 +1370,7 @@ async function browserTool(
   const acted = await guardedBrowserEffect(options, threadId, signal, () =>
     options.browser!.act({
       windowId: options.windowId,
+      threadId,
       request,
       capturedBy: "agent",
       refuseStaleRevision: true,

@@ -218,6 +218,10 @@ describe("BrowserRuntimeBroker", () => {
     try {
       for (const action of [
         { kind: "resize", viewport: { width: 9000, height: 800 } },
+        { kind: "resize", colorScheme: "sepia" },
+        { kind: "resize", touch: "yes" },
+        { kind: "resize", mobile: true },
+        { kind: "resize", viewport: { width: 390, height: 844 }, deviceScaleFactor: 40 },
         { kind: "wait", waitFor: { conditions: [], match: "all" } },
         { kind: "wait", waitFor: { conditions: [{ kind: "text", text: "x" }], match: "all" } },
       ]) {

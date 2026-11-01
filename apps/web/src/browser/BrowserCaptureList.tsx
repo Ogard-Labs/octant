@@ -2,7 +2,7 @@ import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
-import type { BrowserCapture, BrowserThreadId } from "@octant/contracts";
+import type { BrowserCapture, BrowserStep, BrowserThreadId } from "@octant/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
@@ -12,6 +12,8 @@ import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { useWorkspaceContentView } from "../shell/WorkspaceContentView";
 import { OctantButton } from "../ui/base/OctantButton";
+import { BrowserCaptureImage, captureLabel } from "./BrowserCaptureImage";
+import { BrowserProofPanel } from "./BrowserProofPanel";
 import "./browser-captures.css";
 
 /**
@@ -38,6 +40,7 @@ export interface BrowserCaptureListProps {
 export function BrowserCaptureList(props: BrowserCaptureListProps) {
   const workspace = useWorkspaceContentView();
   const [captures, setCaptures] = useState<ReadonlyArray<BrowserCapture>>([]);
+  const [steps, setSteps] = useState<ReadonlyArray<BrowserStep>>([]);
   const [expanded, setExpanded] = useState<BrowserCapture | undefined>(undefined);
   const refused = useRef(false);
   const revision = useThreadActivityRevision("browserCaptures");
@@ -46,6 +49,7 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
   useEffect(() => {
     refused.current = false;
     setCaptures([]);
+    setSteps([]);
     setExpanded(undefined);
   }, [props.client, props.threadId]);
 
@@ -63,6 +67,17 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
         setCaptures((current) =>
           samePollingData(current, response.captures) ? current : response.captures,
         );
+        // The steps ride the same beat and the same refusal. A host that
+        // keeps none, or a step list that cannot be read, leaves the strip as
+        // it was.
+        const listSteps = props.client.listSteps;
+        if (listSteps !== undefined) {
+          const recorded = await listSteps.call(props.client, { threadId: props.threadId }, signal);
+          if (signal.aborted) return;
+          setSteps((current) =>
+            samePollingData(current, recorded.steps) ? current : recorded.steps,
+          );
+        }
       } catch (error) {
         // An aborted read belongs to the old thread; its refusal must not
         // suppress the new one.
@@ -84,7 +99,7 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
     revision === undefined ? CAPTURE_POLL_MS : THREAD_ACTIVITY_RECOVERY_MS,
   );
 
-  if (captures.length === 0) return null;
+  if (captures.length === 0 && steps.length === 0) return null;
 
   const open = (capture: BrowserCapture) => {
     if (workspace === undefined) {
@@ -96,47 +111,62 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
     ));
   };
 
+  const proof =
+    steps.length === 0 ? null : (
+      <BrowserProofPanel
+        captures={captures}
+        client={props.client}
+        steps={steps}
+        threadId={props.threadId}
+        {...(props.className === undefined ? {} : { className: props.className })}
+      />
+    );
+  if (captures.length === 0) return proof;
+
   return (
-    <section
-      aria-label="Browser captures"
-      className={
-        props.className === undefined ? "browser-captures" : `browser-captures ${props.className}`
-      }
-      data-testid="browser-capture-list"
-    >
-      <h3 className="oct-section-label">Browser captures</h3>
-      <ul className="browser-captures__list">
-        {captures.map((capture) => (
-          <li className="browser-capture" key={capture.captureId}>
-            <OctantButton
-              aria-label={`Open capture of ${captureLabel(capture)}`}
-              className="browser-capture__hit"
-              onClick={() => open(capture)}
-              type="button"
-              variant="bare"
-            />
-            <BrowserCaptureImage
-              capture={capture}
-              className="browser-capture__thumb"
-              client={props.client}
-              threadId={props.threadId}
-            />
-            <span className="browser-capture__text">
-              <span className="browser-capture__title">{captureLabel(capture)}</span>
-              <span className="oct-meta oct-meta--mono browser-capture__origin">
-                {capture.origin}
-                {capture.profile === undefined
-                  ? ""
-                  : ` · ${capture.profile.kind === "personal" ? "Personal" : "Project"} profile`}
+    <>
+      <section
+        aria-label="Browser captures"
+        className={
+          props.className === undefined ? "browser-captures" : `browser-captures ${props.className}`
+        }
+        data-testid="browser-capture-list"
+      >
+        <h3 className="oct-section-label">Browser captures</h3>
+        <ul className="browser-captures__list">
+          {captures.map((capture) => (
+            <li className="browser-capture" key={capture.captureId}>
+              <OctantButton
+                aria-label={`Open capture of ${captureLabel(capture)}`}
+                className="browser-capture__hit"
+                onClick={() => open(capture)}
+                type="button"
+                variant="bare"
+              />
+              <BrowserCaptureImage
+                capture={capture}
+                className="browser-capture__thumb"
+                client={props.client}
+                threadId={props.threadId}
+              />
+              <span className="browser-capture__text">
+                <span className="browser-capture__title">{captureLabel(capture)}</span>
+                <span className="oct-meta oct-meta--mono browser-capture__origin">
+                  {capture.origin}
+                  {capture.profile === undefined
+                    ? ""
+                    : ` · ${capture.profile.kind === "personal" ? "Personal" : "Project"} profile`}
+                </span>
               </span>
-            </span>
-          </li>
-        ))}
-      </ul>
-      {expanded === undefined ? null : (
-        <BrowserCaptureView capture={expanded} client={props.client} threadId={props.threadId} />
-      )}
-    </section>
+            </li>
+          ))}
+        </ul>
+        {expanded === undefined ? null : (
+          <BrowserCaptureView capture={expanded} client={props.client} threadId={props.threadId} />
+        )}
+      </section>
+      {proof}
+    </>
   );
 }
 
@@ -159,54 +189,4 @@ function BrowserCaptureView(props: {
       </figcaption>
     </figure>
   );
-}
-
-function BrowserCaptureImage(props: {
-  readonly capture: BrowserCapture;
-  readonly client: BrowserAutomationClient;
-  readonly threadId: BrowserThreadId;
-  readonly className: string;
-}) {
-  const [dataUrl, setDataUrl] = useState<string | undefined>(undefined);
-  const [unavailable, setUnavailable] = useState(false);
-
-  useEffect(() => {
-    const readCapture = props.client.readCapture;
-    setDataUrl(undefined);
-    setUnavailable(false);
-    if (readCapture === undefined) return;
-    const controller = new AbortController();
-    void readCapture
-      .call(
-        props.client,
-        { threadId: props.threadId, captureId: props.capture.captureId },
-        controller.signal,
-      )
-      .then((image) => {
-        if (!controller.signal.aborted) setDataUrl(image.dataUrl);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setUnavailable(true);
-      });
-    return () => controller.abort();
-  }, [props.capture.captureId, props.client, props.threadId]);
-
-  if (unavailable) {
-    return <span aria-label="Capture is unavailable" className={props.className} role="img" />;
-  }
-  if (dataUrl === undefined) return <span aria-hidden="true" className={props.className} />;
-  // The contract constrains the data URL to an image, so this never loads a
-  // network or local resource.
-  return (
-    <img
-      alt={`Capture of ${captureLabel(props.capture)}`}
-      className={props.className}
-      draggable={false}
-      src={dataUrl}
-    />
-  );
-}
-
-function captureLabel(capture: BrowserCapture): string {
-  return capture.title ?? capture.origin;
 }

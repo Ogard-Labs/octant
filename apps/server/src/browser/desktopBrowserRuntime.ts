@@ -184,6 +184,12 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           ...(request.tabId === undefined ? {} : { tabId: request.tabId }),
           ...(request.waitFor === undefined ? {} : { waitFor: request.waitFor }),
           ...(request.viewport === undefined ? {} : { viewport: request.viewport }),
+          ...(request.deviceScaleFactor === undefined
+            ? {}
+            : { deviceScaleFactor: request.deviceScaleFactor }),
+          ...(request.mobile === undefined ? {} : { mobile: request.mobile }),
+          ...(request.touch === undefined ? {} : { touch: request.touch }),
+          ...(request.colorScheme === undefined ? {} : { colorScheme: request.colorScheme }),
           ...(request.diagnosticsSince === undefined
             ? {}
             : { diagnosticsSince: request.diagnosticsSince }),

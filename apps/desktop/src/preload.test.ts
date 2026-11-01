@@ -180,6 +180,31 @@ describe("desktop preload bridge", () => {
     ).rejects.toThrow("Octant could not save the diagnostics. Nothing was written.");
   });
 
+  it("saves Browser screenshots over their own channel, answering a count and a folder name only", async () => {
+    const bridge = (invoke: (channel: string, ...args: unknown[]) => Promise<unknown>) =>
+      createHostBridge({ invoke, on: vi.fn(), removeListener: vi.fn() }, projectWindowCapability);
+    const pictures = [{ fileNumber: 1, dataUrl: "data:image/png;base64,AAAA" }];
+
+    const saved = vi.fn().mockResolvedValue({ kind: "saved", count: 1, folderName: "pr-12" });
+    await expect(bridge(saved).saveBrowserProofScreenshots(pictures)).resolves.toEqual({
+      kind: "saved",
+      count: 1,
+      folderName: "pr-12",
+    });
+    expect(saved).toHaveBeenCalledWith(IPC_CHANNELS.saveBrowserProofScreenshots, pictures);
+
+    await expect(
+      bridge(
+        vi.fn().mockResolvedValue({ kind: "saved", count: 1, folderName: "/Users/ada/pr-12" }),
+      ).saveBrowserProofScreenshots(pictures),
+    ).rejects.toThrow(/Invalid screenshot save result/);
+    await expect(
+      bridge(
+        vi.fn().mockRejectedValue(new Error("Error invoking remote method: /Users/ada/secret")),
+      ).saveBrowserProofScreenshots(pictures),
+    ).rejects.toThrow("Octant could not save the screenshots. Nothing more was written.");
+  });
+
   it("settles a pairing on its own channel and refuses an answer it does not know", async () => {
     const invoke = vi.fn().mockResolvedValue({ status: "settled" });
     const bridge = createHostBridge(
@@ -444,6 +469,7 @@ describe("desktop preload bridge", () => {
       "revokeAllRemoteDevices",
       "revokeRemoteDevice",
       "rotateRemoteHostIdentity",
+      "saveBrowserProofScreenshots",
       "saveSupportBundle",
       "selectLocalPluginFolder",
       "selectProjectRoot",

@@ -25,6 +25,8 @@ import {
   decodeBrowserCaptureTakeCommand,
   decodeBrowserCapturesCommand,
   decodeBrowserCapturesResponse,
+  decodeBrowserStepsCommand,
+  decodeBrowserStepsResponse,
 } from "@octant/contracts/browser-capture";
 import type {
   BrowserAuthorityResolver,
@@ -33,12 +35,19 @@ import type {
 import type { BrowserCaptureService } from "./browser/browserCaptureService";
 import { remoteBrowserActionReach } from "@octant/domain";
 import {
+  decodeProjectAgentPages,
+  decodeProjectAgentPagesCommand,
   decodeProjectBrowserCommand,
   decodeProjectBrowserResult,
 } from "@octant/contracts/project-browser";
 import type { ProjectBrowserService } from "./browser/projectBrowserService";
 import type { BrowserProfileService } from "./browser/browserProfileService";
 import type { BrowserExtensionService } from "./browser/browserExtensionService";
+import type { BrowserFlowService } from "./browser/browserFlows";
+import {
+  decodeBrowserFlowsCommand,
+  decodeBrowserFlowsResult,
+} from "@octant/contracts/browser-flows";
 import {
   decodeBrowserExtensionsCommand,
   decodeBrowserExtensionsResult,
@@ -63,9 +72,23 @@ export interface BrowserAutomationRouteDependencies {
     BrowserAutomationService,
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
   > &
-    Partial<Pick<BrowserAutomationService, "peekThread" | "peekContext" | "profileOf">>;
+    Partial<
+      Pick<
+        BrowserAutomationService,
+        "peekThread" | "peekContext" | "profileOf" | "listProjectAgentPages"
+      >
+    >;
+  /**
+   * What the Project's tab strip needs beyond the Browser itself: whether the
+   * window can open the Project, and the title of a thread it can see. Absent
+   * on a host that has no Project threads to name.
+   */
+  readonly projectAgentPages?: {
+    readonly windowCanOpenProject: (windowId: WindowId, projectId: string) => Promise<boolean>;
+    readonly threadTitle: (threadId: BrowserThreadId, mode: "work" | "code") => string | undefined;
+  };
   /** The thread's kept screenshots; absent on a host that keeps none. */
-  readonly captures?: Pick<BrowserCaptureService, "list" | "read">;
+  readonly captures?: Pick<BrowserCaptureService, "list" | "read" | "listSteps">;
   /**
    * Whether this window can open the thread, archived or not. Reading what a
    * thread kept asks this rather than live Browser authority, which an archived
@@ -87,6 +110,8 @@ export interface BrowserAutomationRouteDependencies {
   readonly extensions?: Pick<BrowserExtensionService, "execute">;
   /** The stored Browser profiles (Project and Personal); absent on a host without them. */
   readonly profiles?: Pick<BrowserProfileService, "execute">;
+  /** The Projects' saved Browser flows, listed and deleted by the person; absent on a host without them. */
+  readonly flows?: Pick<BrowserFlowService, "summaries" | "delete">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
 }
@@ -197,6 +222,40 @@ export function createBrowserAutomationRouteHandler(
           origin,
         );
       }
+      if (url.pathname === "/api/browser/project-agent-pages") {
+        const pages = dependencies.projectAgentPages;
+        if (pages === undefined || dependencies.service.listProjectAgentPages === undefined) {
+          return failure(
+            { category: "unavailable", message: "Project agent pages are unavailable." },
+            503,
+            origin,
+          );
+        }
+        const input = decodeProjectAgentPagesCommand(decoded.value);
+        // The window must hold the Project, and each thread's page is listed
+        // only when the window also holds that thread's live Browser
+        // authority: knowing a Project's id shows nothing of its threads.
+        if (!(await pages.windowCanOpenProject(windowId, String(input.projectId)))) {
+          return notThisWindowsThread(origin);
+        }
+        return success(
+          decodeProjectAgentPages({
+            projectId: input.projectId,
+            mode: input.mode,
+            pages: dependencies.service.listProjectAgentPages({
+              windowId,
+              projectId: String(input.projectId),
+              mode: input.mode,
+              threadTitle: (threadId) =>
+                dependencies.authority.canAccessWindow(windowId, threadId, input.mode)
+                  ? pages.threadTitle(threadId, input.mode)
+                  : undefined,
+              remote: callerKind === "remote-device",
+            }),
+          }),
+          origin,
+        );
+      }
       if (url.pathname === "/api/browser/extensions") {
         if (dependencies.extensions === undefined) {
           return failure(
@@ -232,6 +291,49 @@ export function createBrowserAutomationRouteHandler(
               callerKind === "local-window" ? "local-window" : "remote-device",
               command,
             ),
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/flows") {
+        if (dependencies.flows === undefined) {
+          return failure(
+            { category: "unavailable", message: "Browser flows are unavailable." },
+            503,
+            origin,
+          );
+        }
+        const command = decodeBrowserFlowsCommand(decoded.value);
+        // Flows are a Project's data that a replay would navigate and type
+        // from; a paired device may not run, save or delete them.
+        if (callerKind !== "local-window") {
+          return success(
+            decodeBrowserFlowsResult({
+              kind: "browser-flows-refused",
+              reason: "not-local",
+              message: "Browser flows are managed only on this Mac.",
+            }),
+            origin,
+          );
+        }
+        if (command.kind === "list") {
+          return success(
+            decodeBrowserFlowsResult({
+              kind: "browser-flows",
+              flows: dependencies.flows.summaries(),
+            }),
+            origin,
+          );
+        }
+        return success(
+          decodeBrowserFlowsResult(
+            dependencies.flows.delete(command.projectId, command.name)
+              ? { kind: "browser-flow-deleted", projectId: command.projectId, name: command.name }
+              : {
+                  kind: "browser-flows-refused",
+                  reason: "not-found",
+                  message: "That flow no longer exists.",
+                },
           ),
           origin,
         );
@@ -361,6 +463,19 @@ export function createBrowserAutomationRouteHandler(
         return success(
           decodeBrowserCapturesResponse({
             captures: dependencies.captures?.list(input.threadId) ?? [],
+          }),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/steps") {
+        // The step list is the Browser's history beside the captures, so it
+        // answers the same callers: a local window that can open the thread.
+        const input = decodeBrowserStepsCommand(decoded.value);
+        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
+        if (refusal !== undefined) return refusal;
+        return success(
+          decodeBrowserStepsResponse({
+            steps: dependencies.captures?.listSteps(input.threadId) ?? [],
           }),
           origin,
         );

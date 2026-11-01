@@ -311,7 +311,10 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<
     BrowserWiring,
-    "browserAutomationService" | "browserToolApprovalService" | "productFeedbackService"
+    | "browserAutomationService"
+    | "browserFlows"
+    | "browserToolApprovalService"
+    | "productFeedbackService"
   > &
   Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<
@@ -349,6 +352,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     bindDeviceApprovals,
     browserAuthority,
     browserAutomationService,
+    browserFlows,
     browserToolApprovalService,
     buildCodeService,
     canAccessCodeProject,
@@ -854,7 +858,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserAutomationService.releaseThread(windowId, threadId),
           holdForPerson: (windowId, threadId) =>
             browserAutomationService.holdForPerson(windowId, threadId),
+          snapshotRefs: (windowId, threadId) =>
+            browserAutomationService.snapshotRefs(windowId, threadId),
         },
+        browserFlows,
         isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
         // A paired device is not at the computer a saved download would land on.
         browserDownloadRefusal: (windowId) =>

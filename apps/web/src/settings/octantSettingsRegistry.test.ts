@@ -105,6 +105,7 @@ describe("octantSettingsRegistry", () => {
     expect(ids("data")).toEqual([
       "data-map",
       "browser-profiles",
+      "browser-flows",
       "browser-extensions",
       "thread-retention",
     ]);

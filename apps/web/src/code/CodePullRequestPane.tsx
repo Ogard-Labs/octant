@@ -1,4 +1,9 @@
+import {
+  BrowserAutomationClientFailure,
+  type BrowserAutomationClient,
+} from "@octant/client-runtime/browser-automation-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { BrowserCapture, BrowserStep, BrowserThreadId } from "@octant/contracts";
 import type { CodeCheckoutId, CodeEvidenceContentId, CodeThreadId } from "@octant/contracts/code";
 import type {
   CodeOperationId,
@@ -9,14 +14,36 @@ import type {
 } from "@octant/contracts/code-operations";
 import type { CodeApprovalId } from "@octant/contracts/code";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
-import { decidesCodeEffectsByApproval } from "@octant/domain";
+import {
+  bodyWithBrowserProof,
+  browserProofCaptureOrder,
+  browserProofPullRequestSection,
+  decidesCodeEffectsByApproval,
+} from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
+import {
+  browserProofSaveMessage,
+  canSaveBrowserProofScreenshots,
+  saveBrowserProofScreenshots,
+} from "../browser/browserProofSave";
+import { getInjectedHostBridge, type OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { PullRequestConversation } from "./CodeReviewPane";
 import { OctantAlert } from "../ui/base/OctantAlert";
+
+type ProofState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "loading" }
+  | {
+      readonly kind: "ready";
+      readonly steps: ReadonlyArray<BrowserStep>;
+      readonly captures: ReadonlyArray<BrowserCapture>;
+    }
+  | { readonly kind: "unavailable"; readonly message: string };
 
 type PullRequestResult = Extract<CodeOperationResult, { readonly kind: "pull-request-state" }>;
 
@@ -70,6 +97,15 @@ export interface CodePullRequestPaneProps {
   readonly onNavigateThread?: () => void;
   readonly onNavigateWorktree?: () => void;
   readonly onRefresh?: () => void;
+  /**
+   * Where this thread's Browser proof can be read. Absent on a host that keeps
+   * none; the pull request form then offers no choice about it.
+   */
+  readonly browserProof?: {
+    readonly client: BrowserAutomationClient;
+    readonly threadId: BrowserThreadId;
+    readonly hostBridge?: OctantHostBridge | undefined;
+  };
 }
 
 export function CodePullRequestPane(props: CodePullRequestPaneProps) {
@@ -381,6 +417,78 @@ function CreatePullRequest(
   const [result, setResult] = useState<PullRequestResult>();
   const [failure, setFailure] = useState<string>();
   const [suggesting, setSuggesting] = useState(false);
+  const [includeProof, setIncludeProof] = useState(false);
+  const [proof, setProof] = useState<ProofState>({ kind: "idle" });
+  const [proofSaved, setProofSaved] = useState<string>();
+  // The captures, oldest first, as they were when the files were saved. The
+  // section names files by position, so a changed list would name the wrong ones.
+  const [savedCaptureIds, setSavedCaptureIds] = useState<ReadonlyArray<string>>();
+  const proofSource = props.browserProof;
+  const proofBridge = proofSource?.hostBridge ?? getInjectedHostBridge();
+
+  /**
+   * Read the thread's Browser proof. It runs only after the person turned the
+   * choice on, and again when they create the pull request, so the section
+   * carries the steps as they stand then.
+   */
+  const readProof = async (): Promise<ProofState> => {
+    const listSteps = proofSource?.client.listSteps;
+    const listCaptures = proofSource?.client.listCaptures;
+    if (proofSource === undefined || listSteps === undefined || listCaptures === undefined) {
+      return { kind: "unavailable", message: "Browser proof is not available on this host." };
+    }
+    try {
+      const [steps, captures] = await Promise.all([
+        listSteps.call(proofSource.client, { threadId: proofSource.threadId }),
+        listCaptures.call(proofSource.client, { threadId: proofSource.threadId }),
+      ]);
+      return { kind: "ready", steps: steps.steps, captures: captures.captures };
+    } catch (error) {
+      return {
+        kind: "unavailable",
+        message:
+          error instanceof BrowserAutomationClientFailure && error.category === "unauthorized"
+            ? "Browser proof can be attached only from a window on this computer."
+            : "Browser proof could not be read. Try again, or create the pull request without it.",
+      };
+    }
+  };
+
+  const chooseProof = async (checked: boolean) => {
+    setIncludeProof(checked);
+    setProofSaved(undefined);
+    if (!checked) {
+      setProof({ kind: "idle" });
+      return;
+    }
+    setProof({ kind: "loading" });
+    setProof(await readProof());
+  };
+
+  const saveProofScreenshots = async () => {
+    if (proofSource === undefined || proof.kind !== "ready") return;
+    setProofSaved(undefined);
+    try {
+      const result = await saveBrowserProofScreenshots({
+        client: proofSource.client,
+        threadId: proofSource.threadId,
+        captures: proof.captures,
+        bridge: proofBridge,
+      });
+      setProofSaved(browserProofSaveMessage(result));
+      setSavedCaptureIds(
+        result.kind === "saved"
+          ? browserProofCaptureOrder(proof.captures).map((capture) => String(capture.captureId))
+          : undefined,
+      );
+    } catch (error) {
+      setFailure(
+        error instanceof Error && error.message.length > 0
+          ? error.message
+          : "The screenshots could not be saved.",
+      );
+    }
+  };
 
   /**
    * Ask the thread's provider to describe the branch's change. Reading a diff
@@ -417,12 +525,44 @@ function CreatePullRequest(
 
   const create = async () => {
     try {
+      let finalBody = body;
+      if (includeProof) {
+        const current = await readProof();
+        // Asked for and not readable: say so rather than open a pull request
+        // that quietly lacks what the person chose to include.
+        if (current.kind !== "ready") {
+          setProof(current);
+          if (current.kind === "unavailable") setFailure(current.message);
+          return;
+        }
+        setProof(current);
+        if (savedCaptureIds !== undefined) {
+          const now = browserProofCaptureOrder(current.captures).map((capture) =>
+            String(capture.captureId),
+          );
+          if (
+            now.length !== savedCaptureIds.length ||
+            now.some((id, i) => id !== savedCaptureIds[i])
+          ) {
+            setProofSaved(undefined);
+            setSavedCaptureIds(undefined);
+            setFailure(
+              "The screenshots changed since you saved them. Save screenshots again, then create the pull request.",
+            );
+            return;
+          }
+        }
+        finalBody = bodyWithBrowserProof(
+          body,
+          browserProofPullRequestSection(current.steps, current.captures),
+        );
+      }
       const operationId = props.createOperationId();
       const command = {
         kind: "create-pull-request",
         operationId,
         title,
-        body,
+        body: finalBody,
         idempotencyKey: props.idempotencyKey,
         authorization: { kind: "full-access" },
         ...props.scope,
@@ -486,6 +626,41 @@ function CreatePullRequest(
             Pull request body
             <OctantTextarea value={body} onChange={(event) => setBody(event.target.value)} />
           </label>
+          {proofSource === undefined ? null : (
+            <div className="code-pr-pane__proof">
+              <label className="code-pr-pane__proof-choice">
+                <OctantCheckbox
+                  checked={includeProof}
+                  onChange={(event) => void chooseProof(event.currentTarget.checked)}
+                />
+                Include Browser proof
+              </label>
+              {proof.kind === "loading" ? <p role="status">Reading the Browser proof…</p> : null}
+              {proof.kind === "unavailable" ? (
+                <OctantAlert tone="warning">{proof.message}</OctantAlert>
+              ) : null}
+              {proof.kind === "ready" ? (
+                <p className="code-delivery-pane__notice" role="status">
+                  {proof.steps.length === 0
+                    ? "This thread has no Browser steps to include."
+                    : `Adds a “Browser check” section with ${proof.steps.length} ${proof.steps.length === 1 ? "step" : "steps"} to the description. Screenshots are not uploaded: save them to a folder and drag them in.`}
+                </p>
+              ) : null}
+              {proof.kind === "ready" &&
+              proof.captures.length > 0 &&
+              canSaveBrowserProofScreenshots(proofBridge) ? (
+                <OctantButton
+                  onClick={() => void saveProofScreenshots()}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Save screenshots…
+                </OctantButton>
+              ) : null}
+              {proofSaved === undefined ? null : <p role="status">{proofSaved}</p>}
+            </div>
+          )}
           <OctantButton
             disabled={suggesting}
             onClick={() => void suggest()}

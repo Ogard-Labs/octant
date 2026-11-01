@@ -242,6 +242,36 @@ export const BROWSER_RESIZE_BOUNDS = {
   maxHeight: 2160,
 } as const;
 
+/**
+ * The device sizes a `resize` names. Each one fixes a size, a pixel ratio, and
+ * a mobile flag; a mobile device also turns touch on unless the call says
+ * otherwise. The set is small on purpose: the model picks a name, not numbers.
+ */
+export const BROWSER_DEVICE_PRESETS = {
+  phone: { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+  "phone-landscape": { width: 844, height: 390, deviceScaleFactor: 3, mobile: true },
+  tablet: { width: 820, height: 1180, deviceScaleFactor: 2, mobile: true },
+  desktop: { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false },
+} as const;
+export type BrowserDevicePreset = keyof typeof BROWSER_DEVICE_PRESETS;
+
+/** `default` returns the page to the color scheme its own browser reports. */
+export const BrowserColorScheme = Schema.Literal("light", "dark", "default");
+export type BrowserColorScheme = typeof BrowserColorScheme.Type;
+
+/**
+ * What the page itself reports after a `resize`, measured in the page rather
+ * than assumed from the request, so the answer says what the page now sees.
+ */
+export const BrowserEmulationReport = Schema.Struct({
+  width: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(8192)),
+  height: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(8192)),
+  deviceScaleFactor: Schema.Number.pipe(Schema.positive(), Schema.lessThanOrEqualTo(8)),
+  touch: Schema.Boolean,
+  colorScheme: Schema.Literal("light", "dark"),
+}).annotations(strict);
+export type BrowserEmulationReport = typeof BrowserEmulationReport.Type;
+
 /** How a page's own dialog was answered; see the fixed policy in the spec. */
 export const BrowserDialogReport = Schema.Struct({
   type: Schema.Literal("alert", "confirm", "prompt", "beforeunload"),
@@ -305,6 +335,18 @@ export const BrowserActionRequest = Schema.Struct({
   waitFor: Schema.optional(BrowserWaitFor),
   /** The size a `resize` sets; absent, the page returns to its own size. */
   viewport: Schema.optional(BrowserViewportSize),
+  /**
+   * With a `viewport`, the pixel ratio and mobile flag of the device it stands
+   * for; absent, 1 and false. Without a `viewport` they are not allowed.
+   */
+  deviceScaleFactor: Schema.optional(
+    Schema.Number.pipe(Schema.positive(), Schema.lessThanOrEqualTo(4)),
+  ),
+  mobile: Schema.optional(Schema.Boolean),
+  /** Touch on or off for the page; absent, the page keeps what it has. */
+  touch: Schema.optional(Schema.Boolean),
+  /** The color scheme the page prefers; absent, the page keeps what it has. */
+  colorScheme: Schema.optional(BrowserColorScheme),
   /** For a diagnostics read: only entries after this cursor. Absent, all kept entries. */
   diagnosticsSince: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /** For a diagnostics read: include console warnings. */
@@ -443,6 +485,8 @@ export const BrowserObservation = Schema.Struct({
     ),
   ),
   viewport: Schema.optional(BrowserViewportSize),
+  /** Only a `resize` fills this: what the page reports about its device now. */
+  emulation: Schema.optional(BrowserEmulationReport),
   /** The page's own dialogs since the last action, and how each was answered. */
   dialogs: Schema.optional(Schema.Array(BrowserDialogReport).pipe(Schema.maxItems(8))),
   /** Downloads the page started during this action; see the report. */

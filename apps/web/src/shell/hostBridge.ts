@@ -317,6 +317,10 @@ export type SupportBundleSaveResult =
   | { readonly kind: "cancelled" }
   | { readonly kind: "saved"; readonly fileName: string };
 
+export type BrowserProofSaveResult =
+  | { readonly kind: "cancelled" }
+  | { readonly kind: "saved"; readonly count: number; readonly folderName: string };
+
 export interface OctantHostBridge
   extends
     Partial<RemoteAccessAdministrationBridge>,
@@ -485,6 +489,15 @@ export interface OctantHostBridge
    * never the path. Absent in a browser or on a paired device, which download.
    */
   readonly saveSupportBundle?: () => Promise<SupportBundleSaveResult>;
+  /**
+   * Opens the desktop app's native folder picker and writes the thread's kept
+   * Browser screenshots into the folder the person chose, as numbered files.
+   * Answers a count and the folder's name, never a path. Absent in a browser
+   * or on a paired device, which cannot save to this computer.
+   */
+  readonly saveBrowserProofScreenshots?: (
+    pictures: ReadonlyArray<{ readonly fileNumber: number; readonly dataUrl: string }>,
+  ) => Promise<BrowserProofSaveResult>;
   /**
    * Window capture for the composer's attach menu. Present only where the host
    * can capture a window (the macOS desktop app), so a web or phone client
