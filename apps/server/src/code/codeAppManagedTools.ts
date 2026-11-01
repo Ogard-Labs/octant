@@ -5,6 +5,8 @@ import {
   browserToolResult,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
+  runBrowserToolSteps,
+  type BrowserToolAnswer,
   type BrowserToolInput,
 } from "../browser/browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "../browser/browserToolDefinition";
@@ -481,6 +483,7 @@ export interface CodeAppManagedToolsOptions {
       readonly capturedBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
+      readonly refuseStaleRevision?: boolean;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -1095,8 +1098,11 @@ async function browserTool(
   options: CodeAppManagedToolsOptions,
   input: BrowserToolInput | undefined,
   signal?: AbortSignal,
-) {
+): Promise<BrowserToolAnswer> {
   if (input === undefined || options.browser === undefined) return failure("invalid-browser-input");
+  if (input.operation === "steps") {
+    return runBrowserToolSteps(input.steps, (step) => browserTool(options, step, signal));
+  }
   const threadId = options.thread.id as unknown as BrowserThreadId;
   const authority = options.browser.resolveAuthority(threadId, "code");
   if (authority === undefined) return failure("browser-authority-unavailable");
@@ -1199,6 +1205,7 @@ async function browserTool(
       windowId: options.windowId,
       request,
       capturedBy: "agent",
+      refuseStaleRevision: true,
       ...(uploadFiles === undefined ? {} : { uploadFiles }),
       ...(release === undefined ? {} : { releaseUpload: release }),
     }),
