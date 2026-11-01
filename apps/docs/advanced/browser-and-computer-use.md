@@ -189,9 +189,17 @@ not offer Browser.
 Where supported, Octant registers `octant_browser` when the provider session
 starts. The agent does not need a separate browser skill, a debugging URL, or
 a shell-launched browser. The tool can navigate, take a snapshot of the page,
-read page text, click and fill elements, press a browser key, scroll
-horizontally or vertically, wait for an element, take a screenshot, and stop
-its session.
+read page text, click and fill elements, hover over a menu, choose an option
+in a list, drag one element onto another, press a key or a shortcut such as
+Control+A, scroll horizontally or vertically, wait for an element, open and
+switch between tabs, take a screenshot, and stop its session.
+
+The agent can also put files into a page's file field, for example to attach a
+report to a form. It may only send files from the thread's own folder (the
+Project folder in Work, the checkout in Code), never a linked file or one
+outside that folder, and Octant asks you every time, naming each file and the
+site: **Upload once** or **Deny**. There is no "Always allow" for uploads.
+Downloads stay blocked.
 
 A snapshot is a short outline of the page: its headings, text, and controls,
 each control with a reference such as `e4` the agent passes back to click or

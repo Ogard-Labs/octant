@@ -1,4 +1,5 @@
 import { browserToolImage } from "./browserToolImage";
+import { admitBrowserUpload } from "./browserUploadFiles";
 import {
   browserToolAction,
   browserToolResult,
@@ -59,6 +60,8 @@ export interface BrowserAppManagedToolsOptions {
       readonly windowId: WindowId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
+      readonly uploadFiles?: ReadonlyArray<string>;
+      readonly releaseUpload?: () => Promise<void>;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -72,6 +75,11 @@ export interface BrowserAppManagedToolsOptions {
    * thread's Private pages only; a page in a signed-in profile needs a person.
    */
   readonly profileCaller?: "terminal-grant";
+  /**
+   * The folder an upload may send files from: the Work thread's Project
+   * folder. Absent, an upload is refused.
+   */
+  readonly uploadRoot?: () => string | undefined;
   readonly uuid: () => string;
 }
 
@@ -255,10 +263,53 @@ export function createBrowserAppManagedTools(
       const request = browserToolAction(input, context);
       if (request === undefined) return failure("invalid-browser-input");
       if (signal?.aborted) return failure("tool-interrupted");
+      let uploadFiles: ReadonlyArray<string> | undefined;
+      let releaseUpload: (() => Promise<void>) | undefined;
+      if (input.operation === "upload") {
+        // A CLI in a terminal is not the person who would be asked.
+        if (options.profileCaller === "terminal-grant") return failure("upload-needs-a-person");
+        const approvals = options.approvals;
+        if (approvals === undefined) return failure("browser-approval-required");
+        const admitted = await admitBrowserUpload({
+          workspaceRoot: options.uploadRoot?.(),
+          files: input.files,
+          ask: (files) =>
+            approvals.request({
+              windowId: options.windowId,
+              threadId: String(options.threadId),
+              authority,
+              origin,
+              ...(profile === undefined ? {} : { profile }),
+              upload: files,
+              ...(signal === undefined ? {} : { signal }),
+            }),
+        });
+        if (admitted.status === "refused") return failure(admitted.reason);
+        uploadFiles = admitted.paths;
+        releaseUpload = admitted.release;
+      }
+      if (releaseUpload !== undefined) {
+        const refreshed = options.resolveAuthority(options.threadId, options.mode);
+        const refusal = signal?.aborted
+          ? "tool-interrupted"
+          : refreshed === undefined || !sameToolActionAuthority(authority, refreshed)
+            ? "browser-authority-stale"
+            : !modelIsCurrent(options)
+              ? "browser-model-stale"
+              : undefined;
+        if (refusal !== undefined) {
+          await releaseUpload();
+          return failure(refusal);
+        }
+      }
+      // The page reads an uploaded file when its form is sent, which can be a
+      // later action, so the service keeps the copies until the page closes.
       const acted = await options.browser.act({
         windowId: options.windowId,
         request,
         capturedBy: "agent",
+        ...(uploadFiles === undefined ? {} : { uploadFiles }),
+        ...(releaseUpload === undefined ? {} : { releaseUpload }),
       });
       if (signal?.aborted) return failure("tool-interrupted");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");

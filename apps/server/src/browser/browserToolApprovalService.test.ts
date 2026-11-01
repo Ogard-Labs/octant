@@ -136,6 +136,35 @@ describe("BrowserToolApprovalService", () => {
     expect(remembered).toEqual([["https://example.com", windowId]]);
   });
 
+  it("never remembers an origin from an answer to an upload", async () => {
+    const remembered: Array<unknown> = [];
+    const service = new BrowserToolApprovalService({
+      uuid: () => "40000000-0000-4000-8000-000000000009",
+      now: () => Date.parse("2026-09-09T10:00:00.000Z"),
+      authorityIsCurrent: () => true,
+      rememberOrigin: (origin) => remembered.push(origin),
+    });
+    const pending = service.request({
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000002",
+      authority,
+      origin: "https://example.com",
+      upload: [{ name: "notes.txt", sizeBytes: 5 }],
+    });
+    expect(service.list(windowId)).toEqual([
+      expect.objectContaining({ upload: { files: [{ name: "notes.txt", sizeBytes: 5 }] } }),
+    ]);
+    expect(
+      service.decide(windowId, {
+        approvalId: "40000000-0000-4000-8000-000000000009" as never,
+        decision: "approved",
+        remember: true,
+      }),
+    ).toBe(true);
+    await expect(pending).resolves.toBe("approved");
+    expect(remembered).toEqual([]);
+  });
+
   it("keeps a window's own approval from every other window, the host scope included", () => {
     const service = new BrowserToolApprovalService({
       uuid: () => "40000000-0000-4000-8000-000000000003",

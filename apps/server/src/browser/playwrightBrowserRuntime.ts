@@ -5,6 +5,7 @@ import {
   MAX_BROWSER_SNAPSHOT_NODES,
   MAX_BROWSER_SNAPSHOT_REFS,
   originAllowed,
+  parseBrowserKeyChord,
   readBrowserPage,
 } from "@octant/domain";
 import { constants } from "node:fs";
@@ -39,6 +40,10 @@ export interface PlaywrightPagePort {
   goto(url: string): Promise<unknown>;
   click(selector: string): Promise<unknown>;
   fill(selector: string, value: string): Promise<unknown>;
+  hover(selector: string): Promise<unknown>;
+  selectOption(selector: string, value: string): Promise<unknown>;
+  dragAndDrop(source: string, target: string): Promise<unknown>;
+  setInputFiles(selector: string, files: ReadonlyArray<string>): Promise<unknown>;
   readonly mouse: {
     click(x: number, y: number): Promise<unknown>;
     wheel(deltaX: number, deltaY: number): Promise<unknown>;
@@ -144,7 +149,18 @@ interface OwnedRuntimeContext {
   readonly context: PlaywrightContextPort;
   readonly allowedOrigins: ReadonlyArray<string>;
   readonly protectCredentials: boolean;
+  readonly maxTabs: number;
+  /** The tab in front, the one every action but a tab action acts on. */
   page: PlaywrightPagePort | undefined;
+  /** Every tab the agent opened, in order, with the id it knows each by. */
+  tabs: Array<{ readonly tabId: string; readonly page: PlaywrightPagePort }>;
+  nextTabOrdinal: number;
+  /**
+   * Set while the agent's own new tab is opening. The context reports every
+   * new page, and any page the agent did not open (a popup) is closed; this is
+   * how the one it did open is told apart.
+   */
+  openingTab: boolean;
   /** Last top-level navigation the allowlist refused during the current action. */
   blockedNavigationUrl: string | undefined;
   /**
@@ -230,7 +246,11 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       context,
       allowedOrigins: policy.allowedOrigins,
       protectCredentials: policy.credentialFieldProtection,
+      maxTabs: policy.maxConcurrentTabs,
       page: undefined,
+      tabs: [],
+      nextTabOrdinal: 1,
+      openingTab: false,
       blockedNavigationUrl: undefined,
       consoleErrors: [],
       failedRequests: [],
@@ -270,6 +290,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         route.connectToServer();
       });
       owned.page = await context.newPage();
+      this.#adoptTab(owned, owned.page);
       this.#collectDiagnostics(owned, owned.page);
       context.on("page", (candidate) => {
         // Listen before adopting or closing: a popup can log an error or fail
@@ -283,8 +304,10 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         // case it looks like it handles. The collection refuses a page it has
         // already instrumented, which is the property that actually matters.
         this.#collectDiagnostics(owned, candidate);
+        if (owned.openingTab) return;
         if (owned.page === undefined) {
           owned.page = candidate;
+          this.#adoptTab(owned, candidate);
           return;
         }
         if (candidate !== owned.page) void candidate.close().catch(() => undefined);
@@ -394,19 +417,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const page = await this.#page(contextId, signal);
     const owned = this.#contexts.get(contextId);
     if (owned !== undefined) owned.blockedNavigationUrl = undefined;
-    if (request.expected !== undefined && request.target !== undefined) {
-      const found = await page.evaluate(readBrowserPage, {
-        mode: "verify",
-        selector: request.target,
-      });
-      const pageUrl = page.url() === "about:blank" ? "about:blank" : bounded(page.url(), 4096);
-      if (
-        found.mode !== "verify" ||
-        !browserRefStillMatches(request.expected, found.element, pageUrl)
-      ) {
-        throw new BrowserTargetStaleError();
-      }
-    }
+    await refuseStaleTarget(page, request.target, request.expected);
+    await refuseStaleTarget(page, request.destination, request.destinationExpected);
     switch (request.kind) {
       case "navigate":
         try {
@@ -438,7 +450,9 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         if (await sensitiveTarget(page, ":focus")) {
           throw new Error("Octant will not type into a sensitive or credential field.");
         }
-        await page.keyboard.press(required(request.value, "Press actions require a key."));
+        await page.keyboard.press(
+          playwrightKey(required(request.value, "Press actions require a key.")),
+        );
         break;
       case "scroll":
         await page.mouse.wheel(request.deltaX ?? 0, request.deltaY ?? 500);
@@ -464,24 +478,99 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       case "wait":
         await page.locator(required(request.target, "Wait actions require a selector.")).waitFor();
         break;
-      case "close-tab":
+      case "hover":
+        await page.hover(required(request.target, "Hover actions require an element."));
+        break;
+      case "select": {
+        const selector = required(request.target, "Select actions require an element.");
+        const choice = required(request.value, "Select actions require an option.");
+        // Playwright waits for a missing option until its timeout; a page with
+        // no such option is the agent's mistake to hear about now.
+        const exists = await page
+          .locator(selector)
+          .evaluate((element) =>
+            element instanceof HTMLSelectElement
+              ? Array.from(element.options).map((option) => [option.value, option.label])
+              : [],
+          );
+        if (!exists.some((pair) => pair.includes(choice))) {
+          throw new Error("The list has no option with that value or label.");
+        }
+        await page.selectOption(selector, choice);
+        break;
+      }
+      case "drag":
+        await page.dragAndDrop(
+          required(request.target, "Drag actions require an element."),
+          required(request.destination, "Drag actions require where to drop."),
+        );
+        break;
+      case "upload":
+        await page.setInputFiles(
+          required(request.target, "Upload actions require a file field."),
+          request.files ?? [],
+        );
+        break;
+      case "tab-list":
+        return this.#tabsObservation(required(owned, "Browser context is unavailable."));
+      case "tab-open": {
+        const tabs = required(owned, "Browser context is unavailable.");
+        if (tabs.tabs.length >= tabs.maxTabs) {
+          throw new Error("This browser context is at its tab limit.");
+        }
+        tabs.openingTab = true;
+        let opened: PlaywrightPagePort;
+        try {
+          opened = await tabs.context.newPage();
+        } finally {
+          tabs.openingTab = false;
+        }
+        this.#collectDiagnostics(tabs, opened);
+        this.#adoptTab(tabs, opened);
+        tabs.page = opened;
+        if (request.target !== undefined) {
+          try {
+            await opened.goto(request.target);
+          } catch (error) {
+            const blocked = tabs.blockedNavigationUrl;
+            throw blocked === undefined ? error : new BrowserNavigationBlockedError(blocked);
+          }
+        }
+        await leaveUnapprovedLanding(opened, tabs.allowedOrigins);
+        return this.#tabsObservation(tabs);
+      }
+      case "tab-select": {
+        const tabs = required(owned, "Browser context is unavailable.");
+        const chosen = tabs.tabs.find((tab) => tab.tabId === request.tabId);
+        if (chosen === undefined) throw new Error("This browser context has no such tab.");
+        tabs.page = chosen.page;
+        await leaveUnapprovedLanding(chosen.page, tabs.allowedOrigins);
+        return this.#tabsObservation(tabs);
+      }
+      case "tab-close": {
+        const tabs = required(owned, "Browser context is unavailable.");
+        const index = tabs.tabs.findIndex((tab) => tab.tabId === request.tabId);
+        const closing = tabs.tabs[index];
+        if (closing === undefined) throw new Error("This browser context has no such tab.");
+        if (tabs.tabs.length === 1) throw new Error("A browser context keeps its last tab.");
+        tabs.tabs.splice(index, 1);
+        await closing.page.close();
+        if (tabs.page === closing.page) {
+          tabs.page = tabs.tabs[Math.min(index, tabs.tabs.length - 1)]?.page;
+        }
+        return this.#tabsObservation(tabs);
+      }
+      case "close-tab": {
         await page.close();
-        this.#contexts.get(contextId)!.page = undefined;
+        const tabs = this.#contexts.get(contextId);
+        if (tabs !== undefined) {
+          tabs.tabs = tabs.tabs.filter((tab) => tab.page !== page);
+          tabs.page = tabs.tabs.at(-1)?.page;
+        }
         return {};
+      }
     }
-    // Chromium follows a redirect inside the routed request, so a top-level
-    // document can land on an origin the request guard never saw. The
-    // allowlist is this context's whole authority: leave the page rather than
-    // observe, script, or screenshot an origin outside it.
-    const landed = page.url();
-    if (
-      owned !== undefined &&
-      /^https?:/i.test(landed) &&
-      !originAllowed(landed, owned.allowedOrigins)
-    ) {
-      await page.goto("about:blank").catch(() => undefined);
-      throw new BrowserNavigationBlockedError(landed);
-    }
+    if (owned !== undefined) await leaveUnapprovedLanding(page, owned.allowedOrigins);
     throwIfAborted(signal);
     if (request.kind === "snapshot") {
       return this.#snapshot(page, owned?.protectCredentials ?? true);
@@ -604,6 +693,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     if (owned === undefined) throw new Error("Browser context is unavailable.");
     if (owned.page === undefined) {
       owned.page = await owned.context.newPage();
+      this.#adoptTab(owned, owned.page);
       this.#collectDiagnostics(owned, owned.page);
     }
     throwIfAborted(signal);
@@ -702,6 +792,43 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       this.#browserPid = undefined;
       throw error;
     }
+  }
+
+  /** Give a page the agent will act on an id it can name it by. */
+  #adoptTab(owned: OwnedRuntimeContext, page: PlaywrightPagePort): void {
+    // The context reports a page before newPage() resolves, so the same page
+    // can arrive here twice; it is one tab.
+    if (owned.tabs.some((tab) => tab.page === page)) return;
+    owned.tabs.push({ tabId: `t${String(owned.nextTabOrdinal)}`, page });
+    owned.nextTabOrdinal += 1;
+  }
+
+  /** The tabs as they now stand, after a tab action, with the one in front. */
+  async #tabsObservation(owned: OwnedRuntimeContext): Promise<BrowserRuntimeObservation> {
+    const tabs = await Promise.all(
+      owned.tabs.map(async (tab) => {
+        // A tab can follow a redirect off the allowed origins after its own
+        // action ended; it is sent to a blank page before anything of it is
+        // read, as the tab in front is after every action.
+        await leaveUnapprovedLanding(tab.page, owned.allowedOrigins).catch(() => undefined);
+        const title = await tab.page.title().catch(() => "");
+        const url = tab.page.url();
+        return {
+          tabId: tab.tabId,
+          ...(url === "about:blank" ? {} : { url: bounded(url, 4096) }),
+          ...(title.trim() === "" ? {} : { title: bounded(title, 1024) }),
+          active: tab.page === owned.page,
+        };
+      }),
+    );
+    const front = owned.page;
+    if (front === undefined) return { tabs };
+    const title = await front.title();
+    return {
+      ...(front.url() === "about:blank" ? {} : { url: bounded(front.url(), 4096) }),
+      ...(title.trim() === "" ? {} : { title: bounded(title, 1024) }),
+      tabs,
+    };
   }
 
   /**
@@ -844,6 +971,56 @@ async function sensitiveDocument(page: PlaywrightPagePort): Promise<boolean> {
     }
   }
   return false;
+}
+
+/**
+ * The chord as Playwright reads it. A letter is the key a keyboard sends: lower
+ * case, or upper case only with Shift held, so `Control+B` reaches the page as
+ * `b` with Control, as it does from a person's keyboard and the desktop Browser.
+ */
+function playwrightKey(value: string): string {
+  const chord = parseBrowserKeyChord(value);
+  if (chord === undefined) return value;
+  const key =
+    chord.key === "Space"
+      ? "Space"
+      : /^[A-Za-z]$/.test(chord.key)
+        ? chord.modifiers.includes("Shift")
+          ? chord.key.toUpperCase()
+          : chord.key.toLowerCase()
+        : chord.key;
+  return [...chord.modifiers, key].join("+");
+}
+
+/**
+ * Chromium follows a redirect inside the routed request, so a top-level
+ * document can land on an origin the request guard never saw. The allowlist is
+ * the context's whole authority: leave the page rather than observe, script,
+ * or screenshot an origin outside it. Every tab is held to it, a new one too.
+ */
+async function leaveUnapprovedLanding(
+  page: PlaywrightPagePort,
+  allowedOrigins: ReadonlyArray<string>,
+): Promise<void> {
+  const landed = page.url();
+  if (/^https?:/i.test(landed) && !originAllowed(landed, allowedOrigins)) {
+    await page.goto("about:blank").catch(() => undefined);
+    throw new BrowserNavigationBlockedError(landed);
+  }
+}
+
+/** Refuse a ref whose page moved on or whose element is no longer the one named. */
+async function refuseStaleTarget(
+  page: PlaywrightPagePort,
+  selector: string | undefined,
+  expected: BrowserRuntimeAction["expected"],
+): Promise<void> {
+  if (expected === undefined || selector === undefined) return;
+  const found = await page.evaluate(readBrowserPage, { mode: "verify", selector });
+  const pageUrl = page.url() === "about:blank" ? "about:blank" : bounded(page.url(), 4096);
+  if (found.mode !== "verify" || !browserRefStillMatches(expected, found.element, pageUrl)) {
+    throw new BrowserTargetStaleError();
+  }
 }
 
 function viewportPoint(
@@ -1022,7 +1199,7 @@ function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw new DOMException("Browser action was interrupted.", "AbortError");
 }
 
-function required(value: string | undefined, message: string): string {
+function required<T>(value: T | undefined, message: string): T {
   if (value === undefined) throw new Error(message);
   return value;
 }

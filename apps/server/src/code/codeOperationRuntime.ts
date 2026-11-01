@@ -3909,6 +3909,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           terminalApproval: {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),
           },
+          // An upload sends files from this thread's checkout only, and asks
+          // every time, at every access level, as the first Browser action on
+          // a site does.
+          browserUpload: {
+            root: active.checkoutRoot,
+            request: (summary, signal) => {
+              const bounded = boundProviderSummary(summary);
+              return bounded === undefined
+                ? Promise.resolve("cancelled" as const)
+                : this.#askToolApproval(active, bounded, undefined, signal);
+            },
+          },
           browserApproval: {
             isApproved: (contextId) => {
               const key = this.#browserApprovalKey(active, contextId);
