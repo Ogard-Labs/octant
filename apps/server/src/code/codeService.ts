@@ -183,6 +183,7 @@ import type { CodeFileWatchService } from "./codeFileWatchService";
 import type { CodeSearchService } from "./codeSearchService";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { readConfinedCodeFile, type CodeConfinedFileRead } from "./codeConfinedFileRead";
+import { directoryInResolvedRoot, pathInResolvedRoot } from "./codeProjectFolderRoot";
 import type { FileIdentity } from "./fileOperationPort";
 import {} from "./codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
@@ -552,6 +553,10 @@ export interface CodeFileRootResolution {
   readonly rootPath: string;
   readonly rootIdentity: FileIdentity;
   readonly expectedFileVersion?: number;
+  /** Set when the request named a file in an extra folder: the path inside `rootPath`. */
+  readonly relativePath?: CodeRelativePath;
+  /** Set when the request named an extra folder itself, which is then the listing's root. */
+  readonly folderRoot?: true;
 }
 
 export interface CodeFileRootAuthorityPort {
@@ -735,6 +740,16 @@ export interface CodeListFilesInput {
   /** Subdirectory relative to the checkout root. Absent lists the root. */
   readonly directory?: CodeRelativePath | undefined;
   readonly signal?: AbortSignal | undefined;
+}
+
+/** The `directory` field of a listing request, absent when the listing starts at the root. */
+function listingDirectory(
+  root: CodeFileRootResolution,
+  named: CodeRelativePath | undefined,
+): { readonly directory?: CodeRelativePath } {
+  if (named === undefined) return {};
+  const directory = directoryInResolvedRoot(root, named);
+  return directory === undefined ? {} : { directory };
 }
 
 /** One thread with its pin removed, so unpinning erases the field entirely. */
@@ -2512,7 +2527,7 @@ export class CodeService {
       threadId: thread.id,
       checkoutId: checkout.id,
       rootPath: root.rootPath,
-      ...(input.directory === undefined ? {} : { directory: input.directory }),
+      ...listingDirectory(root, input.directory),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
   }
@@ -2604,7 +2619,7 @@ export class CodeService {
     return await readConfinedCodeFile({
       port: this.#fileSource,
       canonicalRoot: root.rootPath,
-      relativePath: input.relativePath,
+      relativePath: pathInResolvedRoot(root, input.relativePath),
       maximumBytes: input.maximumBytes,
     });
   }
@@ -2719,7 +2734,7 @@ export class CodeService {
     const opened = await this.#files.open({
       rootPath: root.rootPath,
       rootIdentity: root.rootIdentity,
-      path: input.relativePath,
+      path: pathInResolvedRoot(root, input.relativePath),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     if (opened.status === "editable") {
@@ -2955,7 +2970,7 @@ export class CodeService {
       saved = await this.#files.save({
         rootPath: root.rootPath,
         rootIdentity: root.rootIdentity,
-        path: input.relativePath,
+        path: pathInResolvedRoot(root, input.relativePath),
         expectedIdentity: input.expectedIdentity,
         expectedDigest: input.expectedDigest,
         text: input.text,

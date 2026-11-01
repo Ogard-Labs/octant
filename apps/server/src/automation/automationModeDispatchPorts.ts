@@ -3,6 +3,7 @@ import type {
   AutomationFirstTurnRequestId,
   AutomationRun,
   AutomationThreadId,
+  ChatThreadId,
   CodeThreadId,
   WorkThreadId,
   UtcTimestamp,
@@ -85,6 +86,25 @@ export interface AutomationWorkDispatchPort {
     readonly promptDigest: AutomationDigest;
     /** The routine host scope; a routine never acts through a window. */
     readonly scopeId: WindowId;
+  }) => Promise<AutomationFirstTurnLaunchOutcome>;
+}
+
+/**
+ * Chat adapter behind the ordinary create-thread / send-turn path. A Chat
+ * routine keeps Chat's authority, so the adapter hands the host's own Chat
+ * service nothing a Chat thread could not already do.
+ */
+export interface AutomationChatDispatchPort {
+  readonly createThread: (input: {
+    readonly run: AutomationRun;
+    readonly threadId: ChatThreadId;
+    readonly title: string;
+  }) => Promise<AutomationThreadCreationOutcome>;
+  readonly startOrRecoverFirstTurn: (input: {
+    readonly run: AutomationRun;
+    readonly threadId: ChatThreadId;
+    readonly firstTurnRequestId: AutomationFirstTurnRequestId;
+    readonly promptDigest: AutomationDigest;
   }) => Promise<AutomationFirstTurnLaunchOutcome>;
 }
 

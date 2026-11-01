@@ -9,7 +9,9 @@ import {
   UtcTimestamp,
   decodeWorkArtifactId,
   decodeWorkArtifactRef,
+  decodeThreadWorkingDirectory,
   decodeWorkArtifactVersionId,
+  type ThreadWorkingDirectory,
   type WorkArtifactFormat,
   type WorkArtifactId,
   type WorkArtifactIdentity,
@@ -78,6 +80,12 @@ export interface WorkMutationContext {
   readonly posture: WorkMutationPosture;
   readonly approved: boolean;
   readonly signal?: AbortSignal;
+  /**
+   * The folder, relative to the Project root, a new artifact is placed in.
+   * Absent places it in the root. The host sets it from a thread's working
+   * directory; a request never supplies it.
+   */
+  readonly directory?: string;
 }
 
 export interface WorkMutationEventStorePort {
@@ -196,9 +204,11 @@ export class WorkMutationService {
     }
     if (context.signal?.aborted) return interruptedReply(request);
 
+    const directory =
+      context.directory === undefined || context.directory === "." ? undefined : context.directory;
     let relativePath: string;
     try {
-      relativePath = canonicalizeWorkRelativePath(request.displayName);
+      relativePath = canonicalizeWorkRelativePath(withDirectory(directory, request.displayName));
     } catch {
       return unauthorizedReply(request, "escapes-root");
     }
@@ -257,6 +267,7 @@ export class WorkMutationService {
       format: request.format,
       artifactRef,
       displayName: decodeDisplayName(request.displayName),
+      ...placement(directory),
       createdAt: occurredAt,
     };
     const version: WorkArtifactVersion = {
@@ -373,6 +384,7 @@ export class WorkMutationService {
       format: entry.format,
       artifactRef: decodeWorkArtifactRef(entry.artifactRef),
       displayName: decodeDisplayName(entry.displayName),
+      ...placement(directoryOf(entry.relativePath)),
       createdAt: decodeTimestamp(entry.currentSourceVersion.observedAt),
     };
     const version: WorkArtifactVersion = {
@@ -558,7 +570,9 @@ export class WorkMutationService {
         >
       | undefined;
     if (isCrossFormat) {
-      const newRelativePath = canonicalizeWorkRelativePath(newDisplayName);
+      const newRelativePath = canonicalizeWorkRelativePath(
+        withDirectory(directoryOf(entry.relativePath), newDisplayName),
+      );
       const transformResolution = await this.#resolution.resolveForCreate({
         binding: context.binding,
         relativePath: newRelativePath,
@@ -639,6 +653,7 @@ export class WorkMutationService {
       format: targetFormat,
       artifactRef: decodeWorkArtifactRef(entry.artifactRef),
       displayName: newDisplayName,
+      ...placement(directoryOf(entry.relativePath)),
       createdAt: decodeTimestamp(entry.currentSourceVersion.observedAt),
     };
     const version: WorkArtifactVersion = {
@@ -728,7 +743,9 @@ export class WorkMutationService {
 
     let newRelativePath: string;
     try {
-      newRelativePath = canonicalizeWorkRelativePath(request.displayName);
+      newRelativePath = canonicalizeWorkRelativePath(
+        withDirectory(directoryOf(entry.relativePath), request.displayName),
+      );
     } catch {
       return unauthorizedReply(request, "escapes-root", request.artifactId);
     }
@@ -794,6 +811,7 @@ export class WorkMutationService {
       format: entry.format,
       artifactRef: decodeWorkArtifactRef(entry.artifactRef),
       displayName: decodeDisplayName(request.displayName),
+      ...placement(directoryOf(entry.relativePath)),
       createdAt: decodeTimestamp(entry.currentSourceVersion.observedAt),
     };
     const version: WorkArtifactVersion = {
@@ -972,6 +990,7 @@ export class WorkMutationService {
       format: entry.format,
       artifactRef: decodeWorkArtifactRef(entry.artifactRef),
       displayName: decodeDisplayName(entry.displayName),
+      ...placement(directoryOf(entry.relativePath)),
       createdAt: decodeTimestamp(entry.currentSourceVersion.observedAt),
     };
     const version: WorkArtifactVersion = {
@@ -1079,7 +1098,9 @@ export class WorkMutationService {
       decodeDisplayName(entry.displayName),
       exportFormat,
     );
-    const exportRelativePath = canonicalizeWorkRelativePath(exportDisplayName);
+    const exportRelativePath = canonicalizeWorkRelativePath(
+      withDirectory(directoryOf(entry.relativePath), exportDisplayName),
+    );
     const exportResolution = await this.#resolution.resolveForCreate({
       binding: context.binding,
       relativePath: exportRelativePath,
@@ -1277,6 +1298,21 @@ export class WorkMutationService {
       displayName: artifact.displayName,
     });
   }
+}
+
+/** The folder an artifact's file sits in, relative to the Project root; none at the root. */
+function directoryOf(relativePath: string): string | undefined {
+  const slash = relativePath.lastIndexOf("/");
+  return slash === -1 ? undefined : relativePath.slice(0, slash);
+}
+
+function withDirectory(directory: string | undefined, name: string): string {
+  return directory === undefined ? name : `${directory}/${name}`;
+}
+
+/** The identity field that records a placement, absent at the root. */
+function placement(directory: string | undefined): { readonly directory?: ThreadWorkingDirectory } {
+  return directory === undefined ? {} : { directory: decodeThreadWorkingDirectory(directory) };
 }
 
 function computeSourceVersion(

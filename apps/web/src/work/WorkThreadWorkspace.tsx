@@ -1697,6 +1697,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         format: "markdown",
         displayName: artifactNameFromPrompt(trimmed),
         content: trimmed,
+        threadId: props.threadId,
       });
       if (reply.outcome.kind !== "created") {
         setErrorMessage("The artifact could not be created.");

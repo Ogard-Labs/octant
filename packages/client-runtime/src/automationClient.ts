@@ -27,7 +27,7 @@ export type AutomationClientCommand = AutomationCommand extends infer T
   : never;
 
 export interface AutomationListInput {
-  readonly mode?: "all" | "work" | "code";
+  readonly mode?: "all" | "chat" | "work" | "code";
   readonly projectId?: string;
   readonly search?: string;
   readonly limit?: number;

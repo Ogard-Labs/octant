@@ -655,18 +655,30 @@ describe("Claude execution policy", () => {
     }
   });
 
-  it("points the sandbox's network at the session's egress proxy where the host routes it, and releases it when the session ends", async () => {
-    const started: Array<{ readonly runtime: string; readonly autoReview: boolean | undefined }> =
-      [];
+  it("puts Claude's own process and its sandbox on the session's egress proxy where the host routes them, and releases both when the session ends", async () => {
+    const started: Array<{
+      readonly runtime: string;
+      readonly autoReview: boolean | undefined;
+      readonly sessionId: string | undefined;
+    }> = [];
     let released = 0;
+    const ports = { claude: 47004, "claude-sandbox": 47005 } as const;
     const runtimeNetwork: ProviderRuntimeNetworkPort = {
       start: async (input) => {
-        started.push({ runtime: input.runtime, autoReview: input.autoReview });
-        expect(input.authentication).toBe("none");
+        if (input.executionPolicy === "full-access") return { status: "open" };
+        started.push({
+          runtime: input.runtime,
+          autoReview: input.autoReview,
+          sessionId: input.sessionId,
+        });
+        // Only the sandbox's commands cannot send the launch token.
+        expect(input.authentication).toBe(input.runtime === "claude" ? undefined : "none");
+        const port = input.runtime === "claude" ? ports.claude : ports["claude-sandbox"];
         return {
           status: "proxied",
-          endpoint: { kind: "loopback", port: 47005 },
-          environment: {},
+          endpoint: { kind: "loopback", port },
+          environment:
+            input.runtime === "claude" ? { HTTPS_PROXY: `http://octant:t@127.0.0.1:${port}` } : {},
           release: async () => {
             released += 1;
           },
@@ -686,17 +698,19 @@ describe("Claude execution policy", () => {
       );
       expect(f.opens[0]?.sandbox?.network).toEqual(
         executionPolicy === "approval-gated" || executionPolicy === "auto-accept-edits"
-          ? { httpProxyPort: 47005 }
+          ? { httpProxyPort: ports["claude-sandbox"] }
           : undefined,
+      );
+      expect(f.opens[0]?.network?.endpoint).toEqual(
+        executionPolicy === "full-access" ? undefined : { kind: "loopback", port: ports.claude },
       );
       await Effect.runPromise(acquired.connection.stop(sessionId));
       await acquired.close();
     }
-    expect(started).toEqual([
-      { runtime: "claude-sandbox", autoReview: true },
-      { runtime: "claude-sandbox", autoReview: true },
-    ]);
-    expect(released).toBe(2);
+    const own = { runtime: "claude", autoReview: true, sessionId: String(sessionId) };
+    const sandbox = { runtime: "claude-sandbox", autoReview: true, sessionId: String(sessionId) };
+    expect(started).toEqual([own, sandbox, own, sandbox, own]);
+    expect(released).toBe(5);
   });
 
   it("grants a Project's extra folder what the root gets, in its sandbox and its tool gate", async () => {

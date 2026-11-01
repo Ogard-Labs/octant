@@ -189,7 +189,8 @@ async function startOrRecover(
     // level a Work Project's new threads start at. Nobody is present for this
     // turn, so it runs ask-first unless the routine's captured authority
     // itself is auto-accept-edits, or the person opted this routine into the
-    // Project's level, Full access included; the ceiling only narrows.
+    // Project's level, Full access included, or picked a level on the routine,
+    // which is the ceiling; the ceiling only narrows.
     const result = await options.turns.startFirstTurn(
       input.scopeId,
       command,
@@ -197,9 +198,10 @@ async function startOrRecover(
         ? {}
         : {
             accessCeiling:
-              input.run.authoritySnapshot.effective.executionPolicy === "auto-accept-edits"
+              snapshot.runLevel ??
+              (input.run.authoritySnapshot.effective.executionPolicy === "auto-accept-edits"
                 ? "auto-accept-edits"
-                : "ask-first",
+                : "ask-first"),
           },
     );
     if (result.kind === "accepted") {

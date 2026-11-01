@@ -354,6 +354,25 @@ html:not([data-octant-reduced-transparency="true"])
   line-height: var(--oct-leading-snug);
 }
 
+/* An extra folder sits under the checkout's tree, set off by a hairline and
+   named by its last component. */
+.code-file-explorer-panel__folder {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--octant-border-subtle);
+}
+
+.code-file-explorer-panel__folder-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 12px 4px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-weight: 600;
+}
+
 .code-file-explorer-panel__recovery {
   display: flex;
   padding: 0 var(--oct-space-3) var(--oct-space-3);

@@ -88,6 +88,8 @@ export interface EgressHarnessOptions {
   readonly clock?: () => string;
   readonly decision?: ToolEgressProxyOptions["decision"];
   readonly authentication?: ToolEgressProxyOptions["authentication"];
+  readonly places?: ToolEgressProxyOptions["places"];
+  readonly escalate?: ToolEgressProxyOptions["escalate"];
 }
 
 export interface EgressHarness {
@@ -138,6 +140,8 @@ export async function startEgressHarness(
     ...(options.limits === undefined ? {} : { limits: options.limits }),
     ...(options.decision === undefined ? {} : { decision: options.decision }),
     ...(options.authentication === undefined ? {} : { authentication: options.authentication }),
+    ...(options.places === undefined ? {} : { places: options.places }),
+    ...(options.escalate === undefined ? {} : { escalate: options.escalate }),
     resolveAll: async (host) => {
       resolved.push(host);
       return options.resolve === undefined ? ["93.184.216.10"] : options.resolve(host);

@@ -15,10 +15,7 @@ import type { CodeFileRootResolution } from "./codeService";
  * and the path inside it, so every service that joins a root and a path keeps
  * working on a plain folder with no checkout.
  */
-export interface CodeFolderRootResolution extends CodeFileRootResolution {
-  /** Set when the request named a file in an extra folder: the path inside `rootPath`. */
-  readonly relativePath?: CodeRelativePath;
-}
+export type CodeFolderRootResolution = CodeFileRootResolution;
 
 /** The path inside the folder to join to `resolution.rootPath`. */
 export function pathInResolvedRoot(
@@ -26,6 +23,18 @@ export function pathInResolvedRoot(
   named: CodeRelativePath,
 ): CodeRelativePath {
   return resolution.relativePath ?? named;
+}
+
+/**
+ * The subdirectory of the resolved root a listing starts in: none for an extra
+ * folder named itself, the path inside the folder for one of its directories,
+ * and the name as given for the checkout.
+ */
+export function directoryInResolvedRoot(
+  resolution: CodeFolderRootResolution,
+  named: CodeRelativePath,
+): CodeRelativePath | undefined {
+  return resolution.folderRoot === true ? undefined : pathInResolvedRoot(resolution, named);
 }
 
 /**
@@ -58,7 +67,13 @@ export function withProjectExtraFolders(options: {
     if (!String(named).startsWith("/")) {
       return options.resolve(scopeId, thread, checkout, named);
     }
-    const placed = classifyFileMentionExtraFolderPath(String(named), options.extraFolders(thread));
+    const extraFolders = options.extraFolders(thread);
+    // The folder itself, which the explorer lists as a root of its own.
+    const whole = extraFolders.find((folder) => trimTrailingSlashes(folder) === String(named));
+    const placed =
+      whole === undefined
+        ? classifyFileMentionExtraFolderPath(String(named), extraFolders)
+        : ({ kind: "in-folder", folder: whole, path: "" } as const);
     if (placed.kind !== "in-folder") return undefined;
     const main = await options.resolve(scopeId, thread, checkout, options.probePath);
     if (main === undefined) return undefined;
@@ -72,7 +87,15 @@ export function withProjectExtraFolders(options: {
       fileId: options.fileId(thread.id, checkout.id, String(named)),
       rootPath: placed.folder,
       rootIdentity,
-      relativePath: decodeCodeRelativePath(placed.path),
+      ...(whole === undefined
+        ? { relativePath: decodeCodeRelativePath(placed.path) }
+        : { folderRoot: true as const }),
     };
   };
+}
+
+function trimTrailingSlashes(folder: string): string {
+  let base = folder;
+  while (base.length > 1 && base.endsWith("/")) base = base.slice(0, -1);
+  return base;
 }

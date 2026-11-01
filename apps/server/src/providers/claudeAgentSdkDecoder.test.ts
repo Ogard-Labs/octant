@@ -425,3 +425,37 @@ describe("A published Claude artifact", () => {
     }
   });
 });
+
+describe("Automatic-mode reviewer refusals", () => {
+  const active = { kind: "active", sessionId: "session-1" } as const;
+  const denied = (fields: object = {}) => ({
+    type: "system",
+    subtype: "permission_denied",
+    tool_name: "Bash",
+    tool_use_id: "tool-1",
+    message: "denied",
+    decision_reason_type: "classifier",
+    decision_reason: "Deletes files outside the task.",
+    uuid: "u-1",
+    session_id: "session-1",
+    ...fields,
+  });
+
+  it("reads the classifier's refusal as a verdict on that call", () => {
+    expect(decodeMessage(denied(), openInput, active)).toEqual({
+      kind: "review-denied",
+      sessionId: "session-1",
+      toolUseId: "tool-1",
+      toolName: "Bash",
+      reason: "Deletes files outside the task.",
+    });
+  });
+
+  it("keeps refusing a denial for any other reason", () => {
+    for (const reason of ["rule", "mode", "asyncAgent", undefined]) {
+      expect(() =>
+        decodeMessage(denied({ decision_reason_type: reason }), openInput, active),
+      ).toThrow();
+    }
+  });
+});

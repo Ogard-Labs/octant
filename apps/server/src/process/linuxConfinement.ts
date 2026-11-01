@@ -305,6 +305,24 @@ export function buildBubblewrapLaunch(
       "An inbound relay needs a proxied launch, an absolute socket path, and a port of its own.",
     );
   }
+  const loopbackRelayPorts = [...new Set(input.loopbackRelayPorts ?? [])];
+  if (
+    loopbackRelayPorts.length > 0 &&
+    (proxied === undefined ||
+      loopbackRelayPorts.some(
+        (port) =>
+          !Number.isInteger(port) ||
+          port < 1 ||
+          port > 65_535 ||
+          port === LINUX_EGRESS_FORWARDER_PORT ||
+          port === relay?.port,
+      ))
+  ) {
+    throw new ProcessConfinementError(
+      "invalid-configuration",
+      "A loopback relay needs a proxied launch and ports of its own.",
+    );
+  }
   const args: string[] = ["--unshare-all"];
   if (input.networkEgress === "allow") {
     args.push("--share-net");
@@ -647,6 +665,7 @@ export function buildBubblewrapLaunch(
       proxied.endpoint.path,
       String(LINUX_EGRESS_FORWARDER_PORT),
       ...(relay === undefined ? [] : ["--inbound", relay.socketPath, String(relay.port)]),
+      ...loopbackRelayPorts.flatMap((port) => ["--loopback", String(port)]),
     );
     if (nestedForProcessDenial) {
       const filter = buildLinuxProcessDenySeccompFilter({

@@ -9,6 +9,7 @@ import {
   type AutomationMissedRunPolicy,
   type AutomationMode,
   type AutomationRun,
+  type AutomationRunLevel,
   type AutomationRunLifecycle,
   type AutomationTrigger,
 } from "@octant/contracts";
@@ -51,7 +52,7 @@ export function automationRunStatusLabel(lifecycle: AutomationRunLifecycle): str
 }
 
 export function automationModeLabel(mode: AutomationMode): string {
-  return mode === "work" ? "Work" : "Code";
+  return mode === "chat" ? "Chat" : mode === "work" ? "Work" : "Code";
 }
 
 export function automationMissedRunPolicyLabel(policy: AutomationMissedRunPolicy): string {
@@ -239,6 +240,9 @@ export type AutomationTriggerFormValue =
       readonly timeZone: string;
     };
 
+/** "project" follows the Project's level; the rest cap a run, never raise it. */
+export type AutomationRunLevelChoice = "project" | AutomationRunLevel;
+
 export interface AutomationDraftFormInput {
   readonly displayName: string;
   readonly taskPrompt: string;
@@ -252,10 +256,11 @@ export interface AutomationDraftFormInput {
   readonly deliveryTargetSummary: string;
   readonly deliveryTargetConfirmed: boolean;
   /**
-   * The person's opt-in to run at the level the Project's new threads start
-   * at, Full access included, instead of asking first.
+   * What the person chose for the level of each run: the level the Project's
+   * new threads start at, Full access included, or the highest level a run may
+   * use. Absent asks first. A Chat routine has none.
    */
-  readonly runsAtProjectLevel?: boolean;
+  readonly runLevel?: AutomationRunLevelChoice;
   /** The person's choice to let a Code run merge the pull request its thread opened. */
   readonly mergesItsPullRequests?: boolean;
   readonly previousDeliveryTargetRevision?: number;
@@ -394,7 +399,11 @@ export function buildAutomationDraft(input: AutomationDraftFormInput): Automatio
     trigger: normalizedTrigger(input.trigger),
     missedRunPolicy: input.missedRunPolicy,
     targetPolicy: "new-thread",
-    ...(input.runsAtProjectLevel === true ? { projectLevel: "opted-in" } : {}),
+    ...(input.mode === "chat" || input.runLevel === undefined
+      ? {}
+      : input.runLevel === "project"
+        ? { projectLevel: "opted-in" }
+        : { runLevel: input.runLevel }),
     ...(input.mergesItsPullRequests === true && input.mode === "code"
       ? { agentMerge: "allowed" }
       : {}),
@@ -432,6 +441,13 @@ function crossConsistencyIssues(input: AutomationDraftFormInput): readonly strin
         (project !== undefined && execution.projectId !== project.projectId))) ||
     (authority !== undefined &&
       input.mode === "work" &&
-      !(authority.effective.shell && authority.effective.git));
+      !(authority.effective.shell && authority.effective.git)) ||
+    // A Chat routine keeps Chat's authority: no folder, shell, or Git.
+    (authority !== undefined &&
+      input.mode === "chat" &&
+      (authority.effective.filesystem ||
+        authority.effective.shell ||
+        authority.effective.git ||
+        authority.effective.subagents));
   return mismatch ? [CONTRACT_ISSUE] : [];
 }

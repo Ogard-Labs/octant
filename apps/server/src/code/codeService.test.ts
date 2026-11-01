@@ -3917,6 +3917,49 @@ describe("CodeService.listFiles", () => {
     });
   });
 
+  it("lists an extra folder from its own root when the authority places the request there", async () => {
+    const fixture = serviceFixture();
+    const list = vi.fn(async (_request: unknown) => ({
+      status: "listed" as const,
+      listing: {
+        kind: "code-file-listing" as const,
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        entries: [],
+        truncated: false,
+        observedAt: now,
+      },
+    }));
+    (fixture.files as { list?: unknown }).list = list;
+    fixture.roots.resolve.mockResolvedValue({
+      fileId: ids.file,
+      rootPath: "/private/extra",
+      rootIdentity: { device: "7", inode: "9" },
+      folderRoot: true,
+    } as never);
+
+    await fixture.service.listFiles(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+      directory: "/private/extra" as never,
+    });
+    expect(list.mock.lastCall?.[0]).toMatchObject({ rootPath: "/private/extra" });
+    expect(list.mock.lastCall?.[0]).not.toHaveProperty("directory");
+
+    fixture.roots.resolve.mockResolvedValue({
+      fileId: ids.file,
+      rootPath: "/private/extra",
+      rootIdentity: { device: "7", inode: "9" },
+      relativePath: "src",
+    } as never);
+    await fixture.service.listFiles(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+      directory: "/private/extra/src" as never,
+    });
+    expect(list.mock.lastCall?.[0]).toMatchObject({ rootPath: "/private/extra", directory: "src" });
+  });
+
   it("fails closed as unavailable when no listing capability was wired", async () => {
     const fixture = serviceFixture();
     const result = await fixture.service.listFiles(ids.window, {
@@ -4110,6 +4153,34 @@ describe("CodeService.openFile", () => {
     byteLength,
     modifiedNanoseconds: "5",
     digest,
+  });
+
+  it("opens a file in an extra folder by its path inside that folder", async () => {
+    const fixture = serviceFixture();
+    const reference = fixture.content.put(new TextEncoder().encode("hello"));
+    fixture.files.open.mockResolvedValue({
+      status: "editable",
+      metadata: openMetadata(reference.digest, 5),
+      content: reference,
+    });
+    fixture.roots.resolve.mockResolvedValue({
+      fileId: ids.file,
+      rootPath: "/private/extra",
+      rootIdentity: { device: "7", inode: "9" },
+      relativePath: "src/file.ts",
+    } as never);
+
+    await fixture.service.openFile(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+      relativePath: "/private/extra/src/file.ts" as never,
+    });
+
+    expect(fixture.files.open).toHaveBeenCalledWith({
+      rootPath: "/private/extra",
+      rootIdentity: { device: "7", inode: "9" },
+      path: "src/file.ts",
+    });
   });
 
   it("opens through the resolved root authority and serves the staged content", async () => {

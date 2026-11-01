@@ -24,7 +24,7 @@ import {
   decodeCodeOperationId,
   decodeCodeTerminalInspectionRequest,
   decodeCodeTerminalLiveRequest,
-  decodeCodeRelativePath,
+  decodeCodeProjectFilePath,
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
   decodeCodeThreadId,
@@ -1038,7 +1038,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       try {
         decodeCodeThreadId(threadId);
         decodeCodeCheckoutId(checkoutId);
-        decodeCodeRelativePath(relativePath);
+        decodeCodeProjectFilePath(relativePath);
       } catch {
         throw invalidCommand();
       }
@@ -1564,7 +1564,7 @@ function validSave(input: CodeFileSave): Uint8Array | undefined {
   try {
     decodeCodeThreadId(input.threadId);
     decodeCodeCheckoutId(input.checkoutId);
-    decodeCodeRelativePath(input.path);
+    decodeCodeProjectFilePath(input.path);
   } catch {
     return undefined;
   }
