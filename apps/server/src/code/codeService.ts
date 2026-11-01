@@ -183,6 +183,7 @@ import type { CodeFileWatchService } from "./codeFileWatchService";
 import type { CodeSearchService } from "./codeSearchService";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { readConfinedCodeFile, type CodeConfinedFileRead } from "./codeConfinedFileRead";
+import { deriveCodeFileId } from "./codeFileIdentity";
 import { directoryInResolvedRoot, pathInResolvedRoot } from "./codeProjectFolderRoot";
 import type { FileIdentity } from "./fileOperationPort";
 import {} from "./codeOperationApprovalStore";
@@ -568,6 +569,37 @@ export interface CodeFileRootAuthorityPort {
   ) => CodeFileRootResolution | undefined | Promise<CodeFileRootResolution | undefined>;
 }
 
+/**
+ * The file browser, editor, and test discovery of a server Project's thread,
+ * every read and write of which is on its server. Canonical:
+ * docs/design/server-projects.md § Panels.
+ */
+export interface CodeServerCheckoutPort {
+  readonly list: (request: {
+    readonly threadId: CodeThreadId;
+    readonly checkoutId: CodeCheckoutId;
+    readonly directory?: CodeRelativePath | undefined;
+    readonly signal?: AbortSignal | undefined;
+  }) => Promise<CodeFileListingResult>;
+  readonly open: (input: {
+    readonly path: CodeRelativePath;
+    readonly signal?: AbortSignal | undefined;
+  }) => Promise<CodeFileOpenResult>;
+  readonly read: (input: {
+    readonly path: CodeRelativePath;
+    readonly maximumBytes: number;
+  }) => Promise<CodeConfinedFileRead>;
+  readonly save: (input: {
+    readonly path: CodeRelativePath;
+    readonly text: string;
+    readonly expectedIdentity: FileIdentity;
+    readonly expectedDigest: string;
+  }) => Promise<CodeFileSaveResult>;
+  readonly discoverTests: (input: {
+    readonly checkoutId: string;
+  }) => Promise<ReadonlyArray<CodeRepositoryTestListing["definitions"][number]>>;
+}
+
 export interface CodeRepositoryTestDiscoveryPort {
   readonly discover: (input: {
     readonly checkoutId: string;
@@ -611,6 +643,13 @@ export interface CodeServiceOptions {
    * empty list instead of pretending the repository has tests it cannot name.
    */
   readonly tests?: CodeRepositoryTestDiscoveryPort;
+  /**
+   * A server Project's thread's files and tests, or undefined when the thread
+   * has none now. Absent, a server thread's file browser and tests refuse.
+   * No local root ever resolves such a thread, so nothing here reads this
+   * host's disk for it.
+   */
+  readonly serverCheckout?: (thread: CodeThread) => CodeServerCheckoutPort | undefined;
   /**
    * Live observation of the bound checkout. Optional for the same reason as
    * `files.list`: a host that wired no watcher ends the stream immediately, so
@@ -857,6 +896,7 @@ export class CodeService {
   readonly #gitHistory: CodeServiceOptions["gitHistory"];
   readonly #files: Pick<CodeFileService, "open" | "save"> & Partial<Pick<CodeFileService, "list">>;
   readonly #tests: CodeRepositoryTestDiscoveryPort | undefined;
+  readonly #serverCheckout: CodeServiceOptions["serverCheckout"];
   readonly #watcher: Pick<CodeFileWatchService, "watch"> | undefined;
   /**
    * Open file watches, by the window that opened them. A watch is the one Code
@@ -914,6 +954,7 @@ export class CodeService {
     this.#gitHistory = options.gitHistory;
     this.#files = options.files;
     this.#tests = options.tests;
+    this.#serverCheckout = options.serverCheckout;
     this.#watcher = options.watcher;
     this.#searcher = options.searcher;
     this.#fileSource = options.fileSource ?? liveCodeTestSourcePort;
@@ -2509,6 +2550,21 @@ export class CodeService {
     );
     const thread = authorized.thread;
     const checkout = authorized.checkout;
+    if (checkout.kind === "remote-root") {
+      const server = this.#serverCheckout?.(authorized.effectiveThread);
+      if (server === undefined) {
+        return {
+          status: "failed",
+          failure: { category: "unavailable", message: "Code file authority is unavailable." },
+        };
+      }
+      return await server.list({
+        threadId: thread.id,
+        checkoutId: checkout.id,
+        directory: input.directory,
+        signal: input.signal,
+      });
+    }
     const list = this.#files.list?.bind(this.#files);
     if (list === undefined) {
       return {
@@ -2614,6 +2670,12 @@ export class CodeService {
       input.checkoutId,
       "Code file read is unauthorized.",
     );
+    if (authorized.checkout.kind === "remote-root") {
+      const server = this.#serverCheckout?.(authorized.effectiveThread);
+      return server === undefined
+        ? { status: "unavailable" }
+        : await server.read({ path: input.relativePath, maximumBytes: input.maximumBytes });
+    }
     const root = await this.#roots.resolve(
       authenticatedWindowId,
       authorized.effectiveThread,
@@ -2729,21 +2791,37 @@ export class CodeService {
       input.checkoutId,
       "Code file open is unauthorized.",
     );
-    const root = await this.#roots.resolve(
-      authenticatedWindowId,
-      authorized.effectiveThread,
-      authorized.checkout,
-      input.relativePath,
-    );
-    if (root === undefined) {
-      throw this.#failure("unavailable", "Code file authority is unavailable.");
+    let fileId: CodeFileId;
+    let opened: CodeFileOpenResult;
+    if (authorized.checkout.kind === "remote-root") {
+      const server = this.#serverCheckout?.(authorized.effectiveThread);
+      if (server === undefined) {
+        throw this.#failure("unavailable", "Code file authority is unavailable.");
+      }
+      fileId = deriveCodeFileId(
+        String(authorized.thread.id),
+        String(authorized.checkout.id),
+        input.relativePath,
+      );
+      opened = await server.open({ path: input.relativePath, signal: input.signal });
+    } else {
+      const root = await this.#roots.resolve(
+        authenticatedWindowId,
+        authorized.effectiveThread,
+        authorized.checkout,
+        input.relativePath,
+      );
+      if (root === undefined) {
+        throw this.#failure("unavailable", "Code file authority is unavailable.");
+      }
+      fileId = root.fileId;
+      opened = await this.#files.open({
+        rootPath: root.rootPath,
+        rootIdentity: root.rootIdentity,
+        path: pathInResolvedRoot(root, input.relativePath),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
     }
-    const opened = await this.#files.open({
-      rootPath: root.rootPath,
-      rootIdentity: root.rootIdentity,
-      path: pathInResolvedRoot(root, input.relativePath),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
     if (opened.status === "editable") {
       // An open never invalidates an earlier open's reference, not even for the
       // same file: the editor that opened first may not have fetched its bytes
@@ -2757,7 +2835,7 @@ export class CodeService {
     }
     return decodeCodeFileOpenResultEnvelope({
       kind: "code-file-open-result",
-      result: publicOpenResult(root.fileId, opened),
+      result: publicOpenResult(fileId, opened),
     });
   }
 
@@ -2824,6 +2902,19 @@ export class CodeService {
       input.checkoutId,
       "Code repository test listing is unauthorized.",
     );
+    if (authorized.checkout.kind === "remote-root") {
+      const server = this.#serverCheckout?.(authorized.effectiveThread);
+      return decodeCodeRepositoryTestListing({
+        kind: "code-repository-test-listing",
+        threadId: authorized.thread.id,
+        checkoutId: authorized.checkout.id,
+        definitions:
+          server === undefined
+            ? []
+            : await server.discoverTests({ checkoutId: String(authorized.checkout.id) }),
+        observedAt: this.#clock(),
+      });
+    }
     const root =
       this.#tests === undefined
         ? undefined
@@ -2931,12 +3022,22 @@ export class CodeService {
           : "Code file save is unauthorized.",
       );
     }
-    const root = await this.#roots.resolve(
-      authenticatedWindowId,
-      effectiveThread,
-      checkout,
-      input.relativePath,
-    );
+    // A server thread's file is saved on its server; no local root resolves it.
+    const server =
+      checkout.kind === "remote-root" ? this.#serverCheckout?.(effectiveThread) : undefined;
+    const root =
+      checkout.kind === "remote-root"
+        ? server === undefined
+          ? undefined
+          : {
+              fileId: deriveCodeFileId(String(thread.id), String(checkout.id), input.relativePath),
+            }
+        : await this.#roots.resolve(
+            authenticatedWindowId,
+            effectiveThread,
+            checkout,
+            input.relativePath,
+          );
     if (root === undefined)
       throw this.#failure("unavailable", "Code file authority is unavailable.");
     const existingFile = this.#persistence.readCodeFileReference(root.fileId);
@@ -2949,7 +3050,8 @@ export class CodeService {
     if (existingFile?.state === "saving") {
       throw this.#failure("waiting", "Code file save is already in progress.");
     }
-    const expectedFileVersion = existingFile?.version ?? root.expectedFileVersion ?? 0;
+    const expectedFileVersion =
+      existingFile?.version ?? ("expectedFileVersion" in root ? root.expectedFileVersion : 0) ?? 0;
     const attemptedBytes = new TextEncoder().encode(input.text);
     const attemptedDigest = createHash("sha256").update(attemptedBytes).digest("hex");
     const saving = decodeCodeFileReference({
@@ -2974,14 +3076,24 @@ export class CodeService {
 
     let saved: CodeFileSaveResult;
     try {
-      saved = await this.#files.save({
-        rootPath: root.rootPath,
-        rootIdentity: root.rootIdentity,
-        path: pathInResolvedRoot(root, input.relativePath),
-        expectedIdentity: input.expectedIdentity,
-        expectedDigest: input.expectedDigest,
-        text: input.text,
-      });
+      saved =
+        server !== undefined
+          ? await server.save({
+              path: input.relativePath,
+              text: input.text,
+              expectedIdentity: input.expectedIdentity,
+              expectedDigest: input.expectedDigest,
+            })
+          : "rootPath" in root
+            ? await this.#files.save({
+                rootPath: root.rootPath,
+                rootIdentity: root.rootIdentity,
+                path: pathInResolvedRoot(root, input.relativePath),
+                expectedIdentity: input.expectedIdentity,
+                expectedDigest: input.expectedDigest,
+                text: input.text,
+              })
+            : { status: "interrupted", rescanRequired: true };
       decodeCodeFileSaveResultEnvelope({ kind: "code-file-save-result", result: saved });
     } catch {
       saved = { status: "interrupted", rescanRequired: true };

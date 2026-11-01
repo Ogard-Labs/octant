@@ -85,7 +85,9 @@ import type { ProvidersWiring } from "./providers";
 import type { FoundationsWiring } from "./foundations";
 
 import type { HarnessStateWiring } from "./harnessState";
-import { withServerCodeCheckouts } from "../serverProjects/serverProjectThreads";
+import { serverProjectOf, withServerCodeCheckouts } from "../serverProjects/serverProjectThreads";
+import { ServerCodeFiles } from "../serverProjects/serverCodeFiles";
+import { discoverServerTests } from "../serverProjects/serverTests";
 
 export function createExistingWorktreeCodeFileRootAuthority(options: {
   readonly projects: Pick<ProjectService, "bootstrap">;
@@ -518,7 +520,7 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
 }
 
 export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<HarnessStateWiring, "serverProjectStore"> &
+  Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<
     AuthorityWiring,
     | "bindingReceiptStore"
@@ -590,6 +592,7 @@ export function wireCode(deps: CodeDependencies) {
     projectService,
     refreshStandaloneSkills,
     selectCodeConversation,
+    serverConnection,
     serverProjectStore,
     windowAuthorityStore,
   } = deps;
@@ -780,6 +783,30 @@ export function wireCode(deps: CodeDependencies) {
           },
           files: codeFiles,
           tests: codeTestDiscovery,
+          serverCheckout: (thread) => {
+            const project = serverProjectOf(serverProjectStore, thread);
+            if (project === undefined) return undefined;
+            const projectId = String(project.id);
+            if (serverProjectStore.addressOf(projectId).kind !== "address") return undefined;
+            const files = new ServerCodeFiles({
+              connection: serverConnection,
+              // Read each call, so a server removed mid-request refuses the next one.
+              server: () => {
+                const address = serverProjectStore.addressOf(projectId);
+                return address.kind === "address" ? address.server : undefined;
+              },
+              root: project.folder,
+              content: codeContent,
+              clock: () => new Date().toISOString(),
+            });
+            return {
+              list: (request) => files.list(request),
+              open: (input) => files.open(input),
+              read: (input) => files.read(input),
+              save: (input) => files.save(input),
+              discoverTests: (input) => discoverServerTests(files, input.checkoutId),
+            };
+          },
           watcher: codeFileWatch,
           searcher: codeFileSearch,
           content: codeContent,

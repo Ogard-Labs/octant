@@ -3888,6 +3888,98 @@ describe("Git history authority", () => {
   });
 });
 
+describe("a server Project's file browser and tests", () => {
+  const serverCheckout = decodeCodeCheckoutIdentity({
+    id: ids.checkout,
+    repositoryId,
+    kind: "remote-root",
+    availability: "available",
+    head: { kind: "none" },
+    observedAt: now,
+  });
+  const metadata = {
+    identity: { device: "server", inode: "a".repeat(32) },
+    byteLength: 5,
+    modifiedNanoseconds: "0",
+    digest: "b".repeat(64),
+  };
+  const serverFixture = (present = true) => {
+    const server = {
+      list: vi.fn(async () => ({
+        status: "listed" as const,
+        listing: {
+          kind: "code-file-listing" as const,
+          threadId: ids.thread,
+          checkoutId: serverCheckout.id,
+          entries: [],
+          truncated: false,
+          observedAt: now,
+        },
+      })),
+      open: vi.fn(async () => ({
+        status: "read-only" as const,
+        metadata,
+        reason: "binary" as const,
+      })),
+      read: vi.fn(async () => ({ status: "read" as const, bytes: new Uint8Array([104]) })),
+      save: vi.fn(async () => ({ status: "completed" as const, metadata })),
+      discoverTests: vi.fn(async () => []),
+    };
+    const fixture = serviceFixture({
+      checkout: serverCheckout,
+      serverCheckout: () => (present ? (server as never) : undefined),
+    });
+    return { fixture, server };
+  };
+
+  it("lists, opens, reads, saves, and discovers tests on the server, never through a local root", async () => {
+    const { fixture, server } = serverFixture();
+    const at = { threadId: ids.thread, checkoutId: serverCheckout.id };
+    const path = "README.md" as never;
+    expect((await fixture.service.listFiles(ids.window, at)).status).toBe("listed");
+    expect(await fixture.service.openFile(ids.window, { ...at, relativePath: path })).toMatchObject(
+      { result: { status: "read-only" } },
+    );
+    expect(
+      await fixture.service.readFile(ids.window, { ...at, relativePath: path, maximumBytes: 10 }),
+    ).toMatchObject({ status: "read" });
+    expect(
+      await fixture.service.saveFile(ids.window, {
+        ...at,
+        relativePath: path,
+        expectedIdentity: metadata.identity,
+        expectedDigest: metadata.digest,
+        text: "hello",
+      }),
+    ).toMatchObject({ result: { status: "completed" } });
+    expect(await fixture.service.listTests(ids.window, at)).toMatchObject({ definitions: [] });
+    expect(server.list).toHaveBeenCalledOnce();
+    expect(server.save).toHaveBeenCalledWith(expect.objectContaining({ path, text: "hello" }));
+    expect(server.discoverTests).toHaveBeenCalledOnce();
+    expect(fixture.roots.resolve).not.toHaveBeenCalled();
+    expect(fixture.files.open).not.toHaveBeenCalled();
+    expect(fixture.files.save).not.toHaveBeenCalled();
+  });
+
+  it("refuses the file browser when the thread's server is gone", async () => {
+    const { fixture } = serverFixture(false);
+    expect(
+      await fixture.service.listFiles(ids.window, {
+        threadId: ids.thread,
+        checkoutId: serverCheckout.id,
+      }),
+    ).toMatchObject({ status: "failed", failure: { category: "unavailable" } });
+    await expect(
+      fixture.service.openFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: serverCheckout.id,
+        relativePath: "README.md" as never,
+      }),
+    ).rejects.toThrow("Code file authority is unavailable.");
+    expect(fixture.roots.resolve).not.toHaveBeenCalled();
+  });
+});
+
 describe("CodeService.listFiles", () => {
   it("lists through the resolved root authority", async () => {
     const fixture = serviceFixture();
@@ -4629,6 +4721,7 @@ function serviceFixture(
     readonly recordExternalContentIngestion?: CodeServiceOptions["recordExternalContentIngestion"];
     readonly terminalSessions?: TerminalSessionImportPort;
     readonly isProviderModelAllowed?: CodeServiceOptions["isProviderModelAllowed"];
+    readonly serverCheckout?: CodeServiceOptions["serverCheckout"];
   } = {},
 ) {
   const threads = options.threads ?? [thread()];
@@ -4757,6 +4850,7 @@ function serviceFixture(
     ...(options.watcher === undefined
       ? {}
       : { watcher: options.watcher as unknown as NonNullable<CodeServiceOptions["watcher"]> }),
+    ...(options.serverCheckout === undefined ? {} : { serverCheckout: options.serverCheckout }),
   });
   return {
     service,

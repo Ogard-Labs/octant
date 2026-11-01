@@ -81,7 +81,19 @@ describe("CodeWorkspace", () => {
       expect.objectContaining({ kind: "observe-git" }),
     );
     git.unmount();
-    for (const [kind, title] of [["code-file", "File"]] as const) {
+    const file = render(
+      inServerProject(
+        <CodeWorkspace
+          client={client}
+          controller={server}
+          createUuid={uuidFactory()}
+          tab={{ ...tab("code-file", "README.md"), relativePath: "README.md" } as never}
+        />,
+      ),
+    );
+    expect(screen.queryByText("This is not available for a Project on a server yet.")).toBeNull();
+    file.unmount();
+    for (const [kind, title] of [["code-local-review", "Review"]] as const) {
       const { unmount } = render(
         <ServerCodeProjectsContext.Provider
           value={{

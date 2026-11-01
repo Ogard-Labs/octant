@@ -135,6 +135,11 @@ const SERVER_GIT_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set
   "commit-git",
   "push-git",
 ]);
+/** The Tests panel's operations, which a server thread runs on its server. */
+const SERVER_TEST_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
+  "run-repository-test",
+  "cancel-repository-test",
+]);
 const SERVER_OPERATION_UNAVAILABLE =
   "This is not available for a Project on a server yet. Ask the thread to do it there, or use a terminal on the server.";
 const SERVER_CONNECTORS_UNAVAILABLE =
@@ -405,6 +410,11 @@ interface TerminalOwner {
    */
   journaledCharacters?: number;
 }
+
+export type CodeOperationServerTestPort = CodeOperationRepositoryTestPort & {
+  /** The folder's checked-out commit on the server, or undefined when it has none or cannot be reached. */
+  readonly head: () => Promise<string | undefined>;
+};
 
 export interface CodeOperationRepositoryTestPort {
   /**
@@ -997,6 +1007,11 @@ export interface CodeOperationServiceOptions {
    */
   readonly serverGit?: (thread: CodeThread) => CodeOperationGitPort | undefined;
   /**
+   * The Tests panel on a server thread's server, or undefined when the thread
+   * has none now. Its runs are on the server, never on this host.
+   */
+  readonly serverRepositoryTests?: (thread: CodeThread) => CodeOperationServerTestPort | undefined;
+  /**
    * Runs after the command has passed thread, checkout, lifecycle, and Project
    * scope checks, but before operation approval or any side effect. Runtime
    * work uses this seam so an inaccessible command cannot leave a durable
@@ -1237,7 +1252,14 @@ export class CodeOperationService {
       const serverGit = SERVER_GIT_OPERATIONS.has(command.kind)
         ? this.#options.serverGit?.(scope.thread)
         : undefined;
-      if (!SERVER_THREAD_OPERATIONS.has(command.kind) && serverGit === undefined) {
+      const serverTests = SERVER_TEST_OPERATIONS.has(command.kind)
+        ? this.#options.serverRepositoryTests?.(scope.thread)
+        : undefined;
+      if (
+        !SERVER_THREAD_OPERATIONS.has(command.kind) &&
+        serverGit === undefined &&
+        serverTests === undefined
+      ) {
         return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
       }
       if (
@@ -2747,11 +2769,26 @@ export class CodeOperationService {
         // The renderer selects a definition; it never authors one. Re-deriving
         // the checkout's definitions here is what stops a submitted definition
         // from carrying argv the server never discovered.
-        if (checkout.head.kind === "none") {
+        const serverTests =
+          checkout.kind === "remote-root"
+            ? this.#options.serverRepositoryTests?.(thread)
+            : undefined;
+        const tests = serverTests ?? this.#options.repositoryTests;
+        // A server folder's checkout names no commit here, so the server's own
+        // Git says which one the run is against.
+        const revision =
+          serverTests !== undefined
+            ? await serverTests.head()
+            : checkout.head.kind === "none"
+              ? undefined
+              : checkout.head.oid;
+        if (revision === undefined) {
           return this.#failed(
             command.operationId,
             "unavailable",
-            "Repository tests need a Git repository; this folder has none.",
+            serverTests === undefined
+              ? "Repository tests need a Git repository; this folder has none."
+              : "Repository tests need a Git repository on the server, and the server must answer. Nothing ran.",
           );
         }
         if (this.#pendingTests.has(command.testRunId))
@@ -2773,7 +2810,7 @@ export class CodeOperationService {
         });
         let discovered: ReadonlyArray<CodeRepositoryTestDefinition>;
         try {
-          discovered = await this.#options.repositoryTests.discover({
+          discovered = await tests.discover({
             checkoutId: String(checkout.id),
             rootPath: root.checkoutRoot,
             projectId: String(thread.projectId),
@@ -2801,13 +2838,13 @@ export class CodeOperationService {
             "Repository test definition was not discovered in this checkout.",
           );
         }
-        const run = await this.#options.repositoryTests.run({
+        const run = await tests.run({
           runId: command.testRunId,
           projectId: String(thread.projectId),
           definition: command.definition,
           threadId: thread.id,
           checkoutId: checkout.id,
-          checkoutRevision: checkout.head.oid,
+          checkoutRevision: revision,
           executionPolicy: thread.executionPolicy,
           checkoutRoot: root.checkoutRoot,
           environment: root.environment,
@@ -2851,7 +2888,11 @@ export class CodeOperationService {
             concerns: [],
           });
         }
-        const cancelled = await this.#options.repositoryTests.cancel({
+        const cancelled = await (
+          checkout.kind === "remote-root"
+            ? this.#options.serverRepositoryTests?.(thread)
+            : this.#options.repositoryTests
+        )?.cancel({
           testRunId: command.testRunId,
           threadId: thread.id,
           checkoutId: checkout.id,

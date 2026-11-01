@@ -78,6 +78,14 @@ const CodeTerminalPane = lazy(() =>
 
 type CodeTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
+
+/** The tabs a thread in a server Project opens; each reads or runs on its server. */
+const SERVER_THREAD_TABS: ReadonlySet<CodeTab["kind"]> = new Set([
+  "code-terminal",
+  "code-git",
+  "code-file",
+  "code-test",
+]);
 type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-state" }>;
 type TestResult = Extract<CodeOperationResult, { readonly kind: "repository-test-state" }>;
 
@@ -278,12 +286,12 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
   }
 
   // A thread in a server Project keeps its files, Git, and tests on the
-  // server. Its terminal is a login there, and its Git tab runs Git there;
-  // the tabs this host does not offer for it yet say so.
+  // server. Its terminal is a login there, and its file, Git, and test tabs
+  // read and run there; the tabs this host does not offer for it yet say so.
   const serverThread =
     view.checkout.kind === "remote-root" &&
     serverCodeProjectFor(serverCodeProjects, view.thread.projectId) !== undefined;
-  if (serverThread && props.tab.kind !== "code-terminal" && props.tab.kind !== "code-git") {
+  if (serverThread && !SERVER_THREAD_TABS.has(props.tab.kind)) {
     return (
       <ShellState
         eyebrow="On a server"
@@ -318,7 +326,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           {...(props.onRequestFileRefresh === undefined
             ? {}
             : { onRequestRefresh: props.onRequestFileRefresh })}
-          {...(props.hostBridge?.openCodeExternalEditor === undefined
+          {...(props.hostBridge?.openCodeExternalEditor === undefined || serverThread
             ? {}
             : {
                 onOpenExternalEditor: () =>

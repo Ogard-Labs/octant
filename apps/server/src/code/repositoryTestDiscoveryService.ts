@@ -19,8 +19,8 @@ import { isAbsolutePosixPath, joinCodePath, resolveContainedPath } from "./codeP
 import { TestDefinitionService } from "./testDefinitionService";
 
 /** The only two files discovery reads, both relative to the checkout root. */
-const PACKAGE_JSON_PATH = "package.json";
-const OCTANT_TESTS_PATH = ".octant/tests.json";
+export const PACKAGE_JSON_PATH = "package.json";
+export const OCTANT_TESTS_PATH = ".octant/tests.json";
 
 /**
  * Bound on one source file. A `package.json` or `.octant/tests.json` larger
@@ -90,14 +90,10 @@ export class RepositoryTestDiscoveryService {
     const canonicalRoot = await this.#canonicalRoot(request.rootPath);
     if (canonicalRoot === undefined) return [];
     const discovered = [
-      ...this.#fromPackageScripts(
-        request.checkoutId,
-        await this.#readJson(canonicalRoot, PACKAGE_JSON_PATH),
-      ),
-      ...this.#fromOctantFile(
-        request.checkoutId,
-        await this.#readJson(canonicalRoot, OCTANT_TESTS_PATH),
-      ),
+      ...this.fromSources(request.checkoutId, {
+        packageJson: await this.#readJson(canonicalRoot, PACKAGE_JSON_PATH),
+        octantFile: await this.#readJson(canonicalRoot, OCTANT_TESTS_PATH),
+      }),
     ];
     // An extra folder is a plain folder: its tests are named by its absolute
     // path, run in it, and keep ids of their own so two folders' `test`
@@ -131,6 +127,20 @@ export class RepositoryTestDiscoveryService {
       }
     }
     return discovered.slice(0, MAX_DISCOVERED_TEST_DEFINITIONS);
+  }
+
+  /**
+   * The definitions two already-read sources offer, for a checkout whose files
+   * are read some other way (a server Project's, over its connection).
+   */
+  fromSources(
+    checkoutId: string,
+    sources: { readonly packageJson: unknown; readonly octantFile: unknown },
+  ): ReadonlyArray<CodeRepositoryTestDefinition> {
+    return [
+      ...this.#fromPackageScripts(checkoutId, sources.packageJson),
+      ...this.#fromOctantFile(checkoutId, sources.octantFile),
+    ].slice(0, MAX_DISCOVERED_TEST_DEFINITIONS);
   }
 
   async #canonicalRoot(rootPath: string): Promise<string | undefined> {

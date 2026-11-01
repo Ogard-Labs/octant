@@ -131,6 +131,8 @@ describe("which live tools the dock may offer", () => {
       "side-chat",
       "agents",
       "terminal",
+      "files",
+      "tests",
     ] as const) {
       expect(isDockToolLaunchable(surface as never, capabilities)).toBe(true);
     }

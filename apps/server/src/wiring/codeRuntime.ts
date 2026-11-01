@@ -229,6 +229,11 @@ import {
 import type { GitService } from "../code/gitService";
 import { createServerGitService } from "../serverProjects/serverGit";
 import { serverTerminalLogin } from "../serverProjects/serverTerminal";
+import { ServerCodeFiles } from "../serverProjects/serverCodeFiles";
+import {
+  createServerRepositoryTests,
+  type ServerRepositoryTests,
+} from "../serverProjects/serverTests";
 
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
@@ -457,6 +462,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       // falls back to. Read it per call: the profile is editable while the
       // server runs, and a restart is too high a price for a name.
       const serverGitServices = new Map<string, GitService>();
+      const serverTestServices = new Map<string, ServerRepositoryTests>();
       const gitMutationPort = new GitMutationPort(undefined, {
         commitIdentity: () => {
           const profile = persistence.readShellSettings()?.settings.userProfile;
@@ -689,6 +695,41 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             serverGitServices.set(projectId, git);
           }
           return git;
+        },
+        serverRepositoryTests: (thread) => {
+          const project = serverProjectOf(serverProjectStore, thread);
+          if (project === undefined) return undefined;
+          const projectId = String(project.id);
+          if (serverProjectStore.addressOf(projectId).kind !== "address") return undefined;
+          // One per Project, so a run can be cancelled from any request.
+          let tests = serverTestServices.get(projectId);
+          if (tests === undefined) {
+            const server = () => {
+              const address = serverProjectStore.addressOf(projectId);
+              return address.kind === "address" ? address.server : undefined;
+            };
+            tests = createServerRepositoryTests({
+              connection: serverConnection,
+              server: () => {
+                const address = server();
+                return address === undefined
+                  ? undefined
+                  : { ...address, serverId: String(project.serverId) };
+              },
+              root: project.folder,
+              files: new ServerCodeFiles({
+                connection: serverConnection,
+                server,
+                root: project.folder,
+                clock: () => new Date().toISOString(),
+              }),
+              record: (record) => shieldServerStore.recordServerCommand(record),
+              now: () => new Date().toISOString(),
+              newId: randomUUID,
+            });
+            serverTestServices.set(projectId, tests);
+          }
+          return tests;
         },
         serverCodeTurn: (input) =>
           serverProjectOf(serverProjectStore, input.thread) === undefined
