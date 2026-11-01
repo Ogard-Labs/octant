@@ -8946,6 +8946,30 @@ describe("ChatService", () => {
       expect(texts).not.toContain("Removed question");
     });
 
+    it("retries the only kept turn after a rewind on a provider that keeps its own session", async () => {
+      const fixture = openFixture({ nativeConversation: true });
+      const { service } = fixture;
+      const { threadId, first, second } = await twoTurnThread(fixture, ["Kept", "Removed"]);
+      const rewound = await service.execute({
+        kind: "rewind-chat-thread",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        turnId: second.id,
+      });
+      if (rewound.kind !== "thread-rewound") throw new Error("Expected thread-rewound result.");
+      const attempt = service.read(threadId).turns[0]!.attempts.at(-1)!;
+
+      await service.execute({
+        kind: "retry-chat-turn",
+        threadId,
+        expectedVersion: rewound.thread.version,
+        turnId: first.id,
+        attemptId: attempt.id,
+      });
+
+      expect(service.read(threadId).turns[0]!.attempts).toHaveLength(2);
+    });
+
     it("takes a rewound turn out of transcript search and rebuilds the same index on replay", async () => {
       const fixture = openFixture();
       const { service, persistence } = fixture;

@@ -3465,7 +3465,7 @@ export class ChatService {
     const thread = this.#requireActiveThread(command.threadId);
     this.#assertExpectedThreadVersion(thread, command.expectedVersion);
     const view = this.#requireThreadView(command.threadId);
-    const attempt = view.turns.at(-1)?.attempts.at(-1);
+    const attempt = activeChatTurns(view.turns).at(-1)?.attempts.at(-1);
     if (
       attempt === undefined ||
       attempt.outcome !== "waiting" ||
@@ -3956,8 +3956,12 @@ export class ChatService {
     // removed, so that session is never taken up again. With nothing kept the
     // thread starts again as it did at first.
     const rewoundTail = tailTurn?.rewound !== undefined;
-    const previousTurn =
-      rewoundTail && activeChatTurns(threadView?.turns ?? []).length === 0 ? undefined : tailTurn;
+    // A retry sends the kept turn it retries as its own prompt, so that turn
+    // does not count as something left to hand over.
+    const keptTurns = activeChatTurns(threadView?.turns ?? []).filter(
+      (turn) => String(turn.userMessageRef.contentId) !== String(currentRef.contentId),
+    );
+    const previousTurn = rewoundTail && keptTurns.length === 0 ? undefined : tailTurn;
     const previous = previousTurn?.attempts.at(-1);
     const sessionDecision = decideConversationSession({
       recipient: {
