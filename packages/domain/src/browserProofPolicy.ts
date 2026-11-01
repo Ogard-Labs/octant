@@ -264,6 +264,6 @@ function escapeLine(line: string): string {
 /** The body with the section after it, separated by a blank line; nothing added when absent. */
 export function bodyWithBrowserProof(body: string, section: string | undefined): string {
   if (section === undefined) return body;
-  const trimmed = body.replace(/\s+$/, "");
+  const trimmed = body.trimEnd();
   return trimmed.length === 0 ? section : `${trimmed}\n\n${section}`;
 }
