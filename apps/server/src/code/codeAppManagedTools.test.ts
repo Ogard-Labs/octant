@@ -713,6 +713,66 @@ describe("Code app-managed tools", () => {
     );
   });
 
+  it("refuses every browser call while the person has the page, and says what the person did", async () => {
+    const current = thread();
+    const act = vi.fn(async () => browserSnapshot(browserAuthority()));
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: current,
+      readThread: () => current,
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => ({
+          ...browserSnapshot(browserAuthority()),
+          waitingForPerson: "take-over" as const,
+        }),
+        create: vi.fn(),
+        act,
+        releaseThread: vi.fn(),
+      },
+    });
+    const result = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "click", selector: "#go" }),
+    });
+    expect(result.isError).toBe(true);
+    expect(result.result).toMatchObject({
+      error: "browser-person-took-over",
+      message: expect.stringMatching(/took over/),
+    });
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("says in one line that the person used the page", async () => {
+    const current = thread();
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: current,
+      readThread: () => current,
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => browserSnapshot(browserAuthority()),
+        create: vi.fn(),
+        act: vi.fn(async () => ({
+          ...browserSnapshot(browserAuthority()),
+          personUsedPage: "used" as const,
+        })),
+        releaseThread: vi.fn(),
+      },
+    });
+    const result = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read-page" }),
+    });
+    expect(result.result).toMatchObject({ note: expect.stringMatching(/person used the page/) });
+  });
+
   it("refuses browser actions after the thread switches to Plan", async () => {
     let current = thread();
     const act = vi.fn(async () => browserSnapshot(browserAuthority()));

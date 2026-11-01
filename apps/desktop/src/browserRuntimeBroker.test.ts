@@ -5,7 +5,13 @@ import { BrowserNavigationBlockedError, BrowserTargetStaleError } from "./browse
 const contextId = "10000000-0000-4000-8000-000000000001";
 
 function host() {
+  const personInput: Array<(contextId: string) => void> = [];
   return {
+    personInput,
+    onPersonInput: vi.fn((listener: (contextId: string) => void) => {
+      personInput.push(listener);
+      return () => undefined;
+    }),
     available: () => true,
     act: vi.fn(async () => ({ url: "https://example.com/" })),
     peek: vi.fn(async () => ({
@@ -25,6 +31,29 @@ function host() {
 }
 
 describe("BrowserRuntimeBroker", () => {
+  it("reports the pages the person used once, to the server that asks", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      surface.personInput[0]?.(contextId);
+      surface.personInput[0]?.(contextId);
+      const first = await broker.fetchForTest(
+        request(broker.url, broker.token, {}, "v1/contexts/person-input"),
+      );
+      expect(await first.json()).toEqual({ contextIds: [contextId] });
+      const second = await broker.fetchForTest(
+        request(broker.url, broker.token, {}, "v1/contexts/person-input"),
+      );
+      expect(await second.json()).toEqual({ contextIds: [] });
+      const refused = await broker.fetchForTest(
+        request(broker.url, "wrong", {}, "v1/contexts/person-input"),
+      );
+      expect(refused.status).toBe(401);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("accepts only authenticated bounded interactive actions", async () => {
     const surface = host();
     const broker = await startBrowserRuntimeBroker(surface as never);

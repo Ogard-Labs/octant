@@ -29,11 +29,13 @@ import {
   Camera,
   Globe2,
   ExternalLink,
+  Hand,
   LoaderCircle,
   LockKeyhole,
   PanelRight,
   RotateCw,
   ShieldCheck,
+  Undo2,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -249,15 +251,20 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const secureAddress = committedAddress?.toLocaleLowerCase().startsWith("https:") === true;
   const addressSecurityLabel =
     committedAddress === undefined ? "Address" : secureAddress ? "Secure HTTPS" : "Not secure HTTP";
-  const driverLabel = !nativeContext
-    ? "Preview"
-    : nativeSurface.failed
-      ? "Live page unavailable"
-      : nativeState?.control === "agent"
-        ? "Agent active"
-        : nativeState?.control === "user"
-          ? "You control"
-          : "Shared live page";
+  // The person holds the page: every agent Browser call on it is refused until
+  // they hand it back. The server decides; this only shows it.
+  const personHasPage = activeContext && snapshot?.waitingForPerson === "take-over";
+  const driverLabel = personHasPage
+    ? "You have the page"
+    : !nativeContext
+      ? "Preview"
+      : nativeSurface.failed
+        ? "Live page unavailable"
+        : nativeState?.control === "agent"
+          ? "Agent active"
+          : nativeState?.control === "user"
+            ? "You control"
+            : "Shared live page";
   // While the agent drives a signed-in page the indicator names the profile, so
   // it is plain whose account the agent is acting as.
   const drivenProfile = storedProfileOf(snapshot?.context?.policy.profile);
@@ -576,6 +583,23 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     }
   }
 
+  /**
+   * Take the page from the agent, or give it back. The server holds the agent's
+   * Browser calls and decides who may; this asks and shows the answer.
+   */
+  async function holdPage(hold: "take-over" | "hand-back"): Promise<void> {
+    const ask = hold === "take-over" ? props.client.takeOver : props.client.handBack;
+    if (ask === undefined || props.tab.threadId === undefined) return;
+    localFailure.current = false;
+    try {
+      update(await ask.call(props.client, { threadId: props.tab.threadId }));
+    } catch (error) {
+      localFailure.current = true;
+      localFailureRevision.current = currentSnapshotRevision.current ?? snapshotRevision(snapshot);
+      applyFailure(error, setStatus, setMessage);
+    }
+  }
+
   function update(next: BrowserAutomationSnapshot): void {
     localFailure.current = next.failure !== undefined;
     currentSnapshotRevision.current = snapshotRevision(next);
@@ -854,6 +878,36 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           ) : null}
           {controlLabel}
         </span>
+        {activeContext && personHasPage && props.client.handBack !== undefined ? (
+          <OctantButton
+            aria-label="Hand back"
+            className="browser-workspace__take-over"
+            onClick={() => void holdPage("hand-back")}
+            size="xs"
+            title="You have the page. Hand it back to let the agent use it again."
+            type="button"
+            variant="secondary"
+          >
+            <Undo2 aria-hidden="true" />
+            <span className="browser-workspace__take-over-label">Hand back</span>
+          </OctantButton>
+        ) : null}
+        {activeContext &&
+        snapshot?.waitingForPerson === undefined &&
+        props.client.takeOver !== undefined ? (
+          <OctantButton
+            aria-label="Take over"
+            className="browser-workspace__take-over"
+            onClick={() => void holdPage("take-over")}
+            size="xs"
+            title="Hold the agent's Browser calls while you use the page"
+            type="button"
+            variant="ghost"
+          >
+            <Hand aria-hidden="true" />
+            <span className="browser-workspace__take-over-label">Take over</span>
+          </OctantButton>
+        ) : null}
         {activeContext && props.client.takeCapture !== undefined ? (
           <OctantButton
             aria-label="Screenshot"
@@ -1242,6 +1296,7 @@ function snapshotRevision(snapshot: BrowserAutomationSnapshot | undefined): stri
     snapshot.context?.contextId,
     snapshot.context?.state,
     snapshot.context?.presentation,
+    snapshot.waitingForPerson,
     snapshot.observation?.revision,
     snapshot.observation?.observedAt,
     snapshot.observation?.contentHash,

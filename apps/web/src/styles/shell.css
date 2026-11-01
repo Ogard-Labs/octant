@@ -3519,8 +3519,18 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   }
 }
 
+.browser-workspace__take-over {
+  flex: 0 0 auto;
+}
+
 @media (max-width: 720px) {
   .browser-workspace__control-state {
+    display: none;
+  }
+
+  /* The button keeps its name for assistive technology; the address field
+     keeps the width a phone has. */
+  .browser-workspace__take-over-label {
     display: none;
   }
 }

@@ -3,7 +3,7 @@ import type { BrowserAutomationSnapshot, ToolActionAuthority } from "@octant/con
 import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
 import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
 import { browserToolInputRecord, flowDecision } from "./browserFlows";
-import { parseBrowserToolInput } from "./browserToolOperations";
+import { parseBrowserToolInput, runBrowserToolSteps } from "./browserToolOperations";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as never;
 const threadId = "20000000-0000-4000-8000-000000000001" as never;
@@ -525,6 +525,112 @@ describe("browser diagnostics reach the provider-facing result", () => {
       uuid: () => "80000000-0000-4000-8000-000000000001",
     });
   }
+
+  it("refuses every call while the person has the page, but still lets stop release it", async () => {
+    const act = vi.fn(async () => snapshot());
+    const releaseThread = vi.fn(async () => snapshot());
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => snapshot({ context: activeContext(), waitingForPerson: "take-over" }),
+        create: vi.fn(),
+        act,
+        releaseThread,
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    for (const input of [{ operation: "snapshot" }, { operation: "click", selector: "#go" }]) {
+      const held = await tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify(input),
+      });
+      expect(held.isError).toBe(true);
+      expect(held.result).toMatchObject({
+        error: "browser-person-took-over",
+        message: expect.stringMatching(/took over/),
+      });
+    }
+    expect(act).not.toHaveBeenCalled();
+    await tools.execute({ name: "octant_browser", inputJson: '{"operation":"stop"}' });
+    expect(releaseThread).toHaveBeenCalledOnce();
+  });
+
+  it("answers a call the service refused because the person took over while it was queued as the hold", async () => {
+    const held = vi.fn(async () =>
+      snapshot({
+        status: "running",
+        context: activeContext(),
+        waitingForPerson: "take-over",
+        failure: {
+          category: "unavailable",
+          message: "The person took over the page, so this call did not run.",
+        },
+      }),
+    );
+    const tools = toolsFor({ revision: 1 }, held);
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: '{"operation":"click","selector":"#go"}',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.result).toMatchObject({ error: "browser-person-took-over" });
+  });
+
+  it("stops a batch at the step that hand-back answered with a fresh snapshot", async () => {
+    const note =
+      "The person took the page and handed it back, so your call did not run. This is a fresh snapshot of the page now.";
+    const run = vi.fn(async (step: { operation: string }) =>
+      step.operation === "click"
+        ? { result: { status: "running", note, page: { snapshot: "- button" } }, isError: false }
+        : { result: { status: "running", page: { changed: "ok" } }, isError: false },
+    );
+    const answer = await runBrowserToolSteps(
+      [{ operation: "type" }, { operation: "click" }, { operation: "type" }] as never,
+      run as never,
+    );
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(answer.isError).toBe(false);
+    expect(answer.result).toMatchObject({
+      note,
+      stoppedAtStep: 2,
+      steps: [
+        { step: 1, operation: "type" },
+        { step: 2, operation: "click" },
+      ],
+    });
+  });
+
+  it("says in one line that the person used the page, and in the handed-back case that the call did not run", async () => {
+    for (const [used, text] of [
+      ["used", /person used the page since you last looked/],
+      ["handed-back", /handed it back, so your call did not run/],
+    ] as const) {
+      const tools = toolsFor(
+        { revision: 3 },
+        vi.fn(async () =>
+          snapshot({
+            status: "running",
+            context: activeContext(),
+            observation: { revision: 3 } as never,
+            personUsedPage: used,
+          }),
+        ),
+      );
+      const result = await tools.execute({
+        name: "octant_browser",
+        inputJson: '{"operation":"read-page"}',
+      });
+      expect(result.result).toMatchObject({ note: expect.stringMatching(text) });
+    }
+  });
 
   it.each([
     "data:text/html;base64,aGVsbG8=",

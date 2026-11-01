@@ -19,6 +19,7 @@ import {
 } from "./browserRuntimePort";
 
 const TOKEN_HEADER = "x-octant-browser-broker-token";
+const CONTEXT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface DesktopBrowserRuntimeOptions {
   readonly brokerUrl: string;
@@ -52,6 +53,8 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
   readonly #extensionsFor: DesktopBrowserRuntimeOptions["extensionsFor"];
   readonly #exitListeners = new Set<(contextIds?: ReadonlyArray<BrowserContextId>) => void>();
   #eventPoll: ReturnType<typeof setInterval> | undefined;
+  readonly #personInputListeners = new Set<(contextId: BrowserContextId) => void>();
+  #personInputPoll: ReturnType<typeof setInterval> | undefined;
 
   constructor(options: DesktopBrowserRuntimeOptions) {
     const url = new URL(options.brokerUrl);
@@ -238,6 +241,42 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
         this.#eventPoll = undefined;
       }
     };
+  }
+
+  onPersonInput(listener: (contextId: BrowserContextId) => void): () => void {
+    this.#personInputListeners.add(listener);
+    this.#personInputPoll ??= setInterval(
+      () => void this.#pollPersonInput(),
+      this.#eventPollIntervalMs,
+    );
+    this.#personInputPoll.unref?.();
+    return () => {
+      this.#personInputListeners.delete(listener);
+      if (this.#personInputListeners.size === 0 && this.#personInputPoll !== undefined) {
+        clearInterval(this.#personInputPoll);
+        this.#personInputPoll = undefined;
+      }
+    };
+  }
+
+  async #pollPersonInput(): Promise<void> {
+    try {
+      const payload = await this.#request<unknown>("/v1/contexts/person-input", {});
+      if (
+        typeof payload !== "object" ||
+        payload === null ||
+        !("contextIds" in payload) ||
+        !Array.isArray(payload.contextIds)
+      ) {
+        return;
+      }
+      for (const contextId of payload.contextIds) {
+        if (typeof contextId !== "string" || !CONTEXT_ID_PATTERN.test(contextId)) continue;
+        for (const listener of this.#personInputListeners) listener(contextId as BrowserContextId);
+      }
+    } catch {
+      // The broker may be stopping. Ordinary availability checks own recovery.
+    }
   }
 
   async #pollGoneContexts(): Promise<void> {

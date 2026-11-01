@@ -30,6 +30,7 @@ const ROUTES = new Set([
   "/v1/contexts/create",
   "/v1/contexts/inspect-target",
   "/v1/contexts/gone",
+  "/v1/contexts/person-input",
   "/v1/contexts/act",
   "/v1/contexts/peek",
   "/v1/contexts/download-claim",
@@ -44,6 +45,12 @@ const ROUTES = new Set([
 /** A batch of cookies is larger than any other request, and is bounded by count too. */
 const IMPORT_BODY_LIMIT = 2 * 1_024 * 1_024;
 
+/** What the host reports on its own, kept until the server next asks. */
+interface BrokerEvents {
+  readonly gone: Set<string>;
+  readonly personInput: Set<string>;
+}
+
 export interface BrowserRuntimeBroker {
   readonly url: string;
   readonly token: string;
@@ -56,11 +63,14 @@ export async function startBrowserRuntimeBroker(
   profiles?: BrowserProfileStore,
 ): Promise<BrowserRuntimeBroker> {
   const token = randomBytes(32).toString("base64url");
-  const goneContexts = new Set<string>();
-  const removeGoneListener = host.onContextGone((contextId) => goneContexts.add(contextId));
+  const events: BrokerEvents = { gone: new Set<string>(), personInput: new Set<string>() };
+  const removeGoneListener = host.onContextGone((contextId) => events.gone.add(contextId));
+  const removePersonInputListener = host.onPersonInput((contextId) =>
+    events.personInput.add(contextId),
+  );
   let brokerUrl: string | undefined;
   const server = createServer((incoming, outgoing) => {
-    void handleIncoming(incoming, brokerUrl, token, host, goneContexts, profiles).then(
+    void handleIncoming(incoming, brokerUrl, token, host, events, profiles).then(
       async (response) => {
         const headers: Record<string, string> = {};
         response.headers.forEach((value, name) => (headers[name] = value));
@@ -90,6 +100,7 @@ export async function startBrowserRuntimeBroker(
     close: () => {
       closing ??= (async () => {
         removeGoneListener();
+        removePersonInputListener();
         await host.closeAll();
         await new Promise<void>((resolve, reject) => {
           if (!server.listening) return resolve();
@@ -100,7 +111,7 @@ export async function startBrowserRuntimeBroker(
       return closing;
     },
     fetchForTest: (request: Request, peerAddress = "127.0.0.1") =>
-      handleBrokerRequest(request, peerAddress, token, host, goneContexts, profiles),
+      handleBrokerRequest(request, peerAddress, token, host, events, profiles),
   });
 }
 
@@ -109,7 +120,7 @@ async function handleIncoming(
   brokerUrl: string | undefined,
   token: string,
   host: ReturnTypeOfBrowserSurfaceHost,
-  goneContexts: Set<string>,
+  events: BrokerEvents,
   profiles: BrowserProfileStore | undefined,
 ): Promise<Response> {
   if (brokerUrl === undefined) return failure("unavailable", 503);
@@ -134,7 +145,7 @@ async function handleIncoming(
     incoming.socket.remoteAddress ?? "",
     token,
     host,
-    goneContexts,
+    events,
     profiles,
     abort.signal,
   );
@@ -145,7 +156,7 @@ async function handleBrokerRequest(
   peerAddress: string,
   token: string,
   host: ReturnTypeOfBrowserSurfaceHost,
-  goneContexts: Set<string>,
+  events: BrokerEvents,
   profiles: BrowserProfileStore | undefined,
   signal?: AbortSignal,
 ): Promise<Response> {
@@ -155,8 +166,14 @@ async function handleBrokerRequest(
   if (request.method !== "POST" || url.search !== "") return failure("invalid-request", 400);
   if (url.pathname === "/v1/available") return Response.json({ available: host.available() });
   if (url.pathname === "/v1/contexts/gone") {
-    const contextIds = [...goneContexts];
-    goneContexts.clear();
+    const contextIds = [...events.gone];
+    events.gone.clear();
+    return Response.json({ contextIds });
+  }
+  // The pages the person typed or clicked in since the last ask, once each.
+  if (url.pathname === "/v1/contexts/person-input") {
+    const contextIds = [...events.personInput];
+    events.personInput.clear();
     return Response.json({ contextIds });
   }
   const body = await jsonBody(request);

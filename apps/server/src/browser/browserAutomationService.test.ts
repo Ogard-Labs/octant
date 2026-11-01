@@ -77,11 +77,13 @@ function harness(
     readonly agentDownloadsEnabled?: boolean;
     readonly downloads?: ConstructorParameters<typeof BrowserAutomationService>[0]["downloads"];
     readonly observed?: Partial<Awaited<ReturnType<BrowserRuntimePort["act"]>>>;
+    readonly unattended?: boolean;
   } = {},
 ) {
   const contexts = new Set<BrowserContextId>();
   const revokedThreads = new Set<BrowserThreadId>();
   let processExit: (() => void) | undefined;
+  let personInput: ((contextId: BrowserContextId) => void) | undefined;
   let expire: (() => void) | undefined;
   let now = Date.parse("2026-07-27T20:00:00.000Z");
   const runtime: BrowserRuntimePort = {
@@ -117,6 +119,12 @@ function harness(
         processExit = undefined;
       };
     },
+    onPersonInput: (listener) => {
+      personInput = listener;
+      return () => {
+        personInput = undefined;
+      };
+    },
   };
   const ids = [contextOne, "30000000-0000-4000-8000-000000000002"];
   const service = new BrowserAutomationService({
@@ -140,6 +148,7 @@ function harness(
       ? {}
       : { agentDownloadsEnabled: () => options.agentDownloadsEnabled === true }),
     ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
+    ...(options.unattended === true ? { isUnattendedScope: () => true } : {}),
     uuid: () => ids.shift() ?? crypto.randomUUID(),
     clock: () => new Date(now).toISOString(),
     now: () => now,
@@ -157,6 +166,7 @@ function harness(
     contexts,
     expire: () => expire?.(),
     processExit: () => processExit?.(),
+    personTyped: (contextId: BrowserContextId = contextOne) => personInput?.(contextId),
     revoke: (threadId: BrowserThreadId) => void revokedThreads.add(threadId),
     runtime,
     service,
@@ -751,6 +761,231 @@ describe("BrowserAutomationService", () => {
     fixture.expire();
     await Promise.resolve();
     expect(fixture.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+  });
+
+  describe("person and agent together", () => {
+    const withRef = {
+      url: "https://example.com/start",
+      snapshot: '- textbox "Name" [ref=e1]',
+      snapshotRefs: [{ ref: "e1", selector: "#name", role: "textbox", name: "Name" }],
+    };
+    const agent = { capturedBy: "agent" } as const;
+
+    async function snapshotted(fixture: ReturnType<typeof harness>) {
+      await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      vi.mocked(fixture.runtime.act).mockResolvedValueOnce(withRef);
+      await fixture.service.act({
+        windowId,
+        request: request({ kind: "snapshot", target: undefined }),
+        ...agent,
+      });
+    }
+
+    it("drops the agent's refs when the person types, refuses its next keystroke, and says so once", async () => {
+      const fixture = harness();
+      await snapshotted(fixture);
+      fixture.personTyped();
+
+      const refused = await fixture.service.act({
+        windowId,
+        request: request({ kind: "type", target: undefined, ref: "e1", value: "Ada" }),
+        ...agent,
+      });
+      expect(refused.failure?.category).toBe("stale");
+      expect(refused.failure?.message).toMatch(/person used the page/);
+      expect(refused.personUsedPage).toBe("used");
+      // Only the snapshot reached the runtime: the person's text is untouched.
+      expect(fixture.runtime.act).toHaveBeenCalledTimes(1);
+
+      // A selector does not get around it: the field is the person's too.
+      const bySelector = await fixture.service.act({
+        windowId,
+        request: request({ kind: "press", target: undefined, value: "Enter" }),
+        ...agent,
+      });
+      expect(bySelector.failure?.category).toBe("stale");
+      expect(bySelector.personUsedPage).toBeUndefined();
+
+      // Reading the page is allowed and still says it, once.
+      const read = await fixture.service.act({
+        windowId,
+        request: request({ kind: "extract-text", target: undefined }),
+        ...agent,
+      });
+      expect(read.failure).toBeUndefined();
+
+      vi.mocked(fixture.runtime.act).mockResolvedValueOnce(withRef);
+      const fresh = await fixture.service.act({
+        windowId,
+        request: request({ kind: "snapshot", target: undefined }),
+        ...agent,
+      });
+      expect(fresh.personUsedPage).toBeUndefined();
+      const typed = await fixture.service.act({
+        windowId,
+        request: request({ kind: "type", target: undefined, ref: "e1", value: "Ada" }),
+        ...agent,
+      });
+      expect(typed.failure).toBeUndefined();
+    });
+
+    it("leaves the action in flight to finish and keeps a snapshot it overlapped stale", async () => {
+      const fixture = harness();
+      await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      let finish!: () => void;
+      vi.mocked(fixture.runtime.act).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(withRef);
+          }),
+      );
+      const reading = fixture.service.act({
+        windowId,
+        request: request({ kind: "snapshot", target: undefined }),
+        ...agent,
+      });
+      await vi.waitFor(() => expect(fixture.runtime.act).toHaveBeenCalledTimes(1));
+      fixture.personTyped();
+      finish();
+      expect((await reading).failure).toBeUndefined();
+      const click = await fixture.service.act({
+        windowId,
+        request: request({ kind: "click", target: undefined, ref: "e1" }),
+        ...agent,
+      });
+      expect(click.failure?.category).toBe("stale");
+    });
+
+    it("counts the person's relayed action on a headless page as using it", async () => {
+      const fixture = harness();
+      await snapshotted(fixture);
+      await fixture.service.act({ windowId, request: request({ kind: "click", target: "#x" }) });
+      const refused = await fixture.service.act({
+        windowId,
+        request: request({ kind: "click", target: undefined, ref: "e1" }),
+        ...agent,
+      });
+      expect(refused.failure?.category).toBe("stale");
+      // A screenshot refresh is not the person using the page.
+      const calm = harness();
+      await snapshotted(calm);
+      await calm.service.act({
+        windowId,
+        request: request({ kind: "screenshot", target: undefined }),
+      });
+      const ok = await calm.service.act({
+        windowId,
+        request: request({ kind: "click", target: undefined, ref: "e1" }),
+        ...agent,
+      });
+      expect(ok.failure).toBeUndefined();
+    });
+
+    it("holds the agent out while the person has the page, and keeps the page open", async () => {
+      const fixture = harness();
+      await snapshotted(fixture);
+      const taken = fixture.service.takeOver(windowId, threadOne);
+      expect(taken.waitingForPerson).toBe("take-over");
+      expect(fixture.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("take-over");
+      // The same hold: no sign-in ask can start under it, and a second take-over is the same one.
+      expect(fixture.service.holdForPerson(windowId, threadOne)).toBeUndefined();
+      expect(fixture.service.takeOver(windowId, threadOne).waitingForPerson).toBe("take-over");
+      fixture.advance(400_000);
+      fixture.expire();
+      expect(fixture.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+    });
+
+    it("answers the first acting call after hand back with a fresh snapshot instead of running it", async () => {
+      const fixture = harness();
+      await snapshotted(fixture);
+      fixture.service.takeOver(windowId, threadOne);
+      const handed = fixture.service.handBack(windowId, threadOne);
+      expect(handed.waitingForPerson).toBeUndefined();
+
+      vi.mocked(fixture.runtime.act).mockResolvedValueOnce(withRef);
+      const answered = await fixture.service.act({
+        windowId,
+        request: request({ kind: "click", target: undefined, ref: "e1" }),
+        ...agent,
+      });
+      expect(answered.failure).toBeUndefined();
+      expect(answered.personUsedPage).toBe("handed-back");
+      expect(answered.observation?.snapshot).toBe('- textbox "Name" [ref=e1]');
+      expect(fixture.runtime.act).toHaveBeenLastCalledWith(
+        contextOne,
+        expect.objectContaining({ kind: "snapshot" }),
+        expect.anything(),
+      );
+      // Its refs are good again, and it is not told twice.
+      const next = await fixture.service.act({
+        windowId,
+        request: request({ kind: "click", target: undefined, ref: "e1" }),
+        ...agent,
+      });
+      expect(next.failure).toBeUndefined();
+      expect(next.personUsedPage).toBeUndefined();
+    });
+
+    it("never runs an agent call that was queued when the person took over", async () => {
+      const fixture = harness();
+      await snapshotted(fixture);
+      let finish!: () => void;
+      vi.mocked(fixture.runtime.act).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve({ url: "https://example.com/start" });
+          }),
+      );
+      const running = fixture.service.act({
+        windowId,
+        request: request({ kind: "scroll", target: undefined }),
+        ...agent,
+      });
+      await vi.waitFor(() => expect(fixture.runtime.act).toHaveBeenCalledTimes(2));
+      // Admitted by the tool before the person took the page, then waits its turn.
+      const queued = fixture.service.act({
+        windowId,
+        request: request({ kind: "extract-text", target: undefined }),
+        ...agent,
+      });
+      fixture.service.takeOver(windowId, threadOne);
+      finish();
+      await running;
+      const refused = await queued;
+      expect(refused.failure?.category).toBe("unavailable");
+      expect(refused.failure?.message).toMatch(/took over the page, so this call did not run/);
+      expect(fixture.runtime.act).toHaveBeenCalledTimes(2);
+    });
+
+    it("refuses to take over with no page, from another window, for a routine, or under a sign-in ask", async () => {
+      const none = harness();
+      expect(none.service.takeOver(windowId, threadOne).failure?.category).toBe("unavailable");
+      expect(none.service.handBack(windowId, threadOne).failure?.category).toBe("unavailable");
+
+      const fixture = harness();
+      await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      expect(fixture.service.takeOver(otherWindowId, threadOne).failure?.category).toBe(
+        "unavailable",
+      );
+      expect(fixture.service.takeOver(windowId, threadTwo).failure?.category).toBe("unavailable");
+      expect(fixture.service.inspectThread(windowId, threadOne).waitingForPerson).toBeUndefined();
+
+      const release = fixture.service.holdForPerson(windowId, threadOne);
+      expect(fixture.service.takeOver(windowId, threadOne).failure?.message).toMatch(/sign in/);
+      // Hand back never ends the agent's own sign-in ask; only its card does.
+      expect(fixture.service.handBack(windowId, threadOne).waitingForPerson).toBe("sign-in");
+      release?.();
+
+      const routine = harness({ unattended: true });
+      await routine.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      expect(routine.service.takeOver(windowId, threadOne).failure?.category).toBe("unauthorized");
+      expect(routine.service.inspectThread(windowId, threadOne).waitingForPerson).toBeUndefined();
+
+      const revoked = harness();
+      await revoked.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      revoked.revoke(threadOne);
+      expect(revoked.service.takeOver(windowId, threadOne).failure?.category).toBe("unauthorized");
+    });
   });
 
   it("journals browser observations as tainting tool results once", async () => {

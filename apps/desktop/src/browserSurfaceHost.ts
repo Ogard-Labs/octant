@@ -312,6 +312,10 @@ interface OwnedSurface {
   diagnosticSeq: number;
   /** The files this context's agent actions made it hold. */
   readonly downloads: DesktopDownloadHold;
+  /** How many keys and clicks the person put into the page. */
+  personInputs: number;
+  /** `personInputs` as of the start of the agent's last snapshot or navigation. */
+  snapshotPersonInputs: number;
 }
 
 /**
@@ -459,6 +463,27 @@ const ISOLATED_WORLD_ID = 1_001;
  */
 const MAX_USER_GRANTED_ORIGINS = 128;
 
+/** The actions that put a key or a click into the page; see the server's guard. */
+const PERSON_GUARDED_ACTIONS: ReadonlySet<string> = new Set([
+  "click",
+  "type",
+  "press",
+  "hover",
+  "select",
+  "drag",
+  "upload",
+]);
+
+/**
+ * Whether an input event is a key or a click that can change a field or press
+ * a control. A pointer moving over the page, a key coming up, and the page
+ * scrolling change nothing the agent's refs name.
+ */
+function isPersonInput(input: unknown): boolean {
+  if (typeof input !== "object" || input === null || !("type" in input)) return true;
+  return input.type === "keyDown" || input.type === "char" || input.type === "mouseDown";
+}
+
 export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const surfaces = new Map<string, OwnedSurface>();
   const surfaceByWebContents = new Map<number, OwnedSurface>();
@@ -468,6 +493,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (id !== undefined) surfaceByWebContents.delete(id);
   };
   const goneListeners = new Set<(contextId: string) => void>();
+  const personInputListeners = new Set<(contextId: string) => void>();
   const stateChannel = options.stateChannel ?? DESKTOP_IPC_CHANNELS.browserSurfaceState;
 
   const surface = (contextId: string): OwnedSurface => {
@@ -664,11 +690,17 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       owned.control = "user";
       publish(contextId, owned);
     });
-    const gateUserInput = (event: unknown) => {
-      if (owned.control === "agent") {
-        (event as { preventDefault?: () => void }).preventDefault?.();
-        return;
+    // Everything that reaches these handlers is the person's: the agent drives
+    // the page through the debugger, which does not pass through them. The
+    // person's input is delivered, never dropped, while the agent works; the
+    // server learns of it so the agent's snapshot is not trusted afterwards.
+    const gateUserInput = (_event: unknown, input?: unknown) => {
+      if (isPersonInput(input)) {
+        owned.personInputs += 1;
+        for (const listener of personInputListeners) listener(contextId);
       }
+      // An action in flight keeps the surface until it ends; its end hands it back.
+      if (owned.control === "agent") return;
       owned.control = "user";
       publish(contextId, owned);
     };
@@ -691,6 +723,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       downloadId: string,
     ): Promise<void> => {
       await surfaces.get(contextId)?.downloads.discard(downloadId);
+    },
+    /** The person typed or clicked in a page of this host. */
+    onPersonInput: (listener: (contextId: string) => void): (() => void) => {
+      personInputListeners.add(listener);
+      return () => personInputListeners.delete(listener);
     },
     onContextGone: (listener: (contextId: string) => void): (() => void) => {
       goneListeners.add(listener);
@@ -729,6 +766,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         httpErrors: [],
         diagnosticSeq: 0,
         downloads: new DesktopDownloadHold(options.downloadRoot),
+        personInputs: 0,
+        snapshotPersonInputs: 0,
       };
       openTabView(input.contextId, owned, firstTabId);
       surfaces.set(input.contextId, owned);
@@ -800,6 +839,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const owned = surface(contextId);
       return queueSurfaceAction(owned, async () => {
         throwIfAborted(signal);
+        // The check the server's poll cannot make in time: the person's key
+        // is known here the moment it lands. An action that sends a key or a
+        // click does not run until the agent has read the page since.
+        if (
+          PERSON_GUARDED_ACTIONS.has(request.kind) &&
+          owned.personInputs > owned.snapshotPersonInputs
+        ) {
+          throw new BrowserTargetStaleError();
+        }
+        const inputsAtStart = owned.personInputs;
         owned.control = "agent";
         owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
@@ -1050,6 +1099,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               ...(emulation === undefined ? {} : { emulation }),
             };
           })();
+          if (
+            request.kind === "snapshot" ||
+            request.kind === "navigate" ||
+            request.include?.includes("snapshot") === true
+          ) {
+            owned.snapshotPersonInputs = inputsAtStart;
+          }
           // Every dialog the page raised during the action is reported once,
           // with how the fixed policy answered it; so is every download.
           if (request.downloads === "hold") await owned.downloads.finish();

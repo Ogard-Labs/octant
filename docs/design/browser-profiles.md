@@ -248,7 +248,10 @@ thread made.
 The agent's activity on a profile page is visible: while the agent drives one,
 the Browser toolbar's driver indicator ("Agent active · Personal") and the
 floating page preview both show the profile's name. The toolbar's profile
-control shows the page's profile at all times.
+control shows the page's profile at all times. The person can take the page
+from the agent with **Take over**
+([Person and agent together](browser-agent-tool.md#person-and-agent-together));
+a paired device cannot, signed in or not.
 
 ## Extensions
 

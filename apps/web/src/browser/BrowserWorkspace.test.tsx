@@ -1096,6 +1096,122 @@ describe("BrowserWorkspace", () => {
     },
   );
 
+  describe("taking the page over from the agent", () => {
+    /** A host that holds the page once asked and releases it when handed back. */
+    function holdingClient() {
+      const browser = client();
+      let held: "take-over" | undefined;
+      const answer = () =>
+        ({
+          status: "running",
+          threadId,
+          context,
+          evidence: [],
+          ...(held === undefined ? {} : { waitingForPerson: held }),
+        }) as any;
+      vi.mocked(browser.inspectThread).mockImplementation(async () => answer());
+      browser.takeOver = vi.fn(async () => {
+        held = "take-over";
+        return answer();
+      });
+      browser.handBack = vi.fn(async () => {
+        held = undefined;
+        return answer();
+      });
+      return browser;
+    }
+
+    async function renderHeadless(browser: BrowserAutomationClient) {
+      render(
+        <BrowserWorkspace
+          client={browser}
+          tab={{
+            kind: "browser",
+            id: "90000000-0000-4000-8000-000000000031" as any,
+            mode: "work",
+            title: "Browser",
+            threadId: threadId as any,
+          }}
+        />,
+      );
+      await screen.findByRole("button", { name: "Stop" });
+    }
+
+    it("takes the page on one click, says so, and hands it back on one click", async () => {
+      const browser = holdingClient();
+      await renderHeadless(browser);
+
+      await userEvent.click(await screen.findByRole("button", { name: "Take over" }));
+      expect(browser.takeOver).toHaveBeenCalledWith({ threadId });
+      expect(await screen.findByText("You have the page")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Take over" })).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Hand back" }));
+      expect(browser.handBack).toHaveBeenCalledWith({ threadId });
+      await waitFor(() => expect(screen.queryByText("You have the page")).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "Take over" })).toBeInTheDocument();
+    });
+
+    it("shows a take-over made in another window of the same thread", async () => {
+      const browser = holdingClient();
+      vi.mocked(browser.inspectThread).mockResolvedValue({
+        status: "running",
+        threadId,
+        context,
+        evidence: [],
+        waitingForPerson: "take-over",
+      } as any);
+      await renderHeadless(browser);
+      expect(await screen.findByRole("button", { name: "Hand back" })).toBeInTheDocument();
+      expect(screen.getByText("You have the page")).toBeInTheDocument();
+    });
+
+    it("offers no Take over without a page, with a client that cannot, or under the agent's sign-in ask", async () => {
+      const bare = client();
+      vi.mocked(bare.inspectThread).mockResolvedValue({
+        status: "ready",
+        threadId,
+        evidence: [],
+      } as any);
+      const { unmount } = render(
+        <BrowserWorkspace
+          client={bare}
+          tab={{
+            kind: "browser",
+            id: "90000000-0000-4000-8000-000000000032" as any,
+            mode: "work",
+            title: "Browser",
+            threadId: threadId as any,
+          }}
+        />,
+      );
+      expect(screen.queryByRole("button", { name: "Take over" })).not.toBeInTheDocument();
+      unmount();
+
+      const signingIn = holdingClient();
+      vi.mocked(signingIn.inspectThread).mockResolvedValue({
+        status: "running",
+        threadId,
+        context,
+        evidence: [],
+        waitingForPerson: "sign-in",
+      } as any);
+      await renderHeadless(signingIn);
+      expect(screen.queryByRole("button", { name: "Take over" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Hand back" })).not.toBeInTheDocument();
+    });
+
+    it("says why when the host refuses", async () => {
+      const browser = holdingClient();
+      browser.takeOver = vi.fn(async () => {
+        throw new BrowserAutomationClientFailure("unavailable", "There is no page to take over.");
+      });
+      await renderHeadless(browser);
+      await userEvent.click(await screen.findByRole("button", { name: "Take over" }));
+      expect(await screen.findByText("There is no page to take over.")).toBeInTheDocument();
+    });
+  });
+
   it.each(["workspace-drag-preview", "workspace-drop-overlay", "octant-dialog__backdrop"])(
     "detaches the native surface while the .%s renderer overlay is present",
     async (overlayClass) => {

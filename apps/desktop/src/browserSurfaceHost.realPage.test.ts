@@ -7,7 +7,11 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { chromium, type Browser, type CDPSession, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createBrowserSurfaceHost, type BrowserSurfaceViewPort } from "./browserSurfaceHost";
+import {
+  BrowserTargetStaleError,
+  createBrowserSurfaceHost,
+  type BrowserSurfaceViewPort,
+} from "./browserSurfaceHost";
 
 /**
  * The desktop Browser's agent actions against a real Chromium page. Electron
@@ -136,6 +140,8 @@ afterAll(async () => {
 async function pageView(): Promise<{
   view: BrowserSurfaceViewPort;
   page: Page;
+  /** Plays the person's key into the page, as Electron's input event does. */
+  personKey: () => void;
 }> {
   if (browser === undefined) throw new Error("No Chromium.");
   // An Electron view has no color scheme of its own: it follows the machine.
@@ -143,6 +149,7 @@ async function pageView(): Promise<{
   let title = "";
   let session: CDPSession | undefined;
   let attached = false;
+  const inputListeners = new Set<(event: unknown, input: unknown) => void>();
   const messageListeners = new Set<
     (event: unknown, method: string, params: unknown, sessionId?: string) => void
   >();
@@ -308,7 +315,9 @@ async function pageView(): Promise<{
         goBack: () => undefined,
         goForward: () => undefined,
       },
-      on: () => undefined,
+      on: (event: string, listener: (event: unknown, input: unknown) => void) => {
+        if (event === "before-input-event") inputListeners.add(listener);
+      },
       reload: () => undefined,
       session: {
         on: (_event: string, listener: never) => {
@@ -323,7 +332,15 @@ async function pageView(): Promise<{
       stop: () => undefined,
     },
   };
-  return { view, page };
+  return {
+    view,
+    page,
+    personKey: () => {
+      for (const listener of inputListeners) {
+        listener({ preventDefault: () => undefined }, { type: "keyDown", key: "a" });
+      }
+    },
+  };
 }
 
 async function surface(
@@ -363,7 +380,14 @@ async function surface(
     kind: "navigate",
     target: `${origin}${path}`,
   });
-  return { host, contextId, page, opened, view };
+  return {
+    host,
+    contextId,
+    page,
+    opened,
+    view,
+    personKey: pool[0]?.personKey ?? (() => undefined),
+  };
 }
 
 /**
@@ -516,6 +540,24 @@ describe.skipIf(chrome === undefined)(
           expected: { role: save.role, name: save.name, url: `${origin}/form` },
         }),
       ).rejects.toThrow(/changed since the snapshot/);
+      await page.close();
+    });
+
+    it("holds an agent key or click once the person has typed, and frees it after a snapshot, keeping their text", async () => {
+      const { host, contextId, page, personKey } = await surface("/form");
+      const before = await host.act(contextId, { kind: "snapshot" });
+      const name = entry(before.snapshotRefs, "Name");
+      await page.fill("#name", "Grace");
+      personKey();
+      await expect(
+        host.act(contextId, { kind: "type", target: name.selector, value: "Ada" }),
+      ).rejects.toBeInstanceOf(BrowserTargetStaleError);
+      expect(await page.inputValue("#name")).toBe("Grace");
+      // Reading is allowed, and a snapshot makes the page actable again.
+      await host.act(contextId, { kind: "extract-text" });
+      await host.act(contextId, { kind: "snapshot" });
+      await host.act(contextId, { kind: "type", target: "#name", value: "Ada" });
+      expect(await page.inputValue("#name")).toContain("Ada");
       await page.close();
     });
 

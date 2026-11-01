@@ -72,6 +72,7 @@ export interface BrowserAutomationRouteDependencies {
     BrowserAutomationService,
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
   > &
+    Partial<Pick<BrowserAutomationService, "takeOver" | "handBack">> &
     Partial<
       Pick<
         BrowserAutomationService,
@@ -541,6 +542,56 @@ export function createBrowserAutomationRouteHandler(
           ),
           origin,
         );
+      }
+      if (
+        url.pathname === "/api/browser/contexts/take-over" ||
+        url.pathname === "/api/browser/contexts/hand-back"
+      ) {
+        // The person's, and only from a window of this computer that can see
+        // the thread: this route decides it, never the pane. A paired device
+        // may not, even on a page it can tap: it cannot type, and the gateway
+        // does not admit this path for it either. The service adds the rest (a
+        // routine's window, the agent's own sign-in ask).
+        const input = decodeBrowserThreadContextCommand(decoded.value);
+        if (callerKind === "remote-device") {
+          return failure(
+            {
+              category: "unauthorized",
+              message: "Taking over the page is for the person at this computer.",
+            },
+            403,
+            origin,
+          );
+        }
+        if (
+          !BROWSER_MODES.some((mode) =>
+            dependencies.authority.canAccessWindow(windowId, input.threadId, mode),
+          )
+        ) {
+          return notThisWindowsThread(origin);
+        }
+        const hold =
+          url.pathname === "/api/browser/contexts/take-over"
+            ? dependencies.service.takeOver
+            : dependencies.service.handBack;
+        if (hold === undefined) {
+          return failure(
+            { category: "unavailable", message: "Taking over the page is unavailable." },
+            503,
+            origin,
+          );
+        }
+        const answered = decodeBrowserAutomationSnapshot(
+          hold.call(dependencies.service, windowId, input.threadId),
+        );
+        if (answered.failure !== undefined) {
+          return failure(
+            answered.failure,
+            answered.failure.category === "unauthorized" ? 403 : 409,
+            origin,
+          );
+        }
+        return success(answered, origin);
       }
       if (url.pathname === "/api/browser/actions") {
         const input = decodeBrowserActionCommand(decoded.value);
