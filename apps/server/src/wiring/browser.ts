@@ -266,6 +266,8 @@ export function wireBrowser(deps: BrowserDependencies) {
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       receipts: localPluginImportReceipts,
       runtime: browserRuntime,
+      // Another browser's extensions are listed and copied only on the person's pick.
+      importHome: homedir(),
       readProject: persistence.readProject,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),

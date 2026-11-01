@@ -30,7 +30,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | Area                                                                                  | Decisions | Built   | Partly built | Designed, not built |
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 5         | 4       | 1            | 0                   |
-| [Guardrails and review](#guardrails-and-review)                                       | 8         | 0       | 7            | 1                   |
+| [Guardrails and review](#guardrails-and-review)                                       | 8         | 2       | 6            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
@@ -40,17 +40,17 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 10      | 4            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
-| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
+| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 4       | 0            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 9       | 1            | 0                   |
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 8         | 7       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 6       | 0            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 7       | 1            | 0                   |
-| [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
-| [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 3            | 1                   |
-| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 5       | 3            | 0                   |
+| [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
+| [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
+| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 8       | 0            | 0                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 6       | 2            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 9         | 9       | 0            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **222**   | **179** | **39**       | **4**               |
+| **All areas**                                                                         | **222**   | **186** | **33**       | **3**               |
 
 ## Principles and hard lines
 
@@ -149,7 +149,7 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Built in Work: Auto, Ask first, Accept edits and Full access, set from Settings › Work and the composer, with the one-time warning; Work has no Plan.
 - Built in both: a Work Project and a Code Project can override the mode new threads start in; the first-run answer sets the default for new Work threads as well as Code; the thread header shows the level in force and the scope it came from; every level lowered at the global, Project or thread scope is journaled with who, when, from which level (absent when a Project override replaced the default it followed) and which scope.
 - Computer and Browser keep their ask at the first action in each app at every level, Full access included, by a separate maintainer decision.
-- Not built yet: an ACP agent's own reviewer.
+- Built in Code: Mistral Vibe's auto-approve mode, the one ACP profile that declares its own reviewer. Not built yet: an own reviewer for any other ACP agent.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -180,7 +180,7 @@ The first run asks once which mode new threads start in, with Auto pre-selected 
 - Built for Code: the answer is stored as the Code default, Settings › Code › Access changes it, and a Code Project may override it; a Project that remembered Full access before Project modes existed starts its threads in Full access.
 - Work takes the same modes without Plan; a new Work thread starts in its Project's mode, else the default the first-run answer or Settings › Work set, and its composer switches a thread's mode.
 
-Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
+Status: Built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
 ### Work and Code share one capability set and differ in focus
 
@@ -225,7 +225,7 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Built: the server registry in Settings › Access › Servers (alias, user, Read-only, Operate or Admin profile, described deploys, runbook path), journaled and replayed, local window only; the Judge's SSH rules (a plain ssh call to a registered server as its user passes within its profile, an unregistered host, a key path, a tunnelling option, a lock-out or destructive remote command, or a remote secret read goes to the person or is refused) checked on a real-world command set; every Octant Harness `ssh` command journaled with host and exit status at every level; the person's SSH agent socket handed to harness shells; runbooks given to harness turns as notes that grant nothing.
 - Built: the secret guard's list handed to the Watcher and the Judge, and a journaled tag for a secret-then-network command at Full access.
 - Built: the Judge's fast allow for egress to a safe network, for a call that names its destinations (never a shell command), only while Network limits are on and only on an untainted thread.
-- Not built yet: the shared levels in Work; a confined command reaching a registered server (ssh connects at Full access only), the credential broker for SSH, exit status and runbook context for provider runtimes' own commands, `scp` and `rsync` rules, and a Project override of the registry; the Watcher cannot read a runtime's own web result where the runtime does not expose it (Codex, OpenCode); the false-allow rate of a real model is unmeasured.
+- Not built yet: a confined command reaching a registered server on Linux (macOS only) and a provider runtime's own confined commands reaching one; the credential broker for SSH; the Watcher reading a runtime's own web result where the runtime does not expose it (Codex, OpenCode); the false-allow rate of a real model is unmeasured.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
 
@@ -255,7 +255,7 @@ The person registers their own servers with an action profile, and SSH to a regi
 - Every remote command and its exit status is journaled with the host, remote output passes through the Watcher, and a per-server runbook is context, never authority.
 - Built: the server registry in Settings › Access › Servers with a Project's own list replacing the account list for its threads; the Judge's rules by profile for `ssh`, `scp`, and `rsync` (a download reads, an upload is Admin, a deleting sync is a lock-out action); every remote command journaled with its host, and its exit status where the runtime reports it (the Octant Harness and Codex); remote output through the Watcher (harness and Codex); runbooks given to every runtime's Work and Code turns as notes that grant nothing; at Guarded the first connection to each host in a thread asks, naming the host, and no remembered approval covers it.
 - Built on macOS: below Full access a harness command that is one plain `ssh`, `scp`, or `rsync` call reaches only the registered servers it names, through per-command loopback relays and an agent socket the host owns that only lists keys and signs; the key files stay unreadable and the secret guard's list is unchanged. Octant stores no key and carries no SSH protocol of its own.
-- Not built yet: confined server access on Linux, the credential broker for SSH, and the command record for runtimes that do not name their commands.
+- Not built yet: confined server access on Linux, the credential broker for SSH, and a command record (with exit status) for runtimes that do not name their commands (OpenCode, ACP agents, Pi), which keep Shield's journaled decision as their record.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield) and [Modes](../architecture.md#modes-chat-work-and-code).
 
@@ -550,7 +550,7 @@ An agent reaches a remote machine with `ssh` through the thread's shell, in Work
 
 - At Guarded, the first connection to each host in a thread asks the person, naming the host.
 - Network egress for shell commands follows the level: Project rules at Guarded and Reviewed, open at Full access.
-- A Code Project may be bound to a folder on a registered server, in a catalog of its own; the connection uses this host's `ssh` and the person's agent, forwards nothing, refuses an unknown host key, and fails closed with no local fallback. Built: the catalog, the connection, the folder check, Octant Harness Code threads with files, commands and Git on the server at every level (a remembered approval never covers a command there), and thread terminals as logins on the server. Not built yet: Work Projects there, host-side Git panels, files, tests, worktrees and pull requests for them ([Server Projects](server-projects.md)).
+- A Code Project may be bound to a folder on a registered server, in a catalog of its own; the connection uses this host's `ssh` and the person's agent, forwards nothing, refuses an unknown host key, and fails closed with no local fallback. Built: the catalog, the connection, the folder check, Octant Harness Code threads with files, commands and Git on the server at every level (a remembered approval never covers a command there), and thread terminals as logins on the server. Not built yet: Work Projects there, host-side Git panels, files, tests, worktrees and pull requests for them ([Server Projects](server-projects.md)). Its tests ran against a throwaway local `sshd` only, never a real server.
 - The earlier SSH target binding was removed and old journals still replay; its `remote-root` threads keep refusing every operation.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -777,7 +777,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - The dispatcher revalidates host, Project, binding, profile, provider, model and authority at every occurrence, and a stale definition never adopts replacement authority.
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
 - An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile.
-- The scheduler is an in-process timer; nothing wakes the computer or runs in a cloud, and a self-hosted wake service is designed but not built.
+- The scheduler is an in-process timer; nothing runs in a cloud, and a self-hosted wake service on a person's hub can wake a spoke for a routine (built; run only between hosts on loopback with a fake socket).
 - A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -790,9 +790,9 @@ A routine runs at the guardrail level the person picks when creating it, Full ac
 - Built: a person at a local window may pick a level on the routine itself (Ask first, Accept edits, Auto or Full access). It is the highest a run may use: a run takes the lower of the pick and its Project's level, so a pick lowers a run and never raises it above what the person allowed. A paired device and a routine an agent proposed cannot set it, and a Chat routine has none.
 - Built: a person at a local window may opt a routine into its Project's level, journaled on the definition and copied into each run; each run then takes the level the Project's new threads start at, Full access included. Without it a routine asks first, and a Full access profile stays ineligible.
 - A Work routine captures the shell and Git like a Code routine; one saved without them does not run until a person saves it again.
-- Not built yet: the merge permission.
+- Built: a person at a local window may let a Code routine merge the pull requests it opens (the routine's Merge the pull requests it opens choice); it reaches only the thread one of its runs created, while the routine is enabled, and a routine an agent proposed cannot set it.
 
-Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Follow-ups in the same thread
 
@@ -1330,7 +1330,7 @@ A thread's `autoApprove` flag says who answers a prompt, not what is permitted.
 - On one provider runtime, approval-gated honours permission grants the person saved in that runtime for the same repository; Octant's denies still win and Octant never writes such a grant.
 - Octant Shield answers these prompts on a Code thread or a Work thread where it is the reviewer, on every runtime that routes them to Octant.
 
-Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Approvals](../architecture.md#security-and-authority).
+Status: Built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Approvals](../architecture.md#security-and-authority).
 
 ### Goal-loop round authority
 
@@ -1558,7 +1558,7 @@ A Project browser is the person's browser, never an agent's. A page is Private u
 - A Project context is isolated and ephemeral, registered under an owner id derived from the Project, so no thread surface can attach and no thread approval carries into it.
 - Only the person at a local window may open, read or close it; a paired device is refused.
 - Profile pages open only in the desktop app's native Browser, and an agent acts on an origin there only after a site approval naming the profile.
-- Browser extensions install only from an unpacked folder at a local window, start disabled, are enabled per profile, and never load into a Private page.
+- Browser extensions install only at a local window, from an unpacked folder or from a copy of an extension the person picks in another Chromium-family browser on this Mac (never loaded in place; Manifest V2 and native-messaging extensions are listed as unsupported), start disabled, are enabled per profile, and never load into a Private page.
 - Octant never opens or imports another browser's profile.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Project browsing contexts](../architecture.md#security-and-authority) and [Browser profiles and extensions](../architecture.md#security-and-authority).
@@ -1697,10 +1697,10 @@ Credentials and mutable authority never cross hosts; multi-host views merge read
 - An all-hosts list keeps every registered host; an unreachable host's cached items stay listed as stale and read-only.
 - A host is shown as an environment under the person's name for it, and the host a window runs on is always "Local". _Here only._
 - A row names its environment only when it is not this one; filtering and ordering by environment are client view state, and "All environments" includes hosts that connect later. _Here only._
-- A hub acting on a spoke is a remote principal on that host, held to the grant that host's person chose, and can never approve, read credentials or loosen confinement there (hub and spokes not built yet).
+- A hub acting on a spoke is a remote principal on that host, held to the grant that host's person chose, and can never approve, read credentials or loosen confinement there.
 - The host's platform reaches only a window on the host itself; server-written copy says "this computer" and never follows the platform.
 
-Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Hosts never trust each other](../architecture.md#security-and-authority).
+Status: Built. Since: —. Detail: [Architecture: Security and authority, Hosts never trust each other](../architecture.md#security-and-authority).
 
 ### Dev server proxy grants
 
@@ -2267,6 +2267,7 @@ Status: Built. Since: —. Detail: [Search queries on a tainted thread](search-q
 Browser pages can keep sign-ins in named profiles, and a person may import cookies from another browser into a profile.
 
 - Octant never opens another browser's profile in place; the person's explicit pick of a browser and one of its profiles is the only way its cookies reach a Project or Personal profile.
+- The person may import every cookie in the chosen browser profile or only one site's and its parent domains'; the journal records only that the import was limited to a site.
 - A Chromium-family browser's cookie key comes through the macOS Keychain prompt; a refusal imports nothing. Cookies are never logged, journaled, returned to a window, or sent off the Mac, and the journal records the source, the profile, and counts.
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
