@@ -14,6 +14,9 @@ Status: built. The page snapshot and element refs (frames and open shadow
 roots included), short results, hover, select, drag, key chords, upload, tabs,
 batched steps, waits, settling, dialogs, viewport size, the sign-in handoff,
 and diagnostics with a cursor are built on the headless and desktop Browsers.
+Flows (recording a run, saving it in the Project, and replaying it by name) are
+built in Work and Code; the person can list and delete a Project's flows in
+Settings, and runs one by asking the agent.
 
 ## One tool for every provider
 
@@ -217,9 +220,9 @@ only after the person approves it.
   its operation, and its own refusal or failure) and lists the steps that ran
   before it with what each changed; no later step runs. A batch that succeeds
   answers as its last step does, with a line per step.
-- A batch cannot hold another batch, an upload, `stop`, or a `navigate` with a
-  profile: each of those needs a call, and for an upload or a signed-in page a
-  question to the person, of its own. A malformed step refuses the whole batch
+- A batch cannot hold another batch, an upload, `stop`, a flow operation, or a
+  `navigate` with a profile: each of those needs a call, and for an upload or a
+  signed-in page a question to the person, of its own. A malformed step refuses the whole batch
   before any step runs.
 - A batch is a list of fixed operations, never a script: nothing an agent
   writes runs in the page.
@@ -229,6 +232,94 @@ only after the person approves it.
   re-polls on its own, keeps getting the page back without a refusal.
 - The field a `type` or `select` changes is not page text, so such a step
   reports that the field holds the new value when nothing else changed.
+
+## Flows
+
+A flow is a named, fixed list of the operations an agent ran once, saved in the
+Project so a later turn can repeat the check without a model turn per step. It
+is `steps` kept for later: never a script, and every step is admitted when it
+runs, not when it was recorded.
+
+- **Recording.** The server keeps, for each thread's Browser page, the agent's
+  successful operations since the page opened, at most 50. Each is stored as the
+  operation would be written as a call (without the `expectedObservationRevision`
+  and `include` that belong to one call). `snapshot`, `screenshot`, `read-page`,
+  `diagnostics`, `tab-list`, and `help` are not stored, and a failed or refused
+  operation is not stored. A ref is stored as the element's role and accessible
+  name, with the snapshot's selector as a hint for a reader; the ref id is never
+  stored, because it means nothing on a fresh page.
+- **What a flow cannot hold.** `upload`, `sign-in`, `stop`, a download save, a
+  `navigate` with a profile, and an address that carries a user, a password, or a
+  query value whose name suggests a secret (the same test diagnostics apply)
+  each end what can be saved: the run on that page cannot be saved, and
+  `flow-save` answers `flow-run-needs-a-person` naming the operation. A run
+  longer than 50 steps answers `flow-run-too-long`. `stop` also drops the run.
+- **Expected outcome.** Each step stores the page's path (not its query or
+  fragment) and title after it, the facts behind the `changed` line, and no page
+  text.
+- **Saving.** `flow-save` with a `name` of 1 to 80 characters saves the current
+  run as a flow of the thread's Project (Work or Code), replacing a flow of the
+  same name. A Project keeps at most 50 flows, each at most 256 KiB stored.
+- **Listing.** `flow-list` answers the Project's flow names with their step
+  counts and first address.
+- **Replay.** `flow-run` with a `name` runs the steps in order with no model turn
+  between them, each through exactly the path a single call takes: thread
+  authority, model binding, origin approval, Plan mode, the stale check, and the
+  credential check. A step that acted by ref first takes a snapshot of the fresh
+  page and picks the one element with the recorded role and name; none, or more
+  than one, stops the replay. After each step the server compares the page's
+  path and title with the recorded ones, and the first step whose outcome
+  differs, or that fails or is refused, stops the replay. The answer names that
+  step (its number, its operation, and the expected and found path and title, the
+  element it could not find, or the refusal) and lists the steps that ran with
+  what each changed; a replay that finishes answers as a `steps` batch does. A
+  replayed navigation still raises its origin approval, and the replay's own
+  steps are recorded like any other operation of the agent.
+- **Who may.** The thread's own agent in Work and Code saves, lists, and runs. A
+  paired device may not save or run (a flow navigates and types, which it may
+  not), and Plan mode refuses every flow operation like every other Browser
+  operation. A routine or a subagent may run a flow, on a Private page only,
+  because the profile rules apply to each replayed step as to any call; it may
+  not save one. A terminal grant has no flows. Chat has no Browser.
+- **Where flows live.** Flows are host data per Project, journaled as
+  `browser.flow-saved@1` and `browser.flow-deleted@1` on one aggregate per
+  Project, not files in the Project folder. They are erased with the Project.
+  They are not in a thread export, the host-wide data export that embeds one,
+  or replica sync: those carry a thread's and a Canvas's records, and a Project's
+  Browser records (profiles, approvals) travel in none of them.
+- **The person's view.** Settings › Data & storage › Browser flows lists every
+  Project's flows with step count and first address and deletes one after a
+  confirmation, from a local window only (`/api/browser/flows`; a paired device
+  is refused). A person runs a flow by asking the agent to; a run needs a model's
+  authority and approvals, which a Settings button cannot hold.
+- Rationale: a stored step is read again with the tool's own parser at replay,
+  so a flow can carry nothing a call could not, and a corrupted or edited record
+  cannot add an operation. Refs are stored as role and name because a ref
+  names an element of one snapshot, while a role and name is what the stale check
+  already trusts; requiring exactly one match turns a page that changed under a
+  flow into a stop, not a click on the wrong element. Comparing path and title,
+  not text, keeps the check cheap and keeps page content out of the Project's
+  data. Typed text is stored as typed: credential fields can never be typed into
+  (a `type` or `press` into one is refused before any runtime acts), so no
+  password, code, or card number reaches a flow through a step, and an address
+  that holds a secret ends the recording instead. A step that needs the person
+  ends what can be saved because a replay has nobody to ask. A failed operation is
+  not stored and does not end the run: the page is as it was, and storing it
+  would replay a mistake. A routine may run but not save because saving writes a
+  Project's data for good, with nobody there to have meant it. A secret in an
+  address's path or in a query value under a name the test does not know is not
+  detected, and text typed into a field the page did not mark as a credential is
+  stored as typed, so a flow is Project data the person can read and delete in
+  Settings. A fragment is left out of the stored address because it never reaches
+  a server and often carries a token. A tab id is stored as the context's own
+  ordinal, so a flow with tab steps is meant for a fresh page. The Settings list
+  deletes but does not run for the reason above. Measured on a local page with
+  a two-field form (headless Chromium), the model's tool results for navigate,
+  snapshot, type, click, and a verifying read-page were 175, 353, 179, 149, and
+  226 bytes, 1,082 in all; `flow-run` of the three steps that remain
+  (navigate, type, click) answered once in 461 bytes, and the model sent one
+  short call instead of five. A longer page widens the gap, because a snapshot
+  grows with the page and a replay does not.
 
 ## Waiting, dialogs, and viewport
 
@@ -385,3 +476,8 @@ Several threads of one Project may each drive their own page at the same time.
 - `apps/server/src/browser/browserThreadOwnership.test.ts` covers one thread's
   page being out of reach of another thread, a subagent, and another thread's
   terminal grant, and the Project's page list.
+- The smoke test also records, saves, and replays a flow on a fresh page, stops
+  at a renamed button, a different title, and an ambiguous element, asks again
+  for an origin a replay opens, and refuses Plan mode and a paired device.
+  `browserFlowService.test.ts` covers saving, replacing, listing, deleting,
+  limits, replay of the journal, and erasing a Project.

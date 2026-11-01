@@ -3424,6 +3424,16 @@ flowchart LR
   takes: that thread's export, or the host-wide data export that embeds it. A capture adds no Project filesystem authority and no
   second taint mechanism: the observation that produced it already taints the
   thread. Detail is in [Browser captures](design/browser-captures.md).
+- **Browser flows.** An agent's Browser run can be saved as a named flow in the
+  thread's Work or Code Project and replayed by name with no model turn between
+  steps, each step admitted like a call of its own. The host keeps up to 50 flows
+  of up to 50 steps per Project as `browser.flow-saved@1` and
+  `browser.flow-deleted@1` events on one aggregate per Project. A step holds the
+  operation as a call writes it, an element as its role and name, and the page's
+  path and title expected after it, never page text, a ref id, or a secret. A
+  Project erase takes them; they are in no thread export, host data export, or
+  replica sync. Only a local window lists and deletes them. Detail is in
+  [Browser for agents: Flows](design/browser-agent-tool.md#flows).
 - **Journal growth.** A diagnostics export carries journal events per aggregate
   kind per day for the last 14 days, the journal head sequence, and the database
   size, as kind names and counts only: no payload, identifier, or thread or

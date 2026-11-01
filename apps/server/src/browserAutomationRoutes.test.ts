@@ -754,6 +754,45 @@ describe("browser automation routes", () => {
       expect((await handler(post("profiles", clear)))?.status).toBe(503);
     });
 
+    it("lists and deletes saved flows for a local window and refuses a paired device", async () => {
+      const flowProject = "40000000-0000-4000-8000-000000000001";
+      const flows = {
+        summaries: vi.fn(() => []),
+        delete: vi.fn((_project: unknown, name: string) => name === "Order check"),
+      };
+      const withFlows = createBrowserAutomationRouteHandler({
+        service: service as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        flows: flows as never,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      const body = async (response: Response | undefined) => response?.json();
+
+      expect(await body(await withFlows(post("flows", { kind: "list" })))).toEqual({
+        kind: "browser-flows",
+        flows: [],
+      });
+      const remove = { kind: "delete", projectId: flowProject, name: "Order check" };
+      expect(await body(await withFlows(post("flows", remove)))).toMatchObject({
+        kind: "browser-flow-deleted",
+      });
+      expect(await body(await withFlows(post("flows", { ...remove, name: "Gone" })))).toMatchObject(
+        { kind: "browser-flows-refused", reason: "not-found" },
+      );
+
+      flows.delete.mockClear();
+      expect(await body(await withFlows(post("flows", remove, true)))).toMatchObject({
+        kind: "browser-flows-refused",
+        reason: "not-local",
+      });
+      expect(await body(await withFlows(post("flows", { kind: "list" }, true)))).toMatchObject({
+        reason: "not-local",
+      });
+      expect(flows.delete).not.toHaveBeenCalled();
+      expect((await handler(post("flows", { kind: "list" })))?.status).toBe(503);
+    });
+
     it("carries an extensions command with the window and the caller the host proved", async () => {
       const extensions = {
         execute: vi.fn(async () => ({

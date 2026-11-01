@@ -2333,7 +2333,8 @@ describe("Code tool families", () => {
     // and height arguments added about 240 bytes.
     // The sign-in operation and its reason added about 60 bytes.
     // The diagnostics cursor and warnings arguments added about 70 bytes.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(5_540);
+    // The three flow operations and their name argument added about 65 bytes.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(5_610);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(
