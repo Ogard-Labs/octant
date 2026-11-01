@@ -649,6 +649,34 @@ describe("Pi process boundary", () => {
     expect(linux.args).toContain("--unshare-all");
     expect(linux.args).toContain("--");
     expect(linux.args).toContain(other.binary);
+
+    // On a proxied Linux launch the tool bridge rides the forwarder's loopback relay.
+    const sockets = mkdtempSync(join(other.base, "sockets-"));
+    const relayed = await Effect.runPromise(
+      makePiConfinementLive({
+        platform: "linux",
+        sandboxPath: other.bwrap,
+        temporaryDirectory: other.base,
+      }).prepare({
+        binaryPath: other.binary,
+        root: other.root,
+        piHome: other.home,
+        sessionDirectory: join(other.home, "sessions"),
+        sessionId: "relayed",
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, other.home),
+        tools: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
+        toolBridge: { url: "http://127.0.0.1:43213/octant/test", token: "test-token" },
+        network: {
+          endpoint: { kind: "unix-socket", path: join(sockets, "proxy.sock") },
+          environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:3128" },
+        },
+      }),
+    );
+    expect(relayed.args).not.toContain("--share-net");
+    const loopback = relayed.args.indexOf("--loopback");
+    expect(relayed.args.slice(loopback, loopback + 2)).toEqual(["--loopback", "43213"]);
   });
 
   it("keeps the configured launcher directory readable when the binary is a symlink", async () => {

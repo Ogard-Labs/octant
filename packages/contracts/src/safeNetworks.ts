@@ -127,8 +127,9 @@ export const SafeNetworksProjectOverrideClearedPayload = Schema.Struct({
 export type SafeNetworksProjectOverrideClearedPayload =
   typeof SafeNetworksProjectOverrideClearedPayload.Type;
 
-/** The runtimes whose own process (or, for Claude, whose command sandbox) runs on the proxy. */
+/** The runtimes whose own process, or Claude's command sandbox, runs on the proxy. */
 export const RuntimeNetworkRuntime = Schema.Literal(
+  "claude",
   "claude-sandbox",
   "codex",
   "opencode",

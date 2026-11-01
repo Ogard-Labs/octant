@@ -97,6 +97,8 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
     confirm: useId(),
     projectLevel: useId(),
     projectLevelNote: useId(),
+    merge: useId(),
+    mergeNote: useId(),
   };
 
   const [displayName, setDisplayName] = useState(
@@ -132,6 +134,9 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   const [targetSummary, setTargetSummary] = useState(initial?.deliveryTarget.summary ?? "");
   // Editing always requires an explicit fresh confirmation; never carry it over.
   const [targetConfirmed, setTargetConfirmed] = useState(false);
+  const [mergesItsPullRequests, setMergesItsPullRequests] = useState(
+    initial?.agentMerge === "allowed",
+  );
   const [runsAtProjectLevel, setRunsAtProjectLevel] = useState(
     initial?.projectLevel === "opted-in",
   );
@@ -250,6 +255,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       deliveryTargetSummary: targetSummary,
       deliveryTargetConfirmed: targetConfirmed,
       runsAtProjectLevel,
+      mergesItsPullRequests,
       ...(initial === undefined
         ? {}
         : { previousDeliveryTargetRevision: initial.deliveryTarget.revision }),
@@ -487,6 +493,24 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         Each run uses the mode the Project&apos;s new threads start in, Full access included, so it
         may change files and run commands with nobody asked. Off, every run asks first.
       </p>
+
+      {mode === "code" ? (
+        <>
+          <div className="automation-editor__field automation-editor__confirmation">
+            <OctantCheckbox
+              aria-describedby={ids.mergeNote}
+              checked={mergesItsPullRequests}
+              id={ids.merge}
+              onChange={(event) => setMergesItsPullRequests(event.target.checked)}
+            />
+            <label htmlFor={ids.merge}>Merge the pull requests it opens</label>
+          </div>
+          <p className="automation-editor__note" id={ids.mergeNote}>
+            A run may merge the pull request its own thread opened, with nobody asked, once GitHub
+            shows its required checks passing on the head the run saw. Off, a merge always asks.
+          </p>
+        </>
+      ) : null}
 
       <div className="automation-editor__field automation-editor__confirmation">
         <OctantCheckbox

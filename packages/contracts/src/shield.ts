@@ -10,7 +10,7 @@
  */
 
 import { Schema } from "effect";
-import { UtcTimestamp } from "./events";
+import { AggregateId, UtcTimestamp } from "./events";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -71,6 +71,27 @@ export const ShieldDecision = Schema.Struct({
 export type ShieldDecision = typeof ShieldDecision.Type;
 
 export const decodeShieldDecision = Schema.decodeUnknownSync(ShieldDecision);
+
+/**
+ * What Shield tags at Full access, where it judges nothing: a command that
+ * sends something off the computer after the thread reached for a secret, or
+ * while naming one. A tag is journaled under the thread and never asks or
+ * blocks.
+ */
+export const SHIELD_TAGS_AGGREGATE = "shield-tags";
+export const SHIELD_TAG_EVENT_NAMES = { recorded: "shield-tags.recorded@1" } as const;
+export const ShieldTag = Schema.Literal("reads-secrets-then-egress");
+export type ShieldTag = typeof ShieldTag.Type;
+/** A tagged command is cut to this length after credential-shaped text is redacted. */
+export const MAX_SHIELD_TAGGED_COMMAND_LENGTH = 2_048;
+
+export const ShieldTagRecordedPayload = Schema.Struct({
+  threadId: AggregateId,
+  tag: ShieldTag,
+  command: Schema.String.pipe(Schema.maxLength(MAX_SHIELD_TAGGED_COMMAND_LENGTH)),
+  recordedAt: UtcTimestamp,
+}).annotations(strict);
+export type ShieldTagRecordedPayload = typeof ShieldTagRecordedPayload.Type;
 
 export {
   SHIELD_WATCHER_LABELS,

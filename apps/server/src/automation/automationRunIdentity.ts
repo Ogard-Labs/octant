@@ -83,6 +83,7 @@ export function buildAutomationRunForOccurrence(
       missedRunPolicy: definition.missedRunPolicy,
       targetPolicy: definition.targetPolicy,
       ...(definition.projectLevel === undefined ? {} : { projectLevel: definition.projectLevel }),
+      ...(definition.agentMerge === undefined ? {} : { agentMerge: definition.agentMerge }),
     },
     authoritySnapshot: {
       profileId: definition.authorityProfile.profileId,

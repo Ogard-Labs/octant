@@ -54,6 +54,13 @@ export function proxiedLaunchEnvironment(
  * the forwarder runs in the capsule, so the socket the host found is the
  * forwarder's own, and the host keeps a link to it the capsule cannot reach.
  *
+ * `forwarder <socket> <port> --loopback <port> ... <command> [args...]` also
+ * listens on each such loopback port inside the capsule and carries each
+ * connection to that port on the host's loopback through the proxy, as a
+ * `CONNECT 127.0.0.1:<port>` with the credential `HTTPS_PROXY` names, so the
+ * proxy decides and records it as any other request. A provider runtime's
+ * tool bridge uses it. A refusal closes the connection.
+ *
  * `forwarder <socket> <port> --child-seccomp <filter> <command> [args...]`
  * opens the filter file before anything else runs and hands it to the
  * command as file descriptor 3. That form starts a launch whose own process
@@ -76,6 +83,12 @@ if (rest[0] === "--inbound") {
   if (!rest[1] || !/^[0-9]{1,5}$/.test(rest[2] || "")) refuse("invalid inbound relay");
   inbound = { path: rest[1], port: Number(rest[2]) };
   rest.splice(0, 3);
+}
+const loopbackPorts = [];
+while (rest[0] === "--loopback") {
+  if (!/^[0-9]{1,5}$/.test(rest[1] || "")) refuse("invalid loopback relay");
+  loopbackPorts.push(Number(rest[1]));
+  rest.splice(0, 2);
 }
 let childFilter;
 if (rest[0] === "--child-seccomp") {
@@ -103,6 +116,57 @@ function relay(client, upstream) {
 const server = net.createServer({ allowHalfOpen: true }, (client) => {
   relay(client, net.connect({ path: socketPath, allowHalfOpen: true }));
 });
+function proxyAuthorization() {
+  try {
+    const url = new URL(process.env.HTTPS_PROXY || "");
+    if (url.username === "") return "";
+    const credential = decodeURIComponent(url.username) + ":" + decodeURIComponent(url.password);
+    return "Proxy-Authorization: Basic " + Buffer.from(credential).toString("base64") + "\\r\\n";
+  } catch {
+    return "";
+  }
+}
+function loopbackServer(port) {
+  return net.createServer({ allowHalfOpen: true }, (client) => {
+    client.pause();
+    const upstream = net.connect({ path: socketPath, allowHalfOpen: true });
+    const end = () => {
+      client.destroy();
+      upstream.destroy();
+    };
+    client.on("error", end);
+    upstream.on("error", end);
+    // Until the proxy answers, either side closing ends both.
+    client.on("close", end);
+    upstream.on("close", end);
+    const target = "127.0.0.1:" + port;
+    upstream.write("CONNECT " + target + " HTTP/1.1\\r\\nHost: " + target + "\\r\\n" + proxyAuthorization() + "\\r\\n");
+    let head = Buffer.alloc(0);
+    const onData = (chunk) => {
+      head = Buffer.concat([head, chunk]);
+      const at = head.indexOf("\\r\\n\\r\\n");
+      if (at === -1) {
+        if (head.length > 8192) end();
+        return;
+      }
+      upstream.off("data", onData);
+      if (!/^HTTP\\/1\\.[01] 200 /.test(head.subarray(0, at).toString("latin1"))) return end();
+      const rest = head.subarray(at + 4);
+      if (rest.length > 0) client.write(rest);
+      relay(client, upstream);
+      client.resume();
+    };
+    upstream.on("data", onData);
+  });
+}
+function listenLoopback(index, then) {
+  if (index >= loopbackPorts.length) return then();
+  const relayServer = loopbackServer(loopbackPorts[index]);
+  relayServer.on("error", (error) => refuse("cannot listen on a loopback relay: " + error.message));
+  relayServer.listen({ host: "127.0.0.1", port: loopbackPorts[index], exclusive: true }, () =>
+    listenLoopback(index + 1, then),
+  );
+}
 function listenInbound(then) {
   if (inbound === undefined) return then();
   let started = false;
@@ -118,7 +182,7 @@ function listenInbound(then) {
   inboundServer.listen({ path: inbound.path, exclusive: true });
 }
 server.on("error", (error) => refuse("cannot listen: " + error.message));
-listenInbound(() => server.listen({ host: "127.0.0.1", port: Number(portText), exclusive: true }, () => {
+listenInbound(() => listenLoopback(0, () => server.listen({ host: "127.0.0.1", port: Number(portText), exclusive: true }, () => {
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = spawn(executable, args, {
@@ -131,5 +195,5 @@ listenInbound(() => server.listen({ host: "127.0.0.1", port: Number(portText), e
     const number = signal === null ? 0 : os.constants.signals[signal] || 0;
     process.exit(code === null ? 128 + number : code);
   });
-}));
+})));
 `;

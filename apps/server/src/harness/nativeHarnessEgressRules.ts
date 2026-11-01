@@ -32,6 +32,7 @@ import {
   ToolEgressRuleId,
   UtcTimestamp,
   type EventEnvelope,
+  type SafeNetworkPlace,
   type NativeHarnessCommandHost,
   type ToolEgressDecisionEntry,
   type ToolEgressLaunch,
@@ -231,6 +232,24 @@ export interface ToolEgressRulesOptions {
    * expired rule stays in memory is counted on it.
    */
   readonly elapsedMs?: () => number;
+  /**
+   * The person's safe networks for a Project's commands: what a command's
+   * rules refuse passes when a place names it, while the thread is
+   * untainted. Empty while Network limits are off.
+   */
+  readonly places?: (projectId: string) => ReadonlyArray<SafeNetworkPlace>;
+  /**
+   * The reviewer for a per-call `network-access` prompt: asked about a
+   * command's unlisted host while it runs, `true` when it allows that host
+   * for this one launch. Its answer becomes a `call` rule granted by the
+   * reviewer, which a tainted thread refuses.
+   */
+  readonly reviewNetwork?: (request: {
+    readonly threadId: string;
+    readonly launchId: string;
+    readonly host: string;
+    readonly port: number;
+  }) => Promise<boolean>;
 }
 
 interface StoredRule {
@@ -444,6 +463,7 @@ export class ToolEgressRules {
         launchSummarized: async (payload) => this.#record(launch, "launchSummarized", payload),
       },
       onProposable: (refusal) => collectProposal(proposals, refusal),
+      ...this.#placesAndReviewer(launch),
     });
     if (started.status === "refused") return started;
     const state: LiveLaunchState = { proxy: started.proxy, launch, proposals };
@@ -476,6 +496,47 @@ export class ToolEgressRules {
     return {
       status: "listening",
       launch: { proxy: started.proxy, finish: () => this.#finish(state) },
+    };
+  }
+
+  /**
+   * What a command launch adds to its rules: the Project's safe networks,
+   * and the reviewer for an unlisted host. A reviewer's allowance is a `call`
+   * rule on the thread whose rules the launch uses, its parent's for a child.
+   */
+  #placesAndReviewer(
+    launch: ToolEgressLaunch,
+  ): Pick<ToolEgressProxyOptions, "places" | "escalate"> {
+    const places = this.#options.places;
+    const reviewNetwork = this.#options.reviewNetwork;
+    const threadId = String(launch.parentThreadId ?? launch.threadId);
+    return {
+      ...(places === undefined ? {} : { places: () => places(String(launch.projectId)) }),
+      ...(reviewNetwork === undefined
+        ? {}
+        : {
+            escalate: async (destination: { readonly host: string; readonly port: number }) => {
+              // A tainted thread's network needs a person's confirmation.
+              if (this.#tainted(threadId) || this.#tainted(String(launch.threadId))) return;
+              const allowed = await reviewNetwork({
+                threadId,
+                launchId: String(launch.launchId),
+                ...destination,
+              });
+              if (!allowed) return;
+              this.answer({
+                threadId,
+                principal: { kind: "reviewer" },
+                grants: [
+                  {
+                    host: destination.host,
+                    port: destination.port,
+                    scope: { kind: "call", launchId: String(launch.launchId) },
+                  },
+                ],
+              });
+            },
+          }),
     };
   }
 
@@ -547,6 +608,15 @@ export class ToolEgressRules {
       port: rule.port,
       expiresAt: rule.expiresAt,
     }));
+  }
+
+  /** The Project a Work or Code thread's rules belong to, or `undefined` for any other thread. */
+  threadProject(threadId: string): string | undefined {
+    try {
+      return this.#options.readThread(threadId)?.projectId;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Whether a thread counts as tainted for egress, including a launch whose mark is not yet written. */

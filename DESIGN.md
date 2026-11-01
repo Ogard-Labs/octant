@@ -2151,7 +2151,8 @@ feedback line. A paired device sees the section as set on the host machine.
 A Code, Chat, or Work tool row whose result was outside content carries an
 "Outside content" tag, followed by what Octant Shield's Watcher found in it in
 the warning role, and a Code thread's board card a small mark; at Full access
-the tag stays quiet.
+the tag stays quiet. A call Octant refused because it named a protected secret
+file carries the same tag, naming that finding.
 Neither prompts. The section also shows, each
 as an account default a Project
 may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe

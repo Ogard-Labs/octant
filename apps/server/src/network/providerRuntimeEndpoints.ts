@@ -71,6 +71,8 @@ const RUNTIME_ENDPOINTS: Readonly<
   codex: ["openai.com", "chatgpt.com"],
   opencode: ["opencode.ai", ...MODEL_PROVIDERS],
   pi: MODEL_PROVIDERS,
+  // Claude's own process: its sign-in, catalog, and inference.
+  claude: ["anthropic.com", "claude.ai", "claude.com"],
   // Claude's sandbox carries the commands its shell runs, not the runtime's
   // own inference, so it has no provider endpoint of its own: a command
   // reaches the Project's rules and the safe networks.

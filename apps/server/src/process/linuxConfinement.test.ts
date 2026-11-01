@@ -1307,6 +1307,55 @@ describe("Linux Bubblewrap confinement", () => {
     expect(boundPairs(launch.args, "--ro-bind")).toContainEqual([bwrapPath, bwrapPath]);
   });
 
+  it("hands the forwarder a loopback relay for each tool bridge port, and only for a proxied launch", () => {
+    const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const sockets = join(root, "egress-relay");
+    mkdirSync(sockets, { mode: 0o700 });
+    const socket = join(sockets, "proxy.sock");
+    const runtime = join(root, "node");
+    const proxied = {
+      kind: "proxied",
+      endpoint: { kind: "unix-socket", path: socket },
+    } as const;
+
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/true",
+        args: [],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: proxied,
+        loopbackRelayPorts: [47011, 47012, 47011],
+      },
+      { bwrapPath, forwarderRuntime: runtime },
+    );
+
+    expect(launch.args.slice(launch.args.indexOf("--") + 1)).toEqual([
+      runtime,
+      "--no-warnings",
+      join(sockets, "forwarder.cjs"),
+      socket,
+      String(LINUX_EGRESS_FORWARDER_PORT),
+      "--loopback",
+      "47011",
+      "--loopback",
+      "47012",
+      "/bin/true",
+    ]);
+    for (const input of [
+      { networkEgress: "allow", loopbackRelayPorts: [47011] },
+      { networkEgress: proxied, loopbackRelayPorts: [LINUX_EGRESS_FORWARDER_PORT] },
+      { networkEgress: proxied, loopbackRelayPorts: [0] },
+    ] as const) {
+      expect(() =>
+        buildBubblewrapLaunch(
+          { executable: "/bin/true", args: [], boundRoot, temporaryDirectory, ...input },
+          { bwrapPath, forwarderRuntime: runtime },
+        ),
+      ).toThrow(ProcessConfinementError);
+    }
+  });
+
   it("refuses a proxied launch without its socket", () => {
     const { boundRoot, temporaryDirectory, bwrapPath } = fixture();
     for (const input of [

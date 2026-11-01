@@ -159,7 +159,7 @@ ready…** for an open pull request. Each re-reads the pull request from GitHub,
 shows the short head it read, and waits for your **Confirm**. A merge goes
 ahead only if that head is still current and the required checks have passed;
 **Merge when ready** hands the merge to GitHub once they do. Labels, comments,
-replies, close, and reopen stay on the desktop.
+replies, approving, requesting changes, close, and reopen stay on the desktop.
 
 In `octant agent`, Stop reports an interruption only when the host confirms it.
 If the turn finishes before Stop arrives, it reports that nothing is running;
@@ -348,9 +348,14 @@ already has an open pull request. It can also change that pull request's
 title and description, or mark a draft ready (or turn it back into a draft).
 It can also add or remove labels the repository already has, close the pull
 request or reopen it, post a comment or a reply in a review thread, and merge
-it. Comments, replies, and merges always ask you first, at every access level;
-the comment shows its whole text. It never chooses another branch, and it never
-approves a pull request or deletes a branch. A thread that asks before acting
+it. Comments and replies always ask you first, at every access level, and show
+their whole text; a merge asks too, unless you turned on **Agents may merge**
+for the Project (in the Pull requests list, beside Auto-refresh) or the thread
+came from a routine you allowed to merge the pull requests it opens. Only a
+window on this computer turns either on. Even then the merge goes ahead only if
+the head is the one the agent saw and the required checks have passed. It never
+chooses another branch, and it never approves a pull request or deletes a
+branch. A thread that asks before acting
 shows you the exact change first; Full access goes ahead for the rest; Plan
 refuses. The thread's pull request shows in Review and on
 its card, stacked ones included.

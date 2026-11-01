@@ -197,9 +197,19 @@ describe("SafeNetworksSettings", () => {
         requests: 1,
         lastRefusedAt: new Date().toISOString(),
       },
+      {
+        host: "docs.example.org",
+        port: 443,
+        runtime: "claude",
+        requests: 2,
+        lastRefusedAt: new Date().toISOString(),
+      },
     ] as unknown as SafeNetworksView["refused"];
     const { command, user } = setup({ initial: view({ refused }) });
 
+    // Claude's own process and its command sandbox are named apart.
+    expect(await screen.findByText(/^Claude commands ·/)).toBeVisible();
+    expect(screen.getByText(/^Claude · 2 requests/)).toBeVisible();
     await user.click(await screen.findByRole("button", { name: "Trust cdn.example.net:443" }));
 
     await waitFor(() => expect(command).toHaveBeenCalledOnce());
