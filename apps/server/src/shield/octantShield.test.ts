@@ -70,6 +70,17 @@ describe("Octant Shield on the host", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("sends a command that reads a file on the person's protected list to the person", async () => {
+    const { port } = fakeModel({ status: "answered", text: "{}" });
+    const shield = shieldWith(port, {
+      protectedSecretPath: (path) => path === "~/.config/vault/token",
+    });
+    await expect(
+      shield.review({ threadId: "t", call: bash("cat ~/.config/vault/token"), boundRoot: root }),
+    ).resolves.toMatchObject({ verdict: "ask", stage: "deny-rule", rule: "secret-path" });
+    expect(port.complete).not.toHaveBeenCalled();
+  });
+
   it("decides by rule without calling the model", async () => {
     const { port } = fakeModel({ status: "answered", text: "{}" });
     const shield = shieldWith(port);

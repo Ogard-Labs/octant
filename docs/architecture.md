@@ -2886,9 +2886,12 @@ flowchart LR
   thread's [guardrail level](#security-and-authority): on at Guarded and
   Reviewed, and off at Full access, where the mark is recorded and shown
   but never prompts or blocks;
-  a person turns it down for one thread or Project by setting that scope's
-  level (allowed; not built yet: Full access is the only level where it is off,
-  and a Project or thread cannot turn it down below that). The mark
+  a person turns it down for one thread by setting its level, or for a
+  Project's new threads by setting the Project's level, in Work and Code
+  alike, and back up the same way (`outsideContentRecordedOnly`). No
+  switch turns it down at a level below Full access: the gate is what keeps
+  a marked thread's irreversible calls asking there, so turning it down
+  means choosing Full access for that scope. The mark
   itself is recorded at every level, because the journal records what came
   in. One gate enforces it today:
   `resolveThreadElevation` in `packages/domain/src/toolCallPolicy.ts` asks
@@ -7975,9 +7978,11 @@ mechanisms are:
     soft there: Octant's own file tools (the Octant Harness's, the ACP
     client's host-side file operations, and Claude Code's through Octant's
     tool gate) still refuse a protected path with the same plain message,
-    [Octant Shield](#octant-shield)'s Judge and Watcher are to flag a read of a
-    protected path and a secret-then-network sequence as journaled tags and
-    never block (allowed; not built yet), and secret redaction stays on. Below Full access the list is
+    [Octant Shield](#octant-shield)'s Watcher flags a call that names a
+    protected path and the Octant Harness's secret-then-network commands are
+    tagged, both journaled and never blocking (the
+    [secret guard](#secret-guard) states the rules), and secret redaction
+    stays on. Below Full access the list is
     an OS rule on every confined launch.
   - **Outside content is recorded only** at Full access: a quiet tag on the
     tool row, a small mark on the thread card, and the taint in the journal
@@ -10579,7 +10584,8 @@ Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
 no prompts": a shell command there can read a protected file. Built, except
-the Watcher's protected-path tags.
+short-lived cloud credentials from the broker and the Watcher flagging a
+printed secret-holding environment variable.
 
 - **One list, every runtime.** The list is
   `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
@@ -10679,17 +10685,33 @@ the Watcher's protected-path tags.
   approval requests are left as asked, so redaction never changes what an
   agent does. A key split across two streamed chunks is not caught, and the
   model still sees what a tool returned to it.
-- **Shield links in.** The Judge, built for every runtime that routes approvals through Octant, sends a
-  command that reaches a secret file to the person (`secret-path`) and refuses
-  one that reads secrets and sends something off the computer
-  (`reads-secrets-then-egress`); see [Octant Shield](#octant-shield). The
-  Watcher has a hook to flag a read of a protected path once the list is
-  handed to it. Allowed; not built yet: the Watcher flagging an attempt to
-  read a protected path or print a secret-holding environment variable, and
-  the Judge reading the person's protected list rather than its own
-  secret-path patterns. At Full access these are journaled tags and never
-  block, because nothing else stands between a shell command and the file
-  there.
+- **Shield links in.** The Judge, built for every runtime that routes
+  approvals through Octant, sends a command or call that reaches a secret file to the person (`secret-path`) and refuses a command that reads
+  secrets and sends something off the computer (`reads-secrets-then-egress`);
+  see [Octant Shield](#octant-shield). It reads the list in force, the
+  person's additions included (`isProtectedSecretPath`), beside its own
+  secret-path patterns. The Watcher flags every call of Octant's own tools
+  that names a protected path, in a path field or as a word of a shell
+  command, refused or not, as the `secret-path-read` label. At Full access,
+  where Shield judges nothing, an Octant Harness command that sends something
+  off the computer after the thread reached for a secret, or while naming
+  one, is journaled as a `shield-tags.recorded@1` tag
+  (`reads-secrets-then-egress`) under the thread. These never block, because
+  nothing else stands between a shell command and the file there. Allowed;
+  not built yet: the Watcher flagging a printed secret-holding environment
+  variable.
+  - _Rationale._ The Judge keeps its own patterns beside the list rather than
+    replacing them: they also cover files the list leaves out (`.env`,
+    `.gnupg`, a stray `.pem`), and a built-in group the person removes takes
+    away the OS rule, not Shield's habit of asking, which only ever sends a
+    call to the person. The flag reads a command's text only, so a path the
+    command builds at run time, or a relative path in a tool's arguments, is
+    not seen; it is a record for the person, never what stands between a
+    command and a file. A refused attempt is flagged too, because what the
+    agent reached for is what the person needs to see. A tag that cannot be
+    journaled withholds the command's output, as an unrecorded `ssh` command
+    does; the command itself has already run. A provider runtime's own
+    commands at Full access reach no Octant shell and are not tagged.
 - **Measured friction** (macOS 27, below Full access, fake files in a
   throwaway home): a planted `~/.ssh/id_test` is refused while
   `~/.ssh/config`, `known_hosts`, and public keys read; `ssh-add -l` lists a
@@ -10953,8 +10975,9 @@ decision as an `approval-reviewed` row beside the tool rows. A Work thread
 at Auto is reviewed the same way, judged against its Project folder, with
 its own turn prompts as the person's messages and its model calls counted
 against its spend ceilings as a Work thread. On the Octant Harness its
-decisions are journaled with its harness approvals and its transcript does
-not yet show them as rows (allowed; not built yet). Claude Code, Codex,
+decisions are journaled with its harness approvals, and the running turn
+shows each as a review row among its tool steps, keyed by the call it was
+for. Claude Code, Codex,
 OpenCode, ACP agents, and Pi on a Work thread take the path they take on a
 Code thread: the approval reaches Shield before it becomes a request, an
 allow or deny goes back to the runtime for that one call and nobody is
@@ -11037,8 +11060,14 @@ marked but not read. The Chat and Work tool rows carry the same "Outside
 content" tag as Code's: the turn's tool steps hold the Watcher's labels for a
 runtime web tool and for an app-managed tool's result, and a later progress or
 result message keeps them. The Judge still never sees the text, only the labels.
-The secret guard's protected-files list is not yet handed to the Watcher or the
-Judge, so `secret-path-read` is not raised until that list exists on this branch.
+The secret guard's list in force is handed to the Watcher and the Judge (see
+[Secret guard](#secret-guard)), so `secret-path-read` is raised for every call
+of Octant's own tools that names a protected path, and a refused call's row
+carries the tag too. A Work tool row's tag is quiet at Full access, as Code's
+is. A client built before a tool step carried Shield's decision reads a Work
+turn with a review row as an ordinary completed step: clients decode a host's
+answer ignoring fields they do not know (`decodeHostAnswer`), and a contract
+test decodes such a turn with the older step shape.
 
 **Build order.** (1) Octant Harness; (2) every runtime through the approval
 path; (3) the picker and Settings; (4) the Watcher; (5) safe networks; (6)

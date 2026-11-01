@@ -1,4 +1,5 @@
 import { SHIELD_WATCHER_LABELS, type ShieldWatcherLabel } from "@octant/contracts";
+import { commandPathWords } from "./secretGuardPolicy";
 
 /**
  * Octant Shield's Watcher, the deterministic part: detectors that label
@@ -139,9 +140,11 @@ export function watchedTextOf(result: unknown): string {
 }
 
 /**
- * Whether a call names a path the secret guard protects. The guard's list is
- * the caller's: `protectedSecretPath` answers for one path as the agent wrote
- * it, and absent, nothing is flagged.
+ * Whether a call names a path the secret guard protects: in a path field, or
+ * as a word of its shell `command`. The guard's list is the caller's:
+ * `protectedSecretPath` answers for one path as the agent wrote it, and
+ * absent, nothing is flagged. An attempt counts as much as a read, since the
+ * flag is for the person to see what the agent reached for.
  */
 export function callReadsProtectedSecret(
   args: unknown,
@@ -156,13 +159,15 @@ const PATH_FIELDS = ["path", "paths", "file", "files", "filePath", "file_path", 
 function pathsOf(args: unknown): ReadonlyArray<string> {
   if (typeof args !== "object" || args === null) return [];
   const record = args as Readonly<Record<string, unknown>>;
-  return PATH_FIELDS.flatMap((field) => {
+  const fields = PATH_FIELDS.flatMap((field) => {
     const value = record[field];
     if (typeof value === "string") return [value];
     if (Array.isArray(value))
       return value.filter((item): item is string => typeof item === "string");
     return [];
   });
+  const command = record["command"];
+  return typeof command === "string" ? [...fields, ...commandPathWords(command)] : fields;
 }
 
 function boundedText(text: string): string {
