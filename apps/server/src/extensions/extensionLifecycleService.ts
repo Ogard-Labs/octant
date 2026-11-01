@@ -101,7 +101,16 @@ export class ExtensionLifecycleService {
     this.#isCompatible = options.isCompatible ?? (() => true);
   }
 
-  async install(inspection: InspectedExtensionPackage): Promise<ExtensionSnapshot> {
+  /**
+   * Installs a package. With `trust`, the person's one confirmation also
+   * trusts its source: the journal holds the install and the trust as two
+   * events, and enabling stays its own switch. If the trust is refused (a
+   * driver whose publisher changed), the package stays installed untrusted.
+   */
+  async install(
+    inspection: InspectedExtensionPackage,
+    options: { readonly trust?: boolean } = {},
+  ): Promise<ExtensionSnapshot> {
     const existing = readExtensionRecord(this.#connection, inspection.manifest.extensionId);
     if (existing?.current !== undefined && !existing.tombstoned) {
       throw new ExtensionLifecycleServiceError(
@@ -109,7 +118,21 @@ export class ExtensionLifecycleService {
         "Extension package is already installed.",
       );
     }
-    return this.#promote(inspection, "install");
+    const installed = await this.#promote(inspection, "install");
+    if (options.trust !== true) return installed;
+    const record = this.#installedRecord(inspection.manifest.extensionId);
+    try {
+      return await this.setSourceTrust({
+        extensionId: inspection.manifest.extensionId as never,
+        expectedStateVersion: record.aggregateVersion as never,
+        trusted: true,
+      });
+    } catch (error) {
+      // A refused trust leaves the install in place, untrusted, as the person
+      // would have it after Confirm install; they trust it from Installed.
+      if (error instanceof ExtensionLifecycleServiceError) return this.snapshot();
+      throw error;
+    }
   }
 
   async update(inspection: InspectedExtensionPackage): Promise<ExtensionSnapshot> {

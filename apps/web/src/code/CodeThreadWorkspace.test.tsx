@@ -377,6 +377,15 @@ describe("Code host queue", () => {
 });
 
 describe("CodeThreadWorkspace", () => {
+  it("shows the thread's guardrail level in its header", async () => {
+    render(<CodeThreadWorkspace controller={controller()} threadId={threadId} />);
+    expect(
+      await screen.findByText(/Ask first|Auto|Accept edits|Plan|Full access/, {
+        selector: ".guardrail-level__mode",
+      }),
+    ).toBeVisible();
+  });
+
   it("shows how long a completed Code turn worked and leaves unsettled turns without a duration", async () => {
     render(
       <CodeThreadWorkspace

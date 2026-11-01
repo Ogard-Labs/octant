@@ -753,8 +753,8 @@ In a thread that uses Claude artifacts:
   computer.**
 - That thread's turns run Claude Code with its usage telemetry to Anthropic
   on. Every other thread keeps it off, as before.
-- Claude asks before each publish, even when the thread has Full access, and
-  an earlier answer never covers a later publish. It can only publish a file
+- Claude asks before each publish, and an earlier answer never covers a later
+  publish. At Full access nothing asks, publishing included, as in Claude's own app. It can only publish a file
   inside the thread's folder. A replacement of a page already on your account
   names that page in the request.
 - Plan never publishes, and Chat never does.

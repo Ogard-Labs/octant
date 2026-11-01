@@ -73,8 +73,9 @@ identity and digest. A package that does not validate is not listed.
 
 The same tab also searches **standalone skills** from
 [skills.sh](https://skills.sh/) and npm packages that ship `SKILL.md`. Preview
-a skill, then **Confirm install**. Installed skill packages still start
-disabled — trust and enable them from **Installed**.
+a skill, then **Confirm install**, or **Install and trust** to trust it in the
+same step. Installed skill packages still start disabled — enable them from
+**Installed** (and trust them there if you chose **Confirm install**).
 
 ### Install from npm
 
@@ -92,7 +93,9 @@ The review shows the package, exact version, registry, and integrity. A package
 that is neither an Agent Plugin nor a signed provider driver is refused, and so
 is one whose download does not match, with a plain sentence saying which. After
 **Confirm install** the plugin is untrusted and switched off, like any install;
-trust and enable it yourself.
+trust and enable it yourself. **Install and trust** does both of the first two
+in one confirmation and records them as an install and a trust; the plugin is
+still switched off until you turn it on.
 
 Under **Installed**, an npm plugin shows the same package, version, registry,
 and integrity, and **Check for update** asks that registry for its newest
@@ -448,8 +451,18 @@ from `<directory>/.agents/skills/<skill-name>/SKILL.md` and
 directory and each parent up to the Project or repository root, plus the
 user-global `~/.agents/skills/`. Octant does not scan arbitrary files
 elsewhere under `.agents/` or `.claude/`, and never reads the `.claude` folder
-in your home folder. A `.agents/skills` or `.claude/skills` folder that is a
+in your home folder on its own. A `.agents/skills` or `.claude/skills` folder that is a
 symlink, or that leads outside the Project, is ignored without a message.
+
+### Skill folders you turn on
+
+In **Settings › Skills & Extensions › Skill folders** you can switch on Claude
+Code's skills (`~/.claude/skills`) and Codex's skills (`$CODEX_HOME/skills`, or
+`~/.codex/skills`), and add any other folder by its absolute path. Each is off
+until you switch it on. Listing a folder only indexes its skills: every skill
+there still starts untrusted and switched off, and a skill with the same name as
+another is a separate skill until you choose. A folder that is a link, or that
+does not exist, is ignored.
 
 A skill at a Project's root is available to every thread in that Project and
 to no other Project. A skill in a subfolder is available only to a thread

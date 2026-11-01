@@ -788,6 +788,7 @@ describe("createPhase1RuntimeRegistries", () => {
           voice: {},
           imageGeneration: { customSources: [] },
           standaloneSkillActivations: {},
+          skillFolders: { providers: [], folders: [] },
           rememberedBrowserOrigins: [],
           rememberedBrowserProfileSites: [],
           computerUse: { enabled: false, automaticUpdates: false },
@@ -1026,6 +1027,7 @@ function validSettingsPayload() {
       voice: {},
       imageGeneration: { customSources: [] },
       standaloneSkillActivations: {},
+      skillFolders: { providers: [], folders: [] },
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
       computerUse: { enabled: true, automaticUpdates: true },
@@ -1207,6 +1209,14 @@ function projectEvents(): ReadonlyArray<readonly [string, unknown]> {
     [
       "project.code-permission-mode-changed@1",
       { project: { ...codeProject, defaultPermissionMode: "auto" } },
+    ],
+    [
+      "project.work-permission-mode-changed@1",
+      { project: { ...boundProject(project), defaultPermissionMode: "auto" } },
+    ],
+    [
+      "guardrail.level-lowered@1",
+      { scope: "global", surface: "work", from: "ask-first", to: "full-access" },
     ],
     [
       "project.code-auto-reviewer-changed@1",

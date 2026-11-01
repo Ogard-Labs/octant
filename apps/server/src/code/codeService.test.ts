@@ -1757,6 +1757,62 @@ describe("CodeService commands", () => {
       );
     });
 
+    it("journals who lowered a thread's level, from which level and at which scope, and nothing when the guard goes back up", async () => {
+      const fixture = serviceFixture({
+        threads: [thread({ executionPolicy: "approval-gated" })],
+        approve: false,
+      });
+      await fixture.service.execute(ids.window, raise("current-session"));
+      const guarded = serviceFixture({
+        threads: [thread({ executionPolicy: "full-access" })],
+        approve: false,
+      });
+      await guarded.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+      });
+      expect(
+        guarded.persistence.journal.append.mock.calls.some(
+          ([request]) => request.events[0].eventName === "guardrail.level-lowered@1",
+        ),
+      ).toBe(false);
+      const lowered = fixture.persistence.journal.append.mock.calls
+        .map(([request]) => request.events[0])
+        .filter((event) => event.eventName === "guardrail.level-lowered@1");
+      expect(lowered).toHaveLength(1);
+      expect(lowered[0]).toMatchObject({
+        actor: { kind: "local-user" },
+        occurredAt: expect.any(String),
+        payload: {
+          scope: "thread",
+          surface: "code",
+          from: "ask-first",
+          to: "full-access",
+          projectId: expect.any(String),
+          threadId: ids.thread,
+        },
+      });
+    });
+
+    it("journals a lowered default in Settings at the global scope", async () => {
+      const fixture = serviceFixture({ threads: [] });
+      await fixture.service.execute(ids.window, {
+        kind: "update-code-settings",
+        expectedVersion: 0,
+        defaultExecutionPolicy: "full-access",
+        defaultPermissionPersistence: "current-session",
+      });
+      const lowered = fixture.persistence.journal.append.mock.calls
+        .map(([request]) => request.events[0])
+        .filter((event) => event.eventName === "guardrail.level-lowered@1");
+      expect(lowered.map((event) => event.payload)).toEqual([
+        { scope: "global", surface: "code", from: "ask-first", to: "full-access" },
+      ]);
+    });
+
     it("drops the retired sandbox-off stamp a client or an old journal carries, so both old forms are Full access", async () => {
       const fixture = serviceFixture({ threads: [] });
       const created = await fixture.service.execute(ids.window, {

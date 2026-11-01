@@ -162,15 +162,15 @@ The design rests on a small set of invariants that every package obeys:
   and subject to ordinary sandbox and approval policy. Structured extension or
   plugin references cannot install, trust, enable, elevate, or bypass policy.
   The three steps stay separate by default; a person may install and trust a
-  package in one confirmed step (allowed; not built yet), and enabling stays
-  its own switch.
+  package in one confirmed step (built: **Install and trust** beside
+  **Confirm install**), and enabling stays its own switch.
   Skills are discovered only from valid `.agents/skills/` and
   `.claude/skills/` packages in the permitted repository ancestry (the closed
   `PROJECT_SKILL_ROOTS` allow-list), from the user-global `~/.agents/skills/`
   directory, and also from the key providers' own skill folders and any
-  folder a person adds in Settings (allowed; not built yet), all under the
-  same activation ladder. Today discovery never reads the home folder's own
-  `.claude` ([Extensions and skills](#extensions-and-skills)).
+  folder a person adds in Settings (built), all under the same activation
+  ladder. Discovery reads the home folder's own `.claude` only when the person
+  turns that provider's folder on ([Extensions and skills](#extensions-and-skills)).
 - **Modes are server-enforced.** Chat, Work, and Code are server-enforced
   domain modes, not renderer flags. Code is always available; disabling Chat or
   Work never deletes their data. The shell presents Chat and Work as one
@@ -1300,8 +1300,7 @@ surfaces. Only explicit user approval creates the linked Code thread. A
 promotion moves focus and tooling, not authority: both threads run under the
 shared guardrail levels, and the new thread takes the level of its own
 Project and scope as any new Code thread does, never a level carried over
-from the Work thread. Moving work from Code to Work is the same kind of
-person's choice (allowed; not built yet).
+from the Work thread.
 
 Rebinding a Code Project supersedes the checkout its existing threads were
 created against, and no later observation can produce those threads' checkout
@@ -7125,8 +7124,16 @@ session manager, and skill discovery.
 **Activation ladder.** `resolveExtensionActivation` resolves each component to
 an effective state with a structured reason. Install, trust, and enable stay
 three steps by default; a person may install and trust a package in one
-confirmed step, journaled as both (allowed; not built yet), and enabling
-stays its own switch. A component is active only when
+confirmed step, journaled as both (built), and enabling stays its own switch.
+The one step is **Install and trust** on a Marketplace, npm, local-folder, or
+standalone-skill preview; the command carries `trust: true`, the host installs,
+then appends the trust in the same call, so the journal holds the install and a
+separate `source-trust-changed`. Trust rules are unchanged: a signed provider
+driver pins its publisher key at that trust, and if the trust is refused the
+package stays installed and untrusted. Choice: the one step is offered for a new
+install only, never an update, because an update keeps the package's trust
+decision and a changed digest deserves its own look; a person who wants the
+update trusted already has **Trust source**. A component is active only when
 the package is installed, its source is trusted, the plugin master switch and
 the component switch are enabled, compatibility passes, and host, mode,
 Project, thread, and provider policy allow it. Any other state — `not-installed`,
@@ -7207,13 +7214,23 @@ same. This holds in Chat, Work, and Code.
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
   (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
-  `~/.agents/skills/`, plus the key providers' own skill folders (such as
-  `~/.claude/skills/`) and any folder a person adds in Settings (allowed; not
-  built yet: a folder the person names or a provider folder they turn on is
+  `~/.agents/skills/`, plus the key providers' own skill folders and any
+  folder a person adds in Settings (built: Settings › Skills & Extensions ›
+  Skill folders; a folder the person names or a provider folder they turn on is
   its own root, wherever it is, and Octant never discovers one on its own).
-  Today Octant's own discovery never reads the home folder's own `.claude`,
-  even when
-  the host's Project-less fallback root is the home folder. A discovered
+  The provider folders are Claude Code's `~/.claude/skills` and Codex's
+  `$CODEX_HOME/skills` (`~/.codex/skills` without `CODEX_HOME`), each off until
+  switched on. A folder is added by absolute path with no `..` segment, at most
+  32; its `sourceRef` is `provider:<id>` or `folder:` and a digest of the path,
+  never the path, and its skills are shared by every thread like the
+  user-global ones. A folder that is a symlink, is missing, or is the
+  user-global folder again is read once or not at all. Choices: the provider
+  list holds only the two providers whose folder this document already names,
+  and more join it when their home folder is verified; a folder is typed as a
+  path, not picked, so browser Settings can add one too, and it never reads
+  anything but `SKILL.md` files. Octant's Project walk still never reads the
+  home folder's own `.claude`, even when the host's Project-less fallback root
+  is the home folder; only the provider switch above does. A discovered
   skills folder that is a symlink, or resolves outside the bound root, is
   ignored. Every root
   enters the same activation ladder (indexed disabled, then reviewed, then
@@ -8112,19 +8129,38 @@ mechanisms are:
     Where no reviewer can run for a thread (for example, no reachable Shield
     model), that thread falls back to Ask first and the picker says why.
     There is no separate switch below Full access. The answer becomes the
-    default for every new Code thread; Settings › Code › Access changes it, a
-    Code Project may override it, and any thread can switch mode at any time
-    from the composer in one click (maintainer decision, 2026-10-31). Built
-    for Code; a new Work thread takes its mode from Settings › Work, and the
-    first-run answer and a Work Project override do not reach Work (allowed;
-    not built yet).
+    default for every new thread, Work and
+    Code; Settings › Access changes it, a Project, Work or Code, may override
+    it, and any thread can switch mode at any time from the composer in one
+    click (maintainer decision, 2026-10-31). Work has no Plan, so a Plan
+    answer leaves new Work threads at Ask first. A new Work thread takes its
+    Project's mode, else Work's default; a Project override can be Auto, Ask
+    first, Accept edits, or Full access, and a paired device cannot pick Full
+    access for it.
+  - **Computer and Browser keep their first-action ask** at every level,
+    Full access included: each asks at the first action in each app, by a
+    separate maintainer decision, and this rule does not change it.
   - **Plan is an overlay,** not a level: a mode of a thread at any level,
     always read-only.
   - **Lowering is journaled and shown.** Each change records who lowered it,
     when, from which level, and at which scope. The thread header shows the
-    level in force and the scope it came from (allowed; not built yet: today
-    the composer's mode picker shows the level, and the journal does not
-    record the scope a change was lowered from).
+    level in force and the scope it came from.
+    - **What counts as lowering** is a move to any level but Ask first or
+      Plan, at the global, Project, or thread scope, in Work or Code. The
+      record is `guardrail.level-lowered@1`, its own single-event aggregate,
+      written with the change; it carries the surface, scope, ids, and the
+      two levels, and the envelope carries the local user and the time. A
+      Project override records no earlier level when it replaced the default
+      it followed, because the Project keeps no copy of Settings. Auto and
+      Accept edits each waive something different, so a move between them
+      counts too: the narrower reading keeps more of the person's changes on
+      record.
+    - **The header's scope is read from the settings as they stand,** not
+      stored on the thread: a level equal to its Project's override reads as
+      the Project's, else one equal to the global default as the global one,
+      else it reads as set on the thread. A thread keeps the level it started
+      with, so a default changed later can make an older thread read as set on
+      the thread.
   - **Older recorded levels replay as Full access.** A level journaled by
     the earlier design, which kept a sandboxed no-prompt level and a
     separate switch, replays as Full access; nothing recorded is dropped.
@@ -8142,17 +8178,15 @@ mechanisms are:
   edits). A Code thread's `autoApprove` flag on a provider reporting
   `harnessAutoReview` is Reviewed (below). Built: Guarded, Accept edits,
   Reviewed (the provider's own reviewer, or Octant Shield), and Full access
-  in Code and Work, with the first-run question, a global default, a Code
-  Project override, and the one-time warning. Full access runs Claude Code
-  at `bypassPermissions` and Codex at `danger-full-access` with approval
-  policy `never`, with no Octant wrapping for any provider runtime. A
-  review reply posted under the person's name still asks at every level, and
-  so does a publish of a Project file to an outside service (allowed; not
-  built yet: no prompt for it at Full access).
-  Allowed; not built yet: the header indicator that shows the level in
-  force and the scope it came from, the journaled record of who lowered a
-  level and from where, a Work Project override, and an ACP agent's own
-  reviewer.
+  in Code and Work, with the first-run question, a global default, a Project
+  override in Code and Work, the thread header line, the journaled record of
+  who lowered a level and from where, and the one-time warning. Full access
+  runs Claude Code at `bypassPermissions` and Codex at `danger-full-access`
+  with approval policy `never`, with no Octant wrapping for any provider
+  runtime, and nothing asks there, a publish of a Project file to a
+  provider's hosted service included. A review reply posted under the
+  person's name still asks at every level.
+  Allowed; not built yet: an ACP agent's own reviewer.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
@@ -8205,11 +8239,11 @@ mechanisms are:
   [Extensions and skills](#extensions-and-skills). Work and Code threads
   start in the mode the person picked at first run (Auto
   pre-selected, else Ask first where no reviewer can run), changeable
-  per thread from the composer, per Code Project, or in Settings › Code ›
-  Access (built for Code; allowed; not built yet: a Work Project override);
+  per thread from the composer, per Project, or in Settings › Code › Access;
   Plan mode is read-only; auto-accept-edits waives only project file writes;
-  today a Work thread takes its level from Settings › Work when it is created
-  (Auto, Ask first, the default, Accept edits, or Full access) and changes it
+  a Work thread takes its level from its Project's override, else from
+  Settings › Work or the first-run answer, when it is created (Auto, Ask
+  first, the default, Accept edits, or Full access) and changes it
   from its composer; the host sets it, not the renderer, and a goal-loop round
   runs at it only up to the loop's own ceiling, which today allows at most
   auto-accept-edits. A goal-loop round runs as the host,
@@ -8791,23 +8825,21 @@ access` agree); a thread's own change is journaled as
   a publish is admitted (`list`, which reads titles other people chose into
   the conversation, is refused); and the file must be inside the bound
   Project and outside the login keychain folder, in Full access too. Above
-  that gate every publish asks, under approval-gated, auto-accepting-edits,
-  and Full access alike: the approval says the file goes to claude.ai and
+  that gate every publish asks, under approval-gated and auto-accepting-edits:
+  the approval says the file goes to claude.ai and
   leaves this computer and, when the call names a `url`, which existing page
-  it replaces. The person's answer can come long after the gate first ran,
+  it replaces. At Full access nothing asks, publishing included, and the host
+  keeps the page's snapshot from the call itself. The person's answer can come long after the gate first ran,
   so an approved publish passes the gate again before the runtime is told to
   go on: a setting turned off, or a folder swapped for a link out of the
   Project, while they decided refuses it. Creating a Code thread that already
   carries `native-artifacts` is refused, so the choice is made only through
   the change command. An answer is never reused for a later publish, even with
   session approvals remembered, because the same call republishes the file
-  as it is then. Today Full access asks too, because putting a Project file on an
-  outside service is the person's own act, as a Canvas public link is
-  ([Canvas public links](design/canvas-public-links.md)), and because the
-  first publish marks the thread with outside content, after which Octant's
-  own outward actions ask afresh under every posture today. The rule is
-  that at Full access nothing asks, publishing included (allowed; not
-  built yet; [Guardrail levels](#security-and-authority)). The approval is
+  as it is then. Full access asks nobody: the person who picked it takes the
+  provider's own no-prompt behavior, and the publish stays journaled and
+  marks the thread with outside content, which at Full access is recorded and
+  never asks ([Guardrail levels](#security-and-authority)). The approval is
   answered like the thread's other provider approvals, a paired device
   included for the turns it may already answer. Plan, whose read-only rule
   refuses an outward side effect, never offers the tool (Chat runs in Plan,
@@ -11367,7 +11399,7 @@ request and editing its title, body, or draft state, a person's
 merge of one pull request from a local window, a person's approval or request
 for changes there, an agent's merge on a Project setting or routine, and the
 Merge when ready and Auto-fix switches the person turns on there are built;
-the rest, and the key providers' skill folders and extra skill folders added in Settings,
+the rest
 are allowed and not built yet. Linked external secret stores are built for the
 1Password CLI, under [linked secret stores](#linked-secret-stores): a pointer
 in the credential broker, the value fetched at use and never kept.

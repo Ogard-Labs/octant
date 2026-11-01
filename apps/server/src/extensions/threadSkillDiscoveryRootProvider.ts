@@ -1,5 +1,9 @@
 import type { BindingRevisionId, ProjectId, ThreadWorkingDirectory } from "@octant/contracts";
-import type { SkillDiscoveryRootProvider, SkillDiscoveryRootSet } from "./skillDiscoveryService";
+import type {
+  ExtraSkillRoot,
+  SkillDiscoveryRootProvider,
+  SkillDiscoveryRootSet,
+} from "./skillDiscoveryService";
 
 interface DiscoveryProject {
   readonly id: ProjectId;
@@ -25,9 +29,12 @@ export function createThreadSkillDiscoveryRootProvider(options: {
     workingDirectory: ThreadWorkingDirectory,
   ) => Promise<string>;
   readonly userGlobalSkillsRoot: string;
+  /** Read on every resolve, so a folder turned on or off in Settings applies at the next reconcile. */
+  readonly readExtraSkillRoots?: () => ReadonlyArray<ExtraSkillRoot>;
 }): SkillDiscoveryRootProvider {
   return {
     resolve: async () => {
+      const extraSkillRoots = options.readExtraSkillRoots?.() ?? [];
       const roots: SkillDiscoveryRootSet[] = [];
       const projects = [...options.readProjects()].sort((left, right) =>
         String(left.id).localeCompare(String(right.id)),
@@ -59,6 +66,7 @@ export function createThreadSkillDiscoveryRootProvider(options: {
               projectRoot: project.root,
               projectRef: String(project.id),
               userGlobalSkillsRoot: options.userGlobalSkillsRoot,
+              extraSkillRoots,
               projectScope,
               scope: {
                 mode: thread.mode,
@@ -75,6 +83,7 @@ export function createThreadSkillDiscoveryRootProvider(options: {
           projectRoot: project.root,
           projectRef: String(project.id),
           userGlobalSkillsRoot: options.userGlobalSkillsRoot,
+          extraSkillRoots,
           projectScope,
         });
       }

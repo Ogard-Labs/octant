@@ -210,7 +210,8 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       // confirmation, so the decision cannot arrive from a paired device.
       if (
         (command.kind === "change-code-project-access" ||
-          (command.kind === "change-code-project-permission-mode" &&
+          ((command.kind === "change-code-project-permission-mode" ||
+            command.kind === "change-work-project-permission-mode") &&
             command.permissionMode === "full-access")) &&
         readPrincipalRouteContext(request)?.principal.kind === "remote-device"
       ) {

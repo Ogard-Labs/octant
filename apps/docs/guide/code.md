@@ -135,6 +135,11 @@ in the composer changes it in one click, for new and existing threads alike:
   The first time this computer or a Project picks Full access, Octant shows
   that warning once.
 
+Each thread shows its mode and where it came from in one line at the top,
+such as "Auto · set by this Project". Octant records every time a mode is
+lowered: who did it, when, from which mode, and for what scope (everyone, one
+Project, or one thread).
+
 New threads start in the default mode from first run or **Settings → Code →
 Access**; a Project can choose its own under **Access and limits** in its
 overview. Full access needs no confirmation from a window on this computer
