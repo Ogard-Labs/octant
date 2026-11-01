@@ -34,7 +34,7 @@ function renderLevel(
 ) {
   render(
     <GuardrailDefaultsContext.Provider value={defaults}>
-      <ThreadGuardrailLevel mode={mode} projectId={PROJECT} surface="work" />
+      <ThreadGuardrailLevel autoSupported mode={mode} projectId={PROJECT} surface="work" />
     </GuardrailDefaultsContext.Provider>,
   );
 }
@@ -76,6 +76,14 @@ describe("thread guardrail level", () => {
     );
     expect(screen.getByText("Full access")).toBeVisible();
     expect(screen.getByText(/set by this thread/)).toBeVisible();
+  });
+
+  it("names Ask first for a thread stored at Auto when no reviewer can run", () => {
+    render(
+      <ThreadGuardrailLevel autoSupported={false} mode="auto" projectId={PROJECT} surface="code" />,
+    );
+    expect(screen.getByText("Ask first")).toBeVisible();
+    expect(screen.queryByText("Auto")).toBeNull();
   });
 
   it("names only the level where the defaults are unknown", () => {

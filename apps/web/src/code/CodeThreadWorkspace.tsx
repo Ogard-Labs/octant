@@ -1150,6 +1150,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           the composer's tray. The one line it keeps is the guardrail level in
           force and the scope it came from. */}
       <ThreadGuardrailLevel
+        autoSupported={
+          props.autoReview === undefined
+            ? props.harnessAutoReviewSupported === true
+            : props.autoReview.status === "reviewer"
+        }
         mode={permissionModeOf(thread)}
         projectId={String(thread.projectId)}
         surface="code"

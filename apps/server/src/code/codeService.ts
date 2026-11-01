@@ -1575,23 +1575,25 @@ export class CodeService {
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        this.#append(
-          "code-settings",
-          CODE_SETTINGS_AGGREGATE_ID,
-          command.expectedVersion,
-          "code.settings-updated@1",
-          { kind: "settings-updated", settings },
-        );
-        this.#journalLowering({
-          scope: "global",
-          from: permissionModeOf({
-            executionPolicy: current.defaultExecutionPolicy,
-            autoApprove: current.defaultAutoApprove,
-          }),
-          to: permissionModeOf({
-            executionPolicy: settings.defaultExecutionPolicy,
-            autoApprove: settings.defaultAutoApprove,
-          }),
+        this.#inUnit(() => {
+          this.#append(
+            "code-settings",
+            CODE_SETTINGS_AGGREGATE_ID,
+            command.expectedVersion,
+            "code.settings-updated@1",
+            { kind: "settings-updated", settings },
+          );
+          this.#journalLowering({
+            scope: "global",
+            from: permissionModeOf({
+              executionPolicy: current.defaultExecutionPolicy,
+              autoApprove: current.defaultAutoApprove,
+            }),
+            to: permissionModeOf({
+              executionPolicy: settings.defaultExecutionPolicy,
+              autoApprove: settings.defaultAutoApprove,
+            }),
+          });
         });
         return { kind: "settings-updated", settings };
       }
@@ -2093,19 +2095,21 @@ export class CodeService {
         command.kind === "change-code-thread-access"
           ? this.#withGuardrailStamp(requestedNext)
           : requestedNext;
-      this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
-        kind: "thread-updated",
-        thread: next,
-      });
-      if (command.kind === "change-code-thread-access") {
-        this.#journalLowering({
-          scope: "thread",
-          from: permissionModeOf(current),
-          to: permissionModeOf(next),
-          projectId: current.projectId,
-          threadId: String(current.id),
+      this.#inUnit(() => {
+        this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
+          kind: "thread-updated",
+          thread: next,
         });
-      }
+        if (command.kind === "change-code-thread-access") {
+          this.#journalLowering({
+            scope: "thread",
+            from: permissionModeOf(current),
+            to: permissionModeOf(next),
+            projectId: current.projectId,
+            threadId: String(current.id),
+          });
+        }
+      });
       if (command.kind === "change-code-thread-working-directory") {
         await this.#onWorkingDirectoryChanged({
           mode: "code",
@@ -3161,6 +3165,13 @@ export class CodeService {
         },
       ],
     });
+  }
+
+  /** Runs `body` as one journal unit where the journal offers one. */
+  #inUnit(body: () => void): void {
+    const journal = this.#persistence.journal;
+    if (journal.transaction === undefined) body();
+    else journal.transaction(body);
   }
 
   /**

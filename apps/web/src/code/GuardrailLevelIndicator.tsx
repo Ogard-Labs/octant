@@ -80,8 +80,16 @@ export function ThreadGuardrailLevel(props: {
   readonly surface: "code" | "work";
   readonly projectId: string;
   readonly mode: PermissionMode;
+  /**
+   * Whether a reviewer can run for this thread. A thread stored at Auto with
+   * none asks first, as the mode picker already says, so the header names
+   * Ask first rather than claim a reviewer is in force.
+   */
+  readonly autoSupported: boolean;
 }) {
-  return <GuardrailLevelIndicator mode={props.mode} scope={useGuardrailScope(props)} />;
+  const scope = useGuardrailScope(props);
+  const inForce = props.mode === "auto" && !props.autoSupported ? "ask-first" : props.mode;
+  return <GuardrailLevelIndicator mode={inForce} scope={scope} />;
 }
 
 /** The level in force on a thread and the scope it came from, in the thread's header. */

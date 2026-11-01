@@ -406,27 +406,29 @@ export class WorkThreadService {
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        this.#persistence.journal.append({
-          aggregate: { aggregateType: "work-settings", aggregateId: WORK_SETTINGS_AGGREGATE_ID },
-          expectedVersion: command.expectedVersion,
-          events: [
-            {
-              eventId: decodeEventId(this.#uuid()),
-              eventName: "work.settings-updated@1",
-              eventVersion: 1,
-              correlationId: decodeCorrelationId(this.#uuid()),
-              actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
-              occurredAt: decodeTimestamp(this.#clock()),
-              payload: { kind: "settings-updated", settings },
-            },
-          ],
+        this.#inUnit(() => {
+          this.#persistence.journal.append({
+            aggregate: { aggregateType: "work-settings", aggregateId: WORK_SETTINGS_AGGREGATE_ID },
+            expectedVersion: command.expectedVersion,
+            events: [
+              {
+                eventId: decodeEventId(this.#uuid()),
+                eventName: "work.settings-updated@1",
+                eventVersion: 1,
+                correlationId: decodeCorrelationId(this.#uuid()),
+                actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+                occurredAt: decodeTimestamp(this.#clock()),
+                payload: { kind: "settings-updated", settings },
+              },
+            ],
+          });
+          this.#journalLowering({
+            scope: "global",
+            from: workModeOfAccess(current.defaultAccess),
+            to: workModeOfAccess(settings.defaultAccess),
+          });
         });
         this.#projection.applySettings({ kind: "settings-updated", settings });
-        this.#journalLowering({
-          scope: "global",
-          from: workModeOfAccess(current.defaultAccess),
-          to: workModeOfAccess(settings.defaultAccess),
-        });
         return { kind: "settings-updated", settings };
       }
       if (command.kind === "create-work-thread") {
@@ -787,18 +789,20 @@ export class WorkThreadService {
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
-          kind: "thread-updated",
-          thread: updated,
+        this.#inUnit(() => {
+          this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
+            kind: "thread-updated",
+            thread: updated,
+          });
+          this.#journalLowering({
+            scope: "thread",
+            from: workModeOfAccess(current.access),
+            to: workModeOfAccess(updated.access),
+            projectId: current.projectId,
+            threadId: String(current.id),
+          });
         });
         this.#projection.apply({ kind: "thread-updated", thread: updated });
-        this.#journalLowering({
-          scope: "thread",
-          from: workModeOfAccess(current.access),
-          to: workModeOfAccess(updated.access),
-          projectId: current.projectId,
-          threadId: String(current.id),
-        });
         return { kind: "thread-updated", thread: updated };
       }
       if (command.kind === "change-work-thread-provider") {
@@ -1331,6 +1335,13 @@ export class WorkThreadService {
         updatedAt: decodeTimestamp(this.#clock()),
       }
     );
+  }
+
+  /** Runs `body` as one journal unit where the journal offers one. */
+  #inUnit(body: () => void): void {
+    const journal = this.#persistence.journal;
+    if (journal.transaction === undefined) body();
+    else journal.transaction(body);
   }
 
   /**

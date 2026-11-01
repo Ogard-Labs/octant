@@ -1852,6 +1852,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       <h1 className="sr-only">{props.title}</h1>
       {thread === undefined ? null : (
         <ThreadGuardrailLevel
+          autoSupported={autoSupported}
           mode={workModeOf(thread.access)}
           projectId={String(thread.projectId)}
           surface="work"

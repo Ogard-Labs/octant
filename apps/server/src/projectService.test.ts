@@ -1799,7 +1799,7 @@ function fixtureService(
     return { aggregateVersion: entries.at(-1)?.version };
   });
   const persistence = {
-    journal: { append },
+    journal: { append, transaction: <A>(body: () => A): A => body() },
     readProject: (id: typeof chatId) => projects.find((project) => project.id === id),
     readProjects: (filter?: { lifecycle?: string }) => {
       const result = projects.filter(

@@ -887,13 +887,17 @@ export class ProjectService implements ProjectServiceApi {
       }
 
       try {
-        this.#persistence.journal.append({
-          aggregate: { aggregateType: "project", aggregateId: project.id },
-          expectedVersion: command.expectedVersion,
-          events: [this.#pendingEvent(eventName, { project, ...eventFacts })],
+        // The change and its lowering record commit together: a failed record
+        // must not leave the less guarded mode active with nothing on record.
+        this.#persistence.journal.transaction(() => {
+          this.#persistence.journal.append({
+            aggregate: { aggregateType: "project", aggregateId: project.id },
+            expectedVersion: command.expectedVersion,
+            events: [this.#pendingEvent(eventName, { project, ...eventFacts })],
+          });
+          this.#journalProjectLowering(current, command);
         });
         journaled = true;
-        this.#journalProjectLowering(current, command);
       } finally {
         if (!journaled && enteredKey !== undefined) {
           await this.#desktopRecipeKeys?.discard(enteredKey);

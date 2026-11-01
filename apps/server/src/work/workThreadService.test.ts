@@ -465,6 +465,30 @@ describe("WorkThreadService", () => {
     expect(created).toMatchObject({ kind: "thread-created", thread: { access: "auto" } });
   });
 
+  it("commits a lowering record in the same unit as the level change", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    let open = false;
+    const inUnit: Array<string> = [];
+    fixture.persistence.journal.transaction.mockImplementation(<A>(body: () => A): A => {
+      open = true;
+      try {
+        return body();
+      } finally {
+        open = false;
+      }
+    });
+    fixture.persistence.journal.append.mockImplementation((request: any) => {
+      if (open) inUnit.push(request.events[0].eventName);
+    });
+    await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access",
+    });
+    expect(inUnit).toEqual(["work.thread-updated@1", "guardrail.level-lowered@1"]);
+  });
+
   it("journals who lowered Work's default or a thread's level, from which level and at which scope", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
     await fixture.service.execute(ids.window, {
