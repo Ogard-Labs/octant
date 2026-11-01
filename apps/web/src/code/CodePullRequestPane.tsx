@@ -16,6 +16,7 @@ import type { CodeApprovalId } from "@octant/contracts/code";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import {
   bodyWithBrowserProof,
+  browserProofCaptureOrder,
   browserProofPullRequestSection,
   decidesCodeEffectsByApproval,
 } from "@octant/domain";
@@ -419,6 +420,9 @@ function CreatePullRequest(
   const [includeProof, setIncludeProof] = useState(false);
   const [proof, setProof] = useState<ProofState>({ kind: "idle" });
   const [proofSaved, setProofSaved] = useState<string>();
+  // The captures, oldest first, as they were when the files were saved. The
+  // section names files by position, so a changed list would name the wrong ones.
+  const [savedCaptureIds, setSavedCaptureIds] = useState<ReadonlyArray<string>>();
   const proofSource = props.browserProof;
   const proofBridge = proofSource?.hostBridge ?? getInjectedHostBridge();
 
@@ -472,6 +476,11 @@ function CreatePullRequest(
         bridge: proofBridge,
       });
       setProofSaved(browserProofSaveMessage(result));
+      setSavedCaptureIds(
+        result.kind === "saved"
+          ? browserProofCaptureOrder(proof.captures).map((capture) => String(capture.captureId))
+          : undefined,
+      );
     } catch (error) {
       setFailure(
         error instanceof Error && error.message.length > 0
@@ -527,6 +536,22 @@ function CreatePullRequest(
           return;
         }
         setProof(current);
+        if (savedCaptureIds !== undefined) {
+          const now = browserProofCaptureOrder(current.captures).map((capture) =>
+            String(capture.captureId),
+          );
+          if (
+            now.length !== savedCaptureIds.length ||
+            now.some((id, i) => id !== savedCaptureIds[i])
+          ) {
+            setProofSaved(undefined);
+            setSavedCaptureIds(undefined);
+            setFailure(
+              "The screenshots changed since you saved them. Save screenshots again, then create the pull request.",
+            );
+            return;
+          }
+        }
         finalBody = bodyWithBrowserProof(
           body,
           browserProofPullRequestSection(current.steps, current.captures),

@@ -881,7 +881,7 @@ describe("BrowserAutomationService", () => {
       });
       const refused = recordStep.mock.calls.at(-1)?.[0];
       expect(refused?.facts).toMatchObject({ operation: "click", failure: "stale" });
-      expect(refused?.facts.changed).toBeUndefined();
+      expect(refused?.facts.change).toBeUndefined();
     });
 
     it("names the capture a kept screenshot produced", async () => {

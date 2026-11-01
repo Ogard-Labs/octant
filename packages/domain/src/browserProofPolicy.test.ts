@@ -2,6 +2,7 @@ import { decodeBrowserCapture, decodeBrowserStep, type BrowserStep } from "@octa
 import { describe, expect, it } from "vitest";
 import {
   bodyWithBrowserProof,
+  browserStepChange,
   browserProofPullRequestSection,
   browserProofScreenshotFileName,
   browserProofTimeline,
@@ -41,27 +42,42 @@ describe("browserStepRecord", () => {
         operation: "click",
         element: { role: "button", name: "Save" },
         url: "https://example.com/settings/profile?tab=2&token=abc#top",
-        changed: "The page's text changed.",
+        change: {
+          before: { url: "https://example.com/", title: "A", contentHash: "1" },
+          after: {
+            url: "https://example.com/settings/profile?tab=2&token=abc#top",
+            title: "A",
+            contentHash: "2",
+          },
+        },
       }),
     ).toEqual({
       operation: "click",
       element: { role: "button", name: "Save" },
       origin: "https://example.com",
       path: "/settings/profile",
-      changed: "The page's text changed.",
+      changed: "Address changed to https://example.com/settings/profile. Page content changed.",
     });
   });
 
-  it("redacts an address inside the result line the way a diagnostic does", () => {
+  it("says what changed in fixed words and never copies a title or page text", () => {
+    const typed = "my secret search";
     const record = browserStepRecord({
-      operation: "navigate",
-      url: "https://example.com/cb",
-      changed: "Now at https://user:pw@example.com/cb?code=s3cr3t&page=2#frag.",
+      operation: "type",
+      url: "https://example.com/search?q=my+secret+search",
+      change: {
+        before: { url: "https://example.com/search", title: "Search", contentHash: "1" },
+        after: {
+          url: "https://example.com/search?q=my+secret+search",
+          title: `Results for "${typed}"`,
+          contentHash: "2",
+        },
+      },
     });
-    expect(record.changed).toContain("page=2");
-    expect(record.changed).not.toContain("s3cr3t");
-    expect(record.changed).not.toContain("pw@");
-    expect(record.changed).not.toContain("#frag");
+    expect(record.changed).toBe(
+      "Address changed to https://example.com/search. Title changed. Page content changed.",
+    );
+    expect(JSON.stringify(record)).not.toContain("secret");
   });
 
   it("records the failure category and leaves a non-web page without an origin", () => {
@@ -78,14 +94,25 @@ describe("browserStepRecord", () => {
     });
   });
 
-  it("bounds an element name and a result line", () => {
+  it("bounds an element name", () => {
     const record = browserStepRecord({
       operation: "click",
       element: { role: "link", name: "n".repeat(500) },
-      changed: "c".repeat(5000),
     });
     expect(record.element?.name).toHaveLength(160);
-    expect(record.changed).toHaveLength(1024);
+  });
+});
+
+describe("browserStepChange", () => {
+  const page = { url: "https://example.com/a", title: "T", contentHash: "h" };
+  it("says nothing for a read and 'Nothing changed' when nothing did", () => {
+    expect(browserStepChange("snapshot", page, { ...page, contentHash: "x" })).toBeUndefined();
+    expect(browserStepChange("click", page, page)).toBe("Nothing changed.");
+  });
+  it("says a credential page's content was not compared", () => {
+    expect(browserStepChange("click", page, { ...page, contentHash: undefined })).toBe(
+      "Page content not compared.",
+    );
   });
 });
 
@@ -128,7 +155,7 @@ describe("browserProofPullRequestSection", () => {
           element: { role: "button", name: "Save" },
           origin: "https://example.com",
           path: "/a",
-          changed: "The page's text changed.",
+          changed: "Page content changed.",
         }),
         step(2, { operation: "screenshot", captureId: shot.captureId }),
       ],
@@ -138,7 +165,7 @@ describe("browserProofPullRequestSection", () => {
       [
         "## Browser check",
         "",
-        '1. click button "Save" on https://example.com/a — The page\'s text changed.',
+        '1. click button "Save" on https://example.com/a — Page content changed.',
         "2. screenshot",
         "   - Screenshot: browser-check-01.png",
         "",
@@ -150,6 +177,14 @@ describe("browserProofPullRequestSection", () => {
   it("adds nothing when the thread has no steps", () => {
     expect(browserProofPullRequestSection([], [])).toBeUndefined();
     expect(bodyWithBrowserProof("Body", undefined)).toBe("Body");
+  });
+
+  it("escapes a backslash so it cannot cancel the escape after it", () => {
+    const section = browserProofPullRequestSection(
+      [step(1, { element: { role: "link", name: "a\\[b](c)" } })],
+      [],
+    );
+    expect(section).toContain("a\\\\\\[b\\](c)");
   });
 
   it("keeps a page's title from opening a link or block in the body", () => {

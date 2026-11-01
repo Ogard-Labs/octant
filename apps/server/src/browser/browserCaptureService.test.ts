@@ -304,7 +304,7 @@ describe("BrowserCaptureService steps", () => {
     service.recordStep(
       step({
         element: { role: "button", name: "Save" },
-        changed: "Now at https://example.com/a?token=abc&page=2.",
+        changed: "Address changed to https://example.com/a.",
       }),
     );
     const [row, ...rest] = stepRows(connection);

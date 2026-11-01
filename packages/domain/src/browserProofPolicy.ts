@@ -6,7 +6,6 @@ import type {
   StoredBrowserProfile,
 } from "@octant/contracts";
 import { MAX_BROWSER_STEPS_PER_THREAD } from "@octant/contracts";
-import { redactedBrowserUrl } from "./browserAutomationPolicy";
 import { browserCaptureRetention } from "./browserCapturePolicy";
 import { imageFileExtension } from "./imageGenerationInvocationPolicy";
 
@@ -17,17 +16,64 @@ export interface BrowserStepFacts {
   readonly element?: { readonly role: string; readonly name: string } | undefined;
   /** The page's address after the action (or the last known one when it failed). */
   readonly url?: string | undefined;
-  /** The observation's one-line `changed` result. */
-  readonly changed?: string | undefined;
+  /**
+   * What the page was and became, so the record can say in fixed words what
+   * changed. Page titles and text are compared here and never copied.
+   */
+  readonly change?:
+    | {
+        readonly before: BrowserPageState;
+        readonly after: BrowserPageState;
+      }
+    | undefined;
   readonly failure?: BrowserStepFailureCategory | undefined;
   readonly captureId?: BrowserStep["captureId"] | undefined;
   readonly profile?: StoredBrowserProfile | undefined;
 }
 
+export interface BrowserPageState {
+  readonly url: string | undefined;
+  readonly title: string | undefined;
+  readonly contentHash: string | undefined;
+}
+
+const READ_ONLY_OPERATIONS: ReadonlySet<BrowserActionKind> = new Set([
+  "extract-text",
+  "snapshot",
+  "screenshot",
+  "observe-diagnostics",
+  "tab-list",
+]);
+
+/**
+ * The stored result of a step, built from fixed categories. A page can echo
+ * what the agent typed into its title or text (search results do), so the
+ * record never copies either: it says only that the address, title, or
+ * content changed, and the new address as origin and path.
+ */
+export function browserStepChange(
+  operation: BrowserActionKind,
+  before: BrowserPageState,
+  after: BrowserPageState,
+): string | undefined {
+  if (READ_ONLY_OPERATIONS.has(operation)) return undefined;
+  const parts: string[] = [];
+  if (after.url !== before.url) {
+    const page = pageOf(after.url);
+    parts.push(
+      page === undefined ? "Address changed" : `Address changed to ${page.origin}${page.path}`,
+    );
+  }
+  if (after.title !== before.title && after.title !== undefined) parts.push("Title changed");
+  if (after.contentHash === undefined) parts.push("Page content not compared");
+  else if (before.contentHash !== undefined && after.contentHash !== before.contentHash) {
+    parts.push("Page content changed");
+  }
+  return parts.length === 0 ? "Nothing changed." : `${parts.join(". ")}.`;
+}
+
 const MAX_ELEMENT_NAME = 160;
-const MAX_CHANGED = 1024;
 const MAX_PATH = 512;
-const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/g;
 
 /**
  * The record of one step, without its identity. The request's own text, a
@@ -35,19 +81,18 @@ const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/g;
  * a step names the operation, the element by role and accessible name, the page
  * by origin and path, and what happened in one line.
  *
- * Rationale: the `changed` line can quote an address ("Now at ..."), so every
- * address inside it passes through the same redaction a diagnostic's address
- * does, which drops credentials and any query value whose name suggests a
- * secret.
+ * Rationale: the result line is built from categories (see
+ * `browserStepChange`), so no page title or text, and no query or fragment of an
+ * address, can reach the journal or a pull request body.
  */
 export function browserStepRecord(
   facts: BrowserStepFacts,
 ): Omit<BrowserStep, "stepId" | "threadId" | "recordedAt"> {
   const page = pageOf(facts.url);
-  const changed = facts.changed
-    ?.replace(URL_IN_TEXT, (address) => redactedBrowserUrl(address))
-    .trim()
-    .slice(0, MAX_CHANGED);
+  const changed =
+    facts.change === undefined
+      ? undefined
+      : browserStepChange(facts.operation, facts.change.before, facts.change.after);
   const role = facts.element?.role.trim().slice(0, 64);
   return {
     operation: facts.operation,
@@ -55,7 +100,7 @@ export function browserStepRecord(
       ? {}
       : { element: { role, name: facts.element.name.trim().slice(0, MAX_ELEMENT_NAME) } }),
     ...(page === undefined ? {} : { origin: page.origin, path: page.path }),
-    ...(changed === undefined || changed.length === 0 ? {} : { changed }),
+    ...(changed === undefined ? {} : { changed }),
     ...(facts.failure === undefined ? {} : { failure: facts.failure }),
     ...(facts.captureId === undefined ? {} : { captureId: facts.captureId }),
     ...(facts.profile === undefined ? {} : { profile: facts.profile }),
@@ -200,9 +245,20 @@ export function browserProofPullRequestSection(
   return lines.join("\n");
 }
 
-/** A step line is a list item: a page cannot start a new block or a link with its title. */
+/**
+ * A step line is a list item: a page cannot start a new block, a link, or
+ * emphasis with its element names or paths. One pass over the characters, so
+ * the work is linear in the line; the backslash is escaped with the rest so an
+ * escape cannot be cancelled by the text before it.
+ */
 function escapeLine(line: string): string {
-  return line.replace(/[\r\n]+/g, " ").replace(/([[\]<>`])/g, "\\$1");
+  let out = "";
+  for (const char of line) {
+    if (char === "\r" || char === "\n") out += " ";
+    else if ("\\`*_[]<>~|&".includes(char)) out += `\\${char}`;
+    else out += char;
+  }
+  return out;
 }
 
 /** The body with the section after it, separated by a blank line; nothing added when absent. */

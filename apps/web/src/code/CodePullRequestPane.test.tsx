@@ -402,6 +402,34 @@ describe("CodePullRequestPane", () => {
       ]);
     });
 
+    it("asks for another save when the captures changed after the files were saved", async () => {
+      const browser = proofClient();
+      const saveBrowserProofScreenshots = vi.fn(async () => ({
+        kind: "saved" as const,
+        count: 1,
+        folderName: "pr-7",
+      }));
+      const client = renderPane(browser, {
+        saveBrowserProofScreenshots,
+      } as unknown as OctantHostBridge);
+      fireEvent.click(screen.getByRole("checkbox", { name: "Include Browser proof" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Save screenshots…" }));
+      await screen.findByText("Saved 1 screenshot to “pr-7”.");
+
+      // A newer capture arrives before Create.
+      const newer = {
+        ...shot,
+        captureId: "c2000000-0000-4000-8000-000000000002",
+        capturedAt: "2026-10-12T09:00:09.000Z",
+      };
+      (browser.listCaptures as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+        captures: [shot, newer],
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Create pull request" }));
+      expect(await screen.findByText(/changed since you saved them/)).toBeVisible();
+      expect(client.executeOperation).not.toHaveBeenCalled();
+    });
+
     it("offers no save without the desktop app's folder picker", async () => {
       renderPane(proofClient());
       fireEvent.click(screen.getByRole("checkbox", { name: "Include Browser proof" }));

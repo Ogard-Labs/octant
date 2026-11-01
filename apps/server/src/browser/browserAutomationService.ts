@@ -434,8 +434,15 @@ export class BrowserAutomationService {
       return await this.#queueAction(owned, async () => {
         // Read before the action: it may replace the snapshot the ref names.
         const element = this.#elementOf(owned, input.request);
+        const before = {
+          url: owned.observation?.url,
+          title: owned.observation?.title,
+          contentHash: owned.contentHash,
+        };
         const result = await this.#actOwned(owned, input);
-        if (input.capturedBy === "agent") this.#recordStep(owned, input.request, element, result);
+        if (input.capturedBy === "agent") {
+          this.#recordStep(owned, input.request, element, before, result);
+        }
         return result;
       });
     } finally {
@@ -871,6 +878,11 @@ export class BrowserAutomationService {
     owned: OwnedContext,
     request: BrowserActionRequest,
     element: { readonly role: string; readonly name: string } | undefined,
+    before: {
+      readonly url: string | undefined;
+      readonly title: string | undefined;
+      readonly contentHash: string | undefined;
+    },
     result: BrowserAutomationSnapshot,
   ): void {
     const captures = this.#captures;
@@ -886,8 +898,19 @@ export class BrowserAutomationService {
           element,
           url: observation?.url,
           // A failed step has no result of its own: the observation on a
-          // failure is the previous action's.
-          changed: failed ? undefined : observation?.change,
+          // failure is the previous action's. The record compares the two
+          // page states and never copies a title or text.
+          change:
+            failed || observation === undefined
+              ? undefined
+              : {
+                  before,
+                  after: {
+                    url: observation.url,
+                    title: observation.title,
+                    contentHash: observation.contentHash,
+                  },
+                },
           failure: result.failure?.category,
           captureId:
             observation?.capture?.status === "kept" && !failed
