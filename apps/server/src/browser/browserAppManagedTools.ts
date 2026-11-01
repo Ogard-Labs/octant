@@ -6,6 +6,8 @@ import {
   browserToolWantsScreenshot,
   parseBrowserToolInput,
   handBrowserToPerson,
+  heldForPersonAnswer,
+  heldWhileQueued,
   isBrowserToolFlowInput,
   runBrowserToolSteps,
   signInPageRefusal,
@@ -156,7 +158,9 @@ export function createBrowserAppManagedTools(
     let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
     // While the person signs in, the page is theirs: no other agent action
     // reaches it until they press Continue or the ask ends.
-    if (snapshot.waitingForPerson !== undefined) return failure("browser-waiting-for-person");
+    if (snapshot.waitingForPerson !== undefined) {
+      return heldForPersonAnswer(snapshot.waitingForPerson);
+    }
     if (input.operation === "sign-in") {
       const refusal = signInRefusal(options) ?? signInPageRefusal(snapshot);
       if (refusal !== undefined) return failure(refusal);
@@ -355,12 +359,13 @@ export function createBrowserAppManagedTools(
     }
     // An approval or an upload question may have waited while the agent
     // handed the page to the person; the page is theirs until they answer.
-    if (
-      options.browser.inspectThread(options.windowId, options.threadId).waitingForPerson !==
-      undefined
-    ) {
+    const heldNow = options.browser.inspectThread(
+      options.windowId,
+      options.threadId,
+    ).waitingForPerson;
+    if (heldNow !== undefined) {
       await releaseUpload?.();
-      return failure("browser-waiting-for-person");
+      return heldForPersonAnswer(heldNow);
     }
     // The page reads an uploaded file when its form is sent, which can be a
     // later action, so the service keeps the copies until the page closes.
@@ -376,6 +381,8 @@ export function createBrowserAppManagedTools(
       ...(releaseUpload === undefined ? {} : { releaseUpload }),
     });
     if (signal?.aborted) return failure("tool-interrupted");
+    const heldInQueue = heldWhileQueued(acted);
+    if (heldInQueue !== undefined) return heldForPersonAnswer(heldInQueue);
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
     if (
       input.operation === "screenshot" &&

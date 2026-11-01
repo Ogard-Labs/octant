@@ -175,10 +175,18 @@ export const BrowserAutomationSnapshot = Schema.Struct({
   evidence: Schema.Array(ToolEvidence),
   failure: Schema.optional(BrowserAutomationFailure),
   /**
-   * The agent handed the page to the person and waits: for now only to sign
-   * in. A window showing the thread brings its Browser forward.
+   * The page is the person's and every agent Browser call on it is held:
+   * `sign-in` when the agent handed it over to sign in (a window showing the
+   * thread brings its Browser forward), `take-over` when the person took it.
    */
-  waitingForPerson: Schema.optional(Schema.Literal("sign-in")),
+  waitingForPerson: Schema.optional(Schema.Literal("sign-in", "take-over")),
+  /**
+   * Set on an agent action's answer once: the person used the page since the
+   * agent last looked (`used`), or took the page and handed it back so the
+   * agent's call was answered with a fresh snapshot instead of running
+   * (`handed-back`). Absent from every poll of the page.
+   */
+  personUsedPage: Schema.optional(Schema.Literal("used", "handed-back")),
 }).annotations(strict);
 export type BrowserAutomationSnapshot = typeof BrowserAutomationSnapshot.Type;
 

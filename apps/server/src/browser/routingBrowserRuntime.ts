@@ -120,6 +120,11 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
     };
   }
 
+  /** Only the desktop Browser shows the person its page directly. */
+  onPersonInput(listener: (contextId: BrowserContextId) => void): () => void {
+    return this.#native.onPersonInput?.(listener) ?? (() => undefined);
+  }
+
   #owned(contextId: BrowserContextId): BrowserRuntimePort {
     const runtime = this.#backend.get(contextId);
     if (runtime === undefined) throw new Error("Browser context is stale or unknown.");

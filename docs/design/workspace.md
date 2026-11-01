@@ -594,7 +594,15 @@ the control at the left of the address field, whose menu also signs out of a
 stored profile. A puzzle-piece extensions button follows it when an extension is
 enabled in the page's profile: it lists them, opens a popup or options page, and
 carries a count while the agent drives the page; the driver indicator and the
-floating preview name a stored profile while the agent drives it. The Project
+floating preview name a stored profile while the agent drives it. **Take over.**
+While a page is open, the toolbar carries a **Take over** control beside the
+driver indicator (an icon and the words, the icon alone below 720px). One click
+holds every agent Browser call on the page; the indicator then reads "You have
+the page" (hidden below 720px, where the button's own name and tooltip say it)
+and **Hand back** replaces Take over. While the agent's own sign-in ask is open,
+neither shows. The person's typing and clicking in the page while the agent
+acts is delivered, never dropped, and the indicator keeps saying "Agent active".
+The rules are in [Browser for agents](browser-agent-tool.md#person-and-agent-together). The Project
 browser dock has the same controls. The rules are in
 [Browser profiles and extensions](browser-profiles.md). **Project browser tab
 strip.** When threads of the Project have live agent pages, the Project browser

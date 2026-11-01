@@ -146,8 +146,25 @@ interface OwnedContext {
   agentActions: number;
   /** When an agent's action on this page last finished. */
   agentActedAt: number | undefined;
-  /** The agent handed the page to the person and waits for them to sign in. */
-  waitingForPerson: "sign-in" | undefined;
+  /**
+   * The page is the person's and every agent call on it is held: the agent
+   * asked them to sign in, or they took it over.
+   */
+  waitingForPerson: "sign-in" | "take-over" | undefined;
+  /** Ends a take-over (Hand back). Absent for a sign-in, which only its card ends. */
+  releaseTakeOver: (() => void) | undefined;
+  /**
+   * How many times the person used the page (typed, clicked, or took it over
+   * and handed it back). The agent's refs are good only while this has not
+   * moved past the count at its last snapshot.
+   */
+  personInputs: number;
+  /** `personInputs` as of the start of the agent's last snapshot. */
+  snapshotPersonInputs: number;
+  /** `personInputs` as of the last agent answer that said the person used the page. */
+  announcedPersonInputs: number;
+  /** The person handed the page back and the agent has not looked since. */
+  handedBack: boolean;
   /** A hand-off keeps the page open past its session limit until this time. */
   keptUntil: number | undefined;
   readonly evidence: ToolEvidence[];
@@ -180,6 +197,41 @@ const REF_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
   "drag",
   "upload",
 ]);
+/**
+ * The actions that put a key or a click into the page, which may be a field
+ * the person is typing in. After the person used the page they are refused
+ * until the agent has taken a snapshot; reading, waiting, scrolling, and
+ * navigating are not.
+ */
+const PERSON_GUARDED_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
+  "click",
+  "type",
+  "press",
+  "hover",
+  "select",
+  "drag",
+  "upload",
+]);
+/** The person's pane actions that change what the page shows or holds. */
+const PERSON_PAGE_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
+  "navigate",
+  "click",
+  "type",
+  "press",
+  "hover",
+  "select",
+  "drag",
+  "upload",
+  "tab-open",
+  "tab-select",
+  "tab-close",
+  "close-tab",
+]);
+const personUsedPageFailure: BrowserAutomationFailure = {
+  category: "stale",
+  message:
+    "The person used the page since your last snapshot, so this was not run. Take a fresh snapshot, then act on its refs.",
+};
 const staleRefFailure: BrowserAutomationFailure = {
   category: "stale",
   message:
@@ -203,6 +255,7 @@ export class BrowserAutomationService {
   /** Each context's staged upload copies, deleted when the context closes. */
   readonly #stagedUploads = new Map<BrowserContextId, Array<() => Promise<void>>>();
   readonly #removeProcessExitListener: (() => void) | undefined;
+  readonly #removePersonInputListener: (() => void) | undefined;
 
   constructor(options: BrowserAutomationServiceOptions) {
     this.#runtime = options.runtime;
@@ -217,6 +270,10 @@ export class BrowserAutomationService {
     this.#clock = options.clock;
     this.#now = options.now;
     this.#schedule = options.schedule ?? defaultSchedule;
+    this.#removePersonInputListener = this.#runtime.onPersonInput?.((contextId) => {
+      const owned = this.#contexts.get(contextId);
+      if (owned !== undefined) this.#notePersonInput(owned);
+    });
     this.#removeProcessExitListener = this.#runtime.onProcessExit?.((contextIds) => {
       const affected = contextIds === undefined ? undefined : new Set(contextIds);
       for (const [contextId, owned] of this.#contexts) {
@@ -326,6 +383,11 @@ export class BrowserAutomationService {
       agentActions: 0,
       agentActedAt: undefined,
       waitingForPerson: undefined,
+      releaseTakeOver: undefined,
+      personInputs: 0,
+      snapshotPersonInputs: 0,
+      announcedPersonInputs: 0,
+      handedBack: false,
       keptUntil: undefined,
       evidence: [],
       failure: undefined,
@@ -468,7 +530,7 @@ export class BrowserAutomationService {
     const byAgent = input.capturedBy === "agent";
     if (byAgent) owned.agentActions += 1;
     try {
-      return await this.#queueAction(owned, async () => {
+      const answered = await this.#queueAction(owned, async () => {
         // Read before the action: it may replace the snapshot the ref names.
         const element = this.#elementOf(owned, input.request);
         const before = {
@@ -482,6 +544,7 @@ export class BrowserAutomationService {
         }
         return result;
       });
+      return byAgent ? this.#withPersonNotice(owned, answered) : answered;
     } finally {
       if (byAgent) {
         owned.agentActions -= 1;
@@ -532,6 +595,22 @@ export class BrowserAutomationService {
         owned,
         { category: "interrupted", message: "The browser context is no longer active." },
         "interrupted",
+      );
+    }
+    // The tool checked the hold before it queued this call, but the person may
+    // have taken the page while it waited behind another action. Checked again
+    // here, after dequeuing, so a queued agent call never runs under a hold.
+    if (input.capturedBy === "agent" && owned.waitingForPerson !== undefined) {
+      return this.#failure(
+        owned,
+        {
+          category: "unavailable",
+          message:
+            owned.waitingForPerson === "take-over"
+              ? "The person took over the page, so this call did not run."
+              : "The page is waiting for the person, so this call did not run.",
+        },
+        owned.status,
       );
     }
     const granted = this.#authority.resolve(owned.threadId, modeOf(owned.action.authority));
@@ -587,6 +666,29 @@ export class BrowserAutomationService {
         owned.status,
       );
     }
+    // The person used the page since the agent last looked, so a key or click
+    // could land in a field they are typing in, and a ref may name an element
+    // that moved. The action in flight when they started finished; this one
+    // does not run until the agent has read the page again. After a hand-back
+    // the agent is answered with that reading instead of an error.
+    if (
+      input.capturedBy === "agent" &&
+      PERSON_GUARDED_ACTIONS.has(input.request.kind) &&
+      owned.personInputs > owned.snapshotPersonInputs
+    ) {
+      if (owned.handedBack) {
+        const { actionId, contextId, correlationId, authority } = input.request;
+        const fresh = await this.#actOwned(owned, {
+          ...input,
+          request: { actionId, contextId, correlationId, authority, kind: "snapshot" },
+        });
+        // Said in the answer, so the agent knows its call did not run.
+        owned.announcedPersonInputs = owned.personInputs;
+        return fresh.failure === undefined ? { ...fresh, personUsedPage: "handed-back" } : fresh;
+      }
+      return this.#failure(owned, personUsedPageFailure, owned.status);
+    }
+    const inputsAtStart = owned.personInputs;
     const resolved = this.#resolveRef(owned, input.request);
     if (resolved.kind === "refused") return this.#failure(owned, resolved.failure, "failed");
     // An upload reads files off this computer, so only the agent tool, which
@@ -748,6 +850,10 @@ export class BrowserAutomationService {
           url: observed.url,
           byRef: new Map((observed.snapshotRefs ?? []).map((entry) => [entry.ref, entry])),
         };
+        // This reading is current for the person's input up to the moment it
+        // began; input that arrived while it ran leaves the refs stale.
+        owned.snapshotPersonInputs = inputsAtStart;
+        if (inputsAtStart === owned.personInputs) owned.handedBack = false;
       } else if (
         owned.refs !== undefined &&
         (input.request.kind === "navigate" ||
@@ -755,6 +861,15 @@ export class BrowserAutomationService {
           observed.url !== owned.refs.url)
       ) {
         owned.refs = undefined;
+      }
+      if (input.request.kind === "navigate") {
+        // A new page: nothing the person did on the old one is the agent's to
+        // worry about.
+        owned.snapshotPersonInputs = inputsAtStart;
+        if (inputsAtStart === owned.personInputs) owned.handedBack = false;
+      }
+      if (input.capturedBy !== "agent" && PERSON_PAGE_ACTIONS.has(input.request.kind)) {
+        this.#notePersonInput(owned);
       }
       owned.evidence.push(evidence);
       if (owned.evidence.length > MAX_RETAINED_BROWSER_EVIDENCE) {
@@ -1405,6 +1520,7 @@ export class BrowserAutomationService {
 
   async close(): Promise<void> {
     this.#removeProcessExitListener?.();
+    this.#removePersonInputListener?.();
     for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
     for (const owned of this.#contexts.values()) {
       owned.abort.abort();
@@ -1478,12 +1594,16 @@ export class BrowserAutomationService {
    * returned release. Windows that show the thread see it and bring the Browser
    * forward; the agent tool holds every other agent action on the page meanwhile.
    */
-  holdForPerson(windowId: WindowId, threadId: BrowserThreadId): (() => void) | undefined {
+  holdForPerson(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    kind: "sign-in" | "take-over" = "sign-in",
+  ): (() => void) | undefined {
     const owned = this.#current(windowId, threadId);
     if (owned === undefined) return () => undefined;
     // One hand-off at a time: a second would clear the first's mark early.
     if (owned.waitingForPerson !== undefined) return undefined;
-    owned.waitingForPerson = "sign-in";
+    owned.waitingForPerson = kind;
     // The page outlives the hand-off: a person signing in near the end of the
     // session must not lose the page under them, and the agent gets a moment
     // after Continue to read it.
@@ -1491,9 +1611,112 @@ export class BrowserAutomationService {
     this.#scheduleExpiry(owned);
     return () => {
       owned.waitingForPerson = undefined;
+      owned.releaseTakeOver = undefined;
       owned.keptUntil = this.#now() + AFTER_HAND_OFF_KEEP_MS;
       if (owned.record.state === "active") this.#scheduleExpiry(owned);
     };
+  }
+
+  /**
+   * The person takes the thread's page: every agent Browser call on it is held
+   * (the sign-in hold, under another name) until they hand it back. Taking
+   * over adds no authority to anyone: it only keeps the agent out, so it needs
+   * a person at a window that can see the thread, and it is refused for a
+   * routine's window and while the agent's own sign-in ask is open. The route
+   * refuses a paired device before this is asked.
+   */
+  takeOver(windowId: WindowId, threadId: BrowserThreadId): BrowserAutomationSnapshot {
+    const owned = this.#current(windowId, threadId);
+    if (owned === undefined || owned.record.state !== "active") {
+      return failedSnapshot(
+        threadId,
+        { category: "unavailable", message: "There is no page to take over." },
+        "failed",
+      );
+    }
+    if (!this.#authorityIsActive(owned)) {
+      return failedSnapshot(
+        threadId,
+        { category: "unauthorized", message: "Browser context authority is no longer active." },
+        "failed",
+      );
+    }
+    if (this.#isUnattendedScope(windowId)) {
+      return failedSnapshot(
+        threadId,
+        { category: "unauthorized", message: "A routine has no person to take over a page." },
+        "failed",
+      );
+    }
+    if (owned.waitingForPerson === "take-over") return snapshot(owned);
+    if (owned.waitingForPerson !== undefined) {
+      return failedSnapshot(
+        threadId,
+        { category: "unavailable", message: "The agent asked you to sign in; answer that first." },
+        "failed",
+      );
+    }
+    const release = this.holdForPerson(windowId, threadId, "take-over");
+    if (release === undefined) return snapshot(owned);
+    owned.releaseTakeOver = release;
+    // Taking over is using the page: whatever the agent read is now the
+    // person's to change.
+    this.#notePersonInput(owned);
+    return snapshot(owned);
+  }
+
+  /** Hand the page back: the agent's next call gets a fresh reading. Same rules as `takeOver`. */
+  handBack(windowId: WindowId, threadId: BrowserThreadId): BrowserAutomationSnapshot {
+    const owned = this.#current(windowId, threadId);
+    if (owned === undefined || owned.record.state !== "active") {
+      return failedSnapshot(
+        threadId,
+        { category: "unavailable", message: "There is no page to hand back." },
+        "failed",
+      );
+    }
+    if (!this.#authorityIsActive(owned) || this.#isUnattendedScope(windowId)) {
+      return failedSnapshot(
+        threadId,
+        { category: "unauthorized", message: "Browser thread is not owned by this window." },
+        "failed",
+      );
+    }
+    // Only a take-over ends here; the agent's sign-in ask ends with its card.
+    if (owned.releaseTakeOver === undefined) return snapshot(owned);
+    owned.releaseTakeOver();
+    owned.handedBack = true;
+    this.#notePersonInput(owned);
+    return snapshot(owned);
+  }
+
+  /**
+   * The person used the page. What the agent's last snapshot named may have
+   * moved, so its refs are dropped as a navigation drops them, and its next
+   * answer says so once. While they hold the page, using it keeps it open.
+   */
+  #notePersonInput(owned: OwnedContext): void {
+    if (owned.record.state !== "active") return;
+    owned.personInputs += 1;
+    owned.refs = undefined;
+    if (
+      owned.waitingForPerson === "take-over" &&
+      (owned.keptUntil ?? 0) < this.#now() + HAND_OFF_KEEP_MS - 60_000
+    ) {
+      owned.keptUntil = this.#now() + HAND_OFF_KEEP_MS;
+      this.#scheduleExpiry(owned);
+    }
+  }
+
+  /** Say once, on an agent action's answer, that the person used the page. */
+  #withPersonNotice(
+    owned: OwnedContext,
+    answered: BrowserAutomationSnapshot,
+  ): BrowserAutomationSnapshot {
+    if (answered.personUsedPage !== undefined) return answered;
+    if (owned.personInputs <= owned.announcedPersonInputs) return answered;
+    owned.announcedPersonInputs = owned.personInputs;
+    return { ...answered, personUsedPage: "used" };
   }
 
   #scheduleExpiry(owned: OwnedContext): void {

@@ -54,6 +54,8 @@ describe("browser automation routes", () => {
     inspect: ReturnType<typeof vi.fn>;
     inspectThread: ReturnType<typeof vi.fn>;
     releaseThread: ReturnType<typeof vi.fn>;
+    takeOver: ReturnType<typeof vi.fn>;
+    handBack: ReturnType<typeof vi.fn>;
   };
   let handler: ReturnType<typeof createBrowserAutomationRouteHandler>;
 
@@ -67,11 +69,9 @@ describe("browser automation routes", () => {
       stop: vi.fn(async () => snapshot),
       inspect: vi.fn(() => snapshot),
       inspectThread: vi.fn(() => snapshot),
-      releaseThread: vi.fn(async () => ({
-        status: "ready",
-        threadId,
-        evidence: [],
-      })),
+      releaseThread: vi.fn(async () => ({ status: "ready", threadId, evidence: [] })),
+      takeOver: vi.fn(() => ({ ...snapshot, waitingForPerson: "take-over" })),
+      handBack: vi.fn(() => snapshot),
     };
     handler = createBrowserAutomationRouteHandler({
       service: service as any,
@@ -343,6 +343,101 @@ describe("browser automation routes", () => {
       expect(response?.status).toBe(403);
     }
     expect(service.act).toHaveBeenCalledOnce();
+  });
+
+  describe("taking the page over from the agent", () => {
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+    };
+    const takeOver = "/api/browser/contexts/take-over";
+    const handBack = "/api/browser/contexts/hand-back";
+    const paths = [takeOver, handBack];
+    const post = (path: string, extra: Record<string, unknown> = {}) =>
+      new Request(`http://127.0.0.1${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ threadId, ...extra }),
+      });
+
+    it("asks the service under the authenticated window and the named thread", async () => {
+      const taken = await handler(post(takeOver));
+      expect(taken?.status).toBe(200);
+      const held = (await taken?.json()) as { waitingForPerson?: string } | undefined;
+      expect(held?.waitingForPerson).toBe("take-over");
+      expect(service.takeOver).toHaveBeenCalledWith(windowId, threadId);
+      expect((await handler(post(handBack)))?.status).toBe(200);
+      expect(service.handBack).toHaveBeenCalledWith(windowId, threadId);
+    });
+
+    it("refuses without the window's capability, and malformed input", async () => {
+      for (const path of paths) {
+        const bare = await handler(
+          new Request(`http://127.0.0.1${path}`, {
+            method: "POST",
+            body: JSON.stringify({ threadId }),
+          }),
+        );
+        expect(bare?.status).toBe(401);
+        expect((await handler(post(path, { extra: true })))?.status).toBe(400);
+      }
+      expect(service.takeOver).not.toHaveBeenCalled();
+      expect(service.handBack).not.toHaveBeenCalled();
+    });
+
+    it("refuses a window that cannot see the thread before the service is asked", async () => {
+      const elsewhere = createBrowserAutomationRouteHandler({
+        service: service as any,
+        authority: { canAccessWindow: () => false, resolve: () => authority },
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      for (const path of paths) expect((await elsewhere(post(path)))?.status).toBe(403);
+      expect(service.takeOver).not.toHaveBeenCalled();
+      expect(service.handBack).not.toHaveBeenCalled();
+    });
+
+    it("refuses a paired device even where it could tap the page", async () => {
+      for (const path of paths) {
+        const request = post(path);
+        bindPrincipalRouteContext(request, {
+          principal: createRemoteDevicePrincipal({
+            hostId: "local" as never,
+            deviceId: "90000000-0000-4000-8000-000000000001" as never,
+            credentialGeneration: 1,
+            origin: "https://octant.example",
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+          }),
+          scopeId: windowId,
+        });
+        expect((await handler(request))?.status).toBe(403);
+      }
+      expect(service.takeOver).not.toHaveBeenCalled();
+      expect(service.handBack).not.toHaveBeenCalled();
+    });
+
+    it("passes the service's refusal on: no page, a routine, or the agent's own sign-in ask", async () => {
+      service.takeOver.mockReturnValueOnce({
+        status: "failed",
+        threadId,
+        evidence: [],
+        failure: { category: "unavailable", message: "There is no page to take over." },
+      });
+      const none = await handler(post(takeOver));
+      expect(none?.status).toBe(409);
+      service.takeOver.mockReturnValueOnce({
+        status: "failed",
+        threadId,
+        evidence: [],
+        failure: {
+          category: "unauthorized",
+          message: "A routine has no person to take over a page.",
+        },
+      });
+      expect((await handler(post(takeOver)))?.status).toBe(403);
+    });
   });
 
   describe("thread captures", () => {

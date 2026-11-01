@@ -272,4 +272,10 @@ export interface BrowserRuntimePort {
   readonly onProcessExit?: (
     listener: (contextIds?: ReadonlyArray<BrowserContextId>) => void,
   ) => () => void;
+  /**
+   * The person typed or clicked in a page of their own screen. Only a runtime
+   * that shows the person the page itself can say so; a headless page reaches
+   * the person through relayed actions, which the service already knows of.
+   */
+  readonly onPersonInput?: (listener: (contextId: BrowserContextId) => void) => () => void;
 }

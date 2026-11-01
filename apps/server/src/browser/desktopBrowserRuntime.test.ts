@@ -148,6 +148,37 @@ describe("DesktopBrowserRuntime", () => {
     }
   });
 
+  it("tells the service which pages the person typed or clicked in, and stops asking with no listener", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn(async (input: string | URL | Request) =>
+        Response.json(
+          String(input).endsWith("/v1/contexts/person-input")
+            ? { contextIds: [contextId, "not-a-context"] }
+            : { ok: true },
+        ),
+      );
+      const runtime = new DesktopBrowserRuntime({
+        brokerUrl: "http://127.0.0.1:41234/",
+        token: "broker-token",
+        fetch,
+        eventPollIntervalMs: 10,
+      });
+      const typed = vi.fn();
+      const remove = runtime.onPersonInput(typed);
+
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(typed).toHaveBeenCalledExactlyOnceWith(contextId);
+      remove();
+      fetch.mockClear();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   describe("profile stores", () => {
     const cookie = {
       domain: ".example.com",

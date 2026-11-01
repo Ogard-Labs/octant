@@ -696,6 +696,20 @@ describe("Browser preview", () => {
     expect(onShowBrowser).toHaveBeenCalledOnce();
   });
 
+  it("does not pull the Browser forward when the person took the page over themselves", async () => {
+    const onShowBrowser = vi.fn();
+    const browser = {
+      inspectThread: vi.fn(async () => ({
+        ...browserSnapshot(threadId, "34000000-0000-4000-8000-000000000010"),
+        waitingForPerson: "take-over" as const,
+      })),
+    } as unknown as BrowserAutomationClient;
+    renderPreview(browser, { onShowBrowser, pollIntervalMs: 20 });
+
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledTimes(3));
+    expect(onShowBrowser).not.toHaveBeenCalled();
+  });
+
   it("appears when the Browser is closed and a session is live, then opens the Browser on click", async () => {
     const user = userEvent.setup();
     const onShowBrowser = vi.fn();

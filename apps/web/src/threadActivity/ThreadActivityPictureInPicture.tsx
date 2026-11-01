@@ -77,8 +77,10 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
   const browserPreviewHidden =
     browserPreviewKey !== undefined && hiddenBrowserPreviews.has(browserPreviewKey);
   // The agent handed the page to the person to sign in: bring the Browser
-  // forward once for that hand-off, wherever the person is in the thread.
-  const waitingForPerson = browserSnapshot?.waitingForPerson;
+  // forward once for that hand-off, wherever the person is in the thread. A
+  // take-over is the person's own click in the Browser, so it needs no pull.
+  const waitingForPerson =
+    browserSnapshot?.waitingForPerson === "sign-in" ? browserSnapshot.waitingForPerson : undefined;
   const broughtForward = useRef<string | undefined>(undefined);
   const showBrowser = props.onShowBrowser;
   useEffect(() => {
