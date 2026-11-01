@@ -527,6 +527,7 @@ export function RootNavigator(props: RootNavigatorProps) {
       {props.activeRoute === "thread" ? (
         <ThreadScreen
           onBack={() => props.onSelectRoute(threadReturnRoute)}
+          onOpenThread={setSelectedThread}
           selected={selectedThread}
         />
       ) : null}

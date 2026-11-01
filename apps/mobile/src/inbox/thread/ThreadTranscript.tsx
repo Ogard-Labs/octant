@@ -1,12 +1,20 @@
 import { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { chatAttemptStatusLabel, type MobileCodeConversation } from "@octant/client-runtime";
+import {
+  chatAttemptStatusLabel,
+  mobileChatMessages,
+  mobileCodeTurnTargets,
+  mobileWorkTurnTargets,
+  type MobileCodeConversation,
+  type MobileTurnTargets,
+} from "@octant/client-runtime";
 import type { WorkTurnState } from "@octant/contracts";
 import { MOBILE_COPY } from "../../copy";
 import { mobileSpacing, mobileTypography } from "../../theme/tokens";
 import { useTheme } from "../../../design-system";
 import { AttemptStatus } from "../../ui/AttemptStatus";
 import { MessageBubble } from "../../ui/MessageBubble";
+import type { MessageActionItem } from "../../ui/MessageActions";
 import { ThreadWorkShelf } from "../../ui/ThreadWorkShelf";
 import type { useChatThread } from "./useChatThread";
 
@@ -17,6 +25,10 @@ export interface ThreadTranscriptProps {
   readonly codeConversation: MobileCodeConversation | undefined;
   readonly chat: ChatThread;
   readonly allowProductMutations: boolean;
+  /** Fork from here and Rewind to here for one message; empty where none can run. */
+  readonly turnActionsFor: (
+    targets: MobileTurnTargets | undefined,
+  ) => ReadonlyArray<MessageActionItem>;
 }
 
 export function ThreadTranscript(props: ThreadTranscriptProps) {
@@ -56,6 +68,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
   const { chat, workTurns, codeConversation } = props;
   const codeTurns = codeConversation?.turns;
   const view = chat.view;
+  const messages = useMemo(() => (view === undefined ? [] : mobileChatMessages(view)), [view]);
 
   return (
     <>
@@ -64,19 +77,27 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
           {workTurns.length === 0 ? (
             <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
           ) : (
-            workTurns.map((turn) => (
+            workTurns.map((turn, index) => (
               <View key={String(turn.turnId)} style={styles.transcript}>
                 <MessageBubble
                   body={turn.prompt}
                   role="user"
                   showActions={false}
                   testID={`mobile-work-prompt-${String(turn.turnId)}`}
+                  turnActions={props.turnActionsFor(
+                    mobileWorkTurnTargets(workTurns, index, "user"),
+                  )}
                 />
                 {turn.response !== undefined && turn.response.length > 0 ? (
                   <MessageBubble
                     body={turn.response}
                     role="assistant"
                     testID={`mobile-work-reply-${String(turn.turnId)}`}
+                    turnActions={props.turnActionsFor(
+                      turn.status === "completed"
+                        ? mobileWorkTurnTargets(workTurns, index, "assistant")
+                        : undefined,
+                    )}
                   />
                 ) : turn.failure !== undefined ? (
                   <Text style={styles.warningText}>{turn.failure.message}</Text>
@@ -98,7 +119,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
           {codeTurns.length === 0 ? (
             <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
           ) : (
-            codeTurns.map((turn) => (
+            codeTurns.map((turn, turnIndex) => (
               <View key={turn.operationId} style={styles.transcript}>
                 {turn.prompt.length === 0 ? null : (
                   <MessageBubble
@@ -106,6 +127,9 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                     role="user"
                     showActions={false}
                     testID={`mobile-code-prompt-${turn.operationId}`}
+                    turnActions={props.turnActionsFor(
+                      mobileCodeTurnTargets(codeTurns, turnIndex, "user"),
+                    )}
                   />
                 )}
                 {turn.assistant.map((part, index) => (
@@ -114,6 +138,13 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                     key={`${turn.operationId}-${index}`}
                     role="assistant"
                     testID={`mobile-code-reply-${turn.operationId}-${index}`}
+                    {...(index === turn.assistant.length - 1
+                      ? {
+                          turnActions: props.turnActionsFor(
+                            mobileCodeTurnTargets(codeTurns, turnIndex, "assistant"),
+                          ),
+                        }
+                      : {})}
                   />
                 ))}
                 {turn.status === "waiting" ? (
@@ -179,18 +210,19 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
               ))}
             </View>
           ) : null}
-          {view.contents.length === 0 ? (
+          {messages.length === 0 ? (
             <View style={styles.emptyChat} testID="mobile-thread-empty">
               <Text style={styles.emptyTitle}>{MOBILE_COPY.threadStart}</Text>
               <Text style={styles.emptyBody}>{MOBILE_COPY.threadStartHelp}</Text>
             </View>
           ) : (
-            view.contents.map((content, index) => {
+            messages.map(({ content, targets }, index) => {
               const isLastAssistant =
                 index ===
-                view.contents.reduce(
+                messages.reduce(
                   (last, entry, i) =>
-                    entry.role.toLowerCase() !== "user" && entry.role.toLowerCase() !== "human"
+                    entry.content.role.toLowerCase() !== "user" &&
+                    entry.content.role.toLowerCase() !== "human"
                       ? i
                       : last,
                   -1,
@@ -208,6 +240,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                   role={content.role}
                   showActions={isLastAssistant}
                   testID={`mobile-message-${content.contentId}`}
+                  turnActions={props.turnActionsFor(targets)}
                   {...(content.parts === undefined ? {} : { parts: content.parts })}
                   {...(showRetry
                     ? {

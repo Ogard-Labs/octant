@@ -101,6 +101,7 @@ export * from "./mobileThreadSurfaceClient";
 export * from "./mobileChatAttempt";
 export * from "./chatNdjsonStream";
 export * from "./mobileCodeOperationsClient";
+export * from "./mobileThreadRewind";
 export * from "./mobileCodeCreateClient";
 export * from "./mobilePushTokenClient";
 export * from "./mobileProviderClient";
