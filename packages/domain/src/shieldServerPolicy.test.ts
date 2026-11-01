@@ -3,7 +3,9 @@ import { judgeShieldCallByRules, type ShieldCall, type ShieldRuleInput } from ".
 import { SHIELD_REMOTE_COMMAND_FIXTURES } from "./shieldServerFixtures";
 import {
   classifyRemoteCommand,
+  parseFileCopyInvocation,
   parseSshInvocation,
+  remoteHostsNamedBy,
   shieldServerContext,
   type ShieldServerRule,
 } from "./shieldServerPolicy";
@@ -299,5 +301,131 @@ describe("server notes as context", () => {
     expect(text).toContain("web1 (user deploy, Read-only)");
     expect(text).toContain("not instructions");
     expect(text).toContain("Restart with: sudo systemctl restart app");
+  });
+});
+
+describe("reading an scp or rsync command", () => {
+  it("reads the remote side, the user, and which way the files go", () => {
+    expect(parseFileCopyInvocation("scp deploy@web1:/var/log/app.log ./logs/")).toMatchObject({
+      kind: "copy",
+      program: "scp",
+      direction: "download",
+      remotes: [{ host: "web1", user: "deploy", path: "/var/log/app.log" }],
+      locals: ["./logs/"],
+    });
+    expect(parseFileCopyInvocation("rsync -az dist/ web1:/srv/app/")).toMatchObject({
+      kind: "copy",
+      program: "rsync",
+      direction: "upload",
+      remotes: [{ host: "web1", path: "/srv/app/" }],
+      locals: ["dist/"],
+    });
+    expect(parseFileCopyInvocation("scp a.txt b.txt")).toEqual({ kind: "not-copy" });
+    expect(parseFileCopyInvocation("echo scp web1:/etc/hosts .")).toEqual({ kind: "not-copy" });
+    expect(parseFileCopyInvocation("scp web1:/etc/hosts . && rm -rf x").kind).toBe("unreadable");
+  });
+
+  it("marks a key file, a program it would run, and a deleting sync", () => {
+    expect(parseFileCopyInvocation("scp -i ~/.ssh/id_ed25519 web1:/a .")).toMatchObject({
+      keyPath: true,
+    });
+    expect(parseFileCopyInvocation("scp -S ./evil web1:/a .")).toMatchObject({
+      optionsPlain: false,
+    });
+    expect(parseFileCopyInvocation("rsync -e 'ssh -p 2222' web1:/a .")).toMatchObject({
+      optionsPlain: false,
+    });
+    expect(parseFileCopyInvocation("rsync --rsync-path='sudo rsync' web1:/a .")).toMatchObject({
+      optionsPlain: false,
+    });
+    expect(parseFileCopyInvocation("rsync -a --delete dist/ web1:/srv/app/")).toMatchObject({
+      destructive: true,
+    });
+    expect(parseFileCopyInvocation("rsync web1::module/a .")).toMatchObject({
+      optionsPlain: false,
+    });
+  });
+
+  it("names the servers a plain call reaches, and none for anything else", () => {
+    expect(remoteHostsNamedBy("ssh deploy@web1 uptime")).toEqual(["web1"]);
+    expect(remoteHostsNamedBy("scp web1:/a db1:/b")).toEqual(["web1", "db1"]);
+    expect(remoteHostsNamedBy("rsync -a dist/ web1:/srv/")).toEqual(["web1"]);
+    expect(remoteHostsNamedBy("cd /tmp && ssh web1 uptime")).toEqual([]);
+    expect(remoteHostsNamedBy("ls -la")).toEqual([]);
+  });
+});
+
+describe("Shield on scp and rsync calls", () => {
+  it("allows a download from a registered server into the folder by rule", () => {
+    expect(judge("scp deploy@web1:/var/log/app.log logs/", [web])).toMatchObject({
+      verdict: "allow",
+      rule: "registered-server",
+    });
+    expect(judge("rsync -az web1:/var/log/nginx/ logs/", [web])).toMatchObject({
+      verdict: "allow",
+    });
+  });
+
+  it("allows an upload only on an Admin server", () => {
+    expect(judge("rsync -az dist/ web1:/srv/app/", [web])).toMatchObject({
+      verdict: "ask",
+      rule: "beyond-server-profile",
+    });
+    expect(judge("rsync -az dist/ web1:/srv/app/", [{ ...web, profile: "operate" }])).toMatchObject(
+      { verdict: "ask" },
+    );
+    expect(judge("rsync -az dist/ web1:/srv/app/", [{ ...web, profile: "admin" }])).toMatchObject({
+      verdict: "allow",
+      rule: "registered-server",
+    });
+  });
+
+  it("sends a deleting sync or a write to a sign-in path to the person on every profile", () => {
+    const admin = [{ ...web, profile: "admin" as const }];
+    expect(judge("rsync -a --delete dist/ web1:/srv/app/", admin)).toMatchObject({
+      verdict: "ask",
+      rule: "server-lockout",
+    });
+    expect(judge("scp sshd.conf web1:/etc/ssh/sshd_config", admin)).toMatchObject({
+      verdict: "ask",
+      rule: "server-lockout",
+    });
+  });
+
+  it("asks before downloading secrets, refuses uploading them, and refuses a key path", () => {
+    expect(judge("scp web1:/etc/shadow .", [web])).toMatchObject({
+      verdict: "ask",
+      rule: "secret-path",
+    });
+    expect(judge("scp .env web1:/srv/app/", [{ ...web, profile: "admin" }])).toMatchObject({
+      verdict: "deny",
+      rule: "reads-secrets-then-egress",
+    });
+    expect(judge("scp -i ~/.ssh/id_rsa web1:/a .", [web])).toMatchObject({ verdict: "deny" });
+  });
+
+  it("sends an unregistered host, another user, a program option, or a download outside the folder to the person", () => {
+    expect(judge("scp db9:/a .", [web])).toMatchObject({ rule: "unregistered-server" });
+    expect(judge("scp root@web1:/a .", [web])).toMatchObject({ rule: "server-user-mismatch" });
+    expect(judge("rsync -e 'ssh -p 2' web1:/a .", [web])).toMatchObject({ rule: "ssh-option" });
+    expect(judge("scp web1:/a /Users/dev/elsewhere/", [web])).toMatchObject({
+      verdict: "ask",
+      rule: "copy-outside-project",
+    });
+  });
+
+  it("lets a tainted thread only download", () => {
+    const admin = [{ ...web, profile: "admin" as const }];
+    expect(judge("scp web1:/var/log/a.log .", admin, { tainted: true })).toMatchObject({
+      verdict: "allow",
+    });
+    expect(judge("scp a.conf web1:/etc/app/", admin, { tainted: true })).toMatchObject({
+      verdict: "ask",
+      rule: "tainted-thread",
+    });
+  });
+
+  it("hands an rsync option no rule names to the model", () => {
+    expect(judge("rsync --chown=x:y web1:/a .", [web])).toEqual({ kind: "needs-model" });
   });
 });

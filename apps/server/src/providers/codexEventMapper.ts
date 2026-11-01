@@ -6,7 +6,9 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
 import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
+import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
@@ -393,17 +395,49 @@ function mapToolCompletion(
   if (item.status === "inProgress") {
     return [event(context, { kind: "tool-progress", toolCallId: id, message: "Tool is running." })];
   }
+  const command = item.type === "commandExecution" ? item : undefined;
+  const exitCode =
+    command?.exitCode === undefined || command.exitCode === null
+      ? {}
+      : { exitCode: command.exitCode };
+  // What a server printed reaches the model, so the Watcher reads it as it
+  // reads a fetched page; it is never journaled or shown from here.
+  const remoteOutput =
+    command !== undefined &&
+    remoteHostsNamedBy(command.command).length > 0 &&
+    typeof command.aggregatedOutput === "string" &&
+    command.aggregatedOutput.trim() !== ""
+      ? [
+          event(context, {
+            kind: "outside-content-result",
+            toolCallId: id,
+            toolName: toolName(item),
+            source: "remote-command",
+            text: command.aggregatedOutput.slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS),
+          }),
+        ]
+      : [];
   if (item.status === "completed") {
     if (item.type === "dynamicToolCall" && item.success === false) {
       return protocolFailure("Provider returned a contradictory tool completion status.");
     }
-    return [event(context, { kind: "tool-success", toolCallId: id, summary: "Tool completed." })];
+    return [
+      ...remoteOutput,
+      event(context, {
+        kind: "tool-success",
+        toolCallId: id,
+        summary: "Tool completed.",
+        ...exitCode,
+      }),
+    ];
   }
   return [
+    ...remoteOutput,
     event(context, {
       kind: "tool-failure",
       toolCallId: id,
       message: item.status === "declined" ? "Tool was declined." : "Tool failed.",
+      ...exitCode,
     }),
   ];
 }

@@ -88,7 +88,7 @@ export interface ShieldThreadFacts {
   readonly personMessages: (threadId: string) => ReadonlyArray<string>;
   readonly projectCommands: (boundRoot: string) => ReadonlyArray<string>;
   /** The servers the person registered; SSH to any other host goes to the person. */
-  readonly servers?: () => ReadonlyArray<ShieldServerRule>;
+  readonly servers?: (threadId: string) => ReadonlyArray<ShieldServerRule>;
 }
 
 export interface OctantShieldOptions {
@@ -202,7 +202,7 @@ export class OctantShield {
       ...(request.extraRoots === undefined ? {} : { extraRoots: request.extraRoots }),
       tainted,
       projectCommands: facts.projectCommands(request.boundRoot),
-      servers: facts.servers?.() ?? [],
+      servers: facts.servers?.(request.threadId) ?? [],
       level: reviewing.level,
       personMessages: facts.personMessages(request.threadId),
       watcherLabels,

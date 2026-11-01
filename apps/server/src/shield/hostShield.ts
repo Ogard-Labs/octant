@@ -78,7 +78,8 @@ export interface HostShieldDependencies {
     readonly usage: TurnUsage | undefined;
   }) => void;
   /** The servers the person registered, judged by their profiles. */
-  readonly servers?: () => ReadonlyArray<ShieldServerRule>;
+  /** The servers a thread reaches: its Project's own list, else the account list. */
+  readonly servers?: (threadId: string) => ReadonlyArray<ShieldServerRule>;
   /** A folder outside every Project, where Shield's one-shot sessions start. */
   readonly scratchRoot: string;
   readonly clock?: () => string;

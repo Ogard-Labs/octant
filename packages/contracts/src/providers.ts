@@ -2672,7 +2672,8 @@ export const ProviderRuntimeEvent = Schema.Union(
     kind: Schema.Literal("outside-content-result"),
     toolCallId: Schema.NonEmptyTrimmedString,
     toolName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-    source: Schema.Literal("web-search", "web-fetch", "hosted-tool"),
+    /** `remote-command`: what a server printed for an `ssh`, `scp`, or `rsync` command the runtime ran. */
+    source: Schema.Literal("web-search", "web-fetch", "hosted-tool", "remote-command"),
     text: Schema.NonEmptyString.pipe(Schema.maxLength(OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS)),
   }).annotations(strict),
   Schema.Struct({
@@ -2686,6 +2687,8 @@ export const ProviderRuntimeEvent = Schema.Union(
     kind: Schema.Literal("tool-success"),
     toolCallId: Schema.NonEmptyTrimmedString,
     summary: Schema.NonEmptyTrimmedString,
+    /** A shell tool's exit status, when the runtime reports one. */
+    exitCode: Schema.optional(Schema.Int),
     /**
      * The page the tool published outside this host, when it is a tool whose
      * whole result is such a page (a Claude artifact). Only the address and
@@ -2699,6 +2702,8 @@ export const ProviderRuntimeEvent = Schema.Union(
     kind: Schema.Literal("tool-failure"),
     toolCallId: Schema.NonEmptyTrimmedString,
     message: Schema.NonEmptyTrimmedString,
+    /** A shell tool's exit status, when the runtime reports one. */
+    exitCode: Schema.optional(Schema.Int),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

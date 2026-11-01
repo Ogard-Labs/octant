@@ -17,6 +17,7 @@ import {
 } from "@octant/contracts";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import { shieldCallFromHarness } from "@octant/domain/shield-judge-policy";
+import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { nativeHarnessResultTaintsThread } from "@octant/domain/untrusted-content-policy";
 import type { ShieldReviewPort } from "../shield/octantShield";
 import {
@@ -394,6 +395,13 @@ export function createNativeHarnessComposition(
    * keyed by the call's own id, which no other call has.
    */
   const confirmedCommandHosts = new Map<string, ToolEgressCallConfirmation>();
+  /**
+   * The servers the person let each thread connect to, held for the host's
+   * lifetime. A remembered approval never covers the first connection to a
+   * host: that one asks, naming the host, so the person sees each new server
+   * a thread reaches. A restart forgets them, which only asks again.
+   */
+  const connectedHosts = new Map<string, Set<string>>();
   const approvalStore = options.approvals;
   const askUserFor = (scope: {
     readonly parentThreadId: string;
@@ -481,6 +489,30 @@ export function createNativeHarnessComposition(
                 }
                 ask = { ...ask, shield: decision };
               }
+            }
+            const command =
+              input.toolName === "bash" &&
+              typeof input.arguments === "object" &&
+              input.arguments !== null
+                ? (input.arguments as { readonly command?: unknown }).command
+                : undefined;
+            const connected = connectedHosts.get(scope.parentThreadId) ?? new Set<string>();
+            const newHosts =
+              typeof command === "string"
+                ? remoteHostsNamedBy(command).filter((host) => !connected.has(host.toLowerCase()))
+                : [];
+            if (newHosts.length > 0) {
+              ask = {
+                ...ask,
+                singleUse: true,
+                summary: `First connection to ${newHosts.join(", ")} in this thread: ${ask.summary}`,
+              };
+              const outcome = await approvalStore.ask(ask);
+              if (outcome === "approved") {
+                for (const host of newHosts) connected.add(host.toLowerCase());
+                connectedHosts.set(scope.parentThreadId, connected);
+              }
+              return outcome;
             }
             // A marked thread's command that will run through the egress
             // rules lists the hosts it may reach, so the person picks them

@@ -15,11 +15,13 @@ import { AggregateId, UtcTimestamp } from "./events";
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const SHIELD_SERVERS_AGGREGATE = "shield-servers";
-/** The registry's one aggregate id: every server lives in the person's account list. */
+/** The account list's aggregate id; a Project's own list lives under the Project's id. */
 export const SHIELD_SERVERS_AGGREGATE_ID = "5e7e0000-0000-4000-8000-000000000000";
 export const SHIELD_SERVERS_EVENT_NAMES = {
   serverSet: "shield-servers.server-set@1",
   serverRemoved: "shield-servers.server-removed@1",
+  projectServersSet: "shield-servers.project-servers-set@1",
+  projectOverrideCleared: "shield-servers.project-override-cleared@1",
 } as const;
 
 /** Remote commands are journaled per thread, on the thread's own aggregate id. */
@@ -102,6 +104,24 @@ export const ShieldServerRemovedPayload = Schema.Struct({
 }).annotations(strict);
 export type ShieldServerRemovedPayload = typeof ShieldServerRemovedPayload.Type;
 
+/**
+ * A Project's own server list, whole: it replaces the account list for that
+ * Project's threads until it is cleared.
+ */
+export const ShieldProjectServersSetPayload = Schema.Struct({
+  projectId: AggregateId,
+  servers: Schema.Array(ShieldServer).pipe(Schema.maxItems(MAX_SHIELD_SERVERS)),
+  principal: localWindow,
+}).annotations(strict);
+export type ShieldProjectServersSetPayload = typeof ShieldProjectServersSetPayload.Type;
+
+/** A Project goes back to the account list. */
+export const ShieldProjectServersClearedPayload = Schema.Struct({
+  projectId: AggregateId,
+  principal: localWindow,
+}).annotations(strict);
+export type ShieldProjectServersClearedPayload = typeof ShieldProjectServersClearedPayload.Type;
+
 /** How a remote command ended, as the shell that ran it saw it. */
 export const ShieldRemoteCommandStatus = Schema.Literal(
   "ran",
@@ -129,9 +149,19 @@ export const ShieldRemoteCommandRanPayload = Schema.Struct({
 }).annotations(strict);
 export type ShieldRemoteCommandRanPayload = typeof ShieldRemoteCommandRanPayload.Type;
 
-/** Settings › Servers: the registry, and whether the person's SSH agent is there to use. */
+/**
+ * Settings › Servers: the account list, and when a Project is asked about,
+ * its own list (`null` while it follows the account list), and whether the
+ * person's SSH agent is there to use.
+ */
 export const ShieldServersView = Schema.Struct({
   servers: Schema.Array(ShieldServer).pipe(Schema.maxItems(MAX_SHIELD_SERVERS)),
+  project: Schema.optional(
+    Schema.Struct({
+      projectId: AggregateId,
+      override: Schema.NullOr(Schema.Array(ShieldServer).pipe(Schema.maxItems(MAX_SHIELD_SERVERS))),
+    }).annotations(strict),
+  ),
   sshAgent: Schema.Literal("available", "missing"),
 }).annotations(strict);
 export type ShieldServersView = typeof ShieldServersView.Type;
@@ -150,6 +180,16 @@ export const ShieldServersCommand = Schema.Union(
     kind: Schema.Literal("remove-server"),
     serverId: AggregateId,
   }).annotations(strict),
+  /** Gives a Project its own whole list, which replaces the account list there. */
+  Schema.Struct({
+    kind: Schema.Literal("set-project-servers"),
+    projectId: AggregateId,
+    servers: Schema.Array(ShieldServerFields).pipe(Schema.maxItems(MAX_SHIELD_SERVERS)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("clear-project-override"),
+    projectId: AggregateId,
+  }).annotations(strict),
 );
 export type ShieldServersCommand = typeof ShieldServersCommand.Type;
 
@@ -160,6 +200,7 @@ export const ShieldServersRefusalReason = Schema.Literal(
   "invalid-deploy-command",
   "server-not-found",
   "too-many-servers",
+  "project-not-found",
   "unavailable",
 );
 export type ShieldServersRefusalReason = typeof ShieldServersRefusalReason.Type;
@@ -182,6 +223,12 @@ export const decodeShieldServersView = Schema.decodeUnknownSync(ShieldServersVie
 export const decodeShieldServerSetPayload = Schema.decodeUnknownSync(ShieldServerSetPayload);
 export const decodeShieldServerRemovedPayload = Schema.decodeUnknownSync(
   ShieldServerRemovedPayload,
+);
+export const decodeShieldProjectServersSetPayload = Schema.decodeUnknownSync(
+  ShieldProjectServersSetPayload,
+);
+export const decodeShieldProjectServersClearedPayload = Schema.decodeUnknownSync(
+  ShieldProjectServersClearedPayload,
 );
 export const decodeShieldRemoteCommandRanPayload = Schema.decodeUnknownSync(
   ShieldRemoteCommandRanPayload,
