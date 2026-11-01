@@ -27,10 +27,11 @@ export interface TerminalBrowserApprovalPromptProps {
  * Asks the person before a program in one of this Code thread's terminals
  * opens a new site in the thread's Browser.
  *
- * In Code, the host's Browser approval service is asked only by a terminal's
- * Browser grant: a managed Code turn asks through its own operation approval.
- * So every Code approval listed here came from a terminal, and the card says
- * so, because the person must not mistake it for the thread's own agent.
+ * In Code, the host's Browser approval service is asked by a terminal's
+ * Browser grant, and by the thread's own agent only to hand the page over for
+ * a sign-in: a managed Code turn's site asks go through its own operation
+ * approval. A site ask listed here came from a terminal, and the card says so,
+ * because the person must not mistake it for the thread's own agent.
  */
 export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalPromptProps) {
   const [approvals, setApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);

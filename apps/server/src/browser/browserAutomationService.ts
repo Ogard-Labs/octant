@@ -131,6 +131,8 @@ interface OwnedContext {
   peekedAt: number | undefined;
   /** The agent handed the page to the person and waits for them to sign in. */
   waitingForPerson: "sign-in" | undefined;
+  /** A hand-off keeps the page open past its session limit until this time. */
+  keptUntil: number | undefined;
   readonly evidence: ToolEvidence[];
   failure: BrowserAutomationFailure | undefined;
   creation?: Promise<void>;
@@ -144,6 +146,10 @@ const hostPolicy: BrowserContextPolicy = {
   sessionTimeoutMs: 600_000,
 };
 const MAX_RETAINED_BROWSER_EVIDENCE = 32;
+/** A sign-in waits up to 10 minutes; the page is kept a little longer. */
+const HAND_OFF_KEEP_MS = 11 * 60_000;
+/** After the hand-off ends, the agent has this long to read the page. */
+const AFTER_HAND_OFF_KEEP_MS = 2 * 60_000;
 /** How many uploads' copies one context keeps for forms not yet sent. */
 const MAX_STAGED_UPLOADS = 8;
 /** The actions that name one element, and so may name it by a snapshot ref. */
@@ -301,6 +307,7 @@ export class BrowserAutomationService {
       contentHash: undefined,
       peekedAt: undefined,
       waitingForPerson: undefined,
+      keptUntil: undefined,
       evidence: [],
       failure: undefined,
     };
@@ -1255,13 +1262,34 @@ export class BrowserAutomationService {
    * returned release. Windows that show the thread see it and bring the Browser
    * forward; the agent tool holds every other agent action on the page meanwhile.
    */
-  holdForPerson(windowId: WindowId, threadId: BrowserThreadId): () => void {
+  holdForPerson(windowId: WindowId, threadId: BrowserThreadId): (() => void) | undefined {
     const owned = this.#current(windowId, threadId);
     if (owned === undefined) return () => undefined;
+    // One hand-off at a time: a second would clear the first's mark early.
+    if (owned.waitingForPerson !== undefined) return undefined;
     owned.waitingForPerson = "sign-in";
+    // The page outlives the hand-off: a person signing in near the end of the
+    // session must not lose the page under them, and the agent gets a moment
+    // after Continue to read it.
+    owned.keptUntil = this.#now() + HAND_OFF_KEEP_MS;
+    this.#scheduleExpiry(owned);
     return () => {
       owned.waitingForPerson = undefined;
+      owned.keptUntil = this.#now() + AFTER_HAND_OFF_KEEP_MS;
+      if (owned.record.state === "active") this.#scheduleExpiry(owned);
     };
+  }
+
+  #scheduleExpiry(owned: OwnedContext): void {
+    const deadline = Math.max(
+      Date.parse(owned.record.createdAt) + owned.record.policy.sessionTimeoutMs,
+      owned.keptUntil ?? 0,
+    );
+    owned.cancelExpiry?.();
+    owned.cancelExpiry = this.#schedule(Math.max(0, deadline - this.#now()), () => {
+      if (this.#expired(owned)) void this.#expireContext(owned);
+      else this.#scheduleExpiry(owned);
+    });
   }
 
   /** The profile a live context keeps its site data in, if the host knows the context. */
@@ -1302,6 +1330,7 @@ export class BrowserAutomationService {
 
   #expired(owned: OwnedContext): boolean {
     if (owned.record.state !== "active" && owned.record.state !== "creating") return false;
+    if (owned.keptUntil !== undefined && this.#now() < owned.keptUntil) return false;
     return this.#now() - Date.parse(owned.record.createdAt) >= owned.record.policy.sessionTimeoutMs;
   }
 

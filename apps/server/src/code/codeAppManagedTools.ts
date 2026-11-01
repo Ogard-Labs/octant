@@ -491,7 +491,10 @@ export interface CodeAppManagedToolsOptions {
       threadId: BrowserThreadId,
     ) => Promise<BrowserAutomationSnapshot>;
     /** Marks the page as the person's to sign in on; see the service. */
-    readonly holdForPerson?: (windowId: WindowId, threadId: BrowserThreadId) => () => void;
+    readonly holdForPerson?: (
+      windowId: WindowId,
+      threadId: BrowserThreadId,
+    ) => (() => void) | undefined;
   };
   /**
    * Asks the person to sign in on the thread's page, through the same Browser
@@ -1243,6 +1246,11 @@ async function browserTool(
       await releaseUpload();
       return failure(changed ?? "tool-interrupted");
     }
+  }
+  // The page may have been handed to the person while an approval waited.
+  if (options.browser.inspectThread(options.windowId, threadId).waitingForPerson !== undefined) {
+    await releaseUpload?.();
+    return failure("browser-waiting-for-person");
   }
   // The service keeps the copies until the page closes; see Work's tool.
   const release = releaseUpload;

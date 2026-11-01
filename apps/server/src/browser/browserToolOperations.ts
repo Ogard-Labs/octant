@@ -517,11 +517,15 @@ export function browserToolAction(
  * what they typed, because a credential field never shows a value.
  */
 export async function handBrowserToPerson(input: {
-  readonly hold: () => () => void;
+  /** Marks the page as the person's; undefined when a hand-off is already open. */
+  readonly hold: () => (() => void) | undefined;
   readonly ask: () => Promise<"approved" | "denied" | "cancelled" | "expired">;
   readonly snapshotAfter: () => Promise<BrowserToolAnswer>;
 }): Promise<BrowserToolAnswer> {
   const release = input.hold();
+  if (release === undefined) {
+    return { result: { error: "browser-waiting-for-person" }, isError: true };
+  }
   let outcome: "approved" | "denied" | "cancelled" | "expired";
   try {
     outcome = await input.ask();

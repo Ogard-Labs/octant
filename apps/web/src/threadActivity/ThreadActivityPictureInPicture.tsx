@@ -87,9 +87,9 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
       return;
     }
     const handOff = browserPreviewKey ?? String(props.threadId);
-    if (broughtForward.current === handOff) return;
+    if (broughtForward.current === handOff || showBrowser === undefined) return;
     broughtForward.current = handOff;
-    showBrowser?.();
+    showBrowser();
   }, [browserPreviewKey, props.threadId, showBrowser, waitingForPerson]);
   // A picture is asked for only while one could be seen.
   const wantsPicture = props.browserVisible !== true && !browserPreviewHidden;
