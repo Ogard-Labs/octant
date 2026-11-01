@@ -600,6 +600,27 @@ describe("BrowserAutomationService", () => {
     expect(afterNavigation.failure?.category).toBe("stale");
   });
 
+  it("refuses an upload that did not come with the agent tool's approved files", async () => {
+    const { runtime, service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const refused = await service.act({
+      windowId,
+      request: request({ kind: "upload", target: "#file", files: ["/etc/hosts"] }),
+    });
+    expect(refused.failure?.category).toBe("policy-denied");
+    expect(runtime.act).not.toHaveBeenCalled();
+    await service.act({
+      windowId,
+      request: request({ kind: "upload", target: "#file", files: ["notes.txt"] }),
+      uploadFiles: ["/workspace/notes.txt"],
+    });
+    expect(runtime.act).toHaveBeenLastCalledWith(
+      contextOne,
+      expect.objectContaining({ kind: "upload", files: ["/workspace/notes.txt"] }),
+      expect.anything(),
+    );
+  });
+
   it("journals browser observations as tainting tool results once", async () => {
     const recordExternalContentIngestion = vi.fn(() => ({
       kind: "recorded" as const,

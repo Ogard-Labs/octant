@@ -301,6 +301,44 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
   });
 
+  it("asks once, naming each file, before the agent uploads files to a page", async () => {
+    const user = userEvent.setup();
+    const approval = {
+      approvalId: "90000000-0000-4000-8000-000000000007",
+      threadId: String(threadId),
+      mode: "work",
+      origin: "https://example.com",
+      upload: { files: [{ name: "report.pdf", sizeBytes: 12_288 }] },
+      requestedAt: "2026-09-09T10:00:00.000Z",
+    };
+    const browserAutomationClient = {
+      listApprovals: vi.fn(async () => [approval]),
+      decideApproval: vi.fn(async () => undefined),
+    };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        browserAutomationClient={browserAutomationClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Browser upload approval" });
+    expect(row).toHaveTextContent(
+      "Let the agent upload report.pdf (12 KB) to https://example.com?",
+    );
+    expect(within(row).queryByRole("button", { name: "Always allow" })).toBeNull();
+    await user.click(within(row).getByRole("button", { name: "Upload once" }));
+    expect(browserAutomationClient.decideApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalId: approval.approvalId, decision: "approved" }),
+    );
+  });
+
   it("asks before a selected MCP server's tool runs in this Work thread", async () => {
     const user = userEvent.setup();
     const approval = {

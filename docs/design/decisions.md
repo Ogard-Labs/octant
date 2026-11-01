@@ -1626,7 +1626,7 @@ Each thread surface (conversation, host browser, terminal output, simulator scre
 - A companion client derives each surface's reach (unavailable, read-only or interactive) from the host's catalog and never declares it. _Here only._
 - Observing and in-page gestures (click, press, scroll) are remote-approvable; opening, navigating, typing, closing a tab and terminal writes are local-host-required. _Here only._
 - A companion says when its picture is stale and offers only surfaces it can fill. _Here only._
-- A paired client may click, scroll and press keys in the host's agent browser, but may not navigate, type or close a tab, and cannot take it to a new origin.
+- A paired client may click, hover, scroll and press keys in the host's agent browser and list its tabs, but may not navigate, type, choose a list option, drag, upload, or open, switch or close a tab, and cannot take it to a new origin.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority).
 
@@ -2224,10 +2224,12 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - A snapshot lists headings, text, and controls with refs, states, and values. A credential field reads protected with no value, and a page that holds one shows no field values.
 - Refs are kept and resolved on the server. A ref the latest snapshot did not list, or whose element no longer has the recorded role and name, is refused as stale before the action runs.
 - An action answers with the address, title, revision, and one line on what changed. Page text, a picture, or an outline come back only when the call includes them, and the runtime takes no picture an agent did not ask for. The person's activity preview keeps its picture through the host's peek.
+- The agent may hover, choose a list option, drag, press key chords, and open, list, switch and close tabs; a new tab reaches its page through the same origin admission as a navigation.
+- An upload sends files only from the thread's workspace (the Work Project folder or the Code checkout): relative paths, no symbolic link anywhere on the path, at most 5 files of 25 MB, and the person is asked every time at every access level. The answer is never remembered, and a terminal grant cannot upload.
 - No password saving, no agent-written script in the page, and downloads stay blocked.
-- Not built yet: hover, select, drag, key chords, upload, tabs, batched steps, richer waits, dialogs, viewport size, the sign-in handoff, and fuller diagnostics.
+- Not built yet: batched steps, richer waits, dialogs, viewport size, the sign-in handoff, and fuller diagnostics.
 
-Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot) and [Results](browser-agent-tool.md#results).
+Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), and [Actions](browser-agent-tool.md#actions).
 
 ### Browser profiles and extensions
 

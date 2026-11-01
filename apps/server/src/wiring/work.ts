@@ -380,6 +380,7 @@ export function wireWork(deps: WorkDependencies) {
                   browserAutomationService.releaseThread(ownerWindowId, threadId),
               },
               approvals: browserToolApprovalService,
+              uploadRoot: () => input.projectRoot,
               uuid: randomUUID,
             });
         const sideTaskTools = !browserSupported

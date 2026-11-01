@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserThreadId, ToolActionAuthority, WindowId } from "@octant/contracts";
@@ -39,6 +42,18 @@ const pages: Record<string, string> = {
   "/moves-on": `<!doctype html><title>Moves on</title><button id="save">Save</button>
     <script>setTimeout(() => { location.href = "/moved"; }, 300);</script>`,
   "/moved": `<!doctype html><title>Moved</title><button id="save">Save</button>`,
+  "/controls": `<!doctype html><title>Controls</title>
+    <nav id="menu" onmouseenter="document.getElementById('item').hidden = false">Menu
+      <a id="item" href="/other" hidden>Open settings</a></nav>
+    <label for="size">Size</label>
+    <select id="size" onchange="document.title = 'Size ' + this.value">
+      <option value="s">Small</option><option value="l">Large</option>
+    </select>
+    <div id="card" draggable="true" ondragstart="event.dataTransfer.setData('text', 'card')">Card</div>
+    <div id="done" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>
+    <input id="keys" aria-label="Keys" onkeydown="if (event.ctrlKey) document.title = 'Chord ' + event.key">
+    <label for="file">Attachment</label>
+    <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
 };
 
@@ -73,7 +88,13 @@ afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
-function agentTool() {
+function agentTool(
+  options: {
+    readonly uploadRoot?: string;
+    readonly uploadAnswer?: "approved" | "denied";
+  } = {},
+) {
+  const asked: Array<Record<string, unknown>> = [];
   const service = new BrowserAutomationService({
     runtime,
     authority: { canAccessWindow: () => true, resolve: () => authority },
@@ -96,7 +117,13 @@ function agentTool() {
       act: (input) => service.act(input),
       releaseThread: (window, thread) => service.releaseThread(window, thread),
     },
-    approvals: { request: async () => "approved" as const },
+    approvals: {
+      request: async (request) => {
+        asked.push(request as unknown as Record<string, unknown>);
+        return "upload" in request ? (options.uploadAnswer ?? "approved") : "approved";
+      },
+    },
+    ...(options.uploadRoot === undefined ? {} : { uploadRoot: () => options.uploadRoot }),
     uuid: () => randomUUID(),
   });
   const call = async (input: Record<string, unknown>) => {
@@ -113,7 +140,7 @@ function agentTool() {
       };
     };
   };
-  return { call, service, stop: () => call({ operation: "stop" }) };
+  return { asked, call, service, stop: () => call({ operation: "stop" }) };
 }
 
 function refFor(outline: string | undefined, line: RegExp): string {
@@ -254,6 +281,113 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(next.result.page?.observationRevision).toBe(
       Number(clicked.result.page?.observationRevision) + 1,
     );
+    await tool.stop();
+  });
+
+  it("hovers to open a menu, chooses an option, drags, and presses a key chord", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/controls` });
+    const before = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    expect(before).not.toContain("Open settings");
+    const hovered = await tool.call({
+      operation: "hover",
+      selector: "#menu",
+      include: ["snapshot"],
+    });
+    expect(hovered.result.page?.snapshot).toMatch(/- link "Open settings" \[ref=e\d+\]/);
+    const chosen = await tool.call({
+      operation: "select",
+      ref: refFor(hovered.result.page?.snapshot, /combobox "Size"/),
+      value: "Large",
+    });
+    expect(chosen.result.page?.title).toBe("Size l");
+    const missing = await tool.call({ operation: "select", selector: "#size", value: "Huge" });
+    expect(missing.isError).toBe(true);
+    const dragged = await tool.call({ operation: "drag", selector: "#card", toSelector: "#done" });
+    expect(dragged.result.page?.title).toBe("Dropped card");
+    await tool.call({ operation: "click", selector: "#keys" });
+    const chord = await tool.call({ operation: "press", key: "Control+B" });
+    expect(chord.result.page?.title).toBe("Chord b");
+    const refused = await tool.call({ operation: "press", key: "Control+Control+B" });
+    expect(refused.isError).toBe(true);
+    await tool.stop();
+  });
+
+  it("uploads a workspace file after asking, and refuses a link, an escape, and a refusal", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "octant-upload-"));
+    try {
+      await writeFile(join(workspace, "notes.txt"), "hello");
+      await mkdir(join(workspace, "real"));
+      await writeFile(join(workspace, "real", "deep.txt"), "deep");
+      await symlink(join(workspace, "notes.txt"), join(workspace, "link.txt"));
+      await symlink(join(workspace, "real"), join(workspace, "linked-folder"));
+      const tool = agentTool({ uploadRoot: workspace });
+      await tool.call({ operation: "navigate", url: `${origin}/controls` });
+      tool.asked.length = 0;
+      const sent = await tool.call({
+        operation: "upload",
+        selector: "#file",
+        files: ["notes.txt"],
+      });
+      expect(sent.result.page?.title).toBe("Attached notes.txt 5");
+      expect(tool.asked).toEqual([
+        expect.objectContaining({
+          origin,
+          upload: [expect.objectContaining({ name: "notes.txt", sizeBytes: 5 })],
+        }),
+      ]);
+      for (const [files, reason] of [
+        [["link.txt"], "upload-symlink"],
+        [["linked-folder/deep.txt"], "upload-symlink"],
+        [["../outside.txt"], "upload-outside-workspace"],
+        [[join(workspace, "notes.txt")], "upload-outside-workspace"],
+        [["missing.txt"], "upload-not-found"],
+      ] as const) {
+        const refused = await tool.call({ operation: "upload", selector: "#file", files });
+        expect(refused.result).toEqual({ error: reason });
+      }
+      await tool.stop();
+      const declined = agentTool({ uploadRoot: workspace, uploadAnswer: "denied" });
+      await declined.call({ operation: "navigate", url: `${origin}/controls` });
+      const no = await declined.call({
+        operation: "upload",
+        selector: "#file",
+        files: ["notes.txt"],
+      });
+      expect(no.result).toEqual({ error: "browser-upload-denied" });
+      await declined.stop();
+      const unrooted = agentTool();
+      await unrooted.call({ operation: "navigate", url: `${origin}/controls` });
+      const none = await unrooted.call({
+        operation: "upload",
+        selector: "#file",
+        files: ["notes.txt"],
+      });
+      expect(none.result).toEqual({ error: "upload-unavailable" });
+      await unrooted.stop();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("opens, lists, switches, and closes tabs, each one inside the page's allowed origin", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+    const opened = await tool.call({ operation: "tab-open", url: `${origin}/other` });
+    expect(opened.result.page?.tabs).toEqual([
+      { tabId: "t1", url: `${origin}/form`, title: "Form", active: false },
+      { tabId: "t2", url: `${origin}/other`, title: "Other", active: true },
+    ]);
+    const switched = await tool.call({ operation: "tab-switch", tabId: "t1" });
+    expect(switched.result.page?.title).toBe("Form");
+    const closed = await tool.call({ operation: "tab-close", tabId: "t2" });
+    expect(closed.result.page?.tabs).toEqual([
+      { tabId: "t1", url: `${origin}/form`, title: "Form", active: true },
+    ]);
+    const last = await tool.call({ operation: "tab-close", tabId: "t1" });
+    expect(last.isError).toBe(true);
+    const elsewhere = await tool.call({ operation: "tab-open", url: "https://example.com/" });
+    expect(elsewhere.result.failure?.category).toBe("policy-denied");
     await tool.stop();
   });
 });
