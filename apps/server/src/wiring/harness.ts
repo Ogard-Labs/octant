@@ -70,6 +70,9 @@ import type { WorkspaceWiring } from "./workspace";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import { createShieldServerRouteHandler } from "../shield/shieldServerRoutes";
+import { ServerConnection } from "../serverProjects/serverConnection";
+import { createServerProjectRouteHandler } from "../serverProjects/serverProjectRoutes";
+import { ServerProjectStore } from "../serverProjects/serverProjectStore";
 import {
   personSshAgentSocket,
   readRunbookFile,
@@ -184,6 +187,22 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: shieldServerStore,
     sshAgentAvailable: () => sshAgentSocket() !== undefined,
+  });
+  // Code Projects bound to a folder on one of those servers, reached with
+  // this host's own ssh and the person's agent.
+  const serverConnection = new ServerConnection({ agentSocket: sshAgentSocket });
+  const serverProjectStore = new ServerProjectStore({
+    journal: persistence.journal,
+    personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    servers: () => shieldServerStore.servers(),
+    connection: serverConnection,
+  });
+  serverProjectStore.load();
+  const serverProjectRoutes = createServerProjectRouteHandler({
+    windowAuthorityStore,
+    store: serverProjectStore,
   });
 
   const researchRouter = new ResearchRouter({
@@ -747,6 +766,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessEgressRoutes,
     nativeHarnessRoutingRoutes,
     shieldServerRoutes,
+    serverProjectRoutes,
     nativeHarnessHooks,
     nativeHarnessSessionRoutes,
     onHarnessPausedByPerson,

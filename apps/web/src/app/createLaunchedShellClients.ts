@@ -57,6 +57,10 @@ import {
   type ShieldServersClient,
 } from "@octant/client-runtime/shield-servers-client";
 import {
+  createServerProjectsClient,
+  type ServerProjectsClient,
+} from "@octant/client-runtime/server-projects-client";
+import {
   createSecretStoresClient,
   type SecretStoresClient,
 } from "@octant/client-runtime/secret-stores-client";
@@ -196,6 +200,8 @@ export interface LaunchedShellClients {
   readonly secretStoresClient: SecretStoresClient | undefined;
   /** Absent when the base URL is one the client refuses; the registry is local-window only. */
   readonly shieldServersClient: ShieldServersClient | undefined;
+  /** Absent when the base URL is one the client refuses; the catalog is local-window only. */
+  readonly serverProjectsClient: ServerProjectsClient | undefined;
   /** Absent off a local host: creating, joining, and revoking are host authority. */
   readonly replicaMembershipClient: ReplicaMembershipClient | undefined;
   /** Read-only sync status, for a client that is not on the host. */
@@ -285,6 +291,14 @@ export function createLaunchedShellClients(
     shieldServersClient = undefined;
   }
 
+  let serverProjectsClient: ServerProjectsClient | undefined;
+  try {
+    serverProjectsClient = createServerProjectsClient(port);
+  } catch {
+    // The catalog is host authority, as the registry is.
+    serverProjectsClient = undefined;
+  }
+
   let secretStoresClient: SecretStoresClient | undefined;
   try {
     secretStoresClient = createSecretStoresClient(port);
@@ -351,6 +365,7 @@ export function createLaunchedShellClients(
     replicaStoreSettingsClient,
     secretStoresClient,
     shieldServersClient,
+    serverProjectsClient,
     replicaMembershipClient,
     replicaSyncStatusClient: createReplicaSyncStatusClient(port),
     shipClient: options.shipClient ?? createShipClient(port),

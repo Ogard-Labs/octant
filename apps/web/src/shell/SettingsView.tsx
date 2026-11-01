@@ -104,6 +104,8 @@ import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import { ShieldServersSettings } from "../settings/ShieldServersSettings";
+import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
+import { ServerProjectsSettings } from "../settings/ServerProjectsSettings";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
 import { PhoneNotificationSettings } from "../host/PhoneNotificationSettings";
@@ -235,6 +237,8 @@ export interface SettingsViewProps {
   readonly secretStoresClient?: SecretStoresClient;
   /** Settings › Access › Servers; absent off this computer. */
   readonly shieldServersClient?: ShieldServersClient;
+  /** Code Projects on a registered server; absent off this computer. */
+  readonly serverProjectsClient?: ServerProjectsClient;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -1268,6 +1272,10 @@ function ActiveSectionContent({
           <ShieldServersSettings
             client={props.shieldServersClient}
             focusedSetting={focusedSetting}
+          />
+          <ServerProjectsSettings
+            client={props.serverProjectsClient}
+            servers={props.shieldServersClient}
           />
         </div>
       );

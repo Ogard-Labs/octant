@@ -30,6 +30,7 @@ export * from "./goalClient";
 export * from "./goalLoopClient";
 export * from "./nativeHarnessClient";
 export * from "./shieldServersClient";
+export * from "./serverProjectsClient";
 export * from "./safeNetworksClient";
 export * from "./mobileNativeHarnessClient";
 export * from "./mobileSpeechClient";

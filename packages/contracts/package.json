@@ -105,6 +105,7 @@
     "./providers": "./src/providers.ts",
     "./shield": "./src/shield.ts",
     "./shield-servers": "./src/shieldServers.ts",
+    "./server-projects": "./src/serverProjects.ts",
     "./provider-discovery": "./src/providerDiscovery.ts",
     "./provider-driver-catalog": "./src/providerDriverCatalog.ts",
     "./provider-usage-limits": "./src/providerUsageLimits.ts",

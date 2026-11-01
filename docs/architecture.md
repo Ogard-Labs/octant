@@ -1223,13 +1223,23 @@ Code settings. The renderer preserves its proposed branch as delivery intent wit
 claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
 actions continue to report unavailable for plain folders.
 
-A Project is not bound to another machine over SSH today: an agent that
-needs a remote machine reaches it with `ssh` through its shell (above), and
-Octant on another computer is a hub-and-spoke member
-([Hub and spokes](design/hub-and-spokes.md)). A remote SSH Project binding is
-allowed and not built; it is a scheduling choice, not a safety rule
-(maintainer decision, 2026-10-31, replacing the 2026-10-29 removal). The
-earlier binding was removed, and its records are handled as follows. A journal written by a build that
+A Code Project may be bound to a folder on one of the person's registered
+servers over SSH (maintainer decision, 2026-10-31, replacing the 2026-10-29
+removal; [Server Projects](design/server-projects.md) owns the detail).
+Inference, approvals, every authority check, and the journal stay on this
+host; a thread's files, shell, Git, and terminals are on the server. Server
+Projects are a catalog of their own, never the local Project catalog, so no
+service that reads a local Project's folder can be handed a server path.
+Octant connects with this host's own `ssh`, the person's SSH config, and their
+agent: keys stay with the host, nothing is forwarded, an unknown host key is
+refused, and a call that cannot reach the server fails with nothing run on
+this host instead. Built: the catalog, the connection, and the folder check
+at binding (Settings › Access › Servers). Not built yet: threads and
+terminals there (allowed; not built yet). An agent in a local Project still
+reaches a remote machine with `ssh` through its shell (above), and Octant on
+another computer is a hub-and-spoke member
+([Hub and spokes](design/hub-and-spokes.md)). The earlier SSH target binding
+was removed, and its records are handled as follows. A journal written by a build that
 could bind a Project to an SSH target still replays: its thirteen event names
 (`ssh-target.*`, `ssh-remote-*`, `provider-runtime-egress.*`) are retired, and
 a thread left on a `remote-root` checkout keeps its history but refuses every
@@ -11092,12 +11102,13 @@ provider-driver plugins, and the EU/GDPR compliance package (pending legal
 review). Public store distribution, the Windows sequence below, and the full
 LSP / extension host / debugger companion are release-scope choices the
 maintainer schedules, not safety rules; none of them protects an invariant by
-itself. Remote SSH development environments are allowed and not built yet;
-that is a scheduling choice, not a safety rule (maintainer decision,
-2026-10-31, replacing the 2026-10-29 out-of-scope rule). Today an agent that
-needs another machine runs `ssh` through its shell with the person's own SSH
-agent and configuration ([Modes](#modes-chat-work-and-code)), and Octant on
-the person's other computers joins a hub. A
+itself. Remote SSH development environments are in scope (maintainer
+decision, 2026-10-31, replacing the 2026-10-29 out-of-scope rule): a Code
+Project bound to a folder on a registered server is partly built
+([Server Projects](design/server-projects.md)). An agent in a local Project
+reaches another machine with `ssh` through its shell with the person's own
+SSH agent and configuration ([Modes](#modes-chat-work-and-code)), and Octant
+on the person's other computers joins a hub. A
 hub-and-spoke topology on a person's own devices, where one Octant server
 (running without the desktop app and serving the web app over a private network
 such as Tailscale) enrolls the person's other computers and phones, introduces
