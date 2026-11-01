@@ -43,7 +43,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 9       | 1            | 0                   |
-| [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
+| [Providers](#providers)                                                               | 7         | 6       | 0            | 1                   |
 | [Context and usage](#context-and-usage)                                               | 8         | 7       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 6       | 0            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 7       | 1            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **221**   | **179** | **38**       | **4**               |
+| **All areas**                                                                         | **222**   | **179** | **38**       | **5**               |
 
 ## Principles and hard lines
 
@@ -957,6 +957,17 @@ Providers are multi-instance, and a thread stays on the instance it started with
 - Octant never calls a vendor usage endpoint itself for the first-class providers and never reads their token or credential files.
 
 Status: Built. Since: —. Detail: [Architecture: Providers](../architecture.md#providers).
+
+### Account distribution for new threads
+
+A per-provider setting may pick which of a person's accounts a new thread starts on when no account was picked, by day of week, random, weighted, or most limit left. It is held behind a per-provider terms gate, and the no-failover rule above stays in force until the maintainer lifts it for a provider.
+
+- It is read only when a new thread starts with no account picked; an account the person picks always wins, and a running thread never moves to another account.
+- It skips accounts that are not ready or are at their limit, and never offers an account the Project's provider policy does not allow.
+- The thread shows which account was picked and why, and the pick is journaled with the eligible and skipped accounts.
+- Each provider's setting stays off until its row in the terms gate says Allowed, set from the provider's own text or a written answer (not built yet).
+
+Status: Designed, not built. Since: 2026-11-01. Detail: [Account distribution](account-distribution.md).
 
 ### Provider credentials and sign-in
 
