@@ -1,5 +1,6 @@
 import { GitMutationPort, type CommitIdentityResolver } from "../code/gitMutationPort";
 import { GitObservationPort } from "../code/gitObservationPort";
+import { GitHistoryPort } from "../code/gitHistoryPort";
 import { GitService } from "../code/gitService";
 import type { ServerAddress, ServerConnection } from "./serverConnection";
 
@@ -159,4 +160,36 @@ async function serverPathExists(options: ServerGitOptions, path: string): Promis
   });
   if (call.status !== "ran") throw new Error("The server could not be reached.");
   return call.exitCode === 0;
+}
+
+/**
+ * The Review tool's history and local commits for a server Project: the
+ * host's own history reader, whose read-only Git runs on the server. A call
+ * that cannot reach the server reads as unavailable; nothing runs here.
+ */
+export function createServerGitHistory(
+  options: Pick<ServerGitOptions, "connection" | "server">,
+): GitHistoryPort {
+  return new GitHistoryPort(
+    {},
+    {
+      realpath: (path) => serverRealpath(options, path),
+      run: async (root, args, signal, acceptTruncated) => {
+        const server = options.server();
+        if (server === undefined) return { ok: false, text: "" };
+        const call = await options.connection.run(server, {
+          script: `export PAGER=cat GIT_PAGER=cat GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1; r=$1; shift; exec git -C "$r" "$@"`,
+          args: [root, ...args],
+          timeoutMs: OBSERVATION_TIMEOUT_MS,
+          maxOutputBytes: MAX_OUTPUT_BYTES,
+          ...(signal === undefined ? {} : { signal }),
+        });
+        if (call.status !== "ran") return { ok: false, text: "" };
+        return {
+          ok: call.exitCode === 0 && (!call.truncated || acceptTruncated),
+          text: call.output.toString("utf8"),
+        };
+      },
+    },
+  );
 }

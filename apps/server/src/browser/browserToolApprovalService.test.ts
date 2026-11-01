@@ -136,6 +136,43 @@ describe("BrowserToolApprovalService", () => {
     expect(remembered).toEqual([["https://example.com", windowId]]);
   });
 
+  it("never remembers an origin from the answer to a sign-in request, and waits longer for it", async () => {
+    vi.useFakeTimers();
+    try {
+      const remembered: Array<unknown> = [];
+      const service = new BrowserToolApprovalService({
+        uuid: () => "40000000-0000-4000-8000-000000000010",
+        now: () => Date.now(),
+        authorityIsCurrent: () => true,
+        rememberOrigin: (origin) => remembered.push(origin),
+      });
+      const pending = service.request({
+        windowId,
+        threadId: "50000000-0000-4000-8000-000000000002",
+        authority,
+        origin: "https://example.com",
+        signIn: { reason: "The dashboard needs your account." },
+      });
+      expect(service.list(windowId)).toEqual([
+        expect.objectContaining({ signIn: { reason: "The dashboard needs your account." } }),
+      ]);
+      // Past the ordinary five minutes, a sign-in is still waiting.
+      vi.advanceTimersByTime(6 * 60_000);
+      expect(service.list(windowId)).toHaveLength(1);
+      expect(
+        service.decide(windowId, {
+          approvalId: "40000000-0000-4000-8000-000000000010" as never,
+          decision: "approved",
+          remember: true,
+        }),
+      ).toBe(true);
+      await expect(pending).resolves.toBe("approved");
+      expect(remembered).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("never remembers an origin from an answer to an upload", async () => {
     const remembered: Array<unknown> = [];
     const service = new BrowserToolApprovalService({

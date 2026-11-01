@@ -5,7 +5,10 @@ import {
   browserToolResult,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
+  handBrowserToPerson,
   runBrowserToolSteps,
+  signInPageRefusal,
+  type BrowserToolAnswer,
   type BrowserToolInput,
 } from "./browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
@@ -70,9 +73,16 @@ export interface BrowserAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => Promise<BrowserAutomationSnapshot>;
+    /** Marks the page as the person's to sign in on; see the service. */
+    readonly holdForPerson?: (
+      windowId: WindowId,
+      threadId: BrowserThreadId,
+    ) => (() => void) | undefined;
   };
   readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
-    Partial<Pick<BrowserToolApprovalService, "isRemembered" | "isUnattendedScope">>;
+    Partial<
+      Pick<BrowserToolApprovalService, "isRemembered" | "isUnattendedScope" | "isPairedDevice">
+    >;
   /**
    * Set for a CLI the person typed into a thread terminal. It may drive the
    * thread's Private pages only; a page in a signed-in profile needs a person.
@@ -110,7 +120,7 @@ export function createBrowserAppManagedTools(
   const runOne = async (
     input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
     signal: AbortSignal | undefined,
-  ) => {
+  ): Promise<BrowserToolAnswer> => {
     const authority = options.resolveAuthority(options.threadId, options.mode);
     if (authority === undefined) return failure("browser-authority-unavailable");
     if (initialAuthority !== undefined && !sameToolActionAuthority(initialAuthority, authority)) {
@@ -128,6 +138,13 @@ export function createBrowserAppManagedTools(
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
     if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
     let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
+    // While the person signs in, the page is theirs: no other agent action
+    // reaches it until they press Continue or the ask ends.
+    if (snapshot.waitingForPerson !== undefined) return failure("browser-waiting-for-person");
+    if (input.operation === "sign-in") {
+      const refusal = signInRefusal(options) ?? signInPageRefusal(snapshot);
+      if (refusal !== undefined) return failure(refusal);
+    }
     const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
     if (existing === undefined && snapshot.context !== undefined) {
       options.modelBindings.delete(String(snapshot.context.contextId));
@@ -259,6 +276,25 @@ export function createBrowserAppManagedTools(
         authority: refreshed,
       });
     }
+    if (input.operation === "sign-in") {
+      const approvals = options.approvals;
+      if (approvals === undefined) return failure("browser-approval-required");
+      return handBrowserToPerson({
+        hold: () =>
+          options.browser.holdForPerson?.(options.windowId, options.threadId) ?? (() => undefined),
+        ask: () =>
+          approvals.request({
+            windowId: options.windowId,
+            threadId: String(options.threadId),
+            authority,
+            origin,
+            ...(profile === undefined ? {} : { profile }),
+            signIn: input.reason === undefined ? {} : { reason: input.reason },
+            ...(signal === undefined ? {} : { signal }),
+          }),
+        snapshotAfter: () => runOne({ operation: "snapshot" }, signal),
+      });
+    }
     const request = browserToolAction(input, context);
     if (request === undefined) return failure("invalid-browser-input");
     if (signal?.aborted) return failure("tool-interrupted");
@@ -301,6 +337,15 @@ export function createBrowserAppManagedTools(
         return failure(refusal);
       }
     }
+    // An approval or an upload question may have waited while the agent
+    // handed the page to the person; the page is theirs until they answer.
+    if (
+      options.browser.inspectThread(options.windowId, options.threadId).waitingForPerson !==
+      undefined
+    ) {
+      await releaseUpload?.();
+      return failure("browser-waiting-for-person");
+    }
     // The page reads an uploaded file when its form is sent, which can be a
     // later action, so the service keeps the copies until the page closes.
     const acted = await options.browser.act({
@@ -337,6 +382,22 @@ export function createBrowserAppManagedTools(
     },
   };
   return withToolFamilyHelp(tools, BROWSER_TOOL_HELP);
+}
+
+/**
+ * Who may be asked to sign in: a person at a window of this computer. A
+ * routine, a subagent, a terminal CLI, and a paired device have no one there,
+ * or no one who can see the page.
+ */
+function signInRefusal(options: BrowserAppManagedToolsOptions): string | undefined {
+  if (options.profileCaller === "terminal-grant") return "sign-in-needs-a-person";
+  if (options.approvals?.isUnattendedScope?.(options.windowId) === true) {
+    return "sign-in-needs-a-person";
+  }
+  if (options.approvals?.isPairedDevice?.(options.windowId) === true) {
+    return "sign-in-needs-this-computer";
+  }
+  return undefined;
 }
 
 /** The stored profile a `profile` argument names for this thread, if it has one. */

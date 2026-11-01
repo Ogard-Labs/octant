@@ -223,6 +223,13 @@ accepts it; if it asks to confirm something or to type an answer, Octant
 declines. The agent is told about each one. The agent can also resize its page,
 for example to phone width, and set it back.
 
+When a page needs you to sign in, the agent can hand it to you instead of
+giving up. A card in the thread says which site and why, with **Continue** and
+**Cancel**, and the Browser comes forward. Sign in on the page yourself; the
+agent waits and never sees what you type. Press **Continue** and the agent
+picks up from the page you left. A routine, a subagent, a program in a
+terminal, or a turn started from your phone cannot ask this.
+
 The agent can send up to 10 of these steps in one call, such as filling three
 fields and pressing Save. Octant checks each step on its own, exactly as if it
 came alone, and stops at the first one that fails.
