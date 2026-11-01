@@ -438,6 +438,7 @@ export function startOctantServer(
       reviewedModelManifest,
       skillDiscoveryService,
     } = yield* wireProviders({
+      serverRegistry,
       providerRuntimeNetwork,
       providerRuntimeRegistry,
       workRequestRuntime,
