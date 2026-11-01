@@ -272,6 +272,74 @@ describe("browser profile store extensions", () => {
     ).toBeUndefined();
   });
 
+  it("tells who a loaded extension is and whether it asked to see tab addresses", async () => {
+    const host = extensionHost();
+    const profiles = storeWith(host);
+    const personal = { kind: "personal" } as const;
+    const withTabs = folder({ permissions: ["storage", "tabs"] });
+    const without = folder({ permissions: ["storage"] });
+    await profiles.syncExtensions(personal, [
+      { id: "a".repeat(32), path: withTabs, contentHash: "1".repeat(64) },
+      { id: "b".repeat(32), path: without, contentHash: "1".repeat(64) },
+    ]);
+
+    expect(profiles.extensionOfElectronId(personal, "electron-1")).toEqual({
+      extensionId: "a".repeat(32),
+      seesTabAddresses: true,
+    });
+    expect(profiles.extensionOfElectronId(personal, "electron-2")).toEqual({
+      extensionId: "b".repeat(32),
+      seesTabAddresses: false,
+    });
+    expect(profiles.extensionOfElectronId(personal, "electron-9")).toBeUndefined();
+    expect(
+      profiles.extensionOfElectronId(
+        { kind: "project", projectId: projectId as never },
+        "electron-1",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("offers an action scope only to an extension that has an action and no popup page", async () => {
+    const host = extensionHost();
+    const profiles = storeWith(host);
+    const personal = { kind: "personal" } as const;
+    await profiles.syncExtensions(personal, [
+      { id: "a".repeat(32), path: folder({ action: {} }), contentHash: "1".repeat(64) },
+      {
+        id: "b".repeat(32),
+        path: folder({ action: { default_popup: "popup.html" } }),
+        contentHash: "1".repeat(64),
+      },
+      { id: "c".repeat(32), path: folder({ permissions: [] }), contentHash: "1".repeat(64) },
+    ]);
+
+    expect(profiles.extensionActionScope(personal, "a".repeat(32))).toBe(
+      "chrome-extension://electron-1/",
+    );
+    expect(profiles.extensionActionScope(personal, "b".repeat(32))).toBeUndefined();
+    expect(profiles.extensionActionScope(personal, "c".repeat(32))).toBeUndefined();
+    expect(profiles.extensionActionScope(personal, "d".repeat(32))).toBeUndefined();
+  });
+
+  it("announces a profile's session once, when its first extension is about to load", async () => {
+    const host = extensionHost();
+    const seen: unknown[] = [];
+    const profiles = createBrowserProfileStore({
+      partitionsDirectory: partitions(),
+      sessionFor: () => ({ ...session(), extensions: host }),
+      closeProfilePages: async () => undefined,
+      onExtensionSession: (profile) => seen.push(profile),
+    });
+    const path = folder({});
+    await profiles.syncExtensions({ kind: "personal" }, [
+      { id: "a".repeat(32), path, contentHash: "1".repeat(64) },
+    ]);
+    await profiles.syncExtensions({ kind: "personal" }, []);
+
+    expect(seen).toEqual([{ kind: "personal" }]);
+  });
+
   it("keeps loading the rest when one extension will not load, and does nothing without an extension host", async () => {
     const host = extensionHost();
     host.loadExtension.mockRejectedValueOnce(new Error("bad manifest"));

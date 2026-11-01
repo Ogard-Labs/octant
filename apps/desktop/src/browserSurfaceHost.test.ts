@@ -1023,4 +1023,141 @@ describe("BrowserSurfaceHost stored profiles", () => {
     expect(host.state(contextId)).toBeDefined();
     expect(host.state(privatePage)).toBeDefined();
   });
+
+  describe("pages offered to an extension of the same profile", () => {
+    let nextId = 100;
+    const identified = () => {
+      const base = view();
+      return { ...base, webContents: { ...base.webContents, id: (nextId += 1) } };
+    };
+    const shellWindow = () => ({
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      isDestroyed: () => false,
+      webContents: { send: vi.fn() },
+    });
+    const bounds = { x: 0, y: 0, width: 400, height: 300 };
+
+    async function setup() {
+      const host = createBrowserSurfaceHost({ createView: () => identified() });
+      const owner = { windowId: "window-a", threadId };
+      const personalPage = contextId;
+      const privatePage = "60000000-0000-4000-8000-000000000003";
+      const otherWindow = "60000000-0000-4000-8000-000000000004";
+      await host.createContext({
+        contextId: personalPage,
+        owner,
+        policy: policyIn({ kind: "personal" }),
+      });
+      await host.createContext({ contextId: privatePage, owner, policy: policyIn() });
+      await host.createContext({
+        contextId: otherWindow,
+        owner: { windowId: "window-b", threadId },
+        policy: policyIn({ kind: "personal" }),
+      });
+      host.attach(personalPage, owner, shellWindow(), bounds);
+      return host;
+    }
+
+    it("lists the profile's own pages in the window and never a Private page or another window's", async () => {
+      const host = await setup();
+      const tabs = host.profileTabs({ kind: "personal" }, "window-a");
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0]).toMatchObject({ url: "https://example.com/", active: true });
+      expect(
+        host.profileTabs({ kind: "project", projectId: projectId as never }, "window-a"),
+      ).toEqual([]);
+      expect(host.profileTabs({ kind: "personal" }, "window-c")).toEqual([]);
+    });
+
+    it("opens a page for an extension only at an origin the page already admits", async () => {
+      const host = await setup();
+      const refused = await host.openProfileTab(
+        { kind: "personal" },
+        "window-a",
+        "https://elsewhere.test/",
+      );
+      expect(refused).toEqual({ status: "origin-refused" });
+      const opened = await host.openProfileTab(
+        { kind: "personal" },
+        "window-a",
+        "https://example.com/next",
+      );
+      expect(opened.status).toBe("tab");
+      expect(host.profileTabs({ kind: "personal" }, "window-a")).toHaveLength(2);
+      expect(await host.openProfileTab({ kind: "personal" }, "window-a", undefined)).toEqual({
+        status: "tab-limit",
+      });
+    });
+
+    it("does not let a redirect from an extension's navigation grant the destination origin", async () => {
+      const views: ReturnType<typeof identified>[] = [];
+      const host = createBrowserSurfaceHost({
+        createView: () => {
+          const next = identified();
+          views.push(next);
+          return next;
+        },
+      });
+      const owner = { windowId: "window-a", threadId };
+      await host.createContext({ contextId, owner, policy: policyIn({ kind: "personal" }) });
+      host.attach(contextId, owner, shellWindow(), bounds);
+      const page = views[0];
+      if (page === undefined) throw new Error("no page");
+      const listener = (name: string) =>
+        vi.mocked(page.webContents.on).mock.calls.find((call) => call[0] === name)?.[1];
+      // The person has been browsing, so the surface is theirs.
+      listener("focus")?.();
+      const redirect = () => {
+        const preventDefault = vi.fn();
+        listener("will-redirect")?.({ url: "https://redirected.test/", preventDefault });
+        return preventDefault;
+      };
+      let refusedDuringLoad = false;
+      vi.mocked(page.webContents.loadURL).mockImplementationOnce(async () => {
+        refusedDuringLoad = redirect().mock.calls.length > 0;
+      });
+      const [tab] = host.profileTabs({ kind: "personal" }, "window-a");
+
+      await host.updateProfileTab({ kind: "personal" }, "window-a", tab?.id ?? -1, {
+        url: "https://example.com/next",
+      });
+
+      expect(refusedDuringLoad).toBe(true);
+      // Once the extension's load is over, the person's own redirect grants again.
+      expect(redirect()).not.toHaveBeenCalled();
+    });
+
+    it("has no page to open into when the profile is not on screen in that window", async () => {
+      const host = await setup();
+      expect(
+        await host.openProfileTab({ kind: "personal" }, "window-b", "https://example.com/"),
+      ).toEqual({
+        status: "no-page",
+      });
+    });
+
+    it("navigates and selects only a page of that profile and window", async () => {
+      const host = await setup();
+      const [page] = host.profileTabs({ kind: "personal" }, "window-a");
+      const moved = await host.updateProfileTab({ kind: "personal" }, "window-a", page?.id ?? -1, {
+        url: "https://example.com/other",
+      });
+      expect(moved.status).toBe("tab");
+      expect(
+        await host.updateProfileTab({ kind: "personal" }, "window-a", page?.id ?? -1, {
+          url: "https://elsewhere.test/",
+        }),
+      ).toEqual({ status: "origin-refused" });
+      expect(
+        await host.updateProfileTab(
+          { kind: "project", projectId: projectId as never },
+          "window-a",
+          page?.id ?? -1,
+          {},
+        ),
+      ).toEqual({
+        status: "no-page",
+      });
+    });
+  });
 });

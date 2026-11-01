@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 export const DESKTOP_PRELOAD_FILENAME = "preload.cjs" as const;
 export const CODE_APPROVAL_PRELOAD_FILENAME = "codeOperationApprovalViewPreload.cjs" as const;
 export const CANVAS_PROTOTYPE_PRELOAD_FILENAME = "canvasPrototypePreload.cjs" as const;
+export const EXTENSION_BRIDGE_PRELOAD_FILENAME = "extensionBridgePreload.cjs" as const;
 export const CODE_FILE_HELPER_FILENAME = "octant-code-file-helper" as const;
 export const KEYCHAIN_HELPER_FILENAME = "octant-keychain-helper" as const;
 export const DEVICE_HELPER_FILENAME = "octant-device-helper" as const;

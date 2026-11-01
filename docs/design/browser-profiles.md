@@ -12,8 +12,7 @@ the controls and the approval card.
 
 Status: profiles, their storage, site approvals, refusals, Settings, cookie
 import, and browser extensions (install, per-profile enablement, popups) are
-built. Two pieces of the Popups design are declared and not built, each marked
-where it appears: the `chrome.tabs` support for popups and the
+built, including the `chrome.tabs` support for popups and the
 `chrome.action.onClicked` event for an extension without a popup page.
 
 ## Profiles
@@ -293,17 +292,40 @@ work without it, and takes no extension-support package:
   refused every permission, and cannot navigate away from its extension. At most
   one is open per window; clicking another, pressing Escape, or the window
   going away closes it. Only an extension the profile's session has loaded can
-  be shown, so a disabled or removed one has no page to open. An extension
-  without a popup page is listed but cannot be chosen (the
-  `chrome.action.onClicked` event is not built).
-- The popup and the background worker are meant to get the part of `chrome.tabs`
-  a popup needs, scoped to the page's profile: the active tab's address and
-  title, sending a message to a tab's content script, and opening or updating a
-  tab in that profile. A tab call never reaches another profile or a Private
-  page. This support is not built: until it is, every `chrome.tabs` call is
-  unsupported and fails inside the extension, like any other unsupported API.
-- Anything else in `chrome.tabs` stays unsupported and fails inside the
-  extension, as other unsupported APIs do.
+  be shown, so a disabled or removed one has no page to open.
+- An extension without a popup page is listed and can be chosen. If its manifest
+  has an `action`, the click fires `chrome.action.onClicked` in its background
+  worker with the active page of the profile in that window as the tab; the
+  worker is started if it is asleep, and a click that arrives before the worker
+  has added its listener is held for a few seconds rather than lost. An extension
+  with neither a popup page nor an action opens nothing.
+- The popup, the options page, and the background worker get the part of
+  `chrome.tabs` a popup needs, scoped to the page's profile: `query` (for
+  `active`, `currentWindow` and `lastFocusedWindow`), `get`, `create` and
+  `update` (an address, and bringing a tab to the front), and `sendMessage` to a
+  tab's content script. They list only the profile's own pages in the window the
+  popup is in. A tab call never reaches another profile, another window, or a
+  Private page, and a tab id from anywhere else is unknown. A tab's address and
+  title are shown only to an extension whose manifest asks for the `tabs`
+  permission, as in Chrome.
+  - An extension opens or navigates a page only to a web address (`https:` or
+    `http:`) or a blank page, and only to an origin that window's page already
+    admits, from the agent's approval or from the person's own browsing. An
+    extension is not the person browsing: it cannot widen what the agent may act
+    on, and a refused address is an error inside the extension, not a prompt.
+  - `sendMessage` first asks the app whether the tab is one of the profile's
+    pages, and only then lets the runtime deliver the message.
+  - The background worker serves the whole profile, so it acts in the window the
+    person last used that profile's extensions button in; before any use it sees
+    no pages.
+  - Rationale: the narrower choices (no address-only grant for an extension, no
+    `url` or `title` query filter, no tab close, move or group) keep existing
+    authority boundaries; each can be widened later without changing what is
+    built. The bridge is a preload on the popup view and on the profile
+    session's workers; a website's worker in the same session has no extension
+    address and gets no bridge.
+- Anything else in `chrome.tabs` stays unsupported: the function does not exist,
+  and a call fails inside the extension, as other unsupported APIs do.
 - Rationale: the one package that adds popups is offered under GPL-3.0 or a
   paid commercial license; the maintainer chose to build the needed part
   rather than take either.

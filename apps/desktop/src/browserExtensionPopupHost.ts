@@ -24,6 +24,7 @@ export interface ExtensionPopupView {
   readonly native: unknown;
   setBounds(bounds: ExtensionPopupBounds): void;
   readonly webContents: {
+    readonly id: number;
     loadURL(url: string): Promise<unknown>;
     close(): void;
     isDestroyed(): boolean;
@@ -42,11 +43,21 @@ export interface ExtensionPopupView {
   };
 }
 
+/** Which window and profile an open popup page belongs to, for the calls it makes. */
+export interface ExtensionPopupContext {
+  readonly windowId: string;
+  readonly profile: StoredBrowserProfile;
+  readonly extensionId: string;
+}
+
 export interface ExtensionPopupHostOptions {
   readonly store: Pick<BrowserProfileStore, "extensionPage">;
+  /** The preload that gives the page `chrome.tabs`; absent where none was built. */
+  readonly preloadPath?: string;
   readonly createView: (options: {
     readonly partition: string;
     readonly webPreferences: {
+      readonly preload?: string;
       readonly contextIsolation: true;
       readonly nodeIntegration: false;
       readonly sandbox: true;
@@ -74,7 +85,11 @@ const MAX_HEIGHT = 600;
 export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
   const open = new Map<
     string,
-    { readonly view: ExtensionPopupView; readonly window: ExtensionPopupShellWindow }
+    {
+      readonly view: ExtensionPopupView;
+      readonly window: ExtensionPopupShellWindow;
+      readonly context: ExtensionPopupContext;
+    }
   >();
 
   const close = (windowId: string): void => {
@@ -101,6 +116,7 @@ export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
       const view = options.createView({
         partition: browserProfilePartition(input.profile, ""),
         webPreferences: {
+          ...(options.preloadPath === undefined ? {} : { preload: options.preloadPath }),
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
@@ -143,7 +159,15 @@ export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
       view.webContents.on("destroyed", () => open.delete(input.windowId));
       view.setBounds(clamp(input.bounds));
       input.window.contentView.addChildView(view.native);
-      open.set(input.windowId, { view, window: input.window });
+      open.set(input.windowId, {
+        view,
+        window: input.window,
+        context: {
+          windowId: input.windowId,
+          profile: input.profile,
+          extensionId: input.extensionId,
+        },
+      });
       try {
         await view.webContents.loadURL(url);
       } catch {
@@ -153,6 +177,15 @@ export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
       return { opened: true };
     },
     close,
+    /** The popup page a web contents is, or nothing for a page that is not an open popup. */
+    contextOf(webContentsId: number): ExtensionPopupContext | undefined {
+      for (const entry of open.values()) {
+        if (!entry.view.webContents.isDestroyed() && entry.view.webContents.id === webContentsId) {
+          return entry.context;
+        }
+      }
+      return undefined;
+    },
     closeAll(): void {
       for (const windowId of open.keys()) close(windowId);
     },

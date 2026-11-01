@@ -74,9 +74,10 @@ export function BrowserExtensionsButton(props: BrowserExtensionsButtonProps) {
   };
 
   const items = extensions.flatMap((extension) => [
-    ...(extension.hasPopup
-      ? [{ label: extension.name, value: `popup:${extension.id}` }]
-      : [{ label: extension.name, value: `popup:${extension.id}`, disabled: true }]),
+    // An extension with no popup page is chosen too: its click is the extension's
+    // own `action.onClicked`, which the desktop app fires when the manifest has an
+    // action. An extension with neither opens nothing.
+    { label: extension.name, value: `popup:${extension.id}` },
     ...(extension.hasOptionsPage
       ? [{ label: `${extension.name} options`, value: `options:${extension.id}` }]
       : []),
