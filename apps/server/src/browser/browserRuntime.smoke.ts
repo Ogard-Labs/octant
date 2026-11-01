@@ -187,11 +187,14 @@ try {
   }
   const drained = await runtime.act(
     first,
-    request(first, "observe-diagnostics"),
+    {
+      ...request(first, "observe-diagnostics"),
+      diagnosticsSince: diagnostics.diagnosticsCursor ?? 0,
+    },
     controller.signal,
   );
   if ((drained.consoleErrors?.length ?? 0) !== 0 || (drained.failedRequests?.length ?? 0) !== 0) {
-    throw new Error("Diagnostics repeated evidence that had already been reported.");
+    throw new Error("Diagnostics after the cursor repeated evidence already reported.");
   }
   await runtime.closeContext(first);
   console.log(

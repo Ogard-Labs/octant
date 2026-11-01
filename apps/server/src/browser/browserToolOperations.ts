@@ -52,7 +52,8 @@ export type BrowserToolInput = {
       readonly profile?: "project" | "personal";
     }
   | ({ readonly operation: "read-page" } & Partial<BrowserToolTarget>)
-  | { readonly operation: "snapshot" | "screenshot" | "diagnostics" | "stop" }
+  | { readonly operation: "snapshot" | "screenshot" | "stop" }
+  | { readonly operation: "diagnostics"; readonly since?: number; readonly warnings?: boolean }
   | { readonly operation: "scroll"; readonly deltaX?: number; readonly deltaY?: number }
   | ({ readonly operation: "click" } & BrowserToolTarget)
   | ({ readonly operation: "wait" } & BrowserToolTarget)
@@ -293,13 +294,22 @@ function parseBrowserToolRecord(
       ...(typeof deltaY === "number" ? { deltaY } : {}),
     };
   }
-  if (
-    (operation === "snapshot" ||
-      operation === "screenshot" ||
-      operation === "diagnostics" ||
-      operation === "stop") &&
-    only()
-  )
+  if (operation === "diagnostics" && only("since", "warnings")) {
+    const { since, warnings } = record;
+    if (
+      since !== undefined &&
+      (typeof since !== "number" || !Number.isSafeInteger(since) || since < 0)
+    )
+      return undefined;
+    if (warnings !== undefined && typeof warnings !== "boolean") return undefined;
+    return {
+      ...common,
+      operation,
+      ...(typeof since === "number" ? { since } : {}),
+      ...(typeof warnings === "boolean" ? { warnings } : {}),
+    };
+  }
+  if ((operation === "snapshot" || operation === "screenshot" || operation === "stop") && only())
     return { ...common, operation };
   return undefined;
 }
@@ -474,7 +484,12 @@ export function browserToolAction(
     case "screenshot":
       return { ...base, kind: "screenshot" };
     case "diagnostics":
-      return { ...base, kind: "observe-diagnostics" };
+      return {
+        ...base,
+        kind: "observe-diagnostics",
+        ...(input.since === undefined ? {} : { diagnosticsSince: input.since }),
+        ...(input.warnings === undefined ? {} : { diagnosticsWarnings: input.warnings }),
+      };
     case "hover":
       return { ...base, kind: "hover", ...element(input) };
     case "select":
@@ -633,6 +648,15 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.failedRequests === undefined
                 ? {}
                 : { failedRequests: observation.failedRequests }),
+              ...(observation.consoleWarnings === undefined
+                ? {}
+                : { consoleWarnings: observation.consoleWarnings }),
+              ...(observation.httpErrors === undefined
+                ? {}
+                : { httpErrors: observation.httpErrors }),
+              ...(observation.diagnosticsCursor === undefined
+                ? {}
+                : { diagnosticsCursor: observation.diagnosticsCursor }),
               ...(includeScreenshot && image === undefined
                 ? { screenshotOmitted: "invalid-or-too-large" as const }
                 : {}),

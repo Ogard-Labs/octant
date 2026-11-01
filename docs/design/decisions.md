@@ -58,7 +58,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 6         | 5       | 1            | 0                   |
+| [Browser](#browser)                                                                   | 6         | 6       | 0            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 5       | 1            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 3       | 0            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **222**   | **186** | **33**       | **3**               |
+| **All areas**                                                                         | **222**   | **187** | **32**       | **3**               |
 
 ## Principles and hard lines
 
@@ -2230,9 +2230,9 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - Waits take text, an address, a load state, or an element's state, all or any, with a hard limit of 30 seconds. Actions wait for the page to settle (load, then 250 ms unchanged, at most 2 seconds). A page's dialogs are answered by a fixed rule (alert and leave-page accepted, confirm and prompt dismissed) and reported. `resize` sets the agent's own page to 320-3840 by 320-2160 and restores it.
 - `sign-in` hands the page to the person: a card with Continue and Cancel, the Browser brought forward, every other agent Browser call held, and a fresh snapshot on Continue. It is never remembered and is refused on routine, subagent, terminal-grant and paired-device turns.
 - No password saving, no agent-written script in the page, and downloads stay blocked.
-- Not built yet: fuller diagnostics.
+- Diagnostics report console errors, failed requests, and 4xx and 5xx responses (address, method, status; never a body or header), console warnings on request, each numbered, read after a `since` cursor without clearing.
 
-Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), and [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in).
+Status: Built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), and [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), and [Diagnostics](browser-agent-tool.md#diagnostics).
 
 ### Browser profiles and extensions
 

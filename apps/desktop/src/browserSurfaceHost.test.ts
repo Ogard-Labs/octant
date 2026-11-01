@@ -48,7 +48,7 @@ function view(): BrowserSurfaceViewPort {
         setDisplayMediaRequestHandler: vi.fn(),
         setPermissionCheckHandler: vi.fn(),
         setPermissionRequestHandler: vi.fn(),
-        webRequest: { onErrorOccurred: vi.fn() },
+        webRequest: { onErrorOccurred: vi.fn(), onCompleted: vi.fn() },
       },
       setWindowOpenHandler: vi.fn(),
       stop: vi.fn(),
@@ -819,7 +819,7 @@ describe("BrowserSurfaceHost", () => {
     ).rejects.toThrow("does not own");
   });
 
-  it("reports console errors and failed requests since the last read, then clears them", async () => {
+  it("reports errors, warnings when asked, failed requests, and 4xx and 5xx responses after a cursor, clearing nothing", async () => {
     const created = view();
     const host = createBrowserSurfaceHost({ createView: () => created });
     await host.createContext({
@@ -842,20 +842,47 @@ describe("BrowserSurfaceHost", () => {
     expect(onConsole).toBeDefined();
     expect(onFailed).toBeDefined();
 
+    const onCompleted = vi.mocked(created.webContents.session.webRequest!.onCompleted!).mock
+      .calls[0]?.[0];
+    expect(onCompleted).toBeDefined();
+
     onConsole!({ level: "info", message: "ready" });
     onConsole!({ level: "warning", message: "careful" });
     onConsole!({ level: "error", message: "  boom  " });
     onFailed!({ url: "https://example.com/missing.js", method: "GET", error: "net::ERR_FAILED" });
+    onCompleted!({ url: "https://example.com/ok.js", method: "GET", statusCode: 200 });
+    onCompleted!({ url: "https://example.com/api?token=s3cret", method: "POST", statusCode: 503 });
 
     const first = await host.act(contextId, { kind: "observe-diagnostics" });
-    expect(first.consoleErrors).toEqual([{ text: "boom", url: "https://example.com/" }]);
+    expect(first.consoleErrors).toEqual([{ text: "boom", url: "https://example.com/", seq: 2 }]);
     expect(first.failedRequests).toEqual([
-      { url: "https://example.com/missing.js", method: "GET", failure: "net::ERR_FAILED" },
+      { url: "https://example.com/missing.js", method: "GET", failure: "net::ERR_FAILED", seq: 3 },
     ]);
+    // The address and status only, with a secret in the address redacted.
+    expect(first.httpErrors).toEqual([
+      { url: "https://example.com/api?token=redacted", method: "POST", status: 503, seq: 4 },
+    ]);
+    expect(first.consoleWarnings).toBeUndefined();
+    expect(first.diagnosticsCursor).toBe(4);
 
-    const second = await host.act(contextId, { kind: "observe-diagnostics" });
-    expect(second.consoleErrors).toEqual([]);
+    // A second reader with no cursor still sees everything; nothing was cleared.
+    const again = await host.act(contextId, {
+      kind: "observe-diagnostics",
+      diagnosticsWarnings: true,
+    });
+    expect(again.consoleWarnings).toEqual([
+      { text: "careful", url: "https://example.com/", seq: 1 },
+    ]);
+    expect(again.consoleErrors).toHaveLength(1);
+
+    onConsole!({ level: "error", message: "later" });
+    const second = await host.act(contextId, {
+      kind: "observe-diagnostics",
+      diagnosticsSince: 4,
+    });
+    expect(second.consoleErrors).toEqual([{ text: "later", url: "https://example.com/", seq: 5 }]);
     expect(second.failedRequests).toEqual([]);
+    expect(second.httpErrors).toEqual([]);
 
     const navigated = await host.act(contextId, { kind: "screenshot" });
     expect(navigated.consoleErrors).toBeUndefined();
@@ -887,7 +914,12 @@ describe("BrowserSurfaceHost", () => {
     const read = await host.act(contextId, { kind: "observe-diagnostics" });
 
     expect(read.failedRequests).toEqual([
-      { url: "https://example.com/", method: "GET", failure: "net::ERR_CONNECTION_REFUSED" },
+      {
+        url: "https://example.com/",
+        method: "GET",
+        failure: "net::ERR_CONNECTION_REFUSED",
+        seq: 1,
+      },
     ]);
     expect(read.consoleErrors).toEqual([]);
   });
@@ -1030,7 +1062,7 @@ describe("BrowserSurfaceHost stored profiles", () => {
     const firstRead = await host.act(contextId, { kind: "observe-diagnostics" });
     const secondRead = await host.act(other, { kind: "observe-diagnostics" });
     expect(firstRead.failedRequests).toEqual([
-      { url: "https://example.com/a.js", failure: "net::ERR_FAILED" },
+      { url: "https://example.com/a.js", failure: "net::ERR_FAILED", seq: 1 },
     ]);
     expect(secondRead.failedRequests ?? []).toEqual([]);
   });

@@ -230,6 +230,12 @@ agent waits and never sees what you type. Press **Continue** and the agent
 picks up from the page you left. A routine, a subagent, a program in a
 terminal, or a turn started from your phone cannot ask this.
 
+To find out why a page misbehaves, the agent can read the page's console
+errors (and warnings if it asks), requests that failed, and requests that came
+back with an error status such as 404 or 500. It sees only the address and the
+status, never the content or headers, and reading leaves the list in place for
+the next look.
+
 The agent can send up to 10 of these steps in one call, such as filling three
 fields and pressing Save. Octant checks each step on its own, exactly as if it
 came alone, and stops at the first one that fails.

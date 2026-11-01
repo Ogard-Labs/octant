@@ -63,6 +63,8 @@ const pages: Record<string, string> = {
     <button id="ask" onclick="const ok = confirm('Delete everything?'); alert(ok ? 'deleted' : 'kept'); document.title = ok ? 'Deleted' : 'Kept'">Ask</button>
     <p>Width <span id="width"></span></p>
     <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
+  "/noisy": `<!doctype html><title>Noisy</title>
+    <script>console.warn("careful"); console.error("boom"); fetch("/missing-data");</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
 };
 
@@ -692,5 +694,37 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       expect((await tool.call({ operation: "sign-in" })).result).toEqual({ error: reason });
       await tool.stop();
     }
+  });
+
+  it("reads errors, warnings, and 4xx responses after a cursor, without clearing them", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/noisy` });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const first = (await tool.call({ operation: "diagnostics" })).result.page as {
+      readonly consoleErrors?: ReadonlyArray<{ readonly text: string }>;
+      readonly consoleWarnings?: unknown;
+      readonly httpErrors?: ReadonlyArray<Record<string, unknown>>;
+      readonly diagnosticsCursor?: number;
+    };
+    expect(first.consoleErrors?.map((entry) => entry.text)).toContain("boom");
+    expect(first.consoleWarnings).toBeUndefined();
+    expect(first.httpErrors).toEqual([
+      expect.objectContaining({ url: `${origin}/missing-data`, method: "GET", status: 404 }),
+    ]);
+    expect(Object.keys(first.httpErrors?.[0] ?? {}).sort()).toEqual([
+      "method",
+      "seq",
+      "status",
+      "url",
+    ]);
+    const withWarnings = (await tool.call({ operation: "diagnostics", warnings: true })).result
+      .page as { readonly consoleWarnings?: ReadonlyArray<{ readonly text: string }> };
+    expect(withWarnings.consoleWarnings?.map((entry) => entry.text)).toEqual(["careful"]);
+    const after = (
+      await tool.call({ operation: "diagnostics", since: first.diagnosticsCursor ?? 0 })
+    ).result.page as { readonly consoleErrors?: unknown; readonly httpErrors?: unknown };
+    expect(after.consoleErrors).toEqual([]);
+    expect(after.httpErrors).toEqual([]);
+    await tool.stop();
   });
 });

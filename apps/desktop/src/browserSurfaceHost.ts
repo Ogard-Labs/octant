@@ -120,6 +120,17 @@ interface BrowserSurfaceSessionPort {
           }) => void)
         | null,
     ): void;
+    /** Where Electron reports a completed request; read for its status only. */
+    onCompleted?(
+      listener:
+        | ((details: {
+            readonly url: string;
+            readonly method?: string;
+            readonly statusCode?: number;
+            readonly webContentsId?: number;
+          }) => void)
+        | null,
+    ): void;
   };
 }
 
@@ -256,8 +267,12 @@ interface OwnedSurface {
    * on write, oldest first out, so a page that logs in a loop cannot grow this
    * while the agent looks elsewhere.
    */
-  consoleErrors: Array<{ text: string; url?: string }>;
-  failedRequests: Array<{ url: string; method?: string; failure: string }>;
+  consoleErrors: Array<{ text: string; url?: string; seq: number }>;
+  consoleWarnings: Array<{ text: string; url?: string; seq: number }>;
+  failedRequests: Array<{ url: string; method?: string; failure: string; seq: number }>;
+  httpErrors: Array<{ url: string; method?: string; status: number; seq: number }>;
+  /** The last diagnostic entry's number; every kind shares the count. */
+  diagnosticSeq: number;
 }
 
 /**
@@ -323,6 +338,8 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       | "tabId"
       | "waitFor"
       | "viewport"
+      | "diagnosticsSince"
+      | "diagnosticsWarnings"
     >
   > & {
     /** The role and name a snapshot ref recorded; the target must still match. */
@@ -353,8 +370,24 @@ export interface BrowserSurfaceRuntimeObservation {
   }>;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
-  /** Only an observe-diagnostics read fills these; each read clears what it returns. */
-  readonly consoleErrors?: ReadonlyArray<{ readonly text: string; readonly url?: string }>;
+  /** Only an observe-diagnostics read fills these, after the read's cursor. */
+  readonly consoleErrors?: ReadonlyArray<{
+    readonly text: string;
+    readonly url?: string;
+    readonly seq?: number;
+  }>;
+  readonly consoleWarnings?: ReadonlyArray<{
+    readonly text: string;
+    readonly url?: string;
+    readonly seq?: number;
+  }>;
+  readonly httpErrors?: ReadonlyArray<{
+    readonly url: string;
+    readonly method?: string;
+    readonly status: number;
+    readonly seq?: number;
+  }>;
+  readonly diagnosticsCursor?: number;
   readonly failedRequests?: ReadonlyArray<{
     readonly url: string;
     readonly method?: string;
@@ -561,6 +594,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const target = surfaceByWebContents.get(details.webContentsId);
       if (target !== undefined) recordFailedRequest(target, details);
     });
+    view.webContents.session.webRequest?.onCompleted?.((details) => {
+      if (details.webContentsId === undefined) return recordHttpError(owned, details);
+      const target = surfaceByWebContents.get(details.webContentsId);
+      if (target !== undefined) recordHttpError(target, details);
+    });
     view.webContents.on("focus", () => {
       owned.control = "user";
       publish(contextId, owned);
@@ -615,7 +653,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         shellWindow: undefined,
         blockedNavigationUrl: undefined,
         consoleErrors: [],
+        consoleWarnings: [],
         failedRequests: [],
+        httpErrors: [],
+        diagnosticSeq: 0,
       };
       openTabView(input.contextId, owned, firstTabId);
       surfaces.set(input.contextId, owned);
@@ -861,10 +902,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 // never committed has no document to evaluate, and that is when
                 // the failed request is the whole answer. The next read answers
                 // what happened since this one.
-                return {
-                  consoleErrors: owned.consoleErrors.splice(0),
-                  failedRequests: owned.failedRequests.splice(0),
-                };
+                return readDiagnostics(owned, request);
               case "close-tab":
                 await contents.loadURL("about:blank");
                 break;
@@ -2026,14 +2064,69 @@ function recordConsoleError(owned: OwnedSurface, pageUrl: string, args: readonly
       : {};
   const severity = fromEvent.level ?? level;
   const rawText = fromEvent.message ?? message;
-  if (severity !== "error" && severity !== 3) return;
+  const error = severity === "error" || severity === 3;
+  const warning = severity === "warning" || severity === 2;
+  if (!error && !warning) return;
   if (typeof rawText !== "string") return;
   const text = boundedText(rawText, MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS);
   if (text === "") return;
   const url =
     pageUrl === "" || pageUrl === "about:blank" ? undefined : redactedObservationUrl(pageUrl);
-  if (owned.consoleErrors.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES) owned.consoleErrors.shift();
-  owned.consoleErrors.push({ text, ...(url === undefined ? {} : { url: url.slice(0, 4_096) }) });
+  keepDiagnostic(owned, error ? owned.consoleErrors : owned.consoleWarnings, {
+    text,
+    ...(url === undefined ? {} : { url: url.slice(0, 4_096) }),
+  });
+}
+
+/**
+ * What the page reported after the reader's cursor. Nothing is cleared: the
+ * agent and anyone else reading keep their own place, and the answer's cursor
+ * is where the next read starts.
+ */
+function readDiagnostics(
+  owned: OwnedSurface,
+  request: BrowserSurfaceAction,
+): BrowserSurfaceRuntimeObservation {
+  const since = request.diagnosticsSince ?? 0;
+  const after = <T extends { readonly seq: number }>(list: ReadonlyArray<T>) =>
+    list.filter((entry) => entry.seq > since);
+  return {
+    consoleErrors: after(owned.consoleErrors),
+    failedRequests: after(owned.failedRequests),
+    httpErrors: after(owned.httpErrors),
+    ...(request.diagnosticsWarnings === true
+      ? { consoleWarnings: after(owned.consoleWarnings) }
+      : {}),
+    diagnosticsCursor: owned.diagnosticSeq,
+  };
+}
+
+/** A completed request with a 4xx or 5xx status: its address, method, and status only. */
+function recordHttpError(
+  owned: OwnedSurface,
+  details: { readonly url: string; readonly method?: string; readonly statusCode?: number },
+): void {
+  const status = details.statusCode;
+  if (status === undefined || status < 400 || status > 599) return;
+  const url = boundedText(redactedObservationUrl(details.url), 4_096);
+  if (url === "" || url === "about:blank") return;
+  const method = boundedText(details.method ?? "", 16);
+  keepDiagnostic(owned, owned.httpErrors, {
+    url,
+    ...(method === "" ? {} : { method }),
+    status,
+  });
+}
+
+/** Number one diagnostic entry and keep it, dropping the oldest of its kind past the bound. */
+function keepDiagnostic<T extends { seq: number }>(
+  owned: OwnedSurface,
+  list: T[],
+  entry: Omit<T, "seq">,
+): void {
+  owned.diagnosticSeq += 1;
+  if (list.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES) list.shift();
+  list.push({ ...entry, seq: owned.diagnosticSeq } as T);
 }
 
 function recordFailedRequest(
@@ -2047,8 +2140,7 @@ function recordFailedRequest(
     details.error ?? "The request did not complete.",
     MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
   );
-  if (owned.failedRequests.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES) owned.failedRequests.shift();
-  owned.failedRequests.push({
+  keepDiagnostic(owned, owned.failedRequests, {
     url,
     ...(method === "" ? {} : { method }),
     failure: failure === "" ? "The request did not complete." : failure,

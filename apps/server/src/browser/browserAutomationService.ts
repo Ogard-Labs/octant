@@ -637,6 +637,13 @@ export class BrowserAutomationService {
         ...(observed.failedRequests === undefined
           ? {}
           : { failedRequests: observed.failedRequests }),
+        ...(observed.consoleWarnings === undefined
+          ? {}
+          : { consoleWarnings: observed.consoleWarnings }),
+        ...(observed.httpErrors === undefined ? {} : { httpErrors: observed.httpErrors }),
+        ...(observed.diagnosticsCursor === undefined
+          ? {}
+          : { diagnosticsCursor: observed.diagnosticsCursor }),
         revision: ++owned.observationRevision,
         observedAt: this.#clock() as BrowserObservation["observedAt"],
         stale: false,

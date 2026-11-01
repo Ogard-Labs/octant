@@ -40,12 +40,26 @@ export interface BrowserRuntimeObservation {
   readonly consoleErrors?: ReadonlyArray<{
     readonly text: string;
     readonly url?: string;
+    readonly seq?: number;
   }>;
   readonly failedRequests?: ReadonlyArray<{
     readonly url: string;
     readonly method?: string;
     readonly failure: string;
+    readonly seq?: number;
   }>;
+  readonly consoleWarnings?: ReadonlyArray<{
+    readonly text: string;
+    readonly url?: string;
+    readonly seq?: number;
+  }>;
+  readonly httpErrors?: ReadonlyArray<{
+    readonly url: string;
+    readonly method?: string;
+    readonly status: number;
+    readonly seq?: number;
+  }>;
+  readonly diagnosticsCursor?: number;
 }
 
 export interface BrowserTargetInspection {
@@ -181,6 +195,8 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
       | "tabId"
       | "waitFor"
       | "viewport"
+      | "diagnosticsSince"
+      | "diagnosticsWarnings"
     >
   > & {
     /**

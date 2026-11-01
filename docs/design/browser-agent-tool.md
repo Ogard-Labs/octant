@@ -10,10 +10,10 @@ approval covers
 and [Browser captures](browser-captures.md) owns which screenshots a thread
 keeps.
 
-Status: the page snapshot, element refs, short results, the actions below
-(hover, select, drag, key chords, upload, tabs), batched steps, waits, settling,
-dialogs, viewport size, and the sign-in handoff are built. Fuller diagnostics
-are allowed; not built yet.
+Status: built. The page snapshot and element refs, short results, hover,
+select, drag, key chords, upload, tabs, batched steps, waits, settling, dialogs,
+viewport size, the sign-in handoff, and diagnostics with a cursor are built on
+the headless and desktop Browsers.
 
 ## One tool for every provider
 
@@ -266,8 +266,22 @@ only after the person approves it.
 
 ## Diagnostics
 
-Allowed; not built yet. Console warnings and responses with a 4xx or 5xx status,
-read with a cursor so reads do not clear each other. No bodies and no headers.
+- `diagnostics` returns what the page reported: console errors, requests that
+  never completed (`failedRequests`), and responses with a 4xx or 5xx status
+  (`httpErrors`: address, method, and status). `warnings: true` adds console
+  warnings.
+- No body and no header of any request or response is read or kept. The
+  desktop Browser redacts secrets in an address's query, as it does for every
+  address it reports.
+- Every entry carries a number, counted per page context across all kinds, and
+  each answer carries `diagnosticsCursor`, the last number it covers. Passing
+  it as `since` returns only what came after. A read clears nothing, so the
+  agent and any other reader never take entries from each other.
+- At most 32 entries of each kind are kept, the oldest dropped first, each at
+  most 2 KiB of text. Diagnostics stay on this computer: no telemetry.
+- Rationale: a read that cleared made the second reader see nothing, and a
+  cursor answers the agent's real question, "what happened since I last
+  looked", without that.
 
 ## What the tool never does
 

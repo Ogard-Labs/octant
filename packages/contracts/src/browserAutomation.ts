@@ -279,6 +279,10 @@ export const BrowserActionRequest = Schema.Struct({
   waitFor: Schema.optional(BrowserWaitFor),
   /** The size a `resize` sets; absent, the page returns to its own size. */
   viewport: Schema.optional(BrowserViewportSize),
+  /** For a diagnostics read: only entries after this cursor. Absent, all kept entries. */
+  diagnosticsSince: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** For a diagnostics read: include console warnings. */
+  diagnosticsWarnings: Schema.optional(Schema.Boolean),
   value: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(65_536))),
   point: Schema.optional(BrowserViewportPoint),
   deltaX: Schema.optional(Schema.Number.pipe(Schema.between(-2000, 2000))),
@@ -289,11 +293,19 @@ export const BrowserActionRequest = Schema.Struct({
 }).annotations(strict);
 export type BrowserActionRequest = typeof BrowserActionRequest.Type;
 
-/** One error the page's own console reported, bounded like every other read. */
+/**
+ * Where an entry sits in the context's diagnostics, counted from 1. A read
+ * names the last one it saw as `since` and gets only what came after, so two
+ * readers never clear each other's entries.
+ */
+const DiagnosticSeq = Schema.optional(Schema.Int.pipe(Schema.positive()));
+
+/** One error or warning the page's own console reported, bounded like every other read. */
 export const BrowserConsoleError = Schema.Struct({
   text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS)),
   /** The page's URL when the error was logged, so a navigation is not misread. */
   url: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
+  seq: DiagnosticSeq,
 }).annotations(strict);
 export type BrowserConsoleError = typeof BrowserConsoleError.Type;
 
@@ -309,8 +321,21 @@ export const BrowserFailedRequest = Schema.Struct({
   failure: Schema.NonEmptyTrimmedString.pipe(
     Schema.maxLength(MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS),
   ),
+  seq: DiagnosticSeq,
 }).annotations(strict);
 export type BrowserFailedRequest = typeof BrowserFailedRequest.Type;
+
+/**
+ * One request that completed with a 4xx or 5xx status. The address, method,
+ * and status only: no body and no header is ever read or kept.
+ */
+export const BrowserHttpError = Schema.Struct({
+  url: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
+  method: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(16))),
+  status: Schema.Int.pipe(Schema.between(400, 599)),
+  seq: DiagnosticSeq,
+}).annotations(strict);
+export type BrowserHttpError = typeof BrowserHttpError.Type;
 
 /**
  * What happened to a screenshot the host was asked to keep as a thread capture.
@@ -375,6 +400,16 @@ export const BrowserObservation = Schema.Struct({
   failedRequests: Schema.optional(
     Schema.Array(BrowserFailedRequest).pipe(Schema.maxItems(MAX_BROWSER_DIAGNOSTIC_ENTRIES)),
   ),
+  /** Console warnings, only when the diagnostics read asks for them. */
+  consoleWarnings: Schema.optional(
+    Schema.Array(BrowserConsoleError).pipe(Schema.maxItems(MAX_BROWSER_DIAGNOSTIC_ENTRIES)),
+  ),
+  /** Requests that completed with a 4xx or 5xx status. */
+  httpErrors: Schema.optional(
+    Schema.Array(BrowserHttpError).pipe(Schema.maxItems(MAX_BROWSER_DIAGNOSTIC_ENTRIES)),
+  ),
+  /** The last entry this read covers; the next read passes it as `since`. */
+  diagnosticsCursor: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   screenshotDataUrl: Schema.optional(
     Schema.String.pipe(
       Schema.maxLength(MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS),
