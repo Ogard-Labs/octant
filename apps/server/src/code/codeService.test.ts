@@ -3912,6 +3912,47 @@ describe("Git history authority", () => {
     );
   });
 
+  it("reads a server thread's history with Git on its server, never this host's", async () => {
+    const local = vi.fn(async () => ({ status: "unavailable" as const, message: "Test reader" }));
+    const onServer = vi.fn(async () => ({ status: "unavailable" as const, message: "On server" }));
+    const serverCheckout = decodeCodeCheckoutIdentity({
+      id: ids.checkout,
+      repositoryId,
+      kind: "remote-root",
+      availability: "available",
+      head: { kind: "none" },
+      observedAt: now,
+    });
+    let registered = true;
+    const fixture = serviceFixture({
+      checkout: serverCheckout,
+      gitHistory: { read: local },
+      serverGitHistory: () =>
+        registered ? { root: "/srv/service", reader: { read: onServer } } : undefined,
+    });
+    await fixture.service.readGitHistory(ids.window, {
+      kind: "history",
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+    });
+    expect(onServer).toHaveBeenCalledWith(
+      "/srv/service",
+      expect.objectContaining({ kind: "history" }),
+      undefined,
+      [],
+    );
+    registered = false;
+    expect(
+      await fixture.service.readGitHistory(ids.window, {
+        kind: "history",
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+      }),
+    ).toMatchObject({ status: "unavailable" });
+    expect(local).not.toHaveBeenCalled();
+    expect(fixture.roots.resolve).not.toHaveBeenCalled();
+  });
+
   it("refuses another checkout before invoking the history reader", async () => {
     const read = vi.fn(async () => ({ status: "unavailable" as const, message: "Test reader" }));
     const fixture = serviceFixture({ gitHistory: { read } });
@@ -4752,6 +4793,7 @@ function serviceFixture(
     readonly content?: CodeContentStoreOptions;
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
+    readonly serverGitHistory?: CodeServiceOptions["serverGitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
     readonly awaitsHarnessApproval?: CodeServiceOptions["awaitsHarnessApproval"];
     readonly forkMergeBack?: CodeServiceOptions["forkMergeBack"];
@@ -4867,6 +4909,9 @@ function serviceFixture(
       : { managedThreadCreation: options.managedThreadCreation }),
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
     ...(options.gitHistory === undefined ? {} : { gitHistory: options.gitHistory }),
+    ...(options.serverGitHistory === undefined
+      ? {}
+      : { serverGitHistory: options.serverGitHistory }),
     ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
     ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
     ...(options.awaitsHarnessApproval === undefined

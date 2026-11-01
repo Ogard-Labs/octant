@@ -301,6 +301,43 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
   });
 
+  it("asks the person to sign in themselves and continues the agent on Continue", async () => {
+    const user = userEvent.setup();
+    const approval = {
+      approvalId: "90000000-0000-4000-8000-000000000008",
+      threadId: String(threadId),
+      mode: "work",
+      origin: "https://example.com",
+      signIn: { reason: "The dashboard needs your account." },
+      requestedAt: "2026-09-09T10:00:00.000Z",
+    };
+    const browserAutomationClient = {
+      listApprovals: vi.fn(async () => [approval]),
+      decideApproval: vi.fn(async () => undefined),
+    };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        browserAutomationClient={browserAutomationClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Browser sign-in" });
+    expect(row).toHaveTextContent("The agent asks you to sign in on https://example.com");
+    expect(row).toHaveTextContent("The dashboard needs your account.");
+    expect(within(row).queryByRole("button", { name: "Always allow" })).toBeNull();
+    await user.click(within(row).getByRole("button", { name: "Continue" }));
+    expect(browserAutomationClient.decideApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalId: approval.approvalId, decision: "approved" }),
+    );
+  });
+
   it("asks once, naming each file, before the agent uploads files to a page", async () => {
     const user = userEvent.setup();
     const approval = {

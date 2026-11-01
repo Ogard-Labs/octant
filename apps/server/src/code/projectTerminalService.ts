@@ -32,6 +32,7 @@ import { projectExtraFolderRoots } from "@octant/domain";
 import type { Journal } from "../persistence/journal";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
+import type { ServerTerminalLogin } from "../serverProjects/serverTerminal";
 import type { TerminalService, TerminalSnapshot } from "./terminalService";
 import { defaultTerminalShell } from "./terminalShell";
 
@@ -77,6 +78,19 @@ export interface ProjectTerminalServiceOptions {
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly shell?: string;
+  /**
+   * A Code Project on a registered server, which the local catalog never
+   * holds. Absent for every local Project.
+   */
+  readonly serverProject?: (projectId: ProjectId) => ServerProjectTerminalTarget | undefined;
+}
+
+/** Where a server Project's terminal logs in. Canonical: docs/design/server-projects.md § Threads. */
+export interface ServerProjectTerminalTarget {
+  /** Derived from the Project, server, and folder, so a rebound Project ends its shells. */
+  readonly bindingRevisionId: BindingRevisionId;
+  /** The login now, or undefined once its server left the registry. */
+  readonly login: () => ServerTerminalLogin | undefined;
 }
 
 interface Owner {
@@ -94,6 +108,11 @@ type Authority =
   | {
       readonly kind: "allowed";
       readonly project: BoundProject;
+      readonly bindingRevisionId: BindingRevisionId;
+    }
+  | {
+      readonly kind: "allowed-on-server";
+      readonly server: ServerProjectTerminalTarget;
       readonly bindingRevisionId: BindingRevisionId;
     }
   | {
@@ -196,6 +215,10 @@ export class ProjectTerminalService {
           await this.#end(command.terminalId, owner, "stopped");
           return this.#view(command.terminalId, owner);
         case "run-action": {
+          // A server Project saves no actions.
+          if (authority.kind === "allowed-on-server") {
+            return refused("unavailable", "This Project has no such action.");
+          }
           // The line comes from the Project record read now, never from the
           // caller, so a window can only type what the person saved.
           const action = authority.project.actions?.find(
@@ -216,7 +239,7 @@ export class ProjectTerminalService {
           // into a shell the window no longer holds.
           const settled = this.#authority(windowId, command.projectId);
           if (
-            settled.kind === "refused" ||
+            settled.kind !== "allowed" ||
             owner.ended ||
             String(settled.bindingRevisionId) !== String(owner.bindingRevisionId)
           ) {
@@ -249,7 +272,7 @@ export class ProjectTerminalService {
       owner !== undefined &&
       String(owner.windowId) === String(windowId) &&
       String(owner.projectId) === String(projectId) &&
-      this.#authority(windowId, projectId).kind === "allowed"
+      this.#authority(windowId, projectId).kind !== "refused"
     );
   }
 
@@ -264,7 +287,7 @@ export class ProjectTerminalService {
     const current =
       (project?.type === "code" || project?.type === "work") && project.lifecycle === "active"
         ? project.bindingHistory.at(-1)?.revisionId
-        : undefined;
+        : this.#options.serverProject?.(projectId)?.bindingRevisionId;
     const ending: Array<Promise<void>> = [];
     for (const owner of this.#owners.values()) {
       if (owner.ended || String(owner.projectId) !== String(projectId)) continue;
@@ -274,9 +297,29 @@ export class ProjectTerminalService {
     await Promise.allSettled(ending);
   }
 
+  /**
+   * End every running terminal of a Project that is gone, without reading
+   * the catalog: a server Project's removal is committed to the journal
+   * before its catalog forgets it, so a settle at that moment would still
+   * find the Project and keep its shells.
+   */
+  async revokeProject(projectId: ProjectId): Promise<void> {
+    const ending: Array<Promise<void>> = [];
+    for (const owner of this.#owners.values()) {
+      if (owner.ended || String(owner.projectId) !== String(projectId)) continue;
+      ending.push(this.#end(owner.terminalId, owner, "authority-revoked"));
+    }
+    await Promise.allSettled(ending);
+  }
+
   async #suggest(windowId: WindowId, projectId: ProjectId): Promise<ProjectTerminalResult> {
     const authority = this.#authority(windowId, projectId);
     if (authority.kind === "refused") return refused(authority.reason, authority.message);
+    // Suggestions read the Project's own files on this host, which a server
+    // Project does not have.
+    if (authority.kind === "allowed-on-server") {
+      return refused("unavailable", "A Project on a server does not suggest actions.");
+    }
     const root = await this.#options.resolveRoot(authority.project);
     if (root === undefined) {
       return refused("unavailable", "This Project's folder is unavailable. Relink the Project.");
@@ -309,6 +352,8 @@ export class ProjectTerminalService {
     if (this.#owners.has(String(command.terminalId))) {
       return refused("unavailable", "This terminal id is already in use.");
     }
+    if (authority.kind === "allowed-on-server")
+      return this.#startOnServer(windowId, command, authority);
     const root = await this.#options.resolveRoot(authority.project);
     if (root === undefined) {
       return refused("unavailable", "This Project's folder is unavailable. Relink the Project.");
@@ -317,7 +362,7 @@ export class ProjectTerminalService {
     // must not start a shell in a folder the Project no longer names.
     const settled = this.#authority(windowId, command.projectId);
     if (
-      settled.kind === "refused" ||
+      settled.kind !== "allowed" ||
       String(settled.bindingRevisionId) !== String(authority.bindingRevisionId)
     ) {
       return refused("authority-revoked", "This Project changed while its terminal was starting.");
@@ -366,11 +411,60 @@ export class ProjectTerminalService {
           : "The terminal could not start.",
       );
     }
+    return this.#own(windowId, command, authority.bindingRevisionId, posture);
+  }
+
+  /**
+   * A server Project's shell: a login on its server, in its folder, through
+   * the same connection rules as a thread terminal there. It carries nothing
+   * of this host's (no credential, Browser grant, or other folder), and no
+   * sandbox holds it on the server, which its posture says.
+   */
+  async #startOnServer(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
+    authority: Extract<Authority, { readonly kind: "allowed-on-server" }>,
+  ): Promise<ProjectTerminalResult> {
+    if (command.folder !== undefined) {
+      return refused("unavailable", "That folder is not one of this Project's folders.");
+    }
+    const login = authority.server.login();
+    if (login === undefined) {
+      return refused(
+        "unavailable",
+        "This Project's server is not registered. Register it again in Settings › Access › Servers.",
+      );
+    }
+    try {
+      await this.#options.terminals.launch({
+        terminalId: String(command.terminalId),
+        // The server's own shell and folder; neither is opened on this host.
+        shell: "/bin/sh",
+        cwd: "/",
+        stateScope: `project:${String(command.projectId)}`,
+        columns: command.columns,
+        rows: command.rows,
+        credentialReferences: [],
+        server: login,
+      });
+    } catch {
+      return refused("unavailable", "The terminal could not start.");
+    }
+    return this.#own(windowId, command, authority.bindingRevisionId, "full-access");
+  }
+
+  /** Records a launched shell and follows it until it ends. */
+  async #own(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
+    bindingRevisionId: BindingRevisionId,
+    posture: ProjectTerminalPosture,
+  ): Promise<ProjectTerminalResult> {
     const owner: Owner = {
       terminalId: command.terminalId,
       windowId,
       projectId: command.projectId,
-      bindingRevisionId: authority.bindingRevisionId,
+      bindingRevisionId,
       posture,
       stopObserving: undefined,
       ended: false,
@@ -381,7 +475,7 @@ export class ProjectTerminalService {
         projectId: command.projectId,
         terminalId: command.terminalId,
         windowId,
-        bindingRevisionId: authority.bindingRevisionId,
+        bindingRevisionId,
         posture,
         startedAt: this.#options.clock(),
       });
@@ -412,7 +506,7 @@ export class ProjectTerminalService {
     const launched = this.#authority(windowId, command.projectId);
     if (
       launched.kind === "refused" ||
-      String(launched.bindingRevisionId) !== String(authority.bindingRevisionId)
+      String(launched.bindingRevisionId) !== String(bindingRevisionId)
     ) {
       await this.#end(command.terminalId, owner, "authority-revoked");
       return refused("authority-revoked", "This Project changed while its terminal was starting.");
@@ -422,6 +516,23 @@ export class ProjectTerminalService {
 
   #authority(windowId: WindowId, projectId: ProjectId): Authority {
     const project = this.#options.readProject(projectId);
+    if (project === undefined) {
+      const server = this.#options.serverProject?.(projectId);
+      if (server !== undefined) {
+        if (!this.#options.canAccessProject(windowId, projectId)) {
+          return {
+            kind: "refused",
+            reason: "unauthorized",
+            message: "Open this Project in this window to use its terminal.",
+          };
+        }
+        return {
+          kind: "allowed-on-server",
+          server,
+          bindingRevisionId: server.bindingRevisionId,
+        };
+      }
+    }
     // Work shares Code's shell at the thread's level, so a Work Project has a
     // terminal too; whether a Work window shows it is the Project's Developer
     // tools switch, which is presentation and is not read here.

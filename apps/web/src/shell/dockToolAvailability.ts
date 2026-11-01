@@ -51,9 +51,10 @@ export interface DockToolCapabilities {
 
 /**
  * The tools a thread in a server Project keeps: Files and Tests read and run
- * on its server. Every other tool reads or acts on a folder, a browser, a
- * device, or a desktop of this host, which the host refuses for such a
- * thread, so the dock does not offer them.
+ * on its server, and Review's changes and history are read by Git there.
+ * Every other tool reads or acts on a folder, a browser, a device, or a
+ * desktop of this host, which the host refuses for such a thread, so the dock
+ * does not offer them.
  */
 const SERVER_CHECKOUT_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
   "side-chat",
@@ -64,6 +65,7 @@ const SERVER_CHECKOUT_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
   "terminal",
   "files",
   "tests",
+  "review",
 ]);
 
 /**

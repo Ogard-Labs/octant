@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ServerConnection } from "./serverConnection";
-import { createServerGitService } from "./serverGit";
+import { decodeGitHistoryQuery } from "@octant/contracts/git-history";
+import { createServerGitHistory, createServerGitService } from "./serverGit";
 import {
   canRunThrowawaySshd,
   startThrowawaySshd,
@@ -111,5 +112,39 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's Git panel", () => {
     expect(execFileSync("git", ["-C", root, "diff", "--cached", "--name-only"]).toString()).toBe(
       "",
     );
+  }, 60_000);
+
+  const scope = {
+    threadId: "c0000000-0000-4000-8000-000000000001",
+    checkoutId: "c0000000-0000-4000-8000-000000000002",
+  };
+
+  it("reads the Review tool's history and one commit with Git on the server", async () => {
+    const history = createServerGitHistory({
+      connection,
+      server: () => ({ alias: sshd.alias, user: sshd.user }),
+    });
+    const listed = await history.read(root, decodeGitHistoryQuery({ kind: "history", ...scope }));
+    expect(listed).toMatchObject({ status: "history", branch: "main" });
+    if (listed.status !== "history") return;
+    const first = listed.commits.at(-1);
+    expect(first?.subject).toBe("Start");
+    if (first === undefined) return;
+    const commit = await history.read(
+      root,
+      decodeGitHistoryQuery({ kind: "commit", ...scope, oid: first.oid, parent: 0 }),
+    );
+    expect(commit).toMatchObject({ status: "commit", files: 1 });
+    if (commit.status === "commit") expect(commit.diff).toContain("+# Service");
+  }, 60_000);
+
+  it("reads no history when the server cannot be reached", async () => {
+    const history = createServerGitHistory({
+      connection,
+      server: () => ({ alias: sshd.closedAlias, user: sshd.user }),
+    });
+    expect(
+      (await history.read(root, decodeGitHistoryQuery({ kind: "history", ...scope }))).status,
+    ).toBe("unavailable");
   }, 60_000);
 });

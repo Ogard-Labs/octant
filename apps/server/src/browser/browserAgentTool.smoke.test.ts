@@ -113,6 +113,16 @@ function agentTool(
     readonly uploadAnswer?: "approved" | "denied";
     /** Runs while the person is being asked, before the answer. */
     readonly whileAsking?: () => Promise<void>;
+    /** Plays the person while the agent waits for them to sign in. */
+    readonly whileSigningIn?: () => Promise<"approved" | "denied">;
+    readonly unattended?: boolean;
+    readonly pairedDevice?: boolean;
+    readonly terminal?: boolean;
+    /**
+     * Report the page as the desktop app's own Browser. The page is still the
+     * headless one here; only the presentation the sign-in check reads changes.
+     */
+    readonly presentAsApp?: boolean;
   } = {},
 ) {
   const asked: Array<Record<string, unknown>> = [];
@@ -133,20 +143,33 @@ function agentTool(
     executionPolicy: "approval-gated",
     resolveAuthority: () => authority,
     browser: {
-      inspectThread: (window, thread) => service.inspectThread(window, thread),
+      inspectThread: (window, thread) => {
+        const inspected = service.inspectThread(window, thread);
+        return options.presentAsApp === true && inspected.context !== undefined
+          ? {
+              ...inspected,
+              context: { ...inspected.context, presentation: "native-live" as const },
+            }
+          : inspected;
+      },
       create: (input) => service.create(input),
       act: (input) => service.act(input),
       releaseThread: (window, thread) => service.releaseThread(window, thread),
+      holdForPerson: (window, thread) => service.holdForPerson(window, thread),
     },
     approvals: {
+      isUnattendedScope: () => options.unattended === true,
+      isPairedDevice: () => options.pairedDevice === true,
       request: async (request) => {
         asked.push(request as unknown as Record<string, unknown>);
+        if ("signIn" in request) return (await options.whileSigningIn?.()) ?? "approved";
         if (!("upload" in request)) return "approved";
         await options.whileAsking?.();
         return options.uploadAnswer ?? "approved";
       },
     },
     ...(options.uploadRoot === undefined ? {} : { uploadRoot: () => options.uploadRoot }),
+    ...(options.terminal === true ? { profileCaller: "terminal-grant" as const } : {}),
     uuid: () => randomUUID(),
   });
   const call = async (input: Record<string, unknown>) => {
@@ -629,5 +652,70 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     const restored = await tool.call({ operation: "resize", include: ["text"] });
     expect(restored.result.page?.text).toContain("Width 1280");
     await tool.stop();
+  });
+
+  it("hands the page to the person to sign in, holds the agent, and resumes with a fresh snapshot", async () => {
+    let tool: ReturnType<typeof agentTool> | undefined;
+    let duringHandOff: unknown;
+    let waiting: unknown;
+    tool = agentTool({
+      presentAsApp: true,
+      whileSigningIn: async () => {
+        waiting = tool?.service.inspectThread(windowId, threadId).waitingForPerson;
+        duringHandOff = (await tool?.call({ operation: "snapshot" }))?.result;
+        // The person finishes on the page; the agent never drives this.
+        const context = tool?.service.inspectThread(windowId, threadId).context;
+        if (context !== undefined) {
+          await tool?.service.act({
+            windowId,
+            request: {
+              actionId: context.actionId,
+              contextId: context.contextId,
+              correlationId: context.correlationId,
+              authority: context.authority,
+              kind: "click",
+              target: "button",
+            },
+          });
+        }
+        return "approved";
+      },
+    });
+    await tool.call({ operation: "navigate", url: `${origin}/login` });
+    const resumed = await tool.call({
+      operation: "sign-in",
+      reason: "The form needs your account.",
+    });
+    expect(waiting).toBe("sign-in");
+    expect(duringHandOff).toEqual({ error: "browser-waiting-for-person" });
+    expect(resumed.isError).toBe(false);
+    expect(resumed.result.page?.title).toBe("Submitted");
+    expect(resumed.result.page?.snapshot).toMatch(/- textbox "Password" \[ref=e\d+\] protected$/m);
+    expect(resumed.result.page?.snapshot).not.toContain("hunter2");
+    expect(tool.service.inspectThread(windowId, threadId).waitingForPerson).toBeUndefined();
+    await tool.stop();
+
+    const declined = agentTool({ presentAsApp: true, whileSigningIn: async () => "denied" });
+    await declined.call({ operation: "navigate", url: `${origin}/login` });
+    expect((await declined.call({ operation: "sign-in" })).result).toEqual({
+      error: "browser-sign-in-denied",
+    });
+    expect((await declined.call({ operation: "snapshot" })).isError).toBe(false);
+    await declined.stop();
+  });
+
+  it("refuses to ask for a sign-in on a routine, subagent, terminal, or paired-device turn", async () => {
+    for (const [options, reason] of [
+      // A headless page reaches the person only as a picture they cannot type into.
+      [{}, "sign-in-needs-the-app-browser"],
+      [{ unattended: true }, "sign-in-needs-a-person"],
+      [{ terminal: true }, "sign-in-needs-a-person"],
+      [{ pairedDevice: true }, "sign-in-needs-this-computer"],
+    ] as const) {
+      const tool = agentTool(options);
+      await tool.call({ operation: "navigate", url: `${origin}/login` });
+      expect((await tool.call({ operation: "sign-in" })).result).toEqual({ error: reason });
+      await tool.stop();
+    }
   });
 });

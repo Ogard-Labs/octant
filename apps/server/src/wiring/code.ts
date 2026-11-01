@@ -85,7 +85,12 @@ import type { ProvidersWiring } from "./providers";
 import type { FoundationsWiring } from "./foundations";
 
 import type { HarnessStateWiring } from "./harnessState";
-import { serverThreadOf, withServerCodeCheckouts } from "../serverProjects/serverProjectThreads";
+import { createServerGitHistory } from "../serverProjects/serverGit";
+import {
+  serverProjectOf,
+  serverThreadOf,
+  withServerCodeCheckouts,
+} from "../serverProjects/serverProjectThreads";
 import { ServerCodeFiles } from "../serverProjects/serverCodeFiles";
 import { discoverServerTests } from "../serverProjects/serverTests";
 import {
@@ -751,6 +756,7 @@ export function wireCode(deps: CodeDependencies) {
     // The Code runtime is built from this area and answers a fork's point and
     // merge-back, so the runtime's area builds the service once the runtime
     // exists; everything else the service reads is this area's.
+    const serverGitHistories = new Map<string, GitHistoryPort>();
     const buildCodeService = (codeOperationRuntime: CodeOperationRuntime | undefined) => {
       const codeService =
         options.codeService ??
@@ -758,6 +764,25 @@ export function wireCode(deps: CodeDependencies) {
           liveTurns,
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
           gitHistory: new GitHistoryPort(),
+          serverGitHistory: (thread) => {
+            const project = serverProjectOf(serverProjectStore, thread);
+            if (project === undefined) return undefined;
+            const projectId = String(project.id);
+            if (serverProjectStore.addressOf(projectId).kind !== "address") return undefined;
+            let reader = serverGitHistories.get(projectId);
+            if (reader === undefined) {
+              reader = createServerGitHistory({
+                connection: serverConnection,
+                // Read each call, so a server removed mid-read refuses the next command.
+                server: () => {
+                  const address = serverProjectStore.addressOf(projectId);
+                  return address.kind === "address" ? address.server : undefined;
+                },
+              });
+              serverGitHistories.set(projectId, reader);
+            }
+            return { root: project.folder, reader };
+          },
           persistence,
           access: {
             canBrowseProject: isCodeProject,
