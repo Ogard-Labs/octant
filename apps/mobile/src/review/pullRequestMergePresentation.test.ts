@@ -30,4 +30,13 @@ describe("pull-request merge wording on the phone", () => {
       "not confirmed",
     );
   });
+
+  it("says plainly that nothing merged when the host asked for an owner unlock this phone did not give", () => {
+    expect(mergeOutcomeCopy({ status: "owner-unlock-required", reason: "expired" })).toBe(
+      "The unlock ran out after 60 seconds. Unlock again. Nothing merged.",
+    );
+    expect(
+      mergeWhenReadyOutcomeCopy({ status: "owner-unlock-not-given", reason: "cancelled" }),
+    ).toBe("You cancelled the unlock. Nothing merged.");
+  });
 });

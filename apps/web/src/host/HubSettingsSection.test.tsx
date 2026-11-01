@@ -691,6 +691,41 @@ describe("HubSettingsSection owner devices", () => {
   });
 });
 
+describe("HubSettingsSection owner unlock before a paired merge", () => {
+  it("turns it on from the window, beside the owner devices, and reports it", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: linkedStatus() },
+      "paired-merge-unlock": { status: 200, body: { status: "changed", enabled: true } },
+    });
+
+    const toggle = await screen.findByRole("switch", {
+      name: "Owner unlock before a phone or browser merges",
+    });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "paired-merge-unlock")?.body).toEqual({
+        enabled: true,
+      }),
+    );
+    expect(
+      await screen.findByText("A phone or browser now needs an owner unlock to merge here."),
+    ).toBeVisible();
+  });
+
+  it("is not offered where the hub grant leaves owners out", async () => {
+    renderHub({ status: { status: 200, body: linkedStatus({ items: ["roster"] }) } });
+
+    await screen.findByRole("switch", { name: "Confirm new members" });
+
+    expect(
+      screen.queryByRole("switch", { name: "Owner unlock before a phone or browser merges" }),
+    ).toBeNull();
+  });
+});
+
 describe("HubSettingsSection new members", () => {
   it("turns Confirm new members on from the window and reports it", async () => {
     const user = userEvent.setup();

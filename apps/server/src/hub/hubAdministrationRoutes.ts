@@ -34,6 +34,7 @@ import {
   decodeOwnerAlertRequest,
   decodeOwnerMemberRequest,
   decodeOwnerRemovalRequest,
+  decodePairedMergeUnlockRequest,
   type AuditActingPrincipal,
 } from "@octant/contracts";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -41,6 +42,7 @@ import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthor
 import type { DirectPushService } from "./directPushService";
 import type { FailoverService } from "./failoverService";
 import type { HubService } from "./hubService";
+import type { PairedMergeUnlockService } from "./pairedMergeUnlock";
 import type { ProvisionService } from "./provisionService";
 import type { PushService } from "./pushService";
 import type { SignInService } from "./signInService";
@@ -69,6 +71,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   ownersAdd: "/api/desktop/hub/owners/add",
   ownersRemove: "/api/desktop/hub/owners/remove",
   confirmNewMembers: "/api/desktop/hub/confirm-new-members",
+  /** Whether a paired phone or web client's merge needs an owner unlock: only a window on this host turns it on or off. */
+  pairedMergeUnlock: "/api/desktop/hub/paired-merge-unlock",
   confirmMember: "/api/desktop/hub/members/confirm",
   /** GET: the members this host holds status-only under Confirm new members. */
   heldMembers: "/api/desktop/hub/members/held",
@@ -121,6 +125,7 @@ export interface HubAdministrationRouteOptions {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
+  readonly pairedMergeUnlock: PairedMergeUnlockService;
   readonly failover: FailoverService;
   readonly wake: WakeService;
   readonly spokeWake: SpokeWakeService;
@@ -185,6 +190,7 @@ export function createHubAdministrationRouteHandler(
         directPush: await options.directPush.status(),
         provision: { hub: options.provision.status(), spoke: options.spokeProvision.view() },
         signIn: { hub: options.signIn.status(), spoke: options.spokeSignIn.view() },
+        pairedMergeUnlock: options.pairedMergeUnlock.required(),
       });
     }
     if (route === HUB_ADMINISTRATION_ROUTES.heldMembers) {
@@ -265,6 +271,10 @@ export function createHubAdministrationRouteHandler(
               ? options.hub.removeOwner(memberId, WINDOW_PRINCIPAL)
               : options.spoke.removeOwner(memberId, WINDOW_PRINCIPAL),
           );
+        }
+        case HUB_ADMINISTRATION_ROUTES.pairedMergeUnlock: {
+          const value = decodePairedMergeUnlockRequest(parseJson(request, body.text));
+          return outcome(options.pairedMergeUnlock.setRequired(value.enabled, WINDOW_PRINCIPAL));
         }
         case HUB_ADMINISTRATION_ROUTES.confirmNewMembers: {
           const value = decodeConfirmNewMembersRequest(parseJson(request, body.text));

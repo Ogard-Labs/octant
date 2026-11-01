@@ -1728,6 +1728,7 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.desktopProviderCredentials,
     backend.pushPlatformCredentials,
     makeLinkedSecretStores({ statePath: linkedSecretStoresStatePath(desktopDataDirectory) }),
+    backend.sshKeys,
   );
 }
 

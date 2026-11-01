@@ -32,6 +32,11 @@ import {
   acquireProviderRuntimeNetwork,
   type ProviderRuntimeNetworkPort,
   type ProviderRuntimeProxiedNetwork,
+  acquireProviderServerAccess,
+  serverAccessSeatbeltRules,
+  withServerAccess,
+  type ProviderServerAccess,
+  type ProviderServerAccessPort,
 } from "../network/providerRuntimeNetwork";
 import { decodeInitializeResult } from "./codexProtocol";
 import {
@@ -106,6 +111,8 @@ export interface CodexProcessOptions {
   readonly platform?: NodeJS.Platform;
   /** Routes the app-server through its own egress proxy below Full access. */
   readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
+  /** The Project's registered servers, for the runtime's own `ssh` below Full access. */
+  readonly serverAccess?: ProviderServerAccessPort;
 }
 
 const DEFAULT_OCTANT_VERSION = "0.0.0";
@@ -691,6 +698,8 @@ export function prepareCodexLaunch(input: {
   readonly platform: NodeJS.Platform;
   /** The launch's own egress proxy; absent keeps open network below Full access. */
   readonly network?: ProviderRuntimeProxiedNetwork;
+  /** The folder through which the runtime's own `ssh` reaches the Project's registered servers. */
+  readonly servers?: ProviderServerAccess;
 }):
   | { readonly status: "prepared"; readonly launch: CodexLaunch }
   | { readonly status: "refused"; readonly failure: ProviderFailure } {
@@ -743,11 +752,11 @@ export function prepareCodexLaunch(input: {
               : resolveProbeEgressPolicy(),
           )
         : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
-    const environment: NodeJS.ProcessEnv = {
-      ...input.environment,
-      ...input.network?.environment,
-      TMPDIR: temporaryDirectory,
-    };
+    const environment: NodeJS.ProcessEnv = withServerAccess(
+      { ...input.environment, ...input.network?.environment, TMPDIR: temporaryDirectory },
+      input.servers,
+    );
+    const serverFolder = input.servers === undefined ? [] : [input.servers.folder];
     const launch = input.confinement.prepare({
       executable: input.binaryPath,
       args: input.args,
@@ -757,13 +766,14 @@ export function prepareCodexLaunch(input: {
       networkEgress,
       writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
       additionalWriteRoots: accountRoots,
-      readRoots: [...accountRoots, ...programPaths],
+      readRoots: [...accountRoots, ...programPaths, ...serverFolder],
       privateHomeAllowPaths: [
         root,
         ...extraFolders,
         temporaryDirectory,
         ...accountRoots,
         ...programPaths,
+        ...serverFolder,
       ],
       allowFileReadStar: true,
       ...(input.environment.PATH === undefined
@@ -777,6 +787,7 @@ export function prepareCodexLaunch(input: {
         ? {
             extraRules: [
               ...CODEX_SEATBELT_SERVICE_RULES,
+              ...serverAccessSeatbeltRules(input.servers),
               ...authorityEntries.map((path) => seatbeltDenyRule("file-write*", path)),
             ],
           }
@@ -1029,6 +1040,13 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                     executionPolicy: runtimePolicy,
                     environment: appServerEnvironment,
                   });
+            const servers =
+              authority.kind === "thread"
+                ? yield* acquireProviderServerAccess(options.serverAccess, {
+                    root: authority.root,
+                    executionPolicy: runtimePolicy,
+                  })
+                : undefined;
             const prepared = prepareCodexLaunch({
               binaryPath,
               args: codexAppServerArgs(
@@ -1042,6 +1060,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               confinement,
               platform,
               ...(network === undefined ? {} : { network }),
+              ...(servers === undefined ? {} : { servers }),
             });
             if (prepared.status === "refused") return yield* Effect.fail(prepared.failure);
             const managed = yield* acquireCodexAppServer(

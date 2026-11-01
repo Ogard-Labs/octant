@@ -265,6 +265,12 @@ the hub's page. To confirm, dismiss, or remove, open that computer's own page,
 because a passkey works for only one address. None of this has been tried against
 a real hub yet.
 
+A computer can also ask for an owner unlock before a phone or browser merges a
+pull request. Turn on **Owner unlock before a phone or browser merges** under
+**Owner devices** in that computer's window; it is off by default. A browser can
+give this unlock only on the computer whose page it is on. See
+[Code](../guide/code.md) for how merging asks for it.
+
 An agent, a routine, the hub, a standby hub, and another computer can never
 unlock. Joining a spoke to a hub still happens on that spoke.
 

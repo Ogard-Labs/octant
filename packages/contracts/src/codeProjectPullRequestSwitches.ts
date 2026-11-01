@@ -1,6 +1,9 @@
 import { Schema } from "effect";
 import { CodeThreadId } from "./code";
-import { CodeProjectPullRequestMergeMethod } from "./codeProjectPullRequests";
+import {
+  CodeOwnerMergeUnlockRefusal,
+  CodeProjectPullRequestMergeMethod,
+} from "./codeProjectPullRequests";
 import { UtcTimestamp } from "./events";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { ProjectId } from "./projects";
@@ -205,6 +208,7 @@ export const CodeProjectPullRequestSwitchOutcome = Schema.Union(
     status: Schema.Literal("unavailable"),
     reason: Schema.Literal("disconnected", "unauthenticated", "unavailable"),
   }).annotations(strict),
+  CodeOwnerMergeUnlockRefusal,
 );
 export type CodeProjectPullRequestSwitchOutcome = typeof CodeProjectPullRequestSwitchOutcome.Type;
 

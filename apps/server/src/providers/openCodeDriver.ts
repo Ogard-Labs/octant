@@ -45,7 +45,12 @@ import type {
   Provider,
 } from "@opencode-ai/sdk/v2/types";
 import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
-import { mapOpenCodeEvent, openCodeApprovalCall, type OpenCodeEvent } from "./openCodeEventMapper";
+import {
+  mapOpenCodeEvent,
+  openCodeApprovalCall,
+  type OpenCodeEvent,
+  type OutsideContentCall,
+} from "./openCodeEventMapper";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
 import {
   createOpenCodeManagedToolsBridge,
@@ -138,6 +143,7 @@ interface SessionState {
   active: boolean;
   readonly taskIds: Map<string, string>;
   readonly messageParts: OpenCodeMessageParts;
+  readonly outsideContentCalls: Map<string, OutsideContentCall>;
   modelId: string;
   sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -2697,6 +2703,7 @@ function newSessionState(
     active: false,
     taskIds: new Map(),
     messageParts: new OpenCodeMessageParts(),
+    outsideContentCalls: new Map(),
     modelId,
     sourceId: undefined,
     executionPolicy,
@@ -2928,6 +2935,7 @@ function mapAndOffer(
         sessionId: state.sessionId,
         sequenceStart: state.nextSequence,
         messageParts: state.messageParts,
+        outsideContentCalls: state.outsideContentCalls,
         stopMemory: state.stopMemory,
         correlationId: state.correlationId,
         occurredAt: clock() as UtcTimestamp,

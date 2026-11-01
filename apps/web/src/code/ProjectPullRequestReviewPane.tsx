@@ -1,3 +1,4 @@
+import { ownerMergeUnlockCopy, type OwnerUnlockNotGiven } from "@octant/client-runtime";
 import {
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
   type CodeProjectPullRequestActionContext,
@@ -76,7 +77,7 @@ export interface ProjectPullRequestReviewPaneProps {
   readonly onMerge?: (
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
-  ) => Promise<CodeProjectPullRequestMergeOutcome>;
+  ) => Promise<CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven>;
   readonly onRefresh?: () => void;
   /**
    * The person's own labels, comment, review reply, close, and reopen; absent
@@ -92,11 +93,11 @@ export interface ProjectPullRequestReviewPaneProps {
     enabled: boolean,
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
-  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  ) => Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>;
   readonly onAutoFix?: (
     enabled: boolean,
     threadId: CodeThreadId,
-  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  ) => Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>;
 }
 
 export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPaneProps) {
@@ -109,7 +110,9 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
   const [mergeMethod, setMergeMethod] = useState<CodeProjectPullRequestMergeMethod>("squash");
   const [mergeConfirmationOpen, setMergeConfirmationOpen] = useState(false);
   const [mergePending, setMergePending] = useState(false);
-  const [mergeOutcome, setMergeOutcome] = useState<CodeProjectPullRequestMergeOutcome>();
+  const [mergeOutcome, setMergeOutcome] = useState<
+    CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven
+  >();
   const stale = (section: CodeProjectPullRequestDetailSection) =>
     detail.staleSections.includes(section);
   const waiting = detail.ambiguous || detail.freshness === "stale";
@@ -507,7 +510,10 @@ function PullRequestSwitches(props: {
   const [confirmingMergeWhenReady, setConfirmingMergeWhenReady] = useState(false);
   const [refusal, setRefusal] = useState<{
     readonly switch: "merge-when-ready" | "auto-fix";
-    readonly outcome: Exclude<CodeProjectPullRequestSwitchOutcome, { status: "applied" }>;
+    readonly outcome: Exclude<
+      CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven,
+      { status: "applied" }
+    >;
   }>();
   const autoFixThread =
     switches.autoFix.status === "off"
@@ -539,7 +545,7 @@ function PullRequestSwitches(props: {
 
   async function change(
     which: "merge-when-ready" | "auto-fix",
-    run: () => Promise<CodeProjectPullRequestSwitchOutcome>,
+    run: () => Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>,
   ): Promise<void> {
     setPending(which);
     setRefusal(undefined);
@@ -728,9 +734,15 @@ function autoFixCopy(
 
 function switchRefusalCopy(
   which: "merge-when-ready" | "auto-fix",
-  outcome: Exclude<CodeProjectPullRequestSwitchOutcome, { status: "applied" }>,
+  outcome: Exclude<
+    CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven,
+    { status: "applied" }
+  >,
 ): string {
   const name = which === "merge-when-ready" ? "Merge when ready" : "Auto-fix";
+  if (outcome.status === "owner-unlock-required" || outcome.status === "owner-unlock-not-given") {
+    return `${name} did not change. ${ownerMergeUnlockCopy(outcome).replace(" Nothing merged.", "")}`;
+  }
   if (outcome.status === "unsupported") {
     return "Merge when ready is unsupported: this repository does not allow auto-merge. Turn it on in the repository's GitHub settings, or merge by hand.";
   }
@@ -811,9 +823,14 @@ function safeGithubUrl(value: string): string | undefined {
   }
 }
 
-function mergeOutcomeCopy(outcome: CodeProjectPullRequestMergeOutcome): string {
+function mergeOutcomeCopy(
+  outcome: CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven,
+): string {
   if (outcome.status === "merged") {
     return `Merged pull request #${outcome.number}. Refreshing its review state.`;
+  }
+  if (outcome.status === "owner-unlock-required" || outcome.status === "owner-unlock-not-given") {
+    return ownerMergeUnlockCopy(outcome);
   }
   if (outcome.status === "unavailable") {
     const reason =

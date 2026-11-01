@@ -16,7 +16,7 @@ import {
 } from "@octant/client-runtime";
 import { describe, expect, it } from "vitest";
 import type { GuestHubState } from "./hubGuestFlow";
-import { ownerSpokesOf } from "./ownerFlow";
+import { ownerSpokesOf, phoneOwnerMergeUnlock } from "./ownerFlow";
 import { createPhoneUnlockKey } from "./ownerUnlockKey";
 
 const id = (suffix: string) => `00000000-0000-4000-8000-${suffix.padStart(12, "0")}` as HubMemberId;
@@ -250,5 +250,58 @@ describe("a phone that is an owner of its hub", () => {
       tone: "problem",
       message: "That unlock was already used or never issued. Unlock again for this action.",
     });
+  });
+});
+
+describe("a phone's unlock for a merge its paired host asks for", () => {
+  const merge = { path: "/api/code/project-pull-requests/merge", body: '{"number":12}' };
+
+  it("asks the person once and signs a challenge from the computer that asked", async () => {
+    const w = await world();
+    const unlock = phoneOwnerMergeUnlock({
+      ...w,
+      guestHubStore: { load: async () => joinedState(true) },
+    });
+    w.order.length = 0;
+
+    const result = await unlock({ hostMemberId: String(id("2")), ...merge });
+
+    expect(result.status).toBe("signed");
+    expect(w.order).toEqual(["unlock-asked", "key-read", "/api/hub/owner/challenge"]);
+  });
+
+  it("does not ask the person when the phone is not an owner or the computer is not on its hub", async () => {
+    const w = await world();
+    const notOwner = phoneOwnerMergeUnlock({
+      ...w,
+      guestHubStore: { load: async () => joinedState(false) },
+    });
+    const owner = phoneOwnerMergeUnlock({
+      ...w,
+      guestHubStore: { load: async () => joinedState(true) },
+    });
+    w.order.length = 0;
+
+    expect(await notOwner({ hostMemberId: String(id("2")), ...merge })).toEqual({
+      status: "no-owner-device",
+    });
+    expect(await owner({ hostMemberId: String(id("8")), ...merge })).toEqual({
+      status: "no-owner-device",
+    });
+    expect(w.order).toEqual([]);
+  });
+
+  it("merges nothing when the person declines Face ID", async () => {
+    const w = await world({ presence: "denied" });
+    const unlock = phoneOwnerMergeUnlock({
+      ...w,
+      guestHubStore: { load: async () => joinedState(true) },
+    });
+    w.order.length = 0;
+
+    expect(await unlock({ hostMemberId: String(id("2")), ...merge })).toMatchObject({
+      status: "not-unlocked",
+    });
+    expect(w.order).not.toContain("/api/hub/owner/challenge");
   });
 });

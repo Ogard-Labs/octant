@@ -201,6 +201,24 @@ describe("Code file watch route", () => {
     ]);
   });
 
+  it("passes an extra folder named by absolute path to the watch", async () => {
+    const watchFiles = vi.fn(() =>
+      (async function* () {
+        yield notice(["src/main.ts"]);
+      })(),
+    );
+    const { handler } = createRoute({ watchFiles });
+    const response = await handler(
+      get(`${watchUrl}&folder=${encodeURIComponent("/private/extra")}`),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(watchFiles).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ folder: "/private/extra" }),
+    );
+  });
+
   it("answers a refused watch with its status instead of a stream that closes", async () => {
     const { handler } = createRoute({
       watchFiles: () =>
@@ -246,6 +264,7 @@ describe("Code file watch route", () => {
     const watchFiles = vi.fn();
     const { handler } = createRoute({ watchFiles });
     expect((await handler(get(`${watchUrl}&directory=src`)))?.status).toBe(400);
+    expect((await handler(get(`${watchUrl}&folder=src`)))?.status).toBe(400);
     expect(
       (
         await handler(

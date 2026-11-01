@@ -45,6 +45,7 @@ export default function CodeWorkspaceTab(props: {
   ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly harnessAutoReviewSupported?: boolean;
+  readonly projectExtraFolders?: CodeWorkspaceProps["projectExtraFolders"];
   /** Who answers the thread's prompts at Auto, or why nobody can. */
   readonly autoReview?: AutoReview;
   readonly canvasClient?: CanvasClient;
@@ -164,6 +165,9 @@ export default function CodeWorkspaceTab(props: {
           ? {}
           : { harnessAutoReviewSupported: props.harnessAutoReviewSupported })}
         {...(props.autoReview === undefined ? {} : { autoReview: props.autoReview })}
+        {...(props.projectExtraFolders === undefined
+          ? {}
+          : { projectExtraFolders: props.projectExtraFolders })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined
           ? {}

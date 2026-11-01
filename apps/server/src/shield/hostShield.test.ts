@@ -217,6 +217,31 @@ describe("Octant Shield as the host wires it", () => {
     expect(resolveDriver).toHaveBeenCalledWith(chosen.providerInstanceId);
   });
 
+  it("asks the person, and never another account, when the chosen account is off or at its limit", async () => {
+    const chosen = {
+      providerInstanceId: "00000000-0000-4000-8000-0000000000f1" as never,
+      modelId: "local-model" as never,
+    };
+    const resolveDriver = vi.fn(() => undefined);
+    const shield = hostShieldWith(thread(), {
+      chosenModel: () => chosen,
+      chosenModelUnavailable: () => "Work Claude is turned off.",
+      resolveDriver,
+    });
+    expect(shield.availableFor(providerInstanceId as never)).toBe(true);
+    const decision = await shield.review({
+      threadId,
+      call: command("make deploy"),
+      boundRoot: "/Users/dev/app",
+    });
+    expect(decision).toMatchObject({
+      verdict: "ask",
+      rule: "model-account-unavailable",
+      model: chosen,
+    });
+    expect(resolveDriver).not.toHaveBeenCalledWith(providerInstanceId);
+  });
+
   describe("on a Work thread", () => {
     const work = (access: WorkThread["access"] = "auto") =>
       ({

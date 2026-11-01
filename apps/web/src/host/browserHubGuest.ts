@@ -14,6 +14,7 @@ import {
   type GuestSigner,
   type GuestSpokeAdmission,
   type GuestSpokeTarget,
+  type OwnerMergeUnlock,
   type OwnerSpoke,
   type OwnerUnlockSigner,
   type PinnedListenerTransportPort,
@@ -191,4 +192,41 @@ export async function browserOwnerSpokes(input: {
         },
       ];
     });
+}
+
+/**
+ * The unlock this page's host may ask the browser's merge for. A passkey
+ * belongs to one origin, so the browser answers only for the member whose own
+ * web app served this page, the hub or a spoke, and only when it joined the hub
+ * as an owner. The person is asked for the passkey once, for that merge alone.
+ */
+export function browserOwnerMergeUnlock(input: {
+  readonly store: Pick<BrowserGuestStore, "load">;
+  readonly deviceKeyStore: RemoteDeviceKeyStore;
+  readonly credentials: () => Promise<PasskeyCredentials | undefined>;
+  readonly pageOrigin: string;
+}): OwnerMergeUnlock {
+  return async ({ hostMemberId, path, body }) => {
+    const state = await input.store.load();
+    const passkey = state?.ownerPasskey;
+    if (state === undefined || passkey === undefined) return { status: "no-owner-device" };
+    const here = guestSpokeTargets(state.record).find(
+      (target) =>
+        target.memberId === hostMemberId &&
+        (target.origin === input.pageOrigin || target.webOrigin === input.pageOrigin),
+    );
+    const [identity, credentials] = await Promise.all([
+      browserIdentity({ state, deviceKeyStore: input.deviceKeyStore }),
+      input.credentials(),
+    ]);
+    if (here === undefined || identity === undefined || credentials === undefined) {
+      return { status: "no-owner-device" };
+    }
+    return createOwnerClient({
+      target: { memberId: here.memberId, origin: input.pageOrigin },
+      identity,
+      unlock: passkeyUnlockSigner({ credentials, passkey }),
+      transport: browserPageTransport(input.pageOrigin, rosterWebOrigins(state.record)),
+    }).unlockMerge(path, body);
+  };
 }

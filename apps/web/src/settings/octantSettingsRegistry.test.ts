@@ -28,6 +28,7 @@ describe("octantSettingsRegistry", () => {
       "linear",
       "permissions",
       "access",
+      "memory",
       "secret-stores",
       "data",
       "sync",
@@ -91,7 +92,13 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("secret-stores")?.label).toBe("Secret stores");
     expect(section("secret-stores")?.scope).toBe("host");
-    expect(ids("secret-stores")).toEqual(["secret-store-link", "secret-store-check"]);
+    expect(ids("secret-stores")).toEqual([
+      "secret-store-link",
+      "secret-store-check",
+      "secret-store-aws-cli",
+      "secret-store-aws-cli-key-id",
+      "secret-store-aws-cli-secret",
+    ]);
     expect(section("data")?.label).toBe("Data & storage");
     expect(section("data")?.scope).toBe("host");
     expect(ids("data")).toEqual([
@@ -173,6 +180,8 @@ describe("octantSettingsRegistry", () => {
     expect(usage?.settings).toEqual([]);
     const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
+      "automatic-model-judge",
+      "automatic-model-memory",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",
@@ -194,7 +203,6 @@ describe("octantSettingsRegistry", () => {
       "project-view-switcher",
       "code-default-access",
       "code-auto-reviewer",
-      "code-shield-model",
       "code-editor-executable",
       "code-editor-arguments",
       "open-in-applications",
