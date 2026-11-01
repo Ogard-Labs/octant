@@ -448,7 +448,10 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         const answered = chatTurnAnsweredAttempt(turn) !== undefined;
         const forkFromMessage = props.onBranchTurn !== undefined ? previousTurn : undefined;
         const forkFromReply = props.onBranchTurn !== undefined && answered ? turn : undefined;
-        const canRewind = props.onRewindTurn !== undefined && turnIndex >= 0;
+        // A detached range holds only the turns around a jump, so it cannot say how
+        // many a rewind would take out; the newest messages can.
+        const canRewind =
+          props.onRewindTurn !== undefined && turnIndex >= 0 && detached === undefined;
         const copyMarkdown = assistantBodies.some((body) => body.trim().length > 0);
         const messageActions = chatTurnActions({
           role: "user",
@@ -464,7 +467,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           role: "assistant",
           busy: props.busy === true,
           canFork: forkFromReply !== undefined,
-          canRewind: props.onRewindTurn !== undefined && nextTurn !== undefined,
+          canRewind:
+            props.onRewindTurn !== undefined && nextTurn !== undefined && detached === undefined,
           canCopyMarkdown: false,
           checkpointsAvailable: false,
           checkpointBusy: false,

@@ -8947,7 +8947,12 @@ describe("ChatService", () => {
     });
 
     it("retries the only kept turn after a rewind on a provider that keeps its own session", async () => {
-      const fixture = openFixture({ nativeConversation: true });
+      // The journal's timestamps must show that the retry came after the rewind.
+      let tick = Date.parse(now);
+      const fixture = openFixture({
+        nativeConversation: true,
+        clock: () => new Date((tick += 1000)).toISOString(),
+      });
       const { service } = fixture;
       const { threadId, first, second } = await twoTurnThread(fixture, ["Kept", "Removed"]);
       const rewound = await service.execute({
@@ -8968,6 +8973,18 @@ describe("ChatService", () => {
       });
 
       expect(service.read(threadId).turns[0]!.attempts).toHaveLength(2);
+      const sessions = fixture.fakeDriver.startedSessionIds.length;
+
+      // The retry started its own session from the kept conversation, so the
+      // next message carries on from it rather than handing over again.
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        prompt: "After the retry",
+      });
+      expect(fixture.fakeDriver.startedSessionIds.length).toBe(sessions);
+      expect(service.read(threadId).turns.at(-1)?.attempts[0]?.handoff).toBeUndefined();
     });
 
     it("takes a rewound turn out of transcript search and rebuilds the same index on replay", async () => {

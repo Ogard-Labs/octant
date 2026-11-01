@@ -244,6 +244,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     readonly turnId: ChatTurnId;
     readonly prompt: string | undefined;
     readonly removedTurns: number;
+    /** The conversation's last turn when the question was asked. */
+    readonly tailTurnId: string | undefined;
     readonly busy: boolean;
     readonly message?: string;
   }>();
@@ -672,6 +674,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   async function runRewind() {
     const open = rewind;
     if (open === undefined) return;
+    // The dialog named the turns it would remove. A turn that arrived since
+    // (from another window) is not among them, so ask again rather than take
+    // it out unseen.
+    if (String(activeChatTurns(view?.turns ?? []).at(-1)?.id) !== open.tailTurnId) {
+      setRewind({
+        ...open,
+        message: "The conversation changed while this was open. Close it and try again.",
+      });
+      return;
+    }
     setRewind({ ...open, busy: true });
     const result = await enqueueThreadCommand(async (previous) => {
       const outcome = await props.controller.execute({
@@ -1208,7 +1220,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               })();
             }}
             onRewindTurn={({ turnId, prompt, removedTurns }) =>
-              setRewind({ turnId, prompt, removedTurns, busy: false })
+              setRewind({
+                turnId,
+                prompt,
+                removedTurns,
+                tailTurnId: String(activeChatTurns(view.turns).at(-1)?.id),
+                busy: false,
+              })
             }
             onRetryAttempt={(turnId, attemptId) => {
               void enqueueThreadCommand(async (previous) => {

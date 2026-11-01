@@ -3955,14 +3955,32 @@ export class ChatService {
     // A rewound tail ran in a session that still holds the turns the person
     // removed, so that session is never taken up again. With nothing kept the
     // thread starts again as it did at first.
-    const rewoundTail = tailTurn?.rewound !== undefined;
+    const rewoundAt = tailTurn?.rewound?.rewoundAt;
+    // An attempt that ran on a kept turn after the rewind (a retry, or a turn
+    // sent since) started its own session from the kept conversation, so it,
+    // not the rewound tail, is the session to carry on from.
+    const sinceRewind =
+      rewoundAt === undefined
+        ? undefined
+        : activeChatTurns(threadView?.turns ?? [])
+            .flatMap((turn) => turn.attempts.map((attempt) => ({ turn, attempt })))
+            .filter(({ attempt }) => attempt.createdAt > rewoundAt)
+            .reduce<{ turn: ChatTurn; attempt: ChatAttempt } | undefined>(
+              (latest, candidate) =>
+                latest === undefined || candidate.attempt.createdAt >= latest.attempt.createdAt
+                  ? candidate
+                  : latest,
+              undefined,
+            );
+    const rewoundTail = rewoundAt !== undefined && sinceRewind === undefined;
     // A retry sends the kept turn it retries as its own prompt, so that turn
     // does not count as something left to hand over.
     const keptTurns = activeChatTurns(threadView?.turns ?? []).filter(
       (turn) => String(turn.userMessageRef.contentId) !== String(currentRef.contentId),
     );
-    const previousTurn = rewoundTail && keptTurns.length === 0 ? undefined : tailTurn;
-    const previous = previousTurn?.attempts.at(-1);
+    const previousTurn =
+      sinceRewind?.turn ?? (rewoundTail && keptTurns.length === 0 ? undefined : tailTurn);
+    const previous = sinceRewind?.attempt ?? previousTurn?.attempts.at(-1);
     const sessionDecision = decideConversationSession({
       recipient: {
         providerInstanceId: String(thread.providerInstanceId),

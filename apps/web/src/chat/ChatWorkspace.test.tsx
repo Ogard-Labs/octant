@@ -2773,6 +2773,36 @@ describe("ChatWorkspace", () => {
     expect(setPendingDraft).not.toHaveBeenCalled();
   });
 
+  it("asks again instead of rewinding when a turn arrived while the dialog was open", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined);
+    const view = viewWithQuotableReplies();
+    const first = view.turns[0]!;
+    const grown = decodeChatThreadView({
+      ...view,
+      turns: [...view.turns, { ...first, id: "00000000-0000-4000-8000-000000000949", sequence: 3 }],
+    });
+    const { rerender } = render(
+      <ChatWorkspace
+        controller={controllerFixture({ activeView: view, execute: execute as never })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "More actions" })[0]!);
+    await user.click(await screen.findByRole("menuitem", { name: "Rewind to here…" }));
+    rerender(
+      <ChatWorkspace
+        controller={controllerFixture({ activeView: grown, execute: execute as never })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Rewind" }));
+
+    expect(await screen.findByText(/The conversation changed while this was open/)).toBeVisible();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       what: "rewinds to a turn",
