@@ -139,13 +139,13 @@ supported reasoning setting for a specific child. All choices retain the same
 authority and budget checks.
 
 A provider's own subagent feature is off by default, because a child it starts
-itself would run where Octant cannot show it or answer its approvals. Claude,
-OpenCode, and Devin turn theirs off through their own settings. Codex starts
+itself could run where Octant cannot show it or answer its approvals. Claude,
+OpenCode, Mistral Vibe, and Devin turn theirs off through their own settings. Codex starts
 with its multi-agent features and `agents.enabled` switched off for that run
-only; your `CODEX_HOME` and `config.toml` are left as they are. For Claude Code
-and Codex you can let the provider run as itself, which turns its own subagents
-on and shows each one in the thread as a subagent run. Codex also needs the
-thread at Full access before it starts them; see
+only; your `CODEX_HOME` and `config.toml` are left as they are. For Claude Code,
+Codex, OpenCode, and Mistral Vibe you can let the provider run as itself, which
+turns its own subagents on and shows each one in the thread as a subagent run.
+Mistral Vibe also needs the thread at Full access before it starts them; see
 [Let a provider run as itself](/advanced/providers#let-a-provider-run-as-itself).
 
 ## Posture and clamps

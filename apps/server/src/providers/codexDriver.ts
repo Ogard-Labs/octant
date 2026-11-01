@@ -41,9 +41,11 @@ import {
   codexAccountWindowStatus,
   mapCodexMessage,
   mapCodexSubagentCall,
+  mapCodexSubagentRequest,
   mapCodexSubagentWebSearch,
   type CodexSubagentCall,
   type CodexEventContext,
+  type CodexMappedMessage,
   type CodexPendingApproval,
 } from "./codexEventMapper";
 import { providerApprovalCall } from "./providerApprovalCall";
@@ -217,15 +219,19 @@ const CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG = {
 } as const satisfies CodexThreadConfig;
 
 /**
- * Codex's own subagents run on threads of their own whose approvals never
- * reach Octant, so a child that asked would wait out of sight. They run only
- * at Full access, where nothing asks, once the person let Codex run them.
+ * Codex's own subagents run once the person let Codex run them, at every
+ * level. Read from the codex-cli 0.164.0 source: a spawned agent copies its
+ * parent turn's approval policy, reviewer, working directory, and permission
+ * profile, inherits its app tools, and the app-server attaches every new agent
+ * thread to each connected client, so its approval and app-tool requests
+ * reach Octant on the child's own thread id. The driver answers them as the
+ * parent's own.
  */
 function codexRunsOwnSubagents(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly nativeSetup?: ProviderNativeSetup;
 }): boolean {
-  return input.nativeSetup?.subagents === true && input.executionPolicy === "full-access";
+  return input.nativeSetup?.subagents === true;
 }
 
 /**
@@ -485,7 +491,7 @@ const capabilities = {
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
   nativeSetup: {
-    // Only at Full access: a subagent's approvals never reach Octant.
+    // A subagent's requests reach the parent's approval path at every level.
     subagents: "supported",
     // Codex's own web search was never switched off; each search marks.
     webTools: "supported",
@@ -1468,14 +1474,18 @@ function makeConnection(
       unsubscribeWhenIdle();
     };
     /**
-     * A message on one of Codex's own subagent threads. Only a session that
-     * runs them at Full access has any, and nothing there asks a person, so
-     * two things are read: a web search the subagent ran, which marks the
-     * owning thread, and a subagent call it made, which shows the agents it
-     * started, waited on, or closed as child runs under it. Everything else
-     * on those threads is Codex's own.
+     * A message on one of Codex's own subagent threads. A request it sends
+     * is answered through the owning session, below. Of its notifications two
+     * things are read: a web search the subagent ran, which marks the owning
+     * thread, and a subagent call it made, which shows the agents it started,
+     * waited on, or closed as child runs under it. Everything else on those
+     * threads is Codex's own.
      */
     const observeSubagentThread = (message: CodexServerMessage) => {
+      if (message.kind === "request") {
+        answerSubagentRequest(message);
+        return;
+      }
       if (
         message.kind !== "notification" ||
         (message.method !== "item/started" && message.method !== "item/completed")
@@ -1500,6 +1510,137 @@ function makeConnection(
       if (owner.terminal || owner.context === undefined) return;
       const mark = mapCodexSubagentWebSearch(owner.context, item.query);
       if (mark.kind === "event") offer(mark.event);
+    };
+    /**
+     * Takes one approval or app-tool request into a session's turn: refused
+     * outright where the session's level or mode allows nothing, waived where
+     * the level waives it, and otherwise left pending for the person. A
+     * request from one of Codex's own subagents comes here for the session
+     * that owns it, so it meets exactly the rules the parent's own would.
+     */
+    const admitRequest = (
+      state: SessionState,
+      item: Extract<CodexMappedMessage, { readonly kind: "approval" | "tool" }>,
+      message: CodexServerMessage,
+    ): "admitted" | "stopped" => {
+      if (item.kind === "tool") {
+        if (state.pendingTools.has(item.tool.requestId)) {
+          terminalEvent(state, {
+            kind: "failed",
+            failure: failure("protocol", "Codex app-tool request correlation was not unique."),
+          });
+          return "stopped";
+        }
+        state.pendingTools.set(item.tool.requestId, {
+          providerRequestId: item.tool.providerRequestId,
+          controller: new AbortController(),
+          // The parent's turn, which a subagent's call is answered within.
+          turnId: state.activeTurnId ?? item.tool.turnId,
+        });
+        offer(item.tool.event);
+        return "admitted";
+      }
+      if (state.executionPolicy === "full-access") {
+        terminalEvent(state, {
+          kind: "failed",
+          failure: failure("protocol", "Codex requested approval while Full access was active."),
+        });
+        return "stopped";
+      }
+      if (
+        state.executionPolicy === "plan" ||
+        // Chat has no filesystem or shell authority at all, so nothing
+        // Codex asks for is anyone's to approve.
+        mode === "chat" ||
+        !approvalRequestIsProjectConfined(item.approval, state.projectRoot, extraFolders)
+      ) {
+        respondInBackground(state, item.approval.providerRequestId, () =>
+          declinedApprovalResult(item.approval),
+        );
+        return "admitted";
+      }
+      if (state.executionPolicy === "auto-accept-edits" && item.approval.kind === "file-change") {
+        // Auto-accept edits waives exactly the project-confined file writes
+        // proven above; commands and permission grants still ask.
+        respondInBackground(state, item.approval.providerRequestId, () => ({
+          decision: "accept",
+        }));
+        return "admitted";
+      }
+      if (pendingApprovalOwners.has(item.approval.requestId)) {
+        terminalEvent(state, {
+          kind: "failed",
+          failure: failure("protocol", "Codex approval correlation was not unique."),
+        });
+        return "stopped";
+      }
+      state.pendingApprovals.set(item.approval.requestId, item.approval);
+      pendingApprovalOwners.set(item.approval.requestId, state.sessionId);
+      if (message.kind === "request") {
+        const call = codexApprovalCall(item.approval.event, message.params);
+        if (call !== undefined) approvalCalls.set(item.approval.requestId, call);
+      }
+      offer(item.approval.event);
+      return "admitted";
+    };
+    const respondInBackground = (
+      state: SessionState,
+      providerRequestId: CodexRpcId,
+      result: () => unknown,
+    ) =>
+      Effect.runFork(
+        request(() => client.respondApproval({ providerRequestId, result: result() })).pipe(
+          Effect.catchAll((providerFailure) =>
+            Effect.sync(() => terminalEvent(state, { kind: "failed", failure: providerFailure })),
+          ),
+        ),
+      );
+    /**
+     * A request one of Codex's own subagents sent on its own thread. It goes
+     * to the session that owns the subagent, within that session's turn. With
+     * no turn of the owner's running nobody could answer it, so it is refused
+     * rather than left waiting out of sight: an approval declined, an app-tool
+     * call failed. A subagent whose owner is not on this connection is left
+     * to the connection that holds it.
+     */
+    const answerSubagentRequest = (
+      message: Extract<CodexServerMessage, { readonly kind: "request" }>,
+    ) => {
+      const owner = subagentOwner(message.params.threadId);
+      if (owner === undefined) return;
+      if (owner.terminal || owner.context === undefined) {
+        Effect.runFork(
+          request(() =>
+            message.method === "item/tool/call"
+              ? client.respondTool({
+                  providerRequestId: message.id,
+                  result: {
+                    success: false,
+                    contentItems: [
+                      { type: "inputText", text: "The parent turn has ended; nobody can answer." },
+                    ],
+                  },
+                })
+              : client.respondApproval({
+                  providerRequestId: message.id,
+                  result:
+                    message.method === "item/permissions/requestApproval"
+                      ? { permissions: {}, scope: "turn" }
+                      : { decision: "decline" },
+                }),
+          ).pipe(Effect.ignore),
+        );
+        return;
+      }
+      for (const item of mapCodexSubagentRequest(owner.context, message)) {
+        if (item.kind === "protocol-failure") {
+          terminalEvent(owner, { kind: "failed", failure: item.failure });
+          return;
+        }
+        if (item.kind !== "approval" && item.kind !== "tool") continue;
+        owner.outputAccepted = true;
+        if (admitRequest(owner, item, message) === "stopped") return;
+      }
     };
     const handleMessage = (message: CodexServerMessage) => {
       if (message.kind === "notification" && message.method === "account/rateLimits/updated") {
@@ -1536,94 +1677,9 @@ function makeConnection(
           terminalEvent(state, { kind: "failed", failure: item.failure });
           return;
         }
-        if (item.kind === "approval") {
+        if (item.kind === "approval" || item.kind === "tool") {
           state.outputAccepted = true;
-          if (state.executionPolicy === "full-access") {
-            terminalEvent(state, {
-              kind: "failed",
-              failure: failure(
-                "protocol",
-                "Codex requested approval while Full access was active.",
-              ),
-            });
-            return;
-          }
-          if (
-            state.executionPolicy === "plan" ||
-            // Chat has no filesystem or shell authority at all, so nothing
-            // Codex asks for is anyone's to approve.
-            mode === "chat" ||
-            !approvalRequestIsProjectConfined(item.approval, state.projectRoot, extraFolders)
-          ) {
-            Effect.runFork(
-              request(() =>
-                client.respondApproval({
-                  providerRequestId: item.approval.providerRequestId,
-                  result: declinedApprovalResult(item.approval),
-                }),
-              ).pipe(
-                Effect.catchAll((providerFailure) =>
-                  Effect.sync(() =>
-                    terminalEvent(state, { kind: "failed", failure: providerFailure }),
-                  ),
-                ),
-              ),
-            );
-            continue;
-          }
-          if (
-            state.executionPolicy === "auto-accept-edits" &&
-            item.approval.kind === "file-change"
-          ) {
-            // Auto-accept edits waives exactly the project-confined file writes
-            // proven above; commands and permission grants still ask.
-            Effect.runFork(
-              request(() =>
-                client.respondApproval({
-                  providerRequestId: item.approval.providerRequestId,
-                  result: { decision: "accept" },
-                }),
-              ).pipe(
-                Effect.catchAll((providerFailure) =>
-                  Effect.sync(() =>
-                    terminalEvent(state, { kind: "failed", failure: providerFailure }),
-                  ),
-                ),
-              ),
-            );
-            continue;
-          }
-          if (pendingApprovalOwners.has(item.approval.requestId)) {
-            terminalEvent(state, {
-              kind: "failed",
-              failure: failure("protocol", "Codex approval correlation was not unique."),
-            });
-            return;
-          }
-          state.pendingApprovals.set(item.approval.requestId, item.approval);
-          pendingApprovalOwners.set(item.approval.requestId, state.sessionId);
-          if (message.kind === "request") {
-            const call = codexApprovalCall(item.approval.event, message.params);
-            if (call !== undefined) approvalCalls.set(item.approval.requestId, call);
-          }
-          offer(item.approval.event);
-          continue;
-        }
-        if (item.kind === "tool") {
-          state.outputAccepted = true;
-          if (state.pendingTools.has(item.tool.requestId)) {
-            terminalEvent(state, {
-              kind: "failed",
-              failure: failure("protocol", "Codex app-tool request correlation was not unique."),
-            });
-            return;
-          }
-          state.pendingTools.set(item.tool.requestId, {
-            providerRequestId: item.tool.providerRequestId,
-            controller: new AbortController(),
-            turnId: item.tool.turnId,
-          });
-          offer(item.tool.event);
+          if (admitRequest(state, item, message) === "stopped") return;
           continue;
         }
         if (!isTerminal(item.event)) state.outputAccepted = true;
@@ -2179,8 +2235,11 @@ function makeConnection(
             if (
               pending === undefined ||
               pendingApprovalOwners.get(input.requestId) !== input.sessionId ||
-              pending.threadId !== state.threadId ||
-              pending.turnId !== state.activeTurnId ||
+              // One of Codex's own subagents asks on its own thread and turn;
+              // the request ids below still tie it to this session's turn.
+              (pending.threadId === state.threadId
+                ? pending.turnId !== state.activeTurnId
+                : subagentOwner(pending.threadId) !== state) ||
               state.context?.requestIds.get(pending.providerRequestId) !== input.requestId
             ) {
               return Effect.fail(

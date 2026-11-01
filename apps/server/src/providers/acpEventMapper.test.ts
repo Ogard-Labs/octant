@@ -403,6 +403,80 @@ describe("ACP event normalization", () => {
     ).toMatchObject({ kind: "tool-failure", message: "Tool failed." });
   });
 
+  it("shows a subagent the agent reports on its tool call as a child run, from start to finish", () => {
+    const ctx = context({ childRunMetaKey: "child_session_id" });
+    const notify = (update: Record<string, unknown>) =>
+      mapAcpNotification(ctx, {
+        kind: "notification",
+        method: "session/update",
+        params: { sessionId: "acp-session-1", update },
+      });
+    // The child's session id may come only once the agent has spawned it.
+    expect(
+      notify({
+        sessionUpdate: "tool_call",
+        toolCallId: "spawn-1",
+        title: "Subagent",
+        kind: "think",
+        status: "pending",
+        _meta: { agent: "explore", task: "Map the routes\nwith private detail" },
+      }).map((item) => (item.kind === "event" ? item.event.kind : item.kind)),
+    ).toEqual(["tool-start"]);
+    const started = notify({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "spawn-1",
+      status: "in_progress",
+      _meta: { task: "Map the routes\nwith private detail", child_session_id: "child-7" },
+    });
+    expect(started.map((item) => (item.kind === "event" ? item.event : item))).toEqual([
+      expect.objectContaining({ kind: "tool-progress" }),
+      expect.objectContaining({
+        kind: "child-agent-activity",
+        childAgentId: "child-7",
+        task: "Map the routes",
+        status: "running",
+      }),
+    ]);
+    expect(JSON.stringify(started)).not.toContain("private detail");
+    const finished = notify({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "spawn-1",
+      status: "failed",
+      _meta: { child_session_id: "child-7" },
+    });
+    expect(finished.map((item) => (item.kind === "event" ? item.event : item))).toEqual([
+      expect.objectContaining({ kind: "tool-failure" }),
+      expect.objectContaining({
+        kind: "child-agent-activity",
+        childAgentId: "child-7",
+        status: "failed",
+      }),
+    ]);
+    for (const item of [...started, ...finished]) {
+      if (item.kind === "event") decodeProviderRuntimeEvent(item.event);
+    }
+  });
+
+  it("reads no child run from an agent that never named where it reports one", () => {
+    const result = mapAcpNotification(context(), {
+      kind: "notification",
+      method: "session/update",
+      params: {
+        sessionId: "acp-session-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "spawn-1",
+          title: "Subagent",
+          status: "in_progress",
+          _meta: { child_session_id: "child-7" },
+        },
+      },
+    });
+    expect(result.map((item) => (item.kind === "event" ? item.event.kind : item.kind))).toEqual([
+      "tool-start",
+    ]);
+  });
+
   it("maps plan entries conservatively and ignores config metadata", () => {
     const ctx = context();
     expect(

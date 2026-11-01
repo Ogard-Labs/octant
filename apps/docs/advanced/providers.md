@@ -174,9 +174,9 @@ What each one loads today:
   and MCP servers. Your own MCP servers start only in a trusted Project,
   because Claude Code starts them together with the Project's `.mcp.json`.
 - **Codex:** the skills in the Project, and in Chat your own MCP servers,
-  plugins, and apps. Its own subagents run only when the thread has Full
-  access, because Codex's subagents ask for approval where Octant cannot
-  show it; each one shows in the thread as a subagent run. Codex's web
+  plugins, and apps, and its own subagents. Each subagent shows in the
+  thread as a subagent run and works under the thread's level: any approval
+  it needs reaches you the same way as the main session's. Codex's web
   search was always on.
 - **OpenCode:** its skills in `.claude/skills` and `.agents/skills` (below
   Full access only the Project's). If you remember approvals for the
@@ -196,7 +196,10 @@ What each one loads today:
 - **Mistral Vibe:** its skills, the Project's context files, the MCP
   servers, connectors, and hooks in its own settings, and in a trusted
   Project that Project's `.vibe` tools, MCP servers, hooks, plugins, and
-  agents, as long as Vibe itself trusts the folder too.
+  agents, as long as Vibe itself trusts the folder too. Its own subagents
+  run only when a Work or Code thread has Full access, because Vibe asks
+  for a subagent's approvals without saying what the subagent wants to do;
+  each one shows in the thread as a subagent run.
 
 At Auto in Code, Mistral Vibe now reviews its own approvals with its
 auto-approve mode, as Claude Code and Codex do with theirs, until the thread
