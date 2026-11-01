@@ -3546,10 +3546,12 @@ describe("Codex running as itself", () => {
     await lockedDown.close();
   });
 
-  it("runs Codex's own subagents only at Full access, on a process of their own", async () => {
-    for (const [executionPolicy, ownSubagents] of [
-      ["full-access", true],
-      ["approval-gated", false],
+  it("runs Codex's own subagents at every level once the person allows them, on a process of their own", async () => {
+    for (const [executionPolicy, nativeSetup, ownSubagents] of [
+      ["full-access", ownSetup, true],
+      ["approval-gated", ownSetup, true],
+      ["plan", ownSetup, true],
+      ["approval-gated", { ...ownSetup, subagents: false }, false],
     ] as const) {
       const f = fixture();
       const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
@@ -3558,7 +3560,7 @@ describe("Codex running as itself", () => {
           sessionId,
           modelId: "gpt-5.4" as never,
           executionPolicy,
-          nativeSetup: ownSetup,
+          nativeSetup,
         }),
       );
       expect(f.authorities()[0], executionPolicy).toMatchObject({
@@ -3580,6 +3582,232 @@ describe("Codex running as itself", () => {
       "features.memories=false",
     ]);
     expect(codexAppServerArgs("0.164.0")).toContain("agents.enabled=false");
+  });
+
+  /** A parent turn on `thread-1` that has started Codex's own subagent on `thread-child`. */
+  async function parentWithSubagent(executionPolicy: ProviderExecutionPolicy = "approval-gated") {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy,
+        nativeSetup: ownSetup,
+      }),
+    );
+    const spawned = takeEvents(acquired.connection, 1);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Delegate.", attachments: [], tools: [] }),
+    );
+    f.emit(
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-1",
+          tool: "spawnAgent",
+          status: "completed",
+          receiverThreadIds: ["thread-child"],
+        },
+        completedAtMs: 20,
+      }),
+    );
+    expect((await spawned)[0]).toMatchObject({
+      kind: "child-agent-activity",
+      childAgentId: "thread-child",
+    });
+    return { f, acquired };
+  }
+
+  it.each([
+    ["command", commandApproval],
+    ["file change", fileApproval],
+    ["permissions", permissionsApproval],
+  ] as const)(
+    "asks the person through the parent's approval path for a subagent's %s request",
+    async (_name, makeRequest) => {
+      const { f, acquired } = await parentWithSubagent();
+      const asked = takeEvents(acquired.connection, 1);
+      f.emit(makeRequest({ id: "child-request", threadId: "thread-child", turnId: "turn-child" }));
+      expect((await asked)[0]).toMatchObject({
+        kind: "approval-request",
+        sessionId,
+        requestId: "request-1",
+      });
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: "request-1",
+          approved: true,
+          scope: "once",
+        }),
+      );
+      expect(f.calls.at(-1)).toMatchObject({
+        method: "approval/respond",
+        input: { providerRequestId: "child-request" },
+      });
+      expect(f.calls.at(-1)?.input).not.toMatchObject({ result: { decision: "decline" } });
+      await acquired.close();
+    },
+  );
+
+  it("refuses a subagent's request outside the Project as it refuses the parent's, without asking", async () => {
+    const { f, acquired } = await parentWithSubagent();
+    f.emit(
+      commandApproval({
+        id: "child-outside",
+        threadId: "thread-child",
+        turnId: "turn-child",
+        cwd: "/etc",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(f.calls.at(-1)).toEqual({
+        method: "approval/respond",
+        input: { providerRequestId: "child-outside", result: { decision: "decline" } },
+      }),
+    );
+    await acquired.close();
+  });
+
+  it("refuses every subagent request in Plan, as it refuses the parent's", async () => {
+    const { f, acquired } = await parentWithSubagent("plan");
+    f.emit(fileApproval({ id: "child-write", threadId: "thread-child", turnId: "turn-child" }));
+    await vi.waitFor(() =>
+      expect(f.calls.at(-1)).toEqual({
+        method: "approval/respond",
+        input: { providerRequestId: "child-write", result: { decision: "decline" } },
+      }),
+    );
+    await acquired.close();
+  });
+
+  it("hands a subagent's call to one of Octant's tools to the parent's session and answers it there", async () => {
+    const { f, acquired } = await parentWithSubagent();
+    const requested = takeEvents(acquired.connection, 1);
+    f.emit(dynamicToolCall({ id: "child-tool", threadId: "thread-child", turnId: "turn-child" }));
+    expect((await requested)[0]).toMatchObject({
+      kind: "tool-request",
+      sessionId,
+      requestId: "request-1",
+      toolName: "octant_browser",
+    });
+    await Effect.runPromise(
+      acquired.connection.answerTool({
+        sessionId,
+        requestId: "request-1",
+        resultJson: "{}",
+        isError: false,
+      }),
+    );
+    expect(f.calls.at(-1)).toMatchObject({
+      method: "tool/respond",
+      input: { providerRequestId: "child-tool", result: { success: true } },
+    });
+    await acquired.close();
+  });
+
+  it("refuses a subagent's requests still waiting when its parent's turn ends", async () => {
+    const { f, acquired } = await parentWithSubagent();
+    const asked = takeEvents(acquired.connection, 2);
+    f.emit(
+      commandApproval({ id: "child-waiting", threadId: "thread-child", turnId: "turn-child" }),
+    );
+    f.emit(
+      dynamicToolCall({ id: "child-waiting-tool", threadId: "thread-child", turnId: "turn-child" }),
+    );
+    await asked;
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "interrupted" },
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(f.calls).toContainEqual({
+        method: "approval/respond",
+        input: { providerRequestId: "child-waiting", result: { decision: "decline" } },
+      });
+      expect(f.calls).toContainEqual({
+        method: "tool/respond",
+        input: {
+          providerRequestId: "child-waiting-tool",
+          result: expect.objectContaining({ success: false }),
+        },
+      });
+    });
+    await acquired.close();
+  });
+
+  it("leaves the parent's own pending requests to Codex when its turn ends", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    await startSession(acquired.connection);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
+    );
+    const asked = takeEvents(acquired.connection, 1);
+    f.emit(commandApproval({ id: "parent-waiting" }));
+    await asked;
+    const ended = takeEvents(acquired.connection, 1);
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "interrupted" },
+      }),
+    );
+    await ended;
+    expect(f.calls.some(({ method }) => method === "approval/respond")).toBe(false);
+    await acquired.close();
+  });
+
+  it("refuses a subagent's request heard after its parent's turn ended, so the subagent never waits out of sight", async () => {
+    const { f, acquired } = await parentWithSubagent();
+    // Another thread mid-turn on the same connection keeps it listening.
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId: secondSessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        nativeSetup: ownSetup,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId: secondSessionId,
+        prompt: "Other work.",
+        attachments: [],
+        tools: [],
+      }),
+    );
+    const ended = takeEvents(acquired.connection, 1);
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed" },
+      }),
+    );
+    await ended;
+    f.emit(commandApproval({ id: "child-late", threadId: "thread-child", turnId: "turn-child" }));
+    f.emit(
+      dynamicToolCall({ id: "child-late-tool", threadId: "thread-child", turnId: "turn-child" }),
+    );
+    await vi.waitFor(() => {
+      expect(f.calls).toContainEqual({
+        method: "approval/respond",
+        input: { providerRequestId: "child-late", result: { decision: "decline" } },
+      });
+      expect(f.calls).toContainEqual({
+        method: "tool/respond",
+        input: {
+          providerRequestId: "child-late-tool",
+          result: expect.objectContaining({ success: false }),
+        },
+      });
+    });
+    await acquired.close();
   });
 
   it("keeps a subagent's web searches marking its parent after the parent's thread resumes on a new connection", async () => {

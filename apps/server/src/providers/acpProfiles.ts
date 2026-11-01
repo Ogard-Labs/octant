@@ -110,7 +110,10 @@ export interface AcpProcessProfile {
    * Only Mistral Vibe, the one key provider on this bridge, has one; every
    * other agent keeps every guard and every deny.
    */
-  readonly nativeSetup?: (setup: ProviderNativeSetup) => {
+  readonly nativeSetup?: (
+    setup: ProviderNativeSetup,
+    launch: { readonly executionPolicy: ProviderExecutionPolicy; readonly mode?: AcpSessionMode },
+  ) => {
     readonly releasedGuards: ReadonlyArray<string>;
     readonly releasedRootEntries: ReadonlyArray<string>;
   };
@@ -173,6 +176,11 @@ export interface AcpProviderProfile {
   readonly ownReviewer?: true;
   /** Which of its own features a key provider on this bridge can load (`nativeSetup`). */
   readonly nativeSetupSupport?: NonNullable<ProviderCapabilities["nativeSetup"]>;
+  /**
+   * The tool-call `_meta` key under which the agent names the session of a
+   * subagent it started, so that call is shown as a child run.
+   */
+  readonly childRunMetaKey?: string;
   /**
    * The agent answers a mode it does not offer with success and keeps its
    * previous mode, so a renamed or dropped mode would leave a turn running
@@ -571,9 +579,12 @@ const vibeProfile: AcpProviderProfile = {
     return "ask";
   },
   ownReviewer: true,
+  // Read from the 3.0.3 source: a subagent call carries its child's session
+  // id here once the child exists.
+  childRunMetaKey: "child_session_id",
   nativeSetupSupport: {
-    // Vibe's agent profiles are modes, not subagents Octant could follow.
-    subagents: "unsupported",
+    // Only at Full access in Work and Code; see `VIBE_ENABLE_SUBAGENTS`.
+    subagents: "supported",
     // Its own web fetch was never switched off; each fetch marks the thread.
     webTools: "supported",
     skills: "supported",
@@ -611,6 +622,14 @@ const vibeProfile: AcpProviderProfile = {
       VIBE_AGENT_PATHS: "[]",
       VIBE_SKILL_PATHS: "[]",
       VIBE_INSTALLED_AGENTS: "[]",
+      // Vibe 3.0.3 offers its own subagents by default (`enable_subagents`).
+      // A subagent's permission request reaches `session/request_permission`
+      // on the parent's session naming only the subagent's own history entry,
+      // which the parent's updates never announced, so Octant cannot show
+      // what it asks or hold it to a tool kind's rule. They run only where
+      // nothing asks: at Full access in Work and Code, once the person allows
+      // them. A release without the setting ignores the variable.
+      VIBE_ENABLE_SUBAGENTS: "false",
       // Vibe's Keychain lookup spawns /usr/bin/security, but the confined
       // launch forbids exec; disable it so Vibe reports a missing key instead
       // of dying during model discovery with an unclassified PermissionError.
@@ -662,7 +681,7 @@ const vibeProfile: AcpProviderProfile = {
     // readable again, and Vibe's own folder-trust list still decides whether
     // it loads them. Telemetry, update checks, notifications, the voice and
     // narrator features, the keyring, and the agent allowlist stay as above.
-    nativeSetup: (setup) => {
+    nativeSetup: (setup, launch) => {
       const on =
         setup.skills || setup.toolServers || setup.hooks || setup.projectCode || setup.webTools;
       return {
@@ -672,6 +691,11 @@ const vibeProfile: AcpProviderProfile = {
           ...(setup.toolServers ? ["VIBE_MCP_SERVERS", "VIBE_ENABLE_CONNECTORS"] : []),
           ...(setup.hooks ? ["VIBE_ENABLE_EXPERIMENTAL_HOOKS"] : []),
           ...(setup.projectCode ? ["VIBE_TOOL_PATHS"] : []),
+          ...(setup.subagents &&
+          launch.executionPolicy === "full-access" &&
+          (launch.mode === "work" || launch.mode === "code")
+            ? ["VIBE_ENABLE_SUBAGENTS"]
+            : []),
         ],
         releasedRootEntries: setup.projectCode
           ? [

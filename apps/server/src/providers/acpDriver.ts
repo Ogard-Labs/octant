@@ -1083,6 +1083,9 @@ function makeConnection(
         tools: new Map(runtime.history),
         requestIds: new Map(),
         makeRequestId: factories.makeRequestId,
+        ...(profile.childRunMetaKey === undefined
+          ? {}
+          : { childRunMetaKey: profile.childRunMetaKey }),
       };
       let state!: SessionState;
       const removeNotification = client.onNotification((message) =>

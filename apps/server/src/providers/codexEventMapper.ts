@@ -664,8 +664,12 @@ type CodexApprovalRequest = Exclude<
 function approval(
   context: CodexEventContext,
   message: CodexApprovalRequest,
+  correlation: "parent" | "subagent" = "parent",
 ): ReadonlyArray<CodexMappedMessage> {
-  if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
+  if (
+    correlation === "parent" &&
+    !matchesCorrelation(context, message.params.threadId, message.params.turnId)
+  ) {
     return correlationFailure();
   }
   if (context.requestIds.has(message.id)) {
@@ -736,8 +740,12 @@ function dynamicTool(
     CodexServerMessage,
     { readonly kind: "request"; readonly method: "item/tool/call" }
   >,
+  correlation: "parent" | "subagent" = "parent",
 ): ReadonlyArray<CodexMappedMessage> {
-  if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
+  if (
+    correlation === "parent" &&
+    !matchesCorrelation(context, message.params.threadId, message.params.turnId)
+  ) {
     return correlationFailure();
   }
   if (context.requestIds.has(message.id)) {
@@ -1142,6 +1150,25 @@ function resetTimestamp(resetsAt: number | undefined): UtcTimestamp | undefined 
 
 function isActiveRuntimeMethod(method: string): boolean {
   return method.startsWith("turn/") || method.startsWith("item/") || method.startsWith("thread/");
+}
+
+/**
+ * A request one of Codex's own subagents sent on its own thread, mapped into
+ * the turn of the parent session that owns it. The caller has already found
+ * that owner through the subagent lineage, so the request is not held to the
+ * parent's thread and turn ids; everything else is checked as for the
+ * parent's own requests, and the answer goes back by the request's own id.
+ */
+export function mapCodexSubagentRequest(
+  context: CodexEventContext,
+  message: CodexServerRequest,
+): ReadonlyArray<CodexMappedMessage> {
+  if (context.terminal) {
+    return protocolFailure("Provider emitted runtime activity after the terminal event.");
+  }
+  return message.method === "item/tool/call"
+    ? dynamicTool(context, message, "subagent")
+    : approval(context, message, "subagent");
 }
 
 export function mapCodexMessage(
