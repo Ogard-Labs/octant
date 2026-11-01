@@ -151,6 +151,31 @@ describe("taintAppManagedToolResults", () => {
       expect((await unguarded.execute(call)).outsideContent).toBeUndefined();
     });
 
+    it("flags a refused attempt on a protected path and still returns the refusal", async () => {
+      const record = recorded();
+      const refusal = { result: { error: "protected-file" }, isError: true } as const;
+      const wrapped = taintAppManagedToolResults({
+        tools: tools(async () => refusal),
+        threadId,
+        recordExternalContentIngestion: record,
+        uuid: () => correlationId,
+        protectedSecretPath: (path) => path === "~/.aws/credentials",
+      });
+
+      await expect(
+        wrapped.execute({
+          name: "bash",
+          inputJson: JSON.stringify({ command: "cat ~/.aws/credentials" }),
+        }),
+      ).resolves.toEqual({ ...refusal, outsideContent: { labels: ["secret-path-read"] } });
+      expect(record.mock.calls.map(([call]) => provenanceOf(call).sourceLabel)).toEqual([
+        "shield-watcher-secret-path-read",
+      ]);
+      await expect(
+        wrapped.execute({ name: "read", inputJson: JSON.stringify({ path: "src/a.ts" }) }),
+      ).resolves.toEqual(refusal);
+    });
+
     it("withholds the result when a label cannot be journaled", async () => {
       const record = vi.fn(
         (input: RecordExternalContentIngestionInput) =>

