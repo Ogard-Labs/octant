@@ -116,7 +116,8 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
  * One extra folder of the Project, listed as its own tree. The host lists it
  * when asked for the folder by absolute path, and an entry opens by that
  * folder's path joined to the entry's, which is how the editor names a file
- * outside the checkout. The folder has no file watch, so it relists on Refresh.
+ * outside the checkout. The host watches the folder as it does the checkout,
+ * so the tree relists when something in it changes, and on Refresh.
  */
 function ExtraFolderExplorer(
   props: Pick<
@@ -130,6 +131,8 @@ function ExtraFolderExplorer(
   const directory = projectFilePath(props.folder);
   const controller = useCodeFileListingController({
     enabled: directory !== undefined,
+    watch: true,
+    watchFolder: props.folder,
     ...(directory === undefined ? {} : { directory }),
     ...(props.client === undefined ? {} : { client: props.client }),
     ...(props.threadId === undefined ? {} : { threadId: props.threadId }),

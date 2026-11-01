@@ -1249,6 +1249,9 @@ function renderCodeTab(
           : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}
         {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
         {...(autoReview === undefined ? {} : { autoReview })}
+        {...(project?.type === "code" && (project.extraFolders ?? []).length > 0
+          ? { projectExtraFolders: project.extraFolders?.map((folder) => folder.canonicalRoot) }
+          : {})}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined
           ? {}

@@ -150,6 +150,8 @@ export interface CodeWorkspaceProps {
   ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly harnessAutoReviewSupported?: boolean;
+  /** The Project's extra folders, by absolute path, offered by the Terminal tab. */
+  readonly projectExtraFolders?: ReadonlyArray<string>;
   /** Who answers the thread's prompts at Auto, or why nobody can. */
   readonly autoReview?: AutoReview;
   readonly tab: CodeTab;
@@ -1504,6 +1506,9 @@ function TerminalWorkspaceSurface(
           columns: 100,
           createTerminalId: () => terminalId,
           credentialRefs: [],
+          ...(props.projectExtraFolders === undefined || props.projectExtraFolders.length === 0
+            ? {}
+            : { folders: props.projectExtraFolders }),
           rows: 30,
         }}
         result={terminal}

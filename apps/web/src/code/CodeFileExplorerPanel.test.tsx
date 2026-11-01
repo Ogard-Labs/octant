@@ -354,6 +354,52 @@ describe("CodeFileExplorerPanel extra folders", () => {
     expect(await screen.findByRole("treeitem", { name: /a\.ts/ })).toBeVisible();
   });
 
+  it("relists an extra folder when the host reports that a file in it changed", async () => {
+    const file = (path: string) => ({
+      kind: "file",
+      fileId,
+      path,
+      byteLength: 4,
+      availability: { status: "available" },
+    });
+    const folderListings = [listing([file("plan.md")]), listing([file("plan.md"), file("new.md")])];
+    let folderCalls = 0;
+    const list = vi.fn(async (request: { readonly directory?: string }) =>
+      request.directory === "/Users/me/notes"
+        ? folderListings[Math.min(folderCalls++, 1)]!
+        : listing([file("a.ts")]),
+    );
+    const watch = vi.fn(async function* (query: { readonly folder?: string }) {
+      if (query.folder === "/Users/me/notes") {
+        yield {
+          kind: "code-file-change",
+          threadId,
+          checkoutId,
+          paths: ["new.md"],
+          truncated: false,
+          observedAt: "2026-08-14T08:00:01.000Z",
+        };
+      }
+      await new Promise(() => undefined);
+    });
+    render(
+      <CodeFileExplorerPanel
+        checkoutId={checkoutId}
+        client={{ list, watch } as never}
+        extraFolders={["/Users/me/notes"]}
+        onOpenFile={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    const folder = await screen.findByRole("region", { name: "notes (extra folder)" });
+    expect(await within(folder).findByRole("treeitem", { name: /new\.md/ })).toBeVisible();
+    expect(watch).toHaveBeenCalledWith(
+      expect.objectContaining({ folder: "/Users/me/notes" }),
+      expect.anything(),
+    );
+  });
+
   it("shows an extra folder whose name the file-path schema refuses as unavailable and keeps the checkout's tree", async () => {
     const list = vi.fn(async () =>
       listing([

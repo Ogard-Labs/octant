@@ -13,6 +13,7 @@ export type CodeUtilityProps = Pick<
   | "codeController"
   | "codeProviderGroups"
   | "hostBridge"
+  | "projectExtraFolders"
   | "providerController"
   | "serverUrl"
   | "subject"
@@ -69,6 +70,9 @@ export function CodeUtilityModule(
           : { providerGroups: props.codeProviderGroups })}
         {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
         {...(autoReview === undefined ? {} : { autoReview })}
+        {...(props.projectExtraFolders === undefined
+          ? {}
+          : { projectExtraFolders: props.projectExtraFolders })}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         tab={tab}

@@ -15,6 +15,8 @@ export interface CodeFileChangeWatchOptions {
   readonly enabled: boolean;
   readonly threadId?: CodeThreadId | undefined;
   readonly checkoutId?: CodeCheckoutId | undefined;
+  /** Watch this extra folder of the Project (absolute path) instead of the checkout. */
+  readonly folder?: string | undefined;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
   readonly onChanged: (notice: CodeFileChangeNotice) => void;
@@ -34,7 +36,7 @@ export interface CodeFileChangeWatchOptions {
  * be an endless request loop rather than a recovery.
  */
 export function useCodeFileChangeWatch(options: CodeFileChangeWatchOptions): void {
-  const { enabled, threadId, checkoutId, serverUrl, windowCapability } = options;
+  const { enabled, threadId, checkoutId, folder, serverUrl, windowCapability } = options;
   const client = useMemo(() => {
     if (options.client !== undefined) return options.client;
     if (!enabled || serverUrl === undefined || windowCapability === undefined) return undefined;
@@ -60,7 +62,7 @@ export function useCodeFileChangeWatch(options: CodeFileChangeWatchOptions): voi
     const follow = async (): Promise<void> => {
       while (!signal.aborted) {
         try {
-          for await (const notice of client.watch({ threadId, checkoutId }, signal)) {
+          for await (const notice of client.watch({ threadId, checkoutId, folder }, signal)) {
             if (signal.aborted) return;
             onChanged.current(notice);
           }
@@ -77,7 +79,7 @@ export function useCodeFileChangeWatch(options: CodeFileChangeWatchOptions): voi
     return () => {
       controller.abort();
     };
-  }, [checkoutId, client, enabled, threadId]);
+  }, [checkoutId, client, enabled, folder, threadId]);
 }
 
 /** Wait, or stop waiting the moment the caller goes away. */
