@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createBrowserSurfaceHost, type BrowserSurfaceViewPort } from "./browserSurfaceHost";
+import {
+  BrowserTargetStaleError,
+  createBrowserSurfaceHost,
+  type BrowserSurfaceViewPort,
+} from "./browserSurfaceHost";
 
 const contextId = "60000000-0000-4000-8000-000000000001";
 const threadId = "10000000-0000-4000-8000-000000000001";
@@ -363,6 +367,38 @@ describe("BrowserSurfaceHost", () => {
     expect(window.webContents.send).toHaveBeenLastCalledWith(
       "octant:browser-surface:state",
       expect.objectContaining({ control: "user" }),
+    );
+  });
+
+  it("refuses an agent keystroke or click the moment the person has typed, until the agent reads the page", async () => {
+    const created = view();
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(undefined);
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const keyGate = vi
+      .mocked(created.webContents.on)
+      .mock.calls.find(([event]) => event === "before-input-event")?.[1];
+    keyGate?.({ preventDefault: vi.fn() }, { type: "keyDown", key: "a" });
+    const calls = vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mock.calls.length;
+
+    // No poll has run: the host itself knows, synchronously.
+    for (const kind of ["click", "type", "press"] as const) {
+      await expect(
+        host.act(contextId, { kind, target: "#name", value: "x" }),
+      ).rejects.toBeInstanceOf(BrowserTargetStaleError);
+    }
+    expect(vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mock.calls).toHaveLength(
+      calls,
     );
   });
 

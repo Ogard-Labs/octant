@@ -828,6 +828,37 @@ describe("BrowserAutomationService", () => {
       expect(next.personUsedPage).toBeUndefined();
     });
 
+    it("never runs an agent call that was queued when the person took over", async () => {
+      const fixture = harness();
+      await snapshotted(fixture);
+      let finish!: () => void;
+      vi.mocked(fixture.runtime.act).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve({ url: "https://example.com/start" });
+          }),
+      );
+      const running = fixture.service.act({
+        windowId,
+        request: request({ kind: "scroll", target: undefined }),
+        ...agent,
+      });
+      await vi.waitFor(() => expect(fixture.runtime.act).toHaveBeenCalledTimes(2));
+      // Admitted by the tool before the person took the page, then waits its turn.
+      const queued = fixture.service.act({
+        windowId,
+        request: request({ kind: "extract-text", target: undefined }),
+        ...agent,
+      });
+      fixture.service.takeOver(windowId, threadOne);
+      finish();
+      await running;
+      const refused = await queued;
+      expect(refused.failure?.category).toBe("unavailable");
+      expect(refused.failure?.message).toMatch(/took over the page, so this call did not run/);
+      expect(fixture.runtime.act).toHaveBeenCalledTimes(2);
+    });
+
     it("refuses to take over with no page, from another window, for a routine, or under a sign-in ask", async () => {
       const none = harness();
       expect(none.service.takeOver(windowId, threadOne).failure?.category).toBe("unavailable");

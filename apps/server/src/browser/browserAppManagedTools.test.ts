@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BrowserAutomationSnapshot, ToolActionAuthority } from "@octant/contracts";
 import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
 import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
+import { runBrowserToolSteps } from "./browserToolOperations";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as never;
 const threadId = "20000000-0000-4000-8000-000000000001" as never;
@@ -559,6 +560,51 @@ describe("browser diagnostics reach the provider-facing result", () => {
     expect(act).not.toHaveBeenCalled();
     await tools.execute({ name: "octant_browser", inputJson: '{"operation":"stop"}' });
     expect(releaseThread).toHaveBeenCalledOnce();
+  });
+
+  it("answers a call the service refused because the person took over while it was queued as the hold", async () => {
+    const held = vi.fn(async () =>
+      snapshot({
+        status: "running",
+        context: activeContext(),
+        waitingForPerson: "take-over",
+        failure: {
+          category: "unavailable",
+          message: "The person took over the page, so this call did not run.",
+        },
+      }),
+    );
+    const tools = toolsFor({ revision: 1 }, held);
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: '{"operation":"click","selector":"#go"}',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.result).toMatchObject({ error: "browser-person-took-over" });
+  });
+
+  it("stops a batch at the step that hand-back answered with a fresh snapshot", async () => {
+    const note =
+      "The person took the page and handed it back, so your call did not run. This is a fresh snapshot of the page now.";
+    const run = vi.fn(async (step: { operation: string }) =>
+      step.operation === "click"
+        ? { result: { status: "running", note, page: { snapshot: "- button" } }, isError: false }
+        : { result: { status: "running", page: { changed: "ok" } }, isError: false },
+    );
+    const answer = await runBrowserToolSteps(
+      [{ operation: "type" }, { operation: "click" }, { operation: "type" }] as never,
+      run as never,
+    );
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(answer.isError).toBe(false);
+    expect(answer.result).toMatchObject({
+      note,
+      stoppedAtStep: 2,
+      steps: [
+        { step: 1, operation: "type" },
+        { step: 2, operation: "click" },
+      ],
+    });
   });
 
   it("says in one line that the person used the page, and in the handed-back case that the call did not run", async () => {

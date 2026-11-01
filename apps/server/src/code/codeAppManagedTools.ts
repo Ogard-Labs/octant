@@ -7,6 +7,7 @@ import {
   parseBrowserToolInput,
   handBrowserToPerson,
   heldForPersonAnswer,
+  heldWhileQueued,
   runBrowserToolSteps,
   signInPageRefusal,
   type BrowserToolAnswer,
@@ -1270,6 +1271,8 @@ async function browserTool(
     }),
   );
   if (acted.kind === "failure") return failure(acted.reason);
+  const heldInQueue = heldWhileQueued(acted.snapshot);
+  if (heldInQueue !== undefined) return heldForPersonAnswer(heldInQueue);
   if (
     input.operation === "screenshot" &&
     browserToolImage(acted.snapshot.observation?.screenshotDataUrl) === undefined

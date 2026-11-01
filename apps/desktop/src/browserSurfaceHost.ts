@@ -275,6 +275,10 @@ interface OwnedSurface {
   httpErrors: Array<{ url: string; method?: string; status: number; seq: number }>;
   /** The last diagnostic entry's number; every kind shares the count. */
   diagnosticSeq: number;
+  /** How many keys and clicks the person put into the page. */
+  personInputs: number;
+  /** `personInputs` as of the start of the agent's last snapshot or navigation. */
+  snapshotPersonInputs: number;
 }
 
 /**
@@ -407,6 +411,17 @@ const ISOLATED_WORLD_ID = 1_001;
  * a re-grant on revisit and nothing else.
  */
 const MAX_USER_GRANTED_ORIGINS = 128;
+
+/** The actions that put a key or a click into the page; see the server's guard. */
+const PERSON_GUARDED_ACTIONS: ReadonlySet<string> = new Set([
+  "click",
+  "type",
+  "press",
+  "hover",
+  "select",
+  "drag",
+  "upload",
+]);
 
 /**
  * Whether an input event is a key or a click that can change a field or press
@@ -622,6 +637,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     // server learns of it so the agent's snapshot is not trusted afterwards.
     const gateUserInput = (_event: unknown, input?: unknown) => {
       if (isPersonInput(input)) {
+        owned.personInputs += 1;
         for (const listener of personInputListeners) listener(contextId);
       }
       // An action in flight keeps the surface until it ends; its end hands it back.
@@ -681,6 +697,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         failedRequests: [],
         httpErrors: [],
         diagnosticSeq: 0,
+        personInputs: 0,
+        snapshotPersonInputs: 0,
       };
       openTabView(input.contextId, owned, firstTabId);
       surfaces.set(input.contextId, owned);
@@ -751,6 +769,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const owned = surface(contextId);
       return queueSurfaceAction(owned, async () => {
         throwIfAborted(signal);
+        // The check the server's poll cannot make in time: the person's key
+        // is known here the moment it lands. An action that sends a key or a
+        // click does not run until the agent has read the page since.
+        if (
+          PERSON_GUARDED_ACTIONS.has(request.kind) &&
+          owned.personInputs > owned.snapshotPersonInputs
+        ) {
+          throw new BrowserTargetStaleError();
+        }
+        const inputsAtStart = owned.personInputs;
         owned.control = "agent";
         owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
@@ -983,6 +1011,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               ...(viewport === undefined ? {} : { viewport }),
             };
           })();
+          if (
+            request.kind === "snapshot" ||
+            request.kind === "navigate" ||
+            request.include?.includes("snapshot") === true
+          ) {
+            owned.snapshotPersonInputs = inputsAtStart;
+          }
           // Every dialog the page raised during the action is reported once,
           // with how the fixed policy answered it.
           return dialogs.length === 0 ? observed : { ...observed, dialogs: dialogs.slice(0, 8) };

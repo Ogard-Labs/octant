@@ -538,6 +538,22 @@ export class BrowserAutomationService {
         "interrupted",
       );
     }
+    // The tool checked the hold before it queued this call, but the person may
+    // have taken the page while it waited behind another action. Checked again
+    // here, after dequeuing, so a queued agent call never runs under a hold.
+    if (input.capturedBy === "agent" && owned.waitingForPerson !== undefined) {
+      return this.#failure(
+        owned,
+        {
+          category: "unavailable",
+          message:
+            owned.waitingForPerson === "take-over"
+              ? "The person took over the page, so this call did not run."
+              : "The page is waiting for the person, so this call did not run.",
+        },
+        owned.status,
+      );
+    }
     const granted = this.#authority.resolve(owned.threadId, modeOf(owned.action.authority));
     if (
       !this.#authority.canAccessWindow(

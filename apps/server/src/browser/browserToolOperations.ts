@@ -575,6 +575,19 @@ export function heldForPersonAnswer(
 }
 
 /**
+ * Whether an action was refused inside the service because the page became the
+ * person's while the call waited in the queue; the tool answers it as the hold.
+ */
+export function heldWhileQueued(
+  snapshot: BrowserAutomationSnapshot,
+): BrowserAutomationSnapshot["waitingForPerson"] {
+  return snapshot.failure?.category === "unavailable" &&
+    snapshot.failure.message.endsWith("so this call did not run.")
+    ? snapshot.waitingForPerson
+    : undefined;
+}
+
+/**
  * A page the person can sign in on: the desktop app's own Browser, which they
  * type into directly. A headless page reaches the person as a picture, and
  * typing into its password field is refused like any other relayed typing.
@@ -631,6 +644,22 @@ export async function runBrowserToolSteps(
       ...(typeof changed === "string" ? { changed } : {}),
     });
     last = answer;
+    // The page changed hands under this batch: the call that would have acted
+    // was answered with a fresh snapshot, so what follows was planned against
+    // a page that is no longer there.
+    if (
+      (answer.result as { readonly note?: unknown }).note === PERSON_USED_PAGE_NOTES["handed-back"]
+    ) {
+      return {
+        ...(images.length === 0 ? {} : { images }),
+        result: {
+          ...(answer.result as Record<string, unknown>),
+          steps: completed,
+          stoppedAtStep: index + 1,
+        },
+        isError: false,
+      };
+    }
   }
   return {
     ...(images.length === 0 ? {} : { images }),

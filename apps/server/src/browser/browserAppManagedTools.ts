@@ -7,6 +7,7 @@ import {
   parseBrowserToolInput,
   handBrowserToPerson,
   heldForPersonAnswer,
+  heldWhileQueued,
   runBrowserToolSteps,
   signInPageRefusal,
   type BrowserToolAnswer,
@@ -361,6 +362,8 @@ export function createBrowserAppManagedTools(
       ...(releaseUpload === undefined ? {} : { releaseUpload }),
     });
     if (signal?.aborted) return failure("tool-interrupted");
+    const heldInQueue = heldWhileQueued(acted);
+    if (heldInQueue !== undefined) return heldForPersonAnswer(heldInQueue);
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
     if (
       input.operation === "screenshot" &&

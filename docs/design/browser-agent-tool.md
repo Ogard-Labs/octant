@@ -305,6 +305,9 @@ other without saying so, and the server, not the pane, decides.
   `include` of one). Reading, waiting, scrolling, screenshots, diagnostics, tab
   listing, and navigating still run. A snapshot that was already in flight when
   the person typed does not clear it: it began before their input.
+- The desktop Browser enforces the same rule at its own action boundary, where
+  the person's key is known the moment it lands, not a poll later: it refuses an
+  agent key or click as `stale` until the agent has read the page since.
 - Rationale: refusing only a ref would leave a selector, a bare `press`, and a
   `type` into the focused field free to land in a field the person is typing
   in, so the narrowest rule that protects their text refuses every action that
@@ -326,12 +329,18 @@ other without saying so, and the server, not the pane, decides.
   waiting rather than retry. The check runs again right before an action
   runs, as it does for a sign-in. `stop` still works and ends the page and
   the hold with it.
+- The hold is checked again inside the page's action queue, after a call is
+  dequeued and before it is admitted, so a call that was already waiting
+  behind another action when the person took over never runs; it is answered
+  as the hold.
 - The person's own relayed actions are not held: on the headless Browser they
   are how the person drives the page. Every one counts as the person using it.
 - After **Hand back**, the first agent call that would click, type, press,
   hover, choose, drag, or upload is not run: it is answered with a fresh
   snapshot, the way **Continue** answers a sign-in, with a `note` saying the
-  person handed the page back and the call did not run. Other calls run as
+  person handed the page back and the call did not run. A `steps` batch
+  stops at that step and answers with the snapshot and the note, so later steps,
+  planned against the old page, do not run. Other calls run as
   they would and carry the ordinary note that the person used the page. The
   agent's refs are good again from that snapshot.
 - One hold at a time per page: while the agent's sign-in ask is open, Take over
