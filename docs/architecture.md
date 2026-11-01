@@ -1884,8 +1884,34 @@ Which path reaches the forge depends on the thread's
   activity the provider reports), with the actor and the command, and the
   hard lines still hold: Octant refuses a merge or a plain force-push the
   person did not ask for and a push to another thread's branch when it can
-  see them before they run, and records what it could not see. Allowed; not
-  built yet: today such a change is journaled only as a shell command.
+  see them before they run, and records what it could not see. Built: every
+  push, merge, and pull-request change Octant reads in a shell command
+  (`forgeShellChanges` in `packages/domain/src/forgeShellChangePolicy.ts`:
+  `git push` with its branches and force options, `gh pr` and `gh api`
+  writes to a pull request, a merge however it is spelled, inside a nested
+  shell, a compound command, or behind a wrapper such as `timeout` too;
+  a here-document's body is data, not a command) is journaled under the
+  thread as
+  `shield-forge-changes.observed@1` with who ran it (`octant-harness` or
+  `provider-runtime`), the kinds and branches, the command redacted and cut
+  to 2 KB, and what happened. An Octant Harness command is read before it
+  runs: at Full access one that merges, force-pushes plainly, forces or
+  deletes a branch other than the thread's own, or names another active Code
+  thread's branch in the same Project (`--all` and `--mirror` count when
+  there is one) is refused as `forge-<line>` with a message that names the
+  merge or push tool, which asks the person, and journaled `refused`; every
+  other one runs and is journaled `ran` with its exit code, at every level,
+  and a record that cannot be kept withholds its output. A provider runtime
+  reports a command only as it starts, and only the first line its tool
+  start names, so a change on a later line goes unseen; Octant journals it `seen-after-start` and, at Full access,
+  names the hard line it crossed; it cannot stop it. A target behind an
+  expansion (`git push origin "$BRANCH"`) is journaled `unreadable` and not
+  refused, since a word check cannot tell where it goes. _Rationale:_ a
+  refusal is not a prompt, so Full access still asks nothing; the agent is
+  sent to the tool whose approval the rules above already require at every
+  level. A push to the default branch through the shell is recorded, not
+  refused, because only the sentence above names the acts Octant stops
+  there.
 
 At Guarded and Reviewed a known gap remains: a Code agent's shell can
 reach forge credentials today. (At Full access no runtime is sandboxed,
@@ -1896,8 +1922,9 @@ Codex's `read-only` sandbox with the same reach. Claude's prompting postures
 run inside the runtime's own sandbox, which denies reads outside the project
 root (so `~/.config/gh` and `~/.ssh` are out of reach); whether a
 Keychain-backed credential helper is reachable there has not been measured.
-A push or pull-request change made through that gap is journaled only as a
-shell command, so none of the rules above applies to it. Closing the gap at
+A push or pull-request change made through that gap is journaled as a
+forge change where Octant sees the command (above), but none of the rules
+above applies to it. Closing the gap at
 Guarded and Reviewed is a known follow-up.
 
 **Pull-request merge.** A person merges one open pull request from its review
@@ -5935,9 +5962,13 @@ the model at another size.
   `web-search` does not ask under taint: it
   reaches only the search endpoint the person configured, so the tool-call
   policy instead refuses a tainted thread's query that looks like it carries
-  data, under every posture today and before any request leaves (a default
-  like the gate above: a person may switch it off with the gate; allowed, not
-  built yet), with a named
+  data, before any request leaves, at every level below Full access. It is a
+  guard, not a privacy rule, so the person lowers it with the
+  outside-content gate above: choosing Full access for a thread, or for a
+  Project's new threads, in Work and Code alike, turns the refusal off and
+  leaves the mark recorded, and choosing a lower level turns it back on
+  (built: `resolveToolCall` skips it where `outsideContentRecordedOnly`
+  holds). It refuses with a named
   reason such as `search-query-refused-under-taint: contains a URL`. The
   patterns that count as carrying data (length, URLs, email addresses, hex
   runs, escaped bytes, base64, and high-entropy tokens) are specified in
@@ -7044,7 +7075,9 @@ refuses `private-destination`, a provider endpoint included. Link-local
 addresses, where cloud metadata answers, never pass: no tag holds them and no
 range may cover them. A runtime's bytes taint no thread here: inference and
 tools share the process, and its tool results are marked where the runtime
-reports them, as before. Thread rules and learn mode do not apply to a
+reports them, as before. A launch that names its thread loses the places
+while that thread is marked ([Octant Shield](#octant-shield), safe
+networks). Thread rules and learn mode do not apply to a
 runtime, because a runtime serves a folder, not one thread; its Project comes
 from the folder (a managed worktree's own thread's Project, else the
 innermost active Work or Code Project whose bound folder holds it), and a
@@ -10925,8 +10958,10 @@ the picker says why.
 2. **Fast allow rules,** with no model call: reads and edits inside the bound
    root or one of the Project's extra folders, the Project's own test or build
    command, read-only Git, and SSH to a registered server within its
-   profile. Egress to a safe network is allowed; not built yet in the
-   Judge.
+   profile. Egress to a safe network is allowed: a call that names its
+   destinations (a fetch, or a `network-access` prompt naming a host and
+   port) passes when every one is a place the person trusts for the
+   thread's Project, while Network limits are on (rule `safe-network`).
 3. **Model judgment** for everything else. The Judge sees only the person's
    own messages in this thread, the pending call (tool, arguments, working
    directory), the bound root, the level, the thread's taint state, and the
@@ -10989,7 +11024,19 @@ command's proxy falls back to the places of its thread's Project after the
 thread's and Project's rules refuse, and a private answer passes for it only
 through a place, as for a runtime. Taint suspends places for a command as it
 suspends standing rules, so a marked thread's command reaches only the hosts
-a person confirmed for it; a runtime taints no thread, so its places stay.
+a person confirmed for it. A runtime's own bytes taint no thread, but a
+launch that names its thread (Claude's own process and its sandbox, through
+the session a running Code turn holds or a Work request's thread) loses its
+places while that thread is marked, and an open tunnel a place carried
+closes at once; a launch no thread holds (a probe, and OpenCode, ACP
+agents, Pi, and Codex, which serve a folder) keeps them. A mark that cannot
+be read counts as marked. The Judge's `safe-network` rule comes after its
+taint limits, so a marked thread's network call goes to the person whatever
+place it names. _Rationale:_ the Judge reads places only from a call that
+names its destinations, never from a shell command, because `curl -d @file`
+sends more than its words show; and only while limits are on, so turning
+the switch off returns Shield to exactly the thread's and Project's own
+rules, as it does the proxies.
 Bytes a command receives from a place taint its thread as any other
 command's do. With limits on, an unlisted host goes to Shield where Shield
 reviews the thread at Auto, for a runtime that says it runs at Auto (Claude's

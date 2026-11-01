@@ -131,6 +131,7 @@ import {
 } from "./workAttachmentStore";
 import type { FramedExternalContent } from "../context/externalContentFraming";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
+import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import type { WorkTurnProjection } from "./workTurnProjection";
 import {
   WorkTurnRuntime,
@@ -298,6 +299,8 @@ export interface WorkTurnServiceDependencies {
    * turn.
    */
   readonly outsideContentMarks?: RuntimeOutsideContentMarking;
+  /** Journals the pushes and pull-request changes a runtime's own shell starts. */
+  readonly forgeChanges?: RuntimeForgeChangeObserver;
   readonly onRequestSettled?: (
     input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
     release: () => void,
@@ -458,6 +461,7 @@ export class WorkTurnService {
   readonly #selectConversationHandoffContext: WorkTurnServiceDependencies["selectConversationHandoff"];
   readonly #turnRuntime: WorkTurnRuntimePort;
   readonly #outsideContentMarks: RuntimeOutsideContentMarking | undefined;
+  readonly #forgeChanges: RuntimeForgeChangeObserver | undefined;
   readonly #onRequestSettled: WorkTurnServiceDependencies["onRequestSettled"];
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
@@ -508,6 +512,7 @@ export class WorkTurnService {
     this.#selectConversationHandoffContext = dependencies.selectConversationHandoff;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#outsideContentMarks = dependencies.outsideContentMarks;
+    this.#forgeChanges = dependencies.forgeChanges;
     this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
     this.#nativeHarness = dependencies.nativeHarness;
@@ -1587,6 +1592,7 @@ export class WorkTurnService {
         ...(this.#outsideContentMarks === undefined
           ? {}
           : { outsideContentMarks: this.#outsideContentMarks }),
+        ...(this.#forgeChanges === undefined ? {} : { forgeChanges: this.#forgeChanges }),
         ...(this.#nativeHarness?.observeRemoteCommand === undefined || harnessScope === undefined
           ? {}
           : {

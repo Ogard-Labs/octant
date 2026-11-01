@@ -228,6 +228,69 @@ describe("Octant Shield's rule stages", () => {
   });
 });
 
+describe("Octant Shield's safe networks", () => {
+  const fetch = (url: string, extra: Partial<ShieldCall> = {}): ShieldCall => ({
+    tool: "web-fetch",
+    kind: "fetch",
+    approvalClass: "network-access",
+    paths: [],
+    urls: [url],
+    arguments: JSON.stringify({ url }),
+    workingDirectory: root,
+    ...extra,
+  });
+  const safePlaces = [
+    { kind: "domain", domain: "internal.example" },
+    { kind: "host", host: "registry.example", port: 8443 },
+    { kind: "private-network", tag: "this-mac" },
+  ] as const;
+
+  it("lets egress to a trusted place through by rule, and only there", () => {
+    for (const url of [
+      "https://docs.internal.example/guide",
+      "https://registry.example:8443/v2/",
+      "registry.example:8443",
+      "http://localhost:3000/health",
+    ]) {
+      expect(rules(fetch(url), { safePlaces }), url).toMatchObject({
+        kind: "decided",
+        verdict: "allow",
+        stage: "fast-allow",
+        rule: "safe-network",
+      });
+    }
+    for (const url of [
+      "https://registry.example/v2/",
+      "https://internal.example.attacker.test/",
+      "ftp://docs.internal.example/",
+      "registry.example",
+    ]) {
+      expect(rules(fetch(url), { safePlaces }), url).toEqual({ kind: "needs-model" });
+    }
+    expect(rules(fetch("https://docs.internal.example/"))).toEqual({ kind: "needs-model" });
+  });
+
+  it("never reads a shell command for a place, and suspends places on a tainted thread", () => {
+    expect(
+      rules(
+        bash("curl -d @notes.txt https://docs.internal.example/", {
+          approvalClass: "network-access",
+        }),
+        {
+          safePlaces,
+        },
+      ),
+    ).toEqual({ kind: "needs-model" });
+    expect(
+      rules(fetch("https://docs.internal.example/"), { safePlaces, tainted: true }),
+    ).toMatchObject({
+      kind: "decided",
+      verdict: "ask",
+      stage: "taint-limit",
+    });
+  });
+});
+
 describe("Octant Shield's reading of the person's protected list", () => {
   const listed = (path: string) =>
     path === "/Users/dev/app/deploy/prod.key" || path === "~/.config/vault/token";

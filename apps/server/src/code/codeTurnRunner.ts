@@ -17,6 +17,7 @@ import {
 } from "@octant/contracts";
 import { ledgerUsageCost, observeTurnMetrics, startTurnMetrics } from "@octant/domain";
 import { outsideContentRecordedOnly } from "@octant/domain/guardrail-policy";
+import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type {
   ProviderAcquireInput,
@@ -208,6 +209,12 @@ export interface CodeTurnRunnerInput {
    * turn.
    */
   readonly outsideContentMarks?: RuntimeOutsideContentMarking;
+  /**
+   * Journals each push or pull-request change the runtime's own shell starts,
+   * flagging a hard line at Full access; the runtime reports a command only
+   * as it starts, so this records and never stops one.
+   */
+  readonly forgeChanges?: RuntimeForgeChangeObserver;
   /** Told of every runtime event, for Octant Shield's record of remote commands. */
   readonly observeRemoteCommand?: (event: ProviderRuntimeEvent) => void;
   readonly sanitizeProviderEvent: (
@@ -470,6 +477,13 @@ export class CodeTurnRunner {
                     return yield* fail("interrupted", RUNTIME_OUTSIDE_CONTENT_AUTO_REVIEW_STOP);
                   }
                   if (input.signal?.aborted !== true) return;
+                }
+                if (event.kind === "tool-start" && event.argument !== undefined) {
+                  input.forgeChanges?.observe({
+                    threadId: String(input.thread.id),
+                    command: event.argument,
+                    fullAccess: input.thread.executionPolicy === "full-access",
+                  });
                 }
                 if (handledEvents > maxEvents) {
                   yield* connection

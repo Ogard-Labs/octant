@@ -1717,6 +1717,33 @@ describe("WorkTurnRuntime", () => {
       expect(calls).toEqual([`begin ${at(0)}`, "tool-start", "text-delta", "completed", "end"]);
     });
 
+    it("hands each command a runtime starts to the forge-change record, with the thread's level", async () => {
+      const observed: unknown[] = [];
+      await new WorkTurnRuntime().run({
+        command: command(),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        access: "full-access",
+        driver: driverStreaming([
+          event(4, {
+            kind: "tool-start",
+            toolCallId: "t1",
+            toolName: "Command",
+            argument: "gh pr merge 3",
+          }),
+          event(5, { kind: "tool-start", toolCallId: "t2", toolName: "read" }),
+          event(12, { kind: "completed" }),
+        ]),
+        signal: new AbortController().signal,
+        clock: clockAt(0, 0, 12),
+        forgeChanges: { observe: (input) => observed.push(input) },
+      });
+
+      expect(observed).toEqual([
+        { threadId: String(command().threadId), command: "gh pr merge 3", fullAccess: true },
+      ]);
+    });
+
     it("ends the live turn even when the turn was cancelled before it began", async () => {
       const calls: string[] = [];
       const controller = new AbortController();

