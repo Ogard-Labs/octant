@@ -1246,7 +1246,7 @@ Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../arch
 A person connects an MCP server from Settings in a local window only. It becomes an ordinary package installed, trusted and enabled as one act, under the same activation ladder and approvals.
 
 - A secret value goes to the credential broker and never into the package. Listing servers found on the computer is read-only, and nothing is imported until the person clicks that item.
-- The Connectors view is a bundled first-party catalog that fetches nothing to render. The host accepts a connector id only at that entry's own address.
+- The Connectors view is a bundled first-party catalog that fetches nothing to render. The host accepts a connector id only at that entry's own address. Doop joined on 2026-11-01 after a bare request to its address answered 401 with resource metadata, and its authorization server published PKCE S256 and dynamic client registration.
 - Hosted-server sign-in follows the protocol's authorization flow with PKCE, and the grant lives in the broker. A paired device can read the state and nothing more.
 - A Project pin offers a plugin on every turn in a Project but grants nothing; every tool call still asks.
 
