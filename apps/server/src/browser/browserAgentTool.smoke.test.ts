@@ -65,7 +65,7 @@ const pages: Record<string, string> = {
     <p>Width <span id="width"></span></p>
     <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
   "/noisy": `<!doctype html><title>Noisy</title>
-    <script>console.warn("careful"); console.error("boom"); fetch("/missing-data");</script>`,
+    <script>console.warn("careful"); console.error("boom"); fetch("/missing-data?token=s3cret");</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
 };
 
@@ -734,7 +734,11 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(first.consoleErrors?.map((entry) => entry.text)).toContain("boom");
     expect(first.consoleWarnings).toBeUndefined();
     expect(first.httpErrors).toEqual([
-      expect.objectContaining({ url: `${origin}/missing-data`, method: "GET", status: 404 }),
+      expect.objectContaining({
+        url: `${origin}/missing-data?token=redacted`,
+        method: "GET",
+        status: 404,
+      }),
     ]);
     expect(Object.keys(first.httpErrors?.[0] ?? {}).sort()).toEqual([
       "method",

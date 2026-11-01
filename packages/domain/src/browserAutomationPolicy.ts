@@ -290,3 +290,25 @@ function httpOrigin(
     return undefined;
   }
 }
+
+/**
+ * An address as a diagnostic reports it: no user or password, no fragment,
+ * and every query value whose name suggests a secret replaced, so a token in
+ * a failed request's address never reaches the agent.
+ */
+export function redactedBrowserUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/(?:token|secret|password|passcode|code|key|credential|auth)/i.test(key)) {
+        url.searchParams.set(key, "redacted");
+      }
+    }
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return value;
+  }
+}

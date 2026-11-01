@@ -279,9 +279,13 @@ only after the person approves it.
   never completed (`failedRequests`), and responses with a 4xx or 5xx status
   (`httpErrors`: address, method, and status). `warnings: true` adds console
   warnings.
-- No body and no header of any request or response is read or kept. The
-  desktop Browser redacts secrets in an address's query, as it does for every
-  address it reports.
+- No body and no header of any request or response is read or kept. Both
+  Browsers redact a reported address: no user or password, no fragment, and a
+  query value whose name suggests a secret (token, key, code, password) reads
+  `redacted`.
+- The cursor counts every kind, warnings included, so a read with warnings
+  after a cursor from a read without them starts after warnings it did not
+  return; read with `warnings: true` throughout to follow them.
 - Every entry carries a number, counted per page context across all kinds, and
   each answer carries `diagnosticsCursor`, the last number it covers. Passing
   it as `since` returns only what came after. A read clears nothing, so the

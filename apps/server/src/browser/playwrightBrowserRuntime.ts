@@ -15,6 +15,7 @@ import {
   originAllowed,
   parseBrowserKeyChord,
   readBrowserPage,
+  redactedBrowserUrl,
 } from "@octant/domain";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
@@ -789,7 +790,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       if (type !== "error" && type !== "warning") return;
       const text = bounded(message.text(), MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS);
       if (text === "") return;
-      const url = page.url() === "about:blank" ? undefined : bounded(page.url(), 4096);
+      const url =
+        page.url() === "about:blank" ? undefined : bounded(redactedBrowserUrl(page.url()), 4096);
       keepDiagnostic(owned, type === "error" ? owned.consoleErrors : owned.consoleWarnings, {
         text,
         ...(url === undefined ? {} : { url }),
@@ -800,7 +802,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     page.on?.("response", (response) => {
       const status = response.status();
       if (status < 400 || status > 599) return;
-      const url = bounded(response.url(), 4096);
+      const url = bounded(redactedBrowserUrl(response.url()), 4096);
       if (url === "") return;
       const method = bounded(response.request().method(), 16);
       keepDiagnostic(owned, owned.httpErrors, {
@@ -817,7 +819,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       void (answer === "accepted" ? dialog.accept() : dialog.dismiss()).catch(() => undefined);
     });
     page.on?.("requestfailed", (request) => {
-      const url = bounded(request.url(), 4096);
+      const url = bounded(redactedBrowserUrl(request.url()), 4096);
       if (url === "") return;
       const method = bounded(request.method(), 16);
       const failure = bounded(
