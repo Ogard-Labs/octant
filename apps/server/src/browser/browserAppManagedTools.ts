@@ -63,6 +63,7 @@ export interface BrowserAppManagedToolsOptions {
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
+      readonly threadId?: BrowserThreadId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
@@ -350,6 +351,9 @@ export function createBrowserAppManagedTools(
     // later action, so the service keeps the copies until the page closes.
     const acted = await options.browser.act({
       windowId: options.windowId,
+      // The service refuses a context that is another thread's, even when the
+      // two threads share a Project and so an authority.
+      threadId: options.threadId,
       request,
       capturedBy: "agent",
       refuseStaleRevision: true,

@@ -14,6 +14,12 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { BrowserProfileControl } from "../browser/BrowserProfileControl";
+import {
+  OWN_PAGE_TAB,
+  ProjectAgentPageStrip,
+  ProjectAgentPageView,
+  useProjectAgentPages,
+} from "../browser/ProjectAgentPages";
 import { BrowserExtensionsButton } from "../browser/BrowserExtensionsButton";
 import {
   readRememberedProfileChoice,
@@ -28,6 +34,8 @@ export interface ZenProjectResearchDockProps {
   readonly hostBridge?: OctantHostBridge;
   /** The dock as the space holds it: which Project's own browser it shows. */
   readonly dock: ZenProjectResearchDockBinding;
+  /** Opens the thread that owns an agent page the strip lists. */
+  readonly onOpenThread?: (threadId: string, title: string, mode: "work" | "code") => void;
   readonly onCollapse: (collapsed: boolean) => void;
   readonly onUndock: () => void;
 }
@@ -41,6 +49,11 @@ export interface ZenProjectResearchDockProps {
  * native view; elsewhere the host drives a headless page and this dock shows
  * its picture. Every address the person opens goes through the host, which
  * decides whether this window still holds the Project.
+ *
+ * Beside the person's page, a tab strip lists the live pages of this Project's
+ * threads, each named for the thread that owns it. Choosing one shows that
+ * thread's own picture of it, read-only; the agent in that thread still alone
+ * drives it.
  */
 export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
   const { client } = props;
@@ -55,6 +68,15 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
   const [profileChoice, setProfileChoice] = useState<BrowserProfileChoice>(() =>
     readRememberedProfileChoice(String(projectId)),
   );
+  const [selected, setSelected] = useState(OWN_PAGE_TAB);
+  const agentPages = useProjectAgentPages({
+    client,
+    projectId,
+    mode: props.dock.project.mode,
+    enabled: !props.dock.collapsed,
+  });
+  // A page that closed while it was selected leaves the person on their own.
+  const agentPage = agentPages.find((candidate) => String(candidate.threadId) === selected);
   const context = view?.context;
   const active = context?.state === "active";
   const native = active && context?.presentation === "native-live";
@@ -110,7 +132,7 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
     ...(context === undefined ? {} : { contextId: String(context.contextId) }),
     ...(view === undefined ? {} : { threadId: String(view.subjectId) }),
-    enabled: nativeSupported === true && native && !props.dock.collapsed,
+    enabled: nativeSupported === true && native && !props.dock.collapsed && agentPage === undefined,
     overlaySelector: RENDERER_OVERLAY_SELECTOR,
   });
 
@@ -312,8 +334,25 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
           <X aria-hidden="true" size={14} />
         </OctantButton>
       </header>
-      {addressBar}
-      {!active ? (
+      <ProjectAgentPageStrip
+        onSelect={setSelected}
+        pages={agentPages}
+        selected={agentPage === undefined ? OWN_PAGE_TAB : selected}
+      />
+      {agentPage !== undefined ? (
+        <ProjectAgentPageView
+          client={client}
+          page={agentPage}
+          {...(props.onOpenThread === undefined
+            ? {}
+            : {
+                onOpenThread: (threadId: string, title: string) =>
+                  props.onOpenThread?.(threadId, title, props.dock.project.mode),
+              })}
+        />
+      ) : null}
+      {agentPage !== undefined ? null : addressBar}
+      {agentPage !== undefined ? null : !active ? (
         <div className="zen-research__empty">
           <ShieldCheck aria-hidden="true" size={16} />
           <p>Your own browser for this Project. No agent can see or use this page.</p>

@@ -33,6 +33,8 @@ import type {
 import type { BrowserCaptureService } from "./browser/browserCaptureService";
 import { remoteBrowserActionReach } from "@octant/domain";
 import {
+  decodeProjectAgentPages,
+  decodeProjectAgentPagesCommand,
   decodeProjectBrowserCommand,
   decodeProjectBrowserResult,
 } from "@octant/contracts/project-browser";
@@ -63,7 +65,21 @@ export interface BrowserAutomationRouteDependencies {
     BrowserAutomationService,
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
   > &
-    Partial<Pick<BrowserAutomationService, "peekThread" | "peekContext" | "profileOf">>;
+    Partial<
+      Pick<
+        BrowserAutomationService,
+        "peekThread" | "peekContext" | "profileOf" | "listProjectAgentPages"
+      >
+    >;
+  /**
+   * What the Project's tab strip needs beyond the Browser itself: whether the
+   * window can open the Project, and the title of a thread it can see. Absent
+   * on a host that has no Project threads to name.
+   */
+  readonly projectAgentPages?: {
+    readonly windowCanOpenProject: (windowId: WindowId, projectId: string) => Promise<boolean>;
+    readonly threadTitle: (threadId: BrowserThreadId, mode: "work" | "code") => string | undefined;
+  };
   /** The thread's kept screenshots; absent on a host that keeps none. */
   readonly captures?: Pick<BrowserCaptureService, "list" | "read">;
   /**
@@ -194,6 +210,40 @@ export function createBrowserAutomationRouteHandler(
           decodeProjectBrowserResult(
             await dependencies.projectBrowsers.execute(windowId, callerKind, command),
           ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/project-agent-pages") {
+        const pages = dependencies.projectAgentPages;
+        if (pages === undefined || dependencies.service.listProjectAgentPages === undefined) {
+          return failure(
+            { category: "unavailable", message: "Project agent pages are unavailable." },
+            503,
+            origin,
+          );
+        }
+        const input = decodeProjectAgentPagesCommand(decoded.value);
+        // The window must hold the Project, and each thread's page is listed
+        // only when the window also holds that thread's live Browser
+        // authority: knowing a Project's id shows nothing of its threads.
+        if (!(await pages.windowCanOpenProject(windowId, String(input.projectId)))) {
+          return notThisWindowsThread(origin);
+        }
+        return success(
+          decodeProjectAgentPages({
+            projectId: input.projectId,
+            mode: input.mode,
+            pages: dependencies.service.listProjectAgentPages({
+              windowId,
+              projectId: String(input.projectId),
+              mode: input.mode,
+              threadTitle: (threadId) =>
+                dependencies.authority.canAccessWindow(windowId, threadId, input.mode)
+                  ? pages.threadTitle(threadId, input.mode)
+                  : undefined,
+              remote: callerKind === "remote-device",
+            }),
+          }),
           origin,
         );
       }

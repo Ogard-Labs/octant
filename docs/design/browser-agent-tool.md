@@ -296,6 +296,41 @@ only after the person approves it.
   cursor answers the agent's real question, "what happened since I last
   looked", without that.
 
+## Parallel threads
+
+Several threads of one Project may each drive their own page at the same time.
+
+- A thread's Browser operations reach only that thread's browsing context. The
+  agent tool, a subagent's tool, and a terminal grant are each built for one
+  thread and look the context up by that thread, so a tab id such as `t2` means
+  a tab of the caller's own context and no other. The server also checks it a
+  second time: an agent action names its thread, and the service refuses a
+  context another thread owns even when both threads share a Project, and so an
+  authority, and even when the request carries that context's action and
+  correlation ids. Inspect, stop, and release already check the thread.
+- Contexts do not wait on each other. The server and the desktop host each queue
+  actions per context (surface), never across them, so one thread waiting on its
+  page does not hold up another's click. Actions on the same page still run one
+  at a time, in the order they were asked.
+- The person sees the pages in the Project browser dock's tab strip
+  ([Workspace](workspace.md#tool-lifecycles)): page title or
+  host, the owning thread's title, and an "Agent active" mark. The list is a
+  server route (`/api/browser/project-agent-pages`) for a window that holds the
+  Project; it names a thread's page only when the window also holds that
+  thread's live Browser authority, and returns the page's title and host, the
+  thread's id and title, and whether an agent drives it. It returns no page text
+  and no picture; a selected page's picture is read through its own thread's
+  route, under that thread's authority, as the floating preview reads it. A
+  paired device gets a page in a stored profile named by its existence alone.
+- An agent counts as driving a page while an agent action is queued or running
+  on it and for 15 seconds after the last one ends; a CLI in a terminal grant
+  is not marked.
+- Rationale: threads of a Project share an authority, so the request's authority
+  cannot tell their pages apart; the thread the caller acts for is the only fact
+  that can. Per-context queues cost nothing and make the "at the same time"
+  promise true on both Browsers. The 15-second linger keeps the mark steady
+  while a model thinks between steps.
+
 ## What the tool never does
 
 - It saves no password and fills none. The person signs in by typing into the
@@ -315,3 +350,6 @@ only after the person approves it.
   view.
 - `apps/server/src/browser/browserAutomationService.test.ts` covers ref
   resolution and refusal on the server.
+- `apps/server/src/browser/browserThreadOwnership.test.ts` covers one thread's
+  page being out of reach of another thread, a subagent, and another thread's
+  terminal grant, and the Project's page list.

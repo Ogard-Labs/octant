@@ -2257,8 +2257,9 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - `sign-in` hands the page to the person: a card with Continue and Cancel, the Browser brought forward, every other agent Browser call held, and a fresh snapshot on Continue. It is never remembered and is refused on routine, subagent, terminal-grant and paired-device turns.
 - No password saving, no agent-written script in the page, and downloads stay blocked.
 - Diagnostics report console errors, failed requests, and 4xx and 5xx responses (address, method, status; never a body or header), console warnings on request, each numbered, read after a `since` cursor without clearing.
+- Threads of a Project drive their own pages at the same time without waiting on each other. An agent's action reaches only its own thread's context, checked on the server by thread as well as authority. The Project browser dock lists each thread's live page by title or host, owner thread, and an "Agent active" mark, as names only: a selected page shows its thread's own picture read-only, and a paired device sees a stored-profile page by its existence alone.
 
-Status: Built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), and [Diagnostics](browser-agent-tool.md#diagnostics).
+Status: Built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), [Diagnostics](browser-agent-tool.md#diagnostics), and [Parallel threads](browser-agent-tool.md#parallel-threads).
 
 ### Browser profiles and extensions
 

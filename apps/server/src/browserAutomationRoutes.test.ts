@@ -67,7 +67,11 @@ describe("browser automation routes", () => {
       stop: vi.fn(async () => snapshot),
       inspect: vi.fn(() => snapshot),
       inspectThread: vi.fn(() => snapshot),
-      releaseThread: vi.fn(async () => ({ status: "ready", threadId, evidence: [] })),
+      releaseThread: vi.fn(async () => ({
+        status: "ready",
+        threadId,
+        evidence: [],
+      })),
     };
     handler = createBrowserAutomationRouteHandler({
       service: service as any,
@@ -375,7 +379,10 @@ describe("browser automation routes", () => {
           service: service as any,
           captures: captures as never,
           windowCanOpenThread: async () => canOpenThread,
-          authority: { canAccessWindow: () => canAccessWindow, resolve: () => authority },
+          authority: {
+            canAccessWindow: () => canAccessWindow,
+            resolve: () => authority,
+          },
           windowAuthorityStore: store,
           maxRequestBodySize: 64_000,
         }),
@@ -494,7 +501,10 @@ describe("browser automation routes", () => {
     it("does not serve a capture id the thread does not own", async () => {
       const { handler: capturing } = withCaptures();
       const response = await capturing(
-        post("/image", { threadId, captureId: "b0000000-0000-4000-8000-0000000000ff" }),
+        post("/image", {
+          threadId,
+          captureId: "b0000000-0000-4000-8000-0000000000ff",
+        }),
       );
       expect(response?.status).toBe(404);
     });
@@ -524,7 +534,11 @@ describe("browser automation routes", () => {
         new Request("http://127.0.0.1/api/browser/actions", {
           method: "POST",
           headers,
-          body: JSON.stringify({ ...screenshotRequest, kind: "click", target: "#go" }),
+          body: JSON.stringify({
+            ...screenshotRequest,
+            kind: "click",
+            target: "#go",
+          }),
         }),
       );
       expect(response?.status).toBe(200);
@@ -546,7 +560,10 @@ describe("browser automation routes", () => {
     it("refuses to take a capture of anything but a screenshot", async () => {
       const { handler: capturing } = withCaptures();
       const response = await capturing(
-        post("/take", { threadId, request: { ...screenshotRequest, kind: "navigate" } }),
+        post("/take", {
+          threadId,
+          request: { ...screenshotRequest, kind: "navigate" },
+        }),
       );
       expect(response?.status).toBe(400);
       expect(await response?.json()).toMatchObject({ category: "invalid" });
@@ -570,7 +587,10 @@ describe("browser automation routes", () => {
         status: "failed",
         threadId,
         evidence: [],
-        failure: { category: "unauthorized", message: "Browser context is not owned." },
+        failure: {
+          category: "unauthorized",
+          message: "Browser context is not owned.",
+        },
       });
       const { handler: capturing } = withCaptures();
       const response = await capturing(post("/take", { threadId, request: screenshotRequest }));
@@ -705,7 +725,10 @@ describe("browser automation routes", () => {
 
     it("carries a profile command with the caller the host proved", async () => {
       const profiles = {
-        execute: vi.fn(async () => ({ kind: "browser-profiles" as const, profiles: [] })),
+        execute: vi.fn(async () => ({
+          kind: "browser-profiles" as const,
+          profiles: [],
+        })),
       };
       const withProfiles = createBrowserAutomationRouteHandler({
         service: service as any,
@@ -714,7 +737,11 @@ describe("browser automation routes", () => {
         windowAuthorityStore: store,
         maxRequestBodySize: 64_000,
       });
-      const clear = { kind: "clear", profile: { kind: "personal" }, scope: "all" };
+      const clear = {
+        kind: "clear",
+        profile: { kind: "personal" },
+        scope: "all",
+      };
 
       expect((await withProfiles(post("profiles", clear)))?.status).toBe(200);
       expect(profiles.execute).toHaveBeenLastCalledWith("local-window", clear);
@@ -729,7 +756,10 @@ describe("browser automation routes", () => {
 
     it("carries an extensions command with the window and the caller the host proved", async () => {
       const extensions = {
-        execute: vi.fn(async () => ({ kind: "browser-extensions" as const, extensions: [] })),
+        execute: vi.fn(async () => ({
+          kind: "browser-extensions" as const,
+          extensions: [],
+        })),
       };
       const withExtensions = createBrowserAutomationRouteHandler({
         service: service as any,
@@ -760,11 +790,17 @@ describe("browser automation routes", () => {
       const paired = await handler(post("contexts/current", current, true));
 
       expect(await local?.json()).toMatchObject({
-        observation: { title: "Your account", extractedText: "Signed in as the person" },
+        observation: {
+          title: "Your account",
+          extractedText: "Signed in as the person",
+        },
       });
       const withheld = await paired?.json();
       expect(withheld).toMatchObject({
-        failure: { reason: "profile-not-local", message: "Signed-in page — open it on this Mac." },
+        failure: {
+          reason: "profile-not-local",
+          message: "Signed-in page — open it on this Mac.",
+        },
       });
       expect(JSON.stringify(withheld)).not.toContain("Your account");
       expect(JSON.stringify(withheld)).not.toContain("Signed in as the person");
@@ -790,8 +826,145 @@ describe("browser automation routes", () => {
       const refused = await withProfileOf(post("actions", action, true));
 
       expect(refused?.status).toBe(403);
-      expect(await refused?.json()).toMatchObject({ reason: "profile-not-local" });
+      expect(await refused?.json()).toMatchObject({
+        reason: "profile-not-local",
+      });
       expect(service.act).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("the Project's live agent pages", () => {
+    const projectId = "40000000-0000-4000-8000-000000000001";
+    const otherThread = "20000000-0000-4000-8000-000000000002";
+    const page = (id: string, extra: Record<string, unknown> = {}) => ({
+      threadId: id,
+      contextId,
+      threadTitle: "Research pricing",
+      agentActive: true,
+      ...extra,
+    });
+
+    function listing(
+      options: {
+        readonly canOpenProject?: boolean;
+        readonly canAccessThread?: (id: string) => boolean;
+      } = {},
+    ) {
+      const listProjectAgentPages = vi.fn(
+        (input: { readonly threadTitle: (id: never) => unknown }) => {
+          // The route decides which threads the window may name.
+          const named = [threadId, otherThread].filter(
+            (id) => input.threadTitle(id as never) !== undefined,
+          );
+          return named.map((id) => page(id));
+        },
+      );
+      const handlerWithPages = createBrowserAutomationRouteHandler({
+        service: { ...service, listProjectAgentPages } as any,
+        authority: {
+          canAccessWindow: (_window, id) => options.canAccessThread?.(String(id)) ?? true,
+          resolve: () => authority,
+        },
+        projectAgentPages: {
+          windowCanOpenProject: async () => options.canOpenProject ?? true,
+          threadTitle: (id) => `Title of ${String(id).slice(-1)}`,
+        },
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      const post = (value: unknown, pair = false) => {
+        const request = new Request("http://127.0.0.1/api/browser/project-agent-pages", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": capability,
+          },
+          body: JSON.stringify(value),
+        });
+        if (pair) {
+          bindPrincipalRouteContext(request, {
+            principal: createRemoteDevicePrincipal({
+              hostId: "local" as never,
+              deviceId: "90000000-0000-4000-8000-000000000001" as never,
+              credentialGeneration: 1,
+              origin: "https://octant.example",
+              protocolVersion: 1,
+              capabilityDigest: "a".repeat(64),
+              sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+            }),
+            scopeId: windowId,
+          });
+        }
+        return request;
+      };
+      return { handlerWithPages, listProjectAgentPages, post };
+    }
+
+    it("lists a Project's pages for a window that holds the Project and each thread", async () => {
+      const { handlerWithPages, listProjectAgentPages, post } = listing();
+      const response = await handlerWithPages(post({ projectId, mode: "work" }));
+      expect(response?.status).toBe(200);
+      const answer = (await response?.json()) as {
+        pages: ReadonlyArray<{ threadId: string }>;
+      };
+      expect(answer.pages.map((entry) => entry.threadId)).toEqual([threadId, otherThread]);
+      expect(listProjectAgentPages).toHaveBeenCalledWith(
+        expect.objectContaining({
+          windowId,
+          projectId,
+          mode: "work",
+          remote: false,
+        }),
+      );
+    });
+
+    it("leaves out a thread the window cannot see and refuses a Project it cannot open", async () => {
+      const hidden = listing({ canAccessThread: (id) => id === threadId });
+      const some = await hidden.handlerWithPages(hidden.post({ projectId, mode: "work" }));
+      const answer = (await some?.json()) as {
+        pages: ReadonlyArray<{ threadId: string }>;
+      };
+      expect(answer.pages.map((entry) => entry.threadId)).toEqual([threadId]);
+
+      const closed = listing({ canOpenProject: false });
+      const refused = await closed.handlerWithPages(closed.post({ projectId, mode: "work" }));
+      expect(refused?.status).toBe(403);
+      expect(closed.listProjectAgentPages).not.toHaveBeenCalled();
+    });
+
+    it("tells the service a paired device asked, and refuses bad input and bad capability", async () => {
+      const { handlerWithPages, listProjectAgentPages, post } = listing();
+      expect((await handlerWithPages(post({ projectId, mode: "work" }, true)))?.status).toBe(200);
+      expect(listProjectAgentPages).toHaveBeenCalledWith(expect.objectContaining({ remote: true }));
+      listProjectAgentPages.mockClear();
+
+      expect((await handlerWithPages(post({ projectId, mode: "chat" })))?.status).toBe(400);
+      expect((await handlerWithPages(post({ projectId, mode: "work", threadId })))?.status).toBe(
+        400,
+      );
+      const unauthenticated = new Request("http://127.0.0.1/api/browser/project-agent-pages", {
+        method: "POST",
+        body: JSON.stringify({ projectId, mode: "work" }),
+      });
+      expect((await handlerWithPages(unauthenticated))?.status).toBe(401);
+      expect(listProjectAgentPages).not.toHaveBeenCalled();
+    });
+
+    it("is unavailable on a host with no Project threads to name", async () => {
+      const bare = createBrowserAutomationRouteHandler({
+        service: service as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      const response = await bare(
+        new Request("http://127.0.0.1/api/browser/project-agent-pages", {
+          method: "POST",
+          headers: { "x-octant-window-capability": capability },
+          body: JSON.stringify({ projectId, mode: "work" }),
+        }),
+      );
+      expect(response?.status).toBe(503);
     });
   });
 });

@@ -473,6 +473,18 @@ export function wireContext(deps: ContextDependencies) {
     captures: browserCaptures,
     windowCanOpenThread: windowCanOpenThreadById,
     projectBrowsers: liveProjectBrowsers,
+    projectAgentPages: {
+      windowCanOpenProject: windowCanOpenProjectById,
+      threadTitle: (threadId, mode) => {
+        try {
+          return mode === "work"
+            ? workThreadProjection.read(decodeWorkThreadId(String(threadId)))?.title
+            : persistence.readCodeThread(decodeCodeThreadId(String(threadId)))?.title;
+        } catch {
+          return undefined;
+        }
+      },
+    },
     profiles: browserProfileService,
     extensions: browserExtensionService,
     authority: browserAuthority,

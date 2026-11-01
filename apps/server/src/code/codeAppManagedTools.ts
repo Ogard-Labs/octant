@@ -481,6 +481,7 @@ export interface CodeAppManagedToolsOptions {
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
+      readonly threadId?: BrowserThreadId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
@@ -1258,6 +1259,7 @@ async function browserTool(
   const acted = await guardedBrowserEffect(options, threadId, signal, () =>
     options.browser!.act({
       windowId: options.windowId,
+      threadId,
       request,
       capturedBy: "agent",
       refuseStaleRevision: true,

@@ -819,6 +819,7 @@ describe("Code app-managed tools", () => {
     expect(pressed.isError).toBe(false);
     expect(act).toHaveBeenLastCalledWith({
       windowId,
+      threadId: expect.any(String),
       capturedBy: "agent",
       refuseStaleRevision: true,
       request: expect.objectContaining({
@@ -833,6 +834,7 @@ describe("Code app-managed tools", () => {
     });
     expect(act).toHaveBeenLastCalledWith({
       windowId,
+      threadId: expect.any(String),
       capturedBy: "agent",
       refuseStaleRevision: true,
       request: expect.objectContaining({ kind: "scroll", deltaX: 100, deltaY: -500 }),
