@@ -7,8 +7,9 @@ import {
 import { bindFetchPort } from "./bindFetchPort";
 
 /**
- * Settings › Servers: the servers a person registered with Octant Shield and
- * whether their SSH agent is there to use. A refused change is a value the
+ * Settings › Servers: the servers a person registered with Octant Shield, a
+ * Project's own list when one is asked about, and whether their SSH agent is
+ * there to use. A refused change is a value the
  * caller shows; only a transport failure throws.
  */
 
@@ -19,7 +20,7 @@ export interface ShieldServersClientOptions {
 }
 
 export interface ShieldServersClient {
-  read(signal?: AbortSignal): Promise<ShieldServersView>;
+  read(projectId?: string, signal?: AbortSignal): Promise<ShieldServersView>;
   command(command: ShieldServersCommand, signal?: AbortSignal): Promise<ShieldServersCommandResult>;
 }
 
@@ -38,8 +39,12 @@ export function createShieldServersClient(
   options: ShieldServersClientOptions,
 ): ShieldServersClient {
   const fetch = bindFetchPort(options.fetch);
-  const target = new URL(PATH, options.baseUrl).toString();
-  const send = async (init: RequestInit): Promise<unknown> => {
+  const url = (projectId: string | undefined) => {
+    const target = new URL(PATH, options.baseUrl);
+    if (projectId !== undefined) target.searchParams.set("projectId", projectId);
+    return target.toString();
+  };
+  const send = async (target: string, init: RequestInit): Promise<unknown> => {
     let response: Response;
     try {
       response = await fetch(target, {
@@ -72,13 +77,16 @@ export function createShieldServersClient(
     return body;
   };
   return {
-    async read(signal) {
-      const body = await send({ method: "GET", ...(signal === undefined ? {} : { signal }) });
+    async read(projectId, signal) {
+      const body = await send(url(projectId), {
+        method: "GET",
+        ...(signal === undefined ? {} : { signal }),
+      });
       return decodeHostAnswer(ShieldServersView)((body as { view?: unknown }).view);
     },
     async command(command, signal) {
       return decodeHostAnswer(ShieldServersCommandResult)(
-        await send({
+        await send(url(undefined), {
           method: "POST",
           body: JSON.stringify(command),
           ...(signal === undefined ? {} : { signal }),

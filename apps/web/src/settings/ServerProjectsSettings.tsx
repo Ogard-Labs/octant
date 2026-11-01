@@ -2,17 +2,20 @@ import type { ServerProjectsClient } from "@octant/client-runtime/server-project
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ServerProjectsCommand, ServerProjectsView } from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
-import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SettingsPanel, SettingsState } from "./primitives";
+import { ShieldServersSettings } from "./ShieldServersSettings";
 
 export interface ServerProjectsSettingsProps {
   /** Absent off this computer: the catalog is host authority. */
   readonly client: Pick<ServerProjectsClient, "read" | "command"> | undefined;
   readonly servers: Pick<ShieldServersClient, "read"> | undefined;
+  /** Bumped when the registry above changes, so the server choices are read again. */
+  readonly registryRevision?: number;
 }
 
 export const SERVER_PROJECTS_INTRO =
@@ -35,6 +38,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   const [serverId, setServerId] = useState("");
   const [folder, setFolder] = useState("");
 
+  const registryRevision = props.registryRevision ?? 0;
   const load = useCallback(async () => {
     if (client === undefined) return;
     try {
@@ -47,9 +51,10 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
     }
   }, [client, serversClient]);
 
+  // A changed registry above is read again, so a server added there can be chosen here.
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, registryRevision]);
 
   async function send(command: ServerProjectsCommand): Promise<boolean> {
     if (client === undefined) return false;
@@ -204,5 +209,48 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
         )}
       </SettingsPanel>
     </div>
+  );
+}
+
+/**
+ * Settings › Access › Servers: the registry and the server Projects below it,
+ * which read the registry again whenever it changes above.
+ */
+export function ServerAccessSettings(props: {
+  readonly servers: ShieldServersClient | undefined;
+  readonly projects: Pick<ServerProjectsClient, "read" | "command"> | undefined;
+  readonly focusedSetting?: string | undefined;
+  /** Project names by id, for the registry's Project picker. */
+  readonly projectNames: ReadonlyMap<string, string>;
+}) {
+  const { servers } = props;
+  const [registryRevision, setRegistryRevision] = useState(0);
+  const watched = useMemo<ShieldServersClient | undefined>(
+    () =>
+      servers === undefined
+        ? undefined
+        : {
+            read: (projectId, signal) => servers.read(projectId, signal),
+            command: async (command, signal) => {
+              const result = await servers.command(command, signal);
+              if (result.kind === "shield-servers-updated") setRegistryRevision((n) => n + 1);
+              return result;
+            },
+          },
+    [servers],
+  );
+  return (
+    <>
+      <ShieldServersSettings
+        client={watched}
+        focusedSetting={props.focusedSetting}
+        projectNames={props.projectNames}
+      />
+      <ServerProjectsSettings
+        client={props.projects}
+        registryRevision={registryRevision}
+        servers={servers}
+      />
+    </>
   );
 }

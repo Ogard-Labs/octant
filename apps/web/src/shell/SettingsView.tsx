@@ -103,9 +103,8 @@ import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-mem
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
-import { ShieldServersSettings } from "../settings/ShieldServersSettings";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
-import { ServerProjectsSettings } from "../settings/ServerProjectsSettings";
+import { ServerAccessSettings } from "../settings/ServerProjectsSettings";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
 import { PhoneNotificationSettings } from "../host/PhoneNotificationSettings";
@@ -1269,12 +1268,10 @@ function ActiveSectionContent({
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             {...(focusedSetting === undefined ? {} : { focusedSetting })}
           />
-          <ShieldServersSettings
-            client={props.shieldServersClient}
+          <ServerAccessSettings
             focusedSetting={focusedSetting}
-          />
-          <ServerProjectsSettings
-            client={props.serverProjectsClient}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+            projects={props.serverProjectsClient}
             servers={props.shieldServersClient}
           />
         </div>
