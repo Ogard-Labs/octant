@@ -10,10 +10,10 @@ approval covers
 and [Browser captures](browser-captures.md) owns which screenshots a thread
 keeps.
 
-Status: built. The page snapshot and element refs, short results, hover,
-select, drag, key chords, upload, tabs, batched steps, waits, settling, dialogs,
-viewport size, the sign-in handoff, and diagnostics with a cursor are built on
-the headless and desktop Browsers.
+Status: built. The page snapshot and element refs (frames and open shadow
+roots included), short results, hover, select, drag, key chords, upload, tabs,
+batched steps, waits, settling, dialogs, viewport size, the sign-in handoff,
+and diagnostics with a cursor are built on the headless and desktop Browsers.
 
 ## One tool for every provider
 
@@ -40,9 +40,41 @@ the headless and desktop Browsers.
   included), no field shows a value at all. An editable element is never named
   by its own text, which is what was typed into it, and a label's text leaves
   out the fields inside it.
-- A snapshot carries no picture and no page text beyond the outline. It reads
-  the top document: an iframe is listed as `iframe "not included"`, and shadow
-  roots are not listed.
+- A snapshot carries no picture and no page text beyond the outline.
+- **Frames and shadow roots.** The outline reads the page as a person sees it:
+  an open shadow root's content in place of its host's, a slot's assigned
+  content in place of its fallback, and each frame's content indented under
+  its `iframe "title"` line. A closed shadow root stays unread, because the
+  page closed it to its own scripts too. Frames nest at most 4 deep and one
+  snapshot reads at most 16; one budget of refs, lines, and text covers the
+  whole page, frames included.
+- A ref inside a frame or a shadow root acts like any other: `click`, `type`,
+  `hover`, `select`, `drag` (both ends in one frame), `upload`, `wait`, and
+  `read-page` reach it, and the stale check runs in its own frame. Its stored
+  selector steps into the frame or the shadow root; a model cannot write one
+  that reaches further than a ref could.
+- **Which frames are read.** On a Private page every frame is part of the page
+  the approval covered, whatever its origin. On a Project or Personal page a
+  frame on another origin is read only when the context's approved origins
+  include it, as a page there would need its own site approval; otherwise it
+  is listed as `iframe "https://other.example" not included`. A frame the
+  Browser cannot load or reach, and one that is not http or https, is listed
+  the same way. The headless Browser loads nothing outside the page's approved
+  origins, so there a frame on another origin is always listed as not included.
+- **Credential checks run in every frame.** A credential field in any frame or
+  shadow root reads `protected`, withholds every value on the page, and
+  refuses typing and focused key presses, in that frame as in the top page.
+- The desktop Browser reaches a frame through the debugger protocol: each
+  frame gets an isolated world of its own, so the page's scripts never see the
+  reader, and a frame on another site is reached through its own session.
+  Input still goes to the page at page coordinates. While someone else holds
+  the page's developer tools the desktop Browser reads no frame and lists each
+  as not included.
+- Rationale: a screenshot already shows every frame, and on a Private page a
+  frame's site holds no sign-in older than the page, so reading it adds
+  nothing the approval did not cover. On a signed-in page a frame on another
+  site may be signed in to that site's account, which is exactly what a site
+  approval per origin and profile exists for, so the narrower rule keeps it.
 - An outline is bounded: at most 400 refs, 800 lines, and 24 KiB of text. A
   longer page ends with `(outline truncated)`.
 - `click`, `type`, `wait`, and `read-page` accept `ref` in place of a CSS
