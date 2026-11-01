@@ -999,6 +999,17 @@ function makeConnection(
       }
     };
 
+    const shellWithoutRequestRefusal = (
+      mode: AcpSessionMode,
+      policy: ProviderExecutionPolicy,
+    ): string | undefined =>
+      profile.shellWithoutRequest === true &&
+      mode !== "chat" &&
+      policy !== "plan" &&
+      policy !== "full-access"
+        ? `${name} runs shell commands without asking first, so they cannot be asked per command; use Full access to let it run them.`
+        : undefined;
+
     const handleRequest = (state: SessionState, requestMessage: AcpServerRequestMessage) => {
       if (requestMessage.method !== "session/request_permission") {
         void handleClientCapabilityRequest(state, requestMessage).catch(() => undefined);
@@ -1295,6 +1306,8 @@ function makeConnection(
             }
             const refusal = profile.refuses?.(mode, input.executionPolicy);
             if (refusal !== undefined) throw failure("incompatible", refusal);
+            const shellRefusal = shellWithoutRequestRefusal(mode, input.executionPolicy);
+            if (shellRefusal !== undefined) throw failure("unsupported", shellRefusal);
             const projectRefusal =
               runtimeRoot === projectRoot ? profile.refusesProject?.(projectRoot) : undefined;
             if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);
@@ -1634,7 +1647,7 @@ function makeConnection(
           // existing session, and reporting that as a stale cursor would hide
           // the reason and invite a pointless retry.
           Effect.mapError((error) =>
-            error.category === "incompatible"
+            error.category === "incompatible" || error.category === "unsupported"
               ? error
               : failure("stale-resume", `${name} session could not be resumed.`),
           ),

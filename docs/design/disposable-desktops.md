@@ -789,7 +789,7 @@ Rules this slice resolved:
   only a lease that is the sending thread's own and `ready`, or the turn does
   not start; every command then goes through the lease service, which checks
   the lease's authority again. Only Code turns carry a destination; a Work
-  turn cannot name a lease yet (the later Work-mode item).
+  turn cannot name a lease (Work-mode leasing is not built).
 - **An agent neither acquires nor releases.** A send binds a lease that
   already exists, so this slice gives the agent no acquire, extend, or
   release: acquiring is an effect with its own approval and billing rules,
@@ -1074,7 +1074,7 @@ overflow.
 ### Built in slice 6
 
 Slice 6 lands the shared cloud pieces with the E2B driver. The Cua Spaces
-driver is not built; why is recorded at the end of this section.
+driver came after it ([Cua Spaces through the local daemon](#cua-spaces-through-the-local-daemon)).
 
 - **Seam.** `DesktopHttpsPort` and `desktopProviderHostDeclared` in
   `packages/plugin-api/src/desktopProvider.ts`; `DesktopProvider.hosts`;
