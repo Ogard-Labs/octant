@@ -17,6 +17,7 @@ import { WorkResolutionService } from "../work/workResolutionService";
 import { createWorkResearchRouteHandler } from "../workResearchRoutes";
 import { WorkResearchService } from "../work/workResearchService";
 import { WorkResearchEventStore } from "../work/workResearchEventStore";
+import type { WorkThreadProjection } from "../work/workThreadProjection";
 import { WorkResearchProjection } from "../work/workResearchProjection";
 import { createWorkResearchSourcePort } from "../work/workResearchSourcePort";
 import { createImageRouteHandler } from "../image/imageRoutes";
@@ -53,6 +54,7 @@ export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence">
   Pick<ProvidersWiring, "credentialResolver" | "imageJobService" | "providerDataDirectory"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<WorkWiring, "workThreadService"> &
+  Readonly<{ workThreadProjection: WorkThreadProjection }> &
   Pick<ContextWiring, "windowCanOpenThread"> &
   Pick<FoundationsWiring, "workArtifactProjection" | "workTurnProjection">;
 
@@ -70,6 +72,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     windowCanOpenThread,
     workArtifactProjection,
     workThreadService,
+    workThreadProjection,
     workTurnProjection,
   } = deps;
 
@@ -94,6 +97,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   const workMutationRoutes = createWorkMutationRouteHandler({
     service: workMutationService,
     persistence,
+    readThread: (threadId) => workThreadProjection.read(threadId),
     projects: projectService,
     windowAuthorityStore,
     maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,

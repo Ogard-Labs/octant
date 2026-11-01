@@ -1311,6 +1311,32 @@ describe("Code routes", () => {
     expect(JSON.stringify(openFile.mock.calls[0]?.slice(0, 2))).not.toContain("rootPath");
   });
 
+  it("passes an absolute path in an extra folder to the service and still rejects an escape from it", async () => {
+    const openFile = vi.fn(async () => {
+      throw Object.assign(new Error("unavailable"), {
+        failure: { category: "unavailable", message: "Code file authority is unavailable." },
+      });
+    });
+    const route = routeFixture({ openFile });
+    const open = (path: string) =>
+      route(
+        request(
+          `/api/code/files/open?threadId=${threadId}&checkoutId=${checkoutId}&path=${encodeURIComponent(path)}`,
+        ),
+      );
+
+    await open("/Users/me/notes/plan.md");
+    expect(openFile).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ relativePath: "/Users/me/notes/plan.md" }),
+    );
+
+    openFile.mockClear();
+    expect((await open("/Users/me/notes/../secret"))?.status).toBe(400);
+    expect((await open("//server/share"))?.status).toBe(400);
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
   it("maps an unauthorized open to the shared failure envelope", async () => {
     const openFile = vi.fn(async () => {
       throw Object.assign(new Error("unauthorized"), {

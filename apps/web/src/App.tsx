@@ -517,6 +517,7 @@ export interface AppProps {
   readonly zenClient?: ZenClient;
 }
 
+const NO_PROJECT_EXTRA_FOLDERS: ReadonlyArray<string> = [];
 const NO_PROJECT_ACTIONS: ReadonlyArray<ProjectAction> = [];
 const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
@@ -6577,6 +6578,12 @@ function LaunchedShell(
     actionsProject?.type === "code" || actionsProject?.type === "work"
       ? (actionsProject.actions ?? NO_PROJECT_ACTIONS)
       : NO_PROJECT_ACTIONS;
+  // Only a Code Project's extra folders are listed by the Files tool; a Work
+  // Project's own Files listing already walks them.
+  const activeProjectExtraFolders =
+    actionsProject?.type === "code"
+      ? (actionsProject.extraFolders ?? []).map((folder) => folder.canonicalRoot)
+      : NO_PROJECT_EXTRA_FOLDERS;
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -7034,6 +7041,9 @@ function LaunchedShell(
                     activeMode={activeMode}
                     {...(activeProjectId === undefined ? {} : { activeProjectId })}
                     {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
+                    {...(activeProjectExtraFolders.length === 0
+                      ? {}
+                      : { projectExtraFolders: activeProjectExtraFolders })}
                     bottomPanelHeight={bottomPanelHeight}
                     bottomPanelOpen={bottomPanelOpen}
                     bottomPanelPresentation={bottomPanelPresentation}

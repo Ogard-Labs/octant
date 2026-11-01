@@ -873,7 +873,12 @@ export function createCodeOperationRuntime(
       return context === undefined ? undefined : approvalContextDigest(context);
     },
     resolveCheckoutRoot: async (windowId, thread, checkout) => {
-      const root = await options.resolveCheckoutRoot(windowId, thread, checkout);
+      const resolved = await options.resolveCheckoutRoot(windowId, thread, checkout);
+      const folders = extraFoldersOf(thread.projectId);
+      const root =
+        resolved === undefined || folders.length === 0
+          ? resolved
+          : { ...resolved, extraFolders: folders };
       roots.set(String(thread.id), root);
       return root;
     },

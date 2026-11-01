@@ -8,7 +8,12 @@ import { ShellState } from "../shell/ShellState";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
-  "onOpenFile" | "serverUrl" | "subject" | "windowCapability" | "workFileListingClient"
+  | "onOpenFile"
+  | "projectExtraFolders"
+  | "serverUrl"
+  | "subject"
+  | "windowCapability"
+  | "workFileListingClient"
 >;
 
 export default function FilesModule(props: Props) {
@@ -36,6 +41,9 @@ export default function FilesModule(props: Props) {
         {...(props.subject.checkoutId === undefined
           ? {}
           : { checkoutId: props.subject.checkoutId })}
+        {...(props.projectExtraFolders === undefined
+          ? {}
+          : { extraFolders: props.projectExtraFolders })}
         onOpenFile={(entry) => props.onOpenFile(entry.path)}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         threadId={decodeCodeThreadId(props.subject.threadId)}

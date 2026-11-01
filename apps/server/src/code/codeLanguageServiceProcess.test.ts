@@ -763,6 +763,67 @@ describe("Code language service reads for an agent", () => {
     });
   });
 
+  it("sends a change to a document in an extra folder to that folder's server and to no other", async () => {
+    const { paths, test, log } = fake();
+    const extra = join(paths.root, "extra");
+    mkdirSync(extra);
+    writeFileSync(join(extra, "c.ts"), "export const c = 1;\n");
+    test.state.extraFolders = [extra];
+    const scope = { threadId: test.state.thread.id, checkoutId: plainCheckout().id };
+    const caller = { scopeId, principal: "local-window" } as const;
+
+    const mainFile = syncedFileId(await test.open("a.ts"));
+    const extraOpened = await test.service.syncDocument(caller, {
+      kind: "open",
+      ...scope,
+      path: decodeCodeProjectFilePath(join(extra, "c.ts")),
+      text: "export const c = 1;\n",
+    });
+    const extraFile = syncedFileId(extraOpened);
+    expect(test.launches()).toBe(2);
+
+    await test.service.syncDocument(caller, {
+      kind: "change",
+      ...scope,
+      fileId: extraFile,
+      text: "export const c = 2;\n",
+    });
+    await eventually(() => logged(log).some((entry) => entry.method === "textDocument/didChange"));
+
+    const received = logged(log).filter((entry) => entry.event === "received");
+    const serverOf = (root: string) =>
+      received.find(
+        (entry) =>
+          entry.method === "initialize" &&
+          (entry.params as { rootUri: string }).rootUri === pathToFileURL(root).href,
+      )?.pid;
+    const extraServer = serverOf(extra);
+    const mainServer = serverOf(paths.checkout);
+    expect(extraServer).toBeDefined();
+    expect(mainServer).toBeDefined();
+    expect(extraServer).not.toBe(mainServer);
+
+    const changed = received.filter((entry) => entry.method === "textDocument/didChange");
+    expect(changed).toHaveLength(1);
+    expect(changed[0]).toMatchObject({
+      pid: extraServer,
+      params: { textDocument: { uri: pathToFileURL(join(extra, "c.ts")).href } },
+    });
+
+    // A change to the checkout's own document goes to the checkout's server.
+    await test.service.syncDocument(caller, {
+      kind: "change",
+      ...scope,
+      fileId: mainFile,
+      text: "export const a = 2;\n",
+    });
+    await eventually(
+      () => logged(log).filter((entry) => entry.method === "textDocument/didChange").length === 2,
+    );
+    const second = logged(log).filter((entry) => entry.method === "textDocument/didChange")[1];
+    expect(second).toMatchObject({ pid: mainServer });
+  });
+
   it("names a definition found from an extra folder by that folder's absolute path", async () => {
     const { paths, test } = fake();
     const extra = join(paths.root, "extra");
