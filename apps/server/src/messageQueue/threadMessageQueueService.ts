@@ -777,6 +777,7 @@ function queueScopeForEvent(
     }
     case "chat.thread-created@1":
     case "chat.thread-updated@1":
+    case "chat.thread-rewound@1":
       return scope("chat", eventField(eventField(payload, "thread"), "id"));
     case "chat.turn-created@1":
       return scope("chat", eventField(eventField(payload, "turn"), "threadId"));

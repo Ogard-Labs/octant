@@ -6,6 +6,7 @@
  * resuming against stale evidence.
  */
 import { Schema } from "effect";
+import { activeChatTurns } from "@octant/domain/chat-policy";
 import {
   decodeAggregateVersion,
   decodeAgentRunId,
@@ -213,7 +214,7 @@ function chatPort(deps: UsageResumePortDependencies): UsageResumeModePort {
         return invalid("The scheduled resume is no longer current.");
       }
       const view = deps.chat.readThreadView(threadId);
-      const turn = view?.turns.at(-1);
+      const turn = activeChatTurns(view?.turns ?? []).at(-1);
       const attempt = turn?.attempts.at(-1);
       if (
         turn === undefined ||

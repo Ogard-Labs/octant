@@ -156,7 +156,7 @@ function viewWithAttempt(
   });
 }
 
-/** A view with one turn whose only attempt failed, so it can be edited or retried. */
+/** A view with one turn whose only attempt failed, so it can be rewound or retried. */
 function viewWithFailedAttempt() {
   return viewWithAttempt("failed");
 }
@@ -2670,78 +2670,150 @@ describe("ChatWorkspace", () => {
     expect(trigger).toHaveAccessibleDescription(/no agent-eligible models/i);
   });
 
-  it("sends revise and branch commands against the version the user is looking at", async () => {
+  it("sends fork and rewind commands against the version the user is looking at and returns the message to the composer", async () => {
+    const user = userEvent.setup();
+    const setPendingDraft = vi.fn();
+    const execute = vi.fn(async (command: ChatCommand) =>
+      command.kind === "rewind-chat-thread"
+        ? ({
+            kind: "thread-rewound",
+            thread: {
+              id: threadId,
+              version: 4,
+              providerInstanceId: providerId,
+              modelId: "model-a",
+            },
+          } as never)
+        : undefined,
+    );
+    const view = viewWithQuotableReplies();
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({
+          activeView: view,
+          execute: execute as never,
+          setPendingDraft,
+        })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+    const firstTurn = view.turns[0]!.id;
+    const secondTurn = view.turns[1]!.id;
+
+    // From the second message a fork runs through the turn before it.
+    await user.click(screen.getAllByRole("button", { name: "More actions" })[1]!);
+    await user.click(await screen.findByRole("menuitem", { name: "Fork from here" }));
+    expect(execute).toHaveBeenCalledWith({
+      kind: "branch-chat-thread",
+      threadId: threadId as never,
+      expectedVersion: 3 as never,
+      turnId: firstTurn,
+      title: "Calm planning (branch)",
+    });
+
+    // Nothing is sent until the person answers the dialog.
+    await user.click(screen.getAllByRole("button", { name: "More actions" })[1]!);
+    await user.click(await screen.findByRole("menuitem", { name: "Rewind to here…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Rewind to here" });
+    expect(dialog).toHaveTextContent("This removes this message and its reply");
+    expect(dialog).toHaveTextContent("Chat has no files, so only the conversation can be rewound.");
+    expect(execute.mock.calls.some(([command]) => command.kind === "rewind-chat-thread")).toBe(
+      false,
+    );
+
+    await user.click(within(dialog).getByRole("button", { name: "Rewind" }));
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith({
+        kind: "rewind-chat-thread",
+        threadId: threadId as never,
+        expectedVersion: 3 as never,
+        turnId: secondTurn,
+      }),
+    );
+    // The removed message returns to the composer, above the draft already there.
+    await waitFor(() =>
+      expect(setPendingDraft).toHaveBeenCalledWith(
+        "Second question.\n\nShip this plan",
+        "Second question.".length,
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Rewind to here" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("leaves the thread and the composer alone when the person cancels a rewind or the host refuses it", async () => {
+    const user = userEvent.setup();
+    const setPendingDraft = vi.fn();
+    const execute = vi.fn(async () => undefined);
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({
+          activeView: viewWithQuotableReplies(),
+          execute: execute as never,
+          setPendingDraft,
+        })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "More actions" })[0]!);
+    await user.click(await screen.findByRole("menuitem", { name: "Rewind to here…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Rewind to here" });
+    expect(dialog).toHaveTextContent("this message and the 1 after it");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(execute).not.toHaveBeenCalled();
+
+    await user.click(screen.getAllByRole("button", { name: "More actions" })[0]!);
+    await user.click(await screen.findByRole("menuitem", { name: "Rewind to here…" }));
+    await user.click(await screen.findByRole("button", { name: "Rewind" }));
+    expect(
+      await screen.findByText("The rewind did not go through. Nothing changed."),
+    ).toBeVisible();
+    expect(setPendingDraft).not.toHaveBeenCalled();
+  });
+
+  it("asks again instead of rewinding when a turn arrived while the dialog was open", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => undefined);
-    const base = controllerFixture();
-    const view = decodeChatThreadView({
-      ...base.activeView!,
-      turns: [
-        {
-          id: turnId,
-          threadId,
-          sequence: 1,
-          userMessageRef: { contentId, digest: "a".repeat(64), byteLength: 12 },
-          attachmentIds: [],
-          attempts: [],
-          createdAt: now,
-        },
-      ],
-      contents: [
-        {
-          contentId,
-          role: "user",
-          body: "Ship the transcript first.",
-          digest: "a".repeat(64),
-          byteLength: 25,
-        },
-      ],
+    const view = viewWithQuotableReplies();
+    const first = view.turns[0]!;
+    const grown = decodeChatThreadView({
+      ...view,
+      turns: [...view.turns, { ...first, id: "00000000-0000-4000-8000-000000000949", sequence: 3 }],
     });
-    render(
+    const { rerender } = render(
       <ChatWorkspace
         controller={controllerFixture({ activeView: view, execute: execute as never })}
         providerSnapshot={providerSnapshot()}
       />,
     );
 
-    await chooseTurnAction(user, "Branch from here");
-    expect(execute).toHaveBeenCalledWith({
-      kind: "branch-chat-thread",
-      threadId: threadId as never,
-      expectedVersion: 3 as never,
-      turnId: turnId as never,
-      title: "Calm planning (branch)",
-    });
+    await user.click(screen.getAllByRole("button", { name: "More actions" })[0]!);
+    await user.click(await screen.findByRole("menuitem", { name: "Rewind to here…" }));
+    rerender(
+      <ChatWorkspace
+        controller={controllerFixture({ activeView: grown, execute: execute as never })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Rewind" }));
 
-    await chooseTurnAction(user, "Edit");
-    const editor = screen.getByRole("textbox", { name: "Edit your message" });
-    await user.clear(editor);
-    await user.type(editor, "Ship export first.");
-    await user.click(screen.getByRole("button", { name: "Save and run" }));
-    expect(execute).toHaveBeenCalledWith({
-      kind: "edit-chat-turn",
-      threadId: threadId as never,
-      expectedVersion: 3 as never,
-      turnId: turnId as never,
-      prompt: "Ship export first.",
-    });
+    expect(await screen.findByText(/The conversation changed while this was open/)).toBeVisible();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it.each([
     {
-      what: "revises a turn",
+      what: "rewinds to a turn",
       act: async (user: ReturnType<typeof userEvent.setup>) => {
-        await chooseTurnAction(user, "Edit");
-        const editor = screen.getByRole("textbox", { name: "Edit your message" });
-        await user.clear(editor);
-        await user.type(editor, "Ship export first.");
-        await user.click(screen.getByRole("button", { name: "Save and run" }));
+        await chooseTurnAction(user, "Rewind to here…");
+        await user.click(await screen.findByRole("button", { name: "Rewind" }));
       },
       expected: {
-        kind: "edit-chat-turn",
+        kind: "rewind-chat-thread",
         expectedVersion: 4,
         turnId,
-        prompt: "Ship export first.",
       },
     },
     {
@@ -2908,30 +2980,7 @@ describe("ChatWorkspace", () => {
 
   it("opens the created branch thread and dispatches at most one branch at a time", async () => {
     const user = userEvent.setup();
-    const base = controllerFixture();
-    const view = decodeChatThreadView({
-      ...base.activeView!,
-      turns: [
-        {
-          id: turnId,
-          threadId,
-          sequence: 1,
-          userMessageRef: { contentId, digest: "a".repeat(64), byteLength: 12 },
-          attachmentIds: [],
-          attempts: [],
-          createdAt: now,
-        },
-      ],
-      contents: [
-        {
-          contentId,
-          role: "user",
-          body: "Ship the transcript first.",
-          digest: "a".repeat(64),
-          byteLength: 25,
-        },
-      ],
-    });
+    const view = viewWithQuotableReplies();
     const branchedThread = {
       ...view.thread,
       id: "00000000-0000-4000-8000-000000000933",
@@ -2953,11 +3002,12 @@ describe("ChatWorkspace", () => {
       />,
     );
 
-    await chooseTurnAction(user, "Branch from here");
+    await user.click(screen.getAllByRole("button", { name: "More actions" })[1]!);
+    await user.click(await screen.findByRole("menuitem", { name: "Fork from here" }));
     // While the server is still creating the branch, a second click must not
     // mint a second thread.
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    const branch = await screen.findByRole("menuitem", { name: "Branch from here" });
+    await user.click(screen.getAllByRole("button", { name: "More actions" })[1]!);
+    const branch = await screen.findByRole("menuitem", { name: "Fork from here" });
     expect(branch).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(branch);
     expect(execute).toHaveBeenCalledTimes(1);
@@ -2966,8 +3016,8 @@ describe("ChatWorkspace", () => {
     await waitFor(() => expect(onThreadBranched).toHaveBeenCalledWith(branchedThread));
     expect(onThreadBranched).toHaveBeenCalledTimes(1);
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    expect(await screen.findByRole("menuitem", { name: "Branch from here" })).not.toHaveAttribute(
+    await user.click(screen.getAllByRole("button", { name: "More actions" })[1]!);
+    expect(await screen.findByRole("menuitem", { name: "Fork from here" })).not.toHaveAttribute(
       "aria-disabled",
       "true",
     );

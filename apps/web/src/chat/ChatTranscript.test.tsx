@@ -447,7 +447,7 @@ describe("ChatTranscript", () => {
     expect(screen.queryByRole("link", { name: /Untrusted source/i })).not.toBeInTheDocument();
   });
 
-  it("shows a delivered subagent result as an attributed card, not as the person's message", () => {
+  it("shows a delivered subagent result as an attributed card, not as the person's message", async () => {
     const delivered = [
       "A subagent you delegated has finished.",
       "",
@@ -470,14 +470,21 @@ describe("ChatTranscript", () => {
       ),
     });
 
-    render(<ChatTranscript onEditTurn={vi.fn()} view={view} />);
+    const onRewindTurn = vi.fn();
+    render(<ChatTranscript onRewindTurn={onRewindTurn} view={view} />);
 
     expect(screen.queryByRole("article", { name: "Your message" })).not.toBeInTheDocument();
     const card = screen.getByRole("article", { name: "Research subagent finished" });
     expect(card).toHaveTextContent("MATRIX-A3");
     expect(card).not.toHaveTextContent("0b9d3f40-5a52-4a1e-8c11-111111111111");
-    // The person wrote nothing here, so there is nothing of theirs to revise.
-    expect(screen.queryByRole("menuitem", { name: /Edit/ })).not.toBeInTheDocument();
+    // The person wrote nothing here, so a rewind has no message of theirs to
+    // return to the composer.
+    await chooseTurnAction("Rewind to here…");
+    expect(onRewindTurn).toHaveBeenCalledWith({
+      turnId: ids.turn,
+      prompt: undefined,
+      removedTurns: 1,
+    });
   });
 
   it("uses visible text for every durable attempt state", () => {
@@ -1243,23 +1250,47 @@ describe("ChatTranscript", () => {
     expect(screen.queryByLabelText("Turn route receipt")).not.toBeInTheDocument();
   });
 
-  it("revises a message in place and asks the server to re-run from there", async () => {
-    const onEditTurn = vi.fn();
-    render(<ChatTranscript onEditTurn={onEditTurn} view={viewFixture()} />);
+  it("offers no way to edit a sent message", async () => {
+    render(<ChatTranscript onBranchTurn={vi.fn()} onRewindTurn={vi.fn()} view={viewFixture()} />);
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await screen.findByRole("menuitem", { name: "Rewind to here…" });
+    expect(screen.queryByRole("menuitem", { name: /^Edit/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Edit your message" })).not.toBeInTheDocument();
+  });
 
-    await chooseTurnAction("Edit");
-    const editor = screen.getByRole("textbox", { name: "Edit your message" });
-    expect(editor).toHaveValue("Please summarize this.");
-    // An unchanged message is not a revision.
-    expect(screen.getByRole("button", { name: "Save and run" })).toBeDisabled();
+  it("rewinds to a person's message with that message and the turns after it counted", async () => {
+    const onRewindTurn = vi.fn();
+    render(<ChatTranscript onRewindTurn={onRewindTurn} view={longView(3)} />);
+    const second = within(screen.getByText("User turn 1").closest("li")!);
 
-    await userEvent.clear(editor);
-    await userEvent.type(editor, "Summarize it in one line.");
-    await userEvent.click(screen.getByRole("button", { name: "Save and run" }));
+    await userEvent.click(second.getByRole("button", { name: "More actions" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Rewind to here…" }));
 
-    expect(onEditTurn).toHaveBeenCalledWith(ids.turn, "Summarize it in one line.");
-    // The renderer never edits the transcript itself; it waits for the server.
-    expect(screen.getByText("Please summarize this.")).toBeVisible();
+    expect(onRewindTurn).toHaveBeenCalledWith({
+      turnId: "00000000-0000-4000-8000-000000000002",
+      prompt: "User turn 1",
+      removedTurns: 2,
+    });
+  });
+
+  it("rewinds from a reply to the turns after it, and offers that only where a turn follows", async () => {
+    const onRewindTurn = vi.fn();
+    render(<ChatTranscript onRewindTurn={onRewindTurn} view={longView(3)} />);
+    const rows = screen
+      .getAllByRole("listitem")
+      .filter((row) => row.matches(".chat-transcript__turns > li"));
+    const first = within(rows[0]!);
+    const last = within(rows[2]!);
+
+    await userEvent.click(first.getByRole("button", { name: "Reply actions" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Rewind to here…" }));
+    expect(onRewindTurn).toHaveBeenCalledWith({
+      turnId: "00000000-0000-4000-8000-000000000002",
+      prompt: "User turn 1",
+      removedTurns: 2,
+    });
+    // Nothing follows the last reply, so there is nothing to rewind from it.
+    expect(last.queryByRole("button", { name: "Reply actions" })).not.toBeInTheDocument();
   });
 
   it("shows the conversation as it now stands and says how much history is behind it", () => {
@@ -1292,15 +1323,31 @@ describe("ChatTranscript", () => {
     expect(screen.queryByText("Please summarize this.")).not.toBeInTheDocument();
     expect(screen.queryByText("Here is the summary.")).not.toBeInTheDocument();
     expect(
-      screen.getByText(/1 earlier message was revised.*stays in this thread's history/),
+      screen.getByText(/1 earlier message was revised or rewound.*stays in this thread's history/),
     ).toBeVisible();
   });
 
-  it("offers a branch from a turn and states a branch's own provenance", async () => {
+  it("offers Fork from here on a message and its reply, and states a branch's own provenance", async () => {
     const onBranchTurn = vi.fn();
-    render(<ChatTranscript onBranchTurn={onBranchTurn} view={viewFixture()} />);
-    await chooseTurnAction("Branch from here");
-    expect(onBranchTurn).toHaveBeenCalledWith(ids.turn);
+    render(<ChatTranscript onBranchTurn={onBranchTurn} view={longView(3)} />);
+    const rows = screen
+      .getAllByRole("listitem")
+      .filter((row) => row.matches(".chat-transcript__turns > li"));
+
+    // From a person's message the fork runs through the turn before it, so the
+    // first message offers none.
+    await userEvent.click(within(rows[0]!).getByRole("button", { name: "More actions" }));
+    await screen.findByRole("menuitem", { name: "Copy turn with sources" });
+    expect(screen.queryByRole("menuitem", { name: "Fork from here" })).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+
+    await userEvent.click(within(rows[1]!).getByRole("button", { name: "More actions" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Fork from here" }));
+    expect(onBranchTurn).toHaveBeenLastCalledWith("00000000-0000-4000-8000-000000000001");
+
+    // From a reply it runs through that reply.
+    await userEvent.click(within(rows[1]!).getAllByRole("button", { name: "Fork from here" })[0]!);
+    expect(onBranchTurn).toHaveBeenLastCalledWith("00000000-0000-4000-8000-000000000002");
 
     const base = viewFixture();
     render(
@@ -1327,7 +1374,7 @@ describe("ChatTranscript", () => {
     ).toBeVisible();
   });
 
-  it("offers Fork, Branch and Restore from here whichever provider keeps the conversation", async () => {
+  it("offers Fork and Restore from here whichever provider keeps the conversation", async () => {
     const threadProvider = "10000000-0000-4000-8000-000000000001";
     const replyProvider = "10000000-0000-4000-8000-000000000002";
     const branchActions = async (groups: ReadonlyArray<PickerGroup>) => {
@@ -1350,7 +1397,6 @@ describe("ChatTranscript", () => {
       await screen.findByRole("menuitem", { name: "Forget" });
       const offered = {
         fork,
-        branch: screen.queryByRole("menuitem", { name: "Branch from here" }) !== null,
         restore: screen.queryByRole("menuitem", { name: "Restore from here" }) !== null,
       };
       unmount();
@@ -1370,7 +1416,7 @@ describe("ChatTranscript", () => {
           providerGroup(threadProvider, thread),
           providerGroup(replyProvider, reply),
         ]),
-      ).toEqual({ fork: true, branch: true, restore: true });
+      ).toEqual({ fork: true, restore: true });
     }
   });
 
@@ -1454,16 +1500,19 @@ describe("ChatTranscript", () => {
     });
   });
 
-  it("keeps revising and branching unavailable while a response is running", async () => {
+  it("keeps rewinding and forking unavailable while a response is running", async () => {
     render(
-      <ChatTranscript busy onBranchTurn={vi.fn()} onEditTurn={vi.fn()} view={viewFixture()} />,
+      <ChatTranscript busy onBranchTurn={vi.fn()} onRewindTurn={vi.fn()} view={longView(2)} />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
-    expect(await screen.findByRole("menuitem", { name: "Edit" })).toHaveAttribute(
+    const rows = screen
+      .getAllByRole("listitem")
+      .filter((row) => row.matches(".chat-transcript__turns > li"));
+    await userEvent.click(within(rows[1]!).getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Rewind to here…" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );
-    expect(screen.getByRole("menuitem", { name: "Branch from here" })).toHaveAttribute(
+    expect(screen.getByRole("menuitem", { name: "Fork from here" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );
@@ -1649,8 +1698,7 @@ describe("ChatTranscript", () => {
     });
   });
 
-  it("mirrors fork, checkpoint, and copy on the turn's context menu", async () => {
-    const onBranchTurn = vi.fn();
+  it("mirrors fork, rewind, checkpoint, and copy on the message's and the reply's context menus", async () => {
     render(
       <ChatTranscript
         checkpoints={{
@@ -1660,16 +1708,24 @@ describe("ChatTranscript", () => {
           onMark: vi.fn(),
           onRestore: vi.fn(),
         }}
-        onBranchTurn={onBranchTurn}
-        view={viewFixture()}
+        onBranchTurn={vi.fn()}
+        onRewindTurn={vi.fn()}
+        view={longView(2)}
       />,
     );
 
-    fireEvent.contextMenu(screen.getByText("Please summarize this."));
-    expect(await screen.findByRole("menuitem", { name: "Branch from here" })).toBeVisible();
+    fireEvent.contextMenu(screen.getByText("User turn 1"));
+    expect(await screen.findByRole("menuitem", { name: "Fork from here" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Rewind to here…" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Checkpoint" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Copy as Markdown" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Copy turn with sources" })).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+
+    fireEvent.contextMenu(screen.getByText("Assistant turn 0"));
+    expect(await screen.findByRole("menuitem", { name: "Fork from here" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Rewind to here…" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Checkpoint" })).not.toBeInTheDocument();
   });
 
   it("windows a 1000-turn conversation so only a bounded number of rows mount", () => {
@@ -1802,7 +1858,7 @@ describe("ChatTranscript", () => {
         />,
       );
 
-      expect(screen.getByText(/^4 earlier messages were revised\./)).toBeVisible();
+      expect(screen.getByText(/^4 earlier messages were revised or rewound\./)).toBeVisible();
     });
 
     it("offers the messages before the oldest loaded one", () => {
