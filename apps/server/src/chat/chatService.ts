@@ -40,6 +40,7 @@ import {
   SIDE_CHAT_LIST_FILES_TOOL_NAME,
   SIDE_CHAT_READ_FILE_TOOL_NAME,
   SIDE_CHAT_SEARCH_FILES_TOOL_NAME,
+  decodeChatRewindId,
   decodeChatThreadId,
   decodeChatThread,
   decodeChatTurn,
@@ -141,6 +142,7 @@ import {
   archiveChatThread,
   beginChatTurn,
   chatTurnAnsweredAttempt,
+  chatTurnsRemovedByRewind,
   chatTurnsThrough,
   changeChatProvider,
   changeChatResearch,
@@ -181,6 +183,7 @@ import {
 } from "../agentRun/agentRunParentContext";
 import {
   branchHandoffRecord,
+  restartHandoffRecord,
   conversationHandoffRefusalMessage,
   providerSwitchHandoffRecord,
   selectionBelongsToThread,
@@ -328,6 +331,7 @@ const CHAT_EVENT_NAMES = new Set([
   "chat.settings-updated@1",
   "chat.thread-created@1",
   "chat.thread-updated@1",
+  "chat.thread-rewound@1",
   "chat.turn-created@1",
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
@@ -1559,8 +1563,10 @@ export class ChatService {
           return await this.#sendTurn(command, executionContext);
         case "deliver-chat-agent-result":
           return await this.#deliverAgentResult(command, executionContext);
-        case "edit-chat-turn":
-          return await this.#editTurn(command, executionContext);
+        case "rewind-chat-thread":
+          return await this.#withThreadAdmission(command.threadId, () =>
+            this.#rewindThread(command),
+          );
         case "branch-chat-thread":
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#branchThread(command),
@@ -2898,142 +2904,60 @@ export class ChatService {
   }
 
   /**
-   * Revise an earlier user message and re-run the thread from that point.
+   * Rewind the thread in place to just before one of its turns.
    *
-   * Nothing is rewritten or deleted. The revised turn, its attempts, and every
-   * turn that followed it stay journaled exactly as they were; the edit appends
-   * a new turn that names the revised one in `supersedes`. The re-run is asked
-   * to continue from the conversation as it stood *before* the revised message,
-   * so the superseded exchange never leaks back into context.
+   * Nothing is deleted. The turn and every later one stay journaled; the
+   * rewind appends one `thread-rewound` event naming them, and the projection
+   * marks each so it leaves the active conversation exactly as a superseded
+   * turn does. Chat has no files, so the conversation is all that goes back,
+   * and the thread gains no filesystem or shell authority by it.
    *
-   * Provider, model, and Project scope come from the server's copy of the
-   * thread, so an edit can neither widen authority nor silently re-route, and
-   * `expectedVersion` is checked here before any side effect, so an edit
-   * computed against a stale transcript is refused rather than applied.
+   * It is refused while a response is running or the thread is compacting,
+   * and when the turn is not part of the active conversation, so a stale or
+   * foreign turn id rewinds nothing. Provider, model and Project scope are the
+   * server's copy and are not touched; `expectedVersion` is checked before any
+   * side effect, so a rewind computed against a stale transcript is refused.
    */
-  async #editTurn(
-    command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "edit-chat-turn" }>,
-    executionContext?: ChatServiceExecutionContext,
+  async #rewindThread(
+    command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "rewind-chat-thread" }>,
   ): Promise<ChatCommandResult> {
-    const accepted = await this.#withTurnAdmission(command.threadId, async () => {
-      const thread = this.#requireActiveThread(command.threadId);
-      this.#admitHarnessTurn(thread);
-      this.#assertExpectedThreadVersion(thread, command.expectedVersion);
-      const view = this.#requireThreadView(command.threadId);
-      this.#assertNoActiveTurn(view, thread.id);
-      this.#assertNotCompacting(thread.id);
-      const through = chatTurnsThrough(view.turns, command.turnId);
-      if (through === undefined) {
-        throw new ChatServiceError({
-          category: "invalid",
-          message: "Chat turn is not part of the active conversation.",
-        });
-      }
-      const revised = through[through.length - 1]!;
-      const history = through.slice(0, -1);
-      const timestamp = decodeTimestamp(this.#clock());
-      const userMessage = this.#prepareContent(thread.id, "user", command.prompt);
-      const userMessageRef = userMessage.reference;
-      const sequence = view.turns.length + 1;
-      const turnId = this.#uuid() as ChatTurn["id"];
-      // The revised turn's own extension selections are re-resolved, not
-      // trusted: a selection that was revoked since the original send must
-      // fail closed here exactly as it does on a fresh send.
-      const resolvedExtensions =
-        revised.extensionSelections === undefined || revised.extensionSelections.length === 0
-          ? undefined
-          : await this.#resolveExtensionContext(
-              thread,
-              revised.extensionSelections,
-              "send",
-              executionContext?.windowId,
-            );
-      const routing = await this.#computeTurnRouting(thread, turnId);
-      if (routing !== undefined && routing.decision.decision.kind === "waiting") {
-        await this.#multiModelRoute.persistTurnRoute(routing.decision);
-        throw new ChatServiceError(
-          decodeChatFailure({
-            category: "waiting",
-            message: routing.decision.decision.message,
-          }),
-        );
-      }
-      const executionThread = routing?.executionThread ?? thread;
-      const prepared = await this.#prepareTurnExecution(
-        executionThread,
-        command.prompt,
-        userMessageRef,
-        revised.attachmentIds,
-        undefined,
-        undefined,
-        undefined,
-        revised.extensionSelections,
-        "send",
-        executionContext,
-        resolvedExtensions,
-        history,
-      );
-      const turn = beginChatTurn(prepared.executionThread, {
-        turnId,
-        attemptId: this.#uuid() as ChatAttempt["id"],
-        providerSessionId: decodeProviderSessionId(this.#uuid()),
-        contextManifestId: prepared.context.snapshot.next.manifest.id,
-        userMessageRef,
-        ...(revised.attachmentIds.length === 0 ? {} : { attachmentIds: revised.attachmentIds }),
-        ...(prepared.extensionSelections.length === 0
-          ? {}
-          : {
-              extensionSelections: prepared.extensionSelections.map((selection) => ({
-                ...selection,
-                origin: { kind: "turn" as const, reference: String(turnId) },
-              })),
-            }),
-        supersedes: revised.id,
-        sequence,
-        expectedVersion: command.expectedVersion,
-        createdAt: timestamp,
+    this.#assertReady();
+    const thread = this.#requireActiveThread(command.threadId);
+    this.#assertExpectedThreadVersion(thread, command.expectedVersion);
+    if (thread.projectId !== undefined) this.#assertActiveChatProject(thread.projectId);
+    const view = this.#requireThreadView(command.threadId);
+    this.#assertNoActiveTurn(view, thread.id);
+    this.#assertNotCompacting(thread.id);
+    const [first, ...rest] = (chatTurnsRemovedByRewind(view.turns, command.turnId) ?? []).map(
+      (turn) => turn.id,
+    );
+    if (first === undefined) {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Chat turn is not part of the active conversation.",
       });
-      // A person sending the thread a message is re-engaging with it: a
-      // completed thread comes back and a snoozed one wakes, in the same
-      // thread update the turn already journals.
-      const updatedThread = {
-        ...withoutThreadRest(thread),
-        version: (command.expectedVersion + 1) as AggregateVersion,
-        updatedAt: timestamp,
-      };
-      this.#persistence.journal.append(
-        {
-          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
-          expectedVersion: command.expectedVersion,
-          events: [
-            this.#pending("chat.thread-updated@1", {
-              kind: "thread-updated",
-              thread: updatedThread,
-            }),
-            this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
-            ...(routing !== undefined && routing.decision.decision.kind === "selected"
-              ? [
-                  this.#pending("chat.turn-route-decided@1", {
-                    kind: "turn-route-decided",
-                    decision: routing.decision,
-                  }),
-                ]
-              : []),
-          ],
-        },
-        { beforeEvents: (connection) => this.#writePreparedContent(connection, userMessage) },
-      );
-      return { thread: updatedThread, turn, attempt: turn.attempts[0]!, prepared };
+    }
+    const timestamp = decodeTimestamp(this.#clock());
+    // A person rewinding the thread is re-engaging with it, as sending is.
+    const updatedThread = {
+      ...withoutThreadRest(thread),
+      version: (command.expectedVersion + 1) as AggregateVersion,
+      updatedAt: timestamp,
+    };
+    const rewound = {
+      kind: "thread-rewound" as const,
+      thread: updatedThread,
+      rewindId: decodeChatRewindId(this.#uuid()),
+      fromTurnId: command.turnId,
+      removedTurnIds: [first, ...rest] as const,
+      rewoundAt: timestamp,
+    };
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+      expectedVersion: command.expectedVersion,
+      events: [this.#pending("chat.thread-rewound@1", rewound)],
     });
-    await this.#runAttempt({
-      thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
-      turn: accepted.turn,
-      attempt: accepted.attempt,
-      prompt: command.prompt,
-      prepared: accepted.prepared,
-      ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
-    });
-    return { kind: "turn-created", turn: accepted.turn };
+    return rewound;
   }
 
   /**
@@ -3243,7 +3167,7 @@ export class ChatService {
   #selectConversationHandoff(
     thread: ChatThread,
     view: ChatThreadView | undefined,
-    reason: "provider-switch" | "branch",
+    reason: "provider-switch" | "branch" | "rewind",
     source: {
       /** The provider the conversation came from; absent for a branch whose tail kept no attempt. */
       readonly from:
@@ -3295,9 +3219,11 @@ export class ChatService {
     return {
       blocks: selection.blocks,
       record:
-        reason === "branch" || source.from === undefined
-          ? branchHandoffRecord(selection)
-          : providerSwitchHandoffRecord(selection, source.from),
+        reason === "rewind"
+          ? restartHandoffRecord(selection, "rewind")
+          : reason === "branch" || source.from === undefined
+            ? branchHandoffRecord(selection)
+            : providerSwitchHandoffRecord(selection, source.from),
     };
   }
 
@@ -3539,7 +3465,7 @@ export class ChatService {
     const thread = this.#requireActiveThread(command.threadId);
     this.#assertExpectedThreadVersion(thread, command.expectedVersion);
     const view = this.#requireThreadView(command.threadId);
-    const attempt = view.turns.at(-1)?.attempts.at(-1);
+    const attempt = activeChatTurns(view.turns).at(-1)?.attempts.at(-1);
     if (
       attempt === undefined ||
       attempt.outcome !== "waiting" ||
@@ -4000,8 +3926,8 @@ export class ChatService {
     canvasSelections?: ReadonlyArray<CanvasContextSelection>,
     /**
      * `#thread` mentions this turn names. Like preview and canvas selections,
-     * they belong to the turn that made them: a retry, resume, or edit passes
-     * none, so nothing a mention contributed is replayed.
+     * they belong to the turn that made them: a retry or resume passes none,
+     * so nothing a mention contributed is replayed.
      */
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
     extensionSelections?: ReadonlyArray<ExtensionSelection>,
@@ -4012,13 +3938,6 @@ export class ChatService {
       readonly entries: ReadonlyArray<ResolvedChatExtensionContextEntry>;
       readonly toolSet?: AppManagedToolSet;
     },
-    /**
-     * Conversation history this turn should run against. Only an edit supplies
-     * it, because an edit re-runs the thread from before the revised message
-     * and must not see the turns it supersedes. Absent means the thread's
-     * current active conversation.
-     */
-    historyTurns?: ReadonlyArray<ChatTurn>,
   ): Promise<PreparedChatTurn> {
     const settings = this.#requireChatSettings();
     const routed = await this.#resolveTurnProvider(requestedThread, settings, extensionPhase);
@@ -4027,15 +3946,41 @@ export class ChatService {
     const driver = routed.driver;
     const probe = routed.probe;
     const nativeConversation = driver.conversationOwnership === "provider";
-    // Only a new message continues a host-resumable session; a retry, resume,
-    // or edit is planned on the host as before.
+    // Only a new message continues a host-resumable session; a retry or
+    // resume is planned on the host as before.
     const resumableHost =
-      driver.conversationOwnership === "host-resumable" &&
-      extensionPhase === "send" &&
-      historyTurns === undefined;
+      driver.conversationOwnership === "host-resumable" && extensionPhase === "send";
     const threadView = this.#persistence.readChatThreadView(thread.id);
-    const previousTurn = threadView?.turns.at(-1);
-    const previous = previousTurn?.attempts.at(-1);
+    const tailTurn = threadView?.turns.at(-1);
+    // A rewound tail ran in a session that still holds the turns the person
+    // removed, so that session is never taken up again. With nothing kept the
+    // thread starts again as it did at first.
+    const rewoundAt = tailTurn?.rewound?.rewoundAt;
+    // An attempt that ran on a kept turn after the rewind (a retry, or a turn
+    // sent since) started its own session from the kept conversation, so it,
+    // not the rewound tail, is the session to carry on from.
+    const sinceRewind =
+      rewoundAt === undefined
+        ? undefined
+        : activeChatTurns(threadView?.turns ?? [])
+            .flatMap((turn) => turn.attempts.map((attempt) => ({ turn, attempt })))
+            .filter(({ attempt }) => attempt.createdAt > rewoundAt)
+            .reduce<{ turn: ChatTurn; attempt: ChatAttempt } | undefined>(
+              (latest, candidate) =>
+                latest === undefined || candidate.attempt.createdAt >= latest.attempt.createdAt
+                  ? candidate
+                  : latest,
+              undefined,
+            );
+    const rewoundTail = rewoundAt !== undefined && sinceRewind === undefined;
+    // A retry sends the kept turn it retries as its own prompt, so that turn
+    // does not count as something left to hand over.
+    const keptTurns = activeChatTurns(threadView?.turns ?? []).filter(
+      (turn) => String(turn.userMessageRef.contentId) !== String(currentRef.contentId),
+    );
+    const previousTurn =
+      sinceRewind?.turn ?? (rewoundTail && keptTurns.length === 0 ? undefined : tailTurn);
+    const previous = sinceRewind?.attempt ?? previousTurn?.attempts.at(-1);
     const sessionDecision = decideConversationSession({
       recipient: {
         providerInstanceId: String(thread.providerInstanceId),
@@ -4045,6 +3990,7 @@ export class ChatService {
         ? {}
         : {
             previous: {
+              ...(rewoundTail ? { rewound: true } : {}),
               providerInstanceId: String(previous.providerInstanceId),
               continuable: resumableHost
                 ? this.#hostResumableSessionContinues(thread, previous, threadView?.turns ?? [])
@@ -4071,10 +4017,10 @@ export class ChatService {
         thread.branchedFrom !== undefined &&
         previousTurn !== undefined &&
         previousTurn.sequence <= thread.branchedFrom.carriedTurnCount,
-      // A resume and an edit continue or rewrite a conversation that already
-      // has a session. A new message may start a handed-over one, and so may
-      // a retry whose own earlier session may never have received its handoff.
-      handoff: extensionPhase !== "resume" && historyTurns === undefined ? "allowed" : "refused",
+      // A resume continues a conversation that already has a session. A new
+      // message may start a handed-over one, and so may a retry whose own
+      // earlier session may never have received its handoff.
+      handoff: extensionPhase !== "resume" ? "allowed" : "refused",
     });
     if (sessionDecision.kind === "refuse") {
       throw new ChatServiceError({
@@ -4084,12 +4030,8 @@ export class ChatService {
       });
     }
     let nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
-    // Chat keeps its own edit and is never rewound, so a rewind handoff is a
-    // broken invariant here rather than a case a person could reach.
-    if (sessionDecision.kind === "new-session-with-handoff" && sessionDecision.reason === "rewind")
-      throw new Error("A Chat turn cannot hand over a rewound conversation.");
     const handoff =
-      sessionDecision.kind === "new-session-with-handoff" && sessionDecision.reason !== "rewind"
+      sessionDecision.kind === "new-session-with-handoff"
         ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, {
             // A handoff that never completed is made again from the provider
             // the conversation came from, not the one that may not have got it.
@@ -4107,13 +4049,6 @@ export class ChatService {
             )?.id,
           })
         : undefined;
-    if (nativeConversation && historyTurns !== undefined) {
-      throw new ChatServiceError({
-        category: "unsupported",
-        message:
-          "This provider cannot revise earlier native turns without replacing its conversation. Send a correction as a new message to keep the same session.",
-      });
-    }
     const attachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
@@ -4182,10 +4117,7 @@ export class ChatService {
             // an edit, retry, or resume may rewind the session behind it.
             // Only a continued session still holds the earlier snapshot; a new
             // one, handed over or not, has never seen it.
-            reusable:
-              sessionDecision.kind === "continue-session" &&
-              extensionPhase === "send" &&
-              historyTurns === undefined,
+            reusable: sessionDecision.kind === "continue-session" && extensionPhase === "send",
             previous,
           });
     const threadMentionContexts = await this.#resolveThreadMentions(
@@ -4215,7 +4147,7 @@ export class ChatService {
         providerFacts.modelLimitObservations,
         providerFacts.serviceLimits,
         researchRoute,
-        nativeConversation ? [] : historyTurns,
+        nativeConversation ? [] : undefined,
         sideChatContext,
         threadMentionContexts,
         handoff?.blocks,
@@ -5217,7 +5149,12 @@ export class ChatService {
     modelLimitObservations: ReadonlyArray<ModelContextLimits>,
     serviceLimits: ProviderServiceLimits,
     researchRoute: ResearchRouteDecision,
-    historyTurns?: ReadonlyArray<ChatTurn>,
+    /**
+     * The conversation to send in place of the thread's active one. A provider
+     * that keeps the conversation in its own session is given none, because its
+     * session already holds it.
+     */
+    historyTurns: ReadonlyArray<ChatTurn> | undefined,
     /**
      * Framed, read-only transcript of the thread a Side Chat sidecar is about
      * Present only for a sidecar, and resolved by the host on this
@@ -5277,17 +5214,18 @@ export class ChatService {
       }
       return content;
     };
-    // Superseded turns stay journaled but are not part of the conversation the
-    // model is asked to continue, so the transcript is always the active one.
+    // Superseded and rewound turns stay journaled but are not part of the
+    // conversation the model is asked to continue, so the transcript is always
+    // the active one.
     const selectedTurns = historyTurns ?? activeChatTurns(view?.turns ?? []);
     // Conversation a previous turn already compacted. Its summary is reused
     // instead of re-sending the material and paying for maintenance again, and
     // the transcript keeps every original message either way.
     const compacted = this.#contextHarness.compactedConversation(subject);
     // A summary stands for the sources it replaced, so it may only be reused
-    // when all of them belong to the history this turn selected. An edit runs
-    // the thread from before the revised message, and a summary reaching past
-    // that point would restate exactly the conversation the edit excludes.
+    // when all of them belong to the history this turn selected. After a
+    // rewind, a summary reaching past the kept turns would restate exactly the
+    // conversation the person removed.
     const reusableSummaryIds = reusableContextSummaryIds(
       compacted.summarizedSourceKeys,
       new Set(

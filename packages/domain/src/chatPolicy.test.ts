@@ -30,6 +30,7 @@ import {
   beginChatTurn,
   changeChatProvider,
   changeChatResearch,
+  chatTurnsRemovedByRewind,
   chatTurnsThrough,
   createChatThread,
   requestChatThreadDeletion,
@@ -740,9 +741,34 @@ describe("chat turn and attempt policy", () => {
 });
 
 describe("activeChatTurns", () => {
-  const turn = (id: string, supersedes?: string) => ({
+  const turn = (id: string, supersedes?: string, rewound?: true) => ({
     id,
     ...(supersedes === undefined ? {} : { supersedes }),
+    ...(rewound === undefined ? {} : { rewound }),
+  });
+
+  it("leaves out rewound turns, and a rewound edit does not bring back the turn it replaced", () => {
+    expect(
+      activeChatTurns([turn("a"), turn("b", undefined, true), turn("c", undefined, true)]).map(
+        (entry) => entry.id,
+      ),
+    ).toEqual(["a"]);
+    const edited = [turn("a"), turn("b"), turn("c", "b", true)];
+    expect(activeChatTurns(edited).map((entry) => entry.id)).toEqual(["a"]);
+    // A turn sent after the rewind is the thread's own again.
+    expect(activeChatTurns([...edited, turn("d")]).map((entry) => entry.id)).toEqual(["a", "d"]);
+  });
+
+  it("names the turns a rewind removes, or nothing for a turn outside the conversation", () => {
+    const turns = [turn("a"), turn("b"), turn("c", "b"), turn("d")];
+    expect(chatTurnsRemovedByRewind(turns, "c" as never)?.map((entry) => entry.id)).toEqual([
+      "c",
+      "d",
+    ]);
+    expect(chatTurnsRemovedByRewind(turns, "b" as never)).toBeUndefined();
+    expect(
+      chatTurnsRemovedByRewind([turn("a"), turn("b", undefined, true)], "b" as never),
+    ).toBeUndefined();
   });
 
   it("drops a superseded turn and everything that followed it", () => {

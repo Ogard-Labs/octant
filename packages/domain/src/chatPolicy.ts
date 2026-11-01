@@ -310,6 +310,10 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
  * journaled and recoverable. A `supersedes` marker naming a turn that is
  * already inactive changes nothing, so replaying an old event stream is
  * idempotent.
+ *
+ * A rewind marks the turns it removed `rewound` instead. Such a turn is never
+ * part of the conversation, but its `supersedes` marker still applies: a
+ * rewound edit must not bring the turn it replaced back.
  */
 export function activeChatTurns<T extends ChatTranscriptTurn>(
   turns: ReadonlyArray<T>,
@@ -322,9 +326,24 @@ export function activeChatTurns<T extends ChatTranscriptTurn>(
       );
       if (superseded >= 0) active.length = superseded;
     }
-    active.push(turn);
+    if (turn.rewound === undefined) active.push(turn);
   }
   return active;
+}
+
+/**
+ * The turns a rewind to just before `turnId` removes: that turn and every later
+ * one of the active conversation, oldest first. `undefined` when the turn is
+ * not part of the active conversation, so a stale or foreign turn never
+ * rewinds anything.
+ */
+export function chatTurnsRemovedByRewind<T extends ChatTranscriptTurn>(
+  turns: ReadonlyArray<T>,
+  turnId: ChatTurnId,
+): ReadonlyArray<T> | undefined {
+  const active = activeChatTurns(turns);
+  const index = active.findIndex((turn) => String(turn.id) === String(turnId));
+  return index < 0 ? undefined : active.slice(index);
 }
 
 /**
@@ -383,6 +402,8 @@ export function chatTurnsThrough<T extends ChatTranscriptTurn>(
 export interface ChatTranscriptTurn {
   readonly id: string;
   readonly supersedes?: string | undefined;
+  /** Present once a rewind removed the turn from the conversation. */
+  readonly rewound?: unknown;
 }
 
 export interface RetryChatTurnInput {

@@ -1119,7 +1119,8 @@ stay visible when the probe read them. Raw provider output never appears here.
 **Session rollback** says whether a provider can cut its own session back when
 you rewind a Work or Code thread. The Octant Harness can. The other providers
 say **None**: after a rewind, your next message starts a fresh session with
-the messages you kept handed over as text.
+the messages you kept handed over as text. A Chat thread always works this
+way, whichever provider it uses.
 
 A Codex CLI configured for Amazon Bedrock works in Octant only with a Bedrock
 API key: one you signed that Codex account in to Bedrock with, or, for the

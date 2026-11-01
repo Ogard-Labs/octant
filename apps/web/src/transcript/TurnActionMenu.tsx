@@ -9,6 +9,8 @@ export interface TurnActionMenuProps {
   readonly actions: ReadonlyArray<TurnAction>;
   readonly children: ReactNode;
   readonly onAction: (value: string) => void;
+  /** The control's name; a turn with two menus names the second one. */
+  readonly label?: string;
 }
 
 /**
@@ -33,7 +35,7 @@ export function TurnActionMenu(props: TurnActionMenuProps) {
           trigger={<Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />}
           selectionMode="action"
           triggerClassName="shell-icon-button"
-          triggerLabel="More actions"
+          triggerLabel={props.label ?? "More actions"}
           value=""
         />
       </div>

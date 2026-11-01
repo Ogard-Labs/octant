@@ -21,6 +21,7 @@ import {
   ChatDeletionRequested,
   ChatSettingsUpdated,
   ChatThreadCreated,
+  ChatThreadRewound,
   ChatThreadUpdated,
   ChatTurnCreated,
   ChatTurnRouteDecided,
@@ -484,6 +485,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("chat.settings-updated@1", 1, ChatSettingsUpdated)
     .register("chat.thread-created@1", 1, ChatThreadCreated)
     .register("chat.thread-updated@1", 1, ChatThreadUpdated)
+    .register("chat.thread-rewound@1", 1, ChatThreadRewound)
     .register("chat.turn-created@1", 1, ChatTurnCreated)
     .register("chat.attempt-updated@1", 1, ChatAttemptUpdated)
     .register("chat.attempt-response-appended@1", 1, ChatAttemptResponseAppended)

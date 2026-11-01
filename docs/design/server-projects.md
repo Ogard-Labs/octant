@@ -10,8 +10,9 @@ of the person's registered servers, reached over SSH. Architecture owns the boun
 the SSH connection, and the folder check at binding (`/api/server-projects`);
 Code threads there on the Octant Harness, with file tools, commands, and Git
 on the server at every level; thread terminals there; the Project terminal;
-the Git tab and the dock's Review tool, whose Git runs on the server; a
-thread's own worktree on the server and its pull request
+the Git tab and the dock's Review tool, whose Git runs on the server; the
+Files panel and file editor, and the Tests panel, which read, write and run
+on the server; a thread's own worktree on the server and its pull request
 ([Worktrees and pull requests](#worktrees-and-pull-requests)); and the Code
 sidebar, composer, and thread view that open them. On the host: Work Projects
 there, whose Work threads run on the Octant Harness with file tools and
@@ -120,8 +121,8 @@ hands are on the server.
   Project, server, and folder under labels of their own, so it can never name a
   retired checkout, and every host-side Git, file, test, checkpoint, and
   worktree path keeps refusing it as it refuses every `remote-root` checkout.
-  The Git tab reaches it only through Git on the server ([Panels](#panels)),
-  and a thread's own worktree is made there
+  The Git, Files, and Tests panels reach it only through the server
+  ([Panels](#panels)), and a thread's own worktree is made there
   ([Worktrees and pull requests](#worktrees-and-pull-requests)).
 - **Octant Harness only.** A thread there runs on the Octant Harness, whose
   inference stays on this host and whose hands are on the server. Every other
@@ -242,6 +243,38 @@ hands are on the server.
 - **One queue per Project.** Git changes on one server Project run one after
   another, as they do on one local checkout. A change the tab stops waiting
   for may still finish on the server; the next look at the tab shows it.
+- **Files.** A server thread's Files panel, file editor, and `@` path
+  mentions list, open, and save the thread's folder on the server: the
+  Project's own, or the thread's own worktree. The Tests panel runs there
+  too. Each path is
+  resolved to its real path on the server and refused there before any byte
+  travels when it is outside the folder or in a key or credential location
+  (the file tools' rule). A listing names only real folders and files, never
+  a link, skips `.git` and `node_modules` as a local listing does, and leaves
+  out credential locations; it keeps the local listing's entry and depth
+  bounds. A file's identity is its real path on the server, and a save is
+  refused as a conflict when the file's content changed since it was opened,
+  compared by digest. Saving is the person's own action, so it asks no
+  approval below Full access, as a local save does, and Plan refuses it. The
+  file references are journaled as a local file's are. _Rationale:_ file
+  times and inode numbers mean nothing from one server to the next, so the
+  digest is the only change check that holds everywhere; the check and the
+  write are two calls, so a change made on the server between them is
+  overwritten, and the write replaces the file whole so no reader there sees
+  half of it.
+- **No live updates.** The folder is not watched: the panel lists it when it
+  opens and again on **Refresh**, and a search across the folder is not
+  offered there. _Rationale:_ watching would keep a connection and a process
+  open on the server for as long as the panel is; a refresh costs one call.
+- **Tests.** The Tests panel offers what the folder's `package.json` and
+  `.octant/tests.json` define, read on the server through the Files rules.
+  A run is the discovered command, run on a terminal on the server in the
+  folder, with no environment of this host's; cancelling or timing out hangs
+  it up. The levels and approvals are a local run's: Plan refuses, and below
+  Full access the level's approver is asked. Each run is journaled as
+  `shield-remote-commands.ran@1`. A run needs a Git repository on the server
+  (its commit is the run's revision, read there with `git rev-parse`), and a
+  server that cannot be reached runs nothing anywhere.
 - Run review and merge (mergeability needs a scratch object store on this
   host), checkpoints, and a drafted commit message stay refused for a server
   thread. _Rationale:_ the draft's model session is opened with the checkout
@@ -305,15 +338,13 @@ hands are on the server.
 - The Work sidebar, composer, and thread view for a Work Project on a server,
   and the choice of mode when binding one in Settings; the host side is built.
 - Extra folders in a server Project.
-- The file browser and tests for a server Project; the Git tab, the Review
-  tool, managed worktrees, and pull requests are built.
 - Saved Project actions and their suggestions for a server Project; its
   Project terminal is built.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,
-  commands, terminals, the Git tab, the Review tool's history and worktrees
-  were exercised against a throwaway local `sshd` only, and pull requests
-  against a stand-in for `gh`, never GitHub. Linux
+  commands, terminals, the Git tab, the Review tool's history, Files, Tests
+  and worktrees were exercised against a throwaway local `sshd` only, and
+  pull requests against a stand-in for `gh`, never GitHub. Linux
   hosts are likewise untested; the connection uses only `ssh` options both
   platforms share.
