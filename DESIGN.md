@@ -2188,13 +2188,18 @@ the list being edited. While limits are off, or when the host cannot route
 runtimes through these rules, a plain note says the lists are saved but not applied
 ([Provider runtime network](docs/architecture.md#provider-runtime-network)).
 **Servers** opens with a sentence saying agents reach these servers with the
-person's SSH agent and Octant never reads key files, a quiet note when no SSH
-agent is running, one line per profile (Read-only, Operate, Admin) and one
-saying lock-out and destructive actions always ask. A server row shows
-`user@alias` in the code font, its profile, its runbook path, and how many
-deploys it has, with quiet Change and Remove; the form is Alias, User,
-Profile, Deploy commands (one per line, shown for Operate and Admin), and
-Runbook path. A refusal from the host shows inline in the alert role.
+person's SSH agent or a key Octant makes and keeps for one server, and Octant
+never reads key files, a quiet note when no SSH agent is running, one line per
+profile (Read-only, Operate, Admin) and one saying lock-out and destructive
+actions always ask. A server row shows `user@alias` in the code font, its
+profile, its runbook path, how many deploys it has, and "Key Octant keeps"
+when it signs in with one, with quiet Change and Remove, and **Show key** for
+such a server. Show key opens a line under the row: "Add this line to
+`~/.ssh/authorized_keys` for <user> on <alias>.", the public key in the code
+font, wrapping, and a quiet Copy that reads Copied once it has; a refusal
+shows there in the alert role. The form is Alias, User, Profile, Sign in with
+(Your SSH agent, the default, or A key Octant keeps), Deploy commands (one per
+line, shown for Operate and Admin), and Runbook path. A refusal from the host shows inline in the alert role.
 Below it, **Code Projects on your servers** lists each server Project as its
 name and `alias:folder` in the code font with a quiet Remove, and a form of
 Project name, Server (`user@alias`), and Folder on the server whose button

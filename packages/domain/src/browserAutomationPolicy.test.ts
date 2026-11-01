@@ -5,6 +5,7 @@ import {
   isContextExpired,
   shouldProtectCredentialField,
   originAllowed,
+  parseBrowserKeyChord,
   remoteBrowserActionReach,
 } from "./browserAutomationPolicy";
 import type {
@@ -160,7 +161,7 @@ describe("evaluateBrowserAction", () => {
     ).toBe("denied");
     expect(
       evaluateBrowserAction(
-        makeRequest({ kind: "press", target: undefined, value: "Meta+L" }),
+        makeRequest({ kind: "press", target: undefined, value: "Hyper+L" }),
         activeContext,
         authority,
       ).kind,
@@ -249,6 +250,40 @@ describe("what a paired device may do in the host's browser", () => {
   it("keeps typing into the page and closing its tabs on the host", () => {
     expect(remoteBrowserActionReach("type").kind).toBe("denied");
     expect(remoteBrowserActionReach("close-tab").kind).toBe("denied");
+  });
+
+  it("keeps choosing options, dragging, uploading, and changing tabs on the host", () => {
+    for (const kind of [
+      "select",
+      "drag",
+      "upload",
+      "tab-open",
+      "tab-select",
+      "tab-close",
+    ] as const) {
+      expect(remoteBrowserActionReach(kind).kind).toBe("denied");
+    }
+    expect(remoteBrowserActionReach("hover").kind).toBe("allowed");
+    expect(remoteBrowserActionReach("tab-list").kind).toBe("allowed");
+  });
+});
+
+describe("which keys an agent may press", () => {
+  it("reads a named key, a letter, or a chord of distinct modifiers and one key", () => {
+    expect(parseBrowserKeyChord("Enter")).toEqual({ modifiers: [], key: "Enter" });
+    expect(parseBrowserKeyChord("Control+A")).toEqual({ modifiers: ["Control"], key: "A" });
+    expect(parseBrowserKeyChord("Meta+Shift+K")).toEqual({
+      modifiers: ["Meta", "Shift"],
+      key: "K",
+    });
+    expect(parseBrowserKeyChord("Shift+Tab")).toEqual({ modifiers: ["Shift"], key: "Tab" });
+    expect(parseBrowserKeyChord("F12")).toEqual({ modifiers: [], key: "F12" });
+  });
+
+  it("refuses a repeated modifier, an unknown key, and text that is not a key", () => {
+    for (const value of ["Control+Control+A", "Hyper+A", "Control+", "F13", "ab", "Control+ab"]) {
+      expect(parseBrowserKeyChord(value)).toBeUndefined();
+    }
   });
 });
 
