@@ -886,11 +886,41 @@ export class BrowserAutomationService {
     signal?: AbortSignal,
   ): Promise<BrowserAutomationSnapshot> {
     const owned = this.#current(windowId, threadId);
+    if (owned !== undefined) await this.#refreshPicture(owned, signal);
+    return this.inspectThread(windowId, threadId);
+  }
+
+  /**
+   * One context as it stands, with a fresh picture when the last one is
+   * stale: the Browser pane that holds a context's id polls this, and an
+   * agent's action no longer leaves a picture behind for it.
+   */
+  async peekContext(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    contextId: BrowserContextId,
+    signal?: AbortSignal,
+  ): Promise<BrowserAutomationSnapshot> {
+    const owned = this.#contexts.get(contextId);
+    if (
+      owned !== undefined &&
+      owned.windowId === windowId &&
+      String(owned.threadId) === String(threadId) &&
+      // A native page is on the person's screen already; only a headless one
+      // is seen as a picture.
+      owned.record.presentation !== "native-live" &&
+      this.#authorityIsActive(owned)
+    ) {
+      await this.#refreshPicture(owned, signal);
+    }
+    return this.inspect(windowId, threadId, contextId);
+  }
+
+  async #refreshPicture(owned: OwnedContext, signal: AbortSignal | undefined): Promise<void> {
     // Called on the runtime, never detached: a runtime's peek reaches for its
     // own state, and a bare reference to it arrived there with no `this`.
     const runtime = this.#runtime;
     if (
-      owned !== undefined &&
       runtime.peek !== undefined &&
       // A live context is "running" for as long as it exists; "waiting" is one
       // still being created, whose page is not there to look at yet.
@@ -934,7 +964,6 @@ export class BrowserAutomationService {
         );
       }
     }
-    return this.inspectThread(windowId, threadId);
   }
 
   /**

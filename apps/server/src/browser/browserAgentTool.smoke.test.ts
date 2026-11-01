@@ -245,6 +245,12 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     const clicked = await tool.call({ operation: "click", selector: "#save" });
     const preview = await tool.service.peekThread(windowId, threadId);
     expect(preview.observation?.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    // The Browser pane, which polls the context by its id, gets one too.
+    const contextId = preview.context?.contextId;
+    if (contextId === undefined) throw new Error("No context.");
+    await new Promise((resolve) => setTimeout(resolve, 1_600));
+    const pane = await tool.service.peekContext(windowId, threadId, contextId);
+    expect(pane.observation?.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
     // The preview's picture does not make the agent's next action stale.
     const next = await tool.call({
       operation: "click",
