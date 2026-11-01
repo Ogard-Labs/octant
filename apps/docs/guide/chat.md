@@ -131,6 +131,12 @@ earlier messages were revised or rewound. A provider that keeps the conversation
 in its own session starts a new session after a rewind and Octant hands it the
 messages you kept as text; the note under the reply says so. Threads edited in an
 earlier version still open and read as they did.
+On the phone app, every message has **Fork from here** and **Rewind to here**
+under it. They do what they do on the computer: a fork opens a new thread, and a
+rewind asks once, then brings your removed message back to the phone's composer.
+The phone shows neither while a response is running or the computer is out of
+reach.
+
 Retrying a failed or interrupted response stays on the turn itself; a
 completed response carries a **Regenerate** control next to its timestamp and
 copy control — asking for a different answer to the same message. The previous

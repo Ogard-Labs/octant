@@ -19,6 +19,8 @@ export interface MessageBubbleProps {
   readonly showActions?: boolean;
   /** Extra actions (e.g. Retry) appended after Copy. */
   readonly extraActions?: ReadonlyArray<MessageActionItem>;
+  /** Fork from here and Rewind to here; shown under either role's message. */
+  readonly turnActions?: ReadonlyArray<MessageActionItem>;
 }
 
 function isUserRole(role: string): boolean {
@@ -86,6 +88,12 @@ export function MessageBubble(props: MessageBubbleProps) {
         <View style={[styles.bubble, styles.bubbleUser]}>
           <MessageBlocks text={props.body} tone="user" />
         </View>
+        {props.turnActions === undefined || props.turnActions.length === 0 ? null : (
+          <MessageActions
+            actions={props.turnActions}
+            {...(props.testID === undefined ? {} : { testID: `${props.testID}-actions` })}
+          />
+        )}
       </View>
     );
   }
@@ -121,18 +129,23 @@ export function MessageBubble(props: MessageBubbleProps) {
           );
         })}
       </View>
-      {showActions ? (
+      {showActions || (props.turnActions?.length ?? 0) > 0 ? (
         <MessageActions
           actions={[
-            {
-              id: "copy",
-              label: "Copy",
-              icon: "copy-outline",
-              onPress: async () => {
-                await Clipboard.setStringAsync(props.body);
-              },
-            },
-            ...(props.extraActions ?? []),
+            ...(showActions
+              ? [
+                  {
+                    id: "copy",
+                    label: "Copy",
+                    icon: "copy-outline" as const,
+                    onPress: async () => {
+                      await Clipboard.setStringAsync(props.body);
+                    },
+                  },
+                  ...(props.extraActions ?? []),
+                ]
+              : []),
+            ...(props.turnActions ?? []),
           ]}
           {...(props.testID === undefined ? {} : { testID: `${props.testID}-actions` })}
         />
