@@ -122,7 +122,12 @@ handoff, and fuller diagnostics are allowed; not built yet.
   `tab-switch` brings one to the front, and `tab-close` closes one but never the
   last. Every other operation acts on the tab in front. A tab action drops the
   snapshot's refs. On the desktop Browser the person sees the tab the agent
-  brings forward. A page's own popup is still refused or closed.
+  brings forward. A page's own popup is still refused or closed. A tab that
+  lands outside the allowed origins, by a redirect too, is left for a blank
+  page and the action is refused.
+- On the desktop Browser the person's own tabs share the context. A tab the
+  person took to a site no approval covers is listed without its address or
+  title, and the agent cannot read or act on it.
 - A paired device may hover and list tabs. It may not choose an option, drag,
   upload, or open, switch, or close a tab, as it may not navigate or type
   ([Architecture: remote access](../architecture.md#security-and-authority)).
@@ -139,6 +144,11 @@ only after the person approves it.
 - A symbolic link is refused, at the file and anywhere between the workspace
   and the file: the file's canonical path must be the path named.
 - At most 5 files, each at most 25 MB.
+- The host copies each checked file into a private temporary folder before it
+  asks, reading it through a descriptor that does not follow a link and that
+  must still be the file it checked, and the page receives the copies. A file
+  swapped for a link while the person reads the question is therefore never
+  what is sent. The copies are deleted when the action ends.
 - The person is asked every time, naming each file with its size and the site:
   "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
   covers those files to that site once. It is never remembered, so the card has

@@ -263,6 +263,7 @@ export function createBrowserAppManagedTools(
       if (request === undefined) return failure("invalid-browser-input");
       if (signal?.aborted) return failure("tool-interrupted");
       let uploadFiles: ReadonlyArray<string> | undefined;
+      let releaseUpload: (() => Promise<void>) | undefined;
       if (input.operation === "upload") {
         // A CLI in a terminal is not the person who would be asked.
         if (options.profileCaller === "terminal-grant") return failure("upload-needs-a-person");
@@ -283,20 +284,28 @@ export function createBrowserAppManagedTools(
             }),
         });
         if (admitted.status === "refused") return failure(admitted.reason);
-        if (signal?.aborted) return failure("tool-interrupted");
-        const refreshed = options.resolveAuthority(options.threadId, options.mode);
-        if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
-          return failure("browser-authority-stale");
-        }
-        if (!modelIsCurrent(options)) return failure("browser-model-stale");
         uploadFiles = admitted.paths;
+        releaseUpload = admitted.release;
       }
-      const acted = await options.browser.act({
-        windowId: options.windowId,
-        request,
-        capturedBy: "agent",
-        ...(uploadFiles === undefined ? {} : { uploadFiles }),
-      });
+      let acted: BrowserAutomationSnapshot;
+      try {
+        if (releaseUpload !== undefined) {
+          if (signal?.aborted) return failure("tool-interrupted");
+          const refreshed = options.resolveAuthority(options.threadId, options.mode);
+          if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
+            return failure("browser-authority-stale");
+          }
+          if (!modelIsCurrent(options)) return failure("browser-model-stale");
+        }
+        acted = await options.browser.act({
+          windowId: options.windowId,
+          request,
+          capturedBy: "agent",
+          ...(uploadFiles === undefined ? {} : { uploadFiles }),
+        });
+      } finally {
+        await releaseUpload?.();
+      }
       if (signal?.aborted) return failure("tool-interrupted");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");
       if (

@@ -1,5 +1,8 @@
-import { lstat, realpath } from "node:fs/promises";
-import { basename, isAbsolute, relative, resolve } from "node:path";
+import { constants, createWriteStream } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { MAX_BROWSER_UPLOAD_FILE_BYTES } from "@octant/contracts";
 
 /** One file an upload would send, as the person is asked about it. */
@@ -7,6 +10,9 @@ export interface BrowserUploadFile {
   readonly path: string;
   readonly name: string;
   readonly sizeBytes: number;
+  /** The file's identity when it was checked, so a swap afterwards is caught. */
+  readonly device: number;
+  readonly inode: number;
 }
 
 export type BrowserUploadResolution =
@@ -69,15 +75,28 @@ export async function resolveBrowserUploadFiles(
       return { status: "refused", reason: "upload-too-large" };
     }
     if (files.some((file) => file.path === candidate)) continue;
-    files.push({ path: candidate, name: basename(candidate), sizeBytes: stats.size });
+    files.push({
+      path: candidate,
+      name: basename(candidate),
+      sizeBytes: stats.size,
+      device: stats.dev,
+      inode: stats.ino,
+    });
   }
   return { status: "resolved", files };
 }
 
 /**
- * Resolve an upload's files and ask the person about exactly those, each time.
- * An upload is never remembered: the answer covers these files to this origin
- * once. Returns the paths a runtime may read, or why the upload stops.
+ * Resolve an upload's files, copy exactly those, and ask the person about
+ * them, each time. An upload is never remembered: the answer covers these
+ * files to this origin once.
+ *
+ * The runtime is handed the copies, never the workspace paths. An agent with a
+ * shell in the workspace could otherwise swap a checked file for a link to
+ * something else while the person reads the question, and the runtime, which
+ * follows links, would send that instead. Each copy is read from a descriptor
+ * opened without following a link and matched to the file that was checked.
+ * The caller releases the copies once the action is done.
  */
 export async function admitBrowserUpload(input: {
   readonly workspaceRoot: string | undefined;
@@ -86,7 +105,11 @@ export async function admitBrowserUpload(input: {
     files: ReadonlyArray<BrowserUploadFile>,
   ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
 }): Promise<
-  | { readonly status: "admitted"; readonly paths: ReadonlyArray<string> }
+  | {
+      readonly status: "admitted";
+      readonly paths: ReadonlyArray<string>;
+      readonly release: () => Promise<void>;
+    }
   | { readonly status: "refused"; readonly reason: string }
 > {
   if (input.workspaceRoot === undefined) {
@@ -94,9 +117,60 @@ export async function admitBrowserUpload(input: {
   }
   const resolved = await resolveBrowserUploadFiles(input.workspaceRoot, input.files);
   if (resolved.status === "refused") return resolved;
-  const outcome = await input.ask(resolved.files);
-  if (outcome !== "approved") return { status: "refused", reason: `browser-upload-${outcome}` };
-  return { status: "admitted", paths: resolved.files.map((file) => file.path) };
+  const staging = await mkdtemp(join(tmpdir(), "octant-browser-upload-"));
+  const release = () => rm(staging, { recursive: true, force: true });
+  try {
+    const paths: string[] = [];
+    for (const [index, file] of resolved.files.entries()) {
+      // A folder of its own per file keeps each file's name, which is what the
+      // page sees, even when two files share one.
+      const folder = join(staging, String(index));
+      await mkdir(folder, { mode: 0o700 });
+      const copy = join(folder, file.name);
+      if (!(await copyCheckedFile(file, copy))) {
+        await release();
+        return { status: "refused", reason: "upload-changed" };
+      }
+      paths.push(copy);
+    }
+    const outcome = await input.ask(resolved.files);
+    if (outcome !== "approved") {
+      await release();
+      return { status: "refused", reason: `browser-upload-${outcome}` };
+    }
+    return { status: "admitted", paths, release };
+  } catch (error) {
+    await release();
+    throw error;
+  }
+}
+
+/** Copy one checked file, refusing it if it is no longer the file that was checked. */
+async function copyCheckedFile(file: BrowserUploadFile, copy: string): Promise<boolean> {
+  let handle;
+  try {
+    handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    return false;
+  }
+  try {
+    const stats = await handle.stat();
+    if (
+      !stats.isFile() ||
+      stats.dev !== file.device ||
+      stats.ino !== file.inode ||
+      stats.size !== file.sizeBytes
+    ) {
+      return false;
+    }
+    await pipeline(
+      handle.createReadStream({ autoClose: false }),
+      createWriteStream(copy, { mode: 0o600 }),
+    );
+    return true;
+  } finally {
+    await handle.close();
+  }
 }
 
 /** The sentence a person reads before files leave this computer. */

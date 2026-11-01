@@ -1169,6 +1169,7 @@ async function browserTool(
   const request = browserToolAction(input, context);
   if (request === undefined) return failure("invalid-browser-input");
   let uploadFiles: ReadonlyArray<string> | undefined;
+  let releaseUpload: (() => Promise<void>) | undefined;
   if (input.operation === "upload") {
     const upload = options.browserUpload;
     const admitted = await admitBrowserUpload({
@@ -1180,19 +1181,27 @@ async function browserTool(
           : upload.request(browserUploadSummary(origin, files), signal),
     });
     if (admitted.status === "refused") return failure(admitted.reason);
-    const changed = browserAuthorityFailure(options);
-    if (changed !== undefined || signal?.aborted === true)
-      return failure(changed ?? "tool-interrupted");
     uploadFiles = admitted.paths;
+    releaseUpload = admitted.release;
   }
-  const acted = await guardedBrowserEffect(options, threadId, signal, () =>
-    options.browser!.act({
-      windowId: options.windowId,
-      request,
-      capturedBy: "agent",
-      ...(uploadFiles === undefined ? {} : { uploadFiles }),
-    }),
-  );
+  let acted: Awaited<ReturnType<typeof guardedBrowserEffect>>;
+  try {
+    if (releaseUpload !== undefined) {
+      const changed = browserAuthorityFailure(options);
+      if (changed !== undefined || signal?.aborted === true)
+        return failure(changed ?? "tool-interrupted");
+    }
+    acted = await guardedBrowserEffect(options, threadId, signal, () =>
+      options.browser!.act({
+        windowId: options.windowId,
+        request,
+        capturedBy: "agent",
+        ...(uploadFiles === undefined ? {} : { uploadFiles }),
+      }),
+    );
+  } finally {
+    await releaseUpload?.();
+  }
   if (acted.kind === "failure") return failure(acted.reason);
   if (
     input.operation === "screenshot" &&

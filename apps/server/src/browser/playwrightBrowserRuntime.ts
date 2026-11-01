@@ -536,6 +536,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
             throw blocked === undefined ? error : new BrowserNavigationBlockedError(blocked);
           }
         }
+        await leaveUnapprovedLanding(opened, tabs.allowedOrigins);
         return this.#tabsObservation(tabs);
       }
       case "tab-select": {
@@ -543,6 +544,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         const chosen = tabs.tabs.find((tab) => tab.tabId === request.tabId);
         if (chosen === undefined) throw new Error("This browser context has no such tab.");
         tabs.page = chosen.page;
+        await leaveUnapprovedLanding(chosen.page, tabs.allowedOrigins);
         return this.#tabsObservation(tabs);
       }
       case "tab-close": {
@@ -568,19 +570,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         return {};
       }
     }
-    // Chromium follows a redirect inside the routed request, so a top-level
-    // document can land on an origin the request guard never saw. The
-    // allowlist is this context's whole authority: leave the page rather than
-    // observe, script, or screenshot an origin outside it.
-    const landed = page.url();
-    if (
-      owned !== undefined &&
-      /^https?:/i.test(landed) &&
-      !originAllowed(landed, owned.allowedOrigins)
-    ) {
-      await page.goto("about:blank").catch(() => undefined);
-      throw new BrowserNavigationBlockedError(landed);
-    }
+    if (owned !== undefined) await leaveUnapprovedLanding(page, owned.allowedOrigins);
     throwIfAborted(signal);
     if (request.kind === "snapshot") {
       return this.#snapshot(page, owned?.protectCredentials ?? true);
@@ -806,6 +796,9 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
 
   /** Give a page the agent will act on an id it can name it by. */
   #adoptTab(owned: OwnedRuntimeContext, page: PlaywrightPagePort): void {
+    // The context reports a page before newPage() resolves, so the same page
+    // can arrive here twice; it is one tab.
+    if (owned.tabs.some((tab) => tab.page === page)) return;
     owned.tabs.push({ tabId: `t${String(owned.nextTabOrdinal)}`, page });
     owned.nextTabOrdinal += 1;
   }
@@ -993,6 +986,23 @@ function playwrightKey(value: string): string {
           : chord.key.toLowerCase()
         : chord.key;
   return [...chord.modifiers, key].join("+");
+}
+
+/**
+ * Chromium follows a redirect inside the routed request, so a top-level
+ * document can land on an origin the request guard never saw. The allowlist is
+ * the context's whole authority: leave the page rather than observe, script,
+ * or screenshot an origin outside it. Every tab is held to it, a new one too.
+ */
+async function leaveUnapprovedLanding(
+  page: PlaywrightPagePort,
+  allowedOrigins: ReadonlyArray<string>,
+): Promise<void> {
+  const landed = page.url();
+  if (/^https?:/i.test(landed) && !originAllowed(landed, allowedOrigins)) {
+    await page.goto("about:blank").catch(() => undefined);
+    throw new BrowserNavigationBlockedError(landed);
+  }
 }
 
 /** Refuse a ref whose page moved on or whose element is no longer the one named. */

@@ -75,7 +75,16 @@ let origin = "";
 
 beforeAll(async () => {
   server = createServer((request, response) => {
-    const body = pages[new URL(request.url ?? "/", "http://localhost").pathname];
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    // A page on this origin that sends the browser to another one: the same
+    // server under its other name is a different origin.
+    if (path === "/leave") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(302, { location: `http://localhost:${String(port)}/other` });
+      response.end();
+      return;
+    }
+    const body = pages[path];
     response.writeHead(body === undefined ? 404 : 200, { "content-type": "text/html" });
     response.end(body ?? "missing");
   });
@@ -92,6 +101,8 @@ function agentTool(
   options: {
     readonly uploadRoot?: string;
     readonly uploadAnswer?: "approved" | "denied";
+    /** Runs while the person is being asked, before the answer. */
+    readonly whileAsking?: () => Promise<void>;
   } = {},
 ) {
   const asked: Array<Record<string, unknown>> = [];
@@ -120,7 +131,9 @@ function agentTool(
     approvals: {
       request: async (request) => {
         asked.push(request as unknown as Record<string, unknown>);
-        return "upload" in request ? (options.uploadAnswer ?? "approved") : "approved";
+        if (!("upload" in request)) return "approved";
+        await options.whileAsking?.();
+        return options.uploadAnswer ?? "approved";
       },
     },
     ...(options.uploadRoot === undefined ? {} : { uploadRoot: () => options.uploadRoot }),
@@ -356,6 +369,24 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       });
       expect(no.result).toEqual({ error: "browser-upload-denied" });
       await declined.stop();
+      // A file swapped for a link while the person reads the question is not
+      // what gets sent: the page receives the file that was checked.
+      await writeFile(join(workspace, "secret.txt"), "a much longer secret");
+      const swapped = agentTool({
+        uploadRoot: workspace,
+        whileAsking: async () => {
+          await rm(join(workspace, "notes.txt"));
+          await symlink(join(workspace, "secret.txt"), join(workspace, "notes.txt"));
+        },
+      });
+      await swapped.call({ operation: "navigate", url: `${origin}/controls` });
+      const kept = await swapped.call({
+        operation: "upload",
+        selector: "#file",
+        files: ["notes.txt"],
+      });
+      expect(kept.result.page?.title).toBe("Attached notes.txt 5");
+      await swapped.stop();
       const unrooted = agentTool();
       await unrooted.call({ operation: "navigate", url: `${origin}/controls` });
       const none = await unrooted.call({
@@ -388,6 +419,10 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(last.isError).toBe(true);
     const elsewhere = await tool.call({ operation: "tab-open", url: "https://example.com/" });
     expect(elsewhere.result.failure?.category).toBe("policy-denied");
+    const redirected = await tool.call({ operation: "tab-open", url: `${origin}/leave` });
+    expect(redirected.result.failure?.category).toBe("policy-denied");
+    const listed = await tool.call({ operation: "tab-list" });
+    expect(JSON.stringify(listed.result.page?.tabs)).not.toContain("localhost");
     await tool.stop();
   });
 });

@@ -736,6 +736,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 if (owned.blockedNavigationUrl === undefined) throw error;
                 throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
               }
+              refuseUnapprovedPage(owned, opened.view.webContents);
               return agentTabs(owned);
             }
             case "tab-select": {
@@ -1427,14 +1428,34 @@ async function pressFocusedTarget(
     }
   }
   const event = keyEvent(chord);
+  // On macOS the editing shortcuts are the system's, not the page's: a Command
+  // chord reaches a text field as the editing command it stands for.
+  const command =
+    process.platform === "darwin" && chord.modifiers.includes("Meta")
+      ? MAC_EDITING_COMMANDS[
+          `${chord.modifiers.includes("Shift") ? "Shift+" : ""}${chord.key.toLowerCase()}`
+        ]
+      : undefined;
   await withDebugger(view, async (send) => {
-    await send("Input.dispatchKeyEvent", { type: "keyDown", ...event });
+    await send("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      ...event,
+      ...(command === undefined ? {} : { commands: [command] }),
+    });
     const { text: _text, ...released } = event;
     await send("Input.dispatchKeyEvent", { type: "keyUp", ...released });
   });
 }
 
 const MODIFIER_BITS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 } as const;
+const MAC_EDITING_COMMANDS: Readonly<Record<string, string>> = {
+  a: "selectAll",
+  c: "copy",
+  x: "cut",
+  v: "paste",
+  z: "undo",
+  "Shift+z": "redo",
+};
 const NAMED_KEYS: Readonly<Record<string, { code: string; keyCode: number; text?: string }>> = {
   Enter: { code: "Enter", keyCode: 13, text: "\r" },
   Tab: { code: "Tab", keyCode: 9 },
@@ -1619,20 +1640,24 @@ function agentTabId(tabId: string): string {
 /** The context's tabs as the agent sees them, after a tab action. */
 function agentTabs(owned: OwnedSurface): BrowserSurfaceRuntimeObservation {
   const front = contentsView(owned).webContents;
+  const frontShown =
+    front.getURL() !== "" &&
+    front.getURL() !== "about:blank" &&
+    originAllowed(front.getURL(), owned.policy.allowedOrigins);
   return {
-    ...(front.getURL() === "" || front.getURL() === "about:blank"
-      ? {}
-      : { url: redactedObservationUrl(front.getURL()).slice(0, 4_096) }),
-    ...(front.getTitle() === "" ? {} : { title: front.getTitle().slice(0, 1_024) }),
+    ...(frontShown ? { url: redactedObservationUrl(front.getURL()).slice(0, 4_096) } : {}),
+    ...(frontShown && front.getTitle() !== "" ? { title: front.getTitle().slice(0, 1_024) } : {}),
     tabs: owned.tabs.map((tab) => {
       const url = tab.view.webContents.getURL();
+      // A tab the person took to a site approval never covered is theirs:
+      // the agent learns that it exists, not where it is or what it shows.
+      const shown =
+        url !== "" && url !== "about:blank" && originAllowed(url, owned.policy.allowedOrigins);
       const title = tab.view.webContents.getTitle();
       return {
         tabId: agentTabId(tab.tabId),
-        ...(url === "" || url === "about:blank"
-          ? {}
-          : { url: redactedObservationUrl(url).slice(0, 4_096) }),
-        ...(title === "" ? {} : { title: title.slice(0, 1_024) }),
+        ...(shown ? { url: redactedObservationUrl(url).slice(0, 4_096) } : {}),
+        ...(shown && title !== "" ? { title: title.slice(0, 1_024) } : {}),
         active: tab.tabId === owned.activeTabId,
       };
     }),
