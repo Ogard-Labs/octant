@@ -1007,6 +1007,7 @@ export function startOctantServer(
       windowAuthorityStore,
       windowCanOpenThread,
       workArtifactProjection,
+      workThreadProjection,
       workThreadService,
       workTurnProjection,
     });

@@ -1,8 +1,9 @@
-import type {
-  CodeCheckoutId,
-  CodeFileChangeNotice,
-  CodeRelativePath,
-  CodeThreadId,
+import {
+  decodeCodeProjectFilePath,
+  type CodeCheckoutId,
+  type CodeFileChangeNotice,
+  type CodeRelativePath,
+  type CodeThreadId,
 } from "@octant/contracts";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { FolderTree, RefreshCw } from "lucide-react";
@@ -15,6 +16,8 @@ export interface CodeFileExplorerPanelProps {
   readonly threadId?: CodeThreadId | undefined;
   readonly checkoutId?: CodeCheckoutId | undefined;
   readonly directory?: CodeRelativePath | undefined;
+  /** The Project's extra folders, by absolute path, each listed below the checkout. */
+  readonly extraFolders?: ReadonlyArray<string> | undefined;
   readonly onOpenFile: (entry: Extract<CodeFileExplorerEntry, { readonly kind: "file" }>) => void;
   readonly selectedPath?: CodeRelativePath | undefined;
   /** Injected in tests; otherwise built from the server URL and capability. */
@@ -91,6 +94,83 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
         truncated={controller.truncated}
         {...(props.selectedPath === undefined ? {} : { selectedPath: props.selectedPath })}
       />
+      {(props.extraFolders ?? []).map((folder) => (
+        <ExtraFolderExplorer
+          key={folder}
+          folder={folder}
+          onOpenFile={props.onOpenFile}
+          {...(props.threadId === undefined ? {} : { threadId: props.threadId })}
+          {...(props.checkoutId === undefined ? {} : { checkoutId: props.checkoutId })}
+          {...(props.client === undefined ? {} : { client: props.client })}
+          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+          {...(props.windowCapability === undefined
+            ? {}
+            : { windowCapability: props.windowCapability })}
+        />
+      ))}
     </div>
   );
+}
+
+/**
+ * One extra folder of the Project, listed as its own tree. The host lists it
+ * when asked for the folder by absolute path, and an entry opens by that
+ * folder's path joined to the entry's, which is how the editor names a file
+ * outside the checkout. The folder has no file watch, so it relists on Refresh.
+ */
+function ExtraFolderExplorer(
+  props: Pick<
+    CodeFileExplorerPanelProps,
+    "threadId" | "checkoutId" | "client" | "serverUrl" | "windowCapability" | "onOpenFile"
+  > & { readonly folder: string },
+) {
+  // A folder spelled in a way the file-path schema refuses (a decomposed
+  // Unicode name, a backslash) is a valid folder on disk, so it is shown as
+  // unavailable here rather than taking the whole explorer down.
+  const directory = projectFilePath(props.folder);
+  const controller = useCodeFileListingController({
+    enabled: directory !== undefined,
+    ...(directory === undefined ? {} : { directory }),
+    ...(props.client === undefined ? {} : { client: props.client }),
+    ...(props.threadId === undefined ? {} : { threadId: props.threadId }),
+    ...(props.checkoutId === undefined ? {} : { checkoutId: props.checkoutId }),
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const name = props.folder.slice(props.folder.lastIndexOf("/") + 1);
+  return (
+    <section aria-label={`${name} (extra folder)`} className="code-file-explorer-panel__folder">
+      <h3 className="code-file-explorer-panel__folder-name">
+        <FolderTree aria-hidden="true" size={14} strokeWidth={1.8} />
+        {name}
+      </h3>
+      {directory === undefined || controller.status === "error" ? (
+        <OctantAlert className="code-file-explorer__error" tone="danger">
+          {directory === undefined
+            ? "Octant cannot list this folder because its name uses characters the editor does not accept."
+            : (controller.errorMessage ?? "This folder's files are unavailable.")}
+        </OctantAlert>
+      ) : (
+        <CodeFileExplorer
+          entries={controller.entries}
+          loading={controller.status === "loading"}
+          onOpenFile={(entry) => {
+            const path = projectFilePath(`${props.folder}/${entry.path}`);
+            if (path !== undefined) props.onOpenFile({ ...entry, path });
+          }}
+          onRefresh={() => void controller.refresh()}
+          refreshing={controller.status === "loading"}
+          truncated={controller.truncated}
+        />
+      )}
+    </section>
+  );
+}
+
+function projectFilePath(path: string) {
+  try {
+    return decodeCodeProjectFilePath(path);
+  } catch {
+    return undefined;
+  }
 }

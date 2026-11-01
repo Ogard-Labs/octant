@@ -2685,7 +2685,15 @@ Git start in the main folder. Built.
   folder as it does the main one, and the ACP client file and terminal tools
   accept an absolute path or working directory inside an extra folder and
   bind every Project folder for the command they launch; a path outside all
-  of them is refused.
+  of them is refused. The editor and the Files explorer open, read and save
+  a file in an extra folder under the same checkout authority and the same
+  confinement as the checkout's own: the request names the file by absolute
+  path, the root authority places it in one of the Project's current extra
+  folders after resolving the checkout, and the folder is then the file's
+  root. The explorer lists each extra folder as its own tree beneath the
+  checkout's, labelled with the folder's last component. An extra folder has
+  no file watch, so its tree relists on Refresh, and a save there is
+  journaled like any other save of the thread.
 - **Terminals and Project actions.** A Project terminal starts in the main
   folder unless the person picks an extra folder, and a saved action runs
   under the folder they pick (the action's own directory is relative to it).
@@ -2694,7 +2702,12 @@ Git start in the main folder. Built.
   binds all of the Project's folders that exist like the main folder, so the
   shell can move between them; the pick only chooses where it starts. The
   header's action buttons and the start screen's quick tools offer the pick
-  once a Project has an extra folder.
+  once a Project has an extra folder. A Code thread's terminal binds every
+  Project folder that exists as a Project terminal does, and its start command
+  may name an extra folder to start in, compared as the exact path the Project
+  lists; the host refuses any other, and a folder missing on disk is left out
+  of the binding. The Terminal tab does not offer that pick yet: a thread
+  terminal started from it still opens in the thread's working directory.
 - **Work files.** A path relative to the main folder is always the main
   folder's; a file in an extra folder is named by its absolute path, and the
   host honours an absolute path only inside one of the Project's current
@@ -2706,8 +2719,17 @@ Git start in the main folder. Built.
   the item limit and naming each by its last component, so it carries no
   host path. A turn's record of the files that changed while it ran watches
   every folder the same way, so a file written in an extra folder lists as
-  Work's own. Artifacts the host itself creates, revises or exports still
-  take a name with no path and live in the main folder.
+  Work's own. An artifact the host creates for a Work thread takes a name with
+  no path and is placed in the folder that thread works in: its working
+  directory, which is always inside the main folder, read from the thread by
+  the host and never from the request, and refused for a thread of another
+  Project. Without a thread it goes to the main folder. The artifact's record
+  keeps that folder, so revising, renaming, converting and exporting it act on
+  the same folder.
+  _Rationale:_ a thread's working directory is a path relative to the main
+  folder by contract, so no thread works in an extra folder, and an artifact
+  never lands in one. Letting a request name an extra folder would widen what
+  a create request may reach beyond what it reaches today.
 - **`@file` picker and Code search.** A mention is the main folder's relative
   path or the absolute path of a file inside one of the Project's current
   extra folders; the host reads an absolute path only there and reports any
@@ -2715,12 +2737,11 @@ Git start in the main folder. Built.
   main folder under the same confinement and root identity checks, and the
   Code picker offers those files by absolute path. Code search walks the
   checkout and then each extra folder under the shared budgets, and a match
-  there carries its folder. The editor opens files of the checkout only, so
-  such a match is listed but not opened from the search dialog.
-- **Not yet.** Artifacts the host itself creates, revises or exports in Work
-  still live in the main folder, and the Code editor and explorer do not open
-  files of an extra folder. An agent reaches them through its runtime's own
-  tools.
+  there carries its folder; choosing it opens the file in the editor by the
+  folder's path joined to the match's.
+- **Not yet.** The Terminal tab has no control to start a thread terminal in
+  an extra folder, and an extra folder has no live file watch in the
+  explorer.
 
 ## Agent task display
 

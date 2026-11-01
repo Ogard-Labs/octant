@@ -360,6 +360,12 @@ const StartTerminal = Schema.Struct({
    * the host refuses it for any other caller and then starts no terminal.
    */
   browserGrant: Schema.optional(Schema.Literal("on")),
+  /**
+   * Which of the Project's folders the shell starts in: the real path of one
+   * extra folder, exactly as the Project lists it. Absent means the thread's
+   * working directory. The host refuses any other path.
+   */
+  folder: Schema.optional(Schema.String.pipe(Schema.maxLength(4_096))),
 }).annotations(strict);
 const AttachTerminal = Schema.Struct({
   kind: Schema.Literal("attach-terminal"),

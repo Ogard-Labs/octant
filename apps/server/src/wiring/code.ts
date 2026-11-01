@@ -26,6 +26,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { projectExtraFolderRoots } from "@octant/domain";
+import { withProjectExtraFolders } from "../code/codeProjectFolderRoot";
 import { Effect } from "effect";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
@@ -743,7 +744,27 @@ export function wireCode(deps: CodeDependencies) {
             canAccessProject: canAccessCodeProject,
           },
           checkouts,
-          roots,
+          // A file in a Project's extra folder is named by absolute path and
+          // opens, reads, saves and lists under the folder as its own root.
+          roots: {
+            resolve: withProjectExtraFolders({
+              resolve: (scopeId, thread, checkout, relativePath) =>
+                roots.resolve(scopeId, thread, checkout, relativePath),
+              extraFolders: (thread) => {
+                const project = persistence.readProject(thread.projectId);
+                return project?.type === "code" ? projectExtraFolderRoots(project) : [];
+              },
+              probePath: codeWorkingDirectoryProbePath,
+              fileId: stableCodeFileId,
+              statIdentity: async (path) => {
+                const metadata = await lstat(path, { bigint: true });
+                if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+                  throw new Error("Project folder is unavailable.");
+                }
+                return { device: metadata.dev.toString(10), inode: metadata.ino.toString(10) };
+              },
+            }),
+          },
           files: codeFiles,
           tests: codeTestDiscovery,
           watcher: codeFileWatch,

@@ -1,5 +1,7 @@
 import { Schema } from "effect";
 import { ProjectId } from "./projects";
+import { WorkThreadId } from "./workThreads";
+import { ThreadWorkingDirectory } from "./workingDirectory";
 import { EventActor, UtcTimestamp } from "./events";
 import { PreviewSourceVersion, PreviewTarget } from "./previews";
 
@@ -80,6 +82,12 @@ export const WorkArtifactIdentity = Schema.Struct({
   format: WorkArtifactFormat,
   artifactRef: WorkArtifactRef,
   displayName: WorkArtifactDisplayName,
+  /**
+   * The folder the artifact sits in, relative to the Project root. Absent
+   * means the root. The host sets it from the thread the artifact was made
+   * for; it is never a host path.
+   */
+  directory: Schema.optional(ThreadWorkingDirectory.pipe(Schema.filter((value) => value !== "."))),
   createdAt: UtcTimestamp,
 }).annotations(strict);
 export type WorkArtifactIdentity = typeof WorkArtifactIdentity.Type;
@@ -182,6 +190,12 @@ export const WorkMutationRequest = Schema.Union(
     format: WorkArtifactFormat,
     displayName: WorkArtifactDisplayName,
     content: Schema.NonEmptyTrimmedString,
+    /**
+     * The Work thread the artifact is made for. The host places the file in
+     * the folder that thread works in; absent, it goes to the Project's main
+     * folder. The request never names a path.
+     */
+    threadId: Schema.optional(WorkThreadId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("revise-artifact"),
