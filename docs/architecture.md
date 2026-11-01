@@ -1137,8 +1137,8 @@ SSH to the person's own machines goes through the thread's shell, in Work
 and Code alike: a thread runs `ssh`, `scp`, or `rsync` as ordinary commands.
 Octant stores no SSH key and carries no SSH protocol of its own; the
 commands use the person's own SSH agent and, at Full access, their own
-configuration. Below Full access a command reaches a registered server
-through relays and an agent socket the host opens for that one command
+configuration. Below Full access a harness command reaches a registered
+server through relays and an agent socket the host opens for that one command
 ([Octant Shield](#octant-shield), servers as built). No mode bans them: in
 Work as in Code they are commands at the thread's level. At Guarded, the
 first connection to each host in a thread asks the person, naming the host,
@@ -11181,15 +11181,20 @@ thread's servers and their runbooks (the first 8 KB of each, read when the
 turn starts) as a notes block that says it grants nothing; a provider
 runtime's turn gets the same block a harness turn does.
 
-**Confined commands.** Below Full access, on macOS, a harness command that
-is one plain `ssh`, `scp`, or `rsync` call to registered servers gets, for
-that command only, from the host (`apps/server/src/shield/serverSshAccess.ts`):
+**Confined commands.** Below Full access, on macOS and Linux, a harness
+command that is one plain `ssh`, `scp`, or `rsync` call to registered
+servers gets, for that command only, from the host
+(`apps/server/src/shield/serverSshAccess.ts`):
 
-- a loopback relay per server it names, which carries bytes to the address
-  the person's own `ssh -G <alias>` resolves and nowhere else; Seatbelt opens
-  only these ports beside the egress proxy, so the command reaches no other
-  host, and a server the person's config reaches through `ProxyJump` or
-  `ProxyCommand` gets no relay;
+- a relay per server it names, which carries bytes to the address the
+  person's own `ssh -G <alias>` resolves and nowhere else, so the command
+  reaches no other host; a server the person's config reaches through
+  `ProxyJump` or `ProxyCommand` gets no relay. On macOS the relay is a
+  loopback port, and Seatbelt opens only these ports beside the egress
+  proxy. On Linux it is a Unix socket in the host's private folder, which
+  the capsule binds read-only, and the capsule's forwarder listens on one
+  loopback port inside the capsule per server (from 2201) and carries each
+  connection to that server's socket;
 - an agent socket the host owns, in a private folder, that passes the
   person's SSH agent only the requests to list keys, sign a login, and bind a
   session to a host key, and answers adding, removing, or locking a key with
@@ -11200,7 +11205,8 @@ that command only, from the host (`apps/server/src/shield/serverSshAccess.ts`):
   registered user, the host keys the person's known-hosts files record for it
   (read by `ssh-keygen -F` on the host), strict host key checking, and
   forwarding, proxy commands, local commands, and connection sharing off;
-- the user-database lookup `ssh` makes for the person's own account.
+- on macOS, the user-database lookup `ssh` makes for the person's own
+  account (on Linux the capsule already reads `/etc`).
 
 The secret guard's list is untouched: the key files stay unreadable, and the
 person's own config and known hosts are read only on the host. A command that
@@ -11209,10 +11215,13 @@ this and reaches no server. Rationale: Seatbelt cannot name a remote host, so
 per-server loopback relays are the narrowest network grant; an agent socket
 the host owns was chosen over the credential broker because the person's
 agent already holds the keys and never hands them out, and the filter keeps a
-command from changing what it holds. Not built: Linux, whose Bubblewrap
-capsule would need its forwarder to carry the relays; a provider runtime's
-own commands, which run in its own sandbox or the provider launch profile and
-keep today's reach.
+command from changing what it holds. On Linux the forwarder carries a
+server's port straight to its relay rather than through the egress proxy as
+a `CONNECT`, as the tool bridge's ports go: the relay already reaches one
+address and nothing else, the proxy would refuse that address as private,
+and macOS's Seatbelt rule likewise opens the relay beside the proxy, not
+through it. Not built: a provider runtime's own commands, which run in its
+own sandbox or the provider launch profile and keep today's reach.
 
 **Guarded.** The first connection to each host in a thread asks the person,
 naming the host ("First connection to web1 in this thread"), and is never
