@@ -198,4 +198,41 @@ describe("the library model", () => {
     ]);
     expect(items[0]?.providerLogo).toBe("claude");
   });
+
+  it("keeps every provider a package declares, labels it with all of them, and finds it under each", () => {
+    const two = pkg(
+      "duo",
+      { trusted: true },
+      {
+        compatibility: {
+          platforms: ["macos"],
+          modes: ["code"],
+          providerFamilies: ["claude", "codex"],
+        },
+      },
+    );
+    const only = pkg(
+      "solo",
+      { trusted: true },
+      { compatibility: { platforms: ["macos"], modes: ["code"], providerFamilies: ["gemini"] } },
+    );
+    const items = buildLibrary({ snapshot: snapshot(two, only), connectors: [] });
+    expect(items.find((item) => item.name === "duo")).toMatchObject({
+      provider: "claude, codex",
+      providers: ["claude", "codex"],
+    });
+    const names = (provider: string) =>
+      filterLibrary(items, { query: "", kind: "all", state: "all", provider }).map(
+        (item) => item.name,
+      );
+    expect(names("claude")).toEqual(["duo"]);
+    expect(names("codex")).toEqual(["duo"]);
+    expect(names("gemini")).toEqual(["solo"]);
+  });
+
+  it("does not promise that every tool call asks, since remembered approvals cover some", () => {
+    const text = JSON.stringify(buildLibrary({ snapshot: snapshot(pkg("a", {})) }));
+    expect(text).not.toMatch(/every (tool )?call still asks/);
+    expect(text).toContain("approval policy");
+  });
 });

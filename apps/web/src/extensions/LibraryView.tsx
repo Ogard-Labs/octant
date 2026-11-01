@@ -153,7 +153,7 @@ export function LibraryView(props: LibraryViewProps) {
               options={STATE_FILTERS.map((option) => ({ id: option.value, label: option.label }))}
               value={filter.state}
             />
-            {providers.length > 1 ? (
+            {providers.length > 0 ? (
               <OctantSelectField
                 aria-label="Provider"
                 className="library__select"
@@ -483,7 +483,7 @@ function LibraryDetail(props: LibraryDetailProps) {
       <p className="library-detail__foot oct-meta">
         {ref === undefined
           ? "Installing never trusts or turns anything on by itself. You confirm each step, except a connector, which installs, trusts and turns on as one confirmed act."
-          : "Tool calls still ask under the thread's mode, whatever is on here."}
+          : "Tool calls follow the thread's approval policy, including approvals you chose to remember."}
       </p>
     </OctantDialog>
   );

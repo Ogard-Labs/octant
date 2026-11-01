@@ -47,8 +47,10 @@ export interface LibraryItem {
   readonly summary: string;
   /** Where it comes from, in the words the Installed view uses. */
   readonly source: string;
-  /** The provider it is for, or "Every provider". */
+  /** The providers it is for, in words, or "Every provider". */
   readonly provider: string;
+  /** Each provider it is for, one entry each, for filtering; "Every provider" when it names none. */
+  readonly providers: ReadonlyArray<string>;
   /** The key of the bundled provider logo when the item belongs to one provider. */
   readonly providerLogo?: string;
   /** A catalog grouping, for items that have one. */
@@ -98,7 +100,7 @@ const CAPABILITY_FACTS: Readonly<Record<Capability, CapabilityFact>> = {
   },
   mcp: {
     ability: "Gives the agent tools from a tool server",
-    cost: "Starts or reaches a tool server; every call still asks",
+    cost: "Starts or reaches a tool server; calls follow the thread's approval policy",
     level: "medium",
   },
   filesystem: {
@@ -253,6 +255,7 @@ function packageItem(pkg: InstalledPackage, connectors: ReadonlyArray<ConnectorC
   const fit = providerFit(pkg);
   const families = pkg.compatibility.providerFamilies;
   const only = families.length === 1 ? String(families[0]) : undefined;
+  const providers = families.length === 0 ? [EVERY_PROVIDER] : families.map(String);
   const name =
     connector?.displayName ??
     (pkg.addedInSettings === true ? server?.displayName : undefined) ??
@@ -270,7 +273,8 @@ function packageItem(pkg: InstalledPackage, connectors: ReadonlyArray<ConnectorC
     name: String(name),
     summary,
     source: connector !== undefined ? "Connector" : packageSource(pkg.source),
-    provider: only === undefined ? "Every provider" : only,
+    provider: providers.join(", "),
+    providers,
     ...(only === undefined ? {} : { providerLogo: only }),
     ...(connector === undefined ? {} : { category: CONNECTOR_CATEGORY_LABEL[connector.category] }),
     featured: connector?.category === "popular",
@@ -310,7 +314,8 @@ function skillItem(skill: StandaloneSkill): LibraryItem {
     name: skill.displayName,
     summary: skill.description ?? "A written skill the agent can follow.",
     source: packageSource(skill.source),
-    provider: "Every provider",
+    provider: EVERY_PROVIDER,
+    providers: [EVERY_PROVIDER],
     featured: false,
     state,
     stateLabel: LIBRARY_STATE_LABEL[state],
@@ -327,7 +332,7 @@ function skillItem(skill: StandaloneSkill): LibraryItem {
 
 function connectorItem(entry: ConnectorCatalogEntry): LibraryItem {
   const host = new URL(entry.url).host;
-  const lines = [`Sends your requests to ${host}; every tool call still asks`];
+  const lines = [`Sends your requests to ${host}; tool calls follow the thread's approval policy`];
   if (entry.auth.kind === "sign-in")
     lines.push(`Signs in to ${host} and keeps the grant in the credential store`);
   if (entry.auth.kind === "key") lines.push("Uses a key you create, kept in the credential store");
@@ -337,7 +342,8 @@ function connectorItem(entry: ConnectorCatalogEntry): LibraryItem {
     name: entry.displayName,
     summary: entry.description,
     source: "Connector catalog",
-    provider: "Every provider",
+    provider: EVERY_PROVIDER,
+    providers: [EVERY_PROVIDER],
     category: CONNECTOR_CATEGORY_LABEL[entry.category],
     featured: entry.category === "popular",
     state: "available",
@@ -358,7 +364,8 @@ function marketplaceItem(entry: ExtensionCatalogEntry): LibraryItem {
     name: entry.displayName,
     summary: "Found in Marketplace. Review shows exactly what it holds before anything installs.",
     source: packageSource(entry.source),
-    provider: "Every provider",
+    provider: EVERY_PROVIDER,
+    providers: [EVERY_PROVIDER],
     featured: false,
     state: "available",
     stateLabel: LIBRARY_STATE_LABEL.available,
@@ -381,6 +388,7 @@ function discoveredItems(listing: DiscoveredAgentToolingListing): ReadonlyArray<
     summary: server.summary,
     source: `Found in ${ORIGIN_NAME[server.origin]}`,
     provider: ORIGIN_NAME[server.origin],
+    providers: [ORIGIN_NAME[server.origin]],
     providerLogo: ORIGIN_LOGO[server.origin],
     featured: false,
     state: "available",
@@ -391,7 +399,7 @@ function discoveredItems(listing: DiscoveredAgentToolingListing): ReadonlyArray<
       level: "medium",
       lines:
         server.transport === "stdio"
-          ? ["Starts a program on this computer; every call still asks"]
+          ? ["Starts a program on this computer; calls follow the thread's approval policy"]
           : [CAPABILITY_FACTS.mcp.cost],
     },
     handoff: "installed",
@@ -403,6 +411,7 @@ function discoveredItems(listing: DiscoveredAgentToolingListing): ReadonlyArray<
     summary: `Installed in ${ORIGIN_NAME[plugin.origin]}${plugin.enabledThere ? "" : " (off there)"}.`,
     source: `Found in ${ORIGIN_NAME[plugin.origin]}`,
     provider: ORIGIN_NAME[plugin.origin],
+    providers: [ORIGIN_NAME[plugin.origin]],
     providerLogo: ORIGIN_LOGO[plugin.origin],
     featured: false,
     state: "available",
@@ -449,6 +458,7 @@ export interface LibraryFilter {
 }
 
 export const ALL_PROVIDERS = "all";
+const EVERY_PROVIDER = "Every provider";
 
 /** Installed, then needing a decision, before items nobody has set up. */
 const STATE_RANK: Readonly<Record<LibraryState, number>> = {
@@ -472,7 +482,13 @@ export function filterLibrary(
       if (filter.state === "installed") return item.state !== "available";
       return item.state === "blocked" || item.state === "needs-trust";
     })
-    .filter((item) => filter.provider === ALL_PROVIDERS || item.provider === filter.provider)
+    .filter(
+      (item) =>
+        filter.provider === ALL_PROVIDERS ||
+        item.providers.includes(filter.provider) ||
+        // An item that names no provider works with every one of them.
+        item.providers.includes(EVERY_PROVIDER),
+    )
     .filter(
       (item) =>
         needle === "" ||
@@ -491,7 +507,9 @@ export function filterLibrary(
 }
 
 export function libraryProviders(items: ReadonlyArray<LibraryItem>): ReadonlyArray<string> {
-  return [...new Set(items.map((item) => item.provider))].sort((a, b) => a.localeCompare(b));
+  return [...new Set(items.flatMap((item) => item.providers))]
+    .filter((provider) => provider !== EVERY_PROVIDER)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 export function libraryCounts(
