@@ -820,6 +820,7 @@ describe("Code app-managed tools", () => {
     expect(act).toHaveBeenLastCalledWith({
       windowId,
       capturedBy: "agent",
+      refuseStaleRevision: true,
       request: expect.objectContaining({
         kind: "press",
         value: "Enter",

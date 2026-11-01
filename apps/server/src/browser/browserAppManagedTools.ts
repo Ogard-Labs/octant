@@ -64,6 +64,7 @@ export interface BrowserAppManagedToolsOptions {
       readonly capturedBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
+      readonly refuseStaleRevision?: boolean;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -306,6 +307,7 @@ export function createBrowserAppManagedTools(
       windowId: options.windowId,
       request,
       capturedBy: "agent",
+      refuseStaleRevision: true,
       ...(uploadFiles === undefined ? {} : { uploadFiles }),
       ...(releaseUpload === undefined ? {} : { releaseUpload }),
     });

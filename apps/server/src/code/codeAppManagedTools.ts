@@ -483,6 +483,7 @@ export interface CodeAppManagedToolsOptions {
       readonly capturedBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
+      readonly refuseStaleRevision?: boolean;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -1204,6 +1205,7 @@ async function browserTool(
       windowId: options.windowId,
       request,
       capturedBy: "agent",
+      refuseStaleRevision: true,
       ...(uploadFiles === undefined ? {} : { uploadFiles }),
       ...(release === undefined ? {} : { releaseUpload: release }),
     }),

@@ -502,6 +502,40 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     const read = await tool.call({ operation: "read-page", selector: "#name" });
     expect(read.result.page?.title).toBe("Saved Ada");
 
+    // A step whose revision is out of date does not run, and stops the batch.
+    const revision = Number(
+      (await tool.call({ operation: "read-page", selector: "#name" })).result.page
+        ?.observationRevision,
+    );
+    const outdated = (await tool.call({
+      operation: "steps",
+      steps: [
+        {
+          operation: "type",
+          selector: "#name",
+          text: "Grace",
+          expectedObservationRevision: revision - 1,
+        },
+        { operation: "click", selector: "#save" },
+      ],
+    })) as unknown as {
+      readonly isError: boolean;
+      readonly result: {
+        readonly failedStep: {
+          readonly step: number;
+          readonly answer: { readonly failure?: { readonly category: string } };
+        };
+      };
+    };
+    expect(outdated.isError).toBe(true);
+    expect(outdated.result.failedStep).toMatchObject({
+      step: 1,
+      answer: { failure: { category: "stale" } },
+    });
+    expect(
+      (await tool.call({ operation: "read-page", selector: "#name" })).result.page?.title,
+    ).toBe("Saved Ada");
+
     for (const steps of [
       Array.from({ length: 11 }, () => ({ operation: "snapshot" })),
       [{ operation: "steps", steps: [{ operation: "snapshot" }] }],
