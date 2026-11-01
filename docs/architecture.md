@@ -1121,9 +1121,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   shows the Project terminal and Project actions, the developer surfaces Work
   has today; no thread's authority reads it.
 
-Allowed; not built yet: an ACP agent whose shell runs in-process with no protocol request reporting
-`unsupported` at Guarded and Reviewed and running only at Full access, in
-Work as in Code. Octant Shield answers a Work thread's approvals at Auto on
+An ACP agent whose shell runs in-process with no protocol request reports
+`unsupported` at Guarded and Reviewed and runs only at Full access, in Work as
+in Code (built: the profile's `shellWithoutRequest`; no shipped profile sets
+it). Octant Shield answers a Work thread's approvals at Auto on
 every runtime that routes them to Octant, as it answers a Code thread's:
 the Octant Harness, Claude Code, Codex, OpenCode, ACP agents, and Pi, judged
 against the Project folder and counted against the Work thread's spend; see
@@ -3452,7 +3453,7 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | Claude Code  | With the setup off: own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers start only with a trusted Project's, because `strictMcpConfig` governs both                                     |
   | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                                    | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                               | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on and the person's tool servers on in Chat; its own subagents only at Full access, because their approvals never reach Octant                                                                                                                                                      |
-  | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                                                 | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills, Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents. Not built yet: promotion off the ACP bridge                                                                                    |
+  | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                                                 | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills, Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents. Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                                    |
   | OpenCode     | Shell and delegation follow the level in Work as in Code; Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`, never `always`                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                                 | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card. Not built yet: Reviewed through Octant Shield |
 
   Every other provider keeps the deny rules for Project code and skills under
@@ -9022,8 +9023,11 @@ access` agree); a thread's own change is journaled as
   - **Pi** reports no user questions, file changes, diffs, or task progress,
     and offers Octant's tools only after its probe attests the tool bridge on
     the one release that bridge was read against.
-  - **Mistral Vibe** is first-class but still runs through the ACP bridge, so
-    every ACP gap below applies to it until it is promoted (not built yet).
+  - **Mistral Vibe** is first-class and runs through the ACP bridge, so every
+    ACP gap below applies to it. Its `vibe-app-server` is not adopted
+    ([why](design/provider-runtimes.md#mistral-vibe-surface)); reading usage,
+    compaction, review, and questions from `vibe-acp`'s own ACP extensions is
+    allowed, not built yet.
   - **ACP agents** do not report usage, so a spend ceiling leaves their turns
     out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
@@ -9053,9 +9057,8 @@ access` agree); a thread's own change is journaled as
 
   Work at the shared level is not a capability row: it changes the session a
   driver acquires, not what the driver declares. Each provider runs a Work
-  session as it runs a Code session at the same level (built; Octant Shield
-  answers a Work thread's approvals at Auto on every runtime, and the
-  in-process-shell part is allowed, not built yet):
+  session as it runs a Code session at the same level (built, with Octant
+  Shield answering a Work thread's approvals at Auto on every runtime):
 
   - **Claude Code** starts the Work session with its shell tool; Guarded asks
     per command, Reviewed uses its automatic mode or Octant Shield, Full access
