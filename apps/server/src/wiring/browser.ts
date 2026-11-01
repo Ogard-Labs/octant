@@ -35,6 +35,8 @@ import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRunt
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
 import { defaultShellSettings, enabledModes, isBrowserProfileSiteRemembered } from "@octant/domain";
+import { prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
+import { createBrowserDownloadJournal } from "../browser/browserDownloadJournal";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -186,6 +188,19 @@ export function wireBrowser(deps: BrowserDependencies) {
             headless: headlessBrowserRuntime,
           }));
     yield* Effect.promise(() => browserRuntime.reconcile?.() ?? Promise.resolve());
+    // A file an earlier run held for an agent has no page and no question left.
+    yield* Effect.promise(() =>
+      prepareBrowserDownloadHoldRoot("headless").then(
+        () => undefined,
+        (error: unknown) => {
+          console.warn(
+            `Octant could not clear the Browser's held downloads: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        },
+      ),
+    );
     // A person's own browser for a Work or Code Project, with no thread. It
     // shares the runtime, so shutdown closes its pages too, but it lives apart
     // from the thread-owned automation service so no agent tool can reach it.
@@ -255,6 +270,16 @@ export function wireBrowser(deps: BrowserDependencies) {
       ),
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       isUnattendedScope: isRoutineHostScope,
+      // The person's "Let agents download files" switch, read each time: it
+      // lives in shell settings, which only a local window writes.
+      agentDownloadsEnabled: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).agentBrowserDownloads,
+      downloads: createBrowserDownloadJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      }),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       now: Date.now,

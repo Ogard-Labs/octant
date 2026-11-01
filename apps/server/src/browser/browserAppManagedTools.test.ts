@@ -651,6 +651,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       steps: { steps: [{ operation: "snapshot" }] },
       resize: { width: 390, height: 844 },
       "sign-in": { reason: "The dashboard needs your account." },
+      "download-save": { downloadId: "d1" },
       "read-page": {},
       click: { selector: "#go" },
       type: { selector: "#name", text: "octant" },

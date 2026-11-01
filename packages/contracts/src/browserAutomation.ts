@@ -189,6 +189,9 @@ export const MAX_BROWSER_UPLOAD_FILES = 5;
 /** The largest file an upload may send. */
 export const MAX_BROWSER_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
 
+/** How many downloads one browsing context holds at once; the oldest is discarded. */
+export const MAX_BROWSER_HELD_DOWNLOADS = 5;
+
 /** The longest any wait may last; a wait names its own limit up to this. */
 export const MAX_BROWSER_WAIT_MS = 30_000;
 /** How long a wait lasts when it names no limit. */
@@ -246,6 +249,29 @@ export const BrowserDialogReport = Schema.Struct({
   answer: Schema.Literal("accepted", "dismissed"),
 }).annotations(strict);
 export type BrowserDialogReport = typeof BrowserDialogReport.Type;
+
+/**
+ * A download a page started while the agent drove it, as the action's answer
+ * reports it. A held download is in a private folder of the host, not in the
+ * workspace; the agent saves it with `download-save` naming `downloadId`, and
+ * the person is asked then. A refused one was cancelled and holds nothing.
+ */
+export const BrowserDownloadReport = Schema.Union(
+  Schema.Struct({
+    state: Schema.Literal("held"),
+    downloadId: Schema.String.pipe(Schema.pattern(/^d[1-9][0-9]{0,5}$/)),
+    name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+    sizeBytes: Schema.Int.pipe(Schema.nonNegative()),
+    /** Sniffed from the file's first bytes, never from the page's header. */
+    mediaType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  }).annotations(strict),
+  Schema.Struct({
+    state: Schema.Literal("refused"),
+    name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+    reason: Schema.Literal("too-large", "unfinished", "failed"),
+  }).annotations(strict),
+);
+export type BrowserDownloadReport = typeof BrowserDownloadReport.Type;
 
 /** The longest page outline an observation carries, in characters. */
 export const MAX_BROWSER_SNAPSHOT_OUTLINE_CHARACTERS = 32 * 1024;
@@ -419,6 +445,8 @@ export const BrowserObservation = Schema.Struct({
   viewport: Schema.optional(BrowserViewportSize),
   /** The page's own dialogs since the last action, and how each was answered. */
   dialogs: Schema.optional(Schema.Array(BrowserDialogReport).pipe(Schema.maxItems(8))),
+  /** Downloads the page started during this action; see the report. */
+  downloads: Schema.optional(Schema.Array(BrowserDownloadReport).pipe(Schema.maxItems(16))),
   /** The context's tabs, after a tab action. */
   tabs: Schema.optional(
     Schema.Array(

@@ -80,6 +80,7 @@ describe("octantSettingsRegistry", () => {
       "public-links",
       "public-link-service",
       "browser-site-approvals",
+      "browser-agent-downloads",
       "tool-approvals",
     ]);
     expect(section("access")?.label).toBe("Access");

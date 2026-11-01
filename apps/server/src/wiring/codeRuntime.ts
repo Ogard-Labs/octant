@@ -849,12 +849,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserAutomationService.inspectThread(windowId, threadId),
           create: (input) => browserAutomationService.create(input),
           act: (input) => browserAutomationService.act(input),
+          saveDownload: (input) => browserAutomationService.saveDownload(input),
           releaseThread: (windowId, threadId) =>
             browserAutomationService.releaseThread(windowId, threadId),
           holdForPerson: (windowId, threadId) =>
             browserAutomationService.holdForPerson(windowId, threadId),
         },
         isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
+        // A paired device is not at the computer a saved download would land on.
+        browserDownloadRefusal: (windowId) =>
+          browserToolApprovalService.isPairedDevice(windowId)
+            ? "download-needs-this-computer"
+            : undefined,
         browserSignIn: {
           // A routine's or subagent's turn has nobody to sign in, and a paired
           // device cannot see the page.

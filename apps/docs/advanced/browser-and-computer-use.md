@@ -199,7 +199,22 @@ report to a form. It may only send files from the thread's own folder (the
 Project folder in Work, the checkout in Code), never a linked file or one
 outside that folder, and Octant asks you every time, naming each file and the
 site: **Upload once** or **Deny**. There is no "Always allow" for uploads.
-Downloads stay blocked.
+
+Downloads are blocked by default. To let agents download files, turn on **Let
+agents download files** in Settings → Permissions; only you can, from a window
+on this computer, and a phone, a routine, a subagent or the agent itself cannot.
+With it on, a file a page starts downloading while the agent drives it is held
+on this computer, outside your project, and the agent tells you its name, size
+and type. Nothing reaches your project until the agent asks to save it and you
+agree: Octant asks every time, for example "Let the agent save report.pdf
+(1.2 MB, PDF) from https://example.com into this thread's workspace?", and
+there is no "Always allow". A saved file goes into a `downloads` folder at the
+top of the thread's own folder, never over a file that is already there (a
+second `report.pdf` becomes `report (2).pdf`). Octant stops files over 25 MB,
+keeps at most five held at a time, and refuses programs and installers (such as
+`.exe`, `.dmg`, `.pkg`, `.sh`) even if they are renamed. Held files are deleted
+when you answer, when the page closes, and when Octant starts. Downloads you
+start yourself in the Browser pane stay blocked.
 
 A snapshot is a short outline of the page: its headings, text, and controls,
 each control with a reference such as `e4` the agent passes back to click or

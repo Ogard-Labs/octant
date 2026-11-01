@@ -74,6 +74,9 @@ function harness(
       typeof BrowserAutomationService
     >[0]["recordExternalContentIngestion"];
     readonly captures?: ConstructorParameters<typeof BrowserAutomationService>[0]["captures"];
+    readonly agentDownloadsEnabled?: boolean;
+    readonly downloads?: ConstructorParameters<typeof BrowserAutomationService>[0]["downloads"];
+    readonly observed?: Partial<Awaited<ReturnType<BrowserRuntimePort["act"]>>>;
   } = {},
 ) {
   const contexts = new Set<BrowserContextId>();
@@ -95,6 +98,7 @@ function harness(
         // Every action's picture reaches the model; only an explicit
         // screenshot is ever a candidate for a thread capture.
         screenshotDataUrl: "data:image/png;base64,AAAA",
+        ...options.observed,
       };
     }),
     peek: vi.fn(async (contextId) => {
@@ -132,6 +136,10 @@ function harness(
       ? {}
       : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
     ...(options.captures === undefined ? {} : { captures: options.captures }),
+    ...(options.agentDownloadsEnabled === undefined
+      ? {}
+      : { agentDownloadsEnabled: () => options.agentDownloadsEnabled === true }),
+    ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
     uuid: () => ids.shift() ?? crypto.randomUUID(),
     clock: () => new Date(now).toISOString(),
     now: () => now,
@@ -635,6 +643,96 @@ describe("BrowserAutomationService", () => {
     expect(release).not.toHaveBeenCalled();
     await service.stop(windowId, threadOne, contextOne);
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  describe("downloads", () => {
+    const click = () => request({ kind: "click", target: "#get" });
+
+    it("asks the runtime to hold a download only for the agent tool, with the switch on", async () => {
+      const on = harness({ agentDownloadsEnabled: true });
+      await on.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await on.service.act({
+        windowId,
+        request: click(),
+        capturedBy: "agent",
+        holdDownloads: true,
+      });
+      expect(on.runtime.act).toHaveBeenLastCalledWith(
+        contextOne,
+        expect.objectContaining({ downloads: "hold" }),
+        expect.anything(),
+      );
+      // A person's own action in the pane, or an agent turn that may not hold, never does.
+      await on.service.act({ windowId, request: click() });
+      await on.service.act({ windowId, request: click(), capturedBy: "agent" });
+      await on.service.act({ windowId, request: click(), holdDownloads: true });
+      for (const call of vi.mocked(on.runtime.act).mock.calls.slice(1)) {
+        expect(call[1]).not.toHaveProperty("downloads");
+      }
+      const off = harness({ agentDownloadsEnabled: false });
+      await off.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await off.service.act({
+        windowId,
+        request: click(),
+        capturedBy: "agent",
+        holdDownloads: true,
+      });
+      expect(off.runtime.act).toHaveBeenLastCalledWith(
+        contextOne,
+        expect.not.objectContaining({ downloads: expect.anything() }),
+        expect.anything(),
+      );
+    });
+
+    it("reports what the runtime holds, journals a stopped file, and saves only an id it reported", async () => {
+      const refused = vi.fn();
+      const { service } = harness({
+        agentDownloadsEnabled: true,
+        downloads: { saved: vi.fn(), refused },
+        observed: {
+          downloads: [
+            {
+              state: "held",
+              downloadId: "d1",
+              name: "a.pdf",
+              sizeBytes: 3,
+              mediaType: "application/pdf",
+            },
+            { state: "refused", name: "big.bin", reason: "too-large" },
+          ],
+        },
+      });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const acted = await service.act({
+        windowId,
+        request: request({ kind: "click", target: "#get" }),
+        capturedBy: "agent",
+        holdDownloads: true,
+      });
+      expect(acted.observation?.downloads).toHaveLength(2);
+      expect(refused).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: threadOne, origin: "https://example.com" }),
+        expect.objectContaining({ name: "big.bin", reason: "too-large" }),
+      );
+      const ask = vi.fn();
+      const unknown = await service.saveDownload({
+        windowId,
+        threadId: threadOne,
+        downloadId: "d9",
+        workspaceRoot: "/workspace",
+        ask,
+      });
+      expect(unknown).toEqual({ status: "refused", error: "download-not-found" });
+      const otherWindow = await service.saveDownload({
+        windowId: otherWindowId,
+        threadId: threadOne,
+        downloadId: "d1",
+        workspaceRoot: "/workspace",
+        ask,
+      });
+      expect(otherWindow).toEqual({ status: "refused", error: "download-not-found" });
+      expect(ask).not.toHaveBeenCalled();
+    });
   });
 
   it("keeps a page open while the person signs in past its session limit, one hand-off at a time", async () => {

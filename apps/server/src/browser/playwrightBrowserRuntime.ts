@@ -31,7 +31,9 @@ import {
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
 } from "@octant/contracts/browser-automation";
 import { MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS } from "@octant/contracts/product-feedback";
+import { browserDownloadHoldRoot, prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
 import { chromium } from "playwright-core";
+import { PlaywrightDownloadHold, type PlaywrightDownloadPort } from "./playwrightDownloadHold";
 import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
@@ -102,6 +104,12 @@ export interface PlaywrightPagePort {
       failure(): { errorText: string } | null;
     }) => void,
   ): void;
+  /**
+   * A download the page started. Optional like the other listeners; the
+   * context accepts downloads by default, and the runtime cancels every one it
+   * is not holding for an agent action.
+   */
+  on?(event: "download", listener: (download: PlaywrightDownloadPort) => void): void;
   locator(selector: string): {
     evaluate<T>(expression: (element: Element) => T): Promise<T>;
     waitFor(options?: { readonly timeout: number }): Promise<void>;
@@ -179,6 +187,8 @@ export interface PlaywrightBrowserRuntimeOptions {
   readonly processGroupExists?: (pid: number) => Promise<boolean> | boolean;
   readonly killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void;
   readonly shutdownTimeoutMs?: number;
+  /** Where the browser writes a download as it arrives; see `PlaywrightDownloadHold`. */
+  readonly downloadFolder?: string;
 }
 
 interface OwnedRuntimeContext {
@@ -226,6 +236,8 @@ interface OwnedRuntimeContext {
    * it claims.
    */
   instrumentedPages: WeakSet<PlaywrightPagePort>;
+  /** The files the agent's actions made this context hold; see the class. */
+  readonly downloads: PlaywrightDownloadHold;
 }
 
 export const DEFAULT_BROWSER_EXECUTABLE_CANDIDATES = [
@@ -305,6 +317,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       dialogs: [],
       failedRequests: [],
       instrumentedPages: new WeakSet(),
+      downloads: new PlaywrightDownloadHold(this.#options.downloadFolder),
     };
     try {
       // Every request, not only navigations: a subresource reaches the network
@@ -464,12 +477,35 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     request: BrowserRuntimeAction,
     signal: AbortSignal,
   ): Promise<BrowserRuntimeObservation> {
-    const observed = await this.#act(contextId, request, signal);
+    const owned = this.#contexts.get(contextId);
+    // A download is held only while an agent action that was allowed to
+    // download runs; at any other time the context cancels it.
+    if (request.downloads === "hold") owned?.downloads.begin();
+    let observed: BrowserRuntimeObservation;
+    try {
+      observed = await this.#act(contextId, request, signal);
+    } finally {
+      // The reports wait for the next answer if this action failed.
+      if (request.downloads === "hold") await owned?.downloads.finish();
+    }
     // Every dialog the page raised since the last action is reported once,
     // with how the fixed policy answered it.
-    const owned = this.#contexts.get(contextId);
     const dialogs = owned?.dialogs.splice(0) ?? [];
-    return dialogs.length === 0 ? observed : { ...observed, dialogs };
+    const downloads = owned?.downloads.takeReports() ?? [];
+    return {
+      ...observed,
+      ...(dialogs.length === 0 ? {} : { dialogs }),
+      ...(downloads.length === 0 ? {} : { downloads }),
+    };
+  }
+
+  /** The held file for a download the agent asked to save, if this context still holds it. */
+  claimDownload(contextId: BrowserContextId, downloadId: string): Promise<string | undefined> {
+    return Promise.resolve(this.#contexts.get(contextId)?.downloads.claim(downloadId));
+  }
+
+  async discardDownload(contextId: BrowserContextId, downloadId: string): Promise<void> {
+    await this.#contexts.get(contextId)?.downloads.discard(downloadId);
   }
 
   async #act(
@@ -661,13 +697,19 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const owned = this.#contexts.get(contextId);
     if (owned === undefined) return;
     this.#contexts.delete(contextId);
+    await owned.downloads.dispose();
     await owned.context.close();
   }
 
   async closeAll(): Promise<void> {
     const contexts = [...this.#contexts.values()];
     this.#contexts.clear();
-    await Promise.allSettled(contexts.map(async (owned) => owned.context.close()));
+    await Promise.allSettled(
+      contexts.map(async (owned) => {
+        await owned.downloads.dispose();
+        await owned.context.close();
+      }),
+    );
     const browser = this.#browser;
     this.#browser = undefined;
     this.#launching = undefined;
@@ -811,6 +853,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         status,
       });
     });
+    page.on?.("download", (download) => owned.downloads.onDownload(download));
     page.on?.("dialog", (dialog) => {
       const type = dialogType(dialog.type());
       const answer = BROWSER_DIALOG_POLICY[type];
@@ -1343,10 +1386,15 @@ export function createPlaywrightBrowserRuntime(
         return false;
       }
     },
+    // Downloads arrive here, in a private folder that is emptied when the
+    // browser starts, and the runtime watches it to stop a file at the cap.
+    downloadFolder: browserDownloadHoldRoot("headless"),
     launch: async (executablePath, onProcessStarted) => {
+      const downloadsPath = await prepareBrowserDownloadHoldRoot("headless");
       const browser = await chromium.launch({
         executablePath,
         headless: true,
+        downloadsPath,
         handleSIGINT: false,
         handleSIGTERM: false,
         handleSIGHUP: false,

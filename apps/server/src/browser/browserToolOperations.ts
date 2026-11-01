@@ -23,6 +23,7 @@ const MAX_TOOL_INPUT_BYTES = 16 * 1024;
 const MAX_TEXT_RESULT_BYTES = 24 * 1024;
 const REF_PATTERN = /^e[1-9][0-9]{0,3}$/;
 const TAB_PATTERN = /^t[1-9][0-9]{0,3}$/;
+const DOWNLOAD_PATTERN = /^d[1-9][0-9]{0,5}$/;
 
 /** One element to act on: a CSS selector, or a ref from the latest snapshot. */
 export type BrowserToolTarget =
@@ -35,7 +36,7 @@ export type BrowserToolInclude = ReadonlyArray<"text" | "screenshot" | "snapshot
 /** One operation of a `steps` call: anything but a batch, an upload, stop, or help. */
 export type BrowserToolStep = Exclude<
   BrowserToolInput,
-  { readonly operation: "steps" | "upload" | "stop" | "sign-in" }
+  { readonly operation: "steps" | "upload" | "stop" | "sign-in" | "download-save" }
 >;
 
 /** How many operations one `steps` call may carry. */
@@ -76,6 +77,8 @@ export type BrowserToolInput = {
   | { readonly operation: "tab-switch" | "tab-close"; readonly tabId: string }
   | { readonly operation: "steps"; readonly steps: ReadonlyArray<BrowserToolStep> }
   | { readonly operation: "sign-in"; readonly reason?: string }
+  /** Save a download the page started, named by the id an answer reported. */
+  | { readonly operation: "download-save"; readonly downloadId: string }
 );
 
 /**
@@ -117,7 +120,8 @@ export function parseBrowserToolInput(
       one.operation === "steps" ||
       one.operation === "upload" ||
       one.operation === "stop" ||
-      one.operation === "sign-in"
+      one.operation === "sign-in" ||
+      one.operation === "download-save"
     )
       return undefined;
     parsedSteps.push(one);
@@ -254,6 +258,11 @@ function parseBrowserToolRecord(
     )
       return undefined;
     return { ...common, operation, ...named, files: files as ReadonlyArray<string> };
+  }
+  if (operation === "download-save" && only("downloadId")) {
+    return typeof record.downloadId === "string" && DOWNLOAD_PATTERN.test(record.downloadId)
+      ? { ...common, operation, downloadId: record.downloadId }
+      : undefined;
   }
   if (operation === "tab-list" && only()) return { ...common, operation };
   if (operation === "sign-in" && only("reason")) {
@@ -520,6 +529,7 @@ export function browserToolAction(
     case "stop":
     case "steps":
     case "sign-in":
+    case "download-save":
       return undefined;
   }
 }
@@ -651,6 +661,7 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.snapshot === undefined ? {} : { snapshot: observation.snapshot }),
               ...(observation.tabs === undefined ? {} : { tabs: observation.tabs }),
               ...(observation.dialogs === undefined ? {} : { dialogs: observation.dialogs }),
+              ...(observation.downloads === undefined ? {} : { downloads: observation.downloads }),
               ...(bounded === undefined
                 ? {}
                 : {
@@ -687,5 +698,21 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
           }),
     },
     isError: snapshot.failure !== undefined || snapshot.status === "failed",
+  };
+}
+
+/** The answer to a `download-save` that saved: where the file is now. */
+export function browserDownloadSavedResult(saved: {
+  readonly path: string;
+  readonly sizeBytes: number;
+  readonly mediaType: string;
+}): BrowserToolAnswer {
+  return {
+    result: {
+      saved: saved.path,
+      sizeBytes: saved.sizeBytes,
+      mediaType: saved.mediaType,
+    },
+    isError: false,
   };
 }

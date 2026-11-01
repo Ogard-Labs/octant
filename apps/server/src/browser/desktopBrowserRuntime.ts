@@ -190,10 +190,27 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           ...(request.diagnosticsWarnings === undefined
             ? {}
             : { diagnosticsWarnings: request.diagnosticsWarnings }),
+          ...(request.downloads === undefined ? {} : { downloads: request.downloads }),
         },
       },
       signal,
     );
+  }
+
+  async claimDownload(
+    contextId: BrowserContextId,
+    downloadId: string,
+  ): Promise<string | undefined> {
+    const answer = await this.#request<unknown>("/v1/contexts/download-claim", {
+      contextId,
+      downloadId,
+    });
+    const path = (answer as { path?: unknown }).path;
+    return typeof path === "string" && path.startsWith("/") ? path : undefined;
+  }
+
+  async discardDownload(contextId: BrowserContextId, downloadId: string): Promise<void> {
+    await this.#request("/v1/contexts/download-discard", { contextId, downloadId });
   }
 
   async closeContext(contextId: BrowserContextId): Promise<void> {

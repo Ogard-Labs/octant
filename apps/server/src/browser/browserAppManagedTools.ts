@@ -1,6 +1,7 @@
 import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
 import {
+  browserDownloadSavedResult,
   browserToolAction,
   browserToolResult,
   browserToolWantsScreenshot,
@@ -68,7 +69,30 @@ export interface BrowserAppManagedToolsOptions {
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
+      readonly holdDownloads?: boolean;
     }) => Promise<BrowserAutomationSnapshot>;
+    /**
+     * Saves a download the thread's Browser holds into the workspace once
+     * `ask` is answered yes; see the service. Absent, `download-save` is refused.
+     */
+    readonly saveDownload?: (input: {
+      readonly windowId: WindowId;
+      readonly threadId: BrowserThreadId;
+      readonly downloadId: string;
+      readonly workspaceRoot: string | undefined;
+      readonly ask: (
+        facts: { readonly name: string; readonly sizeBytes: number; readonly mediaType: string },
+        origin: string,
+      ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+    }) => Promise<
+      | {
+          readonly status: "saved";
+          readonly path: string;
+          readonly sizeBytes: number;
+          readonly mediaType: string;
+        }
+      | { readonly status: "refused"; readonly error: string }
+    >;
     readonly releaseThread: (
       windowId: WindowId,
       threadId: BrowserThreadId,
@@ -89,8 +113,9 @@ export interface BrowserAppManagedToolsOptions {
    */
   readonly profileCaller?: "terminal-grant";
   /**
-   * The folder an upload may send files from: the Work thread's Project
-   * folder. Absent, an upload is refused.
+   * The thread's workspace: the Work thread's Project folder. An upload sends
+   * files only from it, and a saved download lands only in its `downloads/`
+   * folder. Absent, both are refused.
    */
   readonly uploadRoot?: () => string | undefined;
   readonly uuid: () => string;
@@ -295,6 +320,35 @@ export function createBrowserAppManagedTools(
         snapshotAfter: () => runOne({ operation: "snapshot" }, signal),
       });
     }
+    if (input.operation === "download-save") {
+      // A CLI in a terminal is not the person who would be asked, and a paired
+      // device is not at the computer the file would land on.
+      if (options.profileCaller === "terminal-grant") return failure("download-needs-a-person");
+      if (options.approvals?.isPairedDevice?.(options.windowId) === true) {
+        return failure("download-needs-this-computer");
+      }
+      const approvals = options.approvals;
+      if (approvals === undefined) return failure("browser-approval-required");
+      if (options.browser.saveDownload === undefined) return failure("download-unavailable");
+      if (signal?.aborted) return failure("tool-interrupted");
+      const saved = await options.browser.saveDownload({
+        windowId: options.windowId,
+        threadId: options.threadId,
+        downloadId: input.downloadId,
+        workspaceRoot: options.uploadRoot?.(),
+        ask: (facts, pageOrigin) =>
+          approvals.request({
+            windowId: options.windowId,
+            threadId: String(options.threadId),
+            authority,
+            origin: pageOrigin,
+            ...(profile === undefined ? {} : { profile }),
+            download: facts,
+            ...(signal === undefined ? {} : { signal }),
+          }),
+      });
+      return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
+    }
     const request = browserToolAction(input, context);
     if (request === undefined) return failure("invalid-browser-input");
     if (signal?.aborted) return failure("tool-interrupted");
@@ -353,6 +407,13 @@ export function createBrowserAppManagedTools(
       request,
       capturedBy: "agent",
       refuseStaleRevision: true,
+      // Downloads are held only for a turn at this computer with a workspace to
+      // save into, where the question about saving one can be answered.
+      ...(options.profileCaller === "terminal-grant" ||
+      options.approvals?.isPairedDevice?.(options.windowId) === true ||
+      options.uploadRoot?.() === undefined
+        ? {}
+        : { holdDownloads: true }),
       ...(uploadFiles === undefined ? {} : { uploadFiles }),
       ...(releaseUpload === undefined ? {} : { releaseUpload }),
     });

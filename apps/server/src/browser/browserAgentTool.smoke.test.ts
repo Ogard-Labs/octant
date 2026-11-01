@@ -1,11 +1,12 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserThreadId, ToolActionAuthority, WindowId } from "@octant/contracts";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createBrowserAppManagedTools } from "./browserAppManagedTools";
 import { BrowserAutomationService } from "./browserAutomationService";
 import { createPlaywrightBrowserRuntime } from "./playwrightBrowserRuntime";
@@ -67,6 +68,24 @@ const pages: Record<string, string> = {
   "/noisy": `<!doctype html><title>Noisy</title>
     <script>console.warn("careful"); console.error("boom"); fetch("/missing-data?token=s3cret");</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
+  "/downloads": `<!doctype html><title>Downloads</title>
+    <a id="report" href="/dl/report.pdf">Report</a>
+    <a id="elf" href="/dl/notes.txt">Notes</a>
+    <a id="pe" href="/dl/readme.txt">Readme</a>
+    <a id="big" href="/dl/big.bin">Big</a>
+    <a id="again" href="/dl/report.pdf?again">Again</a>`,
+};
+
+const PDF_BYTES = Buffer.from("%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n");
+/** The bytes a program starts with, under a name that says it is a note. */
+const ELF_BYTES = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0]);
+const PE_BYTES = Buffer.from("MZ\u0090\u0000\u0003\u0000", "latin1");
+const BIG_CHUNKS = 200;
+let bigChunksSent = 0;
+const attachments: Record<string, { readonly name: string; readonly body: Buffer }> = {
+  "/dl/report.pdf": { name: "report.pdf", body: PDF_BYTES },
+  "/dl/notes.txt": { name: "notes.txt", body: ELF_BYTES },
+  "/dl/readme.txt": { name: "readme.txt", body: PE_BYTES },
 };
 
 const threadId = randomUUID() as BrowserThreadId;
@@ -96,6 +115,35 @@ beforeAll(async () => {
       response.end();
       return;
     }
+    const attachment = attachments[path];
+    if (attachment !== undefined) {
+      response.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-disposition": `attachment; filename="${attachment.name}"`,
+        "content-length": String(attachment.body.length),
+      });
+      response.end(attachment.body);
+      return;
+    }
+    if (path === "/dl/big.bin") {
+      // Streams far more than the cap, slowly enough to be stopped in flight.
+      bigChunksSent = 0;
+      response.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-disposition": 'attachment; filename="big.bin"',
+      });
+      const timer = setInterval(() => {
+        if (bigChunksSent >= BIG_CHUNKS) {
+          clearInterval(timer);
+          response.end();
+          return;
+        }
+        bigChunksSent += 1;
+        response.write(Buffer.alloc(1024 * 1024, 65));
+      }, 10);
+      response.on("close", () => clearInterval(timer));
+      return;
+    }
     const body = pages[path];
     response.writeHead(body === undefined ? 404 : 200, { "content-type": "text/html" });
     response.end(body ?? "missing");
@@ -120,6 +168,9 @@ function agentTool(
     readonly unattended?: boolean;
     readonly pairedDevice?: boolean;
     readonly terminal?: boolean;
+    /** The person's "Let agents download files" switch. */
+    readonly downloads?: boolean;
+    readonly downloadAnswer?: "approved" | "denied";
     /**
      * Report the page as the desktop app's own Browser. The page is still the
      * headless one here; only the presentation the sign-in check reads changes.
@@ -128,9 +179,12 @@ function agentTool(
   } = {},
 ) {
   const asked: Array<Record<string, unknown>> = [];
+  const journal = { saved: vi.fn(), refused: vi.fn() };
   const service = new BrowserAutomationService({
     runtime,
     authority: { canAccessWindow: () => true, resolve: () => authority },
+    agentDownloadsEnabled: () => options.downloads === true,
+    downloads: journal,
     uuid: () => randomUUID(),
     clock: () => new Date().toISOString(),
     now: () => Date.now(),
@@ -156,6 +210,7 @@ function agentTool(
       },
       create: (input) => service.create(input),
       act: (input) => service.act(input),
+      saveDownload: (input) => service.saveDownload(input),
       releaseThread: (window, thread) => service.releaseThread(window, thread),
       holdForPerson: (window, thread) => service.holdForPerson(window, thread),
     },
@@ -165,6 +220,7 @@ function agentTool(
       request: async (request) => {
         asked.push(request as unknown as Record<string, unknown>);
         if ("signIn" in request) return (await options.whileSigningIn?.()) ?? "approved";
+        if ("download" in request) return options.downloadAnswer ?? "approved";
         if (!("upload" in request)) return "approved";
         await options.whileAsking?.();
         return options.uploadAnswer ?? "approved";
@@ -188,7 +244,7 @@ function agentTool(
       };
     };
   };
-  return { asked, call, service, stop: () => call({ operation: "stop" }) };
+  return { asked, call, service, journal, stop: () => call({ operation: "stop" }) };
 }
 
 function refFor(outline: string | undefined, line: RegExp): string {
@@ -755,5 +811,198 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(after.consoleErrors).toEqual([]);
     expect(after.httpErrors).toEqual([]);
     await tool.stop();
+  });
+
+  describe("downloads", () => {
+    type Download = Record<string, unknown>;
+    const downloadsOf = (answer: Awaited<ReturnType<ReturnType<typeof agentTool>["call"]>>) =>
+      answer.result.page?.downloads as ReadonlyArray<Download> | undefined;
+
+    async function openDownloadsPage(tool: ReturnType<typeof agentTool>) {
+      await tool.call({ operation: "navigate", url: `${origin}/downloads` });
+      const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+      return (name: RegExp) => refFor(outline, name);
+    }
+
+    it("blocks a download exactly as before while the switch is off", async () => {
+      const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
+      const tool = agentTool({ uploadRoot: workspace });
+      const ref = await openDownloadsPage(tool);
+      const clicked = await tool.call({ operation: "click", ref: ref(/"Report"/) });
+      expect(clicked.isError).toBe(false);
+      expect(downloadsOf(clicked)).toBeUndefined();
+      const saved = await tool.call({ operation: "download-save", downloadId: "d1" });
+      expect(saved.isError).toBe(true);
+      expect(saved.result).toEqual({ error: "download-not-found" });
+      expect(tool.asked.filter((request) => "download" in request)).toEqual([]);
+      await tool.stop();
+      await rm(workspace, { recursive: true, force: true });
+    });
+
+    it("reports a held download, asks every time, and saves the bytes into downloads/", async () => {
+      const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
+      const tool = agentTool({ uploadRoot: workspace, downloads: true });
+      const ref = await openDownloadsPage(tool);
+      const clicked = await tool.call({ operation: "click", ref: ref(/"Report"/) });
+      expect(downloadsOf(clicked)).toEqual([
+        {
+          state: "held",
+          downloadId: "d1",
+          name: "report.pdf",
+          sizeBytes: PDF_BYTES.length,
+          mediaType: "application/pdf",
+        },
+      ]);
+      // Nothing is in the workspace until the person says yes.
+      expect(existsSync(join(workspace, "downloads"))).toBe(false);
+      const saved = await tool.call({ operation: "download-save", downloadId: "d1" });
+      expect(saved.isError).toBe(false);
+      expect(saved.result).toEqual({
+        saved: "downloads/report.pdf",
+        sizeBytes: PDF_BYTES.length,
+        mediaType: "application/pdf",
+      });
+      expect(readFileSync(join(workspace, "downloads", "report.pdf"))).toEqual(PDF_BYTES);
+      const question = tool.asked.find((request) => "download" in request);
+      expect(question).toMatchObject({
+        origin,
+        download: { name: "report.pdf", sizeBytes: PDF_BYTES.length, mediaType: "application/pdf" },
+      });
+      expect(tool.journal.saved).toHaveBeenCalledWith(
+        expect.objectContaining({ origin }),
+        expect.objectContaining({
+          path: "downloads/report.pdf",
+          sizeBytes: PDF_BYTES.length,
+          mediaType: "application/pdf",
+          sha256: createHash("sha256").update(PDF_BYTES).digest("hex"),
+        }),
+      );
+      // The held copy is gone once it is saved.
+      expect((await tool.call({ operation: "download-save", downloadId: "d1" })).result).toEqual({
+        error: "download-not-found",
+      });
+      await tool.stop();
+      await rm(workspace, { recursive: true, force: true });
+    });
+
+    it("saves nothing when the person denies, and deletes the held file", async () => {
+      const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
+      const tool = agentTool({ uploadRoot: workspace, downloads: true, downloadAnswer: "denied" });
+      const ref = await openDownloadsPage(tool);
+      await tool.call({ operation: "click", ref: ref(/"Report"/) });
+      const saved = await tool.call({ operation: "download-save", downloadId: "d1" });
+      expect(saved.result).toEqual({ error: "browser-download-denied" });
+      expect(existsSync(join(workspace, "downloads"))).toBe(false);
+      expect(tool.journal.refused).toHaveBeenCalledWith(
+        expect.objectContaining({ origin }),
+        expect.objectContaining({ name: "report.pdf", reason: "denied" }),
+      );
+      expect((await tool.call({ operation: "download-save", downloadId: "d1" })).result).toEqual({
+        error: "download-not-found",
+      });
+      await tool.stop();
+      await rm(workspace, { recursive: true, force: true });
+    });
+
+    it("refuses a program by its bytes whatever the page calls it, without asking", async () => {
+      const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
+      const tool = agentTool({ uploadRoot: workspace, downloads: true });
+      const ref = await openDownloadsPage(tool);
+      const elf = await tool.call({ operation: "click", ref: ref(/"Notes"/) });
+      expect(downloadsOf(elf)?.[0]).toMatchObject({ state: "held", name: "notes.txt" });
+      const pe = await tool.call({ operation: "click", ref: ref(/"Readme"/) });
+      expect(downloadsOf(pe)?.[0]).toMatchObject({ state: "held", name: "readme.txt" });
+      for (const id of ["d1", "d2"]) {
+        const saved = await tool.call({ operation: "download-save", downloadId: id });
+        expect(saved.result).toEqual({ error: "download-executable" });
+      }
+      expect(tool.asked.filter((request) => "download" in request)).toEqual([]);
+      expect(existsSync(join(workspace, "downloads"))).toBe(false);
+      expect(tool.journal.refused).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ reason: "executable" }),
+      );
+      await tool.stop();
+      await rm(workspace, { recursive: true, force: true });
+    });
+
+    it("stops a file as it passes the size cap", async () => {
+      const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
+      const tool = agentTool({ uploadRoot: workspace, downloads: true });
+      const ref = await openDownloadsPage(tool);
+      const clicked = await tool.call({ operation: "click", ref: ref(/"Big"/) });
+      expect(downloadsOf(clicked)).toEqual([
+        { state: "refused", name: "big.bin", reason: "too-large" },
+      ]);
+      // The page's server was cut off long before it finished sending.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(bigChunksSent).toBeLessThan(BIG_CHUNKS);
+      expect(tool.journal.refused).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ name: "big.bin", reason: "too-large" }),
+      );
+      await tool.stop();
+      await rm(workspace, { recursive: true, force: true });
+    });
+
+    it("never overwrites: a second file of the same name gets a number", async () => {
+      const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
+      const tool = agentTool({ uploadRoot: workspace, downloads: true });
+      const ref = await openDownloadsPage(tool);
+      await tool.call({ operation: "click", ref: ref(/"Report"/) });
+      await tool.call({ operation: "download-save", downloadId: "d1" });
+      await tool.call({ operation: "click", ref: ref(/"Again"/) });
+      const second = await tool.call({ operation: "download-save", downloadId: "d2" });
+      expect(second.result).toMatchObject({ saved: "downloads/report (2).pdf" });
+      expect(readFileSync(join(workspace, "downloads", "report.pdf"))).toEqual(PDF_BYTES);
+      expect(readFileSync(join(workspace, "downloads", "report (2).pdf"))).toEqual(PDF_BYTES);
+      await tool.stop();
+      await rm(workspace, { recursive: true, force: true });
+    });
+
+    it("saves into an existing folder whose name differs only in letter case", async () => {
+      const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
+      await mkdir(join(workspace, "Downloads"));
+      const tool = agentTool({ uploadRoot: workspace, downloads: true });
+      const ref = await openDownloadsPage(tool);
+      await tool.call({ operation: "click", ref: ref(/"Report"/) });
+      const saved = await tool.call({ operation: "download-save", downloadId: "d1" });
+      expect(saved.isError).toBe(false);
+      expect(saved.result).toMatchObject({ saved: "downloads/report.pdf" });
+      expect(readFileSync(join(workspace, "downloads", "report.pdf"))).toEqual(PDF_BYTES);
+      await tool.stop();
+      await rm(workspace, { recursive: true, force: true });
+    });
+
+    it("refuses a symbolic link at downloads/ and writes nothing through it", async () => {
+      const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
+      const elsewhere = await mkdtemp(join(tmpdir(), "octant-download-elsewhere-"));
+      await symlink(elsewhere, join(workspace, "downloads"));
+      const tool = agentTool({ uploadRoot: workspace, downloads: true });
+      const ref = await openDownloadsPage(tool);
+      await tool.call({ operation: "click", ref: ref(/"Report"/) });
+      const saved = await tool.call({ operation: "download-save", downloadId: "d1" });
+      expect(saved.result).toEqual({ error: "download-symlink" });
+      expect(readdirSync(elsewhere)).toEqual([]);
+      expect(tool.asked.filter((request) => "download" in request)).toEqual([]);
+      await tool.stop();
+      await rm(workspace, { recursive: true, force: true });
+      await rm(elsewhere, { recursive: true, force: true });
+    });
+
+    it("refuses to save on a paired device's or terminal's turn, and holds nothing there", async () => {
+      const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
+      for (const turn of [{ pairedDevice: true }, { terminal: true }] as const) {
+        const tool = agentTool({ uploadRoot: workspace, downloads: true, ...turn });
+        const ref = await openDownloadsPage(tool);
+        const clicked = await tool.call({ operation: "click", ref: ref(/"Report"/) });
+        expect(downloadsOf(clicked)).toBeUndefined();
+        const saved = await tool.call({ operation: "download-save", downloadId: "d1" });
+        expect(saved.isError).toBe(true);
+        expect(existsSync(join(workspace, "downloads"))).toBe(false);
+        await tool.stop();
+      }
+      await rm(workspace, { recursive: true, force: true });
+    });
   });
 });

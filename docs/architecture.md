@@ -589,7 +589,17 @@ Personal Browser profile asks for each origin and remembers the pair (origin,
 profile), never one without the other
 ([Browser profiles](design/browser-profiles.md#the-agent-on-a-signed-in-page)).
 Plan refuses every Code browser operation except stopping the
-thread's own browser (`plan-mode-read-only`).
+thread's own browser (`plan-mode-read-only`). Downloads in the agent's Browser
+are blocked on every page unless the person turns on "Let agents download
+files" in Settings (a shell setting only a local window writes, off by
+default). Then a download an agent action starts is held in a private
+temporary folder of the host, never the workspace, and saved only by the
+agent's `download-save`, which asks the person every time, at every access
+level, before creating a new file in `downloads/` of the thread's workspace;
+programs and installers and a symbolic link are refused, and a paired device,
+a terminal grant, and Plan cannot save
+([Browser for agents: Download](design/browser-agent-tool.md#download)). A
+person's own download in the Browser pane stays blocked.
 
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
@@ -10038,7 +10048,7 @@ access` agree); a thread's own change is journaled as
   starts; a server shutdown keeps it and only a local disable forgets it.
   A paired client may click, hover, scroll, and press keys in the host's agent
   browser, and list its tabs, but may not navigate it, type into it, choose a
-  list option, drag, upload, or open, switch, or close a tab. Those clicks
+  list option, drag, upload, save a download, or open, switch, or close a tab. Those clicks
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
   so a paired client cannot take the host browser to a new origin.

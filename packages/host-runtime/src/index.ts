@@ -206,3 +206,9 @@ export {
   type ReleaseFeedVerifier,
   type ReleaseRing,
 } from "./updateReleaseKeys";
+export {
+  browserDownloadHoldRoot,
+  isInsideBrowserDownloadHold,
+  prepareBrowserDownloadHoldRoot,
+  type BrowserDownloadHoldKind,
+} from "./browserDownloadHold";

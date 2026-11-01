@@ -120,8 +120,11 @@ and service workers in. There are three kinds:
 ### Page rules that do not change
 
 A profile changes only where site data is kept. Every other page rule stays as
-it is for a Private page: downloads are blocked; camera, microphone, location,
-notifications, devices, and screen capture are refused; only http and https
+it is for a Private page: downloads are blocked, except that an agent's download
+is held and saved only when the person turned on "Let agents download files"
+and answers for each file
+([Browser for agents: Download](browser-agent-tool.md#download)); camera,
+microphone, location, notifications, devices, and screen capture are refused; only http and https
 addresses open; a loopback HTTPS certificate is accepted only by the context
 opened for it; the host's session ceiling and tab limit apply.
 

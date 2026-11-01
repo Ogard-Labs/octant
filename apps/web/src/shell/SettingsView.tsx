@@ -1347,6 +1347,28 @@ function ActiveSectionContent({
               })
             }
           />
+          <SettingsSection
+            description="Off, every download in the agent's Browser is blocked."
+            title="Browser downloads"
+          >
+            <div className="setgroup">
+              <SettingRow
+                description="On, a file a page starts downloading while the agent drives it is held on this computer, not in the workspace, until you say yes to saving it into the thread's downloads folder. You are asked every time. Downloads you start yourself stay blocked."
+                focused={focusedSetting === settingId("browser-agent-downloads")}
+                label="Let agents download files"
+                scope="host"
+                settingId="browser-agent-downloads"
+              >
+                <OctantSwitch
+                  checked={props.settings.agentBrowserDownloads}
+                  label="Let agents download files"
+                  onCheckedChange={(checked) =>
+                    props.onSettingsChange({ agentBrowserDownloads: checked })
+                  }
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
           {props.canvasClient?.publicLinkSettings === undefined ? null : (
             <SettingsSection title="Public links">
               <div className="setgroup">

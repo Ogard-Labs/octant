@@ -189,6 +189,7 @@ export function defaultShellSettings(): ShellSettings {
     skillFolders: { providers: [], folders: [] },
     rememberedBrowserOrigins: [],
     rememberedBrowserProfileSites: [],
+    agentBrowserDownloads: false,
   };
 }
 

@@ -22,6 +22,7 @@ import {
   type BrowserPageSnapshotRef,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
+import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
 import {
   DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
@@ -30,6 +31,7 @@ import {
   type BrowserActionRequest,
   type BrowserContextId,
   type BrowserContextPolicy,
+  type BrowserDownloadReport,
   type BrowserThreadId,
 } from "@octant/contracts";
 
@@ -80,7 +82,18 @@ export interface BrowserSurfaceShellWindowPort {
 }
 
 interface BrowserSurfaceSessionPort {
-  on(event: "will-download", listener: (event: { preventDefault?: () => void }) => void): void;
+  /**
+   * Electron reports the download item and the page that started it. A
+   * download is held only for a context's agent action; see `DesktopDownloadHold`.
+   */
+  on(
+    event: "will-download",
+    listener: (
+      event: { preventDefault?: () => void },
+      item?: DesktopDownloadItemPort,
+      contents?: { readonly id?: number },
+    ) => void,
+  ): void;
   /**
    * Electron's per-session certificate override. Octant declines it: the
    * request it reports carries only `hostname`, which cannot be bounded to the
@@ -205,6 +218,11 @@ export interface BrowserSurfaceViewPort {
 }
 
 export interface BrowserSurfaceHostOptions {
+  /**
+   * The host's private folder for files held for the agent, emptied at start.
+   * Absent, every download stays blocked, as it is for the person's own pane.
+   */
+  readonly downloadRoot?: string;
   readonly createView: (options: {
     readonly partition: string;
     readonly webPreferences: {
@@ -275,6 +293,8 @@ interface OwnedSurface {
   httpErrors: Array<{ url: string; method?: string; status: number; seq: number }>;
   /** The last diagnostic entry's number; every kind shares the count. */
   diagnosticSeq: number;
+  /** The files this context's agent actions made it hold. */
+  readonly downloads: DesktopDownloadHold;
 }
 
 /**
@@ -344,6 +364,12 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       | "diagnosticsWarnings"
     >
   > & {
+    /**
+     * Set by the server for an action of the agent tool while the person's
+     * "Let agents download files" switch is on: a download the page starts
+     * while the action runs is held for the agent.
+     */
+    readonly downloads?: "hold";
     /** The role and name a snapshot ref recorded; the target must still match. */
     readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
     /** The same for a drag's drop target. */
@@ -363,6 +389,8 @@ export interface BrowserSurfaceRuntimeObservation {
   readonly snapshot?: string;
   readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
   readonly dialogs?: ReadonlyArray<DialogReport>;
+  /** Downloads the page started during an action that allowed them. */
+  readonly downloads?: ReadonlyArray<BrowserDownloadReport>;
   /** Only a tab action fills this, with the ids the agent knows tabs by. */
   readonly tabs?: ReadonlyArray<{
     readonly tabId: string;
@@ -445,6 +473,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
     }
     owned.shellWindow = undefined;
+    void owned.downloads.dispose();
     for (const listener of goneListeners) listener(contextId);
   };
 
@@ -531,7 +560,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     // installed once per session rather than once per tab.
     if (!guardedSessions.has(view.webContents.session)) {
       guardedSessions.add(view.webContents.session);
-      view.webContents.session.on("will-download", (event) => event.preventDefault?.());
+      // The page that started a download decides who may hold it: the agent's
+      // context while one of its actions runs, and nobody otherwise.
+      view.webContents.session.on("will-download", (event, item, contents) => {
+        const target =
+          contents?.id === undefined ? undefined : surfaceByWebContents.get(contents.id);
+        if (target === undefined || item === undefined) return event.preventDefault?.();
+        target.downloads.accept(event, item);
+      });
     }
     // `policy.acceptsLocalCertificate` relaxes nothing here. That acceptance
     // is bounded to the one origin this surface opened, and Electron's
@@ -624,6 +660,15 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
 
   return Object.freeze({
     available: (): boolean => true,
+    /** The held file for a download the agent asked to save, or undefined. */
+    claimDownload: (contextId: BrowserContextId | string, downloadId: string): string | undefined =>
+      surfaces.get(contextId)?.downloads.claim(downloadId),
+    discardDownload: async (
+      contextId: BrowserContextId | string,
+      downloadId: string,
+    ): Promise<void> => {
+      await surfaces.get(contextId)?.downloads.discard(downloadId);
+    },
     onContextGone: (listener: (contextId: string) => void): (() => void) => {
       goneListeners.add(listener);
       return () => goneListeners.delete(listener);
@@ -660,6 +705,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         failedRequests: [],
         httpErrors: [],
         diagnosticSeq: 0,
+        downloads: new DesktopDownloadHold(options.downloadRoot),
       };
       openTabView(input.contextId, owned, firstTabId);
       surfaces.set(input.contextId, owned);
@@ -736,6 +782,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         // Dialogs an earlier action answered before it failed come first.
         const dialogs: DialogReport[] = owned.unreportedDialogs.splice(0);
         const releaseDialogs = await guardDialogs(contentsView(owned), dialogs);
+        if (request.downloads === "hold") owned.downloads.begin();
         try {
           const observed = await (async (): Promise<BrowserSurfaceRuntimeObservation> => {
             const contents = contentsView(owned).webContents;
@@ -963,8 +1010,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             };
           })();
           // Every dialog the page raised during the action is reported once,
-          // with how the fixed policy answered it.
-          return dialogs.length === 0 ? observed : { ...observed, dialogs: dialogs.slice(0, 8) };
+          // with how the fixed policy answered it; so is every download.
+          if (request.downloads === "hold") await owned.downloads.finish();
+          const downloads = owned.downloads.takeReports();
+          return {
+            ...observed,
+            ...(dialogs.length === 0 ? {} : { dialogs: dialogs.slice(0, 8) }),
+            ...(downloads.length === 0 ? {} : { downloads }),
+          };
         } catch (error) {
           // The action failed after the page raised a dialog: the answer the
           // policy gave is reported with the next action that succeeds.
@@ -974,6 +1027,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // Released before the surface is handed back, whatever the action did;
           // a page that went away with its tab has nothing left to detach.
           await releaseDialogs().catch(() => undefined);
+          // A failed action stops holding too; its reports wait for the next answer.
+          if (request.downloads === "hold") await owned.downloads.finish().catch(() => undefined);
           owned.control = "idle";
           publish(contextId, owned);
         }
@@ -1242,6 +1297,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       forgetWebContents(tab);
       if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
     }
+    await owned.downloads.dispose();
   }
 }
 

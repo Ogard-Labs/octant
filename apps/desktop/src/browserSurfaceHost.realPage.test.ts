@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,10 +53,20 @@ const pages: Record<string, string> = {
   "/html-drag": `<!doctype html><title>Drag</title>
     <div id="card" draggable="true" style="width:60px;height:30px" ondragstart="event.dataTransfer.setData('text', 'card')">Card</div>
     <div id="done" style="width:60px;height:30px;margin-top:40px" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>`,
+  "/downloads": `<!doctype html><title>Downloads</title>
+    <a id="report" href="/dl/report.pdf">Report</a>
+    <a id="program" href="/dl/notes.txt">Notes</a>`,
   "/form": `<!doctype html><title>Form</title>
     <label>Name <input id="name"></label>
     <button id="save" onclick="document.title = 'Saved ' + document.getElementById('name').value">Save</button>
     <button onclick="document.getElementById('save').textContent = 'Store'">Rename save</button>`,
+};
+
+const PDF_BYTES = Buffer.from("%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n");
+const ELF_BYTES = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0]);
+const attachments: Record<string, { readonly name: string; readonly body: Buffer }> = {
+  "/dl/report.pdf": { name: "report.pdf", body: PDF_BYTES },
+  "/dl/notes.txt": { name: "notes.txt", body: ELF_BYTES },
 };
 
 let server: Server;
@@ -64,7 +75,17 @@ let browser: Browser | undefined;
 
 beforeAll(async () => {
   server = createServer((request, response) => {
-    const body = pages[new URL(request.url ?? "/", "http://localhost").pathname];
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    const attachment = attachments[path];
+    if (attachment !== undefined) {
+      response.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-disposition": `attachment; filename="${attachment.name}"`,
+      });
+      response.end(attachment.body);
+      return;
+    }
+    const body = pages[path];
     response.writeHead(body === undefined ? 404 : 200, { "content-type": "text/html" });
     response.end(body ?? "missing");
   });
@@ -98,6 +119,36 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
   // Electron answers no dialog by itself here; leave each one to the host's
   // protocol session, as the app's own view would.
   page.on("dialog", () => undefined);
+  const webContentsId = Math.floor(Math.random() * 1_000_000);
+  let willDownload:
+    | ((event: { preventDefault?: () => void }, item: unknown, contents: { id: number }) => void)
+    | undefined;
+  // Electron's session reports a download as an item the host gives a save
+  // path; here the page's own download is the item, and the real bytes are
+  // copied to that path once it finishes.
+  page.on("download", (download) => {
+    let prevented = false;
+    const item = Object.assign(new EventEmitter(), {
+      savePath: undefined as string | undefined,
+      getFilename: () => download.suggestedFilename(),
+      getTotalBytes: () => 0,
+      getReceivedBytes: () => 0,
+      setSavePath(path: string) {
+        item.savePath = path;
+      },
+      cancel: () => void download.cancel(),
+    });
+    willDownload?.({ preventDefault: () => (prevented = true) }, item, { id: webContentsId });
+    if (prevented || item.savePath === undefined) {
+      void download.cancel();
+      return;
+    }
+    const target = item.savePath;
+    void download
+      .saveAs(target)
+      .then(() => item.emit("done", {}, "completed"))
+      .catch(() => item.emit("done", {}, "interrupted"));
+  });
   const refreshTitle = async () => {
     title = await page.evaluate(() => document.title).catch(() => title);
   };
@@ -105,7 +156,7 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
     setBounds: () => undefined,
     setVisible: () => undefined,
     webContents: {
-      id: Math.floor(Math.random() * 1_000_000),
+      id: webContentsId,
       capturePage: async () => {
         const bytes = await page.screenshot({ type: "jpeg", quality: 50 });
         return { isEmpty: () => false, toJPEG: () => bytes };
@@ -162,7 +213,9 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
       on: () => undefined,
       reload: () => undefined,
       session: {
-        on: () => undefined,
+        on: (_event: string, listener: never) => {
+          willDownload = listener;
+        },
         setDevicePermissionHandler: () => undefined,
         setDisplayMediaRequestHandler: () => undefined,
         setPermissionCheckHandler: () => undefined,
@@ -175,12 +228,13 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
   return { view, page };
 }
 
-async function surface(path: string, views = 1) {
+async function surface(path: string, views = 1, downloadRoot?: string) {
   const pool = await Promise.all(Array.from({ length: views }, () => pageView()));
   const page = pool[0]?.page;
   if (page === undefined) throw new Error("No page.");
   let next = 0;
   const host = createBrowserSurfaceHost({
+    ...(downloadRoot === undefined ? {} : { downloadRoot }),
     createView: () => {
       const created = pool[next]?.view;
       next += 1;
@@ -422,6 +476,72 @@ describe.skipIf(chrome === undefined)(
       const next = await host.act(contextId, { kind: "extract-text" });
       expect(next.dialogs).toEqual([{ type: "alert", message: "late news", answer: "accepted" }]);
       await page.close();
+    });
+
+    describe("downloads", () => {
+      it("blocks a download the page starts unless an agent action holds it", async () => {
+        const root = await mkdtemp(join(tmpdir(), "octant-desktop-downloads-"));
+        const { host, contextId, page } = await surface("/downloads", 1, root);
+        const observed = await host.act(contextId, { kind: "snapshot" });
+        const report = entry(observed.snapshotRefs, "Report");
+        // Without "hold", as when the switch is off or the person drives: blocked.
+        const blocked = await host.act(contextId, { kind: "click", target: report.selector });
+        expect(blocked.downloads).toBeUndefined();
+        // After the action ended, the page starting one is blocked as well.
+        await page.evaluate(() => document.getElementById("report")?.click());
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(host.claimDownload(contextId, "d1")).toBeUndefined();
+        await page.close();
+        await rm(root, { recursive: true, force: true });
+      });
+
+      it("holds a download during an agent action, with its real bytes, and discards it", async () => {
+        const root = await mkdtemp(join(tmpdir(), "octant-desktop-downloads-"));
+        const { host, contextId, page } = await surface("/downloads", 1, root);
+        const observed = await host.act(contextId, { kind: "snapshot" });
+        const clicked = await host.act(contextId, {
+          kind: "click",
+          target: entry(observed.snapshotRefs, "Report").selector,
+          downloads: "hold",
+        });
+        expect(clicked.downloads).toEqual([
+          {
+            state: "held",
+            downloadId: "d1",
+            name: "report.pdf",
+            sizeBytes: PDF_BYTES.length,
+            mediaType: "application/pdf",
+          },
+        ]);
+        const path = host.claimDownload(contextId, "d1");
+        expect(path?.startsWith(root)).toBe(true);
+        expect(readFileSync(path ?? "")).toEqual(PDF_BYTES);
+        // Reported once.
+        const next = await host.act(contextId, { kind: "extract-text" });
+        expect(next.downloads).toBeUndefined();
+        await host.discardDownload(contextId, "d1");
+        expect(existsSync(path ?? "")).toBe(false);
+        expect(host.claimDownload(contextId, "d1")).toBeUndefined();
+        await page.close();
+        await rm(root, { recursive: true, force: true });
+      });
+
+      it("deletes what a context holds when it closes", async () => {
+        const root = await mkdtemp(join(tmpdir(), "octant-desktop-downloads-"));
+        const { host, contextId, page } = await surface("/downloads", 1, root);
+        const observed = await host.act(contextId, { kind: "snapshot" });
+        await host.act(contextId, {
+          kind: "click",
+          target: entry(observed.snapshotRefs, "Notes").selector,
+          downloads: "hold",
+        });
+        const path = host.claimDownload(contextId, "d1");
+        expect(existsSync(path ?? "")).toBe(true);
+        await host.closeAll();
+        expect(existsSync(path ?? "")).toBe(false);
+        await page.close().catch(() => undefined);
+        await rm(root, { recursive: true, force: true });
+      });
     });
   },
 );
