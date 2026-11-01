@@ -2577,6 +2577,67 @@ describe("CodeOperationService", () => {
     expect(localRun).not.toHaveBeenCalled();
   });
 
+  it("opens a server thread's pull request by name after checking its remote with Git on the server", async () => {
+    const githubRemote = [
+      {
+        name: "origin",
+        fetch: { kind: "network" as const, url: "git@github.com:acme/site.git" },
+        push: { kind: "network" as const, url: "git@github.com:acme/site.git" },
+      },
+    ];
+    const localRemotes = vi.fn(async () => githubRemote);
+    let serverRemotes: typeof githubRemote = githubRemote;
+    const serverObserveRemotes = vi.fn(async () => serverRemotes);
+    const ensure = vi.fn(async () => ({
+      status: "created" as const,
+      draft: false,
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/acme/site/pull/7",
+        state: "open" as const,
+        baseRepository: "acme/site",
+        baseBranch: "main",
+        headOwner: "acme",
+        headBranch: "octant/fix-1",
+      },
+    }));
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      holdsServerThread: () => true,
+      git: { observeRemotes: localRemotes } as never,
+      serverGit: () => ({ observeRemotes: serverObserveRemotes }) as never,
+      pullRequests: { ensure } as never,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "full-access" }),
+    });
+    const create = {
+      kind: "create-pull-request",
+      operationId: decodeCodeOperationId("4f4f4f4f-4f4f-44f4-84f4-4f4f4f4f4f4f"),
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      title: "Fix the site",
+      body: "Made on the server.",
+      idempotencyKey: "server-pr",
+      authorization: { kind: "full-access" },
+    } as const;
+    expect(await fixture.service.execute(ids.window, create)).toMatchObject({
+      kind: "pull-request-state",
+      state: "created",
+      number: 7,
+    });
+    expect(serverObserveRemotes).toHaveBeenCalledWith({ checkoutRoot: "/private/exact-checkout" });
+    expect(localRemotes).not.toHaveBeenCalled();
+
+    serverRemotes = [];
+    expect(
+      await fixture.service.execute(ids.window, {
+        ...create,
+        operationId: decodeCodeOperationId("50505050-5050-4505-8505-505050505050"),
+        idempotencyKey: "server-pr-2",
+      }),
+    ).toMatchObject({ kind: "pull-request-state", state: "unavailable", failureCode: "no-remote" });
+    expect(ensure).toHaveBeenCalledOnce();
+  });
+
   it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
     const fixture = providerTurnFixture();
     const result = await fixture.service.execute(ids.window, {
@@ -3080,6 +3141,7 @@ function providerTurnFixture(
       | "serverRepositoryTests"
       | "repositoryTests"
       | "evidence"
+      | "pullRequests"
     >
   > & {
     readonly thread?: CodeThread;

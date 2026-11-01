@@ -84,7 +84,7 @@ named as omissions rather than inlined. A paired device may export only a
 thread it can already read.
 
 **Export my data** is the host-wide cut: a local-owner-only read of every
-projectable thread across Chat, Work, and Code, plus Projects, memory,
+projectable thread across Chat, Work, and Code, plus Projects, Project memory, your person memory (each note and the threads it came from),
 Canvases, settings, usage rows, and retention state including purge
 tombstones, streamed as line-delimited JSON. A remote or paired device
 principal is refused before any export data is read, and the same secret and

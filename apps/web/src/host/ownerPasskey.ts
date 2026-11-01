@@ -146,3 +146,15 @@ export function passkeyUnlockSigner(input: {
     },
   };
 }
+
+/** The browser's passkey API, or nothing when it has none: the owner option then stays off. */
+export async function platformPasskeys(): Promise<PasskeyCredentials | undefined> {
+  const available = globalThis.PublicKeyCredential;
+  if (available === undefined || globalThis.navigator?.credentials === undefined) return undefined;
+  try {
+    if (!(await available.isUserVerifyingPlatformAuthenticatorAvailable())) return undefined;
+  } catch {
+    return undefined;
+  }
+  return globalThis.navigator.credentials;
+}

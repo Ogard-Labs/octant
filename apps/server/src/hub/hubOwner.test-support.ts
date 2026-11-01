@@ -127,6 +127,11 @@ export async function ownerCall(input: {
   readonly omitIdentityKey?: true;
   /** An administration session id to present beside the signed request, instead of a challenge answer. */
   readonly session?: string;
+  /**
+   * Ask for the challenge and sign it, but send no action: the proof goes with
+   * a request on another route, as a paired client's merge carries it.
+   */
+  readonly proofOnly?: true;
 }): Promise<OwnerCallResult> {
   const method = input.method ?? "POST";
   const body = input.body === undefined ? "" : JSON.stringify(input.body);
@@ -205,6 +210,9 @@ export async function ownerCall(input: {
           };
     proofHeader = Buffer.from(JSON.stringify(proof)).toString("base64url");
     if (input.unlock.delayMs !== undefined) target.clock.offset += input.unlock.delayMs;
+  }
+  if (input.proofOnly === true) {
+    return { status: 0, json: null, ...(proofHeader === undefined ? {} : { proofHeader }) };
   }
   const answered = await send(input.route, method, body, proofHeader);
   return proofHeader === undefined ? answered : { ...answered, proofHeader };

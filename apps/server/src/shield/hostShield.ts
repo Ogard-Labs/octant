@@ -70,6 +70,11 @@ export interface HostShieldDependencies {
   readonly personMessages: (threadId: CodeThread["id"], limit: number) => ReadonlyArray<string>;
   /** The person's chosen Shield model, when they picked one. */
   readonly chosenModel?: () => ShieldModelChoice | undefined;
+  /**
+   * Why the person's chosen account cannot be asked right now, as one plain
+   * sentence; undefined when it can. The decision then goes to the person.
+   */
+  readonly chosenModelUnavailable?: (choice: ShieldModelChoice) => string | undefined;
   /** The person's Auto reviewer for a thread: its Project's, else Settings'. */
   readonly chosenReviewer?: (thread: CodeThread | WorkThread) => AutoReviewer | undefined;
   readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
@@ -156,8 +161,13 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }): ShieldModelPort | undefined => {
+    const chosen = deps.chosenModel?.();
+    const unavailable = chosen === undefined ? undefined : deps.chosenModelUnavailable?.(chosen);
+    if (chosen !== undefined && unavailable !== undefined) {
+      return { model: chosen, unavailable, complete: async () => ({ status: "unreached" }) };
+    }
     const model = resolveShieldModel({
-      chosen: deps.chosenModel?.(),
+      chosen,
       thread: { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
       catalog: deps.catalog,
     });
@@ -169,6 +179,9 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
   const availableFor = (providerInstanceId: ProviderInstanceId): boolean => {
     if (!deps.routesApprovals(providerInstanceId)) return false;
     const chosen = deps.chosenModel?.();
+    // A chosen account that cannot be asked still reviews: the Judge says why
+    // and sends each decision to the person, rather than the prompt skipping it.
+    if (chosen !== undefined && deps.chosenModelUnavailable?.(chosen) !== undefined) return true;
     return deps.resolveDriver(chosen?.providerInstanceId ?? providerInstanceId) !== undefined;
   };
   const shield = new OctantShield({

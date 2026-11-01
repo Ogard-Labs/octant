@@ -28,7 +28,7 @@ describe("CodeWorkspace", () => {
     expect(screen.getByText("Loading exact checkout status and diff evidence.")).toBeVisible();
   });
 
-  it("says a server Project's file tab is not available yet, and opens its terminal and Git tabs", () => {
+  it("says a server Project's file tab is not available yet, and opens its terminal, Git, and pull request tabs", () => {
     const client = codeClient();
     const serverProjectId = "77777777-7777-4777-8777-777777777777" as ProjectId;
     const base = controller("approval-gated") as {
@@ -81,18 +81,23 @@ describe("CodeWorkspace", () => {
       expect.objectContaining({ kind: "observe-git" }),
     );
     git.unmount();
-    const file = render(
-      inServerProject(
-        <CodeWorkspace
-          client={client}
-          controller={server}
-          createUuid={uuidFactory()}
-          tab={{ ...tab("code-file", "README.md"), relativePath: "README.md" } as never}
-        />,
-      ),
-    );
-    expect(screen.queryByText("This is not available for a Project on a server yet.")).toBeNull();
-    file.unmount();
+    for (const opened of [
+      { ...tab("code-file", "README.md"), relativePath: "README.md" },
+      tab("code-pr", "Pull request"),
+    ]) {
+      const { unmount } = render(
+        inServerProject(
+          <CodeWorkspace
+            client={client}
+            controller={server}
+            createUuid={uuidFactory()}
+            tab={opened as never}
+          />,
+        ),
+      );
+      expect(screen.queryByText("This is not available for a Project on a server yet.")).toBeNull();
+      unmount();
+    }
     for (const [kind, title] of [["code-local-review", "Review"]] as const) {
       const { unmount } = render(
         <ServerCodeProjectsContext.Provider

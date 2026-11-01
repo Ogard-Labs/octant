@@ -393,6 +393,8 @@ export const HubState = Schema.Struct({
   link: Schema.optional(HubLinkState),
   /** Guest devices a dropped link could not revoke because the device pairing was not running; revoked once it is. */
   pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
+  /** A paired phone or web client's merge needs a fresh unlock on an owner device; set only from a window on this host. */
+  ownerUnlockBeforePairedMerge: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type HubState = typeof HubState.Type;
 

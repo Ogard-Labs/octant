@@ -56,6 +56,16 @@ Choose one to start a thread there.
 - **Git tab.** Choose **Git** on the thread's checkout bar to see the
   changes in the folder on the server, stage, commit, and push. Git runs on
   the server with the server's own Git setup. At Plan it changes nothing.
+- **A worktree of its own.** In the composer, choose **Workspace** ›
+  **Managed worktree** to start the thread on a new branch in its own
+  worktree on the server, beside the Project's folder, from the branch you
+  pick. The Project's folder must be its repository's top folder. Octant
+  never removes that worktree; remove it on the server when you are done
+  (`git worktree remove`). Plan cannot start a thread in a new worktree.
+- **Pull requests.** Push the thread's branch from **Git**, then choose
+  **Create pull request** on the checkout bar. Octant opens it with this
+  computer's GitHub sign-in, on the GitHub repository of the remote on the
+  server.
 - **Files and Tests.** The Files panel lists the folder on the server, and
   files open and save there. Choose **Refresh** to see changes made on the
   server, since the folder is not watched. The Tests panel runs the tests
@@ -63,7 +73,7 @@ Choose one to start a thread there.
   the thread's access level. A save is refused when the file changed on the
   server after you opened it.
 - **Not available there yet:** connectors and plugins, Browser and Computer,
-  subagents, forks, checkpoints and rewind, pull requests, and searching
-  across the folder. Ask the agent to do it on the server, or use a terminal.
+  subagents, forks, checkpoints and rewind, and searching across the folder.
+  Ask the agent to do it on the server, or use a terminal.
 - **Tested on a throwaway local server only.** Octant's tests ran this against
   an `sshd` started on this computer for the test, never a real server.

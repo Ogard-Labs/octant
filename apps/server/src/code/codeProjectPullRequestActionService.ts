@@ -303,6 +303,16 @@ export class CodeProjectPullRequestActionService {
         merged.push(item.number);
         continue;
       }
+      // The owner unlock is checked once for the whole stack, on its route,
+      // before this runs; a single merge here never asks for it.
+      if (outcome.status === "owner-unlock-required") {
+        return {
+          status: "stopped",
+          merged,
+          stoppedAt: item.number,
+          outcome: { status: "refused", reason: "not-authorized" },
+        };
+      }
       return { status: "stopped", merged, stoppedAt: item.number, outcome };
     }
     return { status: "merged", merged };

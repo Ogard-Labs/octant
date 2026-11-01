@@ -2161,11 +2161,13 @@ as an account default a Project
 may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
 networks** (trusted hosts, domains, address ranges, and private-network tags),
 and **Servers** (registered SSH hosts, each with a Read-only, Operate, or Admin
-profile and an optional notes file), and as an account setting **Shield
-model** (each thread's provider with its smallest model, or a configured
-endpoint). The rules behind them are in
+profile and an optional notes file), and, with the memory distiller's model, the account choices under **Automatic
+model calls** (each thread's provider with its smallest model, or one configured
+account and model). The rules behind them are in
 [Octant Shield](docs/architecture.md#octant-shield). Built for Code: Auto
-reviewer and Shield model in Settings › Code › Access, and the reviewer
+reviewer in Settings › Code › Access, **Automatic model calls** in Settings ›
+Providers & Models (a section with one select per job, a plain note of where the
+work goes, and the account's problem when it has one), and the reviewer
 override as a select on a Code Project's overview; **Servers** is built below
 Safe networks in Settings › Access as an account list and a **Project**
 picker that says whether the chosen Project uses the account's servers or

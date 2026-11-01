@@ -85,6 +85,7 @@ const SERVER_THREAD_TABS: ReadonlySet<CodeTab["kind"]> = new Set([
   "code-git",
   "code-file",
   "code-test",
+  "code-pr",
 ]);
 type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-state" }>;
 type TestResult = Extract<CodeOperationResult, { readonly kind: "repository-test-state" }>;
@@ -286,8 +287,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
   }
 
   // A thread in a server Project keeps its files, Git, and tests on the
-  // server. Its terminal is a login there, and its file, Git, and test tabs
-  // read and run there; the tabs this host does not offer for it yet say so.
+  // server. Its terminal is a login there, its file, Git, and test tabs read
+  // and run there, and its pull request is opened from the branch it pushed
+  // from there; the tabs this host does not offer for it yet say so.
   const serverThread =
     view.checkout.kind === "remote-root" &&
     serverCodeProjectFor(serverCodeProjects, view.thread.projectId) !== undefined;

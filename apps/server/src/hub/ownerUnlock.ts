@@ -163,6 +163,38 @@ export class OwnerUnlockService {
   }
 
   /**
+   * Checks a proof that names no owner of its own: a paired client's merge
+   * carries only the unlock, so the owner is the one the challenge was issued
+   * to, and its key comes from the host's own owner list. A challenge whose
+   * owner is no longer listed is consumed and refused.
+   */
+  verifyIssued(input: {
+    readonly proof: OwnerUnlockProof;
+    readonly request: { readonly method: string; readonly path: string; readonly body: string };
+    readonly unlockKeyFor: (ownerMemberId: string) => string | undefined;
+  }):
+    | { readonly status: "fresh"; readonly ownerMemberId: string }
+    | Extract<OwnerUnlockVerification, { status: "refused" }>
+    | { readonly status: "refused"; readonly kind: "not-an-owner" } {
+    const issued = this.#issued.get(input.proof.challengeId);
+    if (issued === undefined) return { status: "refused", kind: "no-such-challenge" };
+    const unlockPublicKey = input.unlockKeyFor(issued.ownerMemberId);
+    if (unlockPublicKey === undefined) {
+      this.#issued.delete(input.proof.challengeId);
+      return { status: "refused", kind: "not-an-owner" };
+    }
+    const verified = this.verify({
+      ownerMemberId: issued.ownerMemberId,
+      unlockPublicKey,
+      proof: input.proof,
+      request: input.request,
+    });
+    return verified.status === "fresh"
+      ? { status: "fresh", ownerMemberId: issued.ownerMemberId }
+      : verified;
+  }
+
+  /**
    * Opens the administration session a verified unlock earns (decision H17).
    * One owner has one session; opening again replaces it. The id is a secret
    * the device presents beside its signed requests, and it is useless to any

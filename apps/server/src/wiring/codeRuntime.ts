@@ -225,6 +225,7 @@ import {
   bindServerCodeTurn,
   serverCodeCheckoutRoot,
   serverProjectOf,
+  serverThreadOf,
 } from "../serverProjects/serverProjectThreads";
 import type { GitService } from "../code/gitService";
 import { createServerGitService } from "../serverProjects/serverGit";
@@ -234,6 +235,7 @@ import {
   createServerRepositoryTests,
   type ServerRepositoryTests,
 } from "../serverProjects/serverTests";
+import { serverPullRequestRepository } from "../serverProjects/serverWorktrees";
 
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
@@ -680,11 +682,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
         serverTerminalLogin: (thread) => {
-          const project = serverProjectOf(serverProjectStore, thread);
-          if (project === undefined) return undefined;
-          const address = serverProjectStore.addressOf(String(project.id));
+          const place = serverThreadOf(serverProjectStore, thread);
+          if (place === undefined) return undefined;
+          const address = serverProjectStore.addressOf(String(place.project.id));
           return address.kind === "address"
-            ? serverTerminalLogin(serverConnection, address.server, project.folder)
+            ? serverTerminalLogin(serverConnection, address.server, place.folder)
             : undefined;
         },
         serverGit: (thread) => {
@@ -716,12 +718,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           return git;
         },
         serverRepositoryTests: (thread) => {
-          const project = serverProjectOf(serverProjectStore, thread);
-          if (project === undefined) return undefined;
+          // The thread's folder there: the Project's own, or its own worktree.
+          const place = serverThreadOf(serverProjectStore, thread);
+          if (place === undefined) return undefined;
+          const project = place.project;
           const projectId = String(project.id);
           if (serverProjectStore.addressOf(projectId).kind !== "address") return undefined;
-          // One per Project, so a run can be cancelled from any request.
-          let tests = serverTestServices.get(projectId);
+          // One per folder, so a run can be cancelled from any request.
+          const key = `${projectId}\0${place.folder}`;
+          let tests = serverTestServices.get(key);
           if (tests === undefined) {
             const server = () => {
               const address = serverProjectStore.addressOf(projectId);
@@ -735,18 +740,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                   ? undefined
                   : { ...address, serverId: String(project.serverId) };
               },
-              root: project.folder,
+              root: place.folder,
               files: new ServerCodeFiles({
                 connection: serverConnection,
                 server,
-                root: project.folder,
+                root: place.folder,
                 clock: () => new Date().toISOString(),
               }),
               record: (record) => shieldServerStore.recordServerCommand(record),
               now: () => new Date().toISOString(),
               newId: randomUUID,
             });
-            serverTestServices.set(projectId, tests);
+            serverTestServices.set(key, tests);
           }
           return tests;
         },
@@ -1191,11 +1196,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         resolvePullRequestTarget: async (threadId) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return undefined;
-          const owner = thread.deliveryTarget.proposedBaseRepository.split("/")[0];
+          const baseRepository = await serverPullRequestRepository(
+            { store: serverProjectStore, connection: serverConnection },
+            thread,
+          );
+          const owner = baseRepository.split("/")[0];
           if (owner === undefined || owner.length === 0) return undefined;
           return {
             authorization: "confirmed-delivery-target",
-            baseRepository: thread.deliveryTarget.proposedBaseRepository,
+            baseRepository,
             baseBranch: thread.deliveryTarget.proposedBaseBranch,
             head: `${owner}:${thread.deliveryTarget.branchIntent}`,
           };

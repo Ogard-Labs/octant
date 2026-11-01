@@ -85,9 +85,13 @@ import type { ProvidersWiring } from "./providers";
 import type { FoundationsWiring } from "./foundations";
 
 import type { HarnessStateWiring } from "./harnessState";
-import { serverProjectOf, withServerCodeCheckouts } from "../serverProjects/serverProjectThreads";
+import { serverThreadOf, withServerCodeCheckouts } from "../serverProjects/serverProjectThreads";
 import { ServerCodeFiles } from "../serverProjects/serverCodeFiles";
 import { discoverServerTests } from "../serverProjects/serverTests";
+import {
+  listServerWorktreeRefs,
+  withServerWorktreeCreation,
+} from "../serverProjects/serverWorktrees";
 
 export function createExistingWorktreeCodeFileRootAuthority(options: {
   readonly projects: Pick<ProjectService, "bootstrap">;
@@ -784,9 +788,10 @@ export function wireCode(deps: CodeDependencies) {
           files: codeFiles,
           tests: codeTestDiscovery,
           serverCheckout: (thread) => {
-            const project = serverProjectOf(serverProjectStore, thread);
-            if (project === undefined) return undefined;
-            const projectId = String(project.id);
+            // The thread's folder there: the Project's own, or its own worktree.
+            const place = serverThreadOf(serverProjectStore, thread);
+            if (place === undefined) return undefined;
+            const projectId = String(place.project.id);
             if (serverProjectStore.addressOf(projectId).kind !== "address") return undefined;
             const files = new ServerCodeFiles({
               connection: serverConnection,
@@ -795,7 +800,7 @@ export function wireCode(deps: CodeDependencies) {
                 const address = serverProjectStore.addressOf(projectId);
                 return address.kind === "address" ? address.server : undefined;
               },
-              root: project.folder,
+              root: place.folder,
               content: codeContent,
               clock: () => new Date().toISOString(),
             });
@@ -818,8 +823,14 @@ export function wireCode(deps: CodeDependencies) {
           worktreeSourcePreview: {
             preview: (input, signal) => managedWorktreeSourcePreview(input, signal),
           },
+          // A server Project's branches and worktrees are its server's.
           worktreeRefs: {
-            list: (input, signal) => managedWorktreeRefsList(input, signal),
+            list: async (input, signal) =>
+              (await listServerWorktreeRefs(
+                { store: serverProjectStore, connection: serverConnection },
+                String(input.projectId),
+                signal,
+              )) ?? managedWorktreeRefsList(input, signal),
           },
           // The operation runtime reads a thread's turns and checkout.
           forkPoints: {
@@ -841,12 +852,15 @@ export function wireCode(deps: CodeDependencies) {
                 ? { status: "refused", reason: "unsupported" }
                 : codeOperationRuntime.mergeForkContext(windowId, forkThreadId, throughOperationId),
           },
-          managedThreadCreation: {
-            prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
-            commit: (input, preparation, signal) =>
-              managedCodeThreadCreation.commit(input, preparation, signal),
-            cleanup: (input, signal) => managedCodeThreadCreation.cleanup(input, signal),
-          },
+          managedThreadCreation: withServerWorktreeCreation(
+            { store: serverProjectStore, connection: serverConnection },
+            {
+              prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
+              commit: (input, preparation, signal) =>
+                managedCodeThreadCreation.commit(input, preparation, signal),
+              cleanup: (input, signal) => managedCodeThreadCreation.cleanup(input, signal),
+            },
+          ),
           workingDirectories: {
             resolve: async (windowId, thread, checkout, workingDirectory) => {
               const root = await roots.resolve(

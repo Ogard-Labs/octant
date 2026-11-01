@@ -119,7 +119,7 @@ describe("who answers a thread's prompts at Auto, as the picker shows it", () =>
   });
 });
 
-describe("Settings › Access reviewer and Shield model", () => {
+describe("Settings › Access reviewer", () => {
   const settings = {
     defaultExecutionPolicy: "approval-gated",
     defaultPermissionPersistence: "current-session",
@@ -136,80 +136,19 @@ describe("Settings › Access reviewer and Shield model", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ autoReviewer: "octant-shield" }));
   });
 
-  it("shows the stored reviewer and Shield model again when saving them fails, so a retry is possible", async () => {
+  it("shows the stored reviewer again when saving it fails, so a retry is possible", async () => {
     const update = vi.fn(async () => false);
-    const chosen = {
-      providerInstanceId: id("00000000-0000-4000-8000-0000000000a1"),
-      modelId: "local-small" as never,
-    };
-    render(
-      <CodeSettingsView
-        onUpdate={update}
-        providerSnapshot={
-          {
-            instances: [{ id: chosen.providerInstanceId, displayName: "Local", enabled: true }],
-            catalogs: [
-              {
-                instanceId: chosen.providerInstanceId,
-                models: [{ id: chosen.modelId, displayName: "Local small" }],
-              },
-            ],
-          } as never
-        }
-        settings={settings as never}
-      />,
-    );
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
     const user = userEvent.setup();
     const reviewer = screen.getByRole("combobox", { name: "Auto reviewer" });
     await chooseSelectFieldOption(user, reviewer, "Octant Shield");
     await vi.waitFor(() => expect(reviewer).toHaveTextContent("Provider's own"));
     await chooseSelectFieldOption(user, reviewer, "Octant Shield");
     expect(update).toHaveBeenCalledTimes(2);
-
-    const model = screen.getByRole("combobox", { name: "Shield model" });
-    await chooseSelectFieldOption(user, model, "Local · Local small");
-    await vi.waitFor(() =>
-      expect(model).toHaveTextContent("Each thread's provider, smallest model"),
-    );
   });
 
-  it("offers each enabled provider's models for Shield and returns to the thread's own", async () => {
-    const update = vi.fn(async () => true);
-    const chosen = {
-      providerInstanceId: id("00000000-0000-4000-8000-0000000000a1"),
-      modelId: "local-small" as never,
-    };
-    render(
-      <CodeSettingsView
-        onUpdate={update}
-        providerSnapshot={
-          {
-            instances: [
-              { id: chosen.providerInstanceId, displayName: "Local", enabled: true },
-              {
-                id: id("00000000-0000-4000-8000-0000000000a2"),
-                displayName: "Off",
-                enabled: false,
-              },
-            ],
-            catalogs: [
-              {
-                instanceId: chosen.providerInstanceId,
-                models: [{ id: chosen.modelId, displayName: "Local small" }],
-              },
-            ],
-          } as never
-        }
-        settings={{ ...settings, shieldModel: chosen } as never}
-      />,
-    );
-    const field = screen.getByRole("combobox", { name: "Shield model" });
-    expect(field).toHaveTextContent("Local · Local small");
-    await chooseSelectFieldOption(
-      userEvent.setup(),
-      field,
-      "Each thread's provider, smallest model",
-    );
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({ shieldModel: null }));
+  it("no longer holds a model choice of its own, which lives under Automatic model calls", () => {
+    render(<CodeSettingsView onUpdate={vi.fn(async () => true)} settings={settings as never} />);
+    expect(screen.queryByRole("combobox", { name: "Shield model" })).toBeNull();
   });
 });
