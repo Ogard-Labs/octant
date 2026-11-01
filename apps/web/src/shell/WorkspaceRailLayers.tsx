@@ -114,6 +114,10 @@ export interface WorkspaceRailLayersProps {
     readonly enabledFor: (projectId: ProjectId) => boolean;
     readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   };
+  readonly agentMerge?: {
+    readonly enabledFor: (projectId: ProjectId) => boolean;
+    readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  };
   readonly onSelectBoardPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly selectedProjectPullRequestKey?: string;
   readonly unreadThreadIds?: ReadonlySet<string>;
@@ -260,6 +264,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.pullRequestBackgroundRefresh === undefined
                 ? {}
                 : { backgroundRefresh: props.pullRequestBackgroundRefresh })}
+              {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
               {...(props.onSelectProjectPullRequest === undefined
                 ? {}
                 : { onSelectRow: props.onSelectProjectPullRequest })}

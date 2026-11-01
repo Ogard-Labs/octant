@@ -256,6 +256,8 @@ export interface AutomationDraftFormInput {
    * at, Full access included, instead of asking first.
    */
   readonly runsAtProjectLevel?: boolean;
+  /** The person's choice to let a Code run merge the pull request its thread opened. */
+  readonly mergesItsPullRequests?: boolean;
   readonly previousDeliveryTargetRevision?: number;
   readonly actorId: string;
   /** Strict UTC timestamp used as the confirmation instant. */
@@ -393,6 +395,9 @@ export function buildAutomationDraft(input: AutomationDraftFormInput): Automatio
     missedRunPolicy: input.missedRunPolicy,
     targetPolicy: "new-thread",
     ...(input.runsAtProjectLevel === true ? { projectLevel: "opted-in" } : {}),
+    ...(input.mergesItsPullRequests === true && input.mode === "code"
+      ? { agentMerge: "allowed" }
+      : {}),
   };
   try {
     return { kind: "valid", draft: decodeAutomationDefinitionDraft(candidate) };

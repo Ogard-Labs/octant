@@ -15,11 +15,15 @@ export type ProjectPullRequestPersonAction =
     }
   | { readonly kind: "comment"; readonly body: string }
   | { readonly kind: "reply"; readonly reviewThreadId: string; readonly body: string }
+  | { readonly kind: "approve"; readonly headSha: string; readonly body?: string }
+  | { readonly kind: "request-changes"; readonly headSha: string; readonly body: string }
   | { readonly kind: "close" }
   | { readonly kind: "reopen" };
 
 export interface ProjectPullRequestActionsProps {
   readonly pullRequestState: "open" | "draft" | "merged" | "closed";
+  /** The head the person is reading; a review is recorded on it and refused if it moves. */
+  readonly headSha: string;
   readonly loadContext: () => Promise<CodeProjectPullRequestActionContext>;
   readonly onAct: (
     action: ProjectPullRequestPersonAction,
@@ -35,8 +39,8 @@ type Notice =
   | { readonly tone: "refused"; readonly text: string };
 
 /**
- * Labels, a comment, a reply in one review thread, close, and reopen: the
- * person's own controls. The click is the approval, so there is no second
+ * Labels, a comment, a reply in one review thread, approving or requesting
+ * changes, close, and reopen: the person's own controls. The click is the approval, so there is no second
  * confirmation; a comment or reply posts under the person's name, which the
  * copy says next to the button. A paired phone or web client is refused by the
  * host, and the pane says so instead of failing silently.
@@ -49,6 +53,7 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
   const [comment, setComment] = useState("");
   const [replyThread, setReplyThread] = useState<string>();
   const [reply, setReply] = useState("");
+  const [reviewNote, setReviewNote] = useState("");
   const noticeRef = useRef<HTMLParagraphElement>(null);
   const readSequence = useRef(0);
   const { loadContext } = props;
@@ -287,6 +292,66 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
         </div>
       )}
 
+      {merged || closed || props.headSha === "" ? null : (
+        <form
+          aria-label="Review this pull request"
+          noValidate
+          className="code-pr-actions__group"
+          onSubmit={(event) => event.preventDefault()}
+        >
+          <label htmlFor="code-pr-actions-review">
+            <strong>Review</strong>
+          </label>
+          <OctantTextarea
+            id="code-pr-actions-review"
+            onChange={(event) => setReviewNote(event.target.value)}
+            placeholder="Add a note (needed to request changes)"
+            rows={3}
+            value={reviewNote}
+          />
+          <div className="code-pr-actions__row">
+            <span className="code-pr-actions__note">
+              Recorded under your name on {props.headSha.slice(0, 7)}. GitHub does not let you
+              approve your own pull request.
+            </span>
+            <OctantButton
+              disabled={pending}
+              onClick={() =>
+                void run(
+                  {
+                    kind: "approve",
+                    headSha: props.headSha,
+                    ...(reviewNote.trim() === "" ? {} : { body: reviewNote }),
+                  },
+                  "Approved the pull request.",
+                  () => setReviewNote(""),
+                )
+              }
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Approve
+            </OctantButton>
+            <OctantButton
+              disabled={pending || reviewNote.trim() === ""}
+              onClick={() =>
+                void run(
+                  { kind: "request-changes", headSha: props.headSha, body: reviewNote },
+                  "Requested changes.",
+                  () => setReviewNote(""),
+                )
+              }
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Request changes
+            </OctantButton>
+          </div>
+        </form>
+      )}
+
       {merged ? null : (
         <div className="code-pr-actions__group code-pr-actions__row">
           <span className="code-pr-actions__note">
@@ -369,10 +434,14 @@ function actionRefusalCopy(
           ? "the pull request is not closed"
           : outcome.reason === "merged"
             ? "the pull request is already merged"
-            : outcome.reason === "label-not-found"
-              ? "the repository does not have that label"
-              : outcome.reason === "invalid"
-                ? "GitHub did not accept that text or thread"
-                : "GitHub rejected it";
+            : outcome.reason === "stale"
+              ? "the pull request has a newer commit than the one you read (a review already sent stays on the older commit); refresh and check it"
+              : outcome.reason === "own-pull-request"
+                ? "GitHub does not let you review your own pull request"
+                : outcome.reason === "label-not-found"
+                  ? "the repository does not have that label"
+                  : outcome.reason === "invalid"
+                    ? "GitHub did not accept that text or thread"
+                    : "GitHub rejected it";
   return `That did not go through: ${reason}.`;
 }

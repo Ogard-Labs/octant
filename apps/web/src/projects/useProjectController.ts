@@ -14,6 +14,7 @@ import {
   type ProjectType,
   type CodeAccessPersistence,
   type CodeNewThreadWorkspace,
+  type CodeProjectAgentMerge,
   type CodeProjectPullRequestBackgroundRefresh,
   type ProjectAction,
   type ProjectColor,
@@ -329,6 +330,31 @@ export function useProjectController(options: ProjectControllerOptions) {
       pullRequestBackgroundRefresh === "enabled"
         ? "Background pull-request refresh enabled."
         : "Background pull-request refresh disabled.",
+    );
+  }
+
+  /**
+   * Let a Code Project's agents merge the pull requests their threads own
+   * without asking each time, or stop that. The server is the authority and
+   * accepts it only from a window on the host.
+   */
+  async function setCodeAgentMerge(
+    projectId: ProjectId,
+    agentMerge: CodeProjectAgentMerge,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    if ((project.agentMerge ?? "disabled") === agentMerge) return true;
+    return execute(
+      {
+        kind: "change-code-project-agent-merge",
+        projectId,
+        expectedVersion: project.version,
+        agentMerge,
+      },
+      agentMerge === "enabled"
+        ? "Agents may now merge this Project's pull requests."
+        : "Agents no longer merge this Project's pull requests without asking.",
     );
   }
 
@@ -874,6 +900,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodePermissionMode,
     setCodeAutoReviewer,
     setCodePullRequestBackgroundRefresh,
+    setCodeAgentMerge,
     setProviderPolicy,
     setNativeProviders,
     setBrandKit,

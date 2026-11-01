@@ -387,6 +387,20 @@ export const CodeProjectPullRequestActionCommand = Schema.Union(
     reviewThreadId: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/)),
     body: boundedNonEmptyText(65_536),
   }).annotations(strict),
+  // A review lands on the head the person read: the host refuses it as stale
+  // when the head has moved, and the forge records it on that commit.
+  Schema.Struct({
+    kind: Schema.Literal("approve"),
+    ...CodeProjectPullRequestActionTarget,
+    headSha: boundedNonEmptyText(64),
+    body: Schema.optional(boundedNonEmptyText(65_536)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("request-changes"),
+    ...CodeProjectPullRequestActionTarget,
+    headSha: boundedNonEmptyText(64),
+    body: boundedNonEmptyText(65_536),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("close"),
     ...CodeProjectPullRequestActionTarget,
@@ -406,6 +420,8 @@ const CodeProjectPullRequestActionRefusal = Schema.Literal(
   "not-closed",
   "merged",
   "label-not-found",
+  "stale",
+  "own-pull-request",
   "failed",
 );
 
@@ -481,7 +497,15 @@ export const CodeProjectPullRequestActionRecorded = Schema.Struct({
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
   number: Schema.Int.pipe(Schema.positive()),
-  action: Schema.Literal("labels", "comment", "reply", "close", "reopen"),
+  action: Schema.Literal(
+    "labels",
+    "comment",
+    "reply",
+    "approve",
+    "request-changes",
+    "close",
+    "reopen",
+  ),
   labels: Schema.optional(
     Schema.Struct({
       add: Schema.Array(CodeProjectPullRequestLabel),

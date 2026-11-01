@@ -101,6 +101,21 @@ describe("pull-request merge policy", () => {
     ).toEqual({ decision: "refuse", reason: "not-confirmed" });
   });
 
+  it("holds an agent on a stored choice to the same checks as one on request", () => {
+    const base = { caller: "agent-on-standing-permission", confirmed: true } as const;
+    expect(decideRemotePullRequestMerge({ ...base, requiredChecks: "passing" })).toEqual({
+      decision: "allow",
+    });
+    expect(decideRemotePullRequestMerge({ ...base, requiredChecks: "pending" })).toEqual({
+      decision: "refuse",
+      reason: "checks-not-passing",
+    });
+    expect(decideRemotePullRequestMerge({ ...base, requiredChecks: "unknown" })).toEqual({
+      decision: "refuse",
+      reason: "checks-unknown",
+    });
+  });
+
   it("refuses an agent merging on its own initiative", () => {
     expect(
       decideRemotePullRequestMerge({

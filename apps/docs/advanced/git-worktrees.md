@@ -106,7 +106,13 @@ receives an explicit normalized path set.
   text, because it posts under your name. The agent never approves or requests
   changes on a pull request. It can merge its own pull request when you ask,
   after you approve that one merge; Octant merges only the head you saw, and
-  only when the repository's required checks have passed.
+  only when the repository's required checks have passed. Two choices of yours
+  let it merge without asking each time: **Agents may merge** on a Project
+  (in the Pull requests list, beside Auto-refresh), and **Merge the pull
+  requests it opens** on a Code routine in Automation Center. Only a window on
+  this computer turns either on, and the head and required-check rules still
+  apply. Switch the choice off and the next merge asks again. A routine's
+  choice covers only the threads its own runs create.
 - **You merge yourself.** Open a pull request's review and choose a method,
   then **Confirm merge**. Octant merges only the head you reviewed, refuses
   if it moved or if a required check has not passed, and uses your signed-in
@@ -114,8 +120,12 @@ receives an explicit normalized path set.
   stack from the bottom, the same way; a stack that is not one chain is
   refused before anything merges. Under **Your actions** in the review you can
   add or remove a label the repository already has, post a comment, reply in an
-  open review thread, and close or reopen the pull request. Comments and replies
-  post under your name, and these controls work in the desktop window only. You
+  open review thread, approve it or request changes (a note is needed to
+  request changes), and close or reopen the pull request. Comments, replies,
+  and reviews post under your name, and these controls work in the desktop
+  window only. A review is recorded on the head you read and refused if the
+  pull request has a newer commit; GitHub does not let you approve your own
+  pull request. You
   can also turn on **Merge when ready** and **Auto-fix** there; see
   [Automatic actions](#automatic-actions-on-a-pull-request). Durable local review findings stay thread-owned; publishing
   them to GitHub is a later phase.
@@ -164,8 +174,8 @@ only exact PR identities produced by Code operations, so after restart a Code
 card can show an identity as **Unknown** and stale until a user refreshes.
 
 Thread-scoped create and observe remain on the thread. A pull request's review
-can merge it after you confirm; nothing here approves, comments, closes, or
-force-pushes.
+can merge it after you confirm; nothing here comments, closes, or
+force-pushes without your action.
 
 ### Automatic actions on a pull request
 

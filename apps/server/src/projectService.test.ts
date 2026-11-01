@@ -1027,6 +1027,33 @@ describe("ProjectService", () => {
     );
   });
 
+  it("journals one event when a Code Project lets agents merge and refuses a Chat Project", async () => {
+    const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-code-project-agent-merge",
+        projectId: chatId,
+        expectedVersion: 1,
+        agentMerge: "enabled",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-code-project-agent-merge",
+      projectId: workId,
+      expectedVersion: 1,
+      agentMerge: "enabled",
+    });
+    expect(result).toMatchObject({
+      kind: "code-project-agent-merge-changed",
+      project: { agentMerge: "enabled", version: 2 },
+    });
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.code-agent-merge-changed@1",
+    );
+  });
+
   it("saves a Code Project's terminal actions as one journaled event and refuses a Work Project", async () => {
     const fixture = fixtureService({ projects: [codeProject()] });
     const actions = [

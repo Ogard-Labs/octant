@@ -85,6 +85,13 @@ function renderWorkspace(
         enabled: boolean,
       ) => Promise<boolean>;
     };
+    readonly agentMerge?: {
+      readonly enabledFor: (projectId: import("@octant/contracts").ProjectId) => boolean;
+      readonly setEnabled: (
+        projectId: import("@octant/contracts").ProjectId,
+        enabled: boolean,
+      ) => Promise<boolean>;
+    };
   } = {},
 ) {
   const load = options.load ?? vi.fn(async () => view());
@@ -99,6 +106,7 @@ function renderWorkspace(
       {...(options.backgroundRefresh === undefined
         ? {}
         : { backgroundRefresh: options.backgroundRefresh })}
+      {...(options.agentMerge === undefined ? {} : { agentMerge: options.agentMerge })}
     />,
   );
   return { load, refresh };
@@ -196,6 +204,24 @@ describe("CodeProjectPullRequests", () => {
     // The unconnected Project has nothing to refresh, so it gets no toggle.
     expect(
       screen.queryByRole("switch", { name: "Auto-refresh Local notes pull requests" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(setEnabled).toHaveBeenCalledWith(projectA, true);
+  });
+
+  it("lets a local window turn on agents merging for a connected Project only", async () => {
+    const user = userEvent.setup();
+    const setEnabled = vi.fn(async () => true);
+    renderWorkspace({ agentMerge: { enabledFor: () => false, setEnabled } });
+    await screen.findByText("List active pull requests");
+
+    const toggle = screen.getByRole("switch", {
+      name: "Let agents merge Octant pull requests",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(
+      screen.queryByRole("switch", { name: "Let agents merge Local notes pull requests" }),
     ).not.toBeInTheDocument();
 
     await user.click(toggle);
