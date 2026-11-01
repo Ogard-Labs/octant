@@ -189,17 +189,53 @@ export class ShieldServerStore {
     if (ssh.kind === "not-ssh") return "not-remote";
     const host = ssh.host !== undefined && ALIAS.test(ssh.host) ? ssh.host : undefined;
     const server = host === undefined ? undefined : registeredServerFor(this.servers(), host);
+    return this.#recordRan({
+      ...input,
+      ...(host === undefined ? {} : { host }),
+      ...(server === undefined ? {} : { serverId: String(server.serverId) }),
+    });
+  }
+
+  /**
+   * Journals one command a server Project's thread ran on its server, which
+   * the command itself does not name: the thread's hands are on that server.
+   */
+  recordServerCommand(input: {
+    readonly threadId: string;
+    readonly serverId: string;
+    readonly alias: string;
+    readonly command: string;
+    readonly status: ShieldRemoteCommandStatus;
+    readonly exitCode?: number | undefined;
+  }): "recorded" | "unavailable" {
+    return this.#recordRan({
+      ...input,
+      ...(ALIAS.test(input.alias) ? { host: input.alias } : {}),
+    });
+  }
+
+  #recordRan(input: {
+    readonly threadId: string;
+    readonly command: string;
+    readonly status: ShieldRemoteCommandStatus;
+    readonly exitCode?: number | undefined;
+    readonly host?: string;
+    readonly serverId?: string;
+  }): "recorded" | "unavailable" {
     const redacted = redactSecretShaped(input.command.trim());
     let threadId: AggregateId;
+    let serverId: AggregateId | undefined;
     try {
       threadId = decodeAggregateId(input.threadId);
+      serverId = input.serverId === undefined ? undefined : decodeAggregateId(input.serverId);
     } catch {
       return "unavailable";
     }
+    const host = input.host;
     const payload = {
       threadId,
       ...(host === undefined ? {} : { host }),
-      ...(server === undefined ? {} : { serverId: server.serverId }),
+      ...(serverId === undefined ? {} : { serverId }),
       command:
         redacted.length > MAX_SHIELD_REMOTE_COMMAND_LENGTH
           ? `${redacted.slice(0, MAX_SHIELD_REMOTE_COMMAND_LENGTH - 1)}…`

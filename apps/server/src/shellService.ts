@@ -1,5 +1,6 @@
 import {
   ActorId,
+  type CodeThread,
   AggregateVersion,
   CorrelationId,
   type AppReleaseRing,
@@ -79,8 +80,27 @@ export interface ShellServiceApi {
   }) => ShellCommandResult;
 }
 
+/**
+ * The Code Projects bound to a folder on a registered server. They are a
+ * catalog of their own, so `readProject` never names one. A window binds to
+ * one with no folder of this host (`boundRoot: null`), so no Files, Browser,
+ * or other root-backed surface resolves for it, and only a server thread's
+ * own view opens: its terminal, Git, tests, and files would act here.
+ */
+export interface ServerCodeProjectBindings {
+  readonly has: (projectId: ProjectId) => boolean;
+  /** Whether the thread runs in a server Project, on the checkout that Project derives. */
+  readonly holdsThread: (thread: CodeThread) => boolean;
+}
+
+const NO_SERVER_CODE_PROJECTS: ServerCodeProjectBindings = {
+  has: () => false,
+  holdsThread: () => false,
+};
+
 export interface ShellServiceOptions {
   readonly persistence: PersistenceService;
+  readonly serverCodeProjects?: ServerCodeProjectBindings;
   readonly readWorkThread?: (threadId: WorkThreadId) => WorkThread | undefined;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -99,6 +119,7 @@ export class ShellServiceError extends Error {
 export class ShellService implements ShellServiceApi {
   readonly #persistence: PersistenceService;
   readonly #readWorkThread: ShellServiceOptions["readWorkThread"];
+  readonly #serverCodeProjects: ServerCodeProjectBindings;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #home: string | undefined;
@@ -107,6 +128,7 @@ export class ShellService implements ShellServiceApi {
   constructor(options: ShellServiceOptions) {
     this.#persistence = options.persistence;
     this.#readWorkThread = options.readWorkThread;
+    this.#serverCodeProjects = options.serverCodeProjects ?? NO_SERVER_CODE_PROJECTS;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#home = options.home;
@@ -281,6 +303,7 @@ export class ShellService implements ShellServiceApi {
                   this.#persistence,
                 ),
                 this.#persistence,
+                this.#serverCodeProjects,
               ),
               this.#persistence,
             ),
@@ -391,6 +414,7 @@ export class ShellService implements ShellServiceApi {
         reconcileContextWithProjects(
           projected?.workspace ?? defaultWindowWorkspace(command.windowId),
           this.#persistence,
+          this.#serverCodeProjects,
         ),
         settings,
       );
@@ -490,7 +514,8 @@ export class ShellService implements ShellServiceApi {
   #contextResolves(): WorkspaceContextResolves {
     const persistence = this.#persistence;
     return {
-      tabContext: (tab) => resolveTabContext(tab, persistence, this.#readWorkThread),
+      tabContext: (tab) =>
+        resolveTabContext(tab, persistence, this.#readWorkThread, this.#serverCodeProjects),
     };
   }
 
@@ -706,6 +731,7 @@ function threadOwnedCanvasTabAuthority(
 function reconcileContextWithProjects(
   workspace: WindowWorkspace,
   persistence: PersistenceService,
+  server: ServerCodeProjectBindings,
 ): WindowWorkspace {
   // Clear stale context bindings: if a bound Project is archived, deleted, or
   // no longer matches the mode, drop its projectId/boundRoot so the surface
@@ -738,6 +764,14 @@ function reconcileContextWithProjects(
   ): { context: WorkspaceContextKey; layout: WorkspaceLayoutNode } => {
     if (context.projectId === null) return { context, layout };
     const project = persistence.readProject(context.projectId);
+    // A server Code Project stays bound with no folder of this host: its
+    // folder is a path on the server, so root-backed surfaces fail closed.
+    if (project === undefined && mode === "code" && server.has(context.projectId)) {
+      return {
+        context: { host: context.host, mode, projectId: context.projectId, boundRoot: null },
+        layout: context.boundRoot === null ? layout : visit(layout, mode, context.projectId),
+      };
+    }
     // Missing or archived Project: clear the context and render root-backed
     // surfaces as welcome so the layout remains restorable.
     if (project === undefined || project.lifecycle !== "active" || project.type !== mode) {
@@ -878,6 +912,7 @@ function resolveTabContext(
   tab: Parameters<WorkspaceContextResolves["tabContext"]>[0],
   persistence: PersistenceService,
   readWorkThread: ShellServiceOptions["readWorkThread"],
+  server: ServerCodeProjectBindings,
 ): WorkspaceContextKey | undefined {
   if (tab.kind === "project") {
     const project = persistence.readProject(tab.projectId);
@@ -898,6 +933,11 @@ function resolveTabContext(
     // the refusal to the user as a missing Git checkout.
     if (tab.projectId === undefined) return undefined;
     const project = persistence.readProject(tab.projectId);
+    // A Code draft in a server Project binds the window to it with no folder
+    // of this host, which is what lets that window create its thread.
+    if (project === undefined && tab.mode === "code" && server.has(tab.projectId)) {
+      return { host: LOCAL_HOST_ID, mode: "code", projectId: tab.projectId, boundRoot: null };
+    }
     if (project === undefined || project.lifecycle !== "active" || project.type !== tab.mode) {
       return undefined;
     }
@@ -960,6 +1000,14 @@ function resolveTabContext(
     const thread = persistence.readCodeThread(tab.threadId as never);
     if (thread === undefined) return undefined;
     const project = persistence.readProject(thread.projectId);
+    // A server thread opens only its own view. Its terminal, Git, tests,
+    // files, Browser, and Apple surfaces would act on a folder of this host,
+    // so none of them resolves.
+    if (project === undefined && server.holdsThread(thread)) {
+      return tab.kind === "code-overview"
+        ? { host: LOCAL_HOST_ID, mode: "code", projectId: thread.projectId, boundRoot: null }
+        : undefined;
+    }
     if (project === undefined || project.lifecycle !== "active" || project.type !== "code") {
       return undefined;
     }

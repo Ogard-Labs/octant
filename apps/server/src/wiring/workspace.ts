@@ -41,16 +41,20 @@ import type { IntegrationsWiring } from "./integrations";
 import type { FoundationsWiring } from "./foundations";
 import type { ComputerUseWiring } from "./computerUse";
 
+import type { HarnessStateWiring } from "./harnessState";
+import { serverProjectOf } from "../serverProjects/serverProjectThreads";
 export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "bindingReceiptStore" | "onWindowRevoked" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "spendCeilingHolder"> &
   Pick<IntegrationsWiring, "githubCapabilityService" | "githubIntegrationIsEffective"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection"> &
-  Pick<ComputerUseWiring, "desktopRecipeKeys" | "offeredDesktopProviders">;
+  Pick<ComputerUseWiring, "desktopRecipeKeys" | "offeredDesktopProviders"> &
+  Pick<HarnessStateWiring, "serverProjectStore">;
 
 export function wireWorkspace(deps: WorkspaceDependencies) {
   const {
     bindingReceiptStore,
+    serverProjectStore,
     desktopRecipeKeys,
     githubCapabilityService,
     githubIntegrationIsEffective,
@@ -143,6 +147,10 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     const shellService = new ShellService({
       persistence,
       readWorkThread: (threadId) => workThreadProjection.read(threadId),
+      serverCodeProjects: {
+        has: (projectId) => serverProjectStore.project(String(projectId)) !== undefined,
+        holdsThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
+      },
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });

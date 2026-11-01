@@ -34,7 +34,10 @@ import type { GoalService } from "../goal/goalService";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
-import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
+import {
+  NativeHarnessFileSystem,
+  type NativeHarnessFileSystemPort,
+} from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
 import {
   createThreadJournalLookup,
@@ -269,6 +272,18 @@ export interface NativeHarnessComposition {
      */
     readonly secrets?: ReadonlyArray<string>;
   }) => AppManagedToolSet | undefined;
+  /**
+   * A Code thread's tools in a server Project: the same tools as `forCode`,
+   * with the file tools and shell on the server and no delegation. Every
+   * command there asks the level's approver, with no remembered approval.
+   */
+  readonly forServerCode: (input: {
+    readonly thread: CodeThread;
+    readonly filesystem: NativeHarnessFileSystemPort;
+    readonly shell: NativeHarnessShellPort;
+    readonly windowId: string;
+    readonly secrets?: ReadonlyArray<string>;
+  }) => AppManagedToolSet | undefined;
   readonly forAgentRun: (input: {
     readonly run: AgentRun;
     readonly authority: AgentRunAuthority;
@@ -438,6 +453,12 @@ export function createNativeHarnessComposition(
     readonly boundRoot?: string;
     /** The Project's extra folders, which Shield judges as it judges the root. */
     readonly extraRoots?: ReadonlyArray<string> | undefined;
+    /**
+     * Commands run with no sandbox, on a server: a remembered approval for
+     * commands was given for ones inside this host's sandbox, so each one
+     * asks again.
+     */
+    readonly everyCommandAsks?: boolean;
   }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering" | "callEnded"> => ({
     callEnded: (callId) => {
       confirmedCommandHosts.delete(callId);
@@ -460,6 +481,9 @@ export function createNativeHarnessComposition(
       ? {}
       : {
           approvals: async (input) => {
+            const singleUse =
+              input.freshConfirmation ||
+              (scope.everyCommandAsks === true && input.approvalClass === "shell-commands");
             let ask: NativeHarnessApprovalAsk = {
               threadId: scope.parentThreadId,
               mode: scope.mode,
@@ -468,7 +492,7 @@ export function createNativeHarnessComposition(
               toolName: input.toolName,
               summary: input.summary,
               approvalClass: input.approvalClass,
-              singleUse: input.freshConfirmation,
+              singleUse,
               signal: input.signal,
             };
             // At Auto with Shield reviewing, Shield answers before anyone is
@@ -478,11 +502,8 @@ export function createNativeHarnessComposition(
               scope.mode !== "chat" &&
               scope.boundRoot !== undefined &&
               options.shield !== undefined &&
-              approvalStore.remembers?.(
-                scope.parentThreadId,
-                input.approvalClass,
-                input.freshConfirmation,
-              ) !== true;
+              approvalStore.remembers?.(scope.parentThreadId, input.approvalClass, singleUse) !==
+                true;
             if (shieldReviews && scope.boundRoot !== undefined && options.shield !== undefined) {
               const decision = await options.shield.review({
                 threadId: scope.parentThreadId,
@@ -858,6 +879,50 @@ export function createNativeHarnessComposition(
             ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
           }),
           ...(shell === undefined ? {} : { shell }),
+          ...webPorts(),
+          ...contextRemainingFor("code-thread", threadId),
+          ...(secrets === undefined
+            ? {}
+            : journalLookupFor({
+                mode: "code",
+                providerInstanceId: thread.providerInstanceId,
+                latestSession: () => options.journal?.latestCodeSession(thread.id),
+                secrets,
+              })),
+          ...secondOpinion({
+            threadId,
+            mode: "code",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
+        },
+      });
+    },
+    forServerCode: ({ thread, filesystem, shell, windowId, secrets }) => {
+      if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
+      const threadId = String(thread.id);
+      const planned =
+        thread.executionPolicy === "plan" ||
+        options.readCodeExecutionPolicy?.(threadId, windowId) === "plan";
+      return compose({
+        threadId,
+        mode: "code",
+        ...(planned ? { executionPolicy: "plan" as const } : {}),
+        turnExecutionPolicy: () => options.readCodeExecutionPolicy?.(threadId, windowId),
+        ports: {
+          ...shared(threadId),
+          // No delegation: a child would run on this host, not on the server.
+          ...askUserFor({
+            parentThreadId: threadId,
+            mode: "code",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+            windowId,
+            boundRoot: filesystem.root,
+            everyCommandAsks: true,
+          }),
+          filesystem,
+          shell,
           ...webPorts(),
           ...contextRemainingFor("code-thread", threadId),
           ...(secrets === undefined

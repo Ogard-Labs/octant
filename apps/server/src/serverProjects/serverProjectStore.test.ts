@@ -153,6 +153,15 @@ describe("server Project catalog", () => {
       }),
     ).toMatchObject({ kind: "refused", reason: "folder-not-found" });
     expect(missing.projects()).toEqual([]);
+    const whole = storeOn(journal, answering(() => resolvedTo("/")).connection);
+    expect(
+      await whole.bind({
+        name: "Everything",
+        serverId: String(web.serverId),
+        folder: "/srv/..",
+        principal: "local-window",
+      }),
+    ).toMatchObject({ kind: "refused", reason: "folder-not-found" });
   });
 
   it("refuses a server that is not registered, and a caller that is not a local window", async () => {

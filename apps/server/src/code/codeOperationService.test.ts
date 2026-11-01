@@ -2413,6 +2413,59 @@ describe("CodeOperationService", () => {
     ).resolves.toBe(false);
   });
 
+  it("runs a server Project's turns with no checkpoint, and refuses its other operations and connectors", async () => {
+    const checkpoint = vi.fn(async () => ({ status: "unavailable" as const }));
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      holdsServerThread: () => true,
+      git: { checkpoint } as never,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+    });
+    const result = await fixture.service.execute(ids.window, startProviderTurn);
+    expect(result.kind).toBe("provider-turn-state");
+    expect(fixture.turns.start).toHaveBeenCalledOnce();
+    expect(checkpoint).not.toHaveBeenCalled();
+    await expect(
+      fixture.service.admitsTurn(ids.window, { id: ids.thread, checkoutId: ids.checkout }),
+    ).resolves.toBe(true);
+
+    const terminal = await fixture.service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: decodeCodeOperationId("49494949-4949-4494-8494-494949494949"),
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      terminalId: ids.terminal,
+      columns: 120,
+      rows: 40,
+      credentialRefs: [],
+    });
+    expect(terminal).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable" },
+    });
+    const connector = await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      operationId: decodeCodeOperationId("4a4a4a4a-4a4a-44a4-84a4-4a4a4a4a4a4a"),
+      extensionSelections: [
+        {
+          kind: "plugin",
+          extensionId: "94000000-0000-4000-8000-000000000011",
+          packageId: "94000000-0000-4000-8000-000000000012",
+          componentId: "notes-server",
+          packageVersion: "1.0.0",
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "notes" },
+        },
+      ],
+    });
+    expect(connector).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable" },
+    });
+    expect(fixture.turns.start).toHaveBeenCalledOnce();
+  });
+
   it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
     const fixture = providerTurnFixture();
     const result = await fixture.service.execute(ids.window, {
@@ -2911,6 +2964,7 @@ function providerTurnFixture(
       | "carryAgentMessages"
       | "confirmAgentMessagesDelivered"
       | "takeProductFeedbackForTurn"
+      | "holdsServerThread"
     >
   > & {
     readonly thread?: CodeThread;

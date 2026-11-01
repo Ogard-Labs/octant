@@ -1418,6 +1418,70 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("runs a server Project's turn with the server's tools as its whole tool set, and refuses one that cannot bind", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const starts: Array<ProviderSessionStart> = [];
+    const connection = providerConnection(queue, starts);
+    const execute = vi.fn(async () => ({ result: { lines: ["on the server"] } }));
+    let binding: "bound" | "refused" = "refused";
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      holdsServerThread: () => true,
+      serverCodeTurn: () =>
+        binding === "refused"
+          ? { status: "refused", message: "Only the Octant Harness runs on a server." }
+          : {
+              status: "bound",
+              tools: {
+                definitions: [
+                  { name: "read", description: "Read a file.", inputSchema: { type: "object" } },
+                ],
+                execute,
+              },
+            },
+    });
+    try {
+      fixture.bindCheckoutToRemoteFolder();
+      const refused = await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1460),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      expect(JSON.stringify(refused)).toContain("Only the Octant Harness runs on a server.");
+      expect(connection.send).not.toHaveBeenCalled();
+
+      binding = "bound";
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1461),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+      expect(starts.at(-1)?.tools?.map((tool) => tool.name)).toEqual(["read"]);
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "server-read-1",
+            toolName: "read",
+            inputJson: JSON.stringify({ path: "index.html" }),
+          }),
+        ),
+      );
+      await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledOnce());
+      expect(execute).toHaveBeenCalledOnce();
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("refuses to start a turn when the thread cannot be brought back, and records no work for it", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -6906,6 +6970,8 @@ function runtimeFixture(options: {
   >[0]["readThreadExternalContentTaint"];
   siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
+  serverCodeTurn?: Parameters<typeof createCodeOperationRuntime>[0]["serverCodeTurn"];
+  holdsServerThread?: Parameters<typeof createCodeOperationRuntime>[0]["holdsServerThread"];
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
   confirmAgentMessagesDelivered?: Parameters<
@@ -7229,6 +7295,10 @@ function runtimeFixture(options: {
       ? {}
       : { readThreadExternalContentTaint: options.readThreadExternalContentTaint }),
     ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
+    ...(options.serverCodeTurn === undefined ? {} : { serverCodeTurn: options.serverCodeTurn }),
+    ...(options.holdsServerThread === undefined
+      ? {}
+      : { holdsServerThread: options.holdsServerThread }),
     ...(options.contributedTools === undefined
       ? {}
       : { contributedTools: options.contributedTools }),

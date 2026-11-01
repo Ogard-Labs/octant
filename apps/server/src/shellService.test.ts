@@ -349,6 +349,69 @@ describe("ShellService", () => {
     ).toThrowError(expect.objectContaining({ failure: expect.objectContaining({}) }));
   });
 
+  it("binds the window to a server Project with no folder of this host, and opens only its thread's view", () => {
+    const serverThreadId = "00000000-0000-4000-8000-000000000251";
+    const fixture = persistenceStub({
+      codeThread: { id: serverThreadId, projectId } as never,
+    });
+    const service = new ShellService({
+      persistence: fixture.persistence,
+      serverCodeProjects: {
+        has: (candidate) => String(candidate) === String(projectId),
+        holdsThread: (thread) => String(thread.id) === serverThreadId,
+      },
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+    const code = defaultWindowWorkspace(ids.window).layouts.code;
+    if (code.kind !== "pane") throw new Error("expected pane");
+
+    const drafted = service.execute({
+      kind: "apply-workspace-operation",
+      windowId: ids.window,
+      expectedVersion: 0,
+      operation: {
+        kind: "open-surface",
+        mode: "code",
+        paneId: code.paneId,
+        surface: {
+          kind: "draft-thread",
+          id: "00000000-0000-4000-8000-000000000252" as never,
+          projectId,
+          mode: "code",
+          title: "New Code thread",
+        },
+      },
+    });
+    expect(drafted).toMatchObject({
+      kind: "workspace-replaced",
+      workspace: { contextByMode: { code: { projectId, boundRoot: null } } },
+    });
+
+    const opened = service.execute({
+      kind: "apply-workspace-operation",
+      windowId: ids.window,
+      expectedVersion: 1,
+      operation: {
+        kind: "open-surface",
+        mode: "code",
+        paneId: code.paneId,
+        surface: {
+          kind: "code-overview",
+          id: "00000000-0000-4000-8000-000000000253" as never,
+          threadId: serverThreadId as never,
+          mode: "code" as const,
+          title: "Thread",
+        },
+      },
+    });
+    expect(opened).toMatchObject({
+      kind: "workspace-replaced",
+      workspace: { contextByMode: { code: { projectId, boundRoot: null } } },
+    });
+  });
+
   it("leaves the window unbound for a draft thread that names no Project", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;

@@ -207,6 +207,9 @@ export function startOctantServer(
     });
     const {
       agentRunInteractions,
+      serverConnection,
+      serverProjectStore,
+      serverRegistry,
       shieldHolder,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
@@ -371,6 +374,7 @@ export function startOctantServer(
       workProjectStatusReader,
     } = yield* wireWorkspace({
       onWindowRevoked,
+      serverProjectStore,
       bindingReceiptStore,
       githubCapabilityService,
       githubIntegrationIsEffective,
@@ -461,6 +465,7 @@ export function startOctantServer(
       nativeHarnessHooks,
       nativeHarnessRoutingRoutes,
       shieldServerRoutes,
+      shieldServerStore,
       serverProjectRoutes,
       nativeHarnessSessionRoutes,
       onHarnessPausedByPerson,
@@ -473,6 +478,8 @@ export function startOctantServer(
     } = wireHarness({
       projectService,
       agentRunInteractions,
+      serverProjectStore,
+      serverRegistry,
       shieldHolder,
       codeEvidence,
       providerRuntimeRegistry,
@@ -530,6 +537,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      serverProjectStore,
       codeBoardEventStore,
       codeEvidence,
       isProjectPolicyTargetAllowed,
@@ -652,6 +660,9 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      serverConnection,
+      serverProjectStore,
+      shieldServerStore,
       hostShield,
       onHarnessQuestionAsked,
       onHarnessQuestionSettled,

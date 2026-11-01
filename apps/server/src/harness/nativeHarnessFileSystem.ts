@@ -546,7 +546,12 @@ export function editedText(
     readonly replaceAll?: boolean | undefined;
   },
 ):
-  | { readonly kind: "edited"; readonly text: string; readonly count: number; readonly fuzzy: boolean }
+  | {
+      readonly kind: "edited";
+      readonly text: string;
+      readonly count: number;
+      readonly fuzzy: boolean;
+    }
   | NativeHarnessFileRefused {
   const exact = countOccurrences(content, input.oldText);
   if (exact > 0) {
