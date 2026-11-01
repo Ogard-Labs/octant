@@ -188,7 +188,6 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     workThreadProjection,
     workTurnProjection,
-    options,
     personMemory,
   } = deps;
   // The keys Octant keeps for servers that sign in with one, in the broker.
