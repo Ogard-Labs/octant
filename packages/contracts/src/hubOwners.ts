@@ -97,6 +97,13 @@ export const ConfirmNewMembersRequest = Schema.Struct({ enabled: Schema.Boolean 
 export type ConfirmNewMembersRequest = typeof ConfirmNewMembersRequest.Type;
 export const decodeConfirmNewMembersRequest = Schema.decodeUnknownSync(ConfirmNewMembersRequest);
 
+/** A window turns on or off the owner unlock a paired phone or web client's merge needs on this host. */
+export const PairedMergeUnlockRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(
+  strict,
+);
+export type PairedMergeUnlockRequest = typeof PairedMergeUnlockRequest.Type;
+export const decodePairedMergeUnlockRequest = Schema.decodeUnknownSync(PairedMergeUnlockRequest);
+
 export const HubRoleRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(strict);
 export type HubRoleRequest = typeof HubRoleRequest.Type;
 export const decodeHubRoleRequest = Schema.decodeUnknownSync(HubRoleRequest);

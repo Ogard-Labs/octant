@@ -14,6 +14,7 @@ import {
   CodeEvidenceReference,
   decodeCodeAttachmentId,
   decodeHostAnswer,
+  OWNER_UNLOCK_HEADER,
   type CodeAttachmentId,
   CodeProjectPullRequestDetailView,
   CodeProjectPullRequestMergeOutcome,
@@ -22,6 +23,11 @@ import {
   type CodeProjectPullRequestMergeMethod,
 } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
+import {
+  sendWithOwnerUnlock,
+  type OwnerMergeUnlock,
+  type OwnerUnlockNotGiven,
+} from "./ownerMergeUnlock";
 
 async function decodeJson<T>(
   response: Response,
@@ -148,6 +154,40 @@ async function postProject(
 }
 
 /**
+ * A merge route: sent once, and again with an owner unlock when the host asks
+ * for one and this phone is one of its owner devices. Both sends carry the same
+ * body, which the unlock is bound to.
+ */
+async function postMerge<T extends { readonly status: string }>(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly path: string;
+  readonly body: unknown;
+  readonly decode: (value: unknown) => T;
+  readonly failure: string;
+  readonly unlock: OwnerMergeUnlock | undefined;
+}): Promise<T | OwnerUnlockNotGiven> {
+  const path = `/api/code/project-pull-requests/${input.path}`;
+  const body = JSON.stringify(input.body);
+  return sendWithOwnerUnlock({
+    path,
+    body,
+    unlock: input.unlock,
+    send: async (proof) =>
+      decodeJson(
+        await input.transport.authenticatedFetch({
+          method: "POST",
+          path,
+          body,
+          contentType: "application/json",
+          ...(proof === undefined ? {} : { headers: { [OWNER_UNLOCK_HEADER]: proof } }),
+        }),
+        input.decode,
+        input.failure,
+      ),
+  });
+}
+
+/**
  * Re-reads the pull request from GitHub for its current head, so the head the
  * person confirms is one the host just saw, and reads the Merge when ready
  * switch beside it.
@@ -195,17 +235,21 @@ export async function mergeMobilePullRequest(
     readonly method: CodeProjectPullRequestMergeMethod;
     readonly headSha: string;
   },
-): Promise<CodeProjectPullRequestMergeOutcome> {
-  return decodeJson(
-    await postProject(transport, "merge", {
+  unlock?: OwnerMergeUnlock,
+): Promise<CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven> {
+  return postMerge({
+    transport,
+    path: "merge",
+    body: {
       ...projectTarget(input),
       method: input.method,
       headSha: input.headSha,
       confirmed: true,
-    }),
-    decodeHostAnswer(CodeProjectPullRequestMergeOutcome),
-    "The merge could not be sent over the remote session.",
-  );
+    },
+    decode: decodeHostAnswer(CodeProjectPullRequestMergeOutcome),
+    failure: "The merge could not be sent over the remote session.",
+    unlock,
+  });
 }
 
 /**
@@ -223,25 +267,25 @@ export async function setMobileMergeWhenReady(
         }
       | { readonly enabled: false }
     ),
-): Promise<CodeProjectPullRequestSwitchOutcome> {
+  unlock?: OwnerMergeUnlock,
+): Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven> {
   const target = projectTarget(input);
-  return decodeJson(
-    await postProject(
-      transport,
-      "merge-when-ready",
-      input.enabled
-        ? {
-            kind: "enable",
-            target,
-            headSha: input.headSha,
-            method: input.method,
-            confirmed: true,
-          }
-        : { kind: "disable", target },
-    ),
-    decodeHostAnswer(CodeProjectPullRequestSwitchOutcome),
-    "Merge when ready could not be changed over the remote session.",
-  );
+  return postMerge({
+    transport,
+    path: "merge-when-ready",
+    body: input.enabled
+      ? {
+          kind: "enable",
+          target,
+          headSha: input.headSha,
+          method: input.method,
+          confirmed: true,
+        }
+      : { kind: "disable", target },
+    decode: decodeHostAnswer(CodeProjectPullRequestSwitchOutcome),
+    failure: "Merge when ready could not be changed over the remote session.",
+    unlock,
+  });
 }
 
 export interface MobileCodeConversationTurn {

@@ -1316,6 +1316,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "hub join spoke code comparison grant leave roster introduce owners sign-in sign in request accept decline provider account",
         },
         {
+          id: settingId("hub-paired-merge-unlock"),
+          label: "Owner unlock before a phone or browser merges",
+          scope: "host",
+          keywords:
+            "hub owner unlock merge pull request phone browser paired client passkey fresh unlock off by default",
+        },
+        {
           id: settingId("hub-confirm-new-members"),
           label: "Confirm new members",
           scope: "host",

@@ -34,7 +34,7 @@ import {
   type BrowserGuestStore,
 } from "./browserHubGuest";
 import { BrowserOwnerSection } from "./BrowserOwnerSection";
-import { registerOwnerPasskey, type PasskeyCredentials } from "./ownerPasskey";
+import { platformPasskeys, registerOwnerPasskey, type PasskeyCredentials } from "./ownerPasskey";
 
 const POLL_MS = 3_000;
 
@@ -68,18 +68,6 @@ function describeAdmission(answer: GuestSpokeAdmission, name: string): string {
 
 const NO_PASSKEY_COPY =
   "This browser can't make a passkey here (it needs a secure page and a fingerprint, face, or device-passcode check), so it can join only as a plain guest.";
-
-/** The browser's passkey API, or nothing when it has none: the owner option then stays off. */
-async function platformPasskeys(): Promise<PasskeyCredentials | undefined> {
-  const available = globalThis.PublicKeyCredential;
-  if (available === undefined || globalThis.navigator?.credentials === undefined) return undefined;
-  try {
-    if (!(await available.isUserVerifyingPlatformAuthenticatorAvailable())) return undefined;
-  } catch {
-    return undefined;
-  }
-  return globalThis.navigator.credentials;
-}
 
 type Phase =
   | { readonly kind: "idle" }

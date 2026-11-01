@@ -263,6 +263,49 @@ describe("owner client", () => {
     expect(unlock.calls).toHaveLength(1);
   });
 
+  it("signs an unlock for a paired client's merge on the host's own merge path and sends no action", async () => {
+    const keys = await p256();
+    const unlock = await rawSigner(keys);
+    const host = fakeHost({ unlockPublicKey: keys.publicKey });
+    const client = await ownerFixture(host, unlock.signer);
+    const body = JSON.stringify({ number: 12, headSha: "9".repeat(40), confirmed: true });
+
+    const result = await client.unlockMerge("/api/code/project-pull-requests/merge", body);
+
+    if (result.status !== "signed") throw new Error(JSON.stringify(result));
+    expect(host.requests.map((request) => request.path)).toEqual(["/api/hub/owner/challenge"]);
+    expect(JSON.parse(host.requests[0]?.body ?? "")).toEqual({
+      method: "POST",
+      path: "/api/code/project-pull-requests/merge",
+      bodyHash: hex(await sha256(body)),
+    });
+    const proof = JSON.parse(new TextDecoder().decode(base64UrlDecode(result.proof))) as {
+      shape: string;
+      challengeId: string;
+      signature: string;
+    };
+    expect(proof).toMatchObject({ shape: "raw", challengeId: CHALLENGE_ID });
+    const signed = ownerUnlockSigningPayload({
+      challengeId: CHALLENGE_ID,
+      nonce: "nonce1",
+      hostMemberId: HOST_ID,
+      ownerMemberId: OWNER_ID,
+      method: "POST",
+      path: "/api/code/project-pull-requests/merge",
+      bodyHash: hex(await sha256(body)),
+      expiresAt: 1_900_000_000_000,
+    });
+    expect(
+      await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        keys.publicKey,
+        base64UrlDecode(proof.signature),
+        encoder.encode(signed),
+      ),
+    ).toBe(true);
+    expect(unlock.sessions).toEqual({ opened: 1, closed: 1 });
+  });
+
   it("asks the person to unlock again for each action instead of reusing one proof", async () => {
     const keys = await p256();
     const unlock = await rawSigner(keys);

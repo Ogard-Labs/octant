@@ -2139,6 +2139,139 @@ describe("Code project pull-request detail routes", () => {
     );
   });
 
+  describe("an owner unlock before a paired client's merge", () => {
+    const mergeBody = { ...detailQuery, method: "squash", headSha: mergeHeadSha, confirmed: true };
+    const missing = {
+      status: "owner-unlock-required" as const,
+      reason: "missing" as const,
+      hostMemberId: "11111111-1111-4111-8111-111111111111",
+    };
+    const unlockPort = (required: boolean, answer: unknown) => ({
+      required: vi.fn(() => required),
+      verify: vi.fn(() => answer),
+    });
+    const withProof = (path: string, body: unknown, proof: string) => {
+      const sent = remoteDeviceRequest(path, body);
+      sent.headers.set("x-octant-owner-unlock", proof);
+      return sent;
+    };
+
+    it("refuses a paired client's merge without an unlock when the host asks for one, and merges nothing", async () => {
+      const mergeProjectPullRequest = vi.fn();
+      const pairedMergeUnlock = unlockPort(true, missing);
+      const route = routeFixture({ mergeProjectPullRequest, pairedMergeUnlock });
+
+      const response = await route(
+        remoteDeviceRequest("/api/code/project-pull-requests/merge", mergeBody),
+      );
+
+      expect(response?.status).toBe(200);
+      expect(await response!.json()).toEqual(missing);
+      expect(mergeProjectPullRequest).not.toHaveBeenCalled();
+      expect(pairedMergeUnlock.verify).toHaveBeenCalledWith({
+        path: "/api/code/project-pull-requests/merge",
+        body: JSON.stringify(mergeBody),
+        proof: null,
+      });
+    });
+
+    it("hands the unlock and the exact body to the host's check and merges once it holds", async () => {
+      const outcome = {
+        status: "merged" as const,
+        number: 1,
+        method: "squash" as const,
+        mergedAt: now,
+      };
+      const mergeProjectPullRequest = vi.fn(() => outcome);
+      const pairedMergeUnlock = unlockPort(true, {
+        status: "unlocked",
+        ownerMemberId: "22222222-2222-4222-8222-222222222222",
+      });
+      const route = routeFixture({ mergeProjectPullRequest, pairedMergeUnlock });
+
+      const response = await route(
+        withProof("/api/code/project-pull-requests/merge", mergeBody, "cHJvb2Y"),
+      );
+
+      expect(await response!.json()).toEqual(outcome);
+      expect(pairedMergeUnlock.verify).toHaveBeenCalledWith({
+        path: "/api/code/project-pull-requests/merge",
+        body: JSON.stringify(mergeBody),
+        proof: "cHJvb2Y",
+      });
+      expect(mergeProjectPullRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves a paired client's merge as it was while the switch is off, and never asks a local window", async () => {
+      const outcome = { status: "refused" as const, reason: "not-confirmed" as const };
+      const mergeProjectPullRequest = vi.fn(() => outcome);
+      const off = unlockPort(false, missing);
+      const remote = await routeFixture({ mergeProjectPullRequest, pairedMergeUnlock: off })(
+        remoteDeviceRequest("/api/code/project-pull-requests/merge", mergeBody),
+      );
+      const on = unlockPort(true, missing);
+      const local = await routeFixture({ mergeProjectPullRequest, pairedMergeUnlock: on })(
+        request("/api/code/project-pull-requests/merge", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(mergeBody),
+        }),
+      );
+
+      expect(await remote!.json()).toEqual(outcome);
+      expect(await local!.json()).toEqual(outcome);
+      expect(off.verify).not.toHaveBeenCalled();
+      expect(on.required).not.toHaveBeenCalled();
+      expect(mergeProjectPullRequest).toHaveBeenCalledTimes(2);
+    });
+
+    it("asks a stack merge and turning Merge when ready on, but not turning it off", async () => {
+      const mergeProjectPullRequestStack = vi.fn();
+      const setProjectPullRequestMergeWhenReady = vi.fn(async () => ({
+        status: "unavailable" as const,
+        reason: "unavailable" as const,
+      }));
+      const pairedMergeUnlock = unlockPort(true, missing);
+      const route = routeFixture({
+        mergeProjectPullRequestStack,
+        setProjectPullRequestMergeWhenReady,
+        pairedMergeUnlock,
+      });
+
+      const stack = await route(
+        remoteDeviceRequest("/api/code/project-pull-requests/merge-stack", {
+          projectId: detailQuery.projectId,
+          repositoryOwner: detailQuery.repositoryOwner,
+          repositoryName: detailQuery.repositoryName,
+          method: "squash",
+          confirmed: true,
+          items: [{ number: 1, headSha: mergeHeadSha }],
+        }),
+      );
+      const enable = await route(
+        remoteDeviceRequest("/api/code/project-pull-requests/merge-when-ready", {
+          kind: "enable",
+          target: detailQuery,
+          headSha: mergeHeadSha,
+          confirmed: true,
+        }),
+      );
+      const disable = await route(
+        remoteDeviceRequest("/api/code/project-pull-requests/merge-when-ready", {
+          kind: "disable",
+          target: detailQuery,
+        }),
+      );
+
+      expect(await stack!.json()).toEqual(missing);
+      expect(await enable!.json()).toEqual(missing);
+      expect(disable?.status).toBe(200);
+      expect(mergeProjectPullRequestStack).not.toHaveBeenCalled();
+      expect(setProjectPullRequestMergeWhenReady).toHaveBeenCalledTimes(1);
+      expect(pairedMergeUnlock.verify).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("merges a stack for the local user and for a paired device, answering what landed", async () => {
     const outcome = { status: "merged" as const, merged: [1, 2] };
     const mergeProjectPullRequestStack = vi.fn(
@@ -2442,6 +2575,7 @@ function routeFixture(
   for (const extra of extraWindows) {
     store.register({ windowId: extra.windowId, capability: extra.capability, now: 0 });
   }
+  const { pairedMergeUnlock, ...serviceOverrides } = overrides;
   const service = {
     bootstrap: vi.fn(async () => ({ settings: settings(), threads: [], checkouts: [] })),
     navigation: vi.fn(async () => ({ threads: [], activity: [], runtime: [] })),
@@ -2454,12 +2588,15 @@ function routeFixture(
     readOperationContent: vi.fn(),
     saveFile: vi.fn(),
     openFile: vi.fn(),
-    ...overrides,
+    ...serviceOverrides,
   };
   return createCodeRouteHandler({
     service: service as never,
     windowAuthorityStore: store,
     now: () => 1,
+    ...(pairedMergeUnlock === undefined
+      ? {}
+      : { pairedMergeUnlock: () => pairedMergeUnlock as never }),
     ...(maxJsonBodySize === undefined ? {} : { maxJsonBodySize }),
     ...(projectTerminals === undefined ? {} : { projectTerminals: projectTerminals as never }),
     ...(language === undefined ? {} : { language: language as never }),
