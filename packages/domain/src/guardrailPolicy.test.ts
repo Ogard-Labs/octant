@@ -311,6 +311,8 @@ describe("outside content at each level", () => {
     expect(outsideContentRecordedOnly({ mode: "chat", executionPolicy: "full-access" })).toBe(
       false,
     );
+  });
+});
 
 describe("lowering and scope", () => {
   it("counts a move to anything but Ask first or Plan as a lowering", () => {
