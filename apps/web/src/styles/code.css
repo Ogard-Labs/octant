@@ -2589,3 +2589,20 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__details {
   flex-wrap: wrap;
 }
+
+.guardrail-level {
+  margin: 0;
+  padding-block: var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+}
+
+.guardrail-level__mode {
+  color: var(--oct-fg-2);
+  font-weight: var(--oct-weight-medium);
+}
+
+.guardrail-level[data-mode="full-access"] .guardrail-level__mode {
+  color: var(--oct-danger-fg);
+}

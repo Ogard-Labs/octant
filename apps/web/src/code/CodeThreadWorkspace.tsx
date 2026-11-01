@@ -123,6 +123,7 @@ import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker
 import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
 import { PermissionModePicker } from "./PermissionModePicker";
+import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
@@ -1146,7 +1147,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           lifecycle badge said "Active" on nearly every thread, the branch is
           the Environment summary's fact, and follow-up is the thread row's
           right-click menu. Live subagents, the last thing it held, now sit in
-          the composer's tray. */}
+          the composer's tray. The one line it keeps is the guardrail level in
+          force and the scope it came from. */}
+      <ThreadGuardrailLevel
+        mode={permissionModeOf(thread)}
+        projectId={String(thread.projectId)}
+        surface="code"
+      />
 
       {props.controller.errorMessage === undefined ||
       (turnErrorCallout && props.controller.errorMessage === props.controller.turnError) ? null : (

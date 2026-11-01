@@ -1,4 +1,10 @@
 import { projectExtraFolderRoots, unsupportedModelOptionValues } from "@octant/domain";
+import { guardrailLowered, permissionModeOf } from "@octant/domain/guardrail-policy";
+import {
+  decodeGuardrailLevelLowered,
+  GUARDRAIL_LEVEL_LOWERED,
+} from "@octant/contracts/guardrail-lowering";
+import type { PermissionMode } from "@octant/contracts/providers";
 import {
   CODE_FORK_HANDOFF_REFUSALS,
   selectCodeForkHandoff,
@@ -1576,6 +1582,17 @@ export class CodeService {
           "code.settings-updated@1",
           { kind: "settings-updated", settings },
         );
+        this.#journalLowering({
+          scope: "global",
+          from: permissionModeOf({
+            executionPolicy: current.defaultExecutionPolicy,
+            autoApprove: current.defaultAutoApprove,
+          }),
+          to: permissionModeOf({
+            executionPolicy: settings.defaultExecutionPolicy,
+            autoApprove: settings.defaultAutoApprove,
+          }),
+        });
         return { kind: "settings-updated", settings };
       }
       if (command.kind === "create-code-thread") {
@@ -2080,6 +2097,15 @@ export class CodeService {
         kind: "thread-updated",
         thread: next,
       });
+      if (command.kind === "change-code-thread-access") {
+        this.#journalLowering({
+          scope: "thread",
+          from: permissionModeOf(current),
+          to: permissionModeOf(next),
+          projectId: current.projectId,
+          threadId: String(current.id),
+        });
+      }
       if (command.kind === "change-code-thread-working-directory") {
         await this.#onWorkingDirectoryChanged({
           mode: "code",
@@ -3135,6 +3161,29 @@ export class CodeService {
         },
       ],
     });
+  }
+
+  /**
+   * Records a lowered guardrail as its own single-event aggregate, so no
+   * other writer's version waits on it. The envelope names the local user and
+   * the time; the payload names the scope and both levels. A change that does
+   * not lower the guardrail records nothing.
+   */
+  #journalLowering(change: {
+    readonly scope: "global" | "project" | "thread";
+    readonly from: PermissionMode;
+    readonly to: PermissionMode;
+    readonly projectId?: ProjectId;
+    readonly threadId?: string;
+  }): void {
+    if (!guardrailLowered(change.from, change.to)) return;
+    this.#append(
+      "guardrail-change",
+      this.#uuid(),
+      0,
+      GUARDRAIL_LEVEL_LOWERED,
+      decodeGuardrailLevelLowered({ surface: "code", ...change }),
+    );
   }
 
   /**

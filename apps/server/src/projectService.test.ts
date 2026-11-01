@@ -1267,6 +1267,52 @@ describe("ProjectService", () => {
     );
   });
 
+  it("lets a Work Project override the mode new threads start in and journals a lowering with its scope", async () => {
+    const fixture = fixtureService({ projects: [workProject()] });
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-work-project-permission-mode",
+      projectId: workId,
+      expectedVersion: 1,
+      permissionMode: "full-access",
+    } as never);
+    expect(result).toMatchObject({
+      kind: "work-project-permission-mode-changed",
+      project: { defaultPermissionMode: "full-access", version: 2 },
+    });
+    const names = fixture.append.mock.calls.map((call) => call[0]?.events?.[0]?.eventName);
+    expect(names).toEqual(["project.work-permission-mode-changed@1", "guardrail.level-lowered@1"]);
+    expect(fixture.append.mock.calls[1]?.[0]?.events?.[0]?.payload).toEqual({
+      scope: "project",
+      surface: "work",
+      to: "full-access",
+      projectId: workId,
+    });
+  });
+
+  it("does not journal a lowering when a Work Project returns to Ask first or to the Settings default", async () => {
+    const fixture = fixtureService({ projects: [workProject()] });
+    await fixture.service.executeProject(windowId, {
+      kind: "change-work-project-permission-mode",
+      projectId: workId,
+      expectedVersion: 1,
+      permissionMode: "ask-first",
+    } as never);
+    expect(fixture.append).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a Plan override on a Work Project", async () => {
+    const fixture = fixtureService({ projects: [workProject()] });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-work-project-permission-mode",
+        projectId: workId,
+        expectedVersion: 1,
+        permissionMode: "plan",
+      } as never),
+    ).rejects.toBeDefined();
+    expect(fixture.append).not.toHaveBeenCalled();
+  });
+
   it("writes STATUS.md and never AGENTS.md into the folder when a Work Project opts into a status file", async () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "octant-status-opt-in-")));
     try {

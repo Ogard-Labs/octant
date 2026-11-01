@@ -5,17 +5,20 @@ import { useFullAccessWarning } from "../code/FullAccessWarning";
 import { PERMISSION_MODE_OPTIONS } from "../code/PermissionModePicker";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
-type CodeProjectSummary = Extract<ProjectSummary, { readonly type: "code" }>;
+type BoundProjectSummary = Extract<ProjectSummary, { readonly type: "code" | "work" }>;
 
 const FOLLOW_SETTINGS = "settings";
 
-const OPTIONS = [
+const optionsFor = (modes: ReadonlyArray<(typeof PERMISSION_MODE_OPTIONS)[number]>) => [
   { id: FOLLOW_SETTINGS, label: "Same as Settings" },
-  ...PERMISSION_MODE_OPTIONS.map((option) => ({ id: option.id, label: option.label })),
+  ...modes.map((option) => ({ id: option.id, label: option.label })),
 ];
+const CODE_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS);
+// Work shares Code's levels and has no Plan overlay.
+const WORK_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS.filter((option) => option.id !== "plan"));
 
 export interface ProjectPermissionModeSectionProps {
-  readonly project: CodeProjectSummary;
+  readonly project: BoundProjectSummary;
   readonly onChange: (mode: PermissionMode | undefined) => Promise<boolean>;
   readonly disabled?: boolean;
 }
@@ -31,7 +34,9 @@ export function ProjectPermissionModeSection(props: ProjectPermissionModeSection
   const warning = useFullAccessWarning({ projectId: String(props.project.id) });
   const value =
     props.project.defaultPermissionMode ??
-    (props.project.codeAccessPersistence === "project-default" ? "full-access" : FOLLOW_SETTINGS);
+    (props.project.type === "code" && props.project.codeAccessPersistence === "project-default"
+      ? "full-access"
+      : FOLLOW_SETTINGS);
   return (
     <>
       <OctantSelectField
@@ -46,7 +51,7 @@ export function ProjectPermissionModeSection(props: ProjectPermissionModeSection
             void props.onChange(mode).finally(() => setPending(false));
           });
         }}
-        options={OPTIONS}
+        options={props.project.type === "work" ? WORK_OPTIONS : CODE_OPTIONS}
         value={value}
       />
       {warning.dialog}

@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   AUTO_UNSUPPORTED_REASON,
   defaultPermissionModeFor,
+  defaultWorkPermissionModeFor,
+  guardrailLowered,
+  guardrailScopeOf,
   guardrailLevelOf,
   permissionModeOf,
   clampWorkAccess,
@@ -289,5 +292,40 @@ describe("who reviews at Auto", () => {
         capabilities: { ...claudeOrCodex, shield: shieldRuns },
       }),
     ).toBe(false);
+  });
+});
+
+describe("lowering and scope", () => {
+  it("counts a move to anything but Ask first or Plan as a lowering", () => {
+    expect(guardrailLowered("ask-first", "full-access")).toBe(true);
+    expect(guardrailLowered("ask-first", "auto")).toBe(true);
+    expect(guardrailLowered("auto", "accept-edits")).toBe(true);
+    expect(guardrailLowered("full-access", "ask-first")).toBe(false);
+    expect(guardrailLowered("full-access", "plan")).toBe(false);
+    expect(guardrailLowered("auto", "auto")).toBe(false);
+  });
+
+  it("starts a Work thread at its Project's mode, else Work's default, else Ask first", () => {
+    const settings = { defaultAccess: "auto" } as const;
+    expect(
+      defaultWorkPermissionModeFor({ project: { defaultPermissionMode: "full-access" }, settings }),
+    ).toBe("full-access");
+    expect(defaultWorkPermissionModeFor({ project: {}, settings })).toBe("auto");
+    expect(defaultWorkPermissionModeFor({})).toBe("ask-first");
+  });
+
+  it("names the narrowest scope that gives a thread its level", () => {
+    expect(guardrailScopeOf({ mode: "auto", globalDefault: "auto" })).toBe("global");
+    expect(
+      guardrailScopeOf({ mode: "auto", projectDefault: "auto", globalDefault: "ask-first" }),
+    ).toBe("project");
+    expect(
+      guardrailScopeOf({
+        mode: "full-access",
+        projectDefault: "auto",
+        globalDefault: "full-access",
+      }),
+    ).toBe("thread");
+    expect(guardrailScopeOf({ mode: "plan", globalDefault: "auto" })).toBe("thread");
   });
 });

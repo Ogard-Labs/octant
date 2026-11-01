@@ -421,3 +421,48 @@ export function outsideContentRecordedOnly(input: {
   });
   return guardrail.status === "supported" && guardrail.outsideContent === "recorded";
 }
+
+/**
+ * Whether moving from one mode to another lowers the guardrail and so is
+ * journaled. Ask first and Plan are the most guarded postures, so a move to
+ * either never counts. Auto and Accept edits each waive something different
+ * (who answers, which writes ask) and neither holds the other, so a move
+ * between them counts too: the record errs toward more of the person's
+ * changes being kept.
+ */
+export function guardrailLowered(from: PermissionMode, to: PermissionMode): boolean {
+  return from !== to && to !== "ask-first" && to !== "plan";
+}
+
+/**
+ * The mode a new Work thread starts in: the Project's own choice, else Work's
+ * default in Settings, else Ask first.
+ */
+export function defaultWorkPermissionModeFor(input: {
+  readonly project?: { readonly defaultPermissionMode?: PermissionMode | undefined } | undefined;
+  readonly settings?: { readonly defaultAccess: WorkAccess } | undefined;
+}): PermissionMode {
+  return (
+    input.project?.defaultPermissionMode ??
+    permissionModeOf(workThreadAccessOf(input.settings?.defaultAccess ?? "ask-first"))
+  );
+}
+
+export type GuardrailLevelScope = "global" | "project" | "thread";
+
+/**
+ * Where a thread's level in force comes from. A thread keeps the level it
+ * started with, so the scope is read from the settings as they stand: a level
+ * equal to its Project's override is the Project's, else one equal to the
+ * global default is the global one, else the person set it on the thread.
+ */
+export function guardrailScopeOf(input: {
+  readonly mode: PermissionMode;
+  readonly projectDefault?: PermissionMode | undefined;
+  readonly globalDefault: PermissionMode;
+}): GuardrailLevelScope {
+  if (input.projectDefault !== undefined) {
+    return input.mode === input.projectDefault ? "project" : "thread";
+  }
+  return input.mode === input.globalDefault ? "global" : "thread";
+}

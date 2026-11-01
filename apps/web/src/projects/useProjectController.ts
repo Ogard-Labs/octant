@@ -250,12 +250,28 @@ export function useProjectController(options: ProjectControllerOptions) {
    * default; the create dialog still overrides it for one thread without
    * coming through here.
    */
-  /** Record the mode a Code Project's new threads start in; absent follows Settings. */
+  /**
+   * Record the mode a Code or Work Project's new threads start in; absent
+   * follows Settings. Work has no Plan, so a Work Project takes the other four.
+   */
   async function setCodePermissionMode(
     projectId: ProjectId,
     permissionMode: PermissionMode | undefined,
   ): Promise<boolean> {
     const project = projectById.get(projectId);
+    if (project?.type === "work") {
+      if (permissionMode === "plan") return false;
+      if (project.defaultPermissionMode === permissionMode) return true;
+      return execute(
+        {
+          kind: "change-work-project-permission-mode",
+          projectId,
+          expectedVersion: project.version,
+          ...(permissionMode === undefined ? {} : { permissionMode }),
+        },
+        "Work Project default mode updated.",
+      );
+    }
     if (project?.type !== "code") return false;
     if (project.defaultPermissionMode === permissionMode) return true;
     return execute(

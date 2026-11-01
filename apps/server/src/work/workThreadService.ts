@@ -23,6 +23,7 @@ import {
   type WorkThreadId,
   type Project,
   type ProjectId,
+  type WorkAccess,
   type ProviderInstance,
   type ProviderModelId,
   type ProviderModelOptionValues,
@@ -38,6 +39,17 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
+import {
+  guardrailLowered,
+  permissionModeOf,
+  workAccessOfPermissionMode,
+  workThreadAccessOf,
+} from "@octant/domain/guardrail-policy";
+import {
+  decodeGuardrailLevelLowered,
+  GUARDRAIL_LEVEL_LOWERED,
+} from "@octant/contracts/guardrail-lowering";
+import type { PermissionMode } from "@octant/contracts/providers";
 import {
   assertProviderAllowedByProjectPolicy,
   hasWorkToolAuthority,
@@ -410,6 +422,11 @@ export class WorkThreadService {
           ],
         });
         this.#projection.applySettings({ kind: "settings-updated", settings });
+        this.#journalLowering({
+          scope: "global",
+          from: workModeOfAccess(current.defaultAccess),
+          to: workModeOfAccess(settings.defaultAccess),
+        });
         return { kind: "settings-updated", settings };
       }
       if (command.kind === "create-work-thread") {
@@ -518,9 +535,13 @@ export class WorkThreadService {
             : { modelOptionValues: command.modelOptionValues }),
           bindingRevisionId: command.bindingRevisionId,
           workingDirectory,
-          // The host decides the access from its own settings; nothing the
-          // renderer sends can raise it.
-          access: this.#currentSettings().defaultAccess,
+          // The host decides the access from its Project's override, else its
+          // own settings; nothing the renderer sends can raise it.
+          access:
+            (project.defaultPermissionMode === undefined
+              ? undefined
+              : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
+            this.#currentSettings().defaultAccess,
           version: 1,
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
@@ -771,6 +792,13 @@ export class WorkThreadService {
           thread: updated,
         });
         this.#projection.apply({ kind: "thread-updated", thread: updated });
+        this.#journalLowering({
+          scope: "thread",
+          from: workModeOfAccess(current.access),
+          to: workModeOfAccess(updated.access),
+          projectId: current.projectId,
+          threadId: String(current.id),
+        });
         return { kind: "thread-updated", thread: updated };
       }
       if (command.kind === "change-work-thread-provider") {
@@ -1305,6 +1333,36 @@ export class WorkThreadService {
     );
   }
 
+  /**
+   * Records a lowered guardrail as its own single-event aggregate, so no
+   * thread or settings version waits on it. A change that does not lower the
+   * guardrail records nothing.
+   */
+  #journalLowering(change: {
+    readonly scope: "global" | "project" | "thread";
+    readonly from: PermissionMode;
+    readonly to: PermissionMode;
+    readonly projectId?: ProjectId;
+    readonly threadId?: string;
+  }): void {
+    if (!guardrailLowered(change.from, change.to)) return;
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "guardrail-change", aggregateId: this.#uuid() },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: decodeEventId(this.#uuid()),
+          eventName: GUARDRAIL_LEVEL_LOWERED,
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#uuid()),
+          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          occurredAt: decodeTimestamp(this.#clock()),
+          payload: decodeGuardrailLevelLowered({ surface: "work", ...change }),
+        },
+      ],
+    });
+  }
+
   #append(
     threadId: WorkThreadId,
     expectedVersion: number,
@@ -1442,4 +1500,9 @@ function lifecycleUpdate(
     ...reactivated
   } = current;
   return reactivated as WorkThread;
+}
+
+/** The picker's word for a Work thread's stored level. */
+function workModeOfAccess(access: WorkAccess): PermissionMode {
+  return permissionModeOf(workThreadAccessOf(access));
 }

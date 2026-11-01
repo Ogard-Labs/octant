@@ -3511,7 +3511,7 @@ describe("Claude artifact delivery", () => {
     }
   });
 
-  it("publishes only a Project file and asks first even in Full access, and never lists the account's artifacts", async () => {
+  it("publishes only a Project file without asking in Full access, and never lists the account's artifacts", async () => {
     const f = harness("subscription", "current-session", { artifactDelivery: () => true });
     const acquired = await acquire(f.driver, "code");
     try {
@@ -3542,10 +3542,9 @@ describe("Claude artifact delivery", () => {
       await expect(
         call("keychain", { file_path: `${projectRoot}/../..${claudeLoginKeychainPath()}` }),
       ).resolves.toMatchObject({ behavior: "deny" });
-      // Full access answers every other tool here; a publish still goes on to
-      // the person's approval.
+      // Full access asks nobody, so a publish inside the Project goes through.
       await expect(call("inside", { file_path: `${projectRoot}/report.html` })).resolves.toEqual({
-        behavior: "ask",
+        behavior: "allow",
       });
     } finally {
       await acquired.close();

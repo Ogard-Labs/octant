@@ -43,6 +43,7 @@ import {
   changeWorkProjectActions,
   changeWorkProjectDeveloperTools,
   changeCodeProjectPermissionMode,
+  changeWorkProjectPermissionMode,
   changeCodeProjectAutoReviewer,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectNewThreadWorkspace,
@@ -65,6 +66,11 @@ import {
   transferMemoryEntry,
   workProjectKeepsStatusFile,
 } from "@octant/domain";
+import { guardrailLowered } from "@octant/domain/guardrail-policy";
+import {
+  decodeGuardrailLevelLowered,
+  GUARDRAIL_LEVEL_LOWERED,
+} from "@octant/contracts/guardrail-lowering";
 import { Schema } from "effect";
 import { realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -804,6 +810,10 @@ export class ProjectService implements ProjectServiceApi {
           );
           kind = "work-project-developer-tools-changed";
           eventName = "project.work-developer-tools-changed@1";
+        } else if (command.kind === "change-work-project-permission-mode") {
+          project = changeWorkProjectPermissionMode(current, command.permissionMode, timestamp);
+          kind = "work-project-permission-mode-changed";
+          eventName = "project.work-permission-mode-changed@1";
         } else if (command.kind === "change-work-project-actions") {
           project = changeWorkProjectActions(current, command.actions, timestamp);
           kind = "work-project-actions-changed";
@@ -883,6 +893,7 @@ export class ProjectService implements ProjectServiceApi {
           events: [this.#pendingEvent(eventName, { project, ...eventFacts })],
         });
         journaled = true;
+        this.#journalProjectLowering(current, command);
       } finally {
         if (!journaled && enteredKey !== undefined) {
           await this.#desktopRecipeKeys?.discard(enteredKey);
@@ -999,6 +1010,48 @@ export class ProjectService implements ProjectServiceApi {
         message: `${type} mode is disabled.`,
       });
     }
+  }
+
+  /**
+   * Records a Project's mode override that lowers the guardrail, as its own
+   * single-event aggregate so no Project version waits on it. The Project
+   * keeps no copy of the Settings default it overrode, so `from` is the
+   * Project's earlier override or absent.
+   */
+  #journalProjectLowering(
+    current: Project | undefined,
+    command: ReturnType<typeof decodeProjectCommand>,
+  ): void {
+    if (
+      command.kind !== "change-code-project-permission-mode" &&
+      command.kind !== "change-work-project-permission-mode"
+    ) {
+      return;
+    }
+    const to = command.permissionMode;
+    if (to === undefined || current === undefined || current.type === "chat") return;
+    const from =
+      current.defaultPermissionMode ??
+      (current.type === "code" && current.codeAccessPersistence === "project-default"
+        ? "full-access"
+        : undefined);
+    if (!guardrailLowered(from ?? "ask-first", to)) return;
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "guardrail-change", aggregateId: this.#uuid() },
+      expectedVersion: 0,
+      events: [
+        this.#pendingEvent(
+          GUARDRAIL_LEVEL_LOWERED,
+          decodeGuardrailLevelLowered({
+            scope: "project",
+            surface: current.type,
+            ...(from === undefined ? {} : { from }),
+            to,
+            projectId: current.id,
+          }),
+        ),
+      ],
+    });
   }
 
   #pendingEvent(eventName: string, payload: unknown) {

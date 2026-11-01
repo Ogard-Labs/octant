@@ -654,7 +654,7 @@ and is never pre-selected; Auto uses the provider's own reviewer or
 [Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
 runtime, and where no reviewer can run the picker shows it unavailable with
 the reason; the pick becomes the default for every new Work and Code thread
-until changed in Settings › Access; this question is allowed, not built yet) — and ends in one primary action, Start a task,
+until changed in Settings › Access or for one Project) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
@@ -2129,7 +2129,10 @@ extension tool request names the plugin, its server, and the tool, and adds
 and the window is a local one. Settings › Permissions lists those answers by
 Project, each with Revoke, beside Remembered websites. Its Access section
 (Settings › Access) shows the global guardrail level with one-click change,
-which governs Work and Code alike. The levels, top to bottom, are Ask first,
+which governs Work and Code alike; a Work or Code Project overrides it from
+its overview (Default mode), and each thread's header shows the level in force
+and the scope it came from, in one quiet line ("Auto · set by this Project").
+The levels, top to bottom, are Ask first,
 Accept edits, Auto, and Full access; Full access is the lowest, and there is
 no separate switch below it. The first time a machine or a Project picks Full
 access, a one-time warning asks to confirm, in the warning role: "Agents can

@@ -1298,8 +1298,7 @@ surfaces. Only explicit user approval creates the linked Code thread. A
 promotion moves focus and tooling, not authority: both threads run under the
 shared guardrail levels, and the new thread takes the level of its own
 Project and scope as any new Code thread does, never a level carried over
-from the Work thread. Moving work from Code to Work is the same kind of
-person's choice (allowed; not built yet).
+from the Work thread.
 
 Rebinding a Code Project supersedes the checkout its existing threads were
 created against, and no later observation can produce those threads' checkout
@@ -7969,15 +7968,37 @@ mechanisms are:
     model), that thread falls back to Ask first and the picker says why.
     There is no separate switch below Full access. The answer becomes the
     default for every new thread, Work and
-    Code; Settings › Access changes it, a Project may override it, and any
-    thread can switch mode at any time from the composer in one click
-    (maintainer decision, 2026-10-31; allowed; not built yet: today new Code
-    threads start approval-gated unless Full access is remembered).
+    Code; Settings › Access changes it, a Project, Work or Code, may override
+    it, and any thread can switch mode at any time from the composer in one
+    click (maintainer decision, 2026-10-31). Work has no Plan, so a Plan
+    answer leaves new Work threads at Ask first. A new Work thread takes its
+    Project's mode, else Work's default; a Project override can be Auto, Ask
+    first, Accept edits, or Full access, and a paired device cannot pick Full
+    access for it.
+  - **Computer and Browser keep their first-action ask** at every level,
+    Full access included: each asks at the first action in each app, by a
+    separate maintainer decision, and this rule does not change it.
   - **Plan is an overlay,** not a level: a mode of a thread at any level,
     always read-only.
   - **Lowering is journaled and shown.** Each change records who lowered it,
     when, from which level, and at which scope. The thread header shows the
     level in force and the scope it came from.
+    - **What counts as lowering** is a move to any level but Ask first or
+      Plan, at the global, Project, or thread scope, in Work or Code. The
+      record is `guardrail.level-lowered@1`, its own single-event aggregate,
+      written with the change; it carries the surface, scope, ids, and the
+      two levels, and the envelope carries the local user and the time. A
+      Project override records no earlier level when it replaced the default
+      it followed, because the Project keeps no copy of Settings. Auto and
+      Accept edits each waive something different, so a move between them
+      counts too: the narrower reading keeps more of the person's changes on
+      record.
+    - **The header's scope is read from the settings as they stand,** not
+      stored on the thread: a level equal to its Project's override reads as
+      the Project's, else one equal to the global default as the global one,
+      else it reads as set on the thread. A thread keeps the level it started
+      with, so a default changed later can make an older thread read as set on
+      the thread.
   - **Older recorded levels replay as Full access.** A journaled "Trusted"
     or "Off" level, from the earlier design that kept a sandboxed no-prompt
     level and a separate switch, replays as Full access; nothing recorded is
@@ -8002,13 +8023,12 @@ mechanisms are:
   wrapping for any provider runtime.
   It still asks for some classes (the
   Octant Harness exception below, a tainted thread's confirmations, a
-  review reply posted under the person's name, a publish to an outside
-  service); those prompts are today's build, not the rule.
-  Allowed; not built yet: the single
-  level setting with its global and Project defaults, the first-run
-  question, the header indicator, the one-time warning,
-  Reviewed in Work, and Full access
-  without a sandbox or prompts for every runtime.
+  review reply posted under the person's name); those prompts are today's
+  build, not the rule. Built: the single level setting with its global,
+  Project, and thread scopes in Code and Work, the first-run question, the
+  header indicator, the one-time warning, Reviewed in Work, and Full access
+  without a sandbox or prompts for every runtime, a publish of a Project file
+  to a provider's hosted service included.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
@@ -8635,23 +8655,21 @@ access` agree); a thread's own change is journaled as
   a publish is admitted (`list`, which reads titles other people chose into
   the conversation, is refused); and the file must be inside the bound
   Project and outside the login keychain folder, in Full access too. Above
-  that gate every publish asks, under approval-gated, auto-accepting-edits,
-  and Full access alike: the approval says the file goes to claude.ai and
+  that gate every publish asks, under approval-gated and auto-accepting-edits:
+  the approval says the file goes to claude.ai and
   leaves this computer and, when the call names a `url`, which existing page
-  it replaces. The person's answer can come long after the gate first ran,
+  it replaces. At Full access nothing asks, publishing included, and the host
+  keeps the page's snapshot from the call itself. The person's answer can come long after the gate first ran,
   so an approved publish passes the gate again before the runtime is told to
   go on: a setting turned off, or a folder swapped for a link out of the
   Project, while they decided refuses it. Creating a Code thread that already
   carries `native-artifacts` is refused, so the choice is made only through
   the change command. An answer is never reused for a later publish, even with
   session approvals remembered, because the same call republishes the file
-  as it is then. Today Full access asks too, because putting a Project file on an
-  outside service is the person's own act, as a Canvas public link is
-  ([Canvas public links](design/canvas-public-links.md)), and because the
-  first publish marks the thread with outside content, after which Octant's
-  own outward actions ask afresh under every posture today. The rule is
-  that at Full access nothing asks, publishing included (allowed; not
-  built yet; [Guardrail levels](#security-and-authority)). The approval is
+  as it is then. Full access asks nobody: the person who picked it takes the
+  provider's own no-prompt behavior, and the publish stays journaled and
+  marks the thread with outside content, which at Full access is recorded and
+  never asks ([Guardrail levels](#security-and-authority)). The approval is
   answered like the thread's other provider approvals, a paired device
   included for the turns it may already answer. Plan, whose read-only rule
   refuses an outward side effect, never offers the tool (Chat runs in Plan,

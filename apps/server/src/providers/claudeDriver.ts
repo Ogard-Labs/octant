@@ -1962,9 +1962,7 @@ function makeConnection(
             if (refusal !== undefined) return deny(refusal);
           }
           if (
-            (input.executionPolicy === "full-access" &&
-              request.toolName !== "AskUserQuestion" &&
-              request.toolName !== CLAUDE_ARTIFACT_TOOL) ||
+            (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
             // Auto-accept edits covers exactly the file writes the gate above
             // already proved to be inside the Project. Shell, network, and
             // every other tool still ask.
@@ -2219,13 +2217,10 @@ function makeConnection(
             });
             return { behavior: "ask" };
           };
-          // A publish asks under every posture, Full access included: like a
-          // Canvas public link, putting a Project file on an outside service
-          // is the person's own act, and each publish is asked afresh.
+          // A publish asks under every posture below Full access, which asks
+          // nobody; the path checks above still refuse a file outside the Project.
           const decide = (): ClaudePreToolDecision =>
-            (input.executionPolicy === "full-access" &&
-              request.toolName !== "AskUserQuestion" &&
-              request.toolName !== CLAUDE_ARTIFACT_TOOL) ||
+            (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
             (input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
             (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName)) ||
@@ -2243,6 +2238,17 @@ function makeConnection(
               : askThroughGrant();
           }
           if (input.executionPolicy === "full-access") {
+            // Nothing asks here, so nothing reads the snapshot at approval:
+            // the host keeps what was sent from this hook instead.
+            if (
+              request.toolName === CLAUDE_ARTIFACT_TOOL &&
+              typeof requestInput.file_path === "string"
+            ) {
+              const snapshot = await readClaudePublishedSnapshot(requestInput.file_path);
+              if (snapshot !== undefined) {
+                activeState.publishedSnapshots.set(request.toolUseId, snapshot);
+              }
+            }
             return decide();
           }
           // A shell call carries no cwd of its own: Claude Code runs it in the

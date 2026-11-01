@@ -137,7 +137,7 @@ new-task composer in that Project. Nothing is sent until you send it.
 The thread starts in the mode you chose in the Mode step, or the one its
 Project chose.
 
-Planned: first run asks once which mode new threads start in. The list is Auto
+First run asks once which mode new threads start in. The list is Auto
 (Recommended), Ask first, Accept edits, Plan, and Full access. In Auto a
 reviewer answers approval prompts for you: your provider's own reviewer where
 it has one (Claude Code, Codex), otherwise Octant Shield, Octant's own
@@ -145,7 +145,7 @@ reviewer. Shield runs on your provider's smallest model by default, never
 allows risky actions such as deleting data or reaching new hosts on its own,
 and sends anything it is unsure of to you. Auto is pre-selected for every
 provider. Where no reviewer can run, the thread starts in Ask first and the
-list says why. Choose the reviewer in Settings › Access. Your pick is the default for new threads.
+list says why. Choose the reviewer in Settings › Access. Your pick is the default for new Work and Code threads. Work has no Plan, so a Plan pick leaves new Work threads at Ask first.
 Change it in Settings › Access, per Project, or on any thread from the
 composer in one click. Full access is never the default. Full access means
 no sandbox and no prompts: agents can change any file and run any command

@@ -25,6 +25,7 @@ import {
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermissionModes";
+import { ThreadGuardrailLevel } from "../code/GuardrailLevelIndicator";
 import { PermissionModePicker } from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
@@ -1849,6 +1850,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   return (
     <section aria-label="Task workspace" className="work-thread-workspace">
       <h1 className="sr-only">{props.title}</h1>
+      {thread === undefined ? null : (
+        <ThreadGuardrailLevel
+          mode={workModeOf(thread.access)}
+          projectId={String(thread.projectId)}
+          surface="work"
+        />
+      )}
 
       {confirmArtifacts ? (
         <ThreadArtifactsConfirm

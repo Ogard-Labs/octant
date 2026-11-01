@@ -413,7 +413,7 @@ describe("WorkThreadService", () => {
       kind: "settings-updated",
       settings: { defaultAccess: "auto-accept-edits", version: 1 },
     });
-    expect(fixture.persistence.journal.append).toHaveBeenLastCalledWith(
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
       expect.objectContaining({
         aggregate: {
           aggregateType: "work-settings",
@@ -444,6 +444,64 @@ describe("WorkThreadService", () => {
     expect(created).toMatchObject({
       kind: "thread-created",
       thread: { access: "auto-accept-edits" },
+    });
+  });
+
+  it("starts a new thread at its Work Project's own mode, over Work's default in Settings", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      project: { ...workProject(), defaultPermissionMode: "auto" } as Project,
+    });
+    const created = await fixture.service.execute(ids.window, {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+    });
+    expect(created).toMatchObject({ kind: "thread-created", thread: { access: "auto" } });
+  });
+
+  it("journals who lowered Work's default or a thread's level, from which level and at which scope", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    await fixture.service.execute(ids.window, {
+      kind: "update-work-settings",
+      expectedVersion: 0,
+      defaultAccess: "full-access",
+    });
+    await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "auto",
+    });
+    // Going back to Ask first is not a lowering and records nothing.
+    await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      access: "ask-first",
+    });
+    const lowered = fixture.persistence.journal.append.mock.calls
+      .map(([request]) => request.events[0])
+      .filter((event) => event.eventName === "guardrail.level-lowered@1");
+    expect(lowered.map((event) => event.payload)).toEqual([
+      { scope: "global", surface: "work", from: "ask-first", to: "full-access" },
+      {
+        scope: "thread",
+        surface: "work",
+        from: "ask-first",
+        to: "auto",
+        projectId: ids.project,
+        threadId: ids.thread,
+      },
+    ]);
+    expect(lowered[0]).toMatchObject({
+      actor: { kind: "local-user" },
+      occurredAt: expect.any(String),
     });
   });
 
