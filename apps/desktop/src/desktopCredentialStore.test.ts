@@ -31,6 +31,7 @@ describe("resolveDesktopCredentialBackend", () => {
       mcpServerCredentials: expect.any(Object),
       desktopProviderCredentials: expect.any(Object),
       pushPlatformCredentials: expect.any(Object),
+      sshKeys: expect.any(Object),
     });
     expect(backend.purgeStore).toBeUndefined();
   });

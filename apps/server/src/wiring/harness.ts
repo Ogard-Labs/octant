@@ -81,6 +81,7 @@ import { createShieldServerRouteHandler } from "../shield/shieldServerRoutes";
 import { createServerProjectRouteHandler } from "../serverProjects/serverProjectRoutes";
 import { serverProjectOf } from "../serverProjects/serverProjectThreads";
 import { openServerSshAccessFor } from "../shield/serverSshAccess";
+import { makeServerSshKeysBrokerClient } from "../shield/sshKeyBrokerClient";
 import { RuntimeRemoteCommands } from "../shield/runtimeRemoteCommands";
 import {
   personSshAgentSocket,
@@ -189,6 +190,14 @@ export function wireHarness(deps: HarnessDependencies) {
     workTurnProjection,
     personMemory,
   } = deps;
+  // The keys Octant keeps for servers that sign in with one, in the broker.
+  const serverSshKeys =
+    options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+      ? undefined
+      : makeServerSshKeysBrokerClient({
+          url: options.credentialBrokerUrl,
+          token: options.credentialBrokerToken,
+        });
 
   // Octant Shield's server registry: SSH to these servers is judged by their
   // profiles, and every remote command a harness shell runs is recorded.
@@ -216,6 +225,7 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: shieldServerStore,
     sshAgentAvailable: () => sshAgentSocket() !== undefined,
+    ...(serverSshKeys === undefined ? {} : { sshKeys: serverSshKeys }),
     projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
   });
   // Code Projects bound to a folder on one of those servers.
@@ -323,6 +333,7 @@ export function wireHarness(deps: HarnessDependencies) {
                 shieldServerStore.serversFor(scope.projectId),
                 {
                   personAgentSocket: sshAgentSocket,
+                  keys: serverSshKeys,
                   ...(harnessEgressEndpoint.kind === "unix-socket"
                     ? { relays: "unix-socket" as const }
                     : {}),

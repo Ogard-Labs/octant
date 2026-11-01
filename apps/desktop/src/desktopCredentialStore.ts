@@ -26,6 +26,8 @@ export type DesktopCredentialBackend =
       readonly desktopProviderCredentials: CredentialStore;
       /** Push credentials of a hub that sends notifications directly, in their own Keychain service. */
       readonly pushPlatformCredentials: CredentialStore;
+      /** SSH sign-in keys Octant made for registered servers, in their own Keychain service. */
+      readonly sshKeys: CredentialStore;
     }
   | {
       readonly kind: "secret-service";
@@ -43,6 +45,8 @@ export type DesktopCredentialBackend =
       readonly desktopProviderCredentials: CredentialStore;
       /** Push credentials of a hub that sends notifications directly, under their own attribute. */
       readonly pushPlatformCredentials: CredentialStore;
+      /** SSH sign-in keys Octant made for registered servers, under their own attribute. */
+      readonly sshKeys: CredentialStore;
     }
   | {
       readonly kind: "credential-manager";
@@ -54,6 +58,7 @@ export type DesktopCredentialBackend =
       readonly mcpServerCredentials?: undefined;
       readonly desktopProviderCredentials?: undefined;
       readonly pushPlatformCredentials?: undefined;
+      readonly sshKeys?: undefined;
     }
   | {
       readonly kind: "unavailable";
@@ -65,6 +70,7 @@ export type DesktopCredentialBackend =
       readonly mcpServerCredentials?: undefined;
       readonly desktopProviderCredentials?: undefined;
       readonly pushPlatformCredentials?: undefined;
+      readonly sshKeys?: undefined;
     };
 
 /**
@@ -115,6 +121,10 @@ export async function resolveDesktopCredentialBackend(options: {
         storeScope: options.storeScope,
         namespace: "push-platform-credential",
       }),
+      sshKeys: makeKeychainCredentialStore(options.keychainHelperPath, {
+        storeScope: options.storeScope,
+        namespace: "ssh-key",
+      }),
     };
   }
   if (options.platform === "linux") {
@@ -137,6 +147,7 @@ export async function resolveDesktopCredentialBackend(options: {
       pushPlatformCredentials: makeSecretServiceCredentialStore({
         namespace: "push-platform-credential",
       }),
+      sshKeys: makeSecretServiceCredentialStore({ namespace: "ssh-key" }),
     };
   }
   if (options.platform === "win32") {

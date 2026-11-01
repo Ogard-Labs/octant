@@ -45,6 +45,11 @@ export const SECRET_SERVICE_DESKTOP_PROVIDER_CREDENTIAL_ATTRIBUTE =
  */
 export const SECRET_SERVICE_PUSH_PLATFORM_CREDENTIAL_ATTRIBUTE =
   "octant.push-platform-credentials.v1";
+/**
+ * The SSH sign-in keys Octant made for registered servers, keyed by server id.
+ * The broker signs with one and never returns it.
+ */
+export const SECRET_SERVICE_SSH_KEY_ATTRIBUTE = "octant.ssh-keys.v1";
 const NAMESPACES = {
   provider: { attribute: SECRET_SERVICE_ATTRIBUTE, label: "Octant provider credential" },
   "replica-device-key": {
@@ -70,6 +75,10 @@ const NAMESPACES = {
   "push-platform-credential": {
     attribute: SECRET_SERVICE_PUSH_PLATFORM_CREDENTIAL_ATTRIBUTE,
     label: "Octant push credential",
+  },
+  "ssh-key": {
+    attribute: SECRET_SERVICE_SSH_KEY_ATTRIBUTE,
+    label: "Octant SSH key",
   },
 } as const;
 const DEFAULT_TIMEOUT_MS = 2_000;

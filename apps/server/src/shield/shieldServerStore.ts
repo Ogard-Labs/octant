@@ -163,6 +163,18 @@ export class ShieldServerStore {
     );
   }
 
+  /**
+   * A server in the account list or in any Project's own list, by its id,
+   * preferring one that signs in with a key Octant keeps: a Project's copy of
+   * an account server shares its id, and the key is the server's either way.
+   */
+  serverById(serverId: string): ShieldServer | undefined {
+    const named = [...this.#servers.values(), ...[...this.#projectServers.values()].flat()].filter(
+      (server) => String(server.serverId) === serverId,
+    );
+    return named.find((server) => server.signIn === "octant-key") ?? named[0];
+  }
+
   /** A Project's own list, or undefined while it follows the account list. */
   projectOverride(projectId: string): ReadonlyArray<ShieldServer> | undefined {
     return this.#projectServers.get(projectId);
@@ -176,12 +188,23 @@ export class ShieldServerStore {
   }): ShieldServersChange {
     if (input.principal !== "local-window") return refused("needs-local-window");
     if (input.servers.length > MAX_SHIELD_SERVERS) return refused("too-many-servers");
+    // A server keeps its id across a save: the one this list already gave
+    // its alias, else the account server's it was copied from. The key
+    // Octant keeps for a server is filed under that id, so a save never
+    // orphans one the person already installed on the server.
+    const previous = this.#projectServers.get(input.projectId) ?? [];
+    const idFor = (alias: string): AggregateId => {
+      const wanted = alias.toLowerCase();
+      const same = (server: ShieldServer) => server.alias.toLowerCase() === wanted;
+      return (
+        previous.find(same)?.serverId ??
+        [...this.#servers.values()].find(same)?.serverId ??
+        decodeAggregateId(this.#options.uuid())
+      );
+    };
     const servers: ShieldServer[] = [];
     for (const fields of input.servers) {
-      const checked = canonicalServer(
-        { serverId: decodeAggregateId(this.#options.uuid()), ...fields },
-        servers,
-      );
+      const checked = canonicalServer({ serverId: idFor(fields.alias), ...fields }, servers);
       if (checked.kind === "refused") return checked;
       servers.push(checked.server);
     }

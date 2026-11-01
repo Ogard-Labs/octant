@@ -146,6 +146,8 @@ export interface HarnessShellScriptInput {
     readonly relaySockets?: ReadonlyArray<{ readonly port: number; readonly socketPath: string }>;
     readonly socketDirectory?: string | undefined;
     readonly agentSocket?: string | undefined;
+    /** Agent sockets for servers that sign in with a key Octant keeps, in the same folder. */
+    readonly keySockets?: ReadonlyArray<string>;
   };
 }
 
@@ -394,13 +396,18 @@ export class RepositoryTestProcessPort {
             (port) => Number.isSafeInteger(port) && port > 0 && port <= 65_535,
           ) ||
           (servers.agentSocket !== undefined && !isAbsolute(servers.agentSocket)) ||
+          !(servers.keySockets ?? []).every(
+            (path) => socketDirectory !== undefined && dirname(path) === socketDirectory,
+          ) ||
           (linux
             ? servers.relayPorts.length > 0 ||
               socketDirectory === undefined ||
               !isAbsolute(socketDirectory) ||
-              ![...relaySockets.map((relay) => relay.socketPath), servers.agentSocket].every(
-                (path) => path === undefined || dirname(path) === socketDirectory,
-              )
+              ![
+                ...relaySockets.map((relay) => relay.socketPath),
+                ...(servers.keySockets ?? []),
+                servers.agentSocket,
+              ].every((path) => path === undefined || dirname(path) === socketDirectory)
             : relaySockets.length > 0)
         )
           throw new Error("Server access is invalid.");
@@ -448,11 +455,13 @@ export class RepositoryTestProcessPort {
                         (port) =>
                           `(allow network-outbound (remote ip "localhost:${String(port)}"))`,
                       ),
-                      ...(servers.agentSocket === undefined
-                        ? []
-                        : [
-                            `(allow network-outbound (remote unix-socket (path-literal "${escapeSeatbeltPath(servers.agentSocket)}")))`,
-                          ]),
+                      ...[
+                        ...(servers.agentSocket === undefined ? [] : [servers.agentSocket]),
+                        ...(servers.keySockets ?? []),
+                      ].map(
+                        (socket) =>
+                          `(allow network-outbound (remote unix-socket (path-literal "${escapeSeatbeltPath(socket)}")))`,
+                      ),
                     ],
                   }),
           },

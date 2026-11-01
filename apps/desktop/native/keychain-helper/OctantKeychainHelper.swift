@@ -40,6 +40,12 @@ private let appStoreConnectKeyService = "app.octant.app-store-connect-keys.v1"
 // replace one.
 private let pushPlatformCredentialService = "app.octant.push-platform-credentials.v1"
 private let pushPlatformCredentialNamespace = "push-platform-credential"
+// The SSH sign-in keys Octant made for registered servers live in a service of
+// their own. The broker makes each key and signs with it; no route reads one
+// back, and a set never replaces a key: a server's key is deleted when the
+// person removes the server or stops signing in with it.
+private let sshKeyService = "app.octant.ssh-keys.v1"
+private let sshKeyNamespace = "ssh-key"
 // An owner device's unlock key: a P-256 key made in the Secure Enclave that
 // signs only after the person proves presence (Touch ID or the account
 // password). The Keychain item holds the key's opaque blob, which only this
@@ -127,6 +133,11 @@ private let separateNamespaces: [String: SeparateNamespace] = [
         service: pushPlatformCredentialService,
         idField: "credentialRef",
         replaceable: true
+    ),
+    sshKeyNamespace: SeparateNamespace(
+        service: sshKeyService,
+        idField: "credentialRef",
+        replaceable: false
     ),
 ]
 
