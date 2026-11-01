@@ -757,6 +757,36 @@ describe("Codex launch confinement", () => {
     if (prepared.status === "prepared") prepared.launch.release();
   });
 
+  it("gives the app-server the Project's server folder to read, its agent socket, and its wrappers first", () => {
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const folder = "/tmp/octant-runtime-ssh-test";
+    const prepared = prepareCodexLaunch({
+      binaryPath: "/bin/sh",
+      args: ["-c", "true"],
+      authority: { kind: "thread", root: tmpdir(), mode: "code", executionPolicy: "approval-gated" },
+      environment: { HOME: homedir(), PATH: "/usr/bin:/bin" },
+      confinement: {
+        prepare: (input) => {
+          captured = input;
+          return { command: input.executable, args: input.args };
+        },
+      },
+      platform: "darwin",
+      servers: {
+        folder,
+        environment: { SSH_AUTH_SOCK: `${folder}/agent`, PATH: `${folder}/bin:/usr/bin:/bin` },
+      },
+    });
+    expect(captured?.readRoots).toContain(folder);
+    expect(captured?.privateHomeAllowPaths).toContain(folder);
+    // Read only: the runtime cannot rewrite its own config or wrappers.
+    expect(captured?.additionalWriteRoots ?? []).not.toContain(folder);
+    const environment = prepared.status === "prepared" ? prepared.launch.environment : {};
+    expect(environment.SSH_AUTH_SOCK).toBe(`${folder}/agent`);
+    expect(environment.PATH).toBe(`${folder}/bin:/usr/bin:/bin`);
+    if (prepared.status === "prepared") prepared.launch.release();
+  });
+
   it("launches Full access as the program itself, with no profile around it", () => {
     const prepared = prepareCodexLaunch({
       binaryPath: "/bin/sh",
