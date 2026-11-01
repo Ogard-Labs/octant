@@ -832,6 +832,24 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "marketplace fetches skills npm github registry catalog search inspect install privacy off",
         },
+        {
+          id: settingId("skill-folder-claude"),
+          label: "Claude Code skills",
+          scope: "host",
+          keywords: "skill folders claude code home skills provider index",
+        },
+        {
+          id: settingId("skill-folder-codex"),
+          label: "Codex skills",
+          scope: "host",
+          keywords: "skill folders codex home skills provider index",
+        },
+        {
+          id: settingId("skill-folders-added"),
+          label: "Added skill folders",
+          scope: "host",
+          keywords: "skill folders add folder path custom directory",
+        },
       ],
     },
     {

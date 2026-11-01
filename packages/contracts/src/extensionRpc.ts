@@ -367,9 +367,15 @@ export const ExtensionCommand = Schema.Union(
     source: ExtensionSource,
     expectedDigest: Schema.optional(ExtensionContentDigest),
   }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("install-package"), ...versionedTarget }).annotations(
-    strict,
-  ),
+  /**
+   * `trust` installs and trusts in one confirmed step, journaled as both.
+   * Enabling stays its own switch. Left out, the package installs untrusted.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("install-package"),
+    ...versionedTarget,
+    trust: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("update-package"), ...versionedTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("rollback-package"), ...versionedTarget }).annotations(
     strict,
@@ -377,7 +383,11 @@ export const ExtensionCommand = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("uninstall-package"), ...packageTarget }).annotations(
     strict,
   ),
-  Schema.Struct({ kind: Schema.Literal("install-skill"), ...versionedTarget }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("install-skill"),
+    ...versionedTarget,
+    trust: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("update-skill"), ...versionedTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("remove-skill"), ...packageTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("reconcile-skills") }).annotations(strict),

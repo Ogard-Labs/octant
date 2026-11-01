@@ -170,6 +170,7 @@ import {
   MarketplaceFetchSettings,
 } from "../settings/MarketplaceFetchSettings";
 import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings";
+import { SkillFolderSettingsPanel } from "../settings/SkillFolderSettings";
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import {
   pairedComputersOf,
@@ -1379,21 +1380,7 @@ function ActiveSectionContent({
     case "skills":
       // Marketplace fetches is this host's own switch, so it stays reachable
       // while the extension catalog is loading or unavailable.
-      return (
-        <div className="settings-section-stack" id="settings-skills">
-          {props.extensionClient === undefined ? null : (
-            <ExtensionsSettingsView
-              client={props.extensionClient}
-              marketplaceFetchesEnabled={props.settings.marketplaceFetchesEnabled}
-              showHeading={false}
-              {...(props.pickLocalPluginFolder === undefined
-                ? {}
-                : { pickLocalPluginFolder: props.pickLocalPluginFolder })}
-            />
-          )}
-          <MarketplaceSection focusedSetting={focusedSetting} props={props} />
-        </div>
-      );
+      return <SkillsSection focusedSetting={focusedSetting} props={props} />;
     default:
       return null;
   }
@@ -1929,6 +1916,55 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         </div>
       </SettingsSection>
     </section>
+  );
+}
+
+/**
+ * Skills & Extensions with its skill folders and marketplace switch. The count
+ * of saved skill-folder changes tells the extension list to discover again once
+ * the host holds the new folders, not while the save is still in flight.
+ */
+function SkillsSection({ focusedSetting, props }: SectionProps) {
+  const [skillFolderSaves, setSkillFolderSaves] = useState(0);
+  return (
+    <div className="settings-section-stack" id="settings-skills">
+      {props.extensionClient === undefined ? null : (
+        <ExtensionsSettingsView
+          client={props.extensionClient}
+          marketplaceFetchesEnabled={props.settings.marketplaceFetchesEnabled}
+          skillFoldersKey={`${JSON.stringify(props.settings.skillFolders)}:${skillFolderSaves}`}
+          showHeading={false}
+          {...(props.pickLocalPluginFolder === undefined
+            ? {}
+            : { pickLocalPluginFolder: props.pickLocalPluginFolder })}
+        />
+      )}
+      <SkillFoldersSection
+        onSaved={() => setSkillFolderSaves((count) => count + 1)}
+        props={props}
+      />
+      <MarketplaceSection focusedSetting={focusedSetting} props={props} />
+    </div>
+  );
+}
+
+/**
+ * The key providers' own skill folders and folders the person adds. Listing a
+ * folder indexes its skills only; the activation ladder still applies.
+ */
+function SkillFoldersSection({
+  onSaved,
+  props,
+}: Pick<SectionProps, "props"> & { readonly onSaved: () => void }) {
+  return (
+    <SettingsSection title="Skill folders">
+      <SkillFolderSettingsPanel
+        onChange={(skillFolders) =>
+          void Promise.resolve(props.onSettingsChange({ skillFolders })).then(onSaved)
+        }
+        value={props.settings.skillFolders}
+      />
+    </SettingsSection>
   );
 }
 

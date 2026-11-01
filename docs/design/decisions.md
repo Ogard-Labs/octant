@@ -1161,7 +1161,7 @@ Status: Built. Since: 2026-10-13. Detail: [Architecture: Harness tool egress rul
 
 A component is active only when its package is installed, its source trusted, the master and component switches on, compatibility passes and policy allows. Any other state contributes nothing.
 
-- Install, trust and enable stay three steps by default. Installing and trusting in one confirmed step is allowed (not built yet).
+- Install, trust and enable stay three steps by default. Installing and trusting in one confirmed step is built for a new install (Install and trust), journaled as both, and enabling stays its own switch.
 - A selection carries the catalog epoch it was resolved under, and the host re-resolves it on send, replay, resume and handoff. Any difference blocks it as stale.
 - Executable components stay quarantined until reviewed, then run in supervised sandboxed processes. Only macOS starts them, since there is no Linux confinement.
 - A structured mention cannot install, trust, enable or elevate anything.
@@ -1172,12 +1172,12 @@ Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../arch
 
 ### Skill discovery and Project code denial
 
-Octant discovers skills only from the closed Project allow-list and the user-global folder, never from the home folder's own tool-configuration folder. A runtime that loads Project code by itself is switched off or denied.
+Octant discovers skills only from the closed Project allow-list, the user-global folder, and the provider and added folders a person turns on, never from the home folder's own tool-configuration folder on its own. A runtime that loads Project code by itself is switched off or denied.
 
 - A discovered skill is never trusted or active because of where it was found. Same-named skills that share a thread are both turned off until the person chooses.
 - A runtime that loads Project skills, MCP servers, hooks or plugins by itself runs with a proven switch or is denied the file in the OS profile. Instruction files stay readable.
 - Two runtimes are refused at start in a Project holding their settings entries, because their loaders fail on a denied file.
-- Skills from key providers' own folders and folders a person adds in Settings become discoverable roots (not built yet).
+- Skills from Claude Code's and Codex's own folders, turned on one by one, and folders a person adds in Settings are discoverable roots under the same ladder; Octant adds none on its own.
 
 Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
 

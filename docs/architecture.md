@@ -162,15 +162,15 @@ The design rests on a small set of invariants that every package obeys:
   and subject to ordinary sandbox and approval policy. Structured extension or
   plugin references cannot install, trust, enable, elevate, or bypass policy.
   The three steps stay separate by default; a person may install and trust a
-  package in one confirmed step (allowed; not built yet), and enabling stays
-  its own switch.
+  package in one confirmed step (built: **Install and trust** beside
+  **Confirm install**), and enabling stays its own switch.
   Skills are discovered only from valid `.agents/skills/` and
   `.claude/skills/` packages in the permitted repository ancestry (the closed
   `PROJECT_SKILL_ROOTS` allow-list), from the user-global `~/.agents/skills/`
   directory, and also from the key providers' own skill folders and any
-  folder a person adds in Settings (allowed; not built yet), all under the
-  same activation ladder. Today discovery never reads the home folder's own
-  `.claude` ([Extensions and skills](#extensions-and-skills)).
+  folder a person adds in Settings (built), all under the same activation
+  ladder. Discovery reads the home folder's own `.claude` only when the person
+  turns that provider's folder on ([Extensions and skills](#extensions-and-skills)).
 - **Modes are server-enforced.** Chat, Work, and Code are server-enforced
   domain modes, not renderer flags. Code is always available; disabling Chat or
   Work never deletes their data. The shell presents Chat and Work as one
@@ -6983,8 +6983,16 @@ session manager, and skill discovery.
 **Activation ladder.** `resolveExtensionActivation` resolves each component to
 an effective state with a structured reason. Install, trust, and enable stay
 three steps by default; a person may install and trust a package in one
-confirmed step, journaled as both (allowed; not built yet), and enabling
-stays its own switch. A component is active only when
+confirmed step, journaled as both (built), and enabling stays its own switch.
+The one step is **Install and trust** on a Marketplace, npm, local-folder, or
+standalone-skill preview; the command carries `trust: true`, the host installs,
+then appends the trust in the same call, so the journal holds the install and a
+separate `source-trust-changed`. Trust rules are unchanged: a signed provider
+driver pins its publisher key at that trust, and if the trust is refused the
+package stays installed and untrusted. Choice: the one step is offered for a new
+install only, never an update, because an update keeps the package's trust
+decision and a changed digest deserves its own look; a person who wants the
+update trusted already has **Trust source**. A component is active only when
 the package is installed, its source is trusted, the plugin master switch and
 the component switch are enabled, compatibility passes, and host, mode,
 Project, thread, and provider policy allow it. Any other state — `not-installed`,
@@ -7065,13 +7073,23 @@ same. This holds in Chat, Work, and Code.
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
   (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
-  `~/.agents/skills/`, plus the key providers' own skill folders (such as
-  `~/.claude/skills/`) and any folder a person adds in Settings (allowed; not
-  built yet: a folder the person names or a provider folder they turn on is
+  `~/.agents/skills/`, plus the key providers' own skill folders and any
+  folder a person adds in Settings (built: Settings › Skills & Extensions ›
+  Skill folders; a folder the person names or a provider folder they turn on is
   its own root, wherever it is, and Octant never discovers one on its own).
-  Today Octant's own discovery never reads the home folder's own `.claude`,
-  even when
-  the host's Project-less fallback root is the home folder. A discovered
+  The provider folders are Claude Code's `~/.claude/skills` and Codex's
+  `$CODEX_HOME/skills` (`~/.codex/skills` without `CODEX_HOME`), each off until
+  switched on. A folder is added by absolute path with no `..` segment, at most
+  32; its `sourceRef` is `provider:<id>` or `folder:` and a digest of the path,
+  never the path, and its skills are shared by every thread like the
+  user-global ones. A folder that is a symlink, is missing, or is the
+  user-global folder again is read once or not at all. Choices: the provider
+  list holds only the two providers whose folder this document already names,
+  and more join it when their home folder is verified; a folder is typed as a
+  path, not picked, so browser Settings can add one too, and it never reads
+  anything but `SKILL.md` files. Octant's Project walk still never reads the
+  home folder's own `.claude`, even when the host's Project-less fallback root
+  is the home folder; only the provider switch above does. A discovered
   skills folder that is a symlink, or resolves outside the bound root, is
   ignored. Every root
   enters the same activation ladder (indexed disabled, then reviewed, then
@@ -11074,7 +11092,6 @@ actions, only a fast-forward push, opening a draft, ready, or stacked pull
 request and editing its title, body, or draft state, a person's
 merge of one pull request from a local window, and the Merge when ready and
 Auto-fix switches the person turns on there are built; the rest, Chat routines,
-and the key providers' skill folders and extra skill folders added in Settings,
 are allowed and not built yet. Linked external secret stores are built for the
 1Password CLI, under [linked secret stores](#linked-secret-stores): a pointer
 in the credential broker, the value fetched at use and never kept.
