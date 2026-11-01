@@ -1,3 +1,4 @@
+import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import type { AutoReview } from "../code/autoReview";
 import {
@@ -558,10 +559,15 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const selectedProject = compatibleProjects.find(
     (project) => String(project.id) === String(selectedProjectId),
   );
-  // A server Project is the server catalog's, not the Project catalog's. Only
-  // Code offers one.
-  const serverCodeProjects = useServerCodeProjects().projects;
-  const offeredServerProjects = props.mode === "code" ? serverCodeProjects : [];
+  // A server Project is the server catalog's, not the Project catalog's. Code
+  // and Work each offer their own.
+  const serverProjects = useServerCodeProjects();
+  const offeredServerProjects =
+    props.mode === "code"
+      ? serverProjects.projects
+      : props.mode === "work"
+        ? serverProjects.workProjects
+        : [];
   const selectedServerProject =
     selectedProject === undefined
       ? serverCodeProjectFor(offeredServerProjects, selectedProjectId)
@@ -938,6 +944,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   }
 
   if (props.mode === "work") {
+    // A Work thread on a server runs on the Octant Harness with nothing of
+    // this host: no extension, and no issue or terminal session to start from.
+    const onServer = selectedServerProject !== undefined;
     return (
       <>
         <WorkComposerAdapter
@@ -948,8 +957,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
           {...(selectedProjectRoot === undefined ? {} : { projectRoot: selectedProjectRoot })}
           folderControl={folderControl}
-          {...(createFromControl === null ? {} : { createFromControl })}
-          providerGroups={props.providerGroups}
+          {...(createFromControl === null || onServer ? {} : { createFromControl })}
+          providerGroups={
+            onServer ? serverCodeThreadProviderGroups(props.providerGroups) : props.providerGroups
+          }
           {...(props.selectedProviderInstanceId === undefined
             ? {}
             : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
@@ -962,7 +973,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.windowCapability === undefined
             ? {}
             : { windowCapability: props.windowCapability })}
-          {...(props.extensionClient === undefined
+          {...(props.extensionClient === undefined || onServer
             ? {}
             : { extensionClient: props.extensionClient })}
           onCreateThread={(

@@ -54,7 +54,7 @@ describe("ServerProjectsSettings", () => {
 
     const list = await screen.findByRole("list", { name: "Server Projects" });
     expect(within(list).getByText("Website")).toBeVisible();
-    expect(within(list).getByText("web-1:/srv/website")).toBeVisible();
+    expect(within(list).getByText("Code · web-1:/srv/website")).toBeVisible();
   });
 
   it("binds a folder on the chosen server and shows the host's refusal as it arrived", async () => {
@@ -81,6 +81,25 @@ describe("ServerProjectsSettings", () => {
     expect(
       await screen.findByText("That folder does not exist on the server, or is not a folder."),
     ).toBeVisible();
+  });
+
+  it("binds a Work Project on a server when Work is the kind chosen", async () => {
+    const { command, user } = setup({ initial: { projects: [] } });
+    const form = await screen.findByRole("form", { name: "Bind a folder on a server" });
+
+    await user.click(within(form).getByRole("combobox", { name: "Project kind" }));
+    await user.click(await screen.findByRole("option", { name: "Work" }));
+    await user.type(within(form).getByLabelText("Project name"), "Notes");
+    await user.type(within(form).getByLabelText("Folder on the server"), "/srv/notes");
+    await user.click(within(form).getByRole("button", { name: "Bind folder" }));
+
+    expect(command).toHaveBeenCalledWith({
+      kind: "bind-server-project",
+      name: "Notes",
+      serverId: WEB.serverId,
+      folder: "/srv/notes",
+      mode: "work",
+    });
   });
 
   it("removes a server Project", async () => {

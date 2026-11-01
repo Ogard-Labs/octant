@@ -4,6 +4,7 @@ import {
   codeUnavailableMessage,
   resolveDraftProject,
   resolveWorkDraftChoice,
+  resolveWorkDraftProject,
   resolveWorkProviderChoice,
 } from "./draftThreadResolution";
 
@@ -180,5 +181,32 @@ describe("resolveWorkDraftChoice", () => {
         sharedSelection: chatPick,
       }),
     ).toEqual(first);
+  });
+});
+
+describe("resolveWorkDraftProject", () => {
+  const local = { id: projectId };
+  const server = { projectId: otherProjectId, name: "Notes" };
+
+  it("finds a Work Project on a server that the Project catalog does not hold", () => {
+    expect(
+      resolveWorkDraftProject({
+        draftProjectId: otherProjectId,
+        serverProjects: [server],
+        candidates: [local],
+        activeProject: local,
+      }),
+    ).toEqual({ kind: "server", project: server });
+  });
+
+  it("still refuses a chosen Project that is in neither catalog", () => {
+    expect(
+      resolveWorkDraftProject({
+        draftProjectId: otherProjectId,
+        serverProjects: [],
+        candidates: [local],
+        activeProject: local,
+      }),
+    ).toEqual({ kind: "unresolved-selection" });
   });
 });

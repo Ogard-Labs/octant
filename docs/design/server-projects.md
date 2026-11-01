@@ -14,9 +14,10 @@ the Git tab and the dock's Review tool, whose Git runs on the server; the
 Files panel and file editor, and the Tests panel, which read, write and run
 on the server; a thread's own worktree on the server and its pull request
 ([Worktrees and pull requests](#worktrees-and-pull-requests)); and the Code
-sidebar, composer, and thread view that open them. On the host: Work Projects
-there, whose Work threads run on the Octant Harness with file tools and
-commands on the server ([Work Projects](#work-projects)). Not built yet: the
+sidebar, composer, and thread view that open them; and Work Projects there,
+whose Work threads run on the Octant Harness with file tools and commands on
+the server, with the Work sidebar, composer, and thread view that open them
+([Work Projects](#work-projects)). Not built yet: the
 items under [Not built yet](#not-built-yet).
 
 ## Outcome
@@ -209,6 +210,14 @@ hands are on the server.
 - **Windows.** A window binds a server Work Project, and its threads, with no
   folder of this host (`boundRoot: null`), so Work Files, Browser, and every
   root-backed Work surface fail closed for it.
+- **Views.** Settings › Access › Servers binds one with **Project kind: Work**.
+  The Work sidebar lists it under **On your servers** with its threads; the
+  Work composer offers it, with only Octant Harness models choosable and no
+  extension, issue, or terminal session to start from; and its thread view
+  names its server and folder and offers no Browser, extension, image
+  generation, or file mention. Its dock keeps only Side chat, Document,
+  Canvas, Plan, and Agents, since Work's Files, terminal, and other tools read
+  a folder of this host and none has a server form yet.
 
 ### Panels
 
@@ -335,8 +344,10 @@ hands are on the server.
 
 ## Not built yet
 
-- The Work sidebar, composer, and thread view for a Work Project on a server,
-  and the choice of mode when binding one in Settings; the host side is built.
+- Work Files, research sources, the status file and due dates, and the
+  Project terminal for a Work Project on a server; its threads are built. A
+  local Work Project shows its terminal through its Developer tools switch on
+  its overview, and a Work Project on a server has neither yet.
 - Extra folders in a server Project.
 - Saved Project actions and their suggestions for a server Project; its
   Project terminal is built.

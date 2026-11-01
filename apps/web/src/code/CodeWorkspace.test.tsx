@@ -46,6 +46,7 @@ describe("CodeWorkspace", () => {
       <ServerCodeProjectsContext.Provider
         value={{
           refresh: () => undefined,
+          workProjects: [],
           projects: [
             { projectId: serverProjectId, name: "Service", location: "devbox:/home/build/service" },
           ],
@@ -103,6 +104,7 @@ describe("CodeWorkspace", () => {
         <ServerCodeProjectsContext.Provider
           value={{
             refresh: () => undefined,
+            workProjects: [],
             projects: [
               {
                 projectId: serverProjectId,

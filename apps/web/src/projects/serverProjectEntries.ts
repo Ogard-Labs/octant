@@ -1,11 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
-import type { ProjectId } from "@octant/contracts/projects";
+import type { BindingRevisionId, ProjectId } from "@octant/contracts/projects";
 import type { ComposerProjectEntry } from "./ComposerProjectSelector";
 
 /**
- * The Code Projects bound to a folder on one of the person's registered
+ * The Code and Work Projects bound to a folder on one of the person's registered
  * servers, as the host's server Project catalog lists them. Canonical:
  * docs/design/server-projects.md.
  *
@@ -20,13 +20,19 @@ export interface ServerCodeProject {
   readonly location: string;
 }
 
+/** A Work Project on a server, with the binding its Work threads are created against. */
+export interface ServerWorkProject extends ServerCodeProject {
+  readonly bindingRevisionId: BindingRevisionId;
+}
+
 export interface ServerCodeProjects {
   readonly projects: ReadonlyArray<ServerCodeProject>;
+  readonly workProjects: ReadonlyArray<ServerWorkProject>;
   /** Reads the host again, as after the person binds a folder in Settings. */
   readonly refresh: () => void;
 }
 
-const NONE: ServerCodeProjects = { projects: [], refresh: () => undefined };
+const NONE: ServerCodeProjects = { projects: [], workProjects: [], refresh: () => undefined };
 
 /** What every surface of a window reads; one source per window polls the host. */
 export const ServerCodeProjectsContext = createContext<ServerCodeProjects>(NONE);
@@ -35,10 +41,10 @@ export function useServerCodeProjects(): ServerCodeProjects {
   return useContext(ServerCodeProjectsContext);
 }
 
-export function serverCodeProjectFor(
-  projects: ReadonlyArray<ServerCodeProject>,
+export function serverCodeProjectFor<Project extends ServerCodeProject>(
+  projects: ReadonlyArray<Project>,
   projectId: ProjectId | string | undefined,
-): ServerCodeProject | undefined {
+): Project | undefined {
   if (projectId === undefined) return undefined;
   return projects.find((project) => String(project.projectId) === String(projectId));
 }
@@ -52,11 +58,13 @@ export function useServerCodeProjectsSource(
   servers: Pick<ShieldServersClient, "read"> | undefined,
 ): ServerCodeProjects {
   const [projects, setProjects] = useState<ReadonlyArray<ServerCodeProject>>([]);
+  const [workProjects, setWorkProjects] = useState<ReadonlyArray<ServerWorkProject>>([]);
   const [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision((current) => current + 1), []);
   useEffect(() => {
     if (client === undefined) {
       setProjects([]);
+      setWorkProjects([]);
       return;
     }
     const controller = new AbortController();
@@ -72,26 +80,34 @@ export function useServerCodeProjectsSource(
         const aliases = new Map(
           (registry?.servers ?? []).map((server) => [String(server.serverId), server.alias]),
         );
-        // A Work Project on a server holds Work threads, never Code ones.
-        const next = view.projects.flatMap((project): ReadonlyArray<ServerCodeProject> => {
-          if (project.mode === "work") return [];
+        const entryOf = (project: (typeof view.projects)[number]): ServerCodeProject => {
           const alias = aliases.get(String(project.serverId));
-          return [
-            {
-              projectId: project.id,
-              name: project.name,
-              location: alias === undefined ? project.folder : `${alias}:${project.folder}`,
-            },
-          ];
-        });
+          return {
+            projectId: project.id,
+            name: project.name,
+            location: alias === undefined ? project.folder : `${alias}:${project.folder}`,
+          };
+        };
+        // A Work Project on a server holds Work threads, never Code ones.
+        const next = view.projects.filter((project) => project.mode !== "work").map(entryOf);
+        const nextWork = view.projects.flatMap(
+          (project): ReadonlyArray<ServerWorkProject> =>
+            project.mode === "work" && project.workBindingRevisionId !== undefined
+              ? [{ ...entryOf(project), bindingRevisionId: project.workBindingRevisionId }]
+              : [],
+        );
         // An unchanged answer keeps its identity, so a poll that found nothing
         // new re-renders nothing that reads it.
         setProjects((previous) =>
           JSON.stringify(previous) === JSON.stringify(next) ? previous : next,
         );
+        setWorkProjects((previous) =>
+          JSON.stringify(previous) === JSON.stringify(nextWork) ? previous : nextWork,
+        );
       } catch {
         if (controller.signal.aborted) return;
         setProjects((previous) => (previous.length === 0 ? previous : []));
+        setWorkProjects((previous) => (previous.length === 0 ? previous : []));
       }
     })();
     return () => controller.abort();
@@ -101,7 +117,7 @@ export function useServerCodeProjectsSource(
     const timer = window.setInterval(refresh, SERVER_PROJECT_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [client, refresh]);
-  return useMemo(() => ({ projects, refresh }), [projects, refresh]);
+  return useMemo(() => ({ projects, workProjects, refresh }), [projects, workProjects, refresh]);
 }
 
 /** The composer's Project picker rows for the server Projects. */

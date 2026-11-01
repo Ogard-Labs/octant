@@ -719,6 +719,7 @@ describe("DraftThreadWorkspace", () => {
     const onSelectProject = vi.fn();
     const serverProjects = {
       projects: [{ projectId: serverId, name: "Service", location: "devbox:/home/build/service" }],
+      workProjects: [],
       refresh: () => undefined,
     };
     const { rerender } = render(
@@ -755,6 +756,51 @@ describe("DraftThreadWorkspace", () => {
     expect(
       screen.queryByText("The selected Project is unavailable. Choose another Project."),
     ).toBeNull();
+  });
+
+  it("offers a Work Project on a server in a Work draft, and only there", async () => {
+    const user = userEvent.setup();
+    const serverId = "77777777-7777-4777-8777-777777777778" as ProjectId;
+    const onSelectProject = vi.fn();
+    const serverProjects = {
+      projects: [],
+      workProjects: [
+        {
+          projectId: serverId,
+          name: "Notes",
+          location: "devbox:/home/build/notes",
+          bindingRevisionId: "77777777-7777-4777-8777-777777777779" as never,
+        },
+      ],
+      refresh: () => undefined,
+    };
+    const { rerender } = render(
+      <ServerCodeProjectsContext.Provider value={serverProjects}>
+        <DraftThreadWorkspace
+          {...baseProps}
+          mode="work"
+          projects={projects}
+          onSelectProject={onSelectProject}
+        />
+      </ServerCodeProjectsContext.Provider>,
+    );
+    await user.click(screen.getByRole("button", { name: /^Project/ }));
+    await user.click(screen.getByRole("option", { name: /Notes/ }));
+    expect(onSelectProject).toHaveBeenCalledWith(serverId);
+
+    rerender(
+      <ServerCodeProjectsContext.Provider value={serverProjects}>
+        <DraftThreadWorkspace
+          {...baseProps}
+          mode="code"
+          projectId={codeProjectId}
+          projects={projects}
+          onSelectProject={onSelectProject}
+        />
+      </ServerCodeProjectsContext.Provider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Project: Octant" }));
+    expect(screen.queryByRole("option", { name: /Notes/ })).toBeNull();
   });
 
   it("does not show branch for non-code modes", () => {

@@ -48,7 +48,7 @@ describe("useServerCodeProjectsSource", () => {
     expect(result.current.projects[0]?.location).toBe("/home/build/service");
   });
 
-  it("leaves out a Work Project on a server, which holds no Code threads", async () => {
+  it("lists a Work Project on a server apart from the Code ones, with its threads' binding", async () => {
     const work = {
       projects: [
         ...(view() as { projects: ReadonlyArray<unknown> }).projects,
@@ -59,6 +59,7 @@ describe("useServerCodeProjectsSource", () => {
           folder: "/home/build/notes",
           boundAt: "2026-10-30T10:00:00.000Z",
           mode: "work",
+          workBindingRevisionId: "77777777-7777-4777-8777-777777777779",
         },
       ],
     } as never;
@@ -67,6 +68,14 @@ describe("useServerCodeProjectsSource", () => {
     );
     await waitFor(() => expect(result.current.projects).toHaveLength(1));
     expect(result.current.projects.map((project) => project.name)).toEqual(["Service"]);
+    expect(result.current.workProjects).toEqual([
+      {
+        projectId: "77777777-7777-4777-8777-777777777778",
+        name: "Notes",
+        location: "/home/build/notes",
+        bindingRevisionId: "77777777-7777-4777-8777-777777777779",
+      },
+    ]);
   });
 
   it("lists nothing without a server Projects client", () => {

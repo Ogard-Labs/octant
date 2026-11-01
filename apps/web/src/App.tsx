@@ -253,6 +253,7 @@ import {
   checkoutNotPreparedMessage,
   codeUnavailableMessage,
   resolveDraftProject,
+  resolveWorkDraftProject,
   resolveWorkDraftChoice,
   UNRESOLVED_DRAFT_PROJECT_MESSAGE,
 } from "./shell/draftThreadResolution";
@@ -2599,9 +2600,19 @@ function LaunchedShell(
             (thread) => String(thread.id) === String(activeCodeThreadId),
           )?.projectId,
     ) !== undefined;
+  const dockServerWork =
+    activeMode === "work" &&
+    activeWorkThreadId !== undefined &&
+    serverCodeProjectFor(
+      serverCodeProjects.workProjects,
+      workNavigation.bootstrap?.threads.find(
+        (thread) => String(thread.id) === String(activeWorkThreadId),
+      )?.projectId,
+    ) !== undefined;
   const dockToolCapabilities = useMemo<DockToolCapabilities>(
     () => ({
       ...(dockServerCheckout ? { serverCheckout: true } : {}),
+      ...(dockServerWork ? { serverWork: true } : {}),
       addAgentInvoked: dockAddAgentInvoked,
       hasAppleSimulator: dockHasAppleSimulator,
       hasCanvasDocument: writtenCanvasKind === "canvas" ? true : dockHasCanvasDocument,
@@ -2621,6 +2632,7 @@ function LaunchedShell(
       dockHasPlanArtifact,
       dockHasWrittenDocument,
       dockServerCheckout,
+      dockServerWork,
       writtenCanvasKind,
     ],
   );
@@ -5500,6 +5512,11 @@ function LaunchedShell(
       await openDraftInKnownProject(serverProject.projectId, "code", serverProject.name);
       return;
     }
+    const serverWorkProject = serverCodeProjectFor(serverCodeProjects.workProjects, projectId);
+    if (serverWorkProject !== undefined) {
+      await openDraftInKnownProject(serverWorkProject.projectId, "work", serverWorkProject.name);
+      return;
+    }
     const project = projectController.allProjects.find((candidate) => candidate.id === projectId);
     if (project === undefined || project.lifecycle !== "active") return;
     await openDraftInKnownProject(project.id, project.type, project.name);
@@ -6406,8 +6423,12 @@ function LaunchedShell(
           onRefuse: (reason) => setDraftError(reason),
         });
         if (destinationHostId === undefined) return false;
-        const resolution = resolveDraftProject({
+        // A Work Project on a server is not in the Project catalog. Its thread
+        // is made against the binding the host derives for it, in its folder,
+        // with no issue, terminal session, or extension of this host.
+        const resolution = resolveWorkDraftProject({
           draftProjectId,
+          serverProjects: serverCodeProjects.workProjects,
           candidates: projectController.projects.filter(
             (
               candidate,
@@ -6422,8 +6443,17 @@ function LaunchedShell(
           setDraftError(UNRESOLVED_DRAFT_PROJECT_MESSAGE);
           return false;
         }
-        const project = resolution.project;
-        if (project === undefined || project.type !== "work") {
+        const serverWorkProject = resolution.kind === "server" ? resolution.project : undefined;
+        const project =
+          resolution.kind === "server"
+            ? {
+                id: resolution.project.projectId,
+                bindingRevisionId: resolution.project.bindingRevisionId,
+              }
+            : resolution.project?.type === "work"
+              ? resolution.project
+              : undefined;
+        if (project === undefined) {
           setDraftError("No active Work Project is available.");
           return false;
         }
@@ -6433,6 +6463,7 @@ function LaunchedShell(
           setDraftError("No provider is available. Configure a provider before starting a task.");
           return false;
         }
+        const onServer = serverWorkProject !== undefined;
         const bindingRevisionId = project.bindingRevisionId;
         const created = await workThreadClient.execute({
           kind: "create-work-thread",
@@ -6445,9 +6476,9 @@ function LaunchedShell(
           hostId: destinationHostId,
           bindingRevisionId,
           workingDirectory: decodeThreadWorkingDirectory("."),
-          ...(issueContext === undefined ? {} : { issueContext }),
-          ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
-          ...(terminalSession === undefined ? {} : { terminalSession }),
+          ...(issueContext === undefined || onServer ? {} : { issueContext }),
+          ...(linearIssueContext === undefined || onServer ? {} : { linearIssueContext }),
+          ...(terminalSession === undefined || onServer ? {} : { terminalSession }),
         });
         if (!("kind" in created) || created.kind !== "thread-created") {
           setDraftError("The task could not be created.");
@@ -6465,8 +6496,8 @@ function LaunchedShell(
           const attachmentIds = await stageWorkImages(created.thread.id, images ?? []);
           const started = await workTurnClient.startFirstTurn({
             kind: "start-work-thread-turn",
-            ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
-            ...(extensionSelections === undefined || extensionSelections.length === 0
+            ...(computerUseSelection === undefined || onServer ? {} : { computerUseSelection }),
+            ...(extensionSelections === undefined || extensionSelections.length === 0 || onServer
               ? {}
               : { extensionSelections }),
             requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),

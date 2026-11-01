@@ -19,10 +19,10 @@ export interface ServerProjectsSettingsProps {
 }
 
 export const SERVER_PROJECTS_INTRO =
-  "A Code Project whose files, commands, Git and terminals are on one of your servers. Octant connects with your own SSH agent and never falls back to this computer.";
+  "A Code or Work Project whose files and commands are on one of your servers. Octant connects with your own SSH agent and never falls back to this computer.";
 
 /**
- * Settings › Access › Servers: the Code Projects bound to a folder on one of
+ * Settings › Access › Servers: the Code and Work Projects bound to a folder on one of
  * the registered servers. The host checks the folder over SSH before it binds
  * anything, and its refusal is shown beside the form as it arrived.
  */
@@ -37,6 +37,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   const [name, setName] = useState("");
   const [serverId, setServerId] = useState("");
   const [folder, setFolder] = useState("");
+  const [mode, setMode] = useState<"code" | "work">("code");
 
   const registryRevision = props.registryRevision ?? 0;
   const load = useCallback(async () => {
@@ -99,6 +100,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
       name: name.trim(),
       serverId: chosenServer.serverId,
       folder: folder.trim(),
+      ...(mode === "work" ? { mode: "work" as const } : {}),
     }).then((bound) => {
       if (!bound) return;
       setName("");
@@ -108,7 +110,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
 
   return (
     <div className="shield-servers" data-setting-id="server-projects">
-      <SettingsPanel description={SERVER_PROJECTS_INTRO} title="Code Projects on your servers">
+      <SettingsPanel description={SERVER_PROJECTS_INTRO} title="Projects on your servers">
         {view.projects.length === 0 ? (
           <p className="shield-servers__empty">No folders on a server are bound.</p>
         ) : (
@@ -117,6 +119,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
               <li className="shield-servers__server" key={String(project.id)}>
                 <span className="shield-servers__name">{project.name}</span>
                 <span className="shield-servers__login">
+                  {project.mode === "work" ? "Work · " : "Code · "}
                   {aliasOf(String(project.serverId))}:{project.folder}
                 </span>
                 <span className="shield-servers__row-actions">
@@ -160,6 +163,19 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                 placeholder="Website"
                 type="text"
                 value={name}
+              />
+            </div>
+            <div className="host-settings__field">
+              <label htmlFor={`${fieldId}-mode`}>Project kind</label>
+              <OctantSelectField
+                aria-label="Project kind"
+                id={`${fieldId}-mode`}
+                onValueChange={(next) => setMode(next === "work" ? "work" : "code")}
+                options={[
+                  { id: "code", label: "Code" },
+                  { id: "work", label: "Work" },
+                ]}
+                value={mode}
               />
             </div>
             <div className="host-settings__field">

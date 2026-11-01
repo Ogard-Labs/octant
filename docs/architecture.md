@@ -1360,8 +1360,8 @@ terminals that are logins on the server; the Git tab, whose Git runs on
 the server; and a thread's own worktree, made with Git on the server, and its
 pull request, opened by repository and branch name. A Work Project may be
 bound there too, in the same catalog: its Work threads run on the Octant
-Harness with file tools and commands on the server under the same rules (host
-side built; its Work views are not built yet). Octant has no sandbox on the server,
+Harness with file tools and commands on the server under the same rules, opened from the
+Work sidebar and composer. Octant has no sandbox on the server,
 so below Full access a remembered approval does not cover a command there. An agent in a local Project still
 reaches a remote machine with `ssh` through its shell (above), and Octant on
 another computer is a hub-and-spoke member

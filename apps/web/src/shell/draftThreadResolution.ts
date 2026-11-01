@@ -36,6 +36,31 @@ export function resolveDraftProject<TProject extends { readonly id: ProjectId }>
     : { kind: "project", project: chosen };
 }
 
+/**
+ * Resolve a Work draft's Project across both catalogs: a Work Project on a
+ * server is not in the Project catalog, so it is found first, and an id in
+ * neither catalog is refused as `resolveDraftProject` refuses it.
+ */
+export function resolveWorkDraftProject<
+  TProject extends { readonly id: ProjectId },
+  TServer extends { readonly projectId: ProjectId },
+>(input: {
+  readonly draftProjectId: ProjectId | undefined;
+  readonly serverProjects: ReadonlyArray<TServer>;
+  readonly candidates: ReadonlyArray<TProject>;
+  readonly activeProject: TProject | undefined;
+}): DraftProjectResolution<TProject> | { readonly kind: "server"; readonly project: TServer } {
+  const onServer =
+    input.draftProjectId === undefined
+      ? undefined
+      : input.serverProjects.find(
+          (project) => String(project.projectId) === String(input.draftProjectId),
+        );
+  return onServer === undefined
+    ? resolveDraftProject(input)
+    : { kind: "server", project: onServer };
+}
+
 /** Shown when a draft's explicitly chosen Project no longer resolves. */
 export const UNRESOLVED_DRAFT_PROJECT_MESSAGE =
   "The folder this draft was started in is no longer available. Choose another folder before starting the thread.";

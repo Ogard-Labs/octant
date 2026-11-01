@@ -1,10 +1,10 @@
 ---
-description: Bind a folder on one of your own servers as a Code Project, reached over SSH with your own SSH agent.
+description: Bind a folder on one of your own servers as a Code or Work Project, reached over SSH with your own SSH agent.
 ---
 
-# Code Projects on your servers
+# Projects on your servers
 
-You can keep a Code Project in a folder on one of your own servers. Octant
+You can keep a Code or Work Project in a folder on one of your own servers. Octant
 reaches the server with `ssh` on this computer, signed in through your own SSH
 agent, and never falls back to this computer when the server cannot be
 reached.
@@ -16,8 +16,8 @@ reached.
    [Your servers over SSH](./privacy-and-security#your-servers-over-ssh).
 2. Connect to it once yourself with `ssh` in a terminal, so its host key is in
    your known hosts. Octant never accepts a new or changed host key for you.
-3. Under **Code Projects on your servers**, give the Project a name, choose the
-   server, and type the folder's path on the server. Octant checks over SSH
+3. Under **Projects on your servers**, choose **Code** or **Work**, give the
+   Project a name, choose the server, and type the folder's path on the server. Octant checks over SSH
    that the folder is there before it binds it, and stores the folder's real
    path.
 
@@ -81,5 +81,24 @@ Choose one to start a thread there.
 - **Not available there yet:** connectors and plugins, Browser and Computer,
   subagents, forks, checkpoints and rewind, and searching across the folder.
   Ask the agent to do it on the server, or use a terminal.
+
+## Work Projects on a server
+
+A Work Project on a server is listed in the Work sidebar under **On your
+servers**. Choose it to start a Work thread there.
+
+- **Octant Harness only, with files and commands on the server.** The agent
+  reads and edits files in the folder on the server and runs commands there,
+  under the thread's access level. Below Full access every command asks
+  again, and every command is recorded with the server and its exit status.
+- **Nothing of this computer.** A Work thread there has no Browser, Computer,
+  extensions, image generation, or file mentions, and starts without an issue
+  or a terminal session. It stays in the Project's folder: it cannot be moved
+  to another Project or folder.
+- **Not available there yet:** the Work Files panel, research sources, and the
+  Project's status file and due dates.
+
+## Testing
+
 - **Tested on a throwaway local server only.** Octant's tests ran this against
   an `sshd` started on this computer for the test, never a real server.
