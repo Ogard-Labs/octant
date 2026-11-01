@@ -1,7 +1,15 @@
 import {
+  decodeProjectAgentPagesCommand,
+  ProjectAgentPages,
+  type ProjectAgentPagesCommand,
   type ProjectBrowserCommand,
   ProjectBrowserResult,
 } from "@octant/contracts/project-browser";
+import {
+  BrowserAutomationSnapshot,
+  decodeBrowserThreadInspectCommand,
+  type BrowserThreadInspectCommand,
+} from "@octant/contracts/browser-automation-rpc";
 import {
   BrowserExtensionsResult,
   decodeBrowserExtensionsCommand,
@@ -23,6 +31,19 @@ export interface ProjectBrowserClientOptions {
 
 export interface ProjectBrowserClient {
   execute(command: ProjectBrowserCommand, signal?: AbortSignal): Promise<ProjectBrowserResult>;
+  /**
+   * The Project's live agent pages, for the dock's tab strip: names only. A
+   * refusal rejects, and the strip stays empty.
+   */
+  agentPages?(command: ProjectAgentPagesCommand, signal?: AbortSignal): Promise<ProjectAgentPages>;
+  /**
+   * A listed page as its thread's own route shows it (the picture the
+   * floating preview shows), under that thread's authority.
+   */
+  agentPageSnapshot?(
+    input: BrowserThreadInspectCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserAutomationSnapshot>;
   /** The extensions enabled in the dock's profile, for the toolbar's extensions button. */
   manageExtensions?(
     command: BrowserExtensionsCommand,
@@ -61,6 +82,8 @@ export function createProjectBrowserClient(
   const url = new URL("/api/browser/project-contexts", options.baseUrl).toString();
   const profilesUrl = new URL("/api/browser/profiles", options.baseUrl).toString();
   const extensionsUrl = new URL("/api/browser/extensions", options.baseUrl).toString();
+  const agentPagesUrl = new URL("/api/browser/project-agent-pages", options.baseUrl).toString();
+  const currentUrl = new URL("/api/browser/contexts/current", options.baseUrl).toString();
 
   async function post(target: string, command: unknown, signal: AbortSignal | undefined) {
     let response: Response;
@@ -94,6 +117,16 @@ export function createProjectBrowserClient(
   return {
     async execute(command, signal) {
       return decodeHostAnswer(ProjectBrowserResult)(await post(url, command, signal));
+    },
+    async agentPages(command, signal) {
+      return decodeHostAnswer(ProjectAgentPages)(
+        await post(agentPagesUrl, decodeProjectAgentPagesCommand(command), signal),
+      );
+    },
+    async agentPageSnapshot(input, signal) {
+      return decodeHostAnswer(BrowserAutomationSnapshot)(
+        await post(currentUrl, decodeBrowserThreadInspectCommand(input), signal),
+      );
     },
     async manageExtensions(command, signal) {
       return decodeHostAnswer(BrowserExtensionsResult)(

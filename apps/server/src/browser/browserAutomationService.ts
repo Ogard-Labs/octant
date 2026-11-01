@@ -11,6 +11,7 @@ import type {
   BrowserThreadId,
   BrowserWorkspaceStatus,
   StoredBrowserProfile,
+  ProjectAgentPage,
   ThreadExternalContentTaint,
   ToolActionAuthority,
   ToolActionCancellation,
@@ -21,6 +22,7 @@ import type {
 import {
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_BROWSER_THREAD_CONTEXTS,
+  MAX_PROJECT_AGENT_PAGES,
   sameToolActionAuthority,
 } from "@octant/contracts";
 import {
@@ -40,7 +42,7 @@ import type {
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
-import type { KeepBrowserCaptureInput } from "./browserCaptureService";
+import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
 import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
@@ -77,6 +79,11 @@ export interface BrowserAutomationServiceOptions {
    */
   readonly captures?: {
     readonly keep: (input: KeepBrowserCaptureInput) => Promise<BrowserCaptureOutcome>;
+    /**
+     * Records one step of the agent's Browser check, for the thread's proof.
+     * Called only for an action the agent tool named itself as the caller of.
+     */
+    readonly recordStep?: (input: RecordBrowserStepInput) => void;
   };
   /**
    * Whether a scope is the host acting for a routine, a goal loop, or a
@@ -92,6 +99,12 @@ export interface BrowserAutomationServiceOptions {
 
 /** How long a picture of a page stays current before a preview may ask for another. */
 const PEEK_INTERVAL_MS = 1_500;
+/**
+ * How long after its last action an agent still counts as driving a page. An
+ * agent's turns pause between actions to think, so the mark would otherwise
+ * flicker off between every step.
+ */
+const AGENT_ACTIVE_LINGER_MS = 15_000;
 
 interface OwnedContext {
   readonly windowId: WindowId;
@@ -129,6 +142,10 @@ interface OwnedContext {
   contentHash: string | undefined;
   /** When a preview last asked the runtime for a picture of the page. */
   peekedAt: number | undefined;
+  /** Agent actions queued or running on this page. */
+  agentActions: number;
+  /** When an agent's action on this page last finished. */
+  agentActedAt: number | undefined;
   /**
    * The page is the person's and every agent call on it is held: the agent
    * asked them to sign in, or they took it over.
@@ -363,6 +380,8 @@ export class BrowserAutomationService {
       refs: undefined,
       contentHash: undefined,
       peekedAt: undefined,
+      agentActions: 0,
+      agentActedAt: undefined,
       waitingForPerson: undefined,
       releaseTakeOver: undefined,
       personInputs: 0,
@@ -448,6 +467,14 @@ export class BrowserAutomationService {
 
   async act(input: {
     readonly windowId: WindowId;
+    /**
+     * The thread the caller drives for. Two threads of one Project hold the
+     * same authority, so the request's authority alone cannot tell their pages
+     * apart; a caller that acts for a thread (the agent tool) names it and the
+     * context must be that thread's. The person's pane names no thread: it
+     * acts in the window, on a context it holds the id of.
+     */
+    readonly threadId?: BrowserThreadId;
     readonly request: BrowserActionRequest;
     /**
      * Who asked. A screenshot is kept as a thread capture only when the caller
@@ -474,7 +501,11 @@ export class BrowserAutomationService {
     readonly refuseStaleRevision?: boolean;
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
-    if (owned === undefined || owned.windowId !== input.windowId) {
+    const foreign =
+      owned !== undefined &&
+      (owned.windowId !== input.windowId ||
+        (input.threadId !== undefined && String(owned.threadId) !== String(input.threadId)));
+    if (owned === undefined || foreign) {
       if (input.releaseUpload !== undefined) void input.releaseUpload().catch(() => undefined);
     }
     if (owned === undefined) {
@@ -487,10 +518,38 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    if (foreign) {
+      // Name the caller's thread, never the page's: the refusal discloses
+      // nothing about the thread that owns the context.
+      return failedSnapshot(
+        input.threadId ?? owned.threadId,
+        { category: "unauthorized", message: "Browser context is not owned by this thread." },
+        "failed",
+      );
+    }
+    const byAgent = input.capturedBy === "agent";
+    if (byAgent) owned.agentActions += 1;
     try {
-      const answered = await this.#queueAction(owned, () => this.#actOwned(owned, input));
-      return input.capturedBy === "agent" ? this.#withPersonNotice(owned, answered) : answered;
+      const answered = await this.#queueAction(owned, async () => {
+        // Read before the action: it may replace the snapshot the ref names.
+        const element = this.#elementOf(owned, input.request);
+        const before = {
+          url: owned.observation?.url,
+          title: owned.observation?.title,
+          contentHash: owned.contentHash,
+        };
+        const result = await this.#actOwned(owned, input);
+        if (input.capturedBy === "agent") {
+          this.#recordStep(owned, input.request, element, before, result);
+        }
+        return result;
+      });
+      return byAgent ? this.#withPersonNotice(owned, answered) : answered;
     } finally {
+      if (byAgent) {
+        owned.agentActions -= 1;
+        owned.agentActedAt = this.#now();
+      }
       if (input.releaseUpload !== undefined) this.#keepUpload(owned, input.releaseUpload);
     }
   }
@@ -734,6 +793,7 @@ export class BrowserAutomationService {
           ? {}
           : { screenshotDataUrl: observed.screenshotDataUrl }),
         ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
+        ...(observed.emulation === undefined ? {} : { emulation: observed.emulation }),
         ...(observed.tabs === undefined ? {} : { tabs: observed.tabs }),
         ...(observed.dialogs === undefined || observed.dialogs.length === 0
           ? {}
@@ -956,6 +1016,73 @@ export class BrowserAutomationService {
    * has already succeeded, so a copy that cannot be kept is reported on the
    * observation instead of failing the action.
    */
+  /** The role and accessible name of the element a ref names, never a selector or a value. */
+  #elementOf(
+    owned: OwnedContext,
+    request: BrowserActionRequest,
+  ): { readonly role: string; readonly name: string } | undefined {
+    if (request.ref === undefined) return undefined;
+    const entry = owned.refs?.byRef.get(request.ref);
+    return entry === undefined ? undefined : { role: entry.role, name: entry.name };
+  }
+
+  /**
+   * Add the action to the thread's proof. Facts are copied out of the result
+   * here, one by one: the request, which holds what was typed, is never handed
+   * on, so a value cannot reach the record by accident.
+   */
+  #recordStep(
+    owned: OwnedContext,
+    request: BrowserActionRequest,
+    element: { readonly role: string; readonly name: string } | undefined,
+    before: {
+      readonly url: string | undefined;
+      readonly title: string | undefined;
+      readonly contentHash: string | undefined;
+    },
+    result: BrowserAutomationSnapshot,
+  ): void {
+    const captures = this.#captures;
+    if (captures?.recordStep === undefined) return;
+    const failed = result.failure !== undefined;
+    const observation = result.observation;
+    const profile = storedBrowserProfile(owned.record.policy.profile);
+    try {
+      captures.recordStep({
+        threadId: owned.threadId,
+        facts: {
+          operation: request.kind,
+          element,
+          url: observation?.url,
+          // A failed step has no result of its own: the observation on a
+          // failure is the previous action's. The record compares the two
+          // page states and never copies a title or text.
+          change:
+            failed || observation === undefined
+              ? undefined
+              : {
+                  before,
+                  after: {
+                    url: observation.url,
+                    title: observation.title,
+                    contentHash: observation.contentHash,
+                  },
+                },
+          failure: result.failure?.category,
+          captureId:
+            observation?.capture?.status === "kept" && !failed
+              ? observation.capture.captureId
+              : undefined,
+          profile,
+        },
+        providerInstanceId: owned.record.authority.providerInstanceId,
+        correlationId: owned.action.correlationId,
+      });
+    } catch {
+      // Proof is best effort beside the action.
+    }
+  }
+
   async #keepCapture(
     owned: OwnedContext,
     input: {
@@ -1125,6 +1252,23 @@ export class BrowserAutomationService {
     });
   }
 
+  /**
+   * What each ref of the thread's latest snapshot names. A saved flow describes
+   * an element by this role and name, and a replay finds one on a fresh page by
+   * them; the ref ids themselves never leave the server.
+   */
+  snapshotRefs(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+  ): ReadonlyArray<BrowserPageSnapshotRef> {
+    const context = this.inspectThread(windowId, threadId).context;
+    if (context === undefined || context.state !== "active") return [];
+    const owned = this.#contexts.get(context.contextId);
+    if (owned === undefined || owned.windowId !== windowId || owned.threadId !== threadId)
+      return [];
+    return [...(owned.refs?.byRef.values() ?? [])];
+  }
+
   inspectThread(windowId: WindowId, threadId: BrowserThreadId): BrowserAutomationSnapshot {
     const threadContexts = [...this.#contexts.values()]
       .filter(
@@ -1166,6 +1310,71 @@ export class BrowserAutomationService {
       );
     }
     return threadSnapshotFromSnapshots(active, threadId);
+  }
+
+  /**
+   * The live agent pages of one Project's threads in this window (the page in
+   * front of each thread), named for a tab strip: the page's title and host, the thread that owns it, and whether
+   * its agent is driving it. It reads no text and no picture; a page's picture
+   * is read through its own thread's route, under that thread's authority.
+   *
+   * A page is listed only while this window could still act on it, so a
+   * thread whose authority lapsed, another window's page, a dedicated page (the
+   * person's own Open), and a page of another Project or mode never appear.
+   * `threadTitle` answers for threads the caller can see and says nothing for
+   * any other, which leaves that thread's page out.
+   */
+  listProjectAgentPages(input: {
+    readonly windowId: WindowId;
+    readonly projectId: string;
+    readonly mode: ToolActionAuthority["mode"];
+    readonly threadTitle: (threadId: BrowserThreadId) => string | undefined;
+    /** A paired device: a page in a stored profile is named but not described. */
+    readonly remote: boolean;
+  }): ReadonlyArray<ProjectAgentPage> {
+    const pages: ProjectAgentPage[] = [];
+    // A thread's page in front is the one its own routes show, so it is the
+    // one listed: one entry per thread, never a second page the thread's
+    // preview would not show.
+    const listed = new Set<string>();
+    for (const owned of this.#contexts.values()) {
+      if (
+        listed.has(String(owned.threadId)) ||
+        owned.windowId !== input.windowId ||
+        owned.dedicated ||
+        owned.record.state !== "active" ||
+        owned.record.authority.mode !== input.mode ||
+        String(owned.record.authority.projectId) !== input.projectId ||
+        !this.#authorityIsActive(owned)
+      ) {
+        continue;
+      }
+      const threadTitle = input.threadTitle(owned.threadId);
+      if (threadTitle === undefined) continue;
+      listed.add(String(owned.threadId));
+      const agentActive =
+        owned.agentActions > 0 ||
+        (owned.agentActedAt !== undefined &&
+          this.#now() - owned.agentActedAt < AGENT_ACTIVE_LINGER_MS);
+      const base = {
+        threadId: owned.threadId,
+        contextId: owned.record.contextId,
+        threadTitle,
+        agentActive,
+      };
+      if (input.remote && storedBrowserProfile(owned.record.policy.profile) !== undefined) {
+        pages.push({ ...base, signedIn: true });
+        continue;
+      }
+      const title = owned.observation?.title;
+      const host = hostOf(owned.observation?.url);
+      pages.push({
+        ...base,
+        ...(title === undefined || title === "" ? {} : { title }),
+        ...(host === undefined ? {} : { host }),
+      });
+    }
+    return pages.slice(0, MAX_PROJECT_AGENT_PAGES);
   }
 
   /**
@@ -1710,6 +1919,17 @@ function describeChange(
     );
   }
   return changes.length === 0 ? undefined : changes.join(" ").slice(0, 1024);
+}
+
+/** The address's host, the one part of it a tab strip shows. */
+function hostOf(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  try {
+    const host = new URL(url).host;
+    return host === "" ? undefined : host;
+  } catch {
+    return undefined;
+  }
 }
 
 function modeOf(authority: ToolActionAuthority): ToolActionAuthority["mode"] {

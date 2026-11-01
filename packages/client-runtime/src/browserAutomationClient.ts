@@ -26,11 +26,14 @@ import {
   decodeBrowserCaptureImageCommand,
   decodeBrowserCaptureTakeCommand,
   decodeBrowserCapturesCommand,
+  decodeBrowserStepsCommand,
   BrowserCaptureImage,
   type BrowserCaptureImageCommand,
   type BrowserCaptureTakeCommand,
   type BrowserCapturesCommand,
   BrowserCapturesResponse,
+  BrowserStepsResponse,
+  type BrowserStepsCommand,
 } from "@octant/contracts/browser-capture";
 import {
   BrowserExtensionsResult,
@@ -42,6 +45,11 @@ import {
   decodeBrowserProfilesCommand,
   type BrowserProfilesCommand,
 } from "@octant/contracts/browser-profiles";
+import {
+  BrowserFlowsResult,
+  decodeBrowserFlowsCommand,
+  type BrowserFlowsCommand,
+} from "@octant/contracts/browser-flows";
 import { decodeHostAnswer } from "@octant/contracts";
 
 export interface BrowserAutomationClientOptions {
@@ -91,6 +99,8 @@ export interface BrowserAutomationClient {
     input: BrowserCapturesCommand,
     signal?: AbortSignal,
   ): Promise<BrowserCapturesResponse>;
+  /** The agent's recorded Browser steps for the thread, oldest first. */
+  listSteps?(input: BrowserStepsCommand, signal?: AbortSignal): Promise<BrowserStepsResponse>;
   readCapture?(
     input: BrowserCaptureImageCommand,
     signal?: AbortSignal,
@@ -115,6 +125,8 @@ export interface BrowserAutomationClient {
     command: BrowserProfilesCommand,
     signal?: AbortSignal,
   ): Promise<BrowserProfilesResult>;
+  /** List or delete the Projects' saved Browser flows; the agent saves and runs them. */
+  manageFlows?(command: BrowserFlowsCommand, signal?: AbortSignal): Promise<BrowserFlowsResult>;
 }
 
 export type BrowserAutomationClientFailureCategory =
@@ -224,6 +236,14 @@ export function createBrowserAutomationClient(
         decodeHostAnswer(BrowserCapturesResponse),
         signal,
       ),
+    listSteps: (input, signal) =>
+      post(
+        options,
+        "/api/browser/steps",
+        decodeBrowserStepsCommand(input),
+        decodeHostAnswer(BrowserStepsResponse),
+        signal,
+      ),
     readCapture: (input, signal) =>
       post(
         options,
@@ -254,6 +274,14 @@ export function createBrowserAutomationClient(
         "/api/browser/profiles",
         decodeBrowserProfilesCommand(command),
         decodeHostAnswer(BrowserProfilesResult),
+        signal,
+      ),
+    manageFlows: (command, signal) =>
+      post(
+        options,
+        "/api/browser/flows",
+        decodeBrowserFlowsCommand(command),
+        decodeHostAnswer(BrowserFlowsResult),
         signal,
       ),
     listApprovals: (signal) =>

@@ -3423,7 +3423,23 @@ flowchart LR
   a diagnostics export. They leave the host only in an export the local owner
   takes: that thread's export, or the host-wide data export that embeds it. A capture adds no Project filesystem authority and no
   second taint mechanism: the observation that produced it already taints the
-  thread. Detail is in [Browser captures](design/browser-captures.md).
+  thread. A thread also keeps the agent's last 50 Browser steps as `browser.step-recorded@1`
+  events on a per-thread aggregate, bounded and erased like captures: the
+  operation, the element's role and name, the page's origin and path, and the
+  one-line result or failure category, never typed text or a field's value. With the
+  captures they are the thread's Browser proof, read only by a local window,
+  added to a pull request body only when the person chooses, and never in
+  telemetry. Detail is in [Browser captures](design/browser-captures.md).
+- **Browser flows.** An agent's Browser run can be saved as a named flow in the
+  thread's Work or Code Project and replayed by name with no model turn between
+  steps, each step admitted like a call of its own. The host keeps up to 50 flows
+  of up to 50 steps per Project as `browser.flow-saved@1` and
+  `browser.flow-deleted@1` events on one aggregate per Project. A step holds the
+  operation as a call writes it, an element as its role and name, and the page's
+  path and title expected after it, never page text, a ref id, or a secret. A
+  Project erase takes them; they are in no thread export, host data export, or
+  replica sync. Only a local window lists and deletes them. Detail is in
+  [Browser for agents: Flows](design/browser-agent-tool.md#flows).
 - **Journal growth.** A diagnostics export carries journal events per aggregate
   kind per day for the last 14 days, the journal head sequence, and the database
   size, as kind names and counts only: no payload, identifier, or thread or
@@ -9908,6 +9924,16 @@ access` agree); a thread's own change is journaled as
   Archiving the Project, relinking its root, turning its mode off, the window
   moving to another Project, or the window's authority ending closes it. On the desktop app the page is a live native view; elsewhere the
   host drives a headless page and shows its picture.
+- **Parallel thread pages.** A thread's Browser page is reachable only through
+  that thread: its agent tool, a subagent's, and a terminal grant are each built
+  for one thread, and the automation service refuses an agent action that names
+  a context another thread owns, though the two threads of a Project hold the
+  same authority. Actions queue per context, never across contexts, on the
+  headless and the desktop Browser. The list of a Project's live agent pages is
+  a server route for a window that holds the Project and the thread: it returns
+  names (page title and host, thread id and title, whether an agent drives it)
+  and never page text or a picture, and a paired device is told a stored-profile
+  page exists and nothing more.
 - **Browser profiles and extensions.** A Browser page is Private (in-memory,
   per browsing context) unless the person at a local window puts it in their
   Project's persistent profile or the host's Personal profile; a profile page

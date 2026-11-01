@@ -44,6 +44,7 @@ import {
   type BrowserActionRequest,
   type BrowserContextId,
   type BrowserContextPolicy,
+  type BrowserEmulationReport,
   type BrowserThreadId,
 } from "@octant/contracts";
 
@@ -360,6 +361,10 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       | "tabId"
       | "waitFor"
       | "viewport"
+      | "deviceScaleFactor"
+      | "mobile"
+      | "touch"
+      | "colorScheme"
       | "diagnosticsSince"
       | "diagnosticsWarnings"
     >
@@ -392,6 +397,8 @@ export interface BrowserSurfaceRuntimeObservation {
   }>;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
+  /** Only a resize fills this: what the page reports about its device now. */
+  readonly emulation?: BrowserEmulationReport;
   /** Only an observe-diagnostics read fills these, after the read's cursor. */
   readonly consoleErrors?: ReadonlyArray<{
     readonly text: string;
@@ -885,22 +892,9 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                   );
                 }
                 break;
-              case "resize": {
-                const webContents = contentsView(owned).webContents;
-                if (request.viewport === undefined) {
-                  webContents.disableDeviceEmulation?.();
-                } else {
-                  webContents.enableDeviceEmulation?.({
-                    screenPosition: "desktop",
-                    screenSize: request.viewport,
-                    viewPosition: { x: 0, y: 0 },
-                    deviceScaleFactor: 0,
-                    viewSize: request.viewport,
-                    scale: 1,
-                  });
-                }
+              case "resize":
+                await emulateDevice(contentsView(owned), request);
                 break;
-              }
               case "hover":
                 await hoverTarget(contentsView(owned), owned.policy, request.target);
                 break;
@@ -1027,6 +1021,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               "({ width: Math.round(window.innerWidth), height: Math.round(window.innerHeight) })",
             );
             const viewport = viewportSize(measuredViewport);
+            const emulation =
+              request.kind === "resize" ? await measureEmulation(contentsView(owned)) : undefined;
             const sensitiveDocument = await hasSensitiveDocument(
               contentsView(owned),
               owned.policy.credentialFieldProtection,
@@ -1053,6 +1049,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 : {}),
               ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
               ...(viewport === undefined ? {} : { viewport }),
+              ...(emulation === undefined ? {} : { emulation }),
             };
           })();
           if (
@@ -1733,8 +1730,11 @@ async function clickTarget(
   point: { readonly x: number; readonly y: number } | undefined,
 ): Promise<void> {
   const target = await targetGeometry(view, policy, selector, point, false, false);
+  // A touch-emulated page is tapped, as a finger would, not clicked.
+  const touch = emulationOf(view.webContents.debugger).touch;
   await withDebugger(view, async (send) => {
-    await dispatchTrustedClick(send, target);
+    if (touch) await dispatchTap(send, target);
+    else await dispatchTrustedClick(send, target);
   });
   await waitForPageSettled(view);
 }
@@ -2123,6 +2123,167 @@ async function dispatchTrustedClick(
   });
 }
 
+async function dispatchTap(
+  send: (method: string, parameters?: Record<string, unknown>) => Promise<unknown>,
+  point: { readonly x: number; readonly y: number },
+): Promise<void> {
+  await send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [point],
+  });
+  await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+}
+
+/**
+ * The protocol overrides of a page's device emulation end when the debugger
+ * detaches, so a page that is touch or color-scheme emulated keeps the agent's
+ * attachment between actions. `held` marks that attachment as the emulation's.
+ */
+interface DeviceEmulationState {
+  touch: boolean;
+  colorScheme: "light" | "dark" | "default";
+  held: boolean;
+}
+const deviceEmulations = new WeakMap<object, DeviceEmulationState>();
+
+/**
+ * The emulation a page's debugger holds. The protocol overrides end when the
+ * attachment does, whoever ended it (developer tools opening on the view
+ * replace it), so state kept for an attachment that is gone is dropped.
+ */
+function emulationOf(
+  client: BrowserSurfaceViewPort["webContents"]["debugger"],
+): DeviceEmulationState {
+  const known = deviceEmulations.get(client);
+  if (known !== undefined && known.held && !client.isAttached()) {
+    known.touch = false;
+    known.colorScheme = "default";
+    known.held = false;
+  }
+  if (known !== undefined) return known;
+  const fresh: DeviceEmulationState = { touch: false, colorScheme: "default", held: false };
+  deviceEmulations.set(client, fresh);
+  return fresh;
+}
+
+/**
+ * Make the agent's page look like another device, on that page's view only:
+ * Electron's device emulation sizes it without moving or restyling the
+ * person's window, and the protocol sets touch and color scheme for this page
+ * alone. A page whose developer tools someone else attached is left alone. Each
+ * field changes what it names; a call naming none restores all of them.
+ */
+async function emulateDevice(
+  view: BrowserSurfaceViewPort,
+  request: BrowserSurfaceAction,
+): Promise<void> {
+  const contents = view.webContents;
+  const client = contents.debugger;
+  const restoring =
+    request.viewport === undefined &&
+    request.touch === undefined &&
+    request.colorScheme === undefined;
+  const state = emulationOf(client);
+  const touch = restoring ? false : (request.touch ?? state.touch);
+  const colorScheme = restoring ? "default" : (request.colorScheme ?? state.colorScheme);
+  const protocolChange = touch !== state.touch || colorScheme !== state.colorScheme;
+  // The action's own dialog guard usually holds the attachment already; when
+  // it could not, this attaches. A debugger someone else holds is theirs, and
+  // that is found out before the size changes, so a refused call changes nothing.
+  let attachedHere = false;
+  if (protocolChange) {
+    if (!client.isAttached()) {
+      client.attach("1.3");
+      agentDebuggers.add(client);
+      attachedHere = true;
+    } else if (!agentDebuggers.has(client)) {
+      throw new Error("Browser automation control is already in use.");
+    }
+  }
+  if (request.viewport !== undefined) {
+    contents.enableDeviceEmulation?.({
+      screenPosition: request.mobile === true ? "mobile" : "desktop",
+      screenSize: request.viewport,
+      viewPosition: { x: 0, y: 0 },
+      // 0 keeps the screen's own ratio, as a plain size always has.
+      deviceScaleFactor: request.deviceScaleFactor ?? 0,
+      viewSize: request.viewport,
+      scale: 1,
+    });
+  } else if (restoring) {
+    contents.disableDeviceEmulation?.();
+  }
+  if (!protocolChange) return;
+  deviceEmulations.set(client, state);
+  state.held = true;
+  try {
+    if (touch !== state.touch) {
+      await client.sendCommand("Emulation.setTouchEmulationEnabled", {
+        enabled: touch,
+        maxTouchPoints: 1,
+      });
+      state.touch = touch;
+    }
+    if (colorScheme !== state.colorScheme) {
+      await client.sendCommand("Emulation.setEmulatedMedia", {
+        features: [
+          {
+            name: "prefers-color-scheme",
+            value: colorScheme === "default" ? "" : colorScheme,
+          },
+        ],
+      });
+      state.colorScheme = colorScheme;
+    }
+  } finally {
+    // With nothing left to hold, the attachment goes back to the action's
+    // guard, which lets it go when the action ends.
+    state.held = state.touch || state.colorScheme !== "default";
+    if (!state.held && attachedHere) detachAgentDebugger(client);
+  }
+}
+
+/** What the page itself reports about its device, read by a fixed script. */
+async function measureEmulation(
+  view: BrowserSurfaceViewPort,
+): Promise<BrowserEmulationReport | undefined> {
+  try {
+    const seen = await execute(
+      view,
+      `({
+        width: Math.round(window.innerWidth),
+        height: Math.round(window.innerHeight),
+        deviceScaleFactor: window.devicePixelRatio,
+        touch: navigator.maxTouchPoints > 0 && window.matchMedia("(pointer: coarse)").matches,
+        dark: window.matchMedia("(prefers-color-scheme: dark)").matches,
+      })`,
+    );
+    const size = viewportSize(seen);
+    if (size === undefined || typeof seen !== "object" || seen === null) return undefined;
+    const report = seen as {
+      deviceScaleFactor?: unknown;
+      touch?: unknown;
+      dark?: unknown;
+    };
+    if (
+      typeof report.deviceScaleFactor !== "number" ||
+      !(report.deviceScaleFactor > 0 && report.deviceScaleFactor <= 8) ||
+      typeof report.touch !== "boolean" ||
+      typeof report.dark !== "boolean"
+    ) {
+      return undefined;
+    }
+    return {
+      ...size,
+      deviceScaleFactor: report.deviceScaleFactor,
+      touch: report.touch,
+      colorScheme: report.dark ? "dark" : "light",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Debuggers the agent's own action attached to, so the action's input and
  * capture reuse the attachment instead of mistaking it for someone else's.
@@ -2170,16 +2331,26 @@ async function guardDialogs(
   const client = view.webContents.debugger;
   // A page that has not loaded yet is guarded too: its first load is when a
   // dialog most often opens.
-  if (client.isAttached() || client.on === undefined) return async () => undefined;
-  try {
-    client.attach("1.3");
-  } catch {
-    return async () => undefined;
+  // An attachment the device emulation holds is the agent's own: the guard
+  // listens on it and leaves it attached when the action ends.
+  // Read first: it drops what an attachment that is gone used to hold.
+  const emulation = emulationOf(client);
+  const reused = client.isAttached() && emulation.held;
+  if ((client.isAttached() && !reused) || client.on === undefined) return async () => undefined;
+  if (!reused) {
+    try {
+      client.attach("1.3");
+    } catch {
+      return async () => undefined;
+    }
+    agentDebuggers.add(client);
   }
-  agentDebuggers.add(client);
   const listener = (_event: unknown, method: string, params: unknown) => {
     if (method !== "Page.javascriptDialogOpening") return;
-    const opened = (params ?? {}) as { readonly type?: unknown; readonly message?: unknown };
+    const opened = (params ?? {}) as {
+      readonly type?: unknown;
+      readonly message?: unknown;
+    };
     const type = dialogType(typeof opened.type === "string" ? opened.type : "alert");
     const answer = BROWSER_DIALOG_POLICY[type];
     if (reports.length < 8) {
@@ -2202,6 +2373,8 @@ async function guardDialogs(
   ]);
   return async () => {
     client.removeListener?.("message", listener);
+    // The attachment holds the page's touch or color scheme: it outlives the action.
+    if (emulation.held) return;
     detachAgentDebugger(client);
   };
 }

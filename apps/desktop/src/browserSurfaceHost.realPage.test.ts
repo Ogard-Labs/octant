@@ -53,6 +53,14 @@ const pages: Record<string, string> = {
     <button id="ask" onclick="const ok = confirm('Delete everything?'); alert(ok ? 'deleted' : 'kept'); document.title = ok ? 'Deleted' : 'Kept'">Ask</button>
     <p>Width <span id="width"></span></p>
     <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
+  "/device": `<!doctype html><title>Device</title><meta name="viewport" content="width=device-width, initial-scale=1">
+    <button id="tap" style="width:120px;height:48px">Tap</button>
+    <p id="log"></p>
+    <script>
+      const log = (what) => { document.getElementById('log').textContent += what + ' '; };
+      addEventListener('touchstart', () => log('touchstart'));
+      document.getElementById('tap').addEventListener('click', () => log('click'));
+    </script>`,
   "/html-drag": `<!doctype html><title>Drag</title>
     <div id="card" draggable="true" style="width:60px;height:30px" ondragstart="event.dataTransfer.setData('text', 'card')">Card</div>
     <div id="done" style="width:60px;height:30px;margin-top:40px" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>`,
@@ -115,7 +123,8 @@ async function pageView(): Promise<{
   personKey: () => void;
 }> {
   if (browser === undefined) throw new Error("No Chromium.");
-  const page = await browser.newPage();
+  // An Electron view has no color scheme of its own: it follows the machine.
+  const page = await (await browser.newContext({ colorScheme: null })).newPage();
   let title = "";
   let session: CDPSession | undefined;
   let attached = false;
@@ -126,6 +135,14 @@ async function pageView(): Promise<{
   // Frames on another site, each with its own protocol session, as Electron's
   // debugger announces them once the host asks to attach to them.
   const frameSessions = new Map<string, CDPSession>();
+  // Electron applies a device change synchronously; this stand-in finishes it
+  // before the page is next read, which is the same order of events.
+  let deviceChange: Promise<void> = Promise.resolve();
+  let deviceSessionOpened: Promise<CDPSession> | undefined;
+  const deviceSession = () => {
+    deviceSessionOpened ??= page.context().newCDPSession(page);
+    return deviceSessionOpened;
+  };
   const openSession = async (): Promise<CDPSession> => {
     if (session !== undefined) return session;
     const opened = await page.context().newCDPSession(page);
@@ -194,9 +211,31 @@ async function pageView(): Promise<{
         on: (_event, listener) => void messageListeners.add(listener),
         removeListener: (_event, listener) => void messageListeners.delete(listener),
       },
-      enableDeviceEmulation: (parameters) => void page.setViewportSize(parameters.viewSize),
-      disableDeviceEmulation: () => void page.setViewportSize({ width: 1280, height: 720 }),
+      // Electron's device emulation lives in the view, not in the debugger
+      // session, so it has a session of its own that the host's debugger
+      // attach and detach never touch.
+      enableDeviceEmulation: (parameters) => {
+        deviceChange = (async () => {
+          await (
+            await deviceSession()
+          ).send("Emulation.setDeviceMetricsOverride", {
+            width: parameters.viewSize.width,
+            height: parameters.viewSize.height,
+            deviceScaleFactor: parameters.deviceScaleFactor,
+            mobile: parameters.screenPosition === "mobile",
+          });
+        })();
+      },
+      disableDeviceEmulation: () => {
+        deviceChange = (async () => {
+          await (await deviceSession()).send("Emulation.clearDeviceMetricsOverride");
+          // Playwright sends nothing for a size it already holds.
+          await page.setViewportSize({ width: 1280, height: 721 });
+          await page.setViewportSize({ width: 1280, height: 720 });
+        })();
+      },
       executeJavaScriptInIsolatedWorld: async (_world, scripts) => {
+        await deviceChange;
         const answer = await page.evaluate(scripts[0]?.code ?? "undefined");
         await refreshTitle();
         return answer;
@@ -212,7 +251,10 @@ async function pageView(): Promise<{
       mainFrame: {
         get framesInSubtree() {
           return page.frames().map((frame) => ({
-            executeJavaScript: (code: string) => frame.evaluate(code),
+            executeJavaScript: async (code: string) => {
+              await deviceChange;
+              return frame.evaluate(code);
+            },
           }));
         },
       },
@@ -251,7 +293,8 @@ async function pageView(): Promise<{
 async function surface(path: string, views = 1, profile?: { readonly kind: "personal" }) {
   const pool = await Promise.all(Array.from({ length: views }, () => pageView()));
   const page = pool[0]?.page;
-  if (page === undefined) throw new Error("No page.");
+  const view = pool[0]?.view;
+  if (page === undefined || view === undefined) throw new Error("No page.");
   let next = 0;
   const host = createBrowserSurfaceHost({
     createView: () => {
@@ -274,8 +317,58 @@ async function surface(path: string, views = 1, profile?: { readonly kind: "pers
       ...(profile === undefined ? {} : { profile }),
     },
   });
-  const opened = await host.act(contextId, { kind: "navigate", target: `${origin}${path}` });
-  return { host, contextId, page, opened, personKey: pool[0]?.personKey ?? (() => undefined) };
+  const opened = await host.act(contextId, {
+    kind: "navigate",
+    target: `${origin}${path}`,
+  });
+  return {
+    host,
+    contextId,
+    page,
+    opened,
+    view,
+    personKey: pool[0]?.personKey ?? (() => undefined),
+  };
+}
+
+/**
+ * One host with two threads' contexts in the same window, each on its own real
+ * page, the way two threads of a Project work at once. Views are handed out in
+ * the order contexts and tabs ask for them.
+ */
+async function twoThreads(firstPath: string, secondPath: string) {
+  const pool = await Promise.all(Array.from({ length: 4 }, () => pageView()));
+  let next = 0;
+  const host = createBrowserSurfaceHost({
+    createView: () => {
+      const created = pool[next]?.view;
+      next += 1;
+      if (created === undefined) throw new Error("No page left for another tab.");
+      return created;
+    },
+  });
+  const policy = {
+    profileMode: "isolated" as const,
+    allowedOrigins: [origin],
+    credentialFieldProtection: true as const,
+    maxConcurrentTabs: 4,
+    sessionTimeoutMs: 300_000,
+  };
+  const firstOwner = { windowId: "window-a", threadId: crypto.randomUUID() };
+  const secondOwner = { windowId: "window-a", threadId: crypto.randomUUID() };
+  const first = crypto.randomUUID();
+  const second = crypto.randomUUID();
+  await host.createContext({ contextId: first, owner: firstOwner, policy });
+  await host.createContext({ contextId: second, owner: secondOwner, policy });
+  await host.act(first, { kind: "navigate", target: `${origin}${firstPath}` });
+  await host.act(second, {
+    kind: "navigate",
+    target: `${origin}${secondPath}`,
+  });
+  const close = () => Promise.all(pool.map((entry) => entry.page.close()));
+  const firstPage = pool[0]?.page;
+  if (firstPage === undefined) throw new Error("No page.");
+  return { host, first, second, firstOwner, secondOwner, firstPage, close };
 }
 
 function entry(
@@ -411,7 +504,10 @@ describe.skipIf(chrome === undefined)(
 
     it("takes no picture and returns no text after an action unless the call asks", async () => {
       const { host, contextId, page } = await surface("/form");
-      const clicked = await host.act(contextId, { kind: "click", target: "#save" });
+      const clicked = await host.act(contextId, {
+        kind: "click",
+        target: "#save",
+      });
       expect(clicked.screenshotDataUrl).toBeUndefined();
       expect(clicked.extractedText).toBeUndefined();
       expect(clicked.contentHash).toMatch(/^[0-9a-f]{64}$/);
@@ -436,13 +532,25 @@ describe.skipIf(chrome === undefined)(
       await host.act(contextId, { kind: "hover", target: "#menu" });
       expect(await page.isVisible("#item")).toBe(true);
       expect(
-        (await host.act(contextId, { kind: "select", target: "#size", value: "Large" })).title,
+        (
+          await host.act(contextId, {
+            kind: "select",
+            target: "#size",
+            value: "Large",
+          })
+        ).title,
       ).toBe("Size l");
       await expect(
         host.act(contextId, { kind: "select", target: "#size", value: "Huge" }),
       ).rejects.toThrow(/no option/);
       expect(
-        (await host.act(contextId, { kind: "drag", target: "#card", destination: "#done" })).title,
+        (
+          await host.act(contextId, {
+            kind: "drag",
+            target: "#card",
+            destination: "#done",
+          })
+        ).title,
       ).toBe("Dropped card");
       await host.act(contextId, { kind: "click", target: "#keys" });
       expect((await host.act(contextId, { kind: "press", value: "Control+B" })).title).toBe(
@@ -468,13 +576,19 @@ describe.skipIf(chrome === undefined)(
 
     it("opens, lists, switches, and closes the agent's tabs inside the allowed origin", async () => {
       const { host, contextId, page } = await surface("/form", 3);
-      const opened = await host.act(contextId, { kind: "tab-open", target: `${origin}/login` });
+      const opened = await host.act(contextId, {
+        kind: "tab-open",
+        target: `${origin}/login`,
+      });
       expect(opened.tabs).toEqual([
         { tabId: "t1", url: `${origin}/form`, title: "Form", active: false },
         { tabId: "t2", url: `${origin}/login`, title: "Sign in", active: true },
       ]);
       expect((await host.act(contextId, { kind: "tab-select", tabId: "t1" })).title).toBe("Form");
-      const closed = await host.act(contextId, { kind: "tab-close", tabId: "t2" });
+      const closed = await host.act(contextId, {
+        kind: "tab-close",
+        tabId: "t2",
+      });
       expect(closed.tabs).toEqual([
         { tabId: "t1", url: `${origin}/form`, title: "Form", active: true },
       ]);
@@ -482,7 +596,10 @@ describe.skipIf(chrome === undefined)(
         /only tab/,
       );
       await expect(
-        host.act(contextId, { kind: "tab-open", target: "https://example.com/" }),
+        host.act(contextId, {
+          kind: "tab-open",
+          target: "https://example.com/",
+        }),
       ).rejects.toThrow(/allowlist/);
       await page.close();
     });
@@ -495,6 +612,94 @@ describe.skipIf(chrome === undefined)(
         destination: "#done",
       });
       expect(dragged.title).toBe("Dropped card");
+      await page.close();
+    });
+
+    it("emulates a phone, touch, and a color scheme on the agent's view and restores all three", async () => {
+      const { host, contextId, page } = await surface("/device");
+      // The page's color scheme follows the machine, so it is read, not assumed.
+      const baseline = (await host.act(contextId, { kind: "resize" })).emulation;
+      expect(baseline).toMatchObject({ width: 1280, touch: false });
+      const phone = await host.act(contextId, {
+        kind: "resize",
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 3,
+        mobile: true,
+        touch: true,
+        colorScheme: "dark",
+      });
+      expect(phone.emulation).toEqual({
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 3,
+        touch: true,
+        colorScheme: "dark",
+      });
+      expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(
+        true,
+      );
+      // The touch and color scheme outlive the action's own debugger attach.
+      const tapped = await host.act(contextId, {
+        kind: "click",
+        target: "#tap",
+        include: ["text"],
+      });
+      expect(tapped.extractedText).toMatch(/touchstart click/);
+      expect(tapped.emulation).toBeUndefined();
+      const light = await host.act(contextId, {
+        kind: "resize",
+        colorScheme: "light",
+      });
+      expect(light.emulation).toMatchObject({
+        width: 390,
+        touch: true,
+        colorScheme: "light",
+      });
+      const restored = await host.act(contextId, { kind: "resize" });
+      expect(restored.emulation).toEqual(baseline);
+      expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(false);
+      await page.close();
+    });
+
+    it("forgets touch the page lost when its debugger attachment was dropped", async () => {
+      const { host, contextId, page, view } = await surface("/device");
+      await host.act(contextId, { kind: "resize", touch: true });
+      // Developer tools opening on the view replace the agent's attachment.
+      view.webContents.debugger.detach();
+      // This stand-in ends the protocol session asynchronously; Electron's is immediate.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const clicked = await host.act(contextId, {
+        kind: "click",
+        target: "#tap",
+        include: ["text"],
+      });
+      expect(clicked.extractedText).toMatch(/click/);
+      expect(clicked.extractedText).not.toMatch(/touchstart/);
+      const again = await host.act(contextId, { kind: "resize", touch: true });
+      expect(again.emulation).toMatchObject({ touch: true });
+      await host.act(contextId, { kind: "resize" });
+      expect(view.webContents.debugger.isAttached()).toBe(false);
+      await page.close();
+    });
+
+    it("leaves device emulation alone when someone else's developer tools hold the page", async () => {
+      const { host, contextId, page, view } = await surface("/device");
+      // Someone else's debugger: attached before the agent's action begins.
+      view.webContents.debugger.attach("1.3");
+      await expect(host.act(contextId, { kind: "resize", touch: true })).rejects.toThrow(
+        /already in use/,
+      );
+      await expect(host.act(contextId, { kind: "resize", colorScheme: "dark" })).rejects.toThrow(
+        /already in use/,
+      );
+      expect(view.webContents.debugger.isAttached()).toBe(true);
+      expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(false);
+      // A size needs no debugger, so it still applies.
+      const sized = await host.act(contextId, {
+        kind: "resize",
+        viewport: { width: 600, height: 800 },
+      });
+      expect(sized.emulation).toMatchObject({ width: 600 });
       await page.close();
     });
 
@@ -525,7 +730,10 @@ describe.skipIf(chrome === undefined)(
       expect((await host.act(contextId, { kind: "click", target: "#later" })).title).toBe(
         "Settled",
       );
-      const asked = await host.act(contextId, { kind: "click", target: "#ask" });
+      const asked = await host.act(contextId, {
+        kind: "click",
+        target: "#ask",
+      });
       expect(asked.title).toBe("Kept");
       expect(asked.dialogs).toEqual([
         { type: "confirm", message: "Delete everything?", answer: "dismissed" },
@@ -537,7 +745,10 @@ describe.skipIf(chrome === undefined)(
         include: ["text"],
       });
       expect(narrow.extractedText).toContain("Width 390");
-      const restored = await host.act(contextId, { kind: "resize", include: ["text"] });
+      const restored = await host.act(contextId, {
+        kind: "resize",
+        include: ["text"],
+      });
       expect(restored.extractedText).toContain("Width 1280");
       await page.close();
     });
@@ -546,10 +757,113 @@ describe.skipIf(chrome === undefined)(
       const { host, contextId, page, opened } = await surface("/greets", 3);
       expect(opened.dialogs).toEqual([{ type: "alert", message: "Welcome", answer: "accepted" }]);
       expect(opened.title).toBe("Greeted");
-      const tabs = await host.act(contextId, { kind: "tab-open", target: `${origin}/greets` });
+      const tabs = await host.act(contextId, {
+        kind: "tab-open",
+        target: `${origin}/greets`,
+      });
       expect(tabs.dialogs).toEqual([{ type: "alert", message: "Welcome", answer: "accepted" }]);
       expect(tabs.tabs?.[1]).toMatchObject({ title: "Greeted", active: true });
       await page.close();
+    });
+
+    it("lets two threads' pages work at once: one waits on its page while the other acts", async () => {
+      const { host, first, second, firstPage, close } = await twoThreads("/slow", "/form");
+      const finished: string[] = [];
+      // The first thread waits for text that only appears once the test says so,
+      // after the second thread has finished. If the host held one action at a
+      // time across surfaces, the second thread's actions would queue behind
+      // this wait and the test would stall to its timeout.
+      const waiting = host
+        .act(first, {
+          kind: "wait",
+          waitFor: {
+            conditions: [{ kind: "text", text: "Released", present: true }],
+            match: "all",
+            timeoutMs: 20_000,
+          },
+        })
+        .then((observed) => (finished.push("first-wait"), observed));
+      // Behind the wait on its own page, the first thread's next action queues.
+      const queued = host
+        .act(first, { kind: "extract-text" })
+        .then((observed) => (finished.push("first-queued"), observed));
+
+      await host.act(second, { kind: "type", target: "#name", value: "Ada" });
+      const saved = await host.act(second, { kind: "click", target: "#save" });
+      finished.push("second-done");
+      expect(saved.title).toBe("Saved Ada");
+      expect(finished).toEqual(["second-done"]);
+
+      await firstPage.evaluate(() => {
+        const note = document.createElement("p");
+        note.textContent = "Released";
+        document.body.append(note);
+      });
+      await waiting;
+      const afterQueue = await queued;
+      expect(finished).toEqual(["second-done", "first-wait", "first-queued"]);
+      // Each action reached its own page, never the other's.
+      expect(afterQueue.url).toBe(`${origin}/slow`);
+      expect(afterQueue.extractedText).toContain("Released");
+      expect((await host.act(second, { kind: "extract-text" })).url).toBe(`${origin}/form`);
+      await close();
+    });
+
+    it("interleaves actions of two pages without crossing them", async () => {
+      const { host, first, second, close } = await twoThreads("/controls", "/form");
+      const rounds = Array.from({ length: 4 }, (_, round) => round);
+      const results = await Promise.all(
+        rounds.flatMap((round) => [
+          host.act(first, {
+            kind: "select",
+            target: "#size",
+            value: round % 2 === 0 ? "Large" : "Small",
+          }),
+          host.act(second, { kind: "click", target: "#save" }),
+        ]),
+      );
+      const own = (observed: { readonly url?: string }, path: string) =>
+        observed.url === `${origin}${path}`;
+      expect(results.filter((observed) => own(observed, "/controls"))).toHaveLength(4);
+      expect(results.filter((observed) => own(observed, "/form"))).toHaveLength(4);
+      // Each page kept its own actions in the order they were asked.
+      expect((await host.act(first, { kind: "extract-text" })).title).toBe("Size s");
+      expect((await host.act(second, { kind: "extract-text" })).title).toBe("Saved");
+      await close();
+    });
+
+    it("keeps each context's tabs to its own thread, however a tab id is guessed", async () => {
+      const { host, first, second, firstOwner, secondOwner, close } = await twoThreads(
+        "/slow",
+        "/form",
+      );
+      await host.act(first, { kind: "tab-open", target: `${origin}/other` });
+      const firstTabs = (await host.act(first, { kind: "tab-list" })).tabs ?? [];
+      expect(firstTabs).toHaveLength(2);
+      const frontBefore = firstTabs.find((tab) => tab.active)?.tabId;
+
+      // The second thread has one tab. The first thread's second tab is none of its.
+      expect((await host.act(second, { kind: "tab-list" })).tabs).toHaveLength(1);
+      await expect(host.act(second, { kind: "tab-select", tabId: "t2" })).rejects.toThrow();
+      await expect(host.act(second, { kind: "tab-close", tabId: "t2" })).rejects.toThrow();
+      // The first thread's real, host-side tab id is no tab of the second.
+      const hostTabId = host.state(first).tabs?.[0]?.tabId;
+      await expect(
+        host.tabCommand(second, secondOwner, {
+          kind: "select",
+          tabId: hostTabId ?? "x",
+        }),
+      ).rejects.toThrow(/unknown/);
+      // A tab command names its owner: the first thread's owner is no owner of the second.
+      await expect(host.tabCommand(second, firstOwner, { kind: "open" })).rejects.toThrow(
+        /does not own/,
+      );
+
+      expect((await host.act(second, { kind: "tab-list" })).tabs).toHaveLength(1);
+      const firstAfter = (await host.act(first, { kind: "tab-list" })).tabs ?? [];
+      expect(firstAfter).toHaveLength(2);
+      expect(firstAfter.find((tab) => tab.active)?.tabId).toBe(frontBefore);
+      await close();
     });
 
     it("reports a dialog answered during an action that then failed with the next answer", async () => {

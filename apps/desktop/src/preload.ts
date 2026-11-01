@@ -296,6 +296,14 @@ export interface OctantHostBridge {
    */
   readonly saveSupportBundle: () => Promise<SupportBundleSaveResult>;
   /**
+   * Opens the native folder picker and writes the kept Browser screenshots,
+   * numbered, into the folder the person chose. Answers a count and the
+   * folder's name, never a path.
+   */
+  readonly saveBrowserProofScreenshots: (
+    pictures: ReadonlyArray<{ readonly fileNumber: number; readonly dataUrl: string }>,
+  ) => Promise<BrowserProofSaveResult>;
+  /**
    * Window capture for the composer. Present only on macOS, where the host can
    * capture a window: listing reads titles only, the permission is requested
    * only on the person's say-so, and a capture reads the one window picked.
@@ -806,6 +814,26 @@ export function createHostBridge(
         throw new Error("Octant could not save the diagnostics. Nothing was written.");
       }
       return decodeSupportBundleSaveResult(answer);
+    },
+    saveBrowserProofScreenshots: async (
+      pictures: ReadonlyArray<{ readonly fileNumber: number; readonly dataUrl: string }>,
+    ) => {
+      let answer: unknown;
+      try {
+        answer = await ipc.invoke(IPC_CHANNELS.saveBrowserProofScreenshots, pictures);
+      } catch (error) {
+        // The main process's sentence names a file or says what to do; any
+        // other text could carry a path, so only these fixed ones pass.
+        const message = error instanceof Error ? error.message : "";
+        const known =
+          /A file named browser-check-\d\d\.[a-z]+ is already in that folder\. Nothing was written\./.exec(
+            message,
+          );
+        throw new Error(
+          known?.[0] ?? "Octant could not save the screenshots. Nothing more was written.",
+        );
+      }
+      return decodeBrowserProofSaveResult(answer);
     },
     ...(platform === "darwin"
       ? {
@@ -1796,6 +1824,35 @@ function decodeCaptureWindowResult(value: unknown): CaptureWindowResult {
       });
   }
   throw new TypeError("Invalid window capture result.");
+}
+
+export type BrowserProofSaveResult =
+  | Readonly<{ kind: "cancelled" }>
+  | Readonly<{ kind: "saved"; count: number; folderName: string }>;
+
+function decodeBrowserProofSaveResult(value: unknown): BrowserProofSaveResult {
+  if (!isRecord(value)) throw new TypeError("Invalid screenshot save result.");
+  const keys = Object.keys(value).sort();
+  if (keys.length === 1 && keys[0] === "kind" && value.kind === "cancelled") {
+    return Object.freeze({ kind: "cancelled" });
+  }
+  if (
+    keys.length === 3 &&
+    keys[0] === "count" &&
+    keys[1] === "folderName" &&
+    keys[2] === "kind" &&
+    value.kind === "saved" &&
+    typeof value.count === "number" &&
+    Number.isInteger(value.count) &&
+    value.count >= 1 &&
+    value.count <= 32 &&
+    typeof value.folderName === "string" &&
+    value.folderName.length <= 255 &&
+    !/[\\/]/.test(value.folderName)
+  ) {
+    return Object.freeze({ kind: "saved", count: value.count, folderName: value.folderName });
+  }
+  throw new TypeError("Invalid screenshot save result.");
 }
 
 export type SupportBundleSaveResult =

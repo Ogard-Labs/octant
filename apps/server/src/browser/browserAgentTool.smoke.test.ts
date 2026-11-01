@@ -4,9 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { BrowserThreadId, ToolActionAuthority, WindowId } from "@octant/contracts";
+import type {
+  BrowserFlow,
+  BrowserThreadId,
+  ToolActionAuthority,
+  WindowId,
+} from "@octant/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createBrowserAppManagedTools } from "./browserAppManagedTools";
+import { BrowserFlowRecorder, type BrowserFlowToolPort } from "./browserFlows";
 import { BrowserAutomationService } from "./browserAutomationService";
 import { createPlaywrightBrowserRuntime } from "./playwrightBrowserRuntime";
 
@@ -64,6 +70,23 @@ const pages: Record<string, string> = {
     <fieldset disabled><input id="locked" aria-label="Locked"></fieldset>
     <p>Width <span id="width"></span></p>
     <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
+  "/device": `<!doctype html><title>Device</title><meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>html { scroll-behavior: smooth; }</style>
+    <button id="tap" style="width:120px;height:48px">Tap</button>
+    <p id="log"></p>
+    <div id="far" style="margin-top: 3000px"></div>
+    <script>
+      document.getElementById('far').attachShadow({ mode: 'open' }).innerHTML = '<button style="width:120px;height:48px">Far tap</button>';
+      document.getElementById('far').shadowRoot.querySelector('button').addEventListener('click', () => log('far'));
+      const log = (what) => { document.getElementById('log').textContent += what + ' '; };
+      addEventListener('touchstart', () => log('touchstart'));
+      document.getElementById('tap').addEventListener('click', () => log('click'));
+      const report = () => log('w' + innerWidth + ' coarse=' + matchMedia('(pointer: coarse)').matches + ' dark=' + matchMedia('(prefers-color-scheme: dark)').matches);
+      report();
+      addEventListener('resize', report);
+      matchMedia('(prefers-color-scheme: dark)').addEventListener('change', report);
+      matchMedia('(pointer: coarse)').addEventListener('change', report);
+    </script>`,
   "/noisy": `<!doctype html><title>Noisy</title>
     <script>console.warn("careful"); console.error("boom"); fetch("/missing-data?token=s3cret");</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
@@ -151,6 +174,11 @@ function agentTool(
      * headless one here; only the presentation the sign-in check reads changes.
      */
     readonly presentAsApp?: boolean;
+    /** The Project's flows, shared between tools to replay on a fresh page. */
+    readonly flows?: BrowserFlowToolPort;
+    /** How the person answers an origin question; approved when absent. */
+    readonly originAnswer?: "approved" | "denied";
+    readonly plan?: boolean;
   } = {},
 ) {
   const asked: Array<Record<string, unknown>> = [];
@@ -168,9 +196,23 @@ function agentTool(
     modelId: "model",
     resolveModelId: () => "model",
     modelBindings: new Map(),
-    executionPolicy: "approval-gated",
+    executionPolicy: options.plan === true ? "plan" : "approval-gated",
     resolveAuthority: () => authority,
+    ...(options.flows === undefined
+      ? {}
+      : {
+          flows: {
+            ...options.flows,
+            caller: () =>
+              options.pairedDevice === true
+                ? "paired-device"
+                : options.unattended === true
+                  ? "unattended"
+                  : "person",
+          },
+        }),
     browser: {
+      snapshotRefs: (window, thread) => service.snapshotRefs(window, thread),
       inspectThread: (window, thread) => {
         const inspected = service.inspectThread(window, thread);
         return options.presentAsApp === true && inspected.context !== undefined
@@ -191,7 +233,7 @@ function agentTool(
       request: async (request) => {
         asked.push(request as unknown as Record<string, unknown>);
         if ("signIn" in request) return (await options.whileSigningIn?.()) ?? "approved";
-        if (!("upload" in request)) return "approved";
+        if (!("upload" in request)) return options.originAnswer ?? "approved";
         await options.whileAsking?.();
         return options.uploadAnswer ?? "approved";
       },
@@ -225,6 +267,29 @@ function refFor(outline: string | undefined, line: RegExp): string {
   const ref = /\[ref=(e\d+)\]/.exec(match ?? "")?.[1];
   if (ref === undefined) throw new Error(`No ref for ${String(line)} in:\n${outline ?? ""}`);
   return ref;
+}
+
+/** An in-memory stand-in for the Project's flow store; the real one has its own tests. */
+function flowPort(): BrowserFlowToolPort & { readonly saved: Map<string, BrowserFlow> } {
+  const saved = new Map<string, BrowserFlow>();
+  return {
+    saved,
+    recorder: new BrowserFlowRecorder(),
+    caller: () => "person",
+    service: {
+      list: () => [...saved.values()],
+      get: (_project, name) => saved.get(name),
+      save: ({ name, steps }) => {
+        const replaced = saved.has(name);
+        saved.set(name, {
+          name,
+          steps,
+          savedAt: new Date().toISOString() as BrowserFlow["savedAt"],
+        });
+        return { status: "saved", replaced };
+      },
+    },
+  };
 }
 
 describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
@@ -734,6 +799,67 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     await tool.stop();
   });
 
+  it("emulates a phone, touch, and dark mode on the agent's page and restores all three", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/device` });
+    // The page's own color scheme follows the machine, so it is read, not assumed.
+    const baseline = (await tool.call({ operation: "resize" })).result.page?.emulation;
+    expect(baseline).toMatchObject({ width: 1280, touch: false });
+    const phone = await tool.call({
+      operation: "resize",
+      preset: "phone",
+      colorScheme: "dark",
+    });
+    expect(phone.result.page?.emulation).toEqual({
+      width: 390,
+      height: 844,
+      deviceScaleFactor: 3,
+      touch: true,
+      colorScheme: "dark",
+    });
+    // The page's own code saw the same: a tap arrives as touch, then a click.
+    const tapped = await tool.call({
+      operation: "click",
+      selector: "#tap",
+      include: ["text"],
+    });
+    expect(tapped.result.page?.text).toContain("w390 coarse=true dark=true");
+    expect(tapped.result.page?.text).toMatch(/touchstart click/);
+    // Off screen on a smooth-scrolling page and inside a shadow root: still tapped.
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    const far = await tool.call({
+      operation: "click",
+      ref: refFor(outline, /"Far tap"/),
+      include: ["text"],
+    });
+    expect(far.result.page?.text).toMatch(/far/);
+    // Each field changes only what it names.
+    const light = await tool.call({
+      operation: "resize",
+      colorScheme: "light",
+    });
+    expect(light.result.page?.emulation).toMatchObject({
+      width: 390,
+      touch: true,
+      colorScheme: "light",
+    });
+    const mouse = await tool.call({ operation: "resize", touch: false });
+    expect(mouse.result.page?.emulation).toMatchObject({
+      width: 390,
+      touch: false,
+    });
+    // A plain size of the same width drops the phone's pixel ratio.
+    const plain = await tool.call({ operation: "resize", width: 390, height: 844 });
+    expect(plain.result.page?.emulation).toMatchObject({ width: 390, deviceScaleFactor: 1 });
+    const restored = await tool.call({
+      operation: "resize",
+      include: ["text"],
+    });
+    expect(restored.result.page?.emulation).toEqual(baseline);
+    expect(restored.result.page?.text).toContain("w1280 coarse=false");
+    await tool.stop();
+  });
+
   it("hands the page to the person to sign in, holds the agent, and resumes with a fresh snapshot", async () => {
     let tool: ReturnType<typeof agentTool> | undefined;
     let duringHandOff: unknown;
@@ -874,7 +1000,9 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       "url",
     ]);
     const withWarnings = (await tool.call({ operation: "diagnostics", warnings: true })).result
-      .page as { readonly consoleWarnings?: ReadonlyArray<{ readonly text: string }> };
+      .page as {
+      readonly consoleWarnings?: ReadonlyArray<{ readonly text: string }>;
+    };
     expect(withWarnings.consoleWarnings?.map((entry) => entry.text)).toEqual(["careful"]);
     const after = (
       await tool.call({ operation: "diagnostics", since: first.diagnosticsCursor ?? 0 })
@@ -882,5 +1010,247 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(after.consoleErrors).toEqual([]);
     expect(after.httpErrors).toEqual([]);
     await tool.stop();
+  });
+});
+
+/** The bytes of one tool result as the model reads it. */
+function resultBytes(answer: { readonly result: unknown }): number {
+  return Buffer.byteLength(JSON.stringify(answer.result), "utf8");
+}
+
+describe.skipIf(!available)("recording and replaying a Browser flow on a real page", () => {
+  /** Records a check on the form, saves it, and closes the page. */
+  async function recordOrderCheck(flows: BrowserFlowToolPort, name = "Order check") {
+    const tool = agentTool({ flows });
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    await tool.call({ operation: "type", ref: refFor(outline, /"Name"/), text: "Ada" });
+    await tool.call({ operation: "click", ref: refFor(outline, /"Save"/) });
+    await tool.call({ operation: "read-page" });
+    const saved = await tool.call({ operation: "flow-save", name });
+    await tool.stop();
+    return saved;
+  }
+
+  it("saves a run without snapshots, reads, or ref ids, and replays it on a fresh page", async () => {
+    const flows = flowPort();
+    const saved = await recordOrderCheck(flows);
+    expect(saved).toMatchObject({ isError: false, result: { saved: "Order check", steps: 3 } });
+    const stored = flows.saved.get("Order check");
+    expect(stored?.steps.map((step) => step.operation)).toEqual(["navigate", "type", "click"]);
+    expect(stored?.steps[1]?.targets).toEqual({
+      ref: expect.objectContaining({ role: "textbox", name: "Name" }),
+    });
+    expect(stored?.steps[2]?.expect).toEqual({ path: "/form", title: "Saved Ada" });
+    expect(JSON.stringify(stored)).not.toMatch(/"e\d+"/);
+    expect(stored?.steps[1]?.input).toEqual({ operation: "type", text: "Ada" });
+
+    const fresh = agentTool({ flows });
+    const listed = await fresh.call({ operation: "flow-list" });
+    expect(listed.result).toEqual({
+      flows: [{ name: "Order check", steps: 3, firstAddress: `${origin}/form` }],
+    });
+    const replayed = await fresh.call({ operation: "flow-run", name: "Order check" });
+    expect(replayed.isError).toBe(false);
+    expect(replayed.result.page?.title).toBe("Saved Ada");
+    expect(replayed.result).toMatchObject({
+      flow: "Order check",
+      steps: [
+        { step: 1, operation: "navigate" },
+        { step: 2, operation: "type" },
+        { step: 3, operation: "click" },
+      ],
+    });
+    await fresh.stop();
+  });
+
+  it("stops at the step whose button changed its name, and names it", async () => {
+    const flows = flowPort();
+    await recordOrderCheck(flows);
+    const original = pages["/form"];
+    pages["/form"] = (original ?? "").replace(">Save</button>", ">Store</button>");
+    const tool = agentTool({ flows });
+    try {
+      const replayed = await tool.call({ operation: "flow-run", name: "Order check" });
+      expect(replayed.isError).toBe(true);
+      expect(replayed.result).toMatchObject({
+        completed: [{ step: 1 }, { step: 2 }],
+        failedStep: {
+          step: 3,
+          operation: "click",
+          reason: "element-not-found",
+          element: { role: "button", name: "Save" },
+        },
+      });
+    } finally {
+      pages["/form"] = original ?? "";
+      await tool.stop();
+    }
+  });
+
+  it("stops at the step whose page ended on a different title", async () => {
+    const flows = flowPort();
+    await recordOrderCheck(flows);
+    const original = pages["/form"];
+    pages["/form"] = (original ?? "").replace("'Saved '", "'Failed '");
+    const tool = agentTool({ flows });
+    try {
+      const replayed = await tool.call({ operation: "flow-run", name: "Order check" });
+      expect(replayed.isError).toBe(true);
+      expect(replayed.result).toMatchObject({
+        completed: [{ step: 1 }, { step: 2 }],
+        failedStep: {
+          step: 3,
+          operation: "click",
+          reason: "page-differs",
+          expected: { path: "/form", title: "Saved Ada" },
+          found: { path: "/form", title: "Failed Ada" },
+        },
+      });
+    } finally {
+      pages["/form"] = original ?? "";
+      await tool.stop();
+    }
+  });
+
+  it("stops when two elements have the recorded role and name", async () => {
+    const flows = flowPort();
+    await recordOrderCheck(flows);
+    const original = pages["/form"];
+    pages["/form"] = (original ?? "").replace(
+      '<a href="/other">',
+      '<button id="again">Save</button><a href="/other">',
+    );
+    const tool = agentTool({ flows });
+    try {
+      const replayed = await tool.call({ operation: "flow-run", name: "Order check" });
+      expect(replayed.result).toMatchObject({
+        failedStep: { step: 3, reason: "element-not-unique", matches: 2 },
+      });
+    } finally {
+      pages["/form"] = original ?? "";
+      await tool.stop();
+    }
+  });
+
+  it("asks the person before a replayed navigation to an origin that is not approved", async () => {
+    const flows = flowPort();
+    const elsewhere = origin.replace("127.0.0.1", "localhost");
+    const recorder = agentTool({ flows });
+    await recorder.call({ operation: "navigate", url: `${elsewhere}/other` });
+    await recorder.call({ operation: "flow-save", name: "Elsewhere" });
+    await recorder.stop();
+
+    const declined = agentTool({ flows, originAnswer: "denied" });
+    const stopped = await declined.call({ operation: "flow-run", name: "Elsewhere" });
+    expect(declined.asked.map((request) => request.origin)).toEqual([elsewhere]);
+    expect(stopped.result).toMatchObject({
+      completed: [],
+      failedStep: { step: 1, operation: "navigate", answer: { error: "browser-approval-denied" } },
+    });
+
+    const allowed = agentTool({ flows });
+    const ran = await allowed.call({ operation: "flow-run", name: "Elsewhere" });
+    expect(allowed.asked.map((request) => request.origin)).toEqual([elsewhere]);
+    expect(ran.isError).toBe(false);
+    await allowed.stop();
+  });
+
+  it("refuses to save, run, or list in Plan mode, and to save or run for a paired device", async () => {
+    const flows = flowPort();
+    await recordOrderCheck(flows);
+    const planning = agentTool({ flows, plan: true });
+    for (const call of [
+      { operation: "flow-save", name: "x" },
+      { operation: "flow-run", name: "Order check" },
+      { operation: "flow-list" },
+    ]) {
+      expect((await planning.call(call)).result).toEqual({ error: "plan-mode-read-only" });
+    }
+    const paired = agentTool({ flows, pairedDevice: true });
+    expect((await paired.call({ operation: "flow-run", name: "Order check" })).result).toEqual({
+      error: "flow-needs-this-computer",
+    });
+    expect((await paired.call({ operation: "flow-save", name: "x" })).result).toEqual({
+      error: "flow-needs-this-computer",
+    });
+  });
+
+  it("lets a routine run a flow on a private page but not save one", async () => {
+    const flows = flowPort();
+    await recordOrderCheck(flows);
+    const unattended = agentTool({ flows, unattended: true });
+    const ran = await unattended.call({ operation: "flow-run", name: "Order check" });
+    expect(ran.isError).toBe(false);
+    expect((await unattended.call({ operation: "flow-save", name: "Copy" })).result).toEqual({
+      error: "flow-needs-a-person",
+    });
+    await unattended.stop();
+  });
+
+  it("will not save a run that needed the person or put a secret in an address", async () => {
+    const flows = flowPort();
+    const signedIn = agentTool({ flows, presentAsApp: true });
+    await signedIn.call({ operation: "navigate", url: `${origin}/login` });
+    await signedIn.call({ operation: "sign-in", reason: "Needs an account" });
+    expect((await signedIn.call({ operation: "flow-save", name: "Login" })).result).toEqual({
+      error: "flow-run-needs-a-person",
+      operation: "sign-in",
+    });
+    await signedIn.stop();
+
+    const secret = agentTool({ flows });
+    await secret.call({ operation: "navigate", url: `${origin}/form?token=abc123` });
+    expect((await secret.call({ operation: "flow-save", name: "Token" })).result).toEqual({
+      error: "flow-run-needs-a-person",
+      operation: "an address with a secret in it",
+    });
+    await secret.stop();
+    expect([...flows.saved.keys()]).toEqual([]);
+
+    // A fragment never reaches a server; it is left out of the stored address.
+    const callback = agentTool({ flows });
+    await callback.call({ operation: "navigate", url: `${origin}/form#access_token=abc123` });
+    expect((await callback.call({ operation: "flow-save", name: "Callback" })).isError).toBe(false);
+    expect(JSON.stringify(flows.saved.get("Callback"))).not.toContain("access_token");
+    expect(flows.saved.get("Callback")?.steps[0]?.input.url).toBe(`${origin}/form`);
+    await callback.stop();
+  });
+
+  it("answers a replay in well under the bytes of doing the same check by hand", async () => {
+    const flows = flowPort();
+    const hand = agentTool({ flows });
+    const byHand = [] as number[];
+    byHand.push(resultBytes(await hand.call({ operation: "navigate", url: `${origin}/form` })));
+    const snapshot = await hand.call({ operation: "snapshot" });
+    byHand.push(resultBytes(snapshot));
+    byHand.push(
+      resultBytes(
+        await hand.call({
+          operation: "type",
+          ref: refFor(snapshot.result.page?.snapshot, /"Name"/),
+          text: "Ada",
+        }),
+      ),
+    );
+    byHand.push(
+      resultBytes(
+        await hand.call({
+          operation: "click",
+          ref: refFor(snapshot.result.page?.snapshot, /"Save"/),
+        }),
+      ),
+    );
+    byHand.push(resultBytes(await hand.call({ operation: "read-page" })));
+    await hand.call({ operation: "flow-save", name: "Order check" });
+    await hand.stop();
+
+    const replay = agentTool({ flows });
+    const flowBytes = resultBytes(
+      await replay.call({ operation: "flow-run", name: "Order check" }),
+    );
+    await replay.stop();
+    const handTotal = byHand.reduce((sum, bytes) => sum + bytes, 0);
+    expect(flowBytes).toBeLessThan(handTotal * 0.6);
   });
 });

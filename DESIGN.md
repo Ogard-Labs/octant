@@ -1964,6 +1964,10 @@ only a pane underneath the window controls reserves space for that cluster.
 The split-pane drag handle alone owns active-pane paint. Feature
 styles may size or scroll these primitives but may not restore a local tab
 track, underline recipe, or persistent active border.
+The Project browser's agent-page strip is one `OctantTabs` rail whose tabs hold
+two lines (the page, then the thread that owns it, with an "Agent active"
+badge). In a narrow dock it wraps onto further rows rather than scrolling, so
+no tab hides past an edge.
 
 ## Component ownership and composition
 

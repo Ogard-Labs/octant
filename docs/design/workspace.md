@@ -604,11 +604,33 @@ neither shows. The person's typing and clicking in the page while the agent
 acts is delivered, never dropped, and the indicator keeps saying "Agent active".
 The rules are in [Browser for agents](browser-agent-tool.md#person-and-agent-together). The Project
 browser dock has the same controls. The rules are in
-[Browser profiles and extensions](browser-profiles.md). **Browser captures.** The Browser pane toolbar has a
+[Browser profiles and extensions](browser-profiles.md). **Project browser tab
+strip.** When threads of the Project have live agent pages, the Project browser
+dock shows a tab strip under its title: "Your page" for the person's own page,
+then one tab per thread's page in front. A tab names the page (its title, else
+its host) and the thread that owns it by thread title, with an "Agent active"
+mark while that thread's agent drives the page and for a few seconds after its
+last action. Choosing a tab shows that thread's own picture of the page, the one
+its floating preview shows, with no address bar and nothing to click, and an
+Open thread control that opens the owning thread; choosing "Your page" returns
+to the person's browser. No tab action moves a page from one thread to another,
+and a thread's agent never sees another thread's page. A paired device sees the
+same strip, but a page in a stored profile reads "Signed-in page — open it on
+this Mac." with no title, host, or picture. The strip draws nothing when no
+thread has a live page. Rationale: the thread Browser pane is bound to one
+thread, so it can only ever show that thread's page; the Project browser dock is
+the one Browser surface scoped to a Project rather than a thread, and the
+person's own page already lives there, so it is where several threads' pages
+sit side by side without giving any thread a view of another's. The tabs use
+the shared tab rail, which wraps rather than scrolls so no tab hides off the
+edge of a narrow dock. **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
 page's picture with the thread, and a thread that kept screenshots shows a
-_Browser captures_ strip in its transcript beside the generated images. The
-rules are in [Browser captures](browser-captures.md). The iOS Simulator and Android emulator are separate device destinations. An
+_Browser captures_ strip in its transcript beside the generated images, and a
+thread with Browser steps also shows a folded _Browser proof_ panel there: the
+agent's steps as a numbered list with each capture under the step that took it.
+The rules are in [Browser captures](browser-captures.md) and
+[Proof](browser-captures.md#proof). The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use
 one device-first pane that adapts to its container's width: a toolbar (device
 switcher, OS and state in words, Back on Android, Home, Screenshot, Lock when

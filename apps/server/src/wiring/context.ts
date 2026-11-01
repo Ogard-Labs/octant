@@ -42,6 +42,7 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     BrowserWiring,
     | "browserAutomationService"
     | "browserExtensionService"
+    | "browserFlowService"
     | "browserProfileService"
     | "browserToolApprovalService"
     | "liveProjectBrowsers"
@@ -70,6 +71,7 @@ export function wireContext(deps: ContextDependencies) {
     contextHarness,
     liveProjectBrowsers,
     browserExtensionService,
+    browserFlowService,
     browserProfileService,
     nativeHarnessHooks,
     persistence,
@@ -473,7 +475,20 @@ export function wireContext(deps: ContextDependencies) {
     captures: browserCaptures,
     windowCanOpenThread: windowCanOpenThreadById,
     projectBrowsers: liveProjectBrowsers,
+    projectAgentPages: {
+      windowCanOpenProject: windowCanOpenProjectById,
+      threadTitle: (threadId, mode) => {
+        try {
+          return mode === "work"
+            ? workThreadProjection.read(decodeWorkThreadId(String(threadId)))?.title
+            : persistence.readCodeThread(decodeCodeThreadId(String(threadId)))?.title;
+        } catch {
+          return undefined;
+        }
+      },
+    },
     profiles: browserProfileService,
+    flows: browserFlowService,
     extensions: browserExtensionService,
     authority: browserAuthority,
     approvals: browserToolApprovalService,

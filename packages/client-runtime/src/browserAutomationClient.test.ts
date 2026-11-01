@@ -91,6 +91,28 @@ describe("BrowserAutomationClient", () => {
     );
   });
 
+  it("reads the thread's recorded steps through the steps route", async () => {
+    const step = {
+      stepId: "b0000000-0000-4000-8000-000000000020",
+      threadId,
+      operation: "click",
+      recordedAt: "2026-10-12T09:00:00.000Z",
+    };
+    const fetch = vi.fn(async () => Response.json({ steps: [step] }));
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    await expect(client.listSteps?.({ threadId: threadId as any })).resolves.toEqual({
+      steps: [step],
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:13773/api/browser/steps"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("resolves thread authority through the authenticated server route", async () => {
     const fetch = vi.fn(async () => Response.json({ threadId, authority }));
     const client = createBrowserAutomationClient({

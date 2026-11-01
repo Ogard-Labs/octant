@@ -8,6 +8,7 @@ import {
   handBrowserToPerson,
   heldForPersonAnswer,
   heldWhileQueued,
+  isBrowserToolFlowInput,
   runBrowserToolSteps,
   signInPageRefusal,
   type BrowserToolAnswer,
@@ -28,6 +29,13 @@ import type {
 import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
 import { browserProfileKey, isToolAllowedByAllowlist, storedBrowserProfile } from "@octant/domain";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import {
+  browserFlowAgentActor,
+  runBrowserFlowOperation,
+  runRecordingFlow,
+  type BrowserFlowRefs,
+  type BrowserFlowToolPort,
+} from "./browserFlows";
 import type { BrowserToolApprovalService } from "./browserToolApprovalService";
 
 export const BROWSER_TOOL_NAME = BROWSER_TOOL_DEFINITION.name;
@@ -65,6 +73,7 @@ export interface BrowserAppManagedToolsOptions {
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
+      readonly threadId?: BrowserThreadId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
@@ -75,6 +84,8 @@ export interface BrowserAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => Promise<BrowserAutomationSnapshot>;
+    /** What the latest snapshot's refs name; flows read it to describe and find elements. */
+    readonly snapshotRefs?: (windowId: WindowId, threadId: BrowserThreadId) => BrowserFlowRefs;
     /** Marks the page as the person's to sign in on; see the service. */
     readonly holdForPerson?: (
       windowId: WindowId,
@@ -90,6 +101,11 @@ export interface BrowserAppManagedToolsOptions {
    * thread's Private pages only; a page in a signed-in profile needs a person.
    */
   readonly profileCaller?: "terminal-grant";
+  /**
+   * The Project's flows and the recorder of this host. Absent (a CLI in a
+   * thread terminal), flow operations are unavailable and nothing is recorded.
+   */
+  readonly flows?: BrowserFlowToolPort;
   /**
    * The folder an upload may send files from: the Work thread's Project
    * folder. Absent, an upload is refused.
@@ -355,6 +371,9 @@ export function createBrowserAppManagedTools(
     // later action, so the service keeps the copies until the page closes.
     const acted = await options.browser.act({
       windowId: options.windowId,
+      // The service refuses a context that is another thread's, even when the
+      // two threads share a Project and so an authority.
+      threadId: options.threadId,
       request,
       capturedBy: "agent",
       refuseStaleRevision: true,
@@ -373,6 +392,53 @@ export function createBrowserAppManagedTools(
     }
     return browserToolResult(acted, browserToolWantsScreenshot(input));
   };
+  const activeContextId = (): string | undefined => {
+    const context = options.browser.inspectThread(options.windowId, options.threadId).context;
+    return context?.state === "active" ? String(context.contextId) : undefined;
+  };
+  const refsOfLatestSnapshot = (): BrowserFlowRefs =>
+    options.browser.snapshotRefs?.(options.windowId, options.threadId) ?? [];
+  // Every operation of the agent goes through here, so a flow records what ran
+  // and a replay runs each step exactly as a call of its own would.
+  const runRecorded = (
+    step: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
+    signal: AbortSignal | undefined,
+  ): Promise<BrowserToolAnswer> =>
+    runRecordingFlow({
+      step,
+      flows: options.browser.snapshotRefs === undefined ? undefined : options.flows,
+      refs: refsOfLatestSnapshot,
+      contextId: activeContextId,
+      run: () => runOne(step, signal),
+    });
+  const runFlow = async (
+    input: Extract<
+      BrowserToolInput,
+      { readonly operation: "flow-save" | "flow-list" | "flow-run" }
+    >,
+    signal: AbortSignal | undefined,
+  ): Promise<BrowserToolAnswer> => {
+    const flows = options.flows;
+    if (flows === undefined || options.browser.snapshotRefs === undefined) {
+      return failure("browser-flows-unavailable");
+    }
+    const authority = options.resolveAuthority(options.threadId, options.mode);
+    if (authority === undefined) return failure("browser-authority-unavailable");
+    if (initialAuthority !== undefined && !sameToolActionAuthority(initialAuthority, authority)) {
+      return failure("browser-authority-stale");
+    }
+    if (!modelIsCurrent(options)) return failure("browser-model-stale");
+    if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
+    return runBrowserFlowOperation(input, {
+      flows,
+      projectId: authority.projectId,
+      caller: flows.caller(options.windowId),
+      actor: () => browserFlowAgentActor(authority, String(options.threadId)),
+      contextId: activeContextId,
+      refs: refsOfLatestSnapshot,
+      run: (step) => runRecorded(step, signal),
+    });
+  };
   const tools: AppManagedToolSet = {
     definitions,
     execute: async ({ inputJson, name, signal }) => {
@@ -382,10 +448,11 @@ export function createBrowserAppManagedTools(
       if (signal?.aborted) return failure("tool-interrupted");
       const input = parseBrowserToolInput(inputJson, { allowProfile: true });
       if (input === undefined) return failure("invalid-browser-input");
+      if (isBrowserToolFlowInput(input)) return runFlow(input, signal);
       if (input.operation === "steps") {
-        return runBrowserToolSteps(input.steps, (step) => runOne(step, signal));
+        return runBrowserToolSteps(input.steps, (step) => runRecorded(step, signal));
       }
-      return runOne(input, signal);
+      return runRecorded(input, signal);
     },
   };
   return withToolFamilyHelp(tools, BROWSER_TOOL_HELP);

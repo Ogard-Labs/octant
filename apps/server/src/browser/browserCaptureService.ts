@@ -3,17 +3,22 @@ import {
   AggregateVersion,
   BROWSER_CAPTURE_AGGREGATE_TYPE,
   BROWSER_CAPTURE_KEPT,
+  BROWSER_STEP_AGGREGATE_TYPE,
+  BROWSER_STEP_RECORDED,
   decodeBrowserCapture,
   decodeBrowserCaptureId,
+  decodeBrowserStep,
   decodeEventActor,
   EventId,
   EventName,
   MAX_BROWSER_CAPTURE_BYTES,
   MAX_BROWSER_CAPTURES_PER_THREAD,
+  MAX_BROWSER_STEPS_PER_THREAD,
   UtcTimestamp,
   type BrowserCapture,
   type BrowserCaptureId,
   type BrowserCaptureOutcome,
+  type BrowserStep,
   type BrowserThreadId,
   type CorrelationId,
   type EventActor,
@@ -23,6 +28,9 @@ import {
 import {
   browserCapturePageOrigin,
   browserCaptureRetention,
+  browserStepRecord,
+  browserStepRetention,
+  type BrowserStepFacts,
   type BrowserCaptureTaker,
 } from "@octant/domain";
 import { Schema } from "effect";
@@ -55,6 +63,14 @@ export interface KeepBrowserCaptureInput {
   /** The stored profile the page lived in, recorded with the capture. */
   readonly profile?: StoredBrowserProfile | undefined;
   /** The provider instance driving the tool; the journal actor for an agent capture. */
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly correlationId: CorrelationId;
+}
+
+export interface RecordBrowserStepInput {
+  readonly threadId: BrowserThreadId;
+  readonly facts: BrowserStepFacts;
+  /** The provider instance driving the tool; the journal actor for an agent step. */
   readonly providerInstanceId: ProviderInstanceId;
   readonly correlationId: CorrelationId;
 }
@@ -146,6 +162,43 @@ export class BrowserCaptureService {
     return { status: "kept", captureId };
   }
 
+  /**
+   * Record one step of the agent's Browser check. Best effort like keeping a
+   * capture: a step that cannot be journaled never fails the action. Only
+   * what `browserStepRecord` keeps reaches the journal; the request itself,
+   * including anything typed, never gets here.
+   */
+  recordStep(input: RecordBrowserStepInput): void {
+    try {
+      const step = decodeBrowserStep({
+        stepId: this.#uuid(),
+        threadId: input.threadId,
+        ...browserStepRecord(input.facts),
+        recordedAt: this.#clock(),
+      });
+      this.#appendOne(BROWSER_STEP_AGGREGATE_TYPE, BROWSER_STEP_RECORDED, step, input);
+    } catch {
+      // The proof is a convenience beside the action; losing a step is better
+      // than failing a page the agent already acted on.
+    }
+  }
+
+  /** The thread's retained steps, oldest first. */
+  listSteps(threadId: BrowserThreadId): ReadonlyArray<BrowserStep> {
+    const aggregateId = String(threadId);
+    const head = readAggregateVersion(this.#connection, BROWSER_STEP_AGGREGATE_TYPE, aggregateId);
+    if (head === 0) return [];
+    const { firstRetainedVersion } = browserStepRetention(head);
+    return this.#journal
+      .replayAggregate({
+        aggregateType: BROWSER_STEP_AGGREGATE_TYPE,
+        aggregateId,
+        afterVersion: firstRetainedVersion - 1,
+        limit: MAX_BROWSER_STEPS_PER_THREAD,
+      })
+      .map((event) => decodeBrowserStep(event.payload));
+  }
+
   /** The thread's retained captures, newest first. */
   list(threadId: BrowserThreadId): ReadonlyArray<BrowserCapture> {
     const aggregateId = String(threadId);
@@ -200,24 +253,45 @@ export class BrowserCaptureService {
   }
 
   #append(capture: BrowserCapture, input: KeepBrowserCaptureInput): number {
-    const aggregateId = decodeAggregateId(String(capture.threadId));
+    return this.#appendOne(
+      BROWSER_CAPTURE_AGGREGATE_TYPE,
+      BROWSER_CAPTURE_KEPT,
+      capture,
+      input,
+      capture.capturedAt,
+    );
+  }
+
+  #appendOne(
+    aggregateType: string,
+    eventName: string,
+    payload: BrowserCapture | BrowserStep,
+    input: {
+      readonly threadId: BrowserThreadId;
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly correlationId: CorrelationId;
+      readonly takenBy?: BrowserCaptureTaker;
+    },
+    occurredAt: string = "recordedAt" in payload ? payload.recordedAt : this.#clock(),
+  ): number {
+    const aggregateId = decodeAggregateId(String(payload.threadId));
     for (let attempt = 1; ; attempt += 1) {
       const expectedVersion = decodeAggregateVersion(
-        readAggregateVersion(this.#connection, BROWSER_CAPTURE_AGGREGATE_TYPE, aggregateId),
+        readAggregateVersion(this.#connection, aggregateType, aggregateId),
       );
       try {
         this.#journal.append({
-          aggregate: { aggregateType: BROWSER_CAPTURE_AGGREGATE_TYPE, aggregateId },
+          aggregate: { aggregateType, aggregateId },
           expectedVersion,
           events: [
             {
               eventId: decodeEventId(this.#uuid()),
-              eventName: decodeEventName(BROWSER_CAPTURE_KEPT),
+              eventName: decodeEventName(eventName),
               eventVersion: 1,
               correlationId: input.correlationId,
               actor: this.#actor(input),
-              occurredAt: decodeTimestamp(capture.capturedAt),
-              payload: capture,
+              occurredAt: decodeTimestamp(occurredAt),
+              payload,
             },
           ],
         });
@@ -228,7 +302,11 @@ export class BrowserCaptureService {
     }
   }
 
-  #actor(input: KeepBrowserCaptureInput): EventActor {
+  #actor(input: {
+    readonly threadId: BrowserThreadId;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly takenBy?: BrowserCaptureTaker;
+  }): EventActor {
     if (input.takenBy === "person") return this.#personActor;
     return decodeEventActor({
       kind: "agent",

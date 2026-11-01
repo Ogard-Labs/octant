@@ -7,6 +7,7 @@ import {
   decodeBrowserThreadId,
   MAX_BROWSER_CAPTURE_BYTES,
   MAX_BROWSER_CAPTURES_PER_THREAD,
+  MAX_BROWSER_STEPS_PER_THREAD,
   type BrowserCaptureOutcome,
   type BrowserThreadId,
   type CorrelationId,
@@ -17,7 +18,11 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
-import { BrowserCaptureService, type KeepBrowserCaptureInput } from "./browserCaptureService";
+import {
+  BrowserCaptureService,
+  type KeepBrowserCaptureInput,
+  type RecordBrowserStepInput,
+} from "./browserCaptureService";
 import { BrowserCaptureStore } from "./browserCaptureStore";
 
 /** 1x1 PNG: magic-number valid and tiny. */
@@ -268,5 +273,89 @@ describe("BrowserCaptureService", () => {
     const { connection, service } = open(blocker);
     expect(await service.keep(request())).toEqual({ status: "not-kept", reason: "unavailable" });
     expect(journalRows(connection)).toEqual([]);
+  });
+});
+
+describe("BrowserCaptureService steps", () => {
+  const step = (
+    overrides: Partial<RecordBrowserStepInput["facts"]> = {},
+  ): RecordBrowserStepInput => ({
+    threadId: threadA,
+    facts: { operation: "click", url: "https://example.com/a?token=abc#x", ...overrides },
+    providerInstanceId,
+    correlationId,
+  });
+
+  const stepRows = (connection: SqliteConnection) =>
+    connection
+      .prepare(
+        `SELECT aggregate_id, event_name, actor_kind, payload_json
+         FROM event_journal WHERE aggregate_type = 'browser-step' ORDER BY global_sequence`,
+      )
+      .all() as ReadonlyArray<{
+      readonly aggregate_id: string;
+      readonly event_name: string;
+      readonly actor_kind: string;
+      readonly payload_json: string;
+    }>;
+
+  it("journals a step on the thread's step aggregate with the agent as actor", () => {
+    const { connection, service } = open();
+    service.recordStep(
+      step({
+        element: { role: "button", name: "Save" },
+        change: {
+          before: { url: "https://example.com/", title: "Home", contentHash: "1" },
+          after: { url: "https://example.com/a?token=abc&page=2", title: "A", contentHash: "2" },
+        },
+      }),
+    );
+    const [row, ...rest] = stepRows(connection);
+    expect(rest).toEqual([]);
+    expect(row).toMatchObject({
+      aggregate_id: String(threadA),
+      event_name: "browser.step-recorded@1",
+      actor_kind: "agent",
+    });
+    // The address keeps its origin and path; no query, fragment, or secret.
+    expect(row?.payload_json).not.toContain("abc");
+    expect(row?.payload_json).not.toContain("#x");
+    expect(service.listSteps(threadA)).toMatchObject([
+      {
+        operation: "click",
+        element: { role: "button", name: "Save" },
+        origin: "https://example.com",
+        path: "/a",
+      },
+    ]);
+  });
+
+  it("keeps only the newest fifty steps of a thread, oldest first, and none of another thread's", () => {
+    const { service } = open();
+    for (let index = 1; index <= MAX_BROWSER_STEPS_PER_THREAD + 5; index += 1) {
+      service.recordStep(step({ url: `https://example.com/p${index}` }));
+    }
+    service.recordStep({ ...step(), threadId: threadB });
+    const steps = service.listSteps(threadA);
+    expect(steps).toHaveLength(MAX_BROWSER_STEPS_PER_THREAD);
+    expect(steps[0]?.path).toBe("/p6");
+    expect(steps.at(-1)?.path).toBe("/p55");
+    expect(service.listSteps(threadB)).toHaveLength(1);
+  });
+
+  it("does not mix steps into the capture strip or its retention", async () => {
+    const { service } = open();
+    service.recordStep(step());
+    expect(service.list(threadA)).toEqual([]);
+    kept(await service.keep(request()));
+    expect(service.listSteps(threadA)).toHaveLength(1);
+    expect(service.list(threadA)).toHaveLength(1);
+  });
+
+  it("never throws when a step cannot be journaled", () => {
+    const { service } = open();
+    expect(() =>
+      service.recordStep({ ...step(), threadId: "not-a-thread" as BrowserThreadId }),
+    ).not.toThrow();
   });
 });

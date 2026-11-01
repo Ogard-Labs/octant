@@ -7,6 +7,7 @@ import type {
   BrowserActionRequest,
   BrowserContextId,
   BrowserContextPolicy,
+  BrowserEmulationReport,
   BrowserPresentationKind,
   BrowserThreadId,
 } from "@octant/contracts/browser-automation";
@@ -23,6 +24,8 @@ export interface BrowserRuntimeObservation {
   readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
+  /** Only a resize fills this: what the page reports about its device now. */
+  readonly emulation?: BrowserEmulationReport;
   /** The page's own dialogs since the last action, as the fixed policy answered them. */
   readonly dialogs?: ReadonlyArray<{
     readonly type: "alert" | "confirm" | "prompt" | "beforeunload";
@@ -195,6 +198,10 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
       | "tabId"
       | "waitFor"
       | "viewport"
+      | "deviceScaleFactor"
+      | "mobile"
+      | "touch"
+      | "colorScheme"
       | "diagnosticsSince"
       | "diagnosticsWarnings"
     >

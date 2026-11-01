@@ -320,7 +320,8 @@ export function classifyProductAction(request: Request): string | undefined {
       method === "POST" &&
       (path === "/api/browser/scope" ||
         path === "/api/browser/contexts/current" ||
-        path === "/api/browser/contexts/inspect")
+        path === "/api/browser/contexts/inspect" ||
+        path === "/api/browser/project-agent-pages")
     ) {
       return "browser.observe";
     }

@@ -166,6 +166,27 @@ address and time. The strip is absent until the thread has a capture.
 - A capture of a page in a Project or Personal profile names the profile, because the picture can show an account.
 - An archived thread still shows the captures it kept.
 
+#### Browser proof
+
+Octant also keeps a short record of the steps the agent took in its Browser, at
+most the last 50 per thread. A **Browser proof** panel appears under the
+captures strip (folded: choose **Show N steps**). It lists the steps as a
+numbered list, for example `click button "Save" on https://example.com/settings`,
+with what changed, or why a step failed, and puts each screenshot under the step
+that took it.
+
+- A step records the action, the element it acted on by role and name, the
+  page's address without its query, and the result. It never records what the
+  agent typed, a field's value, or a page's text.
+- Only the agent's own steps are recorded, not what you do in the pane.
+- The record stays on this computer with the thread and is deleted with it. It
+  is not sent anywhere, and a paired device cannot see it.
+- **Save screenshots…** (in the Octant desktop app) asks you for a folder and
+  writes the thread's captures there as `browser-check-01.png`, `-02`, and so
+  on. It never replaces a file that is already there.
+- To put the steps in a pull request, see [Code threads](../guide/code.md): the
+  **Include Browser proof** choice there is off unless you turn it on.
+
 Links inside a Work or Code conversation open in the app: following one
 creates a dedicated Browser context confined to that link's origin and opens
 it in the thread's right dock, or in a split beside the pane when the dock
@@ -226,8 +247,17 @@ The agent can wait for text to appear, an address to change, or a button to
 become enabled, for at most 30 seconds, and every action waits a moment for the
 page to settle before it reports back. If a page shows its own alert, Octant
 accepts it; if it asks to confirm something or to type an answer, Octant
-declines. The agent is told about each one. The agent can also resize its page,
-for example to phone width, and set it back.
+declines. The agent is told about each one.
+
+The agent can also test how a page looks on another device. It can resize its
+page to a phone, a phone held sideways, a tablet, or a desktop, or to a size it
+picks. On a phone or tablet the page also sees a touch screen, and the agent's
+clicks reach it as taps. It can turn touch on or off by itself, and switch the
+page between light and dark mode. When it is done, one resize with nothing
+else puts the size, touch, and color scheme back. This changes only the agent's
+own page. Your own Browser window and your other pages keep their size and
+look, and a page you opened developer tools on keeps its touch and color
+scheme as they are. The agent is told what the page now reports.
 
 When a page needs you to sign in, the agent can hand it to you instead of
 giving up. A card in the thread says which site and why, with **Continue** and
@@ -299,6 +329,29 @@ check cannot confirm its transport is treated the same way, and so is an ACP
 agent that does not advertise HTTP MCP, unless Octant verified that exact
 release accepts it anyway. Nothing is routed to another model or
 provider in its place.
+
+### Saved flows
+
+When the agent has done a check once, it can save it as a flow in the Project
+and repeat it later without working out each step again. Ask, for example, "save
+that as a flow called Order check", and later "run the Order check flow". A flow
+is a fixed list of the steps the agent took, with the element each one used
+described by its role and name, and the page address path and title expected
+after each step. It holds no page text and no script.
+
+Each step of a replay is checked as if the agent had made it by hand: you are
+asked about a site you have not allowed, Plan mode refuses it, and a page that
+needs your sign-in is never part of a flow. The replay stops at the first step
+that fails, finds no single matching element (a button that changed its name,
+say), or leaves the page at a different address or title than before, and the
+agent tells you which step and what it found instead. A routine can run a flow on
+a private page but cannot save one, and a turn started from your phone can do
+neither.
+
+Settings › Data & storage › Browser flows lists the flows of every Project with
+their step count and starting address, and deletes one. A flow is stored on this
+Mac with the Project, goes when the Project is erased, and is not part of a
+thread export.
 
 ### When a Browser call does not go through
 
@@ -502,6 +555,26 @@ provider, where it runs, its computer, or its key, ends the Project's running de
 itself can set or remove a recipe or enter its key, so **Disposable desktop**
 appears only there: a paired phone or browser doesn't show a Project's
 settings, and the host refuses a recipe change from either.
+
+### Several threads at once
+
+Threads of one Project can each have their own page open and work at the same
+time. Each thread's agent can use only its own page and its own tabs, never
+another thread's, and one thread waiting on its page does not hold up another.
+
+To see them together, open the Project's browser (the Browser quick tool on the
+Project, or the docked Project browser). When any thread of the Project has a
+live page, a tab strip appears under its title: **Your page** for your own
+browser, then one tab for each thread's page. Each tab shows the page's title
+(or its site if it has none) and the title of the thread that owns it, with an
+**Agent active** mark while that thread's agent is driving the page. Choose a
+tab to see that thread's page as its preview shows it. You can look but not
+click in it, and **Open thread** takes you to the thread. Choose **Your page**
+to go back to your own browser. Nothing in the strip moves a page from one
+thread to another.
+
+A paired device sees the same tabs, but a page in a signed-in profile reads
+"Signed-in page — open it on this Mac."
 
 ## Picture in Picture
 

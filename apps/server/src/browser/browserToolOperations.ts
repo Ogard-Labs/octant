@@ -4,9 +4,13 @@ import type {
   ProviderToolImage,
 } from "@octant/contracts";
 import {
+  BROWSER_DEVICE_PRESETS,
   BROWSER_RESIZE_BOUNDS,
+  BrowserColorScheme,
+  MAX_BROWSER_FLOW_NAME_LENGTH,
   MAX_BROWSER_UPLOAD_FILES,
   MAX_BROWSER_WAIT_MS,
+  type BrowserDevicePreset,
   type BrowserWaitCondition,
   type BrowserWaitFor,
 } from "@octant/contracts";
@@ -32,11 +36,34 @@ export type BrowserToolTarget =
 /** What an action may bring back besides what changed; see the contract. */
 export type BrowserToolInclude = ReadonlyArray<"text" | "screenshot" | "snapshot">;
 
-/** One operation of a `steps` call: anything but a batch, an upload, stop, or help. */
+/** One operation of a `steps` call: anything but a batch, an upload, stop, a flow, or help. */
 export type BrowserToolStep = Exclude<
   BrowserToolInput,
-  { readonly operation: "steps" | "upload" | "stop" | "sign-in" }
+  {
+    readonly operation:
+      | "steps"
+      | "upload"
+      | "stop"
+      | "sign-in"
+      | "flow-save"
+      | "flow-list"
+      | "flow-run";
+  }
 >;
+
+/** The operations that save, list, and replay the Project's flows. */
+export type BrowserToolFlowInput = Extract<
+  BrowserToolInput,
+  { readonly operation: "flow-save" | "flow-list" | "flow-run" }
+>;
+
+export function isBrowserToolFlowInput(input: BrowserToolInput): input is BrowserToolFlowInput {
+  return (
+    input.operation === "flow-save" ||
+    input.operation === "flow-list" ||
+    input.operation === "flow-run"
+  );
+}
 
 /** How many operations one `steps` call may carry. */
 export const MAX_BROWSER_TOOL_STEPS = 10;
@@ -61,6 +88,10 @@ export type BrowserToolInput = {
   | {
       readonly operation: "resize";
       readonly viewport?: { readonly width: number; readonly height: number };
+      readonly deviceScaleFactor?: number;
+      readonly mobile?: boolean;
+      readonly touch?: boolean;
+      readonly colorScheme?: BrowserColorScheme;
     }
   | { readonly operation: "press"; readonly key: string }
   | ({ readonly operation: "type"; readonly text: string } & BrowserToolTarget)
@@ -76,6 +107,8 @@ export type BrowserToolInput = {
   | { readonly operation: "tab-switch" | "tab-close"; readonly tabId: string }
   | { readonly operation: "steps"; readonly steps: ReadonlyArray<BrowserToolStep> }
   | { readonly operation: "sign-in"; readonly reason?: string }
+  | { readonly operation: "flow-save" | "flow-run"; readonly name: string }
+  | { readonly operation: "flow-list" }
 );
 
 /**
@@ -117,7 +150,8 @@ export function parseBrowserToolInput(
       one.operation === "steps" ||
       one.operation === "upload" ||
       one.operation === "stop" ||
-      one.operation === "sign-in"
+      one.operation === "sign-in" ||
+      isBrowserToolFlowInput(one)
     )
       return undefined;
     parsedSteps.push(one);
@@ -191,9 +225,37 @@ function parseBrowserToolRecord(
     if (waitFor === null) return undefined;
     if (waitFor !== undefined) return { ...common, operation, waitFor };
   }
-  if (operation === "resize" && only("width", "height")) {
-    if (record.width === undefined && record.height === undefined) return { ...common, operation };
-    const { width, height } = record;
+  if (operation === "resize" && only("preset", "width", "height", "touch", "colorScheme")) {
+    const { preset, width, height, touch, colorScheme } = record;
+    if (touch !== undefined && typeof touch !== "boolean") return undefined;
+    if (
+      colorScheme !== undefined &&
+      !(BrowserColorScheme.literals as ReadonlyArray<unknown>).includes(colorScheme)
+    )
+      return undefined;
+    const emulated = {
+      ...(touch === undefined ? {} : { touch }),
+      ...(colorScheme === undefined ? {} : { colorScheme: colorScheme as BrowserColorScheme }),
+    };
+    if (preset !== undefined) {
+      // A name stands for a whole device; a size beside it would be a second,
+      // conflicting answer to the same question.
+      if (width !== undefined || height !== undefined) return undefined;
+      if (typeof preset !== "string" || !Object.hasOwn(BROWSER_DEVICE_PRESETS, preset))
+        return undefined;
+      const device = BROWSER_DEVICE_PRESETS[preset as BrowserDevicePreset];
+      return {
+        ...common,
+        operation,
+        viewport: { width: device.width, height: device.height },
+        deviceScaleFactor: device.deviceScaleFactor,
+        mobile: device.mobile,
+        // A mobile device is a touch device unless the call says otherwise.
+        touch: device.mobile,
+        ...emulated,
+      };
+    }
+    if (width === undefined && height === undefined) return { ...common, operation, ...emulated };
     if (
       typeof width !== "number" ||
       typeof height !== "number" ||
@@ -205,7 +267,7 @@ function parseBrowserToolRecord(
       height > BROWSER_RESIZE_BOUNDS.maxHeight
     )
       return undefined;
-    return { ...common, operation, viewport: { width, height } };
+    return { ...common, operation, viewport: { width, height }, ...emulated };
   }
   if ((operation === "click" || operation === "wait") && only("selector", "ref")) {
     const named = target();
@@ -256,6 +318,18 @@ function parseBrowserToolRecord(
     return { ...common, operation, ...named, files: files as ReadonlyArray<string> };
   }
   if (operation === "tab-list" && only()) return { ...common, operation };
+  if (operation === "flow-list" && only()) return { ...common, operation };
+  if ((operation === "flow-save" || operation === "flow-run") && only("name")) {
+    // The stored name is trimmed, so the call must already be: a name that
+    // differs from itself once saved could never be run again.
+    const name = record.name;
+    return typeof name === "string" &&
+      name !== "" &&
+      name === name.trim() &&
+      name.length <= MAX_BROWSER_FLOW_NAME_LENGTH
+      ? { ...common, operation, name }
+      : undefined;
+  }
   if (operation === "sign-in" && only("reason")) {
     if (record.reason !== undefined && !text("reason", 300)) return undefined;
     return {
@@ -470,6 +544,12 @@ export function browserToolAction(
         ...base,
         kind: "resize",
         ...(input.viewport === undefined ? {} : { viewport: input.viewport }),
+        ...(input.deviceScaleFactor === undefined
+          ? {}
+          : { deviceScaleFactor: input.deviceScaleFactor }),
+        ...(input.mobile === undefined ? {} : { mobile: input.mobile }),
+        ...(input.touch === undefined ? {} : { touch: input.touch }),
+        ...(input.colorScheme === undefined ? {} : { colorScheme: input.colorScheme }),
       };
     case "wait":
       if ("waitFor" in input) return { ...base, kind: "wait", waitFor: input.waitFor };
@@ -520,6 +600,9 @@ export function browserToolAction(
     case "stop":
     case "steps":
     case "sign-in":
+    case "flow-save":
+    case "flow-list":
+    case "flow-run":
       return undefined;
   }
 }
@@ -709,6 +792,7 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.title === undefined ? {} : { title: observation.title }),
               ...(observation.change === undefined ? {} : { changed: observation.change }),
               ...(observation.snapshot === undefined ? {} : { snapshot: observation.snapshot }),
+              ...(observation.emulation === undefined ? {} : { emulation: observation.emulation }),
               ...(observation.tabs === undefined ? {} : { tabs: observation.tabs }),
               ...(observation.dialogs === undefined ? {} : { dialogs: observation.dialogs }),
               ...(bounded === undefined

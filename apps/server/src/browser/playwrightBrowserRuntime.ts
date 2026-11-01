@@ -24,7 +24,11 @@ import {
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import type { BrowserContextId, BrowserContextPolicy } from "@octant/contracts/browser-automation";
+import type {
+  BrowserContextId,
+  BrowserContextPolicy,
+  BrowserEmulationReport,
+} from "@octant/contracts/browser-automation";
 import {
   DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
@@ -128,6 +132,14 @@ export interface PlaywrightPagePort {
     };
   }): Promise<Uint8Array>;
   setViewportSize(size: { readonly width: number; readonly height: number }): Promise<void>;
+  /**
+   * Optional, like the event listeners: a test double need not model device
+   * emulation, and a resize on one that does not fails with its own message.
+   */
+  emulateMedia?(options: { readonly colorScheme: "light" | "dark" | null }): Promise<void>;
+  context?(): {
+    newCDPSession(page: PlaywrightPagePort): Promise<PlaywrightProtocolSessionPort>;
+  };
   title(): Promise<string>;
   url(): string;
   viewportSize(): { readonly width: number; readonly height: number } | null;
@@ -158,6 +170,11 @@ export type PlaywrightDocumentPort = Pick<
 
 export interface PlaywrightElementPort {
   contentFrame(): Promise<PlaywrightDocumentPort | null>;
+}
+
+/** A DevTools protocol session on one page, which the runtime owns and drops with the page. */
+export interface PlaywrightProtocolSessionPort {
+  send(method: string, parameters?: Record<string, unknown>): Promise<unknown>;
 }
 
 export interface PlaywrightFramePort {
@@ -273,6 +290,7 @@ export const DEFAULT_BROWSER_EXECUTABLE_CANDIDATES = [
 export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
   readonly #options: PlaywrightBrowserRuntimeOptions;
   readonly #contexts = new Map<BrowserContextId, OwnedRuntimeContext>();
+  readonly #emulation = new WeakMap<PlaywrightPagePort, PageEmulation>();
   readonly #processExitListeners = new Set<() => void>();
   #browser: PlaywrightBrowserPort | undefined;
   #launching: Promise<PlaywrightBrowserPort> | undefined;
@@ -542,7 +560,16 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         }
         break;
       case "click":
-        if (request.point === undefined) {
+        if (
+          this.#emulation.get(page)?.touch === true &&
+          (request.point !== undefined ||
+            splitBrowserFrameTarget(request.target ?? "").frames.length === 0)
+        ) {
+          // A touch device is tapped, not clicked: the page gets touch events
+          // and the click a tap ends in, as it would from a finger. An element
+          // inside a frame is still clicked: the tap's point is the page's.
+          await this.#tap(page, request);
+        } else if (request.point === undefined) {
           const target = await at(request.target, "Click actions require a selector or point.");
           await target.document.click(target.selector);
         } else {
@@ -603,7 +630,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         }
         break;
       case "resize":
-        await page.setViewportSize(request.viewport ?? DEFAULT_VIEWPORT);
+        await this.#emulate(page, request);
         break;
       case "hover": {
         const target = await at(request.target, "Hover actions require an element.");
@@ -711,7 +738,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       return this.#snapshot(page, owned?.protectCredentials ?? true, allowedOrigins);
     }
     const include = new Set(request.include ?? []);
-    return this.#observe(
+    const observed = await this.#observe(
       page,
       owned?.protectCredentials ?? true,
       allowedOrigins,
@@ -722,6 +749,139 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       },
       request.kind === "extract-text" ? request.target : undefined,
     );
+    if (request.kind !== "resize") return observed;
+    const emulation = await measureEmulation(page);
+    return emulation === undefined ? observed : { ...observed, emulation };
+  }
+
+  /**
+   * Make the agent's page look like another device, on this page only: the
+   * context and the browser stay as they were. Each field changes what it
+   * names; a call naming none restores size, touch, and color scheme together.
+   */
+  async #emulate(page: PlaywrightPagePort, request: BrowserRuntimeAction): Promise<void> {
+    const restoring =
+      request.viewport === undefined &&
+      request.touch === undefined &&
+      request.colorScheme === undefined;
+    const state = this.#emulation.get(page) ?? {
+      deviceOverride: false,
+      touch: false,
+    };
+    this.#emulation.set(page, state);
+    const session = async (): Promise<PlaywrightProtocolSessionPort> => {
+      if (state.session !== undefined) return state.session;
+      const opened = await page.context?.().newCDPSession(page);
+      if (opened === undefined) throw new Error("This Browser cannot emulate a device.");
+      state.session = opened;
+      return opened;
+    };
+    if (request.viewport !== undefined || restoring) {
+      const size = request.viewport ?? DEFAULT_VIEWPORT;
+      const scale = request.deviceScaleFactor ?? 1;
+      const mobile = request.mobile ?? false;
+      // The protocol override replaces the viewport's own, so it is cleared
+      // before the viewport is set again and set last when a device needs it.
+      if (state.deviceOverride) {
+        await (await session()).send("Emulation.clearDeviceMetricsOverride");
+        state.deviceOverride = false;
+        // Playwright sends nothing for a size it already holds, and the clear
+        // just took its own override away, so a different size goes first.
+        const held = page.viewportSize();
+        if (held?.width === size.width && held.height === size.height) {
+          await page.setViewportSize({
+            width: size.width,
+            height: size.height + 1,
+          });
+        }
+      }
+      await page.setViewportSize(size);
+      if (scale !== 1 || mobile) {
+        await (
+          await session()
+        ).send("Emulation.setDeviceMetricsOverride", {
+          width: size.width,
+          height: size.height,
+          deviceScaleFactor: scale,
+          mobile,
+        });
+        state.deviceOverride = true;
+      }
+    }
+    const touch = restoring ? false : request.touch;
+    if (touch !== undefined && touch !== state.touch) {
+      await (
+        await session()
+      ).send("Emulation.setTouchEmulationEnabled", {
+        enabled: touch,
+        maxTouchPoints: 1,
+      });
+      state.touch = touch;
+    }
+    const colorScheme = restoring ? "default" : request.colorScheme;
+    // Nothing was overridden yet, so there is nothing for "default" to undo.
+    if (
+      colorScheme !== undefined &&
+      !(colorScheme === "default" && state.baselineScheme === undefined)
+    ) {
+      if (page.emulateMedia === undefined) throw new Error("This Browser cannot emulate a device.");
+      if (state.baselineScheme === undefined) {
+        const before = await measureEmulation(page);
+        if (before !== undefined) state.baselineScheme = before.colorScheme;
+      }
+      await page.emulateMedia({
+        colorScheme: colorScheme === "default" ? (state.baselineScheme ?? null) : colorScheme,
+      });
+    }
+  }
+
+  /** A click on a touch-emulated page: one finger down and up on the target. */
+  async #tap(page: PlaywrightPagePort, request: BrowserRuntimeAction): Promise<void> {
+    let x: number;
+    let y: number;
+    if (request.point !== undefined) {
+      ({ x, y } = viewportPoint(page, request.point));
+    } else {
+      const selector = required(request.target, "Click actions require a selector or point.");
+      const center = await page.locator(playwrightSelector(selector)).evaluate((element) => {
+        // Instant, so a page with smooth scrolling is measured where it ends.
+        element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        const rect = element.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        // The topmost element at the point, looked for inside open shadow
+        // roots too, and whether it sits in the target, across shadow hosts.
+        let hit = document.elementFromPoint(cx, cy);
+        while (hit?.shadowRoot) {
+          const inner = hit.shadowRoot.elementFromPoint(cx, cy);
+          if (inner === null || inner === hit) break;
+          hit = inner;
+        }
+        let node: Node | null = hit;
+        while (node !== null && node !== element) {
+          node = node.parentNode instanceof ShadowRoot ? node.parentNode.host : node.parentNode;
+        }
+        return {
+          x: cx,
+          y: cy,
+          reachable: rect.width >= 1 && rect.height >= 1 && hit !== null && node === element,
+        };
+      });
+      // Playwright's own click waits for the element to be reachable; a tap
+      // sent to a covered point would land on whatever covers it.
+      if (!center.reachable) throw new Error("Browser target is not visible or is covered.");
+      ({ x, y } = center);
+    }
+    const session = this.#emulation.get(page)?.session;
+    if (session === undefined) throw new Error("Touch emulation is not active on this page.");
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y }],
+    });
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
   }
 
   async closeContext(contextId: BrowserContextId): Promise<void> {
@@ -1089,6 +1249,33 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
   }
 }
 
+/**
+ * What the page itself reports about its device, read by a fixed script, so
+ * the answer states what the page sees rather than what was asked for.
+ */
+async function measureEmulation(
+  page: PlaywrightPagePort,
+): Promise<BrowserEmulationReport | undefined> {
+  try {
+    const seen = await page.evaluate(() => ({
+      width: Math.round(window.innerWidth),
+      height: Math.round(window.innerHeight),
+      deviceScaleFactor: window.devicePixelRatio,
+      touch: navigator.maxTouchPoints > 0 && window.matchMedia("(pointer: coarse)").matches,
+      dark: window.matchMedia("(prefers-color-scheme: dark)").matches,
+    }));
+    return {
+      width: seen.width,
+      height: seen.height,
+      deviceScaleFactor: seen.deviceScaleFactor,
+      touch: seen.touch,
+      colorScheme: seen.dark ? "dark" : "light",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 async function sensitiveTarget(
   page: PlaywrightDocumentPort & Partial<Pick<PlaywrightPagePort, "frames">>,
   selector: string,
@@ -1181,6 +1368,25 @@ function playwrightKey(value: string): string {
 }
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 } as const;
+
+/**
+ * What a page's device emulation needs to remember between calls: the protocol
+ * session that holds it (a session's overrides end with the session, so it is
+ * kept for the page's life), whether a device override is set and so must be
+ * cleared before the next size, and whether touch is on, which decides how a
+ * click reaches the page.
+ */
+interface PageEmulation {
+  session?: PlaywrightProtocolSessionPort;
+  deviceOverride: boolean;
+  touch: boolean;
+  /**
+   * The color scheme the page had before the first override, read from the
+   * page. Playwright's own reset goes to the machine's scheme, not to the one
+   * this Browser's pages started with, so a restore returns to this instead.
+   */
+  baselineScheme?: "light" | "dark";
+}
 
 /** Number one diagnostic entry and keep it, dropping the oldest of its kind past the bound. */
 function keepDiagnostic<T extends { seq: number }>(

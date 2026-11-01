@@ -1,4 +1,5 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import { decodeBrowserThreadId } from "@octant/contracts";
 import type { AutoReview } from "./autoReview";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import type {
@@ -1171,6 +1172,14 @@ function PullRequestWorkspaceSurface(
       executionPolicy={policy}
       idempotencyKey={`code-tab:${props.tab.id}`}
       onRefresh={() => void observe()}
+      {...(props.browserAutomationClient === undefined
+        ? {}
+        : {
+            browserProof: {
+              client: props.browserAutomationClient,
+              threadId: decodeBrowserThreadId(String(props.scope.threadId)),
+            },
+          })}
       review={review}
       {...(props.onOpenSurface === undefined
         ? {}
