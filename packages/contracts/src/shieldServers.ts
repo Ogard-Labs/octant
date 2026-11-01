@@ -5,8 +5,9 @@
  * A person registers their own servers: a host alias from their SSH config, a
  * user, and an action profile. SSH to a registered server passes Shield's
  * rules within that profile; every remote command a thread runs is journaled
- * with its host and exit status. Payloads never carry a key, a key path, or a
- * command's output; strict decoding refuses any field that is not named here.
+ * with its host and exit status. Payloads never carry a private key, a key
+ * path, or a command's output; strict decoding refuses any field that is not
+ * named here.
  */
 
 import { Schema } from "effect";
@@ -71,6 +72,21 @@ export const ShieldServerRunbookPath = Schema.String.pipe(
   Schema.filter((path) => path.startsWith("/") && !path.includes("\u0000")),
 );
 
+/**
+ * How a confined command signs in to the server: through the person's own SSH
+ * agent (the default, and what a server registered before the choice means),
+ * or with a key Octant made for this server and keeps in its credential
+ * broker, which signs the login and never hands the key out.
+ */
+export const ShieldServerSignIn = Schema.Literal("ssh-agent", "octant-key");
+export type ShieldServerSignIn = typeof ShieldServerSignIn.Type;
+
+/** The public line of a key Octant keeps, as `authorized_keys` takes it. */
+export const ShieldServerPublicKey = Schema.String.pipe(
+  Schema.maxLength(256),
+  Schema.pattern(/^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/),
+);
+
 export const ShieldServerFields = Schema.Struct({
   alias: ShieldServerAlias,
   user: ShieldServerUser,
@@ -79,6 +95,7 @@ export const ShieldServerFields = Schema.Struct({
     Schema.maxItems(MAX_SHIELD_SERVER_DEPLOY_COMMANDS),
   ),
   runbookPath: Schema.optional(ShieldServerRunbookPath),
+  signIn: Schema.optional(ShieldServerSignIn),
 }).annotations(strict);
 export type ShieldServerFields = typeof ShieldServerFields.Type;
 
@@ -190,6 +207,15 @@ export const ShieldServersCommand = Schema.Union(
     kind: Schema.Literal("clear-project-override"),
     projectId: AggregateId,
   }).annotations(strict),
+  /**
+   * The public line of the key Octant keeps for a server that signs in with
+   * one, making the key the first time, for the person to add to the
+   * server's `authorized_keys`.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("show-server-key"),
+    serverId: AggregateId,
+  }).annotations(strict),
 );
 export type ShieldServersCommand = typeof ShieldServersCommand.Type;
 
@@ -201,6 +227,8 @@ export const ShieldServersRefusalReason = Schema.Literal(
   "server-not-found",
   "too-many-servers",
   "project-not-found",
+  "signs-in-with-agent",
+  "key-unavailable",
   "unavailable",
 );
 export type ShieldServersRefusalReason = typeof ShieldServersRefusalReason.Type;
@@ -209,6 +237,11 @@ export const ShieldServersCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("shield-servers-updated"),
     view: ShieldServersView,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("shield-server-key"),
+    serverId: AggregateId,
+    publicKey: ShieldServerPublicKey,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("shield-servers-refused"),

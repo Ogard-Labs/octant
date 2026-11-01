@@ -47,6 +47,9 @@ export function CodeCheckoutBar(props: {
             <span>Git</span>
           </OctantButton>
         )}
+        {props.onCreatePullRequest === undefined ? null : (
+          <CreatePullRequestAction onCreatePullRequest={props.onCreatePullRequest} />
+        )}
       </div>
     );
   }
@@ -88,19 +91,25 @@ export function CodeCheckoutBar(props: {
         </span>
       ) : null}
       {props.onCreatePullRequest === undefined ? null : (
-        <OctantButton
-          aria-label="Create pull request"
-          title="Create pull request"
-          className="code-checkout-bar__action window-no-drag"
-          onClick={props.onCreatePullRequest}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
-          <span>Create pull request</span>
-        </OctantButton>
+        <CreatePullRequestAction onCreatePullRequest={props.onCreatePullRequest} />
       )}
     </div>
+  );
+}
+
+function CreatePullRequestAction(props: { readonly onCreatePullRequest: () => void }) {
+  return (
+    <OctantButton
+      aria-label="Create pull request"
+      title="Create pull request"
+      className="code-checkout-bar__action window-no-drag"
+      onClick={props.onCreatePullRequest}
+      size="sm"
+      type="button"
+      variant="ghost"
+    >
+      <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
+      <span>Create pull request</span>
+    </OctantButton>
   );
 }

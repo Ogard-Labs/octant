@@ -110,11 +110,12 @@ export function renderProviderTurnPrompt(
 
 /**
  * The block kinds that stand for the whole session rather than for one turn:
- * Octant's instructions, selected skills, project memory, and the work item. A
- * session that already received one keeps it in its own history.
+ * Octant's instructions, selected skills, person and project memory, and the
+ * work item. A session that already received one keeps it in its own history.
  */
 const STANDING_CONTEXT_KINDS: ReadonlySet<ProviderContextBlock["kind"]> = new Set([
   "instructions",
+  "person-memory",
   "project-memory",
   "work-item",
 ]);

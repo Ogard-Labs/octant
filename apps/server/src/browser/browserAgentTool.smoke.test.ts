@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserThreadId, ToolActionAuthority, WindowId } from "@octant/contracts";
@@ -37,8 +40,30 @@ const pages: Record<string, string> = {
     <div id="host"></div>
     <script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = '<input type="password" value="hunter2">';</script>`,
   "/moves-on": `<!doctype html><title>Moves on</title><button id="save">Save</button>
-    <script>setTimeout(() => { location.href = "/moved"; }, 300);</script>`,
+    <script>setTimeout(() => { location.href = "/moved"; }, 2500);</script>`,
   "/moved": `<!doctype html><title>Moved</title><button id="save">Save</button>`,
+  "/controls": `<!doctype html><title>Controls</title>
+    <nav id="menu" onmouseenter="document.getElementById('item').hidden = false">Menu
+      <a id="item" href="/other" hidden>Open settings</a></nav>
+    <label for="size">Size</label>
+    <select id="size" onchange="document.title = 'Size ' + this.value">
+      <option value="s">Small</option><option value="l">Large</option>
+    </select>
+    <div id="card" draggable="true" ondragstart="event.dataTransfer.setData('text', 'card')">Card</div>
+    <div id="done" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>
+    <input id="keys" aria-label="Keys" onkeydown="if (event.ctrlKey) document.title = 'Chord ' + event.key">
+    <label for="file">Attachment</label>
+    <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">
+    <button id="read" onclick="document.getElementById('file').files[0].text().then((text) => { document.title = 'Read ' + text; })">Read</button>`,
+  "/later-leave": `<!doctype html><title>Later</title>
+    <script>setTimeout(() => { location.href = "/leave"; }, 100);</script>`,
+  "/slow": `<!doctype html><title>Slow</title>
+    <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.id = 'done'; p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
+    <button id="later" onclick="setTimeout(() => { document.title = 'Settled'; }, 150)">Later</button>
+    <button id="ask" onclick="const ok = confirm('Delete everything?'); alert(ok ? 'deleted' : 'kept'); document.title = ok ? 'Deleted' : 'Kept'">Ask</button>
+    <fieldset disabled><input id="locked" aria-label="Locked"></fieldset>
+    <p>Width <span id="width"></span></p>
+    <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
 };
 
@@ -60,7 +85,16 @@ let origin = "";
 
 beforeAll(async () => {
   server = createServer((request, response) => {
-    const body = pages[new URL(request.url ?? "/", "http://localhost").pathname];
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    // A page on this origin that sends the browser to another one: the same
+    // server under its other name is a different origin.
+    if (path === "/leave") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(302, { location: `http://localhost:${String(port)}/other` });
+      response.end();
+      return;
+    }
+    const body = pages[path];
     response.writeHead(body === undefined ? 404 : 200, { "content-type": "text/html" });
     response.end(body ?? "missing");
   });
@@ -73,7 +107,15 @@ afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
-function agentTool() {
+function agentTool(
+  options: {
+    readonly uploadRoot?: string;
+    readonly uploadAnswer?: "approved" | "denied";
+    /** Runs while the person is being asked, before the answer. */
+    readonly whileAsking?: () => Promise<void>;
+  } = {},
+) {
+  const asked: Array<Record<string, unknown>> = [];
   const service = new BrowserAutomationService({
     runtime,
     authority: { canAccessWindow: () => true, resolve: () => authority },
@@ -96,7 +138,15 @@ function agentTool() {
       act: (input) => service.act(input),
       releaseThread: (window, thread) => service.releaseThread(window, thread),
     },
-    approvals: { request: async () => "approved" as const },
+    approvals: {
+      request: async (request) => {
+        asked.push(request as unknown as Record<string, unknown>);
+        if (!("upload" in request)) return "approved";
+        await options.whileAsking?.();
+        return options.uploadAnswer ?? "approved";
+      },
+    },
+    ...(options.uploadRoot === undefined ? {} : { uploadRoot: () => options.uploadRoot }),
     uuid: () => randomUUID(),
   });
   const call = async (input: Record<string, unknown>) => {
@@ -113,7 +163,7 @@ function agentTool() {
       };
     };
   };
-  return { call, service, stop: () => call({ operation: "stop" }) };
+  return { asked, call, service, stop: () => call({ operation: "stop" }) };
 }
 
 function refFor(outline: string | undefined, line: RegExp): string {
@@ -181,7 +231,7 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     const tool = agentTool();
     await tool.call({ operation: "navigate", url: `${origin}/moves-on` });
     const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await new Promise((resolve) => setTimeout(resolve, 3_200));
     const clicked = await tool.call({ operation: "click", ref: refFor(outline, /"Save"/) });
     expect(clicked.result.failure?.category).toBe("stale");
     await tool.stop();
@@ -260,6 +310,324 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(next.result.page?.observationRevision).toBe(
       Number(clicked.result.page?.observationRevision) + 1,
     );
+    await tool.stop();
+  });
+
+  it("hovers to open a menu, chooses an option, drags, and presses a key chord", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/controls` });
+    const before = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    expect(before).not.toContain("Open settings");
+    const hovered = await tool.call({
+      operation: "hover",
+      selector: "#menu",
+      include: ["snapshot"],
+    });
+    expect(hovered.result.page?.snapshot).toMatch(/- link "Open settings" \[ref=e\d+\]/);
+    const chosen = await tool.call({
+      operation: "select",
+      ref: refFor(hovered.result.page?.snapshot, /combobox "Size"/),
+      value: "Large",
+    });
+    expect(chosen.result.page?.title).toBe("Size l");
+    const missing = await tool.call({ operation: "select", selector: "#size", value: "Huge" });
+    expect(missing.isError).toBe(true);
+    const dragged = await tool.call({ operation: "drag", selector: "#card", toSelector: "#done" });
+    expect(dragged.result.page?.title).toBe("Dropped card");
+    await tool.call({ operation: "click", selector: "#keys" });
+    const chord = await tool.call({ operation: "press", key: "Control+B" });
+    expect(chord.result.page?.title).toBe("Chord b");
+    const refused = await tool.call({ operation: "press", key: "Control+Control+B" });
+    expect(refused.isError).toBe(true);
+    await tool.stop();
+  });
+
+  it("uploads a workspace file after asking, and refuses a link, an escape, and a refusal", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "octant-upload-"));
+    try {
+      await writeFile(join(workspace, "notes.txt"), "hello");
+      await mkdir(join(workspace, "real"));
+      await writeFile(join(workspace, "real", "deep.txt"), "deep");
+      await symlink(join(workspace, "notes.txt"), join(workspace, "link.txt"));
+      await symlink(join(workspace, "real"), join(workspace, "linked-folder"));
+      const tool = agentTool({ uploadRoot: workspace });
+      await tool.call({ operation: "navigate", url: `${origin}/controls` });
+      tool.asked.length = 0;
+      const sent = await tool.call({
+        operation: "upload",
+        selector: "#file",
+        files: ["notes.txt"],
+      });
+      expect(sent.result.page?.title).toBe("Attached notes.txt 5");
+      // The page reads the file when a later action sends it.
+      await tool.call({ operation: "click", selector: "#read" });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const read = await tool.call({ operation: "read-page" });
+      expect(read.result.page?.title).toBe("Read hello");
+      expect(tool.asked).toEqual([
+        expect.objectContaining({
+          origin,
+          upload: [expect.objectContaining({ name: "notes.txt", sizeBytes: 5 })],
+        }),
+      ]);
+      for (const [files, reason] of [
+        [["link.txt"], "upload-symlink"],
+        [["linked-folder/deep.txt"], "upload-symlink"],
+        [["../outside.txt"], "upload-outside-workspace"],
+        [[join(workspace, "notes.txt")], "upload-outside-workspace"],
+        [["missing.txt"], "upload-not-found"],
+      ] as const) {
+        const refused = await tool.call({ operation: "upload", selector: "#file", files });
+        expect(refused.result).toEqual({ error: reason });
+      }
+      await tool.stop();
+      const declined = agentTool({ uploadRoot: workspace, uploadAnswer: "denied" });
+      await declined.call({ operation: "navigate", url: `${origin}/controls` });
+      const no = await declined.call({
+        operation: "upload",
+        selector: "#file",
+        files: ["notes.txt"],
+      });
+      expect(no.result).toEqual({ error: "browser-upload-denied" });
+      await declined.stop();
+      // A file swapped for a link while the person reads the question is not
+      // what gets sent: the page receives the file that was checked.
+      await writeFile(join(workspace, "secret.txt"), "a much longer secret");
+      const swapped = agentTool({
+        uploadRoot: workspace,
+        whileAsking: async () => {
+          await rm(join(workspace, "notes.txt"));
+          await symlink(join(workspace, "secret.txt"), join(workspace, "notes.txt"));
+        },
+      });
+      await swapped.call({ operation: "navigate", url: `${origin}/controls` });
+      const kept = await swapped.call({
+        operation: "upload",
+        selector: "#file",
+        files: ["notes.txt"],
+      });
+      expect(kept.result.page?.title).toBe("Attached notes.txt 5");
+      await swapped.stop();
+      const unrooted = agentTool();
+      await unrooted.call({ operation: "navigate", url: `${origin}/controls` });
+      const none = await unrooted.call({
+        operation: "upload",
+        selector: "#file",
+        files: ["notes.txt"],
+      });
+      expect(none.result).toEqual({ error: "upload-unavailable" });
+      await unrooted.stop();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("opens, lists, switches, and closes tabs, each one inside the page's allowed origin", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+    const opened = await tool.call({ operation: "tab-open", url: `${origin}/other` });
+    expect(opened.result.page?.tabs).toEqual([
+      { tabId: "t1", url: `${origin}/form`, title: "Form", active: false },
+      { tabId: "t2", url: `${origin}/other`, title: "Other", active: true },
+    ]);
+    const switched = await tool.call({ operation: "tab-switch", tabId: "t1" });
+    expect(switched.result.page?.title).toBe("Form");
+    const closed = await tool.call({ operation: "tab-close", tabId: "t2" });
+    expect(closed.result.page?.tabs).toEqual([
+      { tabId: "t1", url: `${origin}/form`, title: "Form", active: true },
+    ]);
+    const last = await tool.call({ operation: "tab-close", tabId: "t1" });
+    expect(last.isError).toBe(true);
+    const elsewhere = await tool.call({ operation: "tab-open", url: "https://example.com/" });
+    expect(elsewhere.result.failure?.category).toBe("policy-denied");
+    const redirected = await tool.call({ operation: "tab-open", url: `${origin}/leave` });
+    expect(redirected.result.failure?.category).toBe("policy-denied");
+    const listed = await tool.call({ operation: "tab-list" });
+    expect(JSON.stringify(listed.result.page?.tabs)).not.toContain("localhost");
+    // A tab that wanders off the allowed origins after its own action ended
+    // is listed blank, never with the other site's address or title.
+    await tool.call({ operation: "tab-open", url: `${origin}/later-leave` });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const wandered = await tool.call({ operation: "tab-list" });
+    expect(JSON.stringify(wandered.result.page?.tabs)).not.toContain("localhost");
+    expect(JSON.stringify(wandered.result.page?.tabs)).not.toContain("Other");
+    await tool.stop();
+  });
+
+  it("runs a batch step by step, stopping at the first step that fails", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    const filled = (await tool.call({
+      operation: "steps",
+      steps: [
+        { operation: "type", ref: refFor(outline, /"Name"/), text: "Ada" },
+        { operation: "click", ref: refFor(outline, /"Save"/) },
+      ],
+    })) as unknown as {
+      readonly isError: boolean;
+      readonly result: {
+        readonly page?: { readonly title?: string };
+        readonly steps?: ReadonlyArray<{ readonly step: number; readonly changed?: string }>;
+      };
+    };
+    expect(filled.isError).toBe(false);
+    expect(filled.result.page?.title).toBe("Saved Ada");
+    expect(filled.result.steps).toEqual([
+      {
+        step: 1,
+        operation: "type",
+        changed: "The field holds the new value; the page's text did not change.",
+      },
+      { step: 2, operation: "click", changed: 'Title is now "Saved Ada".' },
+    ]);
+
+    const stopped = (await tool.call({
+      operation: "steps",
+      steps: [
+        { operation: "click", ref: refFor(outline, /"Rename save"/) },
+        { operation: "click", ref: refFor(outline, /"Save"/) },
+        { operation: "type", selector: "#name", text: "Grace" },
+      ],
+    })) as unknown as {
+      readonly isError: boolean;
+      readonly result: {
+        readonly completed: ReadonlyArray<unknown>;
+        readonly failedStep: {
+          readonly step: number;
+          readonly answer: { readonly failure?: { readonly category: string } };
+        };
+      };
+    };
+    expect(stopped.isError).toBe(true);
+    expect(stopped.result.completed).toHaveLength(1);
+    expect(stopped.result.failedStep).toMatchObject({
+      step: 2,
+      answer: { failure: { category: "stale" } },
+    });
+    // The step after the failure never ran.
+    const read = await tool.call({ operation: "read-page", selector: "#name" });
+    expect(read.result.page?.title).toBe("Saved Ada");
+
+    // A step whose revision is out of date does not run, and stops the batch.
+    const revision = Number(
+      (await tool.call({ operation: "read-page", selector: "#name" })).result.page
+        ?.observationRevision,
+    );
+    const outdated = (await tool.call({
+      operation: "steps",
+      steps: [
+        {
+          operation: "type",
+          selector: "#name",
+          text: "Grace",
+          expectedObservationRevision: revision - 1,
+        },
+        { operation: "click", selector: "#save" },
+      ],
+    })) as unknown as {
+      readonly isError: boolean;
+      readonly result: {
+        readonly failedStep: {
+          readonly step: number;
+          readonly answer: { readonly failure?: { readonly category: string } };
+        };
+      };
+    };
+    expect(outdated.isError).toBe(true);
+    expect(outdated.result.failedStep).toMatchObject({
+      step: 1,
+      answer: { failure: { category: "stale" } },
+    });
+    expect(
+      (await tool.call({ operation: "read-page", selector: "#name" })).result.page?.title,
+    ).toBe("Saved Ada");
+
+    for (const steps of [
+      Array.from({ length: 11 }, () => ({ operation: "snapshot" })),
+      [{ operation: "steps", steps: [{ operation: "snapshot" }] }],
+      [{ operation: "upload", selector: "#file", files: ["a.txt"] }],
+      [{ operation: "stop" }],
+      [{ operation: "navigate", url: `${origin}/form`, profile: "personal" }],
+    ]) {
+      const refused = await tool.call({ operation: "steps", steps });
+      expect(refused.result).toEqual({ error: "invalid-browser-input" });
+    }
+    await tool.stop();
+  });
+
+  it("waits for text, an element's state, and an address, and says what never held", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/slow` });
+    await tool.call({ operation: "click", selector: "#go" });
+    const waited = await tool.call({
+      operation: "wait",
+      conditions: [
+        { text: "Saved at last" },
+        { selector: "#go", state: "disabled" },
+        { urlContains: "/slow" },
+      ],
+      timeoutMs: 5_000,
+    });
+    expect(waited.isError).toBe(false);
+    const either = await tool.call({
+      operation: "wait",
+      conditions: [{ text: "Never there" }, { load: "load" }],
+      match: "any",
+    });
+    expect(either.isError).toBe(false);
+    const timedOut = await tool.call({
+      operation: "wait",
+      conditions: [{ text: "Never there" }, { text: "Saved at last", present: false }],
+      timeoutMs: 300,
+    });
+    expect(timedOut.result.failure).toMatchObject({
+      category: "failed",
+      message: expect.stringMatching(
+        /timed out after 300 ms.*"Never there" present.*"Saved at last" absent/,
+      ),
+    });
+    // A control a disabled fieldset disables is disabled, though it has no
+    // attribute of its own.
+    const inherited = await tool.call({
+      operation: "wait",
+      conditions: [{ selector: "#locked", state: "disabled" }],
+      timeoutMs: 1_000,
+    });
+    expect(inherited.isError).toBe(false);
+    const tooLong = await tool.call({ operation: "wait", selector: "#go", timeoutMs: 60_000 });
+    expect(tooLong.result).toEqual({ error: "invalid-browser-input" });
+    await tool.stop();
+  });
+
+  it("lets the page settle after an action, and answers its dialogs by the fixed rule", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/slow` });
+    const settled = await tool.call({ operation: "click", selector: "#later" });
+    expect(settled.result.page?.title).toBe("Settled");
+    const asked = await tool.call({ operation: "click", selector: "#ask" });
+    expect(asked.result.page?.title).toBe("Kept");
+    expect(asked.result.page?.dialogs).toEqual([
+      { type: "confirm", message: "Delete everything?", answer: "dismissed" },
+      { type: "alert", message: "kept", answer: "accepted" },
+    ]);
+    await tool.stop();
+  });
+
+  it("resizes the agent's page within bounds and restores it", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/slow` });
+    const narrow = await tool.call({
+      operation: "resize",
+      width: 390,
+      height: 844,
+      include: ["text"],
+    });
+    expect(narrow.result.page?.text).toContain("Width 390");
+    const tooWide = await tool.call({ operation: "resize", width: 9000, height: 800 });
+    expect(tooWide.result).toEqual({ error: "invalid-browser-input" });
+    const restored = await tool.call({ operation: "resize", include: ["text"] });
+    expect(restored.result.page?.text).toContain("Width 1280");
     await tool.stop();
   });
 });

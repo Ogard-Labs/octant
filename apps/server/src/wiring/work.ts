@@ -103,6 +103,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "onWindowRevoked"
     | "routineProposalService"
     | "windowAuthorityStore"
+    | "personMemoryAccess"
   > &
   Pick<
     AgentRunsWiring,
@@ -251,6 +252,7 @@ export function wireWork(deps: WorkDependencies) {
     workRequestService,
     workThreadProjection,
     workTurnProjection,
+    personMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
     const workTurnUsageStore = new WorkTurnUsageStore();
@@ -331,6 +333,14 @@ export function wireWork(deps: WorkDependencies) {
     };
     const workTurnService = new WorkTurnService({
       liveTurns,
+      personMemoryBlock: ({ thread, windowId }) =>
+        personMemoryAccess.blockFor({
+          mode: "work",
+          threadId: String(thread.id),
+          projectId: String(thread.projectId),
+          createdAt: thread.createdAt,
+          windowId,
+        }),
       onTurnCancelled: (threadId) => {
         for (const listener of turnCancelledListeners) listener(threadId);
       },
@@ -383,6 +393,7 @@ export function wireWork(deps: WorkDependencies) {
                   browserAutomationService.releaseThread(ownerWindowId, threadId),
               },
               approvals: browserToolApprovalService,
+              uploadRoot: () => input.projectRoot,
               uuid: randomUUID,
             });
         const sideTaskTools = !browserSupported
@@ -439,7 +450,17 @@ export function wireWork(deps: WorkDependencies) {
           executionPolicy: "approval-gated",
         });
         const computer = computerToolsFor(computerOwner);
+        const pastThreads = !browserSupported
+          ? undefined
+          : personMemoryAccess.toolsFor({
+              mode: "work",
+              threadId: String(input.thread.id),
+              projectId: String(input.thread.projectId),
+              createdAt: input.thread.createdAt,
+              windowId: input.windowId,
+            });
         if (
+          pastThreads === undefined &&
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
@@ -457,6 +478,7 @@ export function wireWork(deps: WorkDependencies) {
           routineTools,
           agentsTools,
           canvasTools,
+          pastThreads,
         );
       },
       nativeHarness: nativeHarnessHooks,

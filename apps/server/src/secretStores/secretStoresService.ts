@@ -15,6 +15,8 @@ import type { ProviderInstance, ProviderInstanceId, WindowId } from "@octant/con
 import {
   decodeSecretStoresResult,
   SECRET_STORE_REFUSAL_MESSAGES,
+  type AwsCliKeyReference,
+  type SecretStoreJournalRecord,
   type SecretStoreKind,
   type SecretStoreRefusalReason,
   type SecretStoresResult,
@@ -51,6 +53,33 @@ export interface SecretStoresService {
   readonly readProviderKeyReference: (
     instanceId: ProviderInstanceId,
   ) => Promise<SecretStoresResult>;
+  readonly pointAwsCliKey: (
+    windowId: WindowId,
+    pointer: AwsCliKeyReference,
+  ) => Promise<SecretStoresResult>;
+  readonly clearAwsCliKey: (windowId: WindowId) => Promise<SecretStoresResult>;
+  readonly readAwsCliKey: () => Promise<SecretStoresResult>;
+}
+
+/** Both halves of the AWS key pair's reference, journaled as one append. */
+function awsCliRecords(
+  pointer: AwsCliKeyReference,
+  change:
+    | { readonly name: "credential-reference.set"; readonly replaced: boolean }
+    | { readonly name: "credential-reference.cleared" },
+  windowId: WindowId,
+): ReadonlyArray<SecretStoreJournalRecord> {
+  const parts = [
+    ["access-key-id", pointer.accessKeyIdReference],
+    ["secret-access-key", pointer.secretAccessKeyReference],
+  ] as const;
+  return parts.map(([part, reference]) => ({
+    ...change,
+    target: { kind: "aws-cli-key", part },
+    store: pointer.store,
+    reference,
+    windowId,
+  }));
 }
 
 export function secretStoresRefusal(
@@ -83,7 +112,9 @@ export function createSecretStoresService(
     return run;
   };
 
-  const journaled = (record: Parameters<SecretStoresJournal["record"]>[0]): boolean => {
+  const journaled = (
+    record: SecretStoreJournalRecord | ReadonlyArray<SecretStoreJournalRecord>,
+  ): boolean => {
     try {
       options.journal.record(record);
       return true;
@@ -258,6 +289,74 @@ export function createSecretStoresService(
           reference: null,
         };
       }),
+
+    pointAwsCliKey: (windowId, pointer) =>
+      serialized(async () => {
+        if (broker === undefined) return secretStoresRefusal("broker-unavailable");
+        const before = await broker.awsCliReference();
+        if (before.status === "broker-unavailable")
+          return secretStoresRefusal("broker-unavailable");
+        const pointed = await broker.pointAwsCli(pointer);
+        if (pointed.status === "broker-unavailable")
+          return secretStoresRefusal("broker-unavailable");
+        if (pointed.status !== "pointed") return secretStoresRefusal(CHECK_REFUSAL[pointed.status]);
+        const recorded = journaled(
+          awsCliRecords(
+            pointer,
+            { name: "credential-reference.set", replaced: before.status === "linked" },
+            windowId,
+          ),
+        );
+        if (!recorded) {
+          // As for a provider key: put back the earlier pointer or nothing, and
+          // never leave an unjournaled pointer active.
+          const restored =
+            before.status === "linked"
+              ? await broker.restoreAwsCli(before.pointer)
+              : await broker.clearAwsCli();
+          if (restored.status === "pointed" || restored.status === "cleared") {
+            return secretStoresRefusal("journal-unavailable");
+          }
+          const removed = await broker.clearAwsCli();
+          return secretStoresRefusal(
+            "journal-unavailable",
+            removed.status === "broker-unavailable"
+              ? "The change could not be recorded or undone. Remove the AWS command line's secret store reference, then set it again."
+              : "The change could not be recorded and the earlier items could not be restored, so the AWS command line's secret store reference was removed.",
+          );
+        }
+        return { kind: "secret-stores-aws-cli-key", reference: pointer };
+      }),
+
+    clearAwsCliKey: (windowId) =>
+      serialized(async () => {
+        if (broker === undefined) return secretStoresRefusal("broker-unavailable");
+        const cleared = await broker.clearAwsCli();
+        if (cleared.status === "broker-unavailable")
+          return secretStoresRefusal("broker-unavailable");
+        if (
+          cleared.status === "cleared" &&
+          !journaled(
+            awsCliRecords(cleared.pointer, { name: "credential-reference.cleared" }, windowId),
+          )
+        ) {
+          return secretStoresRefusal(
+            "journal-unavailable",
+            "The reference was removed, but the change could not be recorded.",
+          );
+        }
+        return { kind: "secret-stores-aws-cli-key", reference: null };
+      }),
+
+    readAwsCliKey: async () => {
+      if (broker === undefined) return secretStoresRefusal("broker-unavailable");
+      const answer = await broker.awsCliReference();
+      if (answer.status === "broker-unavailable") return secretStoresRefusal("broker-unavailable");
+      return {
+        kind: "secret-stores-aws-cli-key",
+        reference: answer.status === "linked" ? answer.pointer : null,
+      };
+    },
 
     readProviderKeyReference: async (instanceId) => {
       if (broker === undefined) return secretStoresRefusal("broker-unavailable");

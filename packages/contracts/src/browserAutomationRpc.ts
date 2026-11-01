@@ -62,6 +62,21 @@ export const BrowserToolApproval = Schema.Struct({
    * read and change what the agent reads there, so the prompt says so.
    */
   extensionCount: Schema.optional(Schema.Int.pipe(Schema.between(1, 64))),
+  /**
+   * Set when the agent asks to upload files to the page rather than to open
+   * it: the files, by name and size, that would leave this computer. Such an
+   * approval covers those files once and is never remembered.
+   */
+  upload: Schema.optional(
+    Schema.Struct({
+      files: Schema.Array(
+        Schema.Struct({
+          name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+          sizeBytes: Schema.Int.pipe(Schema.nonNegative()),
+        }).annotations(strict),
+      ).pipe(Schema.minItems(1), Schema.maxItems(5)),
+    }).annotations(strict),
+  ),
   requestedAt: UtcTimestamp,
 }).annotations({ ...strict, ...personDecides });
 export type BrowserToolApproval = typeof BrowserToolApproval.Type;

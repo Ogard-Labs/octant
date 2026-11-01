@@ -2386,17 +2386,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 size="sm"
                 type="button"
               >
-                Approve once
+                {pendingBrowserApproval.upload === undefined ? "Approve once" : "Upload once"}
               </OctantButton>
-              <OctantButton
-                disabled={browserApprovalBusy}
-                onClick={() => void decideBrowserApproval("approved", true)}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                Always allow
-              </OctantButton>
+              {/* An upload's answer covers those files once and is never remembered. */}
+              {pendingBrowserApproval.upload === undefined ? (
+                <OctantButton
+                  disabled={browserApprovalBusy}
+                  onClick={() => void decideBrowserApproval("approved", true)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Always allow
+                </OctantButton>
+              ) : null}
               <OctantButton
                 disabled={browserApprovalBusy}
                 onClick={() => void decideBrowserApproval("denied")}
@@ -2411,7 +2414,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           className="thread-column"
           detail={browserApprovalDetail(pendingBrowserApproval)}
           error={browserApprovalMessage}
-          label="Browser origin approval"
+          label={
+            pendingBrowserApproval.upload === undefined
+              ? "Browser origin approval"
+              : "Browser upload approval"
+          }
           summary={browserApprovalSummary(pendingBrowserApproval)}
         />
       )}

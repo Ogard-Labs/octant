@@ -10,6 +10,7 @@ import { decodeStoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import {
   BrowserNavigationBlockedError,
   BrowserTargetStaleError,
+  BrowserWaitTimedOutError,
   type BrowserProfileStorePort,
   type BrowserRuntimeObservation,
   type BrowserRuntimePort,
@@ -175,6 +176,14 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           ...(request.deltaY === undefined ? {} : { deltaY: request.deltaY }),
           ...(request.expected === undefined ? {} : { expected: request.expected }),
           ...(request.include === undefined ? {} : { include: request.include }),
+          ...(request.destination === undefined ? {} : { destination: request.destination }),
+          ...(request.destinationExpected === undefined
+            ? {}
+            : { destinationExpected: request.destinationExpected }),
+          ...(request.files === undefined ? {} : { files: request.files }),
+          ...(request.tabId === undefined ? {} : { tabId: request.tabId }),
+          ...(request.waitFor === undefined ? {} : { waitFor: request.waitFor }),
+          ...(request.viewport === undefined ? {} : { viewport: request.viewport }),
         },
       },
       signal,
@@ -236,6 +245,9 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     if (response.status === 422) {
       const refused = await structuredRefusal(response);
       if (refused?.error === "target-stale") throw new BrowserTargetStaleError();
+      if (refused?.error === "wait-timed-out") {
+        throw new BrowserWaitTimedOutError(refused.message ?? "The wait timed out.");
+      }
       if (refused?.error === "navigation-blocked" && refused.url !== undefined) {
         throw new BrowserNavigationBlockedError(refused.url);
       }
@@ -257,13 +269,23 @@ export function createDesktopBrowserRuntimeFromEnvironment(
 
 async function structuredRefusal(
   response: Response,
-): Promise<{ readonly error: string; readonly url?: string } | undefined> {
+): Promise<
+  { readonly error: string; readonly url?: string; readonly message?: string } | undefined
+> {
   try {
     const payload: unknown = await response.json();
     if (typeof payload !== "object" || payload === null || !("error" in payload)) return undefined;
     if (typeof payload.error !== "string") return undefined;
     const url = "url" in payload && typeof payload.url === "string" ? payload.url : undefined;
-    return { error: payload.error, ...(url === undefined ? {} : { url }) };
+    const message =
+      "message" in payload && typeof payload.message === "string"
+        ? payload.message.slice(0, 1024)
+        : undefined;
+    return {
+      error: payload.error,
+      ...(url === undefined ? {} : { url }),
+      ...(message === undefined ? {} : { message }),
+    };
   } catch {
     // Not a structured refusal; fall through to the generic broker error.
   }

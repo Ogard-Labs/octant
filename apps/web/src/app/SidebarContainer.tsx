@@ -5,7 +5,9 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
 import { decodeCodeThreadId, type CodeThreadId } from "@octant/contracts/code";
 import { decodeProjectId, decodeUtcTimestamp, decodeWorkThreadId } from "@octant/contracts";
+import { decodePersonMemoryCommand } from "@octant/contracts/person-memory";
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
+import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import type {
@@ -176,6 +178,8 @@ export interface SidebarContainerProps {
   readonly threadErrorMessage?: string;
   readonly threadExportClient: ReturnType<typeof resolveThreadExportClient>;
   readonly threadHandOffClient: ReturnType<typeof resolveThreadHandOffClient>;
+  /** Absent where this window cannot change memory, which hides Leave no trace. */
+  readonly personMemoryClient?: PersonMemoryClient;
   readonly threadStatus: ReturnType<typeof projectThreadsAccessForMode>["status"];
   readonly workStatus: ReturnType<typeof useWorkThreadNavigation>["status"];
   readonly workspace: ShellSidebarProps["workspace"];
@@ -239,6 +243,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     threadErrorMessage,
     threadExportClient,
     threadHandOffClient,
+    personMemoryClient,
     threadStatus,
     workStatus,
     workspace,
@@ -355,6 +360,35 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     const noteChatThreadRest = (outcome: ChatThreadRestOutcome): void => {
       if (outcome.status === "refused") actions.setThreadExportNotice(outcome.message);
     };
+    const leaveNoTraceFromRow = (mode: OctantMode): Pick<ThreadRowActions, "onLeaveNoTrace"> => {
+      const client = personMemoryClient;
+      if (client === undefined) return {};
+      return {
+        onLeaveNoTrace: (threadId, title) => {
+          let command;
+          try {
+            command = decodePersonMemoryCommand({
+              kind: "set-thread-leaves-no-trace",
+              mode,
+              threadId,
+              ...(title.trim() === "" ? {} : { title: title.trim().slice(0, 200) }),
+              leavesNoTrace: true,
+            });
+          } catch {
+            return;
+          }
+          void client.change(command).then(
+            (result) =>
+              actions.setThreadExportNotice(
+                result.kind === "person-memory"
+                  ? `${title} leaves no trace in memory. Undo it in Settings › Memory.`
+                  : result.message,
+              ),
+            () => actions.setThreadExportNotice("Memory could not be changed."),
+          );
+        },
+      };
+    };
     const exportCodeThread = exportThreadFromRow("code");
     const exportChatThread = exportThreadFromRow("chat");
     const exportWorkThread = exportThreadFromRow("work");
@@ -362,6 +396,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     const handOffChatThread = handOffThreadFromRow("chat");
     const handOffWorkThread = handOffThreadFromRow("work");
     const code: ThreadRowActions = {
+      ...leaveNoTraceFromRow("code"),
       ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
       ...(handOffCodeThread === undefined ? {} : { onHandOffThread: handOffCodeThread }),
       onArchiveThread: (threadId) => void actions.archiveCodeThread(decodeCodeThreadId(threadId)),
@@ -396,6 +431,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     // List pin is a Code-only mark; pane placement is the window's split
     // tree, so Chat and Work get that without a list pin they cannot honor.
     const chat: ThreadRowActions = {
+      ...leaveNoTraceFromRow("chat"),
       ...(exportChatThread === undefined ? {} : { onExportThread: exportChatThread }),
       ...(handOffChatThread === undefined ? {} : { onHandOffThread: handOffChatThread }),
       onCompleteThread: (threadId) =>
@@ -416,6 +452,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     // Work has no controller of its own for thread metadata: a rest command
     // goes straight to the client with the version the sidebar last saw.
     const work: ThreadRowActions = {
+      ...leaveNoTraceFromRow("work"),
       ...(exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread }),
       ...(handOffWorkThread === undefined ? {} : { onHandOffThread: handOffWorkThread }),
       onCompleteThread: (threadId) =>
@@ -459,6 +496,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     hostBridge,
     threadExportClient,
     threadHandOffClient,
+    personMemoryClient,
   ]);
 
   // Work lists Chat and Work threads and Projects together. Each row keeps its

@@ -154,6 +154,19 @@ const REWIND_FILES_UNAVAILABLE: Readonly<Record<CodeRewindFilesUnavailableReason
     "A turn after this point changed files without a recorded checkpoint, so the files cannot be put back. Rewind the conversation only.",
   unreadable: "The checkout could not be read, so the files cannot be put back. Try again.",
 };
+/**
+ * Pull request operations, which a server thread runs with this host's `gh`
+ * by repository and branch name alone. Only the GitHub remote check reads
+ * the checkout, and it reads it with Git on the server; no server path is
+ * handed to a process of this host.
+ */
+const SERVER_PULL_REQUEST_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
+  "create-pull-request",
+  "update-pull-request",
+  "comment-pull-request",
+  "merge-pull-request",
+  "observe-pull-request",
+]);
 const SERVER_OPERATION_UNAVAILABLE =
   "This is not available for a Project on a server yet. Ask the thread to do it there, or use a terminal on the server.";
 const SERVER_CONNECTORS_UNAVAILABLE =
@@ -1287,9 +1300,10 @@ export class CodeOperationService {
       if (this.#options.holdsServerThread?.(scope.thread) !== true) {
         return this.#failed(command.operationId, "unavailable", REMOTE_FOLDER_UNAVAILABLE);
       }
-      const serverGit = SERVER_GIT_OPERATIONS.has(command.kind)
-        ? this.#options.serverGit?.(scope.thread)
-        : undefined;
+      const serverGit =
+        SERVER_GIT_OPERATIONS.has(command.kind) || SERVER_PULL_REQUEST_OPERATIONS.has(command.kind)
+          ? this.#options.serverGit?.(scope.thread)
+          : undefined;
       if (!SERVER_THREAD_OPERATIONS.has(command.kind) && serverGit === undefined) {
         return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
       }
@@ -3083,15 +3097,15 @@ export class CodeOperationService {
       case "rewind-code-thread":
         return await this.#rewind(command, thread, checkout, root.checkoutRoot);
       case "create-pull-request":
-        return this.#pullRequest(command, root.checkoutRoot);
+        return this.#pullRequest(command, root.checkoutRoot, git);
       case "update-pull-request":
-        return this.#updatePullRequest(command, root.checkoutRoot);
+        return this.#updatePullRequest(command, root.checkoutRoot, git);
       case "comment-pull-request":
-        return this.#commentPullRequest(command, root.checkoutRoot);
+        return this.#commentPullRequest(command, root.checkoutRoot, git);
       case "merge-pull-request":
-        return this.#mergePullRequest(command, root.checkoutRoot);
+        return this.#mergePullRequest(command, root.checkoutRoot, git);
       case "observe-pull-request":
-        return this.#pullRequestReview(command, root.checkoutRoot);
+        return this.#pullRequestReview(command, root.checkoutRoot, git);
       case "create-review-finding": {
         const finding = await this.#options.reviewFindings.create(windowId, {
           id: command.findingId,
@@ -3995,8 +4009,9 @@ export class CodeOperationService {
   async #pullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "create-pull-request" }>,
     checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
-    if ((await this.#hasGitHubRemote(checkoutRoot)) === false)
+    if ((await this.#hasGitHubRemote(checkoutRoot, git)) === false)
       return decodeCodeOperationResult({
         kind: "pull-request-state",
         operationId: command.operationId,
@@ -4026,6 +4041,7 @@ export class CodeOperationService {
   async #updatePullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "update-pull-request" }>,
     checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
     const pullRequests = this.#options.pullRequests;
     const changesText =
@@ -4039,7 +4055,7 @@ export class CodeOperationService {
         state: "unavailable",
         ...(failureCode === undefined ? {} : { failureCode }),
       });
-    if ((await this.#hasGitHubRemote(checkoutRoot)) === false) return unavailable("no-remote");
+    if ((await this.#hasGitHubRemote(checkoutRoot, git)) === false) return unavailable("no-remote");
     if (command.state !== undefined) {
       // Closing finds the open pull request, reopening finds the closed one;
       // either way it is the thread's own, found by its head.
@@ -4098,6 +4114,7 @@ export class CodeOperationService {
   async #commentPullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "comment-pull-request" }>,
     checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
     // A comment posts under the person's name, so only an approval for this
     // act reaches GitHub; a standing Full access grant does not.
@@ -4108,7 +4125,7 @@ export class CodeOperationService {
         "A comment posts under the person's name and needs their approval for this act.",
       );
     }
-    if ((await this.#hasGitHubRemote(checkoutRoot)) === false)
+    if ((await this.#hasGitHubRemote(checkoutRoot, git)) === false)
       return this.#pullRequestUnavailable(command.operationId, "no-remote");
     const located = await this.#locatePullRequest(command.threadId, "open");
     if (located.status !== "found") return located.result(command.operationId);
@@ -4130,6 +4147,7 @@ export class CodeOperationService {
   async #mergePullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "merge-pull-request" }>,
     checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
     // A merge cannot be taken back. It happens on the person's say: an approval
     // for this act, which names the head they saw and the method, or a stored
@@ -4155,7 +4173,7 @@ export class CodeOperationService {
         );
       }
     }
-    if ((await this.#hasGitHubRemote(checkoutRoot)) === false)
+    if ((await this.#hasGitHubRemote(checkoutRoot, git)) === false)
       return this.#pullRequestUnavailable(command.operationId, "no-remote");
     const actions = this.#options.pullRequests.actions;
     const located = await this.#locatePullRequest(command.threadId, "open");
@@ -4298,8 +4316,9 @@ export class CodeOperationService {
   async #pullRequestReview(
     command: Extract<CodeOperationCommand, { readonly kind: "observe-pull-request" }>,
     checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
-    if ((await this.#hasGitHubRemote(checkoutRoot)) === false)
+    if ((await this.#hasGitHubRemote(checkoutRoot, git)) === false)
       return decodeCodeOperationResult({
         kind: "pull-request-review",
         operationId: command.operationId,
@@ -4353,8 +4372,12 @@ export class CodeOperationService {
     });
   }
 
-  async #hasGitHubRemote(checkoutRoot: string): Promise<boolean | undefined> {
-    const remotes = await this.#options.git.observeRemotes?.({ checkoutRoot });
+  /** Read with the checkout's own Git: a server thread's runs on its server. */
+  async #hasGitHubRemote(
+    checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
+  ): Promise<boolean | undefined> {
+    const remotes = await git?.observeRemotes?.({ checkoutRoot });
     if (remotes === undefined) return undefined;
     return remotes.some(
       (remote) =>

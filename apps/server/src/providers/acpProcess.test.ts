@@ -28,7 +28,10 @@ import {
   type AcpProbeOptions,
   type AcpProcessOptions,
 } from "./acpProcess";
-import type { ProcessConfinementPort } from "../process/seatbeltProfile";
+import {
+  SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
+  type ProcessConfinementPort,
+} from "../process/seatbeltProfile";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
@@ -1705,6 +1708,40 @@ describe("ACP probe confinement", () => {
     expect(profileText).toContain('(allow network-outbound (remote ip "localhost:43124"))');
     expect(launch.environment.HTTPS_PROXY).toBe("http://octant:token@127.0.0.1:47001");
   });
+
+  it("lets the agent's own ssh read the Project's server folder and use its agent socket", async () => {
+    const target = fixture(kilo);
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+    const folder = join(target.canonicalRoot, "server-folder");
+    mkdirSync(hostAuthenticationPath, { recursive: true });
+    mkdirSync(join(folder, "bin"), { recursive: true });
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath,
+      }).prepare({
+        profile: kilo,
+        binaryPath: target.binaryPath,
+        root: managedHome,
+        managedHome,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: sanitizeAcpEnvironment(
+          kilo,
+          { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+          { managedHome, executionPolicy: "approval-gated" },
+        ),
+        servers: { folder, binDirectory: join(folder, "bin"), agentSocket: join(folder, "agent") },
+      }),
+    );
+    expect(seatbeltProfile(launch)).toContain(folder);
+    expect(seatbeltProfile(launch)).toContain("com.apple.system.opendirectoryd.libinfo");
+    expect(launch.environment.SSH_AUTH_SOCK).toBe(join(folder, "agent"));
+    expect(launch.environment.PATH?.split(":")[0]).toBe(join(folder, "bin"));
+  });
 });
 
 it("ships every ACP profile through deny-default confinement", () => {
@@ -1994,7 +2031,10 @@ describe("System Keychain read for fx", () => {
     async (executionPolicy) => {
       const lines = (await fxProfileText(fx, executionPolicy)).trimEnd().split("\n");
       const allow = `(allow file-read* (literal "${systemKeychain}"))`;
-      expect(lines.at(-1)).toBe(allow);
+      // Only the server control-socket denial, which names no Keychain, follows it.
+      const guard = SEATBELT_DENY_SERVER_CONTROL_SOCKETS.length;
+      expect(lines.slice(-guard)).toEqual(SEATBELT_DENY_SERVER_CONTROL_SOCKETS);
+      expect(lines.at(-1 - guard)).toBe(allow);
       expect(lines).toContain('(deny file-read* (subpath "/Library/Keychains"))');
       expect(
         lines.filter((line) => line.includes("Keychains/") && line.startsWith("(allow")),

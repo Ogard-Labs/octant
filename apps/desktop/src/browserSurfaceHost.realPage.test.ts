@@ -1,4 +1,7 @@
 import { existsSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { chromium, type Browser, type CDPSession, type Page } from "playwright-core";
@@ -27,6 +30,28 @@ const pages: Record<string, string> = {
     <label for="user">Email</label><input id="user" value="ada@example.com">
     <label for="pass">Password</label><input id="pass" type="password" value="hunter2">
     <button>Continue</button>`,
+  "/controls": `<!doctype html><title>Controls</title>
+    <nav id="menu" onmouseenter="document.getElementById('item').hidden = false">Menu
+      <a id="item" href="/form" hidden>Open settings</a></nav>
+    <label for="size">Size</label>
+    <select id="size" onchange="document.title = 'Size ' + this.value">
+      <option value="s">Small</option><option value="l">Large</option>
+    </select>
+    <div id="card" style="width:60px;height:30px" onpointerdown="window.dragging = true">Card</div>
+    <div id="done" style="width:60px;height:30px;margin-top:40px" onpointerup="if (window.dragging) document.title = 'Dropped card'">Done</div>
+    <form onsubmit="event.preventDefault(); document.title = 'Submitted'"><input id="keys" aria-label="Keys" onkeydown="if (event.ctrlKey) document.title = 'Chord ' + event.key"></form>
+    <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">`,
+  "/greets": `<!doctype html><title>Greeting</title><script>alert("Welcome"); document.title = "Greeted";</script>`,
+  "/slow": `<!doctype html><title>Slow</title>
+    <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
+    <button id="later" onclick="setTimeout(() => { document.title = 'Settled'; }, 150)">Later</button>
+    <button id="late" onclick="setTimeout(() => alert('late news'), 800)">Late</button>
+    <button id="ask" onclick="const ok = confirm('Delete everything?'); alert(ok ? 'deleted' : 'kept'); document.title = ok ? 'Deleted' : 'Kept'">Ask</button>
+    <p>Width <span id="width"></span></p>
+    <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
+  "/html-drag": `<!doctype html><title>Drag</title>
+    <div id="card" draggable="true" style="width:60px;height:30px" ondragstart="event.dataTransfer.setData('text', 'card')">Card</div>
+    <div id="done" style="width:60px;height:30px;margin-top:40px" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>`,
   "/form": `<!doctype html><title>Form</title>
     <label>Name <input id="name"></label>
     <button id="save" onclick="document.title = 'Saved ' + document.getElementById('name').value">Save</button>
@@ -60,8 +85,21 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
   let title = "";
   let session: CDPSession | undefined;
   let attached = false;
+  const messageListeners = new Set<(event: unknown, method: string, params: unknown) => void>();
+  const openSession = async (): Promise<CDPSession> => {
+    if (session !== undefined) return session;
+    const opened = await page.context().newCDPSession(page);
+    opened.on("Page.javascriptDialogOpening", (params) => {
+      for (const listener of messageListeners) listener({}, "Page.javascriptDialogOpening", params);
+    });
+    session = opened;
+    return opened;
+  };
+  // Electron answers no dialog by itself here; leave each one to the host's
+  // protocol session, as the app's own view would.
+  page.on("dialog", () => undefined);
   const refreshTitle = async () => {
-    title = await page.title().catch(() => title);
+    title = await page.evaluate(() => document.title).catch(() => title);
   };
   const view: BrowserSurfaceViewPort = {
     setBounds: () => undefined,
@@ -84,12 +122,17 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
         },
         isAttached: () => attached,
         sendCommand: async (method, parameters) => {
-          session ??= await page.context().newCDPSession(page);
-          const answer = await session.send(method as "Runtime.evaluate", parameters as never);
+          const answer = await (
+            await openSession()
+          ).send(method as "Runtime.evaluate", parameters as never);
           await refreshTitle();
           return answer;
         },
+        on: (_event, listener) => void messageListeners.add(listener),
+        removeListener: (_event, listener) => void messageListeners.delete(listener),
       },
+      enableDeviceEmulation: (parameters) => void page.setViewportSize(parameters.viewSize),
+      disableDeviceEmulation: () => void page.setViewportSize({ width: 1280, height: 720 }),
       executeJavaScriptInIsolatedWorld: async (_world, scripts) => {
         const answer = await page.evaluate(scripts[0]?.code ?? "undefined");
         await refreshTitle();
@@ -132,9 +175,19 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
   return { view, page };
 }
 
-async function surface(path: string) {
-  const { view, page } = await pageView();
-  const host = createBrowserSurfaceHost({ createView: () => view });
+async function surface(path: string, views = 1) {
+  const pool = await Promise.all(Array.from({ length: views }, () => pageView()));
+  const page = pool[0]?.page;
+  if (page === undefined) throw new Error("No page.");
+  let next = 0;
+  const host = createBrowserSurfaceHost({
+    createView: () => {
+      const created = pool[next]?.view;
+      next += 1;
+      if (created === undefined) throw new Error("No page left for another tab.");
+      return created;
+    },
+  });
   const contextId = crypto.randomUUID();
   await host.createContext({
     contextId,
@@ -147,8 +200,8 @@ async function surface(path: string) {
       sessionTimeoutMs: 300_000,
     },
   });
-  await host.act(contextId, { kind: "navigate", target: `${origin}${path}` });
-  return { host, contextId, page };
+  const opened = await host.act(contextId, { kind: "navigate", target: `${origin}${path}` });
+  return { host, contextId, page, opened };
 }
 
 function entry(
@@ -229,6 +282,145 @@ describe.skipIf(chrome === undefined)(
       expect(pictured.extractedText).toBeUndefined();
       const preview = await host.peek(contextId);
       expect(preview.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+      await page.close();
+    });
+
+    it("hovers, chooses an option, drags, presses chords and Enter, and uploads a file", async () => {
+      const { host, contextId, page } = await surface("/controls");
+      await host.act(contextId, { kind: "hover", target: "#menu" });
+      expect(await page.isVisible("#item")).toBe(true);
+      expect(
+        (await host.act(contextId, { kind: "select", target: "#size", value: "Large" })).title,
+      ).toBe("Size l");
+      await expect(
+        host.act(contextId, { kind: "select", target: "#size", value: "Huge" }),
+      ).rejects.toThrow(/no option/);
+      expect(
+        (await host.act(contextId, { kind: "drag", target: "#card", destination: "#done" })).title,
+      ).toBe("Dropped card");
+      await host.act(contextId, { kind: "click", target: "#keys" });
+      expect((await host.act(contextId, { kind: "press", value: "Control+B" })).title).toBe(
+        "Chord b",
+      );
+      expect((await host.act(contextId, { kind: "press", value: "Enter" })).title).toBe(
+        "Submitted",
+      );
+      const folder = await mkdtemp(join(tmpdir(), "octant-upload-"));
+      try {
+        await writeFile(join(folder, "notes.txt"), "hello");
+        const sent = await host.act(contextId, {
+          kind: "upload",
+          target: "#file",
+          files: [join(folder, "notes.txt")],
+        });
+        expect(sent.title).toBe("Attached notes.txt 5");
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+      await page.close();
+    });
+
+    it("opens, lists, switches, and closes the agent's tabs inside the allowed origin", async () => {
+      const { host, contextId, page } = await surface("/form", 3);
+      const opened = await host.act(contextId, { kind: "tab-open", target: `${origin}/login` });
+      expect(opened.tabs).toEqual([
+        { tabId: "t1", url: `${origin}/form`, title: "Form", active: false },
+        { tabId: "t2", url: `${origin}/login`, title: "Sign in", active: true },
+      ]);
+      expect((await host.act(contextId, { kind: "tab-select", tabId: "t1" })).title).toBe("Form");
+      const closed = await host.act(contextId, { kind: "tab-close", tabId: "t2" });
+      expect(closed.tabs).toEqual([
+        { tabId: "t1", url: `${origin}/form`, title: "Form", active: true },
+      ]);
+      await expect(host.act(contextId, { kind: "tab-close", tabId: "t1" })).rejects.toThrow(
+        /only tab/,
+      );
+      await expect(
+        host.act(contextId, { kind: "tab-open", target: "https://example.com/" }),
+      ).rejects.toThrow(/allowlist/);
+      await page.close();
+    });
+
+    it("drags so a page listening for HTML drag and drop sees the drop too", async () => {
+      const { host, contextId, page } = await surface("/html-drag");
+      const dragged = await host.act(contextId, {
+        kind: "drag",
+        target: "#card",
+        destination: "#done",
+      });
+      expect(dragged.title).toBe("Dropped card");
+      await page.close();
+    });
+
+    it("waits for conditions, settles after an action, answers dialogs, and resizes", async () => {
+      const { host, contextId, page } = await surface("/slow");
+      await host.act(contextId, { kind: "click", target: "#go" });
+      await host.act(contextId, {
+        kind: "wait",
+        waitFor: {
+          conditions: [
+            { kind: "text", text: "Saved at last", present: true },
+            { kind: "element", target: "#go", state: "disabled" },
+          ],
+          match: "all",
+          timeoutMs: 5_000,
+        },
+      });
+      await expect(
+        host.act(contextId, {
+          kind: "wait",
+          waitFor: {
+            conditions: [{ kind: "text", text: "Never there", present: true }],
+            match: "all",
+            timeoutMs: 300,
+          },
+        }),
+      ).rejects.toThrow(/timed out after 300 ms/);
+      expect((await host.act(contextId, { kind: "click", target: "#later" })).title).toBe(
+        "Settled",
+      );
+      const asked = await host.act(contextId, { kind: "click", target: "#ask" });
+      expect(asked.title).toBe("Kept");
+      expect(asked.dialogs).toEqual([
+        { type: "confirm", message: "Delete everything?", answer: "dismissed" },
+        { type: "alert", message: "kept", answer: "accepted" },
+      ]);
+      const narrow = await host.act(contextId, {
+        kind: "resize",
+        viewport: { width: 390, height: 844 },
+        include: ["text"],
+      });
+      expect(narrow.extractedText).toContain("Width 390");
+      const restored = await host.act(contextId, { kind: "resize", include: ["text"] });
+      expect(restored.extractedText).toContain("Width 1280");
+      await page.close();
+    });
+
+    it("answers a dialog the very first page raises as it loads, and one a new tab raises", async () => {
+      const { host, contextId, page, opened } = await surface("/greets", 3);
+      expect(opened.dialogs).toEqual([{ type: "alert", message: "Welcome", answer: "accepted" }]);
+      expect(opened.title).toBe("Greeted");
+      const tabs = await host.act(contextId, { kind: "tab-open", target: `${origin}/greets` });
+      expect(tabs.dialogs).toEqual([{ type: "alert", message: "Welcome", answer: "accepted" }]);
+      expect(tabs.tabs?.[1]).toMatchObject({ title: "Greeted", active: true });
+      await page.close();
+    });
+
+    it("reports a dialog answered during an action that then failed with the next answer", async () => {
+      const { host, contextId, page } = await surface("/slow");
+      await host.act(contextId, { kind: "click", target: "#late" });
+      await expect(
+        host.act(contextId, {
+          kind: "wait",
+          waitFor: {
+            conditions: [{ kind: "text", text: "Never there", present: true }],
+            match: "all",
+            timeoutMs: 2_000,
+          },
+        }),
+      ).rejects.toThrow(/timed out/);
+      const next = await host.act(contextId, { kind: "extract-text" });
+      expect(next.dialogs).toEqual([{ type: "alert", message: "late news", answer: "accepted" }]);
       await page.close();
     });
   },

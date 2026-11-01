@@ -23,6 +23,19 @@ export interface BrowserRuntimeObservation {
   readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
+  /** The page's own dialogs since the last action, as the fixed policy answered them. */
+  readonly dialogs?: ReadonlyArray<{
+    readonly type: "alert" | "confirm" | "prompt" | "beforeunload";
+    readonly message: string;
+    readonly answer: "accepted" | "dismissed";
+  }>;
+  /** Only a tab action fills this: the context's tabs as they now stand. */
+  readonly tabs?: ReadonlyArray<{
+    readonly tabId: string;
+    readonly url?: string;
+    readonly title?: string;
+    readonly active: boolean;
+  }>;
   /** Only the observe-diagnostics action fills these; see the contract. */
   readonly consoleErrors?: ReadonlyArray<{
     readonly text: string;
@@ -96,6 +109,17 @@ export class BrowserTargetStaleError extends Error {
 }
 
 /**
+ * A wait ran out its time before its conditions were met. The message says
+ * which were not, so the agent knows what to wait for differently.
+ */
+export class BrowserWaitTimedOutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BrowserWaitTimedOutError";
+  }
+}
+
+/**
  * A page asked for a stored Browser profile and this runtime cannot hold one.
  * Only the desktop app's own Browser keeps a profile's store, so a runtime
  * without it refuses instead of opening a headless copy that would disagree
@@ -144,7 +168,20 @@ export interface BrowserProfileStorePort {
  */
 export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
   Partial<
-    Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY" | "include">
+    Pick<
+      BrowserActionRequest,
+      | "target"
+      | "value"
+      | "point"
+      | "deltaX"
+      | "deltaY"
+      | "include"
+      | "destination"
+      | "files"
+      | "tabId"
+      | "waitFor"
+      | "viewport"
+    >
   > & {
     /**
      * Set when `target` came from a snapshot ref: the page must still be at the
@@ -153,6 +190,12 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
      * `BrowserTargetStaleError` before touching it.
      */
     readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
+    /** The same check for a `drag`'s drop target when it came from a ref. */
+    readonly destinationExpected?: {
+      readonly role: string;
+      readonly name: string;
+      readonly url: string;
+    };
   };
 
 export interface BrowserRuntimePort {

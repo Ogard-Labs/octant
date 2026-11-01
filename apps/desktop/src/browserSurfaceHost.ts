@@ -2,7 +2,16 @@ import { createHash } from "node:crypto";
 import {
   browserProfileKey,
   browserProfilePartition,
+  awaitQuietPage,
+  BROWSER_DIALOG_POLICY,
+  BROWSER_SETTLE_CAP_MS,
+  BROWSER_SETTLE_QUIET_MS,
+  browserPageConditions,
   browserRefStillMatches,
+  describeUnmetWait,
+  dialogType,
+  parseBrowserKeyChord,
+  waitSatisfied,
   formatBrowserPageSnapshot,
   MAX_BROWSER_SNAPSHOT_NODES,
   MAX_BROWSER_SNAPSHOT_REFS,
@@ -14,7 +23,9 @@ import {
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
+  DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
+  MAX_BROWSER_WAIT_MS,
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
   type BrowserActionRequest,
   type BrowserContextId,
@@ -133,7 +144,26 @@ export interface BrowserSurfaceViewPort {
       detach(): void;
       isAttached(): boolean;
       sendCommand(method: string, commandParams?: Record<string, unknown>): Promise<unknown>;
+      /** Protocol events, such as a page's dialog opening; Electron's debugger emits them. */
+      on?(
+        event: "message",
+        listener: (event: unknown, method: string, params: unknown) => void,
+      ): void;
+      removeListener?(
+        event: "message",
+        listener: (event: unknown, method: string, params: unknown) => void,
+      ): void;
     };
+    /** Electron's device emulation, which sizes the page without moving the view. */
+    enableDeviceEmulation?(parameters: {
+      readonly screenPosition: "desktop" | "mobile";
+      readonly screenSize: { readonly width: number; readonly height: number };
+      readonly viewPosition: { readonly x: number; readonly y: number };
+      readonly deviceScaleFactor: number;
+      readonly viewSize: { readonly width: number; readonly height: number };
+      readonly scale: number;
+    }): void;
+    disableDeviceEmulation?(): void;
     executeJavaScriptInIsolatedWorld(
       worldId: number,
       scripts: ReadonlyArray<{ readonly code: string }>,
@@ -226,6 +256,8 @@ interface OwnedSurface {
    * on write, oldest first out, so a page that logs in a loop cannot grow this
    * while the agent looks elsewhere.
    */
+  /** Dialogs answered during an action that then failed, owed to the next answer. */
+  unreportedDialogs: DialogReport[];
   consoleErrors: Array<{ text: string; url?: string }>;
   failedRequests: Array<{ url: string; method?: string; failure: string }>;
 }
@@ -248,6 +280,14 @@ export class BrowserNavigationBlockedError extends Error {
  * The element a snapshot ref named is gone or is no longer the element the
  * snapshot described, so the action was refused before it touched the page.
  */
+/** A wait ran out its time; the message names the conditions that never held. */
+export class BrowserWaitTimedOutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BrowserWaitTimedOutError";
+  }
+}
+
 export class BrowserTargetStaleError extends Error {
   constructor() {
     super("The element behind that ref changed since the snapshot.");
@@ -255,13 +295,46 @@ export class BrowserTargetStaleError extends Error {
   }
 }
 
+/** The actions after which the page is given a moment to settle before it is read. */
+const SETTLING_ACTIONS: ReadonlySet<string> = new Set([
+  "navigate",
+  "click",
+  "type",
+  "press",
+  "scroll",
+  "hover",
+  "select",
+  "drag",
+  "upload",
+  "resize",
+]);
+
 /** What the server asks a page to do; it carries no authority of its own. */
 export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
   Partial<
-    Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY" | "include">
+    Pick<
+      BrowserActionRequest,
+      | "target"
+      | "value"
+      | "point"
+      | "deltaX"
+      | "deltaY"
+      | "include"
+      | "destination"
+      | "files"
+      | "tabId"
+      | "waitFor"
+      | "viewport"
+    >
   > & {
     /** The role and name a snapshot ref recorded; the target must still match. */
     readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
+    /** The same for a drag's drop target. */
+    readonly destinationExpected?: {
+      readonly role: string;
+      readonly name: string;
+      readonly url: string;
+    };
   };
 
 export interface BrowserSurfaceRuntimeObservation {
@@ -272,6 +345,14 @@ export interface BrowserSurfaceRuntimeObservation {
   /** Only a snapshot read fills these: the outline, and what each ref names. */
   readonly snapshot?: string;
   readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
+  readonly dialogs?: ReadonlyArray<DialogReport>;
+  /** Only a tab action fills this, with the ids the agent knows tabs by. */
+  readonly tabs?: ReadonlyArray<{
+    readonly tabId: string;
+    readonly url?: string;
+    readonly title?: string;
+    readonly active: boolean;
+  }>;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Only an observe-diagnostics read fills these; each read clears what it returns. */
@@ -535,6 +616,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         control: "idle",
         shellWindow: undefined,
         blockedNavigationUrl: undefined,
+        unreportedDialogs: [],
         consoleErrors: [],
         failedRequests: [],
       };
@@ -610,152 +692,250 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         owned.control = "agent";
         owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
+        // Dialogs an earlier action answered before it failed come first.
+        const dialogs: DialogReport[] = owned.unreportedDialogs.splice(0);
+        const releaseDialogs = await guardDialogs(contentsView(owned), dialogs);
         try {
-          const contents = contentsView(owned).webContents;
-          // Reading or driving a page is authorized by the origin approval put
-          // on this context, and the page in front is not always one approval
-          // covered: the person can take their own view somewhere else, and
-          // tabs of a context share its session. Navigating is exempt because
-          // it reads nothing — its own target check is the guard — but its
-          // result is checked below, so a navigation that fails cannot leave
-          // the agent extracting the page it did not manage to leave.
-          if (request.kind !== "navigate") refuseUnapprovedPage(owned, contents);
-          if (request.expected !== undefined && request.target !== undefined) {
-            const found = await readPage(contentsView(owned), {
-              mode: "verify",
-              selector: request.target,
-            });
-            if (
-              found.mode !== "verify" ||
-              !browserRefStillMatches(request.expected, found.element, observedUrl(contents))
-            ) {
-              throw new BrowserTargetStaleError();
-            }
-          }
-          switch (request.kind) {
-            case "navigate": {
-              if (
-                request.target === undefined ||
-                !originAllowed(request.target, owned.policy.allowedOrigins)
-              ) {
-                throw new Error("Navigation target origin is not in the allowlist.");
-              }
-              try {
-                await contents.loadURL(normalizeUrl(request.target));
-              } catch (error) {
-                if (owned.blockedNavigationUrl === undefined) throw error;
-                throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
-              }
-              break;
-            }
-            case "click":
-              await clickTarget(contentsView(owned), request.target, request.point);
-              break;
-            case "type":
-              await typeIntoTarget(
-                contentsView(owned),
-                request.target,
-                request.value,
-                owned.policy.credentialFieldProtection,
-              );
-              break;
-            case "press":
-              await pressFocusedTarget(
-                contentsView(owned),
-                request.value,
-                owned.policy.credentialFieldProtection,
-              );
-              break;
-            case "scroll":
-              await execute(
-                contentsView(owned),
-                `window.scrollBy({ left: ${request.deltaX ?? 0}, top: ${request.deltaY ?? 500}, behavior: 'smooth' });`,
-                true,
-              );
-              break;
-            case "extract-text":
-              break;
-            case "wait":
-              await waitForSelector(contentsView(owned), request.target);
-              break;
-            case "screenshot":
-              break;
-            case "snapshot":
-              // The outline is the whole answer: no picture and no page text,
-              // and a credential field in it is named, never valued.
+          const observed = await (async (): Promise<BrowserSurfaceRuntimeObservation> => {
+            const contents = contentsView(owned).webContents;
+            // Reading or driving a page is authorized by the origin approval put
+            // on this context, and the page in front is not always one approval
+            // covered: the person can take their own view somewhere else, and
+            // tabs of a context share its session. Navigating is exempt because
+            // it reads nothing — its own target check is the guard — but its
+            // result is checked below, so a navigation that fails cannot leave
+            // the agent extracting the page it did not manage to leave.
+            // A tab action reads no page: it names tabs and moves between them,
+            // so a front tab the person took elsewhere does not strand the agent.
+            if (request.kind !== "navigate" && !request.kind.startsWith("tab-")) {
               refuseUnapprovedPage(owned, contents);
-              return {
-                ...(contents.getURL() === ""
-                  ? {}
-                  : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
-                ...(contents.getTitle() === ""
-                  ? {}
-                  : { title: contents.getTitle().slice(0, 1_024) }),
-                ...(await snapshotOf(owned)),
-              };
-            case "observe-diagnostics":
-              // Handed over and cleared before any renderer work: a page that
-              // never committed has no document to evaluate, and that is when
-              // the failed request is the whole answer. The next read answers
-              // what happened since this one.
-              return {
-                consoleErrors: owned.consoleErrors.splice(0),
-                failedRequests: owned.failedRequests.splice(0),
-              };
-            case "close-tab":
-              await contents.loadURL("about:blank");
-              break;
-          }
-          refuseUnapprovedPage(owned, contents);
-          const include = new Set(request.include ?? []);
-          const wantsText = request.kind === "extract-text" || include.has("text");
-          // The body's text is always read, for the hash the server compares to
-          // say what changed; it is returned only when asked for.
-          const bodyText = await execute(
-            contentsView(owned),
-            "document.body?.innerText?.slice(0, 65536) ?? ''",
-          );
-          const text = typeof bodyText === "string" ? bodyText : "";
-          const selectedText =
-            wantsText && request.kind === "extract-text" && request.target !== undefined
-              ? await execute(
+            }
+            await refuseStaleTarget(contentsView(owned), request.target, request.expected);
+            await refuseStaleTarget(
+              contentsView(owned),
+              request.destination,
+              request.destinationExpected,
+            );
+            switch (request.kind) {
+              case "navigate": {
+                if (
+                  request.target === undefined ||
+                  !originAllowed(request.target, owned.policy.allowedOrigins)
+                ) {
+                  throw new Error("Navigation target origin is not in the allowlist.");
+                }
+                try {
+                  await contents.loadURL(normalizeUrl(request.target));
+                } catch (error) {
+                  if (owned.blockedNavigationUrl === undefined) throw error;
+                  throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
+                }
+                break;
+              }
+              case "click":
+                await clickTarget(contentsView(owned), request.target, request.point);
+                break;
+              case "type":
+                await typeIntoTarget(
                   contentsView(owned),
-                  `document.querySelector(${JSON.stringify(request.target)})?.innerText?.slice(0, 65536) ?? ''`,
-                )
-              : text;
-          const measuredViewport = await execute(
-            contentsView(owned),
-            "({ width: Math.round(window.innerWidth), height: Math.round(window.innerHeight) })",
-          );
-          const viewport = viewportSize(measuredViewport);
-          const sensitiveDocument = await hasSensitiveDocument(
-            contentsView(owned),
-            owned.policy.credentialFieldProtection,
-          );
-          // A picture only when one is asked for. The person's activity
-          // preview takes its own through peek, so an agent's click no longer
-          // pays for a capture nobody reads.
-          const screenshotDataUrl =
-            sensitiveDocument || (request.kind !== "screenshot" && !include.has("screenshot"))
-              ? undefined
-              : await captureScreenshot(contentsView(owned));
-          const outline = include.has("snapshot") ? await snapshotOf(owned) : {};
-          return {
-            ...outline,
-            ...(contents.getURL() === ""
-              ? {}
-              : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
-            ...(contents.getTitle() === "" ? {} : { title: contents.getTitle().slice(0, 1_024) }),
-            ...(sensitiveDocument
-              ? {}
-              : { contentHash: createHash("sha256").update(text, "utf8").digest("hex") }),
-            ...(!sensitiveDocument && wantsText
-              ? { extractedText: typeof selectedText === "string" ? selectedText : "" }
-              : {}),
-            ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
-            ...(viewport === undefined ? {} : { viewport }),
-          };
+                  request.target,
+                  request.value,
+                  owned.policy.credentialFieldProtection,
+                );
+                break;
+              case "press":
+                await pressFocusedTarget(
+                  contentsView(owned),
+                  request.value,
+                  owned.policy.credentialFieldProtection,
+                );
+                break;
+              case "scroll":
+                await execute(
+                  contentsView(owned),
+                  `window.scrollBy({ left: ${request.deltaX ?? 0}, top: ${request.deltaY ?? 500}, behavior: 'smooth' });`,
+                  true,
+                );
+                break;
+              case "extract-text":
+                break;
+              case "wait":
+                if (request.waitFor === undefined) {
+                  await waitForSelector(contentsView(owned), request.target);
+                } else {
+                  await waitForConditions(contentsView(owned), request.waitFor, signal);
+                }
+                break;
+              case "resize": {
+                const webContents = contentsView(owned).webContents;
+                if (request.viewport === undefined) {
+                  webContents.disableDeviceEmulation?.();
+                } else {
+                  webContents.enableDeviceEmulation?.({
+                    screenPosition: "desktop",
+                    screenSize: request.viewport,
+                    viewPosition: { x: 0, y: 0 },
+                    deviceScaleFactor: 0,
+                    viewSize: request.viewport,
+                    scale: 1,
+                  });
+                }
+                break;
+              }
+              case "hover":
+                await hoverTarget(contentsView(owned), request.target);
+                break;
+              case "select":
+                await selectOption(contentsView(owned), request.target, request.value);
+                break;
+              case "drag":
+                await dragTarget(contentsView(owned), request.target, request.destination);
+                break;
+              case "upload":
+                await uploadFiles(contentsView(owned), request.target, request.files);
+                break;
+              case "tab-list":
+                return agentTabs(owned);
+              case "tab-open": {
+                // The agent's own new tab: the same guards as every tab, and its
+                // page is reached through the same navigation admission, while
+                // the agent drives so nothing it reaches is granted as browsing.
+                if (owned.tabs.length >= owned.policy.maxConcurrentTabs) {
+                  throw new Error("Octant Browser context is already at its tab limit.");
+                }
+                if (
+                  request.target !== undefined &&
+                  !originAllowed(request.target, owned.policy.allowedOrigins)
+                ) {
+                  throw new Error("Navigation target origin is not in the allowlist.");
+                }
+                const tabId = `${String(contextId)}:${owned.nextTabOrdinal}`;
+                owned.nextTabOrdinal += 1;
+                const opened = openTabView(contextId, owned, tabId);
+                showTab(owned, opened);
+                // The new tab's own load can raise a dialog too.
+                const releaseTabDialogs = await guardDialogs(opened.view, dialogs);
+                try {
+                  await opened.view.webContents.loadURL(
+                    request.target === undefined ? "about:blank" : normalizeUrl(request.target),
+                  );
+                } catch (error) {
+                  if (owned.blockedNavigationUrl === undefined) throw error;
+                  throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
+                } finally {
+                  await releaseTabDialogs().catch(() => undefined);
+                }
+                refuseUnapprovedPage(owned, opened.view.webContents);
+                return agentTabs(owned);
+              }
+              case "tab-select": {
+                const chosen = owned.tabs.find((tab) => agentTabId(tab.tabId) === request.tabId);
+                if (chosen === undefined) throw new Error("Octant Browser tab is unknown.");
+                // The person's tab on a site no approval covers stays theirs.
+                refuseUnapprovedPage(owned, chosen.view.webContents);
+                showTab(owned, chosen);
+                return agentTabs(owned);
+              }
+              case "tab-close": {
+                const chosen = owned.tabs.find((tab) => agentTabId(tab.tabId) === request.tabId);
+                if (chosen === undefined) throw new Error("Octant Browser tab is unknown.");
+                if (owned.tabs.length === 1) {
+                  throw new Error("Octant Browser cannot close a context's only tab.");
+                }
+                forgetTab(String(contextId), owned, chosen);
+                return agentTabs(owned);
+              }
+              case "screenshot":
+                break;
+              case "snapshot":
+                // The outline is the whole answer: no picture and no page text,
+                // and a credential field in it is named, never valued.
+                refuseUnapprovedPage(owned, contents);
+                return {
+                  ...(contents.getURL() === ""
+                    ? {}
+                    : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
+                  ...(contents.getTitle() === ""
+                    ? {}
+                    : { title: contents.getTitle().slice(0, 1_024) }),
+                  ...(await snapshotOf(owned)),
+                };
+              case "observe-diagnostics":
+                // Handed over and cleared before any renderer work: a page that
+                // never committed has no document to evaluate, and that is when
+                // the failed request is the whole answer. The next read answers
+                // what happened since this one.
+                return {
+                  consoleErrors: owned.consoleErrors.splice(0),
+                  failedRequests: owned.failedRequests.splice(0),
+                };
+              case "close-tab":
+                await contents.loadURL("about:blank");
+                break;
+            }
+            if (SETTLING_ACTIONS.has(request.kind)) await settlePage(contentsView(owned));
+            refuseUnapprovedPage(owned, contents);
+            const include = new Set(request.include ?? []);
+            const wantsText = request.kind === "extract-text" || include.has("text");
+            // The body's text is always read, for the hash the server compares to
+            // say what changed; it is returned only when asked for.
+            const bodyText = await execute(
+              contentsView(owned),
+              "document.body?.innerText?.slice(0, 65536) ?? ''",
+            );
+            const text = typeof bodyText === "string" ? bodyText : "";
+            const selectedText =
+              wantsText && request.kind === "extract-text" && request.target !== undefined
+                ? await execute(
+                    contentsView(owned),
+                    `document.querySelector(${JSON.stringify(request.target)})?.innerText?.slice(0, 65536) ?? ''`,
+                  )
+                : text;
+            const measuredViewport = await execute(
+              contentsView(owned),
+              "({ width: Math.round(window.innerWidth), height: Math.round(window.innerHeight) })",
+            );
+            const viewport = viewportSize(measuredViewport);
+            const sensitiveDocument = await hasSensitiveDocument(
+              contentsView(owned),
+              owned.policy.credentialFieldProtection,
+            );
+            // A picture only when one is asked for. The person's activity
+            // preview takes its own through peek, so an agent's click no longer
+            // pays for a capture nobody reads.
+            const screenshotDataUrl =
+              sensitiveDocument || (request.kind !== "screenshot" && !include.has("screenshot"))
+                ? undefined
+                : await captureScreenshot(contentsView(owned));
+            const outline = include.has("snapshot") ? await snapshotOf(owned) : {};
+            return {
+              ...outline,
+              ...(contents.getURL() === ""
+                ? {}
+                : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
+              ...(contents.getTitle() === "" ? {} : { title: contents.getTitle().slice(0, 1_024) }),
+              ...(sensitiveDocument
+                ? {}
+                : { contentHash: createHash("sha256").update(text, "utf8").digest("hex") }),
+              ...(!sensitiveDocument && wantsText
+                ? { extractedText: typeof selectedText === "string" ? selectedText : "" }
+                : {}),
+              ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
+              ...(viewport === undefined ? {} : { viewport }),
+            };
+          })();
+          // Every dialog the page raised during the action is reported once,
+          // with how the fixed policy answered it.
+          return dialogs.length === 0 ? observed : { ...observed, dialogs: dialogs.slice(0, 8) };
+        } catch (error) {
+          // The action failed after the page raised a dialog: the answer the
+          // policy gave is reported with the next action that succeeds.
+          owned.unreportedDialogs.push(...dialogs.slice(-8));
+          throw error;
         } finally {
+          // Released before the surface is handed back, whatever the action did;
+          // a page that went away with its tab has nothing left to detach.
+          await releaseDialogs().catch(() => undefined);
           owned.control = "idle";
           publish(contextId, owned);
         }
@@ -1333,21 +1513,275 @@ async function pressFocusedTarget(
   protectCredentials: boolean,
 ): Promise<void> {
   if (key === undefined) throw new Error("Press requires a key.");
-  await targetGeometry(view, ":focus", undefined, true, protectCredentials);
+  const chord = parseBrowserKeyChord(key);
+  if (chord === undefined) throw new Error("Press requires a supported key.");
+  // A key goes to whatever has focus, a field or the page itself; only a
+  // focused credential field refuses it.
+  if (protectCredentials) {
+    const sensitive = await execute(
+      view,
+      `(() => {
+      const element = document.activeElement;
+      if (!(element instanceof HTMLElement) || element === document.body) return false;
+      const hint = [element.getAttribute("type"), element.getAttribute("autocomplete"), element.getAttribute("name"), element.id, element.getAttribute("aria-label")].join(" ").toLowerCase();
+      return /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token|api.?key)/.test(hint);
+    })()`,
+    );
+    if (sensitive === true) {
+      throw new Error("Octant will not type into a sensitive or credential field.");
+    }
+  }
+  const event = keyEvent(chord);
+  // On macOS the editing shortcuts are the system's, not the page's: a Command
+  // chord reaches a text field as the editing command it stands for.
+  const command =
+    process.platform === "darwin" && chord.modifiers.includes("Meta")
+      ? MAC_EDITING_COMMANDS[
+          `${chord.modifiers.includes("Shift") ? "Shift+" : ""}${chord.key.toLowerCase()}`
+        ]
+      : undefined;
   await withDebugger(view, async (send) => {
-    const shifted = key === "Shift+Tab";
-    const normalized = shifted ? "Tab" : key;
     await send("Input.dispatchKeyEvent", {
       type: "keyDown",
-      key: normalized,
-      ...(shifted ? { modifiers: 8 } : {}),
+      ...event,
+      ...(command === undefined ? {} : { commands: [command] }),
     });
-    await send("Input.dispatchKeyEvent", {
-      type: "keyUp",
-      key: normalized,
-      ...(shifted ? { modifiers: 8 } : {}),
+    const { text: _text, ...released } = event;
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...released });
+  });
+}
+
+const MODIFIER_BITS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 } as const;
+const MAC_EDITING_COMMANDS: Readonly<Record<string, string>> = {
+  a: "selectAll",
+  c: "copy",
+  x: "cut",
+  v: "paste",
+  z: "undo",
+  "Shift+z": "redo",
+};
+const NAMED_KEYS: Readonly<Record<string, { code: string; keyCode: number; text?: string }>> = {
+  Enter: { code: "Enter", keyCode: 13, text: "\r" },
+  Tab: { code: "Tab", keyCode: 9 },
+  Backspace: { code: "Backspace", keyCode: 8 },
+  Delete: { code: "Delete", keyCode: 46 },
+  Escape: { code: "Escape", keyCode: 27 },
+  ArrowUp: { code: "ArrowUp", keyCode: 38 },
+  ArrowDown: { code: "ArrowDown", keyCode: 40 },
+  ArrowLeft: { code: "ArrowLeft", keyCode: 37 },
+  ArrowRight: { code: "ArrowRight", keyCode: 39 },
+  Home: { code: "Home", keyCode: 36 },
+  End: { code: "End", keyCode: 35 },
+  PageUp: { code: "PageUp", keyCode: 33 },
+  PageDown: { code: "PageDown", keyCode: 34 },
+  Space: { code: "Space", keyCode: 32, text: " " },
+};
+
+/**
+ * What Chromium's input protocol needs to deliver one key as a real keyboard
+ * would: the key, its physical code, the legacy key code pages still read, the
+ * modifier bits, and the text it types when no command modifier is held.
+ */
+function keyEvent(chord: {
+  readonly modifiers: ReadonlyArray<keyof typeof MODIFIER_BITS>;
+  readonly key: string;
+}): {
+  readonly key: string;
+  readonly code: string;
+  readonly windowsVirtualKeyCode: number;
+  readonly modifiers: number;
+  readonly text?: string;
+} {
+  const modifiers = chord.modifiers.reduce((bits, modifier) => bits | MODIFIER_BITS[modifier], 0);
+  const commanded = chord.modifiers.some((modifier) => modifier !== "Shift");
+  const named = NAMED_KEYS[chord.key];
+  if (named !== undefined) {
+    return {
+      key: chord.key === "Space" ? " " : chord.key,
+      code: named.code,
+      windowsVirtualKeyCode: named.keyCode,
+      modifiers,
+      ...(named.text === undefined || commanded ? {} : { text: named.text }),
+    };
+  }
+  const fn = /^F([1-9]|1[0-2])$/.exec(chord.key);
+  if (fn?.[1] !== undefined) {
+    return {
+      key: chord.key,
+      code: chord.key,
+      windowsVirtualKeyCode: 111 + Number(fn[1]),
+      modifiers,
+    };
+  }
+  const upper = chord.key.toUpperCase();
+  const shifted = chord.modifiers.includes("Shift");
+  const key = /[A-Z]/.test(upper) ? (shifted ? upper : chord.key.toLowerCase()) : chord.key;
+  return {
+    key,
+    code: /[0-9]/.test(chord.key) ? `Digit${chord.key}` : `Key${upper}`,
+    windowsVirtualKeyCode: upper.charCodeAt(0),
+    modifiers,
+    ...(commanded ? {} : { text: key }),
+  };
+}
+
+async function hoverTarget(view: BrowserSurfaceViewPort, selector: string | undefined) {
+  const point = await targetGeometry(view, selector, undefined, false, false);
+  await withDebugger(view, async (send) => {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
+  });
+}
+
+/**
+ * Choose one option of a list by its value or its label, and tell the page the
+ * way a person's choice would. The option is set in the isolated world, which
+ * shares the document with the page; the events are what a page listens for.
+ */
+async function selectOption(
+  view: BrowserSurfaceViewPort,
+  selector: string | undefined,
+  choice: string | undefined,
+) {
+  if (selector === undefined || choice === undefined) {
+    throw new Error("Select requires a list and an option.");
+  }
+  const chosen = await execute(
+    view,
+    `(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!(element instanceof HTMLSelectElement)) return "not-a-list";
+    const choice = ${JSON.stringify(choice)};
+    const option = Array.from(element.options).find((candidate) => candidate.value === choice || candidate.label === choice);
+    if (option === undefined) return "no-option";
+    element.value = option.value;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    return "chosen";
+  })()`,
+  );
+  if (chosen === "not-a-list") throw new Error("Browser target is not a list.");
+  if (chosen !== "chosen") throw new Error("The list has no option with that value or label.");
+}
+
+/**
+ * Press on one element, move in steps, and release on another: the pointer
+ * path a person's drag takes, so a page that follows pointer or mouse events
+ * sees a drag.
+ */
+async function dragTarget(
+  view: BrowserSurfaceViewPort,
+  source: string | undefined,
+  destination: string | undefined,
+) {
+  const from = await targetGeometry(view, source, undefined, false, false);
+  const to = await targetGeometry(view, destination, undefined, false, false);
+  await withDebugger(view, async (send) => {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y });
+    await send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+      x: from.x,
+      y: from.y,
+    });
+    for (let step = 1; step <= 10; step += 1) {
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        button: "left",
+        buttons: 1,
+        x: from.x + ((to.x - from.x) * step) / 10,
+        y: from.y + ((to.y - from.y) * step) / 10,
+      });
+    }
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+      x: to.x,
+      y: to.y,
     });
   });
+  await waitForPageSettled(view);
+}
+
+/** Put files into one file field through Chromium's own file chooser path. */
+async function uploadFiles(
+  view: BrowserSurfaceViewPort,
+  selector: string | undefined,
+  files: ReadonlyArray<string> | undefined,
+) {
+  if (selector === undefined || files === undefined || files.length === 0) {
+    throw new Error("Upload requires a file field and files.");
+  }
+  const isFileField = await execute(
+    view,
+    `document.querySelector(${JSON.stringify(selector)}) instanceof HTMLInputElement && document.querySelector(${JSON.stringify(selector)}).type === "file"`,
+  );
+  if (isFileField !== true) throw new Error("Browser target is not a file field.");
+  await withDebugger(view, async (send) => {
+    const document = (await send("DOM.getDocument", { depth: 0 })) as {
+      readonly root?: { readonly nodeId?: number };
+    };
+    const rootId = document.root?.nodeId;
+    if (rootId === undefined) throw new Error("Browser page has no document.");
+    const found = (await send("DOM.querySelector", { nodeId: rootId, selector })) as {
+      readonly nodeId?: number;
+    };
+    if (found.nodeId === undefined || found.nodeId === 0) {
+      throw new Error("Browser target was not found.");
+    }
+    await send("DOM.setFileInputFiles", { files: [...files], nodeId: found.nodeId });
+  });
+}
+
+/** The id the agent knows a tab by: `t` and the tab's ordinal in its context. */
+function agentTabId(tabId: string): string {
+  return `t${tabId.slice(tabId.lastIndexOf(":") + 1)}`;
+}
+
+/** The context's tabs as the agent sees them, after a tab action. */
+function agentTabs(owned: OwnedSurface): BrowserSurfaceRuntimeObservation {
+  const front = contentsView(owned).webContents;
+  const frontShown =
+    front.getURL() !== "" &&
+    front.getURL() !== "about:blank" &&
+    originAllowed(front.getURL(), owned.policy.allowedOrigins);
+  return {
+    ...(frontShown ? { url: redactedObservationUrl(front.getURL()).slice(0, 4_096) } : {}),
+    ...(frontShown && front.getTitle() !== "" ? { title: front.getTitle().slice(0, 1_024) } : {}),
+    tabs: owned.tabs.map((tab) => {
+      const url = tab.view.webContents.getURL();
+      // A tab the person took to a site approval never covered is theirs:
+      // the agent learns that it exists, not where it is or what it shows.
+      const shown =
+        url !== "" && url !== "about:blank" && originAllowed(url, owned.policy.allowedOrigins);
+      const title = tab.view.webContents.getTitle();
+      return {
+        tabId: agentTabId(tab.tabId),
+        ...(shown ? { url: redactedObservationUrl(url).slice(0, 4_096) } : {}),
+        ...(shown && title !== "" ? { title: title.slice(0, 1_024) } : {}),
+        active: tab.tabId === owned.activeTabId,
+      };
+    }),
+  };
+}
+
+/** Refuse a ref whose page moved on or whose element is no longer the one named. */
+async function refuseStaleTarget(
+  view: BrowserSurfaceViewPort,
+  selector: string | undefined,
+  expected: BrowserSurfaceAction["expected"],
+): Promise<void> {
+  if (expected === undefined || selector === undefined) return;
+  const found = await readPage(view, { mode: "verify", selector });
+  if (
+    found.mode !== "verify" ||
+    !browserRefStillMatches(expected, found.element, observedUrl(view.webContents))
+  ) {
+    throw new BrowserTargetStaleError();
+  }
 }
 
 function validPoint(value: unknown): { readonly x: number; readonly y: number } {
@@ -1408,6 +1842,119 @@ async function dispatchTrustedClick(
   });
 }
 
+/**
+ * Debuggers the agent's own action attached to, so the action's input and
+ * capture reuse the attachment instead of mistaking it for someone else's.
+ */
+const agentDebuggers = new WeakSet<object>();
+
+interface DialogReport {
+  readonly type: "alert" | "confirm" | "prompt" | "beforeunload";
+  readonly message: string;
+  readonly answer: "accepted" | "dismissed";
+}
+
+/**
+ * Answer the page's own dialogs by the fixed policy for as long as an agent's
+ * action runs, and record each one. A dialog left open would hold the page,
+ * and the agent behind it, until a person found it. A debugger someone else
+ * attached (developer tools) is left alone and the page's dialogs stay theirs.
+ */
+async function guardDialogs(
+  view: BrowserSurfaceViewPort,
+  reports: DialogReport[],
+): Promise<() => Promise<void>> {
+  const client = view.webContents.debugger;
+  // A page that has not loaded yet is guarded too: its first load is when a
+  // dialog most often opens.
+  if (client.isAttached() || client.on === undefined) return async () => undefined;
+  try {
+    client.attach("1.3");
+  } catch {
+    return async () => undefined;
+  }
+  agentDebuggers.add(client);
+  const listener = (_event: unknown, method: string, params: unknown) => {
+    if (method !== "Page.javascriptDialogOpening") return;
+    const opened = (params ?? {}) as { readonly type?: unknown; readonly message?: unknown };
+    const type = dialogType(typeof opened.type === "string" ? opened.type : "alert");
+    const answer = BROWSER_DIALOG_POLICY[type];
+    if (reports.length < 8) {
+      reports.push({
+        type,
+        message: (typeof opened.message === "string" ? opened.message : "").slice(0, 512),
+        answer,
+      });
+    }
+    void client
+      .sendCommand("Page.handleJavaScriptDialog", { accept: answer === "accepted" })
+      .catch(() => undefined);
+  };
+  client.on("message", listener);
+  // Bounded: a view with no document yet may answer late, and the guard must
+  // never hold the action it exists to keep moving.
+  await Promise.race([
+    client.sendCommand("Page.enable").catch(() => undefined),
+    new Promise((resolve) => setTimeout(resolve, 1_000)),
+  ]);
+  return async () => {
+    client.removeListener?.("message", listener);
+    agentDebuggers.delete(client);
+    if (client.isAttached()) client.detach();
+  };
+}
+
+/**
+ * Check a wait's conditions until they hold or its time runs out, never more
+ * than the hard limit the contract sets.
+ */
+async function waitForConditions(
+  view: BrowserSurfaceViewPort,
+  waitFor: NonNullable<BrowserSurfaceAction["waitFor"]>,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const conditions = browserPageConditions(waitFor);
+  const timeoutMs = Math.min(waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS, MAX_BROWSER_WAIT_MS);
+  const deadline = Date.now() + timeoutMs;
+  let met: ReadonlyArray<boolean> = conditions.map(() => false);
+  while (true) {
+    throwIfAborted(signal);
+    try {
+      // One check never outlives the wait: a page stuck in its own script
+      // would otherwise hold the loop past its deadline.
+      const checked = await Promise.race([
+        readPage(view, { mode: "check", conditions }),
+        new Promise<undefined>((resolve) =>
+          setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())),
+        ),
+      ]);
+      if (checked?.mode === "check") met = checked.met;
+    } catch {
+      // A page between documents cannot be read; the next check will be.
+    }
+    if (waitSatisfied(waitFor.match, met)) return;
+    if (Date.now() >= deadline) {
+      throw new BrowserWaitTimedOutError(describeUnmetWait(timeoutMs, conditions, met));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+/**
+ * Give the page a moment to finish what an action started: its load, then a
+ * short window in which the document stops changing, bounded either way.
+ */
+async function settlePage(view: BrowserSurfaceViewPort): Promise<void> {
+  await waitForPageSettled(view);
+  await execute(
+    view,
+    `(${awaitQuietPage.toString()})(${JSON.stringify({
+      quietMs: BROWSER_SETTLE_QUIET_MS,
+      capMs: BROWSER_SETTLE_CAP_MS,
+    })})`,
+  ).catch(() => undefined);
+}
+
 async function withDebugger(
   view: BrowserSurfaceViewPort,
   action: (
@@ -1415,6 +1962,10 @@ async function withDebugger(
   ) => Promise<void>,
 ): Promise<void> {
   const client = view.webContents.debugger;
+  if (client.isAttached() && agentDebuggers.has(client)) {
+    await action((method, parameters) => client.sendCommand(method, parameters));
+    return;
+  }
   if (client.isAttached()) throw new Error("Browser automation control is already in use.");
   client.attach("1.3");
   try {
@@ -1425,7 +1976,7 @@ async function withDebugger(
 }
 
 async function waitForPageSettled(view: BrowserSurfaceViewPort): Promise<void> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + BROWSER_SETTLE_CAP_MS;
   while (view.webContents.isLoading() && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
@@ -1549,7 +2100,9 @@ async function waitForSelector(
       return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error("Timed out waiting for Browser target.");
+  throw new BrowserWaitTimedOutError(
+    "The wait timed out after 10000 ms: the element never appeared.",
+  );
 }
 
 /** What the observation contract carries for a picture, data URL included. */
@@ -1597,9 +2150,10 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
   // captures its view directly instead of a compositor surface it does not
   // have.
   const client = view.webContents.debugger;
-  if (client.isAttached()) return undefined;
+  const ours = agentDebuggers.has(client);
+  if (client.isAttached() && !ours) return undefined;
   try {
-    client.attach("1.3");
+    if (!ours) client.attach("1.3");
     const metrics = (await client.sendCommand("Page.getLayoutMetrics")) as
       | {
           readonly cssLayoutViewport?: {
@@ -1635,6 +2189,6 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
   } catch {
     return undefined;
   } finally {
-    if (client.isAttached()) client.detach();
+    if (!ours && client.isAttached()) client.detach();
   }
 }

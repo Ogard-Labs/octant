@@ -10,9 +10,10 @@ approval covers
 and [Browser captures](browser-captures.md) owns which screenshots a thread
 keeps.
 
-Status: the page snapshot, element refs, and short results are built. More
-actions, batched steps, richer waits, dialogs and viewport size, the sign-in
-handoff, and fuller diagnostics are allowed; not built yet.
+Status: the page snapshot, element refs, short results, the actions below
+(hover, select, drag, key chords, upload, tabs), batched steps, waits, settling,
+dialogs, and viewport size are built. The sign-in handoff and fuller
+diagnostics are allowed; not built yet.
 
 ## One tool for every provider
 
@@ -104,22 +105,135 @@ handoff, and fuller diagnostics are allowed; not built yet.
 
 ## Actions
 
-Allowed; not built yet. `hover`, `select`, `drag`, key chords, `upload`, and
-tabs (list, open, switch, close). Upload sends files only from the thread's
-workspace, refuses symlinks, and asks the person each time. Downloads stay
-blocked.
+- `hover` moves the pointer over an element, for menus that open on hover.
+- `select` chooses one option of a list by its value or its label. A list with
+  no such option refuses at once instead of waiting.
+- `drag` presses on one element and releases on another (`toRef` or
+  `toSelector`); both ends are checked like a ref when they came from one. The
+  desktop Browser moves the pointer in steps, which pages that follow pointer
+  events and pages that use the HTML drag events both see as a drop.
+- `press` takes a named key, a letter, a digit, or F1 to F12, alone or with
+  `Control`, `Alt`, `Shift`, and `Meta` (each at most once): `Control+A`,
+  `Shift+ArrowDown`. A letter reaches the page as a keyboard sends it: lower
+  case unless Shift is held. A focused credential field still refuses every
+  key.
+- Tabs: `tab-list` names the context's tabs `t1`, `t2`, and so on, with the one
+  in front; `tab-open` opens a tab, at most the context's tab limit, optionally
+  at a URL, which must pass the same origin admission as a navigation;
+  `tab-switch` brings one to the front, and `tab-close` closes one but never the
+  last. Every other operation acts on the tab in front. A tab action drops the
+  snapshot's refs. On the desktop Browser the person sees the tab the agent
+  brings forward. A page's own popup is still refused or closed. A tab that
+  lands outside the allowed origins, by a redirect too, is left for a blank
+  page and the action is refused.
+- On the desktop Browser the person's own tabs share the context. A tab the
+  person took to a site no approval covers is listed without its address or
+  title; the agent cannot switch to it, read it, or act on it, and with it in
+  front the agent can still list tabs and switch to another. On the headless
+  Browser, a tab that followed a redirect off the allowed origins after its own
+  action is sent to a blank page before it is listed.
+- A paired device may hover and list tabs. It may not choose an option, drag,
+  upload, or open, switch, or close a tab, as it may not navigate or type
+  ([Architecture: remote access](../architecture.md#security-and-authority)).
+
+### Upload
+
+A file leaves this computer through a page only from the thread's workspace and
+only after the person approves it.
+
+- `upload` puts files into one file field. `files` names them relative to the
+  thread's workspace: the Work thread's Project folder, or the Code thread's
+  checkout. An absolute path, a path that climbs out, and a path that is not a
+  plain file are refused before anyone is asked.
+- A symbolic link is refused, at the file and anywhere between the workspace
+  and the file: the file's canonical path must be the path named.
+- At most 5 files, each at most 25 MB.
+- The host copies each checked file into a private temporary folder before it
+  asks, reading it through a descriptor that does not follow a link and that
+  must still be the file it checked, and the page receives the copies. A file
+  swapped for a link while the person reads the question is therefore never
+  what is sent. A page reads an attached file when its form is sent, often in
+  a later action, so the copies stay until the page's browsing context closes
+  (at most 8 uploads' worth per context, the oldest deleted first), and are
+  deleted then, or at once if the upload never reached the page.
+- The person is asked every time, naming each file with its size and the site:
+  "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
+  covers those files to that site once. It is never remembered, so the card has
+  no "Always allow", and it is asked at every access level, Full access
+  included, as the first Browser action on a site is. Work asks in the thread's
+  Browser approval card; Code asks in the thread's tool approval.
+- Only the agent tool can upload: it resolves the files and holds the answer,
+  and the server's Browser service refuses an upload that did not come with
+  them, so no route or paired device can hand a runtime a path. A CLI in a
+  thread terminal cannot upload.
+- Downloads stay blocked; this adds no download.
+- Rationale: an upload is the one Browser action that reads a file off this
+  computer and sends it to a site, so it keeps the narrowest reach the request
+  allowed. The workspace is the folder the thread's own file tools already
+  treat as its root; a Work Project's extra folders are left out until a person
+  asks for them. Asking every time follows the Browser's first-action ask,
+  which a separate maintainer decision keeps at every access level.
 
 ## Steps
 
-Allowed; not built yet. Up to 10 operations in one call, stopping at the first
-failure, with each step admitted by the server on its own.
+- `steps` runs up to 10 operations in one call. Each step is written exactly as
+  the operation would be alone, and runs through the same path a single call
+  takes, so the server admits each step on its own: the thread's authority, the
+  model binding, the origin approval, Plan mode, the stale check, and the
+  credential check.
+- The first step that fails ends the batch. The answer names it (its number,
+  its operation, and its own refusal or failure) and lists the steps that ran
+  before it with what each changed; no later step runs. A batch that succeeds
+  answers as its last step does, with a line per step.
+- A batch cannot hold another batch, an upload, `stop`, or a `navigate` with a
+  profile: each of those needs a call, and for an upload or a signed-in page a
+  question to the person, of its own. A malformed step refuses the whole batch
+  before any step runs.
+- A batch is a list of fixed operations, never a script: nothing an agent
+  writes runs in the page.
+- An agent's action that names an `expectedObservationRevision` the page has
+  moved past is refused as `stale` and does not run, so a batch stops there
+  rather than carrying on as if the step had run. The person's pane, which
+  re-polls on its own, keeps getting the page back without a refusal.
+- The field a `type` or `select` changes is not page text, so such a step
+  reports that the field holds the new value when nothing else changed.
 
 ## Waiting, dialogs, and viewport
 
-Allowed; not built yet. Waits for text, an address, a load state, or an
-element's state, with a hard time limit; actions that wait for the page to
-settle; dialogs answered by a fixed policy and reported; and a viewport size
-within bounds on the agent's own page.
+- `wait` waits for an element to appear (a selector or ref), or for up to 5
+  conditions: text present or absent in the page's visible text (never a
+  field's value), an address that contains a string, the page's
+  `domcontentloaded` or `load`, or an element attached, detached, visible,
+  hidden, enabled, or disabled. `match` is `all` (the default) or `any`.
+- Every wait has a hard limit: `timeoutMs` up to 30 seconds, 10 seconds when
+  it names none, on both Browsers. A wait that runs out fails and names the
+  conditions that never held. A ref in a wait becomes the snapshot's selector
+  without the identity check an action makes, because waiting for an element
+  to change or leave is the point.
+- **Settling.** After `navigate`, `click`, `type`, `press`, `scroll`, `hover`,
+  `select`, `drag`, `upload`, and `resize`, the Browser waits for the page's
+  load and then for the document to stop changing for 250 ms, at most 2
+  seconds in all, before it reads the page and answers. A page that never stops
+  changing costs the cap and still answers.
+- **Dialogs.** A page's own dialogs are answered by one fixed rule: an alert and
+  a leave-page question are accepted; a confirm and a prompt are dismissed, so
+  the page never gets an answer the agent was not asked for. Each dialog is
+  reported in the next answer as `dialogs`, with its type, its message (at most
+  512 characters), and the answer. The headless Browser applies the rule to
+  every dialog; the desktop Browser applies it while an agent's action runs,
+  and a dialog that opens while the person drives stays theirs. The desktop
+  Browser leaves alone a page whose developer tools someone else attached.
+- **Viewport.** `resize` sets the page to a width of 320 to 3840 and a height
+  of 320 to 2160 CSS pixels, and `resize` with neither restores the page's own
+  size. It acts only on the agent's own page, the thread's Browser context: the
+  headless Browser sets its viewport, and the desktop Browser emulates the size
+  inside the pane without moving or resizing the person's view, so the person
+  sees the page at that size until it is restored. A paired device cannot
+  resize.
+- Rationale: answering a dialog by a fixed rule instead of asking keeps the
+  agent from deciding what the page asked the person, and dismissing a
+  confirm is the answer that changes nothing. Bounding the viewport to common
+  phone and desktop sizes keeps the page renderable at any size it reaches.
 
 ## Asking the person to sign in
 

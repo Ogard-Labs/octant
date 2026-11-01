@@ -348,6 +348,15 @@ export interface WorkTurnServiceDependencies {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
   };
+  /**
+   * The person-memory block for this thread's turn, or undefined when the
+   * turn gets none (memory off, the thread or its Project kept out, or a
+   * principal other than a window on this host).
+   */
+  readonly personMemoryBlock?: (input: {
+    readonly thread: WorkThread;
+    readonly windowId: WindowId;
+  }) => string | undefined;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
@@ -477,6 +486,7 @@ export class WorkTurnService {
   readonly #onRequestSettled: WorkTurnServiceDependencies["onRequestSettled"];
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
+  readonly #personMemoryBlock: WorkTurnServiceDependencies["personMemoryBlock"];
   readonly #spendCeiling: WorkTurnServiceDependencies["spendCeiling"];
   readonly #spendReservations = new Map<
     string,
@@ -528,6 +538,7 @@ export class WorkTurnService {
     this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
     this.#nativeHarness = dependencies.nativeHarness;
+    this.#personMemoryBlock = dependencies.personMemoryBlock;
     this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
     this.#onTurnCancelled = dependencies.onTurnCancelled;
@@ -1041,6 +1052,11 @@ export class WorkTurnService {
             posture: "required",
             block,
           }),
+        ),
+        ...personMemoryContributions(
+          thread === undefined
+            ? undefined
+            : this.#personMemoryBlock?.({ thread, windowId: authenticatedWindowId }),
         ),
         ...extraFolderContributions(project),
         ...(await this.#projectBriefContributions(project, command.threadId)),
@@ -2696,4 +2712,21 @@ function withoutPublishedSnapshots(toolSteps: ThreadToolSteps): ThreadToolSteps 
       return { ...step, published: page };
     }),
   };
+}
+
+/** What Octant remembers about the person, placed after instructions and before the Project's own context. */
+function personMemoryContributions(
+  text: string | undefined,
+): ReadonlyArray<WorkTurnContextContribution> {
+  if (text === undefined) return [];
+  return [
+    {
+      text,
+      sourceKind: "memory",
+      referenceId: "person-memory",
+      category: "person-memory",
+      posture: "compressible",
+      block: { kind: "person-memory", text },
+    },
+  ];
 }

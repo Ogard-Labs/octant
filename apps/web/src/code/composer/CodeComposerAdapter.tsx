@@ -428,10 +428,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [workspaceOverride, setWorkspaceOverride] = useState<CodeNewThreadWorkspace | undefined>(
     storedCheckout?.workspaceOverride ?? handedWorkspace,
   );
-  // A thread on a server works in the bound folder: a managed worktree would
-  // be made by this host's Git in a folder of its own.
+  // A thread on a server starts in the bound folder unless the person picks a
+  // new worktree, which is then made on the server; a remembered habit is
+  // this host's, so it does not choose for a server.
   const workspace: CodeNewThreadWorkspace = isServer
-    ? "current-checkout"
+    ? (workspaceOverride ?? "current-checkout")
     : (workspaceOverride ?? props.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE);
   const startFromOrigin = startFromOriginOverride ?? defaultStartFromOrigin(worktreeRemoteFacts);
   const [worktreeRemote, setWorktreeRemote] = useState<string | undefined>(
@@ -601,10 +602,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // before the reader opens the picker. Loaded only on open, the tray showed
   // its fallback until someone happened to look at the list.
   useEffect(() => {
-    // A server folder's branches are on the server; this host lists none.
-    if (projectId === undefined || isServer) return;
+    // A server folder's branches are listed by Git on the server.
+    if (projectId === undefined) return;
     loadWorktreeRefs();
-  }, [loadWorktreeRefs, projectId, isServer]);
+  }, [loadWorktreeRefs, projectId]);
   useEffect(() => {
     if (baseBranchChosen.current || worktreeRefs === undefined) return;
     const current =
@@ -740,13 +741,18 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // A branch names a Project's checkout. With no Project chosen, a static
   // "Default branch" chip named a branch of nothing and sat between the
   // person and the prompt.
-  const branchControl =
+  // A server Project names where it runs; its branches, listed by Git on the
+  // server, choose a new worktree's source and the pull request's base.
+  const serverLocation =
     hasProject && server !== undefined ? (
       <span className="composer-tray__item" title={`On a server: ${server.location}`}>
         <Network aria-hidden="true" size={12} strokeWidth={1.8} />
         <span>{server.location}</span>
       </span>
-    ) : hasProject ? (
+    ) : null;
+  const branchControl = hasProject ? (
+    <>
+      {serverLocation}
       <CodeBranchSelector
         key={String(props.projectId)}
         branch={resolvedBaseBranch ?? "Default branch"}
@@ -762,7 +768,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
         {...(props.creating === true ? { disabled: true } : {})}
       />
-    ) : null;
+    </>
+  ) : null;
   const environmentControl = (
     <HostSelector
       presentation="environment"
@@ -811,7 +818,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   {environmentControl}
                 </div>
                 <div className="composer-tray__trailing">
-                  {hasProject && !isServer ? (
+                  {hasProject ? (
                     <CodeWorkspaceSelector
                       onChange={setWorkspaceOverride}
                       value={workspace}

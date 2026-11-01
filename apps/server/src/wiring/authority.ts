@@ -36,6 +36,9 @@ import {
   configureSecretGuardLocations,
   secretGuardPlatform,
 } from "../process/secretGuard";
+import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
+import { createPersonMemoryRouteHandler } from "../personMemory/personMemoryRoutes";
+import { PersonMemoryStore } from "../personMemory/personMemoryStore";
 import { ProtectedFilesService } from "../protectedFilesService";
 import { createProtectedFilesRouteHandler } from "../protectedFilesRoutes";
 import { ExtensionToolApprovalService } from "../extensions/extensionToolApprovalService";
@@ -105,6 +108,15 @@ export function wireAuthority(deps: AuthorityDependencies) {
     clock: () => decodeUtcTimestamp(new Date().toISOString()),
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
+  // Person memory is hydrated before any turn runs, so the first turn after
+  // a start already carries what the person was remembered by.
+  const personMemory = new PersonMemoryStore({
+    connection: persistence.connection,
+    journal: persistence.journal,
+    uuid: randomUUID,
+    clock: () => decodeUtcTimestamp(new Date().toISOString()),
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
   const codeApprovalStore = new CodeOperationApprovalStore({
     uuid: randomUUID,
     now: Date.now,
@@ -118,6 +130,12 @@ export function wireAuthority(deps: AuthorityDependencies) {
       readDeviceRegistration(persistence.connection, String(scopeId)),
       Date.now(),
     );
+  const personMemoryAccess = createPersonMemoryAccess({
+    store: personMemory,
+    isPairedDeviceScope,
+    isHostScope: isRoutineHostScope,
+    projectLabel: (projectId) => persistence.readProject(decodeProjectId(projectId))?.name,
+  });
   const extensionToolApprovalService = new ExtensionToolApprovalService({
     uuid: randomUUID,
     now: Date.now,
@@ -250,6 +268,10 @@ export function wireAuthority(deps: AuthorityDependencies) {
       clampNow: processAuthorityNow,
     },
   );
+  const personMemoryRoutes = createPersonMemoryRouteHandler({
+    store: personMemory,
+    windowAuthorityStore,
+  });
   const protectedFilesRoutes = createProtectedFilesRouteHandler({
     service: protectedFiles,
     windowAuthorityStore,
@@ -287,6 +309,9 @@ export function wireAuthority(deps: AuthorityDependencies) {
     onAgentRunExecutionAccepted,
     processAuthorityNow,
     onWindowRevoked,
+    personMemory,
+    personMemoryAccess,
+    personMemoryRoutes,
     protectedFilesRoutes,
     simulatorInputGrants,
     unsubscribeMachineChanges,
