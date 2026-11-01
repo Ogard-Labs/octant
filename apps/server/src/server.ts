@@ -950,6 +950,9 @@ export function startOctantServer(
       workProjectStatusFiles,
       workProjectStatusReader,
       workThreadProjection,
+      serverConnection,
+      serverProjectStore,
+      shieldServerStore,
     });
     yield* wireContinuation({
       agentRunOrchestration,

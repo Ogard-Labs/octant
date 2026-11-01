@@ -91,12 +91,27 @@ export interface ServerCodeProjectBindings {
   readonly has: (projectId: ProjectId) => boolean;
   /** Whether the thread runs in a server Project, on the checkout that Project derives. */
   readonly holdsThread: (thread: CodeThread) => boolean;
+  /** Whether a server Project holds Work threads; a window binds one as it binds a Code one. */
+  readonly hasWork?: (projectId: ProjectId) => boolean;
+  /** Whether the Work thread runs in a server Work Project, on the binding that Project derives. */
+  readonly holdsWorkThread?: (thread: WorkThread) => boolean;
 }
 
 const NO_SERVER_CODE_PROJECTS: ServerCodeProjectBindings = {
   has: () => false,
   holdsThread: () => false,
 };
+
+/** The server Project a window's mode binds with no folder of this host, if it is one. */
+function isServerProjectFor(
+  server: ServerCodeProjectBindings,
+  mode: "chat" | "work" | "code",
+  projectId: ProjectId,
+): boolean {
+  if (mode === "code") return server.has(projectId);
+  if (mode === "work") return server.hasWork?.(projectId) === true;
+  return false;
+}
 
 export interface ShellServiceOptions {
   readonly persistence: PersistenceService;
@@ -764,9 +779,9 @@ function reconcileContextWithProjects(
   ): { context: WorkspaceContextKey; layout: WorkspaceLayoutNode } => {
     if (context.projectId === null) return { context, layout };
     const project = persistence.readProject(context.projectId);
-    // A server Code Project stays bound with no folder of this host: its
-    // folder is a path on the server, so root-backed surfaces fail closed.
-    if (project === undefined && mode === "code" && server.has(context.projectId)) {
+    // A server Project stays bound with no folder of this host: its folder
+    // is a path on the server, so root-backed surfaces fail closed.
+    if (project === undefined && isServerProjectFor(server, mode, context.projectId)) {
       return {
         context: { host: context.host, mode, projectId: context.projectId, boundRoot: null },
         layout: context.boundRoot === null ? layout : visit(layout, mode, context.projectId),
@@ -933,10 +948,10 @@ function resolveTabContext(
     // the refusal to the user as a missing Git checkout.
     if (tab.projectId === undefined) return undefined;
     const project = persistence.readProject(tab.projectId);
-    // A Code draft in a server Project binds the window to it with no folder
-    // of this host, which is what lets that window create its thread.
-    if (project === undefined && tab.mode === "code" && server.has(tab.projectId)) {
-      return { host: LOCAL_HOST_ID, mode: "code", projectId: tab.projectId, boundRoot: null };
+    // A draft in a server Project binds the window to it with no folder of
+    // this host, which is what lets that window create its thread.
+    if (project === undefined && isServerProjectFor(server, tab.mode, tab.projectId)) {
+      return { host: LOCAL_HOST_ID, mode: tab.mode, projectId: tab.projectId, boundRoot: null };
     }
     if (project === undefined || project.lifecycle !== "active" || project.type !== tab.mode) {
       return undefined;
@@ -968,6 +983,9 @@ function resolveTabContext(
   if (tab.kind === "work-thread") {
     const thread = readWorkThread?.(tab.threadId);
     if (thread === undefined) return undefined;
+    if (thread.lifecycle === "active" && server.holdsWorkThread?.(thread) === true) {
+      return { host: LOCAL_HOST_ID, mode: "work", projectId: thread.projectId, boundRoot: null };
+    }
     const project = persistence.readProject(thread.projectId);
     if (project === undefined || project.lifecycle !== "active" || project.type !== "work") {
       return undefined;

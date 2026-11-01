@@ -3874,6 +3874,64 @@ describe("WorkTurnService", () => {
 });
 
 /** Run `count` turns on the one thread, each settled before the next starts. */
+describe("a Work turn in a Project on a server", () => {
+  // The Project is in its own catalog: the local one names nothing, and no
+  // local Work Project is open to the window.
+  function onServer(
+    bind: ReturnType<NonNullable<WorkTurnServiceDependencies["serverProjects"]>["bind"]>,
+  ) {
+    const observe = vi.fn(() => undefined);
+    const resolveAppManagedTools = vi.fn(() => undefined);
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async () => ({
+      kind: "completed",
+      response: "Done there",
+    }));
+    const fixture = serviceFixture({
+      serverProjects: { holds: () => true, bind: () => bind },
+      turnRuntime: { run },
+      resolveAppManagedTools,
+      turnFileObserver: { observe } as never,
+    });
+    fixture.persistence.readProject.mockReturnValue(undefined as never);
+    fixture.projects.bootstrap.mockResolvedValue({ active: [] });
+    return { fixture, run, observe, resolveAppManagedTools };
+  }
+
+  it("runs with the server's tools in its folder there, watching and resolving nothing here", async () => {
+    const tools = {
+      definitions: [],
+      execute: async () => ({ result: {} }),
+      close: async () => undefined,
+    };
+    const { fixture, run, observe, resolveAppManagedTools } = onServer({
+      status: "bound",
+      folder: "/srv/notes",
+      tools,
+    });
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).resolves.toMatchObject(
+      { kind: "accepted" },
+    );
+    await fixture.waitForIdle();
+    expect(run).toHaveBeenCalledOnce();
+    expect(run.mock.calls[0]?.[0]).toMatchObject({
+      projectRoot: "/srv/notes",
+      appManagedTools: tools,
+    });
+    expect(resolveAppManagedTools).not.toHaveBeenCalled();
+    expect(observe).not.toHaveBeenCalled();
+    expect(fixture.workingDirectories.resolve).not.toHaveBeenCalled();
+  });
+
+  it("refuses before anything starts when its turn cannot bind there", async () => {
+    const { fixture, run } = onServer({ status: "refused", message: "Not on the harness." });
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).rejects.toMatchObject({
+      failure: { category: "unavailable", message: "Not on the harness." },
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
+
 async function settleTurns(
   fixture: ReturnType<typeof serviceFixture>,
   count: number,
@@ -3953,6 +4011,7 @@ function serviceFixture(
     readonly withoutConversationHandoff?: boolean;
     /** Whether the thread had taken in outside content when a handoff is read. */
     readonly externalContentIngested?: boolean;
+    readonly serverProjects?: WorkTurnServiceDependencies["serverProjects"];
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -4079,15 +4138,15 @@ function serviceFixture(
       active: [{ id: ids.project, type: "work", lifecycle: "active" }],
     })),
   };
+  const workingDirectories = { resolve: vi.fn(async (root: string) => root) };
   const service = new WorkTurnService({
+    ...(options.serverProjects === undefined ? {} : { serverProjects: options.serverProjects }),
     ...(options.contextHarness === undefined ? {} : { contextHarness: options.contextHarness }),
     persistence: persistence as never,
     threads: threads as never,
     projects: projects as never,
     projection,
-    workingDirectories: {
-      resolve: vi.fn(async (root: string) => root),
-    },
+    workingDirectories,
     resolveDriver: (id) =>
       options.resolveDriver === undefined
         ? defaultDriver
@@ -4164,7 +4223,16 @@ function serviceFixture(
     }
   };
 
-  return { service, persistence, projection, threads, acquireInputs, waitForIdle };
+  return {
+    service,
+    persistence,
+    projection,
+    threads,
+    projects,
+    workingDirectories,
+    acquireInputs,
+    waitForIdle,
+  };
 }
 
 /** The status file on a pretend disk keyed by absolute path. */

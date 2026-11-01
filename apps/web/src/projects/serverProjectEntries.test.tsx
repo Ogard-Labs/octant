@@ -48,6 +48,27 @@ describe("useServerCodeProjectsSource", () => {
     expect(result.current.projects[0]?.location).toBe("/home/build/service");
   });
 
+  it("leaves out a Work Project on a server, which holds no Code threads", async () => {
+    const work = {
+      projects: [
+        ...(view() as { projects: ReadonlyArray<unknown> }).projects,
+        {
+          id: "77777777-7777-4777-8777-777777777778",
+          name: "Notes",
+          serverId,
+          folder: "/home/build/notes",
+          boundAt: "2026-10-30T10:00:00.000Z",
+          mode: "work",
+        },
+      ],
+    } as never;
+    const { result } = renderHook(() =>
+      useServerCodeProjectsSource({ read: vi.fn().mockResolvedValue(work) }, undefined),
+    );
+    await waitFor(() => expect(result.current.projects).toHaveLength(1));
+    expect(result.current.projects.map((project) => project.name)).toEqual(["Service"]);
+  });
+
   it("lists nothing without a server Projects client", () => {
     const { result } = renderHook(() => useServerCodeProjectsSource(undefined, undefined));
     expect(result.current.projects).toEqual([]);

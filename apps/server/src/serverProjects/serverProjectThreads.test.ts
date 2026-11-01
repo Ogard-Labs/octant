@@ -51,7 +51,9 @@ describe("a server Project's checkout", () => {
   it("is derived from the Project alone and names no folder of this host", () => {
     const project = projectAt(tmpdir());
     const thread = threadIn(project);
-    const store = { project: (id: string) => (id === String(project.id) ? project : undefined) };
+    const store = {
+      codeProject: (id: string) => (id === String(project.id) ? project : undefined),
+    };
     expect(serverCodeCheckout(project).checkout.kind).toBe("remote-root");
     expect(serverProjectOf(store, thread)).toBe(project);
     expect(serverCodeCheckoutRoot(store, thread)?.checkoutRoot).toBe(project.folder);
@@ -143,7 +145,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's turn", () => {
     const bound = bindServerCodeTurn(
       {
         store: {
-          project: (id) => (id === String(project.id) ? project : undefined),
+          codeProject: (id) => (id === String(project.id) ? project : undefined),
           addressOf: () => ({
             kind: "address",
             server: { alias: options.alias?.() ?? sshd.alias, user: sshd.user },
