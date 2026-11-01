@@ -357,6 +357,14 @@ describe("browser automation routes", () => {
       mime: "image/png",
       capturedAt: "2026-10-12T09:00:00.000Z",
     };
+    const step = {
+      stepId: "b0000000-0000-4000-8000-000000000020",
+      threadId,
+      operation: "click",
+      origin: "https://example.com",
+      path: "/",
+      recordedAt: "2026-10-12T09:00:00.000Z",
+    };
     const headers = {
       "content-type": "application/json",
       "x-octant-window-capability": capability,
@@ -367,6 +375,7 @@ describe("browser automation routes", () => {
     function withCaptures(canAccessWindow = true, canOpenThread = canAccessWindow) {
       const captures = {
         list: vi.fn(() => [capture] as never),
+        listSteps: vi.fn(() => [step] as never),
         read: vi.fn(async (_thread: unknown, id: unknown) =>
           String(id) === captureId
             ? { capture, bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]) }
@@ -425,6 +434,40 @@ describe("browser automation routes", () => {
         captureId,
         dataUrl: `data:image/png;base64,${Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64")}`,
       });
+    });
+
+    it("lists a thread's steps for a window that can open the thread, and refuses everyone else", async () => {
+      const allowed = withCaptures();
+      const listed = await allowed.handler(
+        new Request("http://127.0.0.1/api/browser/steps", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ threadId }),
+        }),
+      );
+      expect(listed?.status).toBe(200);
+      expect(await listed?.json()).toEqual({ steps: [step] });
+
+      const refused = withCaptures(false);
+      const stepsRequest = () =>
+        new Request("http://127.0.0.1/api/browser/steps", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ threadId }),
+        });
+      expect((await refused.handler(stepsRequest()))?.status).toBe(403);
+      // A paired device reads no part of the proof, as it reads no capture.
+      expect((await allowed.handler(asPairedDevice(stepsRequest())))?.status).toBe(403);
+      const wrong = await allowed.handler(
+        new Request("http://127.0.0.1/api/browser/steps", {
+          method: "POST",
+          headers: { ...headers, "x-octant-window-capability": "wrong" },
+          body: JSON.stringify({ threadId }),
+        }),
+      );
+      expect(wrong?.status).toBe(401);
+      expect(refused.captures.listSteps).not.toHaveBeenCalled();
+      expect(allowed.captures.listSteps).toHaveBeenCalledOnce();
     });
 
     it("refuses a caller with no window capability", async () => {

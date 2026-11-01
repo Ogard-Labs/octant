@@ -618,8 +618,11 @@ the shared tab rail, which wraps rather than scrolls so no tab hides off the
 edge of a narrow dock. **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
 page's picture with the thread, and a thread that kept screenshots shows a
-_Browser captures_ strip in its transcript beside the generated images. The
-rules are in [Browser captures](browser-captures.md). The iOS Simulator and Android emulator are separate device destinations. An
+_Browser captures_ strip in its transcript beside the generated images, and a
+thread with Browser steps also shows a folded _Browser proof_ panel there: the
+agent's steps as a numbered list with each capture under the step that took it.
+The rules are in [Browser captures](browser-captures.md) and
+[Proof](browser-captures.md#proof). The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use
 one device-first pane that adapts to its container's width: a toolbar (device
 switcher, OS and state in words, Back on Android, Home, Screenshot, Lock when

@@ -2240,8 +2240,10 @@ Only an explicit screenshot is kept, and it stays with the thread.
 - The agent's screenshot operation and the person's Screenshot control keep a capture. A paired device, the thread-less Project browser and a terminal CLI keep nothing.
 - Bytes live under the data directory, never a Project. The journal records metadata and a hash, never bytes.
 - A thread keeps its newest 32 captures. Captures leave the host only in the local owner's thread or data export.
+- A thread also keeps the agent's last 50 Browser steps (operation, element role and name, page origin and path, the one-line result or failure category; never typed text, a field value, or a secret query value) on the same journal rules as captures. Beside its captures they are the thread's "Browser proof".
+- Proof reaches a pull request only when the person chooses "Include Browser proof" in the Code pull-request form: a "Browser check" section of numbered steps. Screenshots are saved to a folder the person picks on a local window, never uploaded. A paired device reads, attaches, and saves none of it.
 
-Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept) and [Retention](browser-captures.md#retention).
+Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention) and [Proof](browser-captures.md#proof).
 
 ### Browser for agents
 

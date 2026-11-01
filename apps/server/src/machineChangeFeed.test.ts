@@ -265,6 +265,7 @@ describe("MachineChangeFeed", () => {
     feed.publishCommitted({
       events: [
         { aggregateType: "browser-capture" },
+        { aggregateType: "browser-step" },
         { aggregateType: "thread-side-tasks" },
         { aggregateType: "thread-follow-up-suggestions" },
         { aggregateType: "thread-message-queue" },

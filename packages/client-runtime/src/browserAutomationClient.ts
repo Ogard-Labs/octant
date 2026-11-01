@@ -26,11 +26,14 @@ import {
   decodeBrowserCaptureImageCommand,
   decodeBrowserCaptureTakeCommand,
   decodeBrowserCapturesCommand,
+  decodeBrowserStepsCommand,
   BrowserCaptureImage,
   type BrowserCaptureImageCommand,
   type BrowserCaptureTakeCommand,
   type BrowserCapturesCommand,
   BrowserCapturesResponse,
+  BrowserStepsResponse,
+  type BrowserStepsCommand,
 } from "@octant/contracts/browser-capture";
 import {
   BrowserExtensionsResult,
@@ -84,6 +87,8 @@ export interface BrowserAutomationClient {
     input: BrowserCapturesCommand,
     signal?: AbortSignal,
   ): Promise<BrowserCapturesResponse>;
+  /** The agent's recorded Browser steps for the thread, oldest first. */
+  listSteps?(input: BrowserStepsCommand, signal?: AbortSignal): Promise<BrowserStepsResponse>;
   readCapture?(
     input: BrowserCaptureImageCommand,
     signal?: AbortSignal,
@@ -201,6 +206,14 @@ export function createBrowserAutomationClient(
         "/api/browser/captures",
         decodeBrowserCapturesCommand(input),
         decodeHostAnswer(BrowserCapturesResponse),
+        signal,
+      ),
+    listSteps: (input, signal) =>
+      post(
+        options,
+        "/api/browser/steps",
+        decodeBrowserStepsCommand(input),
+        decodeHostAnswer(BrowserStepsResponse),
         signal,
       ),
     readCapture: (input, signal) =>

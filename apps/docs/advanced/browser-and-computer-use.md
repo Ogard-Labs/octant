@@ -166,6 +166,27 @@ address and time. The strip is absent until the thread has a capture.
 - A capture of a page in a Project or Personal profile names the profile, because the picture can show an account.
 - An archived thread still shows the captures it kept.
 
+#### Browser proof
+
+Octant also keeps a short record of the steps the agent took in its Browser, at
+most the last 50 per thread. A **Browser proof** panel appears under the
+captures strip (folded: choose **Show N steps**). It lists the steps as a
+numbered list, for example `click button "Save" on https://example.com/settings`,
+with what changed, or why a step failed, and puts each screenshot under the step
+that took it.
+
+- A step records the action, the element it acted on by role and name, the
+  page's address without its query, and the result. It never records what the
+  agent typed, a field's value, or a page's text.
+- Only the agent's own steps are recorded, not what you do in the pane.
+- The record stays on this computer with the thread and is deleted with it. It
+  is not sent anywhere, and a paired device cannot see it.
+- **Save screenshots…** (in the Octant desktop app) asks you for a folder and
+  writes the thread's captures there as `browser-check-01.png`, `-02`, and so
+  on. It never replaces a file that is already there.
+- To put the steps in a pull request, see [Code threads](../guide/code.md): the
+  **Include Browser proof** choice there is off unless you turn it on.
+
 Links inside a Work or Code conversation open in the app: following one
 creates a dedicated Browser context confined to that link's origin and opens
 it in the thread's right dock, or in a split beside the pane when the dock
