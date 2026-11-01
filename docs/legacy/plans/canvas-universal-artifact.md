@@ -1,6 +1,6 @@
 # Canvas universal artifact: screens, flows, decks, and code handoff
 
-Status: Building (slice 1 of 5)
+Status: Delivered. All five slices merged; the rules live in the Canvas specifications. History only.
 Size: Full — four Canvas capabilities that cross contracts, domain, server, and web.
 Owner: Henrik · Started: 2026-10-28 · Approved: 2026-10-28, Henrik
 Working assumptions: none

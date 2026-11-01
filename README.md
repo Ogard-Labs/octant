@@ -42,9 +42,10 @@ Code; moving to a linked Code thread requires explicit approval.
 - Provider handoff mid-thread: change provider or model for the next turn with
   a recorded provenance trail.
 - Context manifests and budgets with per-provider limits.
-- Shared, Project-scoped memory across threads.
-- Chat turn editing, thread branching, and Markdown export that states what it
-  could not include.
+- Shared, Project-scoped memory across threads, and a personal memory across
+  Projects that you can read, edit, and switch off.
+- Fork from here and Rewind to here on messages in Chat, Work, and Code
+  threads, and Markdown export that states what it could not include.
 - Managed subagents that run as in-process provider sessions with narrowed
   authority.
 - Native harness for API-key and local models: Octant's own tools, authority
