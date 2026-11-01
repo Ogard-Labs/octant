@@ -1078,6 +1078,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "check item reference op vault found locked missing test",
         },
+        {
+          id: settingId("secret-store-aws-cli"),
+          label: "AWS command line",
+          scope: "host",
+          keywords:
+            "aws cli command line access key id secret access key session token sts short-lived cloud credentials shell",
+        },
+        {
+          id: settingId("secret-store-aws-cli-key-id"),
+          label: "AWS access key ID item",
+          scope: "host",
+          keywords: "aws access key id item reference op vault",
+        },
+        {
+          id: settingId("secret-store-aws-cli-secret"),
+          label: "AWS secret access key item",
+          scope: "host",
+          keywords: "aws secret access key item reference op vault",
+        },
       ],
     },
     {

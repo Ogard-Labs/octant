@@ -23,12 +23,14 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { redactHostSecrets } from "../process/secretRedaction";
 import {
   makeCredentialBrokerClient,
   makeMcpServerCredentialBrokerClient,
 } from "../providers/credentialBrokerClient";
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
 import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
+import { awsCliEnvironment } from "./awsCliEnvironment";
 import { makeConnectorLinkedSecrets } from "./connectorLinkedSecrets";
 import { makeSecretStoreBrokerClient } from "./secretStoreBrokerClient";
 import { secretStoresJournal } from "./secretStoresJournal";
@@ -119,13 +121,15 @@ async function host(
 ) {
   const tool = fakeTool();
   tool.state.items.set(REFERENCE, VALUE);
+  tool.state.items.set(AWS_KEY_ID_REFERENCE, AWS_LONG_LIVED_KEY_ID);
+  tool.state.items.set(AWS_SECRET_REFERENCE, AWS_LONG_LIVED_SECRET);
   const store = memoryStore();
   const directory = mkdtempSync(join(tmpdir(), "octant-secret-stores-"));
   directories.push(directory);
   const broker = await startCredentialBroker(
     store,
     undefined,
-    undefined,
+    { fetch: fakeSts },
     undefined,
     undefined,
     undefined,
@@ -230,6 +234,107 @@ async function host(
     connectorServers,
   };
 }
+
+const AWS_KEY_ID_REFERENCE = "op://Private/AWS/access key id";
+const AWS_SECRET_REFERENCE = "op://Private/AWS/secret access key";
+const AWS_LONG_LIVED_KEY_ID = "AKIAFIXTURE0000LONG";
+const AWS_LONG_LIVED_SECRET = "fixtureLongLivedSecret/0123456789abcdefghij";
+const AWS_SESSION_SECRET = "fixtureSessionSecret/abcdefghij0123456789";
+const AWS_SESSION_TOKEN = "FwoGZXIvYXdzEFixtureSessionToken0123456789";
+const awsPointer = {
+  store: "onepassword",
+  accessKeyIdReference: AWS_KEY_ID_REFERENCE,
+  secretAccessKeyReference: AWS_SECRET_REFERENCE,
+} as const;
+
+/** AWS STS as the broker meets it: a one-hour session for any signed request. */
+const fakeSts = Object.assign(
+  async (): Promise<Response> =>
+    new Response(
+      `<GetSessionTokenResponse><GetSessionTokenResult><Credentials>
+      <AccessKeyId>ASIAFIXTURE00SESSION</AccessKeyId>
+      <SecretAccessKey>${AWS_SESSION_SECRET}</SecretAccessKey>
+      <SessionToken>${AWS_SESSION_TOKEN}</SessionToken>
+      <Expiration>${new Date(Date.now() + 3_600_000).toISOString()}</Expiration>
+    </Credentials></GetSessionTokenResult></GetSessionTokenResponse>`,
+    ),
+  { preconnect: fetch.preconnect },
+);
+
+describe("the AWS command line through a linked store", () => {
+  it("points at two items, journals both halves as one change, and gives a command only a session", async () => {
+    const h = await host();
+    await h.service.linkStore(WINDOW, "onepassword");
+
+    expect(await h.service.pointAwsCliKey(WINDOW, awsPointer)).toEqual({
+      kind: "secret-stores-aws-cli-key",
+      reference: awsPointer,
+    });
+    expect(await h.service.readAwsCliKey()).toEqual({
+      kind: "secret-stores-aws-cli-key",
+      reference: awsPointer,
+    });
+    expect(h.journalNames()).toEqual([
+      "secret-store.linked",
+      "credential-reference.set",
+      "credential-reference.set",
+    ]);
+    expect(h.journalText()).toContain(AWS_SECRET_REFERENCE);
+
+    const environment = await awsCliEnvironment(
+      makeSecretStoreBrokerClient({ url: h.broker.url, token: h.broker.token }),
+    );
+    expect(environment).toMatchObject({
+      AWS_ACCESS_KEY_ID: "ASIAFIXTURE00SESSION",
+      AWS_SECRET_ACCESS_KEY: AWS_SESSION_SECRET,
+      AWS_SESSION_TOKEN: AWS_SESSION_TOKEN,
+    });
+    expect(JSON.stringify(environment)).not.toContain(AWS_LONG_LIVED_SECRET);
+    expect(h.journalText()).not.toContain(AWS_LONG_LIVED_SECRET);
+    // A command that prints the session has it redacted wherever its output is kept.
+    expect(redactHostSecrets(`secret=${AWS_SESSION_SECRET}`)).not.toContain(AWS_SESSION_SECRET);
+  });
+
+  it("refuses an item that does not resolve, and gives a command nothing without a pointer", async () => {
+    const h = await host();
+    await h.service.linkStore(WINDOW, "onepassword");
+    const client = makeSecretStoreBrokerClient({ url: h.broker.url, token: h.broker.token });
+
+    expect(
+      await h.service.pointAwsCliKey(WINDOW, {
+        ...awsPointer,
+        secretAccessKeyReference: "op://Private/AWS/gone",
+      }),
+    ).toMatchObject({ kind: "secret-stores-refused", reason: "item-missing" });
+    await expect(awsCliEnvironment(client)).resolves.toEqual({});
+    await expect(awsCliEnvironment(undefined)).resolves.toEqual({});
+  });
+
+  it("undoes a pointer the journal refused, and journals a clear with both items", async () => {
+    const h = await host();
+    await h.service.linkStore(WINDOW, "onepassword");
+
+    h.failing.journalFails = true;
+    expect(await h.service.pointAwsCliKey(WINDOW, awsPointer)).toMatchObject({
+      reason: "journal-unavailable",
+    });
+    expect(await h.service.readAwsCliKey()).toEqual({
+      kind: "secret-stores-aws-cli-key",
+      reference: null,
+    });
+
+    h.failing.journalFails = false;
+    await h.service.pointAwsCliKey(WINDOW, awsPointer);
+    expect(await h.service.clearAwsCliKey(WINDOW)).toEqual({
+      kind: "secret-stores-aws-cli-key",
+      reference: null,
+    });
+    expect(h.journalNames().slice(-2)).toEqual([
+      "credential-reference.cleared",
+      "credential-reference.cleared",
+    ]);
+  });
+});
 
 describe("linked secret stores through the host", () => {
   it("links a store, points a provider key at an item, and gives the provider the value at use", async () => {
@@ -601,6 +706,9 @@ describe("secret store routes", () => {
       pointProviderKey: vi.fn(),
       clearProviderKeyReference: vi.fn(),
       readProviderKeyReference: vi.fn(),
+      pointAwsCliKey: vi.fn(),
+      clearAwsCliKey: vi.fn(),
+      readAwsCliKey: vi.fn(),
     };
     const handler = createSecretStoresRouteHandler({
       service,
