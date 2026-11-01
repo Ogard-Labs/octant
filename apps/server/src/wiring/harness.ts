@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
+import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
+import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import {
   AggregateId,
@@ -607,11 +609,24 @@ export function wireHarness(deps: HarnessDependencies) {
         },
       ),
     servers: () => shieldServerStore.servers(),
+    protectedSecretPath: (path) => isProtectedSecretPath(path),
     scratchRoot: harnessWorkDirectory,
   });
   shieldHolder.port = hostShield;
   const nativeHarnessComposition = createNativeHarnessComposition({
     recordRemoteCommand: (input) => shieldServerStore.recordRemoteCommand(input),
+    protectedSecretPath: (path) => isProtectedSecretPath(path),
+    tagSecretEgress: ({ threadId, command, workingDirectory }) =>
+      readsSecretsThenEgress({
+        command,
+        workingDirectory,
+        protectedSecretPath: (path) => isProtectedSecretPath(path),
+        threadReadSecret: readShieldWatcherLabels(persistence.connection, threadId).includes(
+          "secret-path-read",
+        ),
+      })
+        ? shieldServerStore.recordTag({ threadId, tag: "reads-secrets-then-egress", command })
+        : "not-tagged",
     goals: goalService,
     questions: nativeHarnessQuestions,
     approvals: nativeHarnessApprovals,

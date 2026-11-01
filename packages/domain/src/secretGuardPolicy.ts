@@ -580,3 +580,29 @@ function isInside(path: string, parent: string): boolean {
   if (parent === "/") return path !== "/";
   return path.startsWith(`${parent}/`);
 }
+
+/** Most words of one command read for paths. */
+const MAX_COMMAND_PATH_WORDS = 256;
+
+/**
+ * The words of a shell command that read as paths, as the agent wrote them:
+ * anything with a slash, or starting `~` or `$HOME`. Quotes are taken off,
+ * a `--flag=` or `NAME=` prefix and an upload's `@` (`curl -d @file`) are
+ * dropped, and shell operators split words.
+ * It reads the text only, so a path a command builds at run time (`cat
+ * "$DIR"/key`) is not seen; this is a flag for a person to read, never what
+ * stands between a command and a file.
+ */
+export function commandPathWords(command: string): ReadonlyArray<string> {
+  const words: string[] = [];
+  for (const raw of command.split(/[\s;&|<>()`]+/)) {
+    if (words.length >= MAX_COMMAND_PATH_WORDS) break;
+    const unquoted = raw.replace(/["']/g, "");
+    const value = unquoted
+      .replace(/^(?:-{1,2}[\w-]+=|[A-Za-z_][A-Za-z0-9_]*=)/, "")
+      .replace(/^@/, "");
+    if (value.length === 0) continue;
+    if (value.includes("/") || value.startsWith("~")) words.push(value);
+  }
+  return words;
+}

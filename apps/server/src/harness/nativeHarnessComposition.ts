@@ -103,6 +103,23 @@ export interface NativeHarnessCompositionOptions {
     readonly exitCode?: number | undefined;
   }) => "recorded" | "not-remote" | "unavailable";
   /**
+   * The secret guard's list in force: whether a path the agent wrote is one it
+   * protects. With it the Watcher flags a call that names a protected path,
+   * at every level, as a journaled label that never blocks.
+   */
+  readonly protectedSecretPath?: (path: string) => boolean;
+  /**
+   * Tags a Full access command Shield does not judge when it sends something
+   * off the computer after reaching for a secret. `unavailable` means the tag
+   * could not be kept, and the command's output is withheld as an unmarked
+   * result is; the command itself is never stopped.
+   */
+  readonly tagSecretEgress?: (input: {
+    readonly threadId: string;
+    readonly command: string;
+    readonly workingDirectory: string;
+  }) => "recorded" | "not-tagged" | "unavailable";
+  /**
    * A Code thread's access posture now, as the window running it holds it and
    * clamped to its running turn's, or nothing for a thread that is not one.
    * Without a window it is the stored posture clamped to the running turn's.
@@ -378,6 +395,9 @@ export function createNativeHarnessComposition(
       recordExternalContentIngestion: options.recordExternalContentIngestion,
       uuid: options.uuid,
       resultTaintsThread,
+      ...(options.protectedSecretPath === undefined
+        ? {}
+        : { protectedSecretPath: options.protectedSecretPath }),
     });
   const leadOf = (thread: {
     readonly providerInstanceId: ProviderInstanceId;
@@ -474,6 +494,8 @@ export function createNativeHarnessComposition(
                   threadId: scope.parentThreadId,
                   summary: input.summary,
                   decision,
+                  requestId: input.callId,
+                  toolName: input.toolName,
                 });
                 if (decision.verdict === "allow" || decision.verdict === "deny") {
                   approvalStore.recordReviewed?.(ask, { ...decision, verdict: decision.verdict });
@@ -525,6 +547,7 @@ export function createNativeHarnessComposition(
    * falls back to open network.
    */
   const postureShell = (
+    threadId: string,
     proxied: NativeHarnessShellPort,
     resolveEgress: () => ReturnType<typeof resolveDefaultThreadEgressPolicy>,
   ): NativeHarnessShellPort => ({
@@ -543,10 +566,38 @@ export function createNativeHarnessComposition(
       // Open network is resolved only at Full access, so it is also the
       // command that runs outside the sandbox.
       const shell =
-        network === "allow" ? (options.fullAccessShell ?? options.shell) : options.offlineShell;
+        network === "allow"
+          ? taggingSecretEgress(threadId, options.fullAccessShell ?? options.shell)
+          : options.offlineShell;
       return (shell ?? unavailableShell).run(input);
     },
   });
+  /**
+   * The Full access shell with each command that sends something off the
+   * computer after reaching for a secret tagged under the thread. Nothing
+   * else judges a command there, so the tag is the record; it never stops one.
+   */
+  const taggingSecretEgress = (
+    threadId: string,
+    shell: NativeHarnessShellPort | undefined,
+  ): NativeHarnessShellPort | undefined => {
+    const tag = options.tagSecretEgress;
+    if (shell === undefined || tag === undefined) return shell;
+    return {
+      run: async (input) => {
+        const run = await shell.run(input);
+        let tagged: ReturnType<typeof tag>;
+        try {
+          tagged = tag({ threadId, command: input.command, workingDirectory: input.cwd });
+        } catch {
+          tagged = "unavailable";
+        }
+        return tagged === "unavailable"
+          ? { status: "unavailable", output: "", truncated: false }
+          : run;
+      },
+    };
+  };
   /** The shell with every `ssh` command it ran journaled under the thread. */
   const recordingRemoteCommands = (
     threadId: string,
@@ -574,6 +625,24 @@ export function createNativeHarnessComposition(
       },
     };
   };
+  /**
+   * Without the egress rules every command runs on `shell`; the ones a Full
+   * access posture runs are still tagged, since Shield judges none of them.
+   */
+  const taggingAtFullAccess = (
+    threadId: string,
+    shell: NativeHarnessShellPort | undefined,
+    resolveEgress: () => ReturnType<typeof resolveDefaultThreadEgressPolicy>,
+  ): NativeHarnessShellPort | undefined => {
+    const tagged = taggingSecretEgress(threadId, shell);
+    if (shell === undefined || tagged === undefined || tagged === shell) return shell;
+    return {
+      run: (input) =>
+        materializeHarnessToolNetwork(resolveEgress()) === "allow"
+          ? tagged.run(input)
+          : shell.run(input),
+    };
+  };
   const codeEgress = (threadId: string, windowId?: string) => {
     const executionPolicy = options.readCodeExecutionPolicy?.(threadId, windowId);
     return executionPolicy === undefined
@@ -587,8 +656,12 @@ export function createNativeHarnessComposition(
     recordingRemoteCommands(
       scope.threadId,
       options.proxiedShell === undefined
-        ? options.shell
-        : postureShell(options.proxiedShell(scope), () => codeEgress(scope.threadId, windowId)),
+        ? taggingAtFullAccess(scope.threadId, options.shell, () =>
+            codeEgress(scope.threadId, windowId),
+          )
+        : postureShell(scope.threadId, options.proxiedShell(scope), () =>
+            codeEgress(scope.threadId, windowId),
+          ),
     );
   const workEgress = (threadId: string) => {
     const executionPolicy = options.readWorkExecutionPolicy?.(threadId);
@@ -602,8 +675,10 @@ export function createNativeHarnessComposition(
     recordingRemoteCommands(
       scope.threadId,
       options.proxiedShell === undefined
-        ? options.shell
-        : postureShell(options.proxiedShell(scope), () => workEgress(scope.threadId)),
+        ? taggingAtFullAccess(scope.threadId, options.shell, () => workEgress(scope.threadId))
+        : postureShell(scope.threadId, options.proxiedShell(scope), () =>
+            workEgress(scope.threadId),
+          ),
     );
   const delegateFor = (scope: {
     readonly parentThreadId: string;
@@ -828,8 +903,8 @@ export function createNativeHarnessComposition(
         });
       const commandsProxied =
         authority.network && options.proxiedShell !== undefined && projectId !== undefined;
-      // A child's remote commands are recorded under the parent thread the
-      // person reviews.
+      // A child's remote commands and Shield's tags are recorded under the
+      // parent thread the person reviews.
       const shell = recordingRemoteCommands(
         parentThreadId,
         !authority.network
@@ -839,6 +914,7 @@ export function createNativeHarnessComposition(
             : projectId === undefined
               ? unavailableShell
               : postureShell(
+                  parentThreadId,
                   options.proxiedShell({
                     threadId: runId,
                     projectId: String(projectId),
@@ -903,6 +979,9 @@ export function createNativeHarnessComposition(
         recordExternalContentIngestion: options.recordExternalContentIngestion,
         uuid: options.uuid,
         resultTaintsThread,
+        ...(options.protectedSecretPath === undefined
+          ? {}
+          : { protectedSecretPath: options.protectedSecretPath }),
       });
     },
   };

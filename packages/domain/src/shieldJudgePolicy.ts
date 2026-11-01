@@ -13,6 +13,7 @@ import {
   type ShieldServerRule,
   type SshInvocation,
 } from "./shieldServerPolicy";
+import { commandPathWords } from "./secretGuardPolicy";
 
 /**
  * Octant Shield's Judge, the deterministic part: the rules that decide a
@@ -78,6 +79,12 @@ export interface ShieldRuleInput {
   readonly projectCommands: ReadonlyArray<string>;
   /** The servers the person registered; SSH to any other host goes to the person. */
   readonly servers?: ReadonlyArray<ShieldServerRule> | undefined;
+  /**
+   * The secret guard's list in force, the person's additions and removals
+   * included: whether a path is one it protects. It is asked about an
+   * absolute path, or a `~/` or `$HOME/` one as the agent wrote it.
+   */
+  readonly protectedSecretPath?: ((path: string) => boolean) | undefined;
 }
 
 /**
@@ -259,6 +266,63 @@ const PERSISTENCE_PATH =
   /(?:^|\/)(?:Library\/Launch(?:Agents|Daemons)|\.(?:zshrc|zprofile|zshenv|zlogin|bashrc|bash_profile|bash_login|profile)$|\.config\/fish\/config\.fish$|\.git\/hooks(?:\/|$))/;
 
 /**
+ * Whether a local command names a secret: one of the Judge's own secret-path
+ * patterns, or a path on the secret guard's list. The patterns stay beside
+ * the list: they also cover files the list leaves out (`.env`, `.gnupg`, a
+ * stray `.pem`), and a built-in group the person removed takes away the OS
+ * rule, not Shield's habit of asking about it, which only ever sends a call
+ * to the person.
+ */
+export function commandReadsSecrets(
+  command: string,
+  workingDirectory: string,
+  protectedSecretPath: ((path: string) => boolean) | undefined,
+): boolean {
+  if (SECRET_PATH_TEXT.test(command)) return true;
+  if (protectedSecretPath === undefined) return false;
+  return commandPathWords(command).some((word) =>
+    listedSecretPath(word, workingDirectory, protectedSecretPath),
+  );
+}
+
+/** Whether a local command can send something off this computer. */
+export function commandSendsOffComputer(command: string): boolean {
+  return EGRESS_TOOL.test(command);
+}
+
+/**
+ * The secret-then-network sequence, for a command Shield does not judge (Full
+ * access): it sends something off the computer, and it names a secret or the
+ * thread already tried to read one. A tag for the journal, never a refusal.
+ */
+export function readsSecretsThenEgress(input: {
+  readonly command: string;
+  readonly workingDirectory: string;
+  readonly protectedSecretPath?: ((path: string) => boolean) | undefined;
+  /** The Watcher already flagged a read of a protected path on this thread. */
+  readonly threadReadSecret: boolean;
+}): boolean {
+  if (!commandSendsOffComputer(input.command)) return false;
+  return (
+    input.threadReadSecret ||
+    commandReadsSecrets(input.command, input.workingDirectory, input.protectedSecretPath)
+  );
+}
+
+function listedSecretPath(
+  path: string,
+  workingDirectory: string,
+  protectedSecretPath: ((path: string) => boolean) | undefined,
+): boolean {
+  if (protectedSecretPath === undefined) return false;
+  const asked =
+    path.startsWith("/") || path.startsWith("~") || path.startsWith("$")
+      ? path
+      : normalizePosixPath(`${workingDirectory}/${path}`);
+  return protectedSecretPath(asked);
+}
+
+/**
  * Applies the rule stages in order. `needs-model` means no rule decided and
  * the model judges; a rule that decided is final.
  */
@@ -275,7 +339,12 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
 
   // 1. Hard lines and deny rules.
   if (command !== undefined && command.length > 0) {
-    if (SECRET_PATH_TEXT.test(command) && EGRESS_TOOL.test(command)) {
+    const readsSecrets = commandReadsSecrets(
+      command,
+      call.workingDirectory,
+      input.protectedSecretPath,
+    );
+    if (readsSecrets && EGRESS_TOOL.test(command)) {
       return decided(
         "deny",
         "deny-rule",
@@ -291,7 +360,7 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
     if (SSH_KEY_PATH_TEXT.test(command)) {
       return decided("deny", "deny-rule", "ssh-key-path", "Shield refuses to reach SSH keys.");
     }
-    if (SECRET_PATH_TEXT.test(command)) {
+    if (readsSecrets) {
       return decided(
         "ask",
         "deny-rule",
@@ -311,7 +380,10 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
             "The call changes SSH settings, so the person decides.",
           );
     }
-    if (SECRET_PATH_TEXT.test(` ${path}`)) {
+    if (
+      SECRET_PATH_TEXT.test(` ${path}`) ||
+      listedSecretPath(path, call.workingDirectory, input.protectedSecretPath)
+    ) {
       return decided(
         "ask",
         "deny-rule",
