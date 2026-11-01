@@ -37,9 +37,9 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [App-managed tools](#app-managed-tools)                                               | 2         | 2       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 10      | 4            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
-| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
+| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 4       | 0            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 9       | 1            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **222**   | **187** | **32**       | **3**               |
+| **All areas**                                                                         | **223**   | **190** | **30**       | **3**               |
 
 ## Principles and hard lines
 
@@ -80,7 +80,7 @@ Every product rule is measured against six principles; a rule that protects none
 - Key providers run as themselves: Octant adds to their native tools, subagents, skills, hooks and sandboxes and does not remove them.
 - Honesty never softens: Octant always says what a provider or tool can and cannot do, and records what happened.
 - Octant is never stricter than a key provider's own app: anything a person can allow there, they can allow in Octant with the same or fewer steps.
-- The specifications are measured against these principles today; the rules they call for that are marked "not built yet" in the entries below (guardrail levels, Octant Shield, key providers' native features, agent pull-request work) are not built yet.
+- The specifications are measured against these principles today; the rules they call for that are marked "not built yet" in the entries below (guardrail levels, Octant Shield, key providers' native features) are not built yet.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Overview and principles](../architecture.md#overview-and-principles).
 
@@ -306,7 +306,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundar
 Mobile maturity, a ciphertext-only hosted relay, language services and a debugger, enterprise identity, disposable desktops, outside provider drivers, the compliance package, and the hub-and-spoke topology are authorized post-preview work, each built only once its specification documents its boundaries.
 
 - The authorization covers design and implementation; creating an account, spending money, submitting to a store, deploying a hosted service, or weakening an invariant each needs a separate maintainer action.
-- Remote SSH development environments are in scope; a Code Project on a registered server is built ([Server Projects](server-projects.md)).
+- Remote SSH development environments are in scope; a Code or Work Project on a registered server is built ([Server Projects](server-projects.md)).
 - Release-scope choices (public store distribution, the Windows sequence, the full language-services companion) are the maintainer's to schedule and protect no invariant by themselves.
 
 Status: Partly built. Since: 2026-10-26. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
@@ -1535,9 +1535,9 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, ACP cl
 
 ### ACP agents keep their credential-file block at Full access
 
-At Full access an ACP agent launches outside Octant's sandbox but keeps the static denials of host credential files and of unapproved MCP, skill and hook folders.
+At Full access an ACP agent launches outside Octant's sandbox with no OS-level denials of host credential files or extension folders, as the provider's own app does; Octant's own file tools still refuse protected paths and secrets are redacted from what it records.
 
-- Credentials reach providers only through the credential broker, and discovery never enables an extension, so these denials hold at every level.
+- Credentials reach providers only through the credential broker; below Full access the sandbox also denies the credential files and unapproved extension folders.
 
 Status: Built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Approvals](../architecture.md#security-and-authority).
 
@@ -1572,7 +1572,7 @@ A Project browser is the person's browser, never an agent's. A page is Private u
 - Only the person at a local window may open, read or close it; a paired device is refused.
 - Profile pages open only in the desktop app's native Browser, and an agent acts on an origin there only after a site approval naming the profile.
 - Browser extensions install only at a local window, from an unpacked folder or from a copy of an extension the person picks in another Chromium-family browser on this Mac (never loaded in place; Manifest V2 and native-messaging extensions are listed as unsupported), start disabled, are enabled per profile, and never load into a Private page.
-- Octant never opens or imports another browser's profile.
+- Octant never opens another browser's profile in place.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Project browsing contexts](../architecture.md#security-and-authority) and [Browser profiles and extensions](../architecture.md#security-and-authority).
 
@@ -2180,7 +2180,7 @@ A public Canvas link is off by default and exists only through the person's expl
 - The payload is a frozen copy with no host, Project, thread or source ids, no file contents and no declared images. A Canvas has at most one active link (30-day default expiry, optional password).
 - The service has no accounts. A per-share owner secret lives in the credential broker, separate from provider credentials, and never in the journal.
 - The service logs no IP address and serves design frames from a separate user-content origin.
-- Service deployment, DNS and TLS are not part of this change (not built yet).
+- The service lives in a separate share-service repository; its deployment, DNS and TLS are not built yet.
 
 Status: Partly built. Since: 2026-10-20. Detail: [Canvas public links](canvas-public-links.md#off-until-the-person-turns-it-on) and [Publishing is the person's act](canvas-public-links.md#publishing-is-the-persons-act).
 
@@ -2257,7 +2257,7 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - The agent may hover, choose a list option, drag, press key chords, and open, list, switch and close tabs; a new tab reaches its page through the same origin admission as a navigation.
 - An upload sends files only from the thread's workspace (the Work Project folder or the Code checkout): relative paths, no symbolic link anywhere on the path, at most 5 files of 25 MB, and the person is asked every time at every access level. The answer is never remembered, and a terminal grant cannot upload.
 - Downloads are blocked unless the person turns on "Let agents download files" (off by default, set only from a local window, journaled with shell settings). Then a download an agent action starts is held outside the workspace (at most 25 MB, 5 per page), reported by name, size and sniffed type, and `download-save` asks the person every time, at every access level, before saving it as a new file in `downloads/` of the thread's workspace. Programs and installers are refused, a symbolic link is refused, and a paired device, a terminal grant and Plan cannot save. A person's own download in the pane stays blocked.
-- `steps` runs up to 10 operations in one call, each admitted by the server on its own, stopping at the first failure. A batch cannot nest, upload, stop, or open a signed-in page.
+- `steps` runs up to 10 operations in one call, each admitted by the server on its own, stopping at the first failure. A batch cannot nest, upload, download-save, sign in, run or save a flow, stop, or open a signed-in page.
 - Waits take text, an address, a load state, or an element's state, all or any, with a hard limit of 30 seconds. Actions wait for the page to settle (load, then 250 ms unchanged, at most 2 seconds). A page's dialogs are answered by a fixed rule (alert and leave-page accepted, confirm and prompt dismissed) and reported. `resize` sets the agent's own page to a size (320-3840 by 320-2160) or one of four device presets (`phone`, `phone-landscape`, `tablet`, `desktop`, each with a pixel ratio and mobile flag), and can turn touch emulation and a light or dark color scheme on or off; with no field it restores all of them. It touches only the agent's own page, never the person's window or another context, and a page whose developer tools someone else attached keeps its touch and color scheme.
 - `sign-in` hands the page to the person: a card with Continue and Cancel, the Browser brought forward, every other agent Browser call held, and a fresh snapshot on Continue. It is never remembered and is refused on routine, subagent, terminal-grant and paired-device turns.
 - `flow-save` keeps the agent's successful operations since the page opened (at most 50; refs as role and name, expected path and title per step) as a named flow in the thread's Project, and `flow-run` replays it with no model turn, every step admitted like a call and the replay stopping at the first step that fails, is refused, finds not exactly one element, or ends on a different path or title. A step that needs the person, or an address with a secret in it, ends what can be saved. A paired device cannot save or run, a routine may run but not save, and the person lists and deletes flows in Settings. Flows are journaled per Project, erased with it, and in no export or replica sync.
@@ -2680,7 +2680,7 @@ Status: Built. Since: 2026-10-26. Detail: [Disposable desktops: model](disposabl
 
 A desktop holds no host credential and no checkout. Only an explicit, journaled transfer of one checkout-relative file moves bytes in.
 
-- A host-local desktop runs in a dedicated Linux sandbox with its own network namespace and no host loopback, and has no network unless the recipe allows it.
+- A host-local desktop runs in a dedicated Linux sandbox with its own network namespace and no host loopback, and never has network: a recipe that asks for it is refused. Only a cloud recipe without a placement may allow network.
 - A cloud desktop's key stays in the host credential store and never enters the desktop.
 - Nothing is copied back except screenshots and recordings as host-held evidence.
 - Transfers to a cloud desktop always ask, in every posture, and Plan refuses transfers.
@@ -2708,6 +2708,6 @@ Desktop providers are plugin contributions through the `desktop-provider` seam; 
 - A billed provider must set a provider-side expiry, or the host destroys the desktop.
 - A daemon-backed placement is chosen per recipe; Octant stores no credential for the daemon and never installs or starts it.
 - A desktop on this machine is a virtual machine with no network until a live check proves otherwise.
-- The drivers are built against recorded and fake providers; no host offers one yet, and live smokes are owed.
+- The drivers are built against recorded and fake providers and are offered on every host (E2B everywhere, the Cua daemon driver on Linux); live smokes are owed.
 
 Status: Partly built. Since: 2026-10-28. Detail: [Disposable desktops: provider seam](disposable-desktops.md#provider-seam), [authority](disposable-desktops.md#authority) and [billed placements](disposable-desktops.md#expiry-and-teardown-when-the-daemons-host-may-die).

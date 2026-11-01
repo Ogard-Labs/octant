@@ -57,6 +57,25 @@ here is merged or being hardened for it.
 - **Routines (Automation Center)** — host-local, Project-bound schedules that
   start ordinary Work or Code threads under a capped authority, with durable
   occurrence recovery and no cloud wake.
+- **Canvas** — provider-neutral reports, dashboards, mockups, flows, decks,
+  and designs with a journaled lifecycle, export, and public links
+  ([Canvas](design/canvas.md)).
+- **Native agent harness** — Octant-owned agent loop for direct and local
+  endpoints with app-managed tools, Goals, roles, and session trees.
+- **Connectors** — MCP servers added by hand, imported from other tools on
+  this Mac, or chosen from a bundled catalog, with sign-in through the MCP
+  authorization flow, under the architecture's
+  [connector rules](architecture.md#extensions-and-skills).
+- **Agent Browser** — the agent's Browser tool with page snapshots, flows,
+  proof, downloads behind a switch, and the person's hand-over
+  ([Browser for agents](design/browser-agent-tool.md)).
+- **Personal memory, rewind, and fork** — memory across Projects, and Fork
+  from here and Rewind to here in Chat, Work, and Code threads and on the phone.
+- **Server Projects** — Code and Work Projects bound to a folder on a
+  registered server over SSH ([Server Projects](design/server-projects.md)).
+- **Hub and spokes, language services, and disposable desktops** — built
+  slices of the post-preview tracks; what each still lacks is listed in
+  [Decisions and requirements](design/decisions.md).
 - **Operations** — usage dashboard, optional Project and thread spend
   ceilings over tokens, turns, run time, and money, checked at turn admission
   (tokens by atomic reservation; money, turns, and run time against recorded
@@ -114,25 +133,15 @@ Hardening in progress for the preview:
   delivery-target sync is next, with the same authority model as GitHub. Chat or Work Linear browsing is a separate
   host mode-policy change, not a plugin side effect. Not a connector/OAuth
   marketplace.
-- **Connectors** — opened on 2026-10-20: MCP servers added by hand, imported
-  from other tools on this Mac, or chosen from a bundled catalog, with sign-in
-  through the MCP authorization flow, under the architecture's
-  [connector rules](architecture.md#extensions-and-skills).
-- **Headless host and multi-host federation** — run the server and web client
-  without Electron on macOS or Linux; pair desktop and web clients with several
-  hosts, show an `All Hosts` view, and choose the destination host per new
-  thread. Hosts never trust each other; offline host data is stale and
-  read-only.
+- **Headless host and multi-host federation** — the server and web client
+  already run without Electron; what remains is Station provisioning and
+  pairing desktop and web clients with several hosts, with an `All Hosts` view
+  and a destination host per new thread. Hosts never trust each other;
+  offline host data is stale and read-only.
   - Per-thread isolation on a Linux Station is not built: Code threads on a
     Linux host run under the same Bubblewrap confinement as every other
-    confined process. Station provisioning, Devices and Machines navigation,
-    and [disposable desktops](design/disposable-desktops.md) remain separate
-    follow-up deliveries.
-- **Canvas artifacts** — provider-neutral interactive reports, dashboards, and
-  agent controls with journaled lifecycle; sharing only after secure local use.
-- **Native agent harness** — Octant-owned agent loop for direct and local
-  endpoints with app-managed tools, Goals, roles, session trees, and CLI
-  parity with the GUI.
+    confined process. Station provisioning and Devices and Machines
+    navigation remain separate follow-up deliveries.
 - **Dogfood-driven fixes** — whatever daily use of the preview surfaces first.
 
 ## Later
@@ -154,21 +163,25 @@ authority, privacy, and release boundaries.
   push notifications, native capture, voice input, and public store
   distribution for the Expo client. Design:
   [Mobile maturity](design/mobile-maturity.md).
-- **Hosted relay** — designed as an opt-in, self-hostable, ciphertext-only
+- **Hosted relay** — only its contracts and policy exist. Designed as an opt-in, self-hostable, ciphertext-only
   fallback for already-paired apps, accepted 2026-10-26 as self-hosted only;
   no reachability gap over LAN, Tailscale, or SSH has been demonstrated, and an
   Octant-run relay waits on written evidence of one. Design: [design/hosted-relay.md](design/hosted-relay.md).
-- **Full LSP / extension host / debugger** — Monaco and explicit external-editor
-  handoff remain primary; a full IDE would run as a separately launched
-  companion. Design:
+- **Full extension host and the rest of the language tooling** — language
+  servers and a debugger are built as separately launched companions; Monaco
+  and explicit external-editor handoff remain primary, and a full IDE or
+  extension host stays outside. Design:
   [Language services](design/language-services.md).
-- **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
-  Bedrock Converse/IAM adapters beyond the API-key paths. Design:
+- **Provider identity extensions** — Azure Entra ID/OAuth and Amazon Bedrock
+  IAM sign-in beyond the API-key paths: built in slices, with the real-tenant
+  and real-gateway smokes still owed. Design:
   [Enterprise provider identity](design/enterprise-provider-identity.md).
-- **Disposable Linux desktops for headless hosts** — short-lived desktops a
-  headless host can drive.
-- **Third-party provider-driver plugins** — outside drivers admitted to the
-  provider catalog through the published seams.
+- **Octant Nightly** — a second app on Octant's host and data. Design:
+  [Octant Nightly](design/nightly-app.md).
+- **Finishing disposable desktops and outside provider drivers** — both are
+  built behind their seams; live provider smokes and wider placements remain
+  ([disposable desktops](design/disposable-desktops.md),
+  [outside provider drivers](design/outside-provider-drivers.md)).
 - **EU/GDPR compliance package** — pending legal review.
 - **Live guest sharing** — waits on the foundation named in its own design
   note; not among the 2026-10-26 tracks.
