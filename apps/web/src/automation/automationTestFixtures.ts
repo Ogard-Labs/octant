@@ -20,6 +20,9 @@ export const AUTOMATION_UI_TEST_IDS = {
   otherRun: "aa000000-0000-4000-8000-000000000011",
   project: "aa000000-0000-4000-8000-000000000020",
   otherProject: "aa000000-0000-4000-8000-000000000021",
+  chatProject: "aa000000-0000-4000-8000-000000000022",
+  chatExecutionProfile: "aa000000-0000-4000-8000-000000000041",
+  chatAuthorityProfile: "aa000000-0000-4000-8000-000000000051",
   bindingRevision: "aa000000-0000-4000-8000-000000000030",
   executionProfile: "aa000000-0000-4000-8000-000000000040",
   authorityProfile: "aa000000-0000-4000-8000-000000000050",
@@ -142,6 +145,52 @@ export function automationCodeDraftFixture(
       ...work.deliveryTarget,
       mode: "code",
       summary: "A green build report exists on the checkout.",
+    },
+    ...overrides,
+  } as Partial<AutomationDefinitionDraft>);
+}
+
+const chatAuthority = {
+  filesystem: false,
+  shell: false,
+  git: false,
+  network: false,
+  tools: true,
+  subagents: false,
+  executionPolicy: "approval-gated",
+  permissionPersistence: "current-session",
+} as const;
+
+export function automationChatDraftFixture(
+  overrides: Partial<AutomationDefinitionDraft> = {},
+): AutomationDefinitionDraft {
+  const work = automationWorkDraftFixture();
+  return automationWorkDraftFixture({
+    displayName: "Morning briefing",
+    mode: "chat",
+    projectId: AUTOMATION_UI_TEST_IDS.chatProject,
+    binding: {
+      kind: "chat",
+      hostId: "local",
+      projectId: AUTOMATION_UI_TEST_IDS.chatProject,
+      projectVersion: 1,
+    },
+    executionProfile: {
+      ...work.executionProfile,
+      profileId: AUTOMATION_UI_TEST_IDS.chatExecutionProfile,
+      mode: "chat",
+      projectId: AUTOMATION_UI_TEST_IDS.chatProject,
+    },
+    authorityProfile: {
+      ...work.authorityProfile,
+      profileId: AUTOMATION_UI_TEST_IDS.chatAuthorityProfile,
+      requested: chatAuthority,
+      effective: chatAuthority,
+    },
+    deliveryTarget: {
+      ...work.deliveryTarget,
+      mode: "chat",
+      summary: "A short briefing is in the thread.",
     },
     ...overrides,
   } as Partial<AutomationDefinitionDraft>);

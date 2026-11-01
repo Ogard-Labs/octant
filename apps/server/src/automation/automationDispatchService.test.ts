@@ -163,6 +163,59 @@ function workDefinition(overrides: Partial<AutomationDefinition> = {}): Automati
   });
 }
 
+function chatDefinition(overrides: Partial<AutomationDefinition> = {}): AutomationDefinition {
+  const authority = {
+    filesystem: false,
+    shell: false,
+    git: false,
+    network: false,
+    tools: true,
+    subagents: false,
+    executionPolicy: "approval-gated",
+    permissionPersistence: "current-session",
+  } as const;
+  return automationDefinitionFixture({
+    mode: "chat",
+    displayName: "Morning briefing",
+    binding: {
+      kind: "chat",
+      hostId: "local",
+      projectId: AUTOMATION_TEST_IDS.project,
+      projectVersion: 1,
+    },
+    executionProfile: {
+      profileId: AUTOMATION_TEST_IDS.executionProfile,
+      profileVersion: 1,
+      hostId: "local",
+      mode: "chat",
+      projectId: AUTOMATION_TEST_IDS.project,
+      providerInstanceId: AUTOMATION_TEST_IDS.providerInstance,
+      modelId: "approved-model",
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    },
+    authorityProfile: {
+      profileId: AUTOMATION_TEST_IDS.authorityProfile,
+      profileVersion: 1,
+      requested: authority,
+      effective: authority,
+      effectiveAuthorityDigest: "automation-authority-digest",
+    },
+    deliveryTarget: {
+      revisionId: AUTOMATION_TEST_IDS.deliveryTargetRevision,
+      revision: 1,
+      mode: "chat",
+      summary: "A short briefing is in the thread.",
+      confirmed: true,
+      confirmedBy: AUTOMATION_TEST_IDS.actor,
+      confirmedAt: "2026-08-10T12:00:00.000Z",
+    },
+    trigger: { kind: "interval", anchorAt: INTERVAL_ANCHOR, intervalMinutes: 60 },
+    nextDueAt: INTERVAL_ANCHOR,
+    ...overrides,
+  } as never);
+}
+
 function matchingFacts(definition: AutomationDefinition) {
   return buildAutomationAuthorityFactsFromHost({
     hostId: "local",
@@ -366,6 +419,86 @@ describe("AutomationDispatchService", () => {
     expect(after?.lifecycle).toBe("running");
     expect(after?.threadId).toBe(automationThreadIdForOccurrence(String(run.occurrenceKey)));
     expect(after?.firstTurnAcceptance?.runtimeReceipt).toBe("work-turn:test");
+    session.connection.close();
+  });
+
+  it("dispatches a Chat run through the Chat port, and refuses it when none is wired", async () => {
+    const session = openSession();
+    const definition = chatDefinition();
+    const run = claimQueuedRun(session, definition);
+    const create = vi.fn(async (input: { readonly threadId: string }) => ({
+      kind: "created" as const,
+      threadId: input.threadId as never,
+      createdAt: "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    }));
+    const launch = vi.fn(async () => ({
+      kind: "accepted" as const,
+      runtimeReceipt: "chat-turn:test",
+      acceptedAt: "2026-08-10T13:00:30.000Z" as UtcTimestamp,
+    }));
+    const common = {
+      store: session.store,
+      projection: session.projection,
+      code: createCodePort().port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      resolveFacts: () => matchingFacts(definition),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    };
+
+    await new AutomationDispatchService(common).dispatchNow(definition.id, run.id);
+    expect(session.projection.getRun(run.id)?.failure?.reason).toBe("unsupported-mode");
+
+    const second = openSession();
+    const secondRun = claimQueuedRun(second, definition);
+    await new AutomationDispatchService({
+      ...common,
+      store: second.store,
+      projection: second.projection,
+      chat: { createThread: create, startOrRecoverFirstTurn: launch },
+    }).dispatchNow(definition.id, secondRun.id);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(launch).toHaveBeenCalledTimes(1);
+    const after = second.projection.getRun(secondRun.id);
+    expect(after?.lifecycle).toBe("running");
+    expect(after?.threadId).toBe(automationThreadIdForOccurrence(String(secondRun.occurrenceKey)));
+    expect(after?.firstTurnAcceptance?.runtimeReceipt).toBe("chat-turn:test");
+    session.connection.close();
+    second.connection.close();
+  });
+
+  it("leaves a Chat run's provider capacity to the ordinary Chat turn path", async () => {
+    const session = openSession();
+    const definition = chatDefinition();
+    const run = claimQueuedRun(session, definition);
+    const admit = vi.fn(() => ({ kind: "waiting" as const, message: "full" }));
+    const launch = vi.fn(async () => ({
+      kind: "accepted" as const,
+      runtimeReceipt: "chat-turn:test",
+      acceptedAt: "2026-08-10T13:00:30.000Z" as UtcTimestamp,
+    }));
+
+    await new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: createCodePort().port,
+      work: unavailableAutomationWorkDispatchPort(),
+      chat: {
+        createThread: async (input) => ({
+          kind: "created",
+          threadId: input.threadId as never,
+          createdAt: "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+        }),
+        startOrRecoverFirstTurn: launch,
+      },
+      capacity: { admit },
+      resolveFacts: () => matchingFacts(definition),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    }).dispatchNow(definition.id, run.id);
+
+    expect(admit).not.toHaveBeenCalled();
+    expect(launch).toHaveBeenCalledTimes(1);
     session.connection.close();
   });
 

@@ -5,6 +5,8 @@ import {
   type ShieldServersRefusalReason,
   type ShieldServersView,
 } from "@octant/contracts/shield-servers";
+import { AggregateId } from "@octant/contracts";
+import { Schema } from "effect";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -15,12 +17,23 @@ import type {
 } from "./shieldServerStore";
 
 const ROUTE = "/api/shield/servers";
+const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 
 export interface ShieldServerRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
-  readonly store: Pick<ShieldServerStore, "servers" | "register" | "change" | "remove">;
+  readonly store: Pick<
+    ShieldServerStore,
+    | "servers"
+    | "register"
+    | "change"
+    | "remove"
+    | "projectOverride"
+    | "setProjectServers"
+    | "clearProject"
+  >;
+  readonly projectExists: (projectId: string) => boolean;
   /** Whether the person's SSH agent socket is there for SSH sessions to use. */
   readonly sshAgentAvailable: () => boolean;
   readonly now?: () => number;
@@ -89,34 +102,73 @@ export function createShieldServerRouteHandler(dependencies: ShieldServerRouteDe
       return failure("Server request is invalid.", 400, origin);
     }
 
-    if (request.method === "GET") return json({ view: view(dependencies) }, 200, origin);
+    if (request.method === "GET") {
+      const projectId = url.searchParams.get("projectId") ?? undefined;
+      if (projectId !== undefined && !dependencies.projectExists(projectId)) {
+        return json(refused("project-not-found"), 404, origin);
+      }
+      return json({ view: view(dependencies, projectId) }, 200, origin);
+    }
     let command: ShieldServersCommand;
     try {
       command = decodeShieldServersCommand(body);
     } catch {
       return failure("Server command is invalid.", 400, origin);
     }
+    if (
+      (command.kind === "set-project-servers" || command.kind === "clear-project-override") &&
+      !dependencies.projectExists(String(command.projectId))
+    ) {
+      return json(refused("project-not-found"), 404, origin);
+    }
     const change: ShieldServersChange =
-      command.kind === "register-server"
-        ? dependencies.store.register({ server: command.server, principal })
-        : command.kind === "change-server"
-          ? dependencies.store.change({
-              serverId: String(command.serverId),
-              server: command.server,
-              principal,
-            })
-          : dependencies.store.remove({ serverId: String(command.serverId), principal });
+      command.kind === "set-project-servers"
+        ? dependencies.store.setProjectServers({
+            projectId: String(command.projectId),
+            servers: command.servers,
+            principal,
+          })
+        : command.kind === "clear-project-override"
+          ? dependencies.store.clearProject({ projectId: String(command.projectId), principal })
+          : command.kind === "register-server"
+            ? dependencies.store.register({ server: command.server, principal })
+            : command.kind === "change-server"
+              ? dependencies.store.change({
+                  serverId: String(command.serverId),
+                  server: command.server,
+                  principal,
+                })
+              : dependencies.store.remove({ serverId: String(command.serverId), principal });
+    const projectId =
+      command.kind === "set-project-servers" || command.kind === "clear-project-override"
+        ? String(command.projectId)
+        : (url.searchParams.get("projectId") ?? undefined);
+    const known = projectId !== undefined && dependencies.projectExists(projectId);
     const result: ShieldServersCommandResult =
       change.kind === "changed"
-        ? { kind: "shield-servers-updated", view: view(dependencies) }
+        ? {
+            kind: "shield-servers-updated",
+            view: view(dependencies, known ? projectId : undefined),
+          }
         : refused(change.reason);
     return json(result, result.kind === "shield-servers-updated" ? 200 : 409, origin);
   };
 }
 
-function view(dependencies: ShieldServerRouteDependencies): ShieldServersView {
+function view(
+  dependencies: ShieldServerRouteDependencies,
+  projectId: string | undefined,
+): ShieldServersView {
   return {
     servers: dependencies.store.servers(),
+    ...(projectId === undefined
+      ? {}
+      : {
+          project: {
+            projectId: decodeAggregateId(projectId),
+            override: dependencies.store.projectOverride(projectId) ?? null,
+          },
+        }),
     sshAgent: dependencies.sshAgentAvailable() ? "available" : "missing",
   };
 }
@@ -129,6 +181,7 @@ const MESSAGES: Readonly<Record<ShieldServersRefusalReason, string>> = {
   "invalid-deploy-command": "Write each deploy command on one line.",
   "server-not-found": "That server is not registered.",
   "too-many-servers": "No more servers can be registered.",
+  "project-not-found": "That Project does not exist on this computer.",
   unavailable: "The change could not be recorded, so nothing changed.",
 };
 

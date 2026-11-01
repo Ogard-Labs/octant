@@ -485,6 +485,49 @@ describe("mapCodexMessage", () => {
     );
   });
 
+  it("reports a finished command's exit status, and hands a server's output to the Watcher only", () => {
+    const completed = (command: string, status: "completed" | "failed", exitCode: number) => {
+      const ctx = context();
+      map(
+        ctx,
+        notification("item/started", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { ...commandItem, command },
+          startedAtMs: 10,
+        }),
+      );
+      return map(
+        ctx,
+        notification("item/completed", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            ...commandItem,
+            command,
+            status,
+            exitCode,
+            aggregatedOutput: "load average: 0.10",
+          },
+          completedAtMs: 20,
+        }),
+      ).flatMap((result) => (result.kind === "event" ? [result.event] : []));
+    };
+
+    // Codex runs each command through a login shell.
+    expect(completed("/bin/zsh -lc 'ssh web1 uptime'", "failed", 3)).toEqual([
+      expect.objectContaining({
+        kind: "outside-content-result",
+        source: "remote-command",
+        text: "load average: 0.10",
+      }),
+      expect.objectContaining({ kind: "tool-failure", exitCode: 3 }),
+    ]);
+    expect(completed("bun run test", "completed", 0)).toEqual([
+      expect.objectContaining({ kind: "tool-success", exitCode: 0 }),
+    ]);
+  });
+
   it("names a started file change by its Project-relative path, never its diff", () => {
     const results = map(
       context(),

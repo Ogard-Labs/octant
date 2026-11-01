@@ -113,6 +113,7 @@ const ACTIVE_RUN_LIFECYCLES = new Set([
 
 const FILTERS: readonly { readonly value: AutomationCenterFilter; readonly label: string }[] = [
   { value: "all", label: "All" },
+  { value: "chat", label: "Chat" },
   { value: "work", label: "Work" },
   { value: "code", label: "Code" },
 ];

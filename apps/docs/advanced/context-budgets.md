@@ -105,14 +105,14 @@ You can also compact a session yourself: **Compact session** in the context
 popover, or beside **Rebuild context plan** in the context inspector. After you
 confirm, the earlier conversation is replaced by a summary for what the model
 sees next; the thread keeps every message. Octant summarizes where it keeps the
-conversation, and asks the runtime (Codex, Claude Code, or Octant Harness in
-Code) where the runtime keeps it. While it runs the popover reads
+conversation, and asks the runtime (Codex, Claude Code, OpenCode 2.2.0 or
+newer, or Octant Harness in Code) where the runtime keeps it. While it runs the popover reads
 **Compacting…** and the composer holds send. Afterwards the popover says how
 much was freed and who wrote the summary, or why it could not compact. The
 button is disabled, with the reason, while something you can wait out stands
 in the way, such as a reply that is still running, or a runtime that is not
 ready. Where the runtime keeps its own history and Octant has no compaction
-request for it (OpenCode, Pi and the ACP agents), or this version of it is too
+request for it (Pi and the ACP agents), or this version of it is too
 old, the button is replaced by a line
 saying so; on a paired device it is left out.
 

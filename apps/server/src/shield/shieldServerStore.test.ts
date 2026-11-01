@@ -69,6 +69,8 @@ const web: ShieldServerFields = {
 };
 
 const threadId = "7c0e8d51-6a2b-4c3d-9e8f-1a2b3c4d5e6f";
+const projectId = "4a1b2c3d-0000-4000-8000-00000000000a";
+const otherProjectId = "4a1b2c3d-0000-4000-8000-00000000000b";
 
 describe("Shield server registry", () => {
   it("journals a registered server and rebuilds it from the journal after a restart", () => {
@@ -219,6 +221,72 @@ describe("Shield server registry", () => {
     ]);
   });
 
+  it("records an scp or rsync call as a remote command with the server it reaches", () => {
+    const journal = openJournal(scratch());
+    const store = storeOn(journal);
+    store.register({ server: web, principal: "local-window" });
+    expect(
+      store.recordRemoteCommand({
+        threadId,
+        command: "rsync -az dist/ web1:/srv/app/",
+        status: "ran",
+        exitCode: 0,
+      }),
+    ).toBe("recorded");
+    expect(store.recordRemoteCommand({ threadId, command: "scp a b", status: "ran" })).toBe(
+      "not-remote",
+    );
+    const [recorded] = journal
+      .replayAggregateType({
+        aggregateType: SHIELD_REMOTE_COMMANDS_AGGREGATE,
+        afterSequence: 0,
+        limit: 10,
+      })
+      .map((envelope) => envelope.payload);
+    expect(recorded).toMatchObject({ host: "web1", serverId: store.servers()[0]?.serverId });
+  });
+
+  it("gives a Project its own list that replaces the account list there, and survives a restart", () => {
+    const directory = scratch();
+    const journal = openJournal(directory);
+    const store = storeOn(journal);
+    store.register({ server: web, principal: "local-window" });
+    const db: ShieldServerFields = {
+      alias: "db1",
+      user: "ops",
+      profile: "read-only",
+      deployCommands: [],
+    };
+    expect(
+      store.setProjectServers({ projectId, servers: [db], principal: "remote-device" }),
+    ).toEqual({ kind: "refused", reason: "needs-local-window" });
+    expect(
+      store.setProjectServers({
+        projectId,
+        servers: [db, { ...db, alias: "DB1" }],
+        principal: "local-window",
+      }),
+    ).toEqual({ kind: "refused", reason: "duplicate-alias" });
+    expect(
+      store.setProjectServers({ projectId, servers: [db], principal: "local-window" }).kind,
+    ).toBe("changed");
+    expect(store.serversFor(projectId).map((server) => server.alias)).toEqual(["db1"]);
+    expect(store.serversFor(otherProjectId).map((server) => server.alias)).toEqual(["web1"]);
+    expect(store.serversFor(undefined).map((server) => server.alias)).toEqual(["web1"]);
+    expect(store.context(projectId)).toContain("db1 (user ops, Read-only)");
+    expect(store.context(projectId)).not.toContain("web1");
+
+    const restarted = storeOn(journal);
+    expect(restarted.projectOverride(projectId)?.map((server) => server.alias)).toEqual(["db1"]);
+    expect(restarted.clearProject({ projectId, principal: "local-window" }).kind).toBe("changed");
+    expect(restarted.projectOverride(projectId)).toBeUndefined();
+    expect(
+      storeOn(journal)
+        .serversFor(projectId)
+        .map((server) => server.alias),
+    ).toEqual(["web1"]);
+  });
+
   it("gives the agent each runbook as notes that grant nothing", () => {
     const directory = scratch();
     const runbook = join(directory, "web1.md");
@@ -261,6 +329,7 @@ describe("Settings › Servers route", () => {
       windowAuthorityStore: windows,
       store,
       sshAgentAvailable: () => false,
+      projectExists: (id) => id === projectId,
       now: () => 1,
     });
     const url = "http://127.0.0.1/api/shield/servers";
@@ -290,6 +359,35 @@ describe("Settings › Servers route", () => {
     expect(await local?.json()).toMatchObject({
       kind: "shield-servers-updated",
       view: { servers: [{ alias: "web1", profile: "operate" }], sshAgent: "missing" },
+    });
+
+    const projectUrl = `${url}?projectId=${projectId}`;
+    const missing = await handler(
+      new Request(`${url}?projectId=${otherProjectId}`, {
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+    expect(missing?.status).toBe(404);
+    const set = await handler(
+      new Request(projectUrl, {
+        method: "POST",
+        body: JSON.stringify({ kind: "set-project-servers", projectId, servers: [] }),
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+    expect(await set?.json()).toMatchObject({
+      kind: "shield-servers-updated",
+      view: { project: { projectId, override: [] } },
+    });
+    const cleared = await handler(
+      new Request(projectUrl, {
+        method: "POST",
+        body: JSON.stringify({ kind: "clear-project-override", projectId }),
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+    expect(await cleared?.json()).toMatchObject({
+      view: { project: { projectId, override: null } },
     });
   });
 });

@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { AppReleaseRing, AppUpdateFeed } from "./appUpdates";
-import { AutomationMode, AutomationTrigger } from "./automation";
+import { AutomationThreadMode, AutomationTrigger } from "./automation";
 import { UtcTimestamp } from "./events";
 import { ExtensionContentDigest } from "./extensionIdentity";
 import { ExtensionCatalogEntryId, ExtensionCatalogId } from "./extensions";
@@ -166,7 +166,7 @@ export const RoutineOffer = Schema.Struct({
   kind: Schema.Literal("routine"),
   displayName: offeredText(160),
   taskPrompt: offeredText(16_384),
-  mode: AutomationMode,
+  mode: AutomationThreadMode,
   trigger: AutomationTrigger,
 }).annotations(strict);
 export type RoutineOffer = typeof RoutineOffer.Type;
