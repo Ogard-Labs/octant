@@ -353,4 +353,31 @@ describe("CodeFileExplorerPanel extra folders", () => {
     );
     expect(await screen.findByRole("treeitem", { name: /a\.ts/ })).toBeVisible();
   });
+
+  it("shows an extra folder whose name the file-path schema refuses as unavailable and keeps the checkout's tree", async () => {
+    const list = vi.fn(async () =>
+      listing([
+        {
+          kind: "file",
+          fileId,
+          path: "a.ts",
+          byteLength: 4,
+          availability: { status: "available" },
+        },
+      ]),
+    );
+    render(
+      <CodeFileExplorerPanel
+        checkoutId={checkoutId}
+        client={{ list, watch: vi.fn(async function* () {}) } as never}
+        extraFolders={["/Users/me/odd\\name"]}
+        onOpenFile={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByText(/cannot list this folder/)).toBeVisible();
+    expect(await screen.findByRole("treeitem", { name: /a\.ts/ })).toBeVisible();
+    expect(list).toHaveBeenCalledTimes(1);
+  });
 });

@@ -196,14 +196,19 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
 
   function open(match: CodeSearchMatch | undefined): void {
     if (match === undefined) return;
-    setScope(undefined);
     // A match in an extra folder opens by that folder's path joined to its own,
-    // the way the editor names a file outside the checkout.
-    props.onOpenFile(
-      match.folder === undefined
-        ? match.path
-        : decodeCodeProjectFilePath(`${match.folder}/${match.path}`),
-    );
+    // the way the editor names a file outside the checkout. A spelling the
+    // file-path schema refuses stays listed and does not open.
+    let path = match.path;
+    if (match.folder !== undefined) {
+      try {
+        path = decodeCodeProjectFilePath(`${match.folder}/${match.path}`);
+      } catch {
+        return;
+      }
+    }
+    setScope(undefined);
+    props.onOpenFile(path);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
