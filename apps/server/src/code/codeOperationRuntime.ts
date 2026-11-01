@@ -142,7 +142,11 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
-import { decodeAgentRunAdmittedContext, type ProviderContextBlock } from "@octant/contracts";
+import {
+  decodeAgentRunAdmittedContext,
+  MAX_SHIELD_REASON_LENGTH,
+  type ProviderContextBlock,
+} from "@octant/contracts";
 import type {
   AgentRunParentContextSelection,
   AgentRunParentContextUnavailableReason,
@@ -4504,7 +4508,11 @@ function normalizedOperationEvent(
         verdict: event.verdict,
         ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
         ...(event.riskLevel === undefined ? {} : { riskLevel: event.riskLevel }),
-        ...(event.reason === undefined ? {} : { reason: event.reason }),
+        // Sanitizing can lengthen the text (a path becomes a placeholder), and
+        // the journal refuses a reason past its bound.
+        ...(event.reason === undefined
+          ? {}
+          : { reason: Array.from(event.reason).slice(0, MAX_SHIELD_REASON_LENGTH).join("") }),
         decidedAt: event.occurredAt,
       },
     };
