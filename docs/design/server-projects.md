@@ -10,10 +10,12 @@ of the person's registered servers, reached over SSH. Architecture owns the boun
 the SSH connection, and the folder check at binding (`/api/server-projects`);
 Code threads there on the Octant Harness, with file tools, commands, and Git
 on the server at every level; thread terminals there; the Git tab, whose Git
-runs on the server; and the Code sidebar, composer, and thread view that open
-them. On the host: Work Projects there, whose Work threads run on the Octant
-Harness with file tools and commands on the server ([Work Projects](#work-projects)).
-Not built yet: the items under [Not built yet](#not-built-yet).
+runs on the server; a thread's own worktree on the server and its pull
+request ([Worktrees and pull requests](#worktrees-and-pull-requests)); and
+the Code sidebar, composer, and thread view that open them. On the host: Work
+Projects there, whose Work threads run on the Octant Harness with file tools
+and commands on the server ([Work Projects](#work-projects)). Not built yet:
+the items under [Not built yet](#not-built-yet).
 
 ## Outcome
 
@@ -117,7 +119,9 @@ hands are on the server.
   Project, server, and folder under labels of their own, so it can never name a
   retired checkout, and every host-side Git, file, test, checkpoint, and
   worktree path keeps refusing it as it refuses every `remote-root` checkout.
-  The Git tab reaches it only through Git on the server ([Panels](#panels)).
+  The Git tab reaches it only through Git on the server ([Panels](#panels)),
+  and a thread's own worktree is made there
+  ([Worktrees and pull requests](#worktrees-and-pull-requests)).
 - **Octant Harness only.** A thread there runs on the Octant Harness, whose
   inference stays on this host and whose hands are on the server. Every other
   runtime is refused before it launches, naming why: its own tools act on this
@@ -225,18 +229,73 @@ hands are on the server.
   thread. _Rationale:_ the draft's model session is opened with the checkout
   as its folder, which would name a server path as a folder of this host.
 
+### Worktrees and pull requests
+
+- **A thread's own worktree is on the server.** The composer's **Workspace**
+  menu offers **Managed worktree** for a server Project, and its branch list
+  is read with Git on the server (`git for-each-ref`). Creating the thread
+  runs `git worktree add` on the server, on a new branch (the thread's
+  delivery branch) from the chosen source, at
+  `<parent of the folder>/.octant-worktrees/<repository id>/<thread id>`: beside
+  the folder, where a local managed worktree sits beside its repository, at
+  a path derived from the Project and the thread alone. Start from origin
+  fetches only that branch there. Nothing is created, read, or fetched on
+  this host.
+- A worktree is made only when the Project's folder is its repository's top
+  folder, only on a branch that does not exist yet, and only where nothing
+  exists at its path; otherwise nothing is made. A fork is not offered, since
+  its files live in this host's checkpoints. A server that cannot be reached
+  makes nothing anywhere.
+- **Its identity.** The thread's checkout is a `remote-root` like the
+  Project's, with an id that is a digest of the Project and the thread under
+  a label of its own, journaled as `code.checkout-observed@1` before the
+  thread. The thread's file tools, commands, terminals, and Git act in the
+  worktree's folder; the folder is derived again from the Project and thread
+  on each use, never read back from a record, and a thread holding another
+  thread's worktree checkout is not that thread.
+- **Plan makes none.** A Plan thread is not started in a new worktree on a
+  server, since the worktree is a Git change there and Octant has no
+  confinement on the server to hold Plan read-only. It starts in Current
+  checkout instead.
+- **Removing it is the person's.** If binding the new thread fails, the
+  worktree and branch this creation just made are removed again. Otherwise
+  Octant never removes a worktree on a server: a thread purge on this host
+  leaves it, and the person removes it there (`git worktree remove`).
+  _Rationale:_ a purge runs without a connection to the server and cannot
+  confirm what it would delete there, so it deletes nothing.
+- **A remembered habit stays local.** A Project's remembered workspace choice
+  is this host's; a server thread starts in Current checkout unless the
+  person picks a worktree in the composer.
+- **Pull requests.** A server thread creates, updates, comments on, observes,
+  and merges its pull request as a local thread does, through this host's
+  `gh`, by repository and branch name alone: the branch is pushed from the
+  server first (**Git** › push), and no server path is handed to a process of
+  this host. The check that the checkout has a GitHub remote reads the remote
+  with Git on the server. The checkout bar offers **Create pull request**.
+  The same approvals, levels, and merge rules as a local thread apply.
+- **Its repository.** When the thread's delivery target names the
+  composer's `local/…` placeholder (a composer reads no remote of a server),
+  the pull request's repository is the GitHub repository of the delivery
+  remote on the server, read when the pull request is made. A repository the
+  person named stays. A server that cannot be reached leaves the
+  placeholder, and no pull request is opened. _Rationale:_ the remote the
+  thread pushes to is the repository its branch is on; reading it at that
+  moment needs no new record of a server's remotes on this host.
+
 ## Not built yet
 
 - The Work sidebar, composer, and thread view for a Work Project on a server,
   and the choice of mode when binding one in Settings; the host side is built.
 - Extra folders in a server Project.
-- The file browser, tests, managed worktrees, and pull request delivery for a
-  server Project, and the dock's Review tool there; the Git tab is built.
+- The file browser and tests for a server Project, and the dock's Review
+  tool there; the Git tab, managed worktrees, and pull requests are built.
 - The Project terminal (the thread-less one) for a server Project; thread
   terminals are built.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,
-  commands, terminals and the Git tab were exercised against a throwaway local `sshd` only. Linux
+  commands, terminals, the Git tab and worktrees were exercised against a
+  throwaway local `sshd` only, and pull requests against a stand-in for
+  `gh`, never GitHub. Linux
   hosts are likewise untested; the connection uses only `ssh` options both
   platforms share.

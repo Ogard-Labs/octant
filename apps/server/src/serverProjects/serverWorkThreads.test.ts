@@ -71,6 +71,7 @@ describe("a server Work Project's threads", () => {
     const derived = serverCodeCheckout(project);
     expect(
       serverProjectOf(store, {
+        id: "22222222-2222-4222-8222-222222222224" as never,
         projectId: project.id,
         bindingRevisionId: derived.bindingRevisionId,
         repositoryId: derived.checkout.repositoryId,

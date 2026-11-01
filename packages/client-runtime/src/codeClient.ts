@@ -103,6 +103,7 @@ import {
   CodeNavigationRuntime,
   CodeThreadActivity,
   decodeHostAnswer,
+  OWNER_UNLOCK_HEADER,
 } from "@octant/contracts";
 import {
   CodeLanguageApprovalResult,
@@ -116,6 +117,11 @@ import {
   type CodeLanguageReadRequest,
 } from "@octant/contracts/code-language";
 import { bindFetchPort } from "./bindFetchPort";
+import {
+  sendWithOwnerUnlock,
+  type OwnerMergeUnlock,
+  type OwnerUnlockNotGiven,
+} from "./ownerMergeUnlock";
 
 /** The attachment route, addressed by thread and attachment. */
 function attachmentUrl(baseUrl: string, threadId: string, attachmentId: string): URL {
@@ -133,6 +139,11 @@ export interface CodeClientOptions {
   readonly baseUrl: string;
   readonly fetch: typeof globalThis.fetch;
   readonly windowCapability: string;
+  /**
+   * How a paired client gives the owner unlock its host may ask a merge for.
+   * Absent in a desktop window, whose own click needs none.
+   */
+  readonly ownerMergeUnlock?: OwnerMergeUnlock;
 }
 
 export interface CodeFileIdentity {
@@ -201,11 +212,11 @@ export interface CodeClient {
   ): Promise<CodeProjectPullRequestDetailView>;
   mergeProjectPullRequest?(
     command: CodeProjectPullRequestMergeCommand,
-  ): Promise<CodeProjectPullRequestMergeOutcome>;
+  ): Promise<CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven>;
   /** Merge a whole stack in one step, from the bottom; the person has confirmed each head. */
   mergeProjectPullRequestStack?(
     command: CodeProjectPullRequestStackMergeCommand,
-  ): Promise<CodeProjectPullRequestStackMergeOutcome>;
+  ): Promise<CodeProjectPullRequestStackMergeOutcome | OwnerUnlockNotGiven>;
   /** The person's labels, comment, review reply, close, and reopen on a pull request. */
   actOnProjectPullRequest?(
     command: CodeProjectPullRequestActionCommand,
@@ -220,7 +231,7 @@ export interface CodeClient {
   ): Promise<CodeProjectPullRequestSwitchesView>;
   setProjectPullRequestMergeWhenReady?(
     command: CodeProjectPullRequestMergeWhenReadyCommand,
-  ): Promise<CodeProjectPullRequestSwitchOutcome>;
+  ): Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>;
   setProjectPullRequestAutoFix?(
     command: CodeProjectPullRequestAutoFixCommand,
   ): Promise<CodeProjectPullRequestSwitchOutcome>;
@@ -366,6 +377,32 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
   const fetch = bindFetchPort(options.fetch);
   validateLoopbackBaseUrl(options.baseUrl);
   const headers = { "x-octant-window-capability": options.windowCapability };
+  /** A merge route: sent once, and again with an owner unlock when the host asks for one. */
+  const mergeRequest = <T extends { readonly status: string }>(
+    path: string,
+    body: string,
+    decode: (value: unknown) => T,
+  ) =>
+    sendWithOwnerUnlock({
+      path,
+      body,
+      unlock: options.ownerMergeUnlock,
+      send: (proof) =>
+        request(
+          fetch,
+          new URL(path, options.baseUrl).toString(),
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              "content-type": "application/json",
+              ...(proof === undefined ? {} : { [OWNER_UNLOCK_HEADER]: proof }),
+            },
+            body,
+          },
+          decode,
+        ),
+    });
   return {
     bootstrap() {
       return request(
@@ -570,14 +607,9 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       } catch {
         throw invalidProjectPullRequestMerge();
       }
-      return request(
-        fetch,
-        new URL("/api/code/project-pull-requests/merge", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(validated),
-        },
+      return mergeRequest(
+        "/api/code/project-pull-requests/merge",
+        JSON.stringify(validated),
         decodeHostAnswer(CodeProjectPullRequestMergeOutcome),
       );
     },
@@ -588,14 +620,9 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       } catch {
         throw invalidProjectPullRequestMerge();
       }
-      return request(
-        fetch,
-        new URL("/api/code/project-pull-requests/merge-stack", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(validated),
-        },
+      return mergeRequest(
+        "/api/code/project-pull-requests/merge-stack",
+        JSON.stringify(validated),
         decodeHostAnswer(CodeProjectPullRequestStackMergeOutcome),
       );
     },
@@ -660,14 +687,9 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       } catch {
         throw invalidProjectPullRequestSwitch();
       }
-      return request(
-        fetch,
-        new URL("/api/code/project-pull-requests/merge-when-ready", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(validated),
-        },
+      return mergeRequest(
+        "/api/code/project-pull-requests/merge-when-ready",
+        JSON.stringify(validated),
         decodeHostAnswer(CodeProjectPullRequestSwitchOutcome),
       );
     },

@@ -286,7 +286,7 @@ copy, not the authoritative export.
 
 **Export this host.** **Export my data** is the host-wide cut
 (`octant.host-export/1`): one local-owner read of every thread the host
-can project — across Chat, Work, and Code — plus Projects, memory,
+can project — across Chat, Work, and Code — plus Projects, Project memory, your person memory (each note and the threads it came from),
 Canvases, settings, usage rows, and the retention state
 including purge tombstones, streamed as line-delimited JSON. It is local-owner-only: a
 remote or paired device principal is refused before any export data is read.

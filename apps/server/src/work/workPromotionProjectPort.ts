@@ -102,7 +102,8 @@ export function createWorkPromotionProjectPort(
   };
 }
 
-function repositoryFromRemote(remote: string): string | undefined {
+/** The `owner/repository` a GitHub remote URL names, without credentials. */
+export function repositoryFromRemote(remote: string): string | undefined {
   const ssh = /^git@github\.com:([^/:]+\/[^/]+?)(?:\.git)?$/.exec(remote);
   if (ssh?.[1] !== undefined) return ssh[1];
   try {

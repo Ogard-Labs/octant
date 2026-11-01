@@ -1,6 +1,5 @@
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import { decodeProjectId } from "@octant/contracts";
-import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import {
   decodePersonMemoryCommand,
   PERSON_MEMORY_ENTRY_MAX_CHARACTERS,
@@ -11,7 +10,6 @@ import {
   type PersonMemoryView,
 } from "@octant/contracts/person-memory";
 import { useCallback, useEffect, useId, useState } from "react";
-import { modelValue, shieldModelOptions, THREAD_PROVIDER_MODEL } from "../code/CodeSettingsView";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantFieldError } from "../ui/base/OctantField";
@@ -24,7 +22,6 @@ export interface PersonMemorySettingsProps {
   /** Absent where the host does not show memory, such as a paired device. */
   readonly client: PersonMemoryClient | undefined;
   readonly projectNames: ReadonlyMap<string, string>;
-  readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
   readonly focusedSetting?: string | undefined;
 }
 
@@ -109,12 +106,9 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
     }
   }
 
-  const changeSettings = (next: Partial<MemorySettings>, clearModel = false) => {
+  const changeSettings = (next: Partial<MemorySettings>) => {
     if (view === undefined) return;
-    const { distillModel, ...rest } = { ...view.settings, ...next };
-    const settings: MemorySettings =
-      clearModel || distillModel === undefined ? rest : { ...rest, distillModel };
-    void send({ kind: "change-person-memory-settings", settings });
+    void send({ kind: "change-person-memory-settings", settings: { ...view.settings, ...next } });
   };
 
   if (client === undefined) {
@@ -140,7 +134,6 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
     .filter(([id]) => !excluded.has(id))
     .sort((left, right) => left[1].localeCompare(right[1]))
     .map(([id, name]) => ({ id, label: name }));
-  const models = shieldModelOptions(props.providerSnapshot, settings.distillModel);
 
   return (
     <>
@@ -172,28 +165,6 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
               disabled={busy || !settings.enabled}
               label="Search past threads"
               onCheckedChange={(pastThreadSearch) => changeSettings({ pastThreadSearch })}
-            />
-          </SettingRow>
-          <SettingRow
-            description="One short request after each thread you put away. It shows in Usage as person-memory."
-            focused={props.focusedSetting === "person-memory-model"}
-            label="Model that writes memory"
-            scope="host"
-            settingId="person-memory-model"
-          >
-            <OctantSelectField
-              aria-label="Model that writes memory"
-              disabled={busy || !settings.enabled}
-              onValueChange={(value) => {
-                const choice = models.find((option) => option.id === value)?.choice;
-                if (value === THREAD_PROVIDER_MODEL || choice === undefined) {
-                  changeSettings({}, true);
-                } else {
-                  changeSettings({ distillModel: choice });
-                }
-              }}
-              options={models.map((option) => ({ id: option.id, label: option.label }))}
-              value={modelValue(settings.distillModel)}
             />
           </SettingRow>
         </div>

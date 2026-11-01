@@ -24,6 +24,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import {
   NewMemberChecks,
   OwnerDevices,
+  PairedMergeUnlockSwitch,
   type HeldMemberRow,
   type NewMemberAlertRow,
   type OwnerCandidateRow,
@@ -256,6 +257,8 @@ interface Grant {
 
 interface HubStatus {
   readonly enabled: boolean;
+  /** Whether a paired phone or web client's merge needs a fresh unlock on an owner device here. */
+  readonly pairedMergeUnlock: boolean;
   readonly members: ReadonlyArray<Member>;
   /** The hub's own owner list, and the roster members that list an unlock key but are not on it. */
   readonly owners: ReadonlyArray<OwnerRow>;
@@ -1012,6 +1015,23 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
       "Octant could not remove that owner.",
     );
     if (reply !== undefined) setMessage(`Removed ${owner.name} as an owner.`);
+    await refresh();
+  };
+
+  const setPairedMergeUnlock = async (enabled: boolean) => {
+    const reply = await act(
+      "paired-merge-unlock",
+      { enabled },
+      "changed",
+      "Octant could not change the owner unlock for merges.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        enabled
+          ? "A phone or browser now needs an owner unlock to merge here."
+          : "A phone or browser merges here without an owner unlock.",
+      );
+    }
     await refresh();
   };
 
@@ -1809,6 +1829,11 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
             onRemove={removeOwner}
             owners={status.owners}
           />
+          <PairedMergeUnlockSwitch
+            busy={busy}
+            enabled={status.pairedMergeUnlock}
+            onChange={(enabled) => void setPairedMergeUnlock(enabled)}
+          />
         </SettingsSection>
       )}
 
@@ -1829,6 +1854,11 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                   onAdd={addOwner}
                   onRemove={removeOwner}
                   owners={linked.owners}
+                />
+                <PairedMergeUnlockSwitch
+                  busy={busy}
+                  enabled={status?.pairedMergeUnlock === true}
+                  onChange={(enabled) => void setPairedMergeUnlock(enabled)}
                 />
               </>
             ) : (
@@ -2233,6 +2263,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const directPush = readDirectPush(field(body, "directPush"));
   const provision = readProvision(field(body, "provision"));
   const signIn = readSignIn(field(body, "signIn"));
+  const pairedMergeUnlock = field(body, "pairedMergeUnlock") === true;
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -2251,6 +2282,7 @@ function readStatus(body: unknown): HubStatus | undefined {
     const removed = field(standIn, "removed");
     return {
       enabled,
+      pairedMergeUnlock,
       members,
       owners: readOwners(field(hub, "owners")),
       ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
@@ -2283,6 +2315,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   }
   return {
     enabled,
+    pairedMergeUnlock,
     members,
     owners: readOwners(field(hub, "owners")),
     ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),

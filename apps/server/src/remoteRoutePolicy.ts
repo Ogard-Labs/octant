@@ -1,5 +1,6 @@
 import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
 import {
+  CODE_OWNER_UNLOCKED_MERGE_PATHS,
   CHAT_ATTACHMENT_MEDIA_TYPES,
   CODE_ATTACHMENT_MEDIA_TYPES,
   HUB_WAKE_MAX_SPOKES,
@@ -758,6 +759,14 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path: "/api/providers/bootstrap",
     methods: ["GET", "HEAD"] as const,
   },
+  // A paired client's merge may carry an owner device's unlock beside it.
+  ...CODE_OWNER_UNLOCKED_MERGE_PATHS.map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedRequestHeaders: [...REMOTE_REQUEST_HEADERS, OWNER_UNLOCK_HEADER] as const,
+    allowedContentTypes: ["application/json"] as const,
+  })),
   {
     kind: "exact" as const,
     path: "/api/code/evidence",

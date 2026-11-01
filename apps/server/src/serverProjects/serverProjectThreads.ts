@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { posix } from "node:path";
 import {
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
@@ -36,15 +37,16 @@ export interface ServerCodeCheckout {
   readonly checkout: Extract<CodeCheckoutIdentity, { readonly kind: "remote-root" }>;
 }
 
-function digest(label: string, project: ServerProject): string {
-  return createHash("sha256")
+function digest(label: string, project: ServerProject, threadId?: string): string {
+  const hash = createHash("sha256")
     .update(`${label}\0`)
     .update(String(project.id))
     .update("\0")
     .update(String(project.serverId))
     .update("\0")
-    .update(project.folder)
-    .digest("hex");
+    .update(project.folder);
+  if (threadId !== undefined) hash.update("\0").update(threadId);
+  return hash.digest("hex");
 }
 
 function digestUuid(hex: string): string {
@@ -72,21 +74,96 @@ export function serverCodeCheckout(project: ServerProject): ServerCodeCheckout {
 }
 
 /**
+ * Where a thread's own worktree lives on the server: beside the Project's
+ * folder, as a local managed worktree lives beside its repository, under the
+ * Project's repository and the thread. Derived from the Project and thread
+ * alone, so no path is ever read back from a record.
+ */
+export function serverWorktreeFolder(project: ServerProject, threadId: string): string {
+  const repositoryId = String(serverCodeCheckout(project).checkout.repositoryId);
+  return posix.join(posix.dirname(project.folder), ".octant-worktrees", repositoryId, threadId);
+}
+
+/**
+ * The checkout of a thread that works in its own worktree on the server. Like
+ * the Project's own, it is a `remote-root`, so every host-side path keeps
+ * refusing it; its id is a digest of the Project and the thread under a label
+ * of its own.
+ */
+export function serverWorktreeCheckout(
+  project: ServerProject,
+  threadId: string,
+  observedAt: string,
+): ServerCodeCheckout {
+  const derived = serverCodeCheckout(project);
+  const checkout = decodeCodeCheckoutIdentity({
+    id: decodeCodeCheckoutId(
+      digestUuid(digest("octant.server-project-worktree-checkout.v1", project, threadId)),
+    ),
+    repositoryId: derived.checkout.repositoryId,
+    kind: "remote-root",
+    availability: "available",
+    head: { kind: "none" },
+    observedAt,
+  });
+  if (checkout.kind !== "remote-root") throw new Error("A server checkout decoded as local.");
+  return { bindingRevisionId: derived.bindingRevisionId, checkout };
+}
+
+/** The receipt id a thread's server worktree is recorded under. */
+export function serverWorktreeReceiptId(project: ServerProject, threadId: string): string {
+  return digestUuid(digest("octant.server-project-worktree-receipt.v1", project, threadId));
+}
+
+export interface ServerThreadPlace {
+  readonly project: ServerProject;
+  /** The folder on the server the thread's hands act in. */
+  readonly folder: string;
+}
+
+/**
+ * The server Project a thread runs in and the folder it works in there: the
+ * Project's own folder, or the thread's own worktree. Only a thread whose
+ * binding, repository, and checkout are exactly the ones the Project derives
+ * has one.
+ */
+export function serverThreadOf(
+  store: Pick<ServerProjectStore, "codeProject">,
+  thread: Pick<
+    CodeThread,
+    "id" | "projectId" | "bindingRevisionId" | "repositoryId" | "checkoutId"
+  >,
+): ServerThreadPlace | undefined {
+  const project = store.codeProject(String(thread.projectId));
+  if (project === undefined) return undefined;
+  const derived = serverCodeCheckout(project);
+  if (
+    String(derived.bindingRevisionId) !== String(thread.bindingRevisionId) ||
+    String(derived.checkout.repositoryId) !== String(thread.repositoryId)
+  ) {
+    return undefined;
+  }
+  if (String(derived.checkout.id) === String(thread.checkoutId)) {
+    return { project, folder: project.folder };
+  }
+  const worktree = serverWorktreeCheckout(project, String(thread.id), project.boundAt);
+  return String(worktree.checkout.id) === String(thread.checkoutId)
+    ? { project, folder: serverWorktreeFolder(project, String(thread.id)) }
+    : undefined;
+}
+
+/**
  * The server Project a thread runs in, when the thread's binding, repository,
  * and checkout are exactly the ones that Project derives.
  */
 export function serverProjectOf(
   store: Pick<ServerProjectStore, "codeProject">,
-  thread: Pick<CodeThread, "projectId" | "bindingRevisionId" | "repositoryId" | "checkoutId">,
+  thread: Pick<
+    CodeThread,
+    "id" | "projectId" | "bindingRevisionId" | "repositoryId" | "checkoutId"
+  >,
 ): ServerProject | undefined {
-  const project = store.codeProject(String(thread.projectId));
-  if (project === undefined) return undefined;
-  const derived = serverCodeCheckout(project);
-  return String(derived.bindingRevisionId) === String(thread.bindingRevisionId) &&
-    String(derived.checkout.repositoryId) === String(thread.repositoryId) &&
-    String(derived.checkout.id) === String(thread.checkoutId)
-    ? project
-    : undefined;
+  return serverThreadOf(store, thread)?.project;
 }
 
 /** Prepares a Project's checkout for a new thread: a server Project's from the Project alone. */
@@ -111,13 +188,16 @@ export function withServerCodeCheckouts(
  */
 export function serverCodeCheckoutRoot(
   store: Pick<ServerProjectStore, "codeProject">,
-  thread: Pick<CodeThread, "projectId" | "bindingRevisionId" | "repositoryId" | "checkoutId">,
+  thread: Pick<
+    CodeThread,
+    "id" | "projectId" | "bindingRevisionId" | "repositoryId" | "checkoutId"
+  >,
 ) {
-  const project = serverProjectOf(store, thread);
-  return project === undefined
+  const place = serverThreadOf(store, thread);
+  return place === undefined
     ? undefined
     : {
-        checkoutRoot: project.folder,
+        checkoutRoot: place.folder,
         shell: "/bin/sh",
         credentialReferences: [],
         environment: {},
@@ -154,8 +234,9 @@ export function bindServerCodeTurn(
     readonly secrets: ReadonlyArray<string>;
   },
 ): ServerCodeTurnBinding {
-  const project = serverProjectOf(options.store, input.thread);
-  if (project === undefined) return { status: "refused", message: SERVER_NOT_REGISTERED };
+  const place = serverThreadOf(options.store, input.thread);
+  if (place === undefined) return { status: "refused", message: SERVER_NOT_REGISTERED };
+  const project = place.project;
   const projectId = String(project.id);
   if (options.store.addressOf(projectId).kind !== "address") {
     return { status: "refused", message: SERVER_NOT_REGISTERED };
@@ -169,7 +250,7 @@ export function bindServerCodeTurn(
   const filesystem = new ServerFileSystem({
     connection: options.connection,
     server: address,
-    root: project.folder,
+    root: place.folder,
   });
   const shell = createServerShell({
     connection: options.connection,
@@ -177,7 +258,7 @@ export function bindServerCodeTurn(
       const server = address();
       return server === undefined ? undefined : { ...server, serverId: String(project.serverId) };
     },
-    root: project.folder,
+    root: place.folder,
     record: (record) => options.record({ ...record, threadId: String(input.thread.id) }),
   });
   const tools = options.composition.forServerCode({

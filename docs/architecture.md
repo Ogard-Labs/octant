@@ -1224,14 +1224,17 @@ except where a bullet says otherwise.
   protected path is dropped.
 - **The model call.** One tool-less, single-use session per ended thread, in a
   scratch folder outside every Project, on the thread's own provider with that
-  provider's smallest model, unless Settings › Memory picks another. Its usage
+  provider's smallest model, unless Settings › Providers & Models › Automatic
+  model calls picks another account. Its usage
   is recorded against the thread as a `person-memory` usage row, so the person
   sees it in the usage dashboard. A reply that read outside content is thrown
   away. The call sits behind one seam (`personMemoryDistillationAllowed`) that
   answers per provider kind, so background use can later be limited for one
   provider without touching the rest; today it allows every kind. Open risk:
   whether a provider's terms allow background calls on a subscription sign-in
-  is not settled, and the seam is where an answer would land.
+  is not settled, and the seam is where an answer would land. If the chosen
+  account is off, not ready or at its limit, the thread waits for a later pass;
+  it is never distilled on another account.
 - **Where it goes.** Every new Chat, Work, and Code thread, on every provider,
   gets one `person-memory` context block through Octant's own context
   assembly, placed after Octant's instructions and before Project memory and
@@ -1268,8 +1271,11 @@ except where a bullet says otherwise.
   journal events (`person-memory-*` aggregates) held in host memory and
   rebuilt from the journal at start, so they are local, owner-only, and in no
   diagnostics or telemetry. A thread's digest names the thread as `threadId`,
-  so a thread purge takes it with the thread. Export my data does not carry
-  person memory yet (allowed; not built yet).
+  so a thread purge takes it with the thread. Export my data carries person
+  memory: a `person-memory` page holding every entry with the threads it came
+  from (title, mode, Project, provider account, end time), and no digest or
+  setting. Entries were redacted before storage, so the export adds nothing
+  beyond what Settings › Memory shows.
 - **Who may read it.**
   - A local window: read and change everything in Settings › Memory.
   - A paired device: the memory routes refuse it, and a turn it sends gets no
@@ -1348,11 +1354,12 @@ this host instead. Built: the catalog, the connection, and the folder check
 at binding (Settings › Access › Servers); Code threads there, which run only
 on the Octant Harness, with file tools, commands, and Git on the server under
 the same levels, approvals, and journal as a local Project; thread
-terminals that are logins on the server; and the Git tab, whose Git runs on
-the server. A Work Project may be bound there too, in the same catalog: its
-Work threads run on the Octant Harness with file tools and commands on the
-server under the same rules (host side built; its Work views are not built
-yet). Octant has no sandbox on the server,
+terminals that are logins on the server; the Git tab, whose Git runs on
+the server; and a thread's own worktree, made with Git on the server, and its
+pull request, opened by repository and branch name. A Work Project may be
+bound there too, in the same catalog: its Work threads run on the Octant
+Harness with file tools and commands on the server under the same rules (host
+side built; its Work views are not built yet). Octant has no sandbox on the server,
 so below Full access a remembered approval does not cover a command there. An agent in a local Project still
 reaches a remote machine with `ssh` through its shell (above), and Octant on
 another computer is a hub-and-spoke member
@@ -2062,27 +2069,41 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
   confirmation. No provider, plugin, routine, hub or peer host reaches the
   routes. Merge when ready from a paired device is built, under its own rule
   below. An agent's merge on a Project setting or routine is built, under the
-  merge rules above. Allowed; not built yet: asking a paired owner device for
-  a fresh unlock first
+  merge rules above. Built: a host may ask a paired client's merge for a
+  fresh unlock on one of its owner devices first
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
-  Rationale for leaving it: an owner device is a hub member that signs
-  `/api/hub/owner` requests, while a paired phone or web client is a product
-  principal, and nothing ties the two together on a host; the owner-device
-  posture change is likewise refused as `unsupported` because no window-free
-  path to the Code service exists. Gating a paired client on an unlock it has
-  no way to give would only lock it out, and a window-free merge would widen
-  the confirmation the merge routes need, so neither is built. Hub and peer
-  hosts never merge on a person's behalf.
-  _What building it needs:_ a host-side switch, default off and set only from
-  a window on the host, so no paired client is locked out by default; a
-  challenge issued for the merge route's own method, path and body hash (the
-  owner challenge route today refuses any path that is not an owner action);
-  verification of the owner's unlock proof in the merge, stack and Merge when
-  ready routes against the host's own owner list, never the hub's roster; and
-  an unlock signer in each paired client that is also an owner device (the
-  phone's key and the browser's passkey). The narrower choice, taken until
-  then, is to leave the paired-client merge as it is, with its reviewed-head
-  confirmation and required-checks gate.
+  **Owner unlock before a phone or browser merges** is a host switch, off by
+  default and set only from a window on that host
+  (`POST /api/desktop/hub/paired-merge-unlock`; each change is journaled), so
+  no paired client is locked out until the person turns it on. While it is on,
+  the merge, stack, and Merge when ready routes answer a paired client's
+  request that carries no valid unlock with `owner-unlock-required`, a plain
+  reason, and the host's hub member id, before the service is reached, so
+  nothing merges. The owner device asks the host's owner route
+  (`/api/hub/owner/challenge`, a signed member request) for a challenge bound
+  to the merge route's own method, path, and body hash; only an owner on the
+  host's own list gets one. Its unlock key signs it (the phone's
+  biometric-gated key, or the browser's passkey for the origin that served the
+  page), and the client sends the same body again with the proof in
+  `x-octant-owner-unlock`. The host consumes the challenge, checks the proof
+  against the key on its own owner list (the hub's list while the hub role is
+  on, else the spoke's, under the Owners grant item), refuses a revoked device
+  or the hub's own member, and journals `owner-merge-unlocked` with the owner.
+  A missing, unreadable, replayed, expired, mismatched, unverified, or unlisted
+  unlock is refused with its reason. The reviewed-head confirmation and the
+  required-checks gate still apply after it. A local window's click needs no
+  unlock. Hub and peer hosts never merge on a person's behalf.
+  Rationale for the narrower choices taken: the proof names no owner, because
+  the challenge was issued to one owner the owner route authenticated, so the
+  host takes that owner and its key from its own list and never from the
+  request or the hub's roster. The client sends a merge without a proof first
+  and learns from the refusal that one is needed, so it never learns or keeps
+  the switch's state and a host with it off costs nothing. Turning Merge when
+  ready off merges nothing, so it asks no unlock. A stack asks one unlock for
+  the whole stack, because its body names every pull request and is checked
+  whole before anything merges. The switch is offered only beside a host's
+  owner devices; a host left in no hub with it on refuses every paired merge
+  with `no-owner-list` rather than merging without an owner.
 - **Stack.** The command lists one to ten pull requests bottom first, each
   with the head the person reviewed. The server reads every one first and
   refuses the stack whole unless each is open and each base is the head
@@ -11462,8 +11483,36 @@ command holds cannot sign anything it could use elsewhere.
 **Model and privacy.** By default Shield uses the thread's own provider
 account with that provider's smallest model, so no new party sees the work.
 The person may pick another configured
-[model endpoint](design/model-endpoints.md), a local one included. Shield
+account and model under Automatic model calls below, a local endpoint
+included. Shield
 sends no telemetry, and its calls count against the existing spend ceilings.
+
+**Automatic model calls.** The jobs Octant runs on a model without the
+person typing, today the Judge and person memory's distilling, share one
+Settings surface: Settings › Providers & Models › Automatic model calls. For
+each job the person keeps the default (the provider of the thread the work is
+about, with that provider's smallest model, unchanged) or picks one configured
+account and one of its models, an API-key account included. The Judge's choice
+is stored as `CodeSettings.shieldModel` and memory's as
+`PersonMemorySettings.distillModel`; the surface is the one place either is
+chosen, and both are changed only from a window on this host (a paired device
+cannot). The surface says in plain words that what the job reads goes to the
+chosen provider: the Judge's input (the person's recent messages, the pending
+call and the Project's root, never tool results or outside content) and
+memory's (a thread's title and the person's own messages, secrets redacted as
+today). Rationale: account selection is fully manual by decision, so there is
+no rotation and no failover; if the chosen account is removed, turned off, not
+ready or at a reported usage limit, the Judge sends that decision to the person
+(`model-account-unavailable`, journaled with the chosen account) and never
+allows it itself, and distilling returns the thread to the next pass without
+calling another account. A rule that decides without a model (a fast allow, a
+hard line) is unaffected. Each call is journaled with its account: the Judge
+decision names its model, and the call's `shield-review` or `person-memory`
+usage row names the provider account and model, so Usage shows which account
+spent it. The surface keeps the two existing stored fields rather than adding a third
+setting, so no migration is needed and the default is exactly the old behavior;
+"at its limit" means only a limit the provider has reported. The harness's advisor review is a separate, slot-routed job and is
+not folded in.
 
 **Journal.** Every Shield decision is journaled with the reviewer, the model,
 the rule or reason, and the latency, and shows on the tool row in the
@@ -11558,9 +11607,8 @@ built, so Shield is its alternative reviewer; Shield is the only reviewer for
 OpenCode, every other ACP agent, and Pi.
 
 The choices are built for Code: Settings › Code › Access has **Auto
-reviewer** (Provider's own / Octant Shield, stored as `CodeSettings.autoReviewer`)
-and **Shield model** (each thread's provider with its smallest model, or any
-enabled provider's catalogued model, local ones included, stored as
+reviewer** (Provider's own / Octant Shield, stored as `CodeSettings.autoReviewer`);
+the Judge's model is chosen under Automatic model calls (stored as
 `CodeSettings.shieldModel`), and a Code Project's overview overrides the
 reviewer (`change-code-project-auto-reviewer`, journaled
 `project.code-auto-reviewer-changed@1`). The picker offers Auto, marked

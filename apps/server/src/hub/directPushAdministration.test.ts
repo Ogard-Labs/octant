@@ -59,6 +59,7 @@ async function setup() {
     windowAuthorityStore: authority,
     hub: host.hub,
     spoke: host.spoke,
+    pairedMergeUnlock: host.pairedMergeUnlock,
     failover: host.failover,
     wake: host.wake,
     spokeWake: host.spokeWake,
