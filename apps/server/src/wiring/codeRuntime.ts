@@ -242,6 +242,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "machineChangeFeed"
     | "onWindowRevoked"
     | "simulatorInputGrants"
+    | "personMemoryAccess"
   > &
   Pick<
     AgentRunsWiring,
@@ -406,6 +407,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     threadMentionService,
     threadOutsideContentMarks,
     workRequestRuntime,
+    personMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
     // A host started with its own runtime uses it; otherwise it is built below.
@@ -420,6 +422,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     ): void => {
       codeToolContributors.push(contributor);
     };
+    contributeCodeTools(({ windowId, thread }) =>
+      personMemoryAccess.toolsFor({
+        mode: "code",
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+        createdAt: thread.createdAt,
+        windowId,
+      }),
+    );
     const {
       androidToolchainRoutes,
       appleToolchainRoutes,
@@ -535,6 +546,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       );
       codeOperationRuntime = createCodeOperationRuntime({
         shield: hostShield,
+        personMemoryBlock: ({ thread, windowId }) =>
+          personMemoryAccess.blockFor({
+            mode: "code",
+            threadId: String(thread.id),
+            projectId: String(thread.projectId),
+            createdAt: thread.createdAt,
+            windowId,
+          }),
         chosenAutoReviewer: (thread) => {
           const project = persistence.readProject(thread.projectId);
           return chosenAutoReviewer({

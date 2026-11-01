@@ -52,6 +52,11 @@ export function mergeThreadRowActions(
           onHandOffThread: (id: string, title: string) => pick(id).onHandOffThread?.(id, title),
         }
       : {}),
+    ...(either("onLeaveNoTrace")
+      ? {
+          onLeaveNoTrace: (id: string, title: string) => pick(id).onLeaveNoTrace?.(id, title),
+        }
+      : {}),
     ...(either("onMarkThreadRead")
       ? { onMarkThreadRead: (id: string) => pick(id).onMarkThreadRead?.(id) }
       : {}),

@@ -37,7 +37,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [App-managed tools](#app-managed-tools)                                               | 2         | 2       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 13        | 10      | 3            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 10      | 4            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **221**   | **179** | **38**       | **4**               |
+| **All areas**                                                                         | **222**   | **179** | **39**       | **4**               |
 
 ## Principles and hard lines
 
@@ -495,7 +495,7 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - Chat and Work can be switched off in Settings; Code is always available, and disabling a mode never deletes its data.
 - A new-thread composer chooses Chat (no folder) or In a folder (a Work thread bound to a Project root). The choice only selects the create command, and nothing converts a thread between Chat and Work.
 - Chat binds a virtual, memory-scoped Project or none; Work binds exactly one OS-confined root; Code binds exactly one directory and selects a checkout inside it.
-- Memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. _Here only._
+- Project memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. Person memory, beside it, crosses Projects ([Person memory across Projects](#person-memory-across-projects)). _Here only._
 - Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -516,9 +516,23 @@ Chat's missing file and shell authority is withheld by rule, not only in today's
 - Provider runtimes launch confined with exec and fork denied or with no execution environment, and a sandbox that only blocks writes is not enough because reads never escalate.
 - Octant-managed tools (research, Canvas) are unaffected because they run on the host.
 - A person's own tool servers stay off in Chat until the person lets the provider run as itself for the account (built for Codex), or for one thread with its own-setup choice.
-- Provider-owned memory stays off in every mode, because a provider's global memory reaches across Projects.
+- Provider-owned memory stays off in every mode, because a provider's global memory follows its own rules into every Project, outside Octant's controls. Octant's own person memory is the cross-Project layer.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Person memory across Projects
+
+Octant keeps a memory of the person beside Project memory: after a thread ends it learns preferences, how the person works and what they did, and every new Chat, Work and Code thread on every provider starts with it. It is on by default with no per-entry prompt, and the person can turn it off.
+
+- Distilled once per thread the person put away after memory began, from the thread's title and the person's own messages only, never agent answers, tool output or files; secrets are redacted before the model call and before storage, and an entry naming a protected path is dropped.
+- One tool-less model call per ended thread on the thread's provider and its smallest model unless Settings picks another, recorded as a `person-memory` usage row, behind the one seam `personMemoryDistillationAllowed`. Open risk: whether background calls on subscription sign-ins fit each provider's terms is being checked.
+- The block is placed after Octant's instructions, holds only entries older than the thread so its text is stable for prompt caching, is capped at 2,000 characters and is framed as data, not instructions.
+- `octant_past_threads` searches remembered digests and entries only and returns at most five excerpts with their source; it reads no transcript or file and grants no authority.
+- Settings › Memory: one switch for everything, one for searching past threads, Projects kept out (not learned from, not shown, no block or tool in them), threads that leave no trace (set from the thread menu), each entry editable and deletable with its sources, and Forget everything. Deleting erases the events from the journal; a thread purge removes what came only from it.
+- Only a turn a window on this host started gets the block or the tool: not a paired device, a routine or other host-started turn, or a subagent. Memory is never synced to a hub, spoke or peer host. First run says in one sentence that it is on and where to turn it off.
+- Export my data carries person memory: not built yet.
+
+Status: Partly built. Since: 2026-11-01. Detail: [Architecture: Person memory](../architecture.md#person-memory).
 
 ### Default Projects
 

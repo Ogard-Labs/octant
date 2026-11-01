@@ -9,6 +9,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  EyeOff,
   Flag,
   Forward,
   GitPullRequest,
@@ -73,6 +74,12 @@ export interface ThreadRowActions {
   readonly onExportThread?: (threadId: string, title: string) => void;
   /** Absent when no hand-off client resolves for this window. */
   readonly onHandOffThread?: (threadId: string, title: string) => void;
+  /**
+   * Keeps the thread out of person memory: nothing is learned from it and
+   * what was is forgotten. Undone in Settings › Memory. Absent when this
+   * window cannot change memory.
+   */
+  readonly onLeaveNoTrace?: (threadId: string, title: string) => void;
   /** Absent when nothing tracks read state for this thread. */
   readonly onMarkThreadRead?: (threadId: string) => void;
   /** Absent when nothing tracks read state for this thread. */
@@ -131,6 +138,7 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onMarkFollowUp === undefined &&
     actions.onExportThread === undefined &&
     actions.onHandOffThread === undefined &&
+    actions.onLeaveNoTrace === undefined &&
     actions.onMarkThreadRead === undefined &&
     actions.onMarkThreadUnread === undefined &&
     actions.onPinInPane === undefined &&
@@ -407,6 +415,17 @@ export function ThreadRowMenu(props: {
             }
           >
             <MenuContent icon={Forward}>Hand off…</MenuContent>
+          </OctantContextMenuItem>
+        )}
+        {props.actions.onLeaveNoTrace === undefined ? null : (
+          <OctantContextMenuItem
+            className="thread-row-context-menu__item"
+            label="Leave no trace in memory"
+            onClick={() =>
+              props.actions.onLeaveNoTrace?.(String(props.thread.threadId), props.thread.title)
+            }
+          >
+            <MenuContent icon={EyeOff}>Leave no trace in memory</MenuContent>
           </OctantContextMenuItem>
         )}
       </OctantContextMenuGroup>

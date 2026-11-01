@@ -71,6 +71,7 @@
     "./canvas-public-share": "./src/canvasPublicShare.ts",
     "./guardrail-lowering": "./src/guardrailLowering.ts",
     "./protected-files": "./src/protectedFiles.ts",
+    "./person-memory": "./src/personMemory.ts",
     "./computer-use": "./src/computerUse.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./support-bundle": "./src/supportBundle.ts",

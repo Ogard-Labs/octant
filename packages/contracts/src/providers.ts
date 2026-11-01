@@ -1612,6 +1612,9 @@ export const ProviderContextBlock = Schema.Struct({
     "instructions",
     "user-message",
     "assistant-message",
+    // What Octant remembers about the person from earlier threads, framed as
+    // data. Standing, so a session keeps it after the first turn.
+    "person-memory",
     "project-memory",
     "work-item",
     // Compacted earlier conversation. Distinct from a real message so the

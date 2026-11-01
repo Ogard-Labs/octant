@@ -561,6 +561,15 @@ export interface CodeOperationRuntimeOptions {
     readonly settle: SpendCeilingService["settle"];
   };
   /** The harness around a turn: stable instructions in front, the reply observed after. */
+  /**
+   * The person-memory block for this thread's turn, or undefined when the
+   * turn gets none (memory off, the thread or its Project kept out, or a
+   * principal other than a window on this host).
+   */
+  readonly personMemoryBlock?: (input: {
+    readonly thread: CodeThread;
+    readonly windowId: WindowId;
+  }) => string | undefined;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
@@ -4065,7 +4074,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ? []
         : [{ kind: "instructions" as const, text: deliveryInstructions }]),
     ];
-    const fullContext = [...harnessContext, ...hostGuidance, ...(context ?? [])];
+    const personMemoryText = this.#options.personMemoryBlock?.({
+      thread: active.thread,
+      windowId: active.windowId,
+    });
+    // Counted with Octant's instructions: a Code window is reported by part,
+    // and person memory is standing text Octant sends with them.
+    const personMemory =
+      personMemoryText === undefined
+        ? []
+        : [{ kind: "person-memory" as const, text: personMemoryText }];
+    const fullContext = [...harnessContext, ...hostGuidance, ...personMemory, ...(context ?? [])];
     // A runtime that keeps its own conversation already holds the standing
     // context an earlier completed turn of this session carried; only what is
     // new goes out, and only that is counted as this turn's copy.
@@ -4090,7 +4109,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ...(delivery.kind === "restated"
               ? [{ kind: "instructions" as const, text: PROVIDER_CONTEXT_RESTATED }]
               : []),
-            ...sentNow([...hostGuidance, ...(active.sentContext?.instructions ?? [])]),
+            ...sentNow([
+              ...hostGuidance,
+              ...personMemory,
+              ...(active.sentContext?.instructions ?? []),
+            ]),
           ],
           skills: sentNow(active.sentContext?.skills ?? []),
         },
