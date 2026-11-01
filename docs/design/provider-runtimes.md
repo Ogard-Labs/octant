@@ -16,12 +16,12 @@ target wire behaviour, gated by the thread's
 [guardrail level](../architecture.md#security-and-authority) (off at Guarded
 and Reviewed until the person turns it on, on at Full access):
 
-| Provider     | Switched off today                                                                                    | Target                                                                                                                                                                                                   | Built                                                                                                                                                                                                                                                                                                 |
-| ------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code only                                                                                                                                                                                                                                                          |
-| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off            | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code only                                                                                                                                                                                                                                                          |
-| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`       | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer, reported `unsupported` until mapped                                 | Reviewed with `auto-approve`, in Code only (`harnessAutoReview` supported); with the setup on, the skill, Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable                                            |
-| OpenCode     | Skills and project config off, `skill` denied; Octant's denies outrank saved grants; `once` only      | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, and the MCP servers and permission rules in the person's own configuration; Reviewed through Octant Shield not built yet |
+| Provider     | Switched off today                                                                                    | Target                                                                                                                                                                                                   | Built                                                                                                                                                                                                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code only                                                                                                                                                                                                                                                    |
+| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off            | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code only                                                                                                                                                                                                                                                    |
+| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`       | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer, reported `unsupported` until mapped                                 | Reviewed with `auto-approve`, in Code only (`harnessAutoReview` supported); with the setup on, the skill, Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable                                      |
+| OpenCode     | Skills and project config off, `skill` denied; Octant's denies outrank saved grants; `once` only      | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, and the MCP servers and permission rules in the person's own configuration; Reviewed through Octant Shield at Auto |
 
 With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 `project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,
@@ -316,6 +316,35 @@ failed delete leaves one empty session and does not change the result. A
 runtime that cannot answer (observed with 2.0.22 on macOS as HTTP 500
 without the stand-in) reports `incompatible` with its models listed and
 every capability unsupported, and no turn is offered.
+
+File changes and runtime compaction are claimed only from 2.2.0, the
+release whose server was read for them; an older 2.x release reports no file
+changes and compaction `unavailable`, and 1.x reports compaction
+`unavailable` and reports no file changes (not built yet: no 1.x
+server was read). Reading a local 2.2.0 server with no prompt sent showed
+the `file.edited` and `session.diff` events, `GET /api/session/{id}/diff`,
+and `POST /api/session/{id}/compact`. A reported file change is held to the
+grants described above, so the capability adds no authority: a change no
+grant names still fails the turn. Compaction sends the route with
+`delivery: "queue"`, which returns the queued item at once; the compaction is
+reported by `session.compaction.ended` or `session.compaction.failed` and then
+the idle that closes its run. The adapter holds the request open until that
+idle and keeps it out of the turn mapper, so a compaction is never read as a
+completed turn. `ended` is a compaction that happened and emits a requested
+`context-compacted`; a `compaction.unavailable` failure (a session with nothing
+to compact yet) is refused `nothing-to-compact` and attests the history was
+left alone; another named failure says the same; a run that closes without a
+report, a stop, or a lost runtime may have changed the history. A missing
+route (404 or 405) is refused as too old, a refusal from the server is a
+failure that changed nothing, and a lost answer is a failure that may have.
+A turn is refused while a compaction is pending, and a compaction is
+refused while a turn is running. Rationale: the narrower reading holds the
+claim to the one release read, because the route and the completion events
+differ between 2.x releases and a later one that changes them would otherwise
+be trusted unseen. The summary and token figures were read only as event
+shapes, never from a model run, so no before-and-after figure is reported.
+A session carried on to another of the instance's models needs no further
+work: every prompt names the thread's model (`modelSwitch`).
 
 Every OpenCode prompt names its model, so a resumed session runs on the
 thread's model, the one its cursor's binding records. The session record is
