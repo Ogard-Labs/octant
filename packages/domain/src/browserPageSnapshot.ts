@@ -145,9 +145,17 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     }
     return undefined;
   };
+  // The text a person reads in a node, leaving out every field inside it: a
+  // label that wraps a textarea would otherwise carry what was typed into it.
+  const readableText = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+    if (!(node instanceof Element)) return "";
+    if (node.localName === "select" || isEditable(node)) return "";
+    return Array.from(node.childNodes).map(readableText).join(" ");
+  };
   const textOf = (id: string): string => {
     const target = document.getElementById(id);
-    return target === null ? "" : (target.textContent ?? "");
+    return target === null ? "" : readableText(target);
   };
   const nameOf = (element: Element): string => {
     const labelledBy = element.getAttribute("aria-labelledby");
@@ -162,11 +170,11 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       const id = element.getAttribute("id");
       if (id !== null && id !== "") {
         for (const candidate of Array.from(document.querySelectorAll("label"))) {
-          if (candidate.htmlFor === id) return clip(candidate.textContent ?? "", 120);
+          if (candidate.htmlFor === id) return clip(readableText(candidate), 120);
         }
       }
       const wrapping = element.closest("label");
-      if (wrapping !== null) return clip(wrapping.textContent ?? "", 120);
+      if (wrapping !== null) return clip(readableText(wrapping), 120);
       const type = (element.getAttribute("type") ?? "").toLowerCase();
       if (["button", "submit", "reset"].includes(type)) {
         return clip(element.getAttribute("value") ?? type, 120);
@@ -176,7 +184,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     if (alt !== null && alt.trim() !== "") return clip(alt, 120);
     // An editable element's text is what was typed into it, never its name.
     if (tag !== "select" && !isEditable(element)) {
-      const text = clip(element.textContent ?? "", 120);
+      const text = clip(readableText(element), 120);
       if (text !== "") return text;
     }
     const title = element.getAttribute("title") ?? element.getAttribute("placeholder");
@@ -321,7 +329,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       if (role !== "listbox" && role !== "combobox") return;
       childDepth = depth + 1;
     } else if (element.localName === "p" || element.localName === "li") {
-      const text = clip(element.textContent ?? "", 80);
+      const text = clip(readableText(element), 80);
       if (text !== "" && !element.querySelector("a[href], button, input, select, textarea")) {
         if (nodes.length >= request.maxNodes) {
           truncated = true;
@@ -372,10 +380,21 @@ export function formatBrowserPageSnapshot(snapshot: BrowserPageSnapshot): string
   return lines.join("\n");
 }
 
-/** Whether a page element still is the one a snapshot ref named. */
+/**
+ * Whether a page element still is the one a snapshot ref named: on the page
+ * the snapshot read, with the role and name it recorded. A page that moved on
+ * by itself between the snapshot and the action can hold an element with the
+ * same selector, role, and name, so the address is checked too.
+ */
 export function browserRefStillMatches(
-  expected: { readonly role: string; readonly name: string },
+  expected: { readonly role: string; readonly name: string; readonly url: string },
   found: { readonly role: string; readonly name: string } | null,
+  pageUrl: string,
 ): boolean {
-  return found !== null && found.role === expected.role && found.name === expected.name;
+  return (
+    pageUrl === expected.url &&
+    found !== null &&
+    found.role === expected.role &&
+    found.name === expected.name
+  );
 }

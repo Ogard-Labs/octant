@@ -33,8 +33,12 @@ const pages: Record<string, string> = {
   "/hidden-credential": `<!doctype html><title>Keys</title>
     <label for="mail">Email</label><input id="mail" value="ada@example.com">
     <div contenteditable id="token">sk-live-abc</div>
+    <label>API key<textarea name="token">sk-live-secret</textarea></label>
     <div id="host"></div>
     <script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = '<input type="password" value="hunter2">';</script>`,
+  "/moves-on": `<!doctype html><title>Moves on</title><button id="save">Save</button>
+    <script>setTimeout(() => { location.href = "/moved"; }, 300);</script>`,
+  "/moved": `<!doctype html><title>Moved</title><button id="save">Save</button>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
 };
 
@@ -148,6 +152,8 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(outline).toMatch(/- textbox "Email" \[ref=e\d+\]$/m);
     expect(outline).toMatch(/- textbox \[ref=e\d+\] protected$/m);
     expect(outline).not.toContain("sk-live-abc");
+    expect(outline).toMatch(/- textbox "API key" \[ref=e\d+\] protected$/m);
+    expect(outline).not.toContain("sk-live-secret");
     expect(outline).not.toContain("ada@example.com");
     await tool.stop();
   });
@@ -168,6 +174,16 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(clicked.result.page?.title).toBe("Saved Ada");
     const again = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
     expect(again).toMatch(/- textbox "Name" \[ref=e\d+\] value="Ada"/);
+    await tool.stop();
+  });
+
+  it("refuses a ref after the page moved on by itself, even to an element of the same name", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/moves-on` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const clicked = await tool.call({ operation: "click", ref: refFor(outline, /"Save"/) });
+    expect(clicked.result.failure?.category).toBe("stale");
     await tool.stop();
   });
 

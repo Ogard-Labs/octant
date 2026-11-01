@@ -78,7 +78,10 @@ macOS then asks whether Octant may read that browser's cookie key from your
 Keychain; if you decline, nothing is imported and Octant says so. The cookies go
 only into that profile, on this Mac: they are not uploaded, logged, exported, or
 shown to an agent, and Octant records only the browser, its profile, and how many
-cookies arrived. Expired and malformed cookies are left behind and counted.
+cookies arrived. Expired and malformed cookies are left behind and counted. To
+bring only one website's sign-in, choose **One website only** and type the site,
+such as `github.com`: Octant then imports just that site's cookies and its
+parent domains', and leaves every other cookie unread.
 **Clear cookies…** removes a profile's cookies and keeps its other data.
 
 **What the agent may do on a signed-in page.** A Project or Personal page is
@@ -108,6 +111,13 @@ read and change the pages it runs on, including what the agent reads there.
   copies the folder, so later edits to it change nothing; choose the folder again
   to update. There is no web store, and extensions that need native messaging
   (most password managers) or a store sign-in do not work.
+- **Import from another browser** with **Import from another browser…** next
+  to it. Pick Chrome, Chromium, Brave, Edge, Vivaldi, or Arc, one of its
+  profiles, and an extension. Octant copies the extension into its own folder and
+  never opens that browser's profile. It arrives off, like any install. Extensions
+  that use the older Manifest V2 format or need native messaging are listed with
+  the reason and cannot be picked. Some extensions may not work in Octant even
+  when they import.
 - **Enable** an extension for one profile at a time. Octant lists in plain words
   the sites it can read and change and the permissions it asks for, and enables
   it only when you confirm. An update that asks for more than the version you

@@ -54,7 +54,14 @@ export function publicCookieSources(
   }));
 }
 
-function chromiumProfiles(directory: string): ReadonlyArray<InstalledCookieSourceProfile> {
+/**
+ * The profile folders a Chromium-family browser lists in its Local State, by
+ * the names it shows. A profile id becomes part of a path, so only names a
+ * browser makes are returned.
+ */
+export function chromiumProfileFolders(
+  directory: string,
+): ReadonlyArray<{ readonly id: string; readonly label: string }> {
   const names = new Map<string, string>();
   try {
     const state: unknown = JSON.parse(readFileSync(join(directory, "Local State"), "utf8"));
@@ -76,14 +83,19 @@ function chromiumProfiles(directory: string): ReadonlyArray<InstalledCookieSourc
       return [];
     }
   }
+  return folders
+    .filter((id) => safeProfileId(id))
+    .map((id) => ({ id, label: names.get(id) ?? id }));
+}
+
+function chromiumProfiles(directory: string): ReadonlyArray<InstalledCookieSourceProfile> {
   const profiles: InstalledCookieSourceProfile[] = [];
-  for (const id of folders) {
-    if (!safeProfileId(id)) continue;
+  for (const { id, label } of chromiumProfileFolders(directory)) {
     const cookiePath = [
       join(directory, id, "Network", "Cookies"),
       join(directory, id, "Cookies"),
     ].find((candidate) => existsSync(candidate));
-    if (cookiePath !== undefined) profiles.push({ id, label: names.get(id) ?? id, cookiePath });
+    if (cookiePath !== undefined) profiles.push({ id, label, cookiePath });
   }
   return profiles;
 }

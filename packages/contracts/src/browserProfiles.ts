@@ -41,6 +41,9 @@ export const CookieImportBrowserId = Schema.Literal(
 );
 export type CookieImportBrowserId = typeof CookieImportBrowserId.Type;
 
+/** A website to import, as a host or a pasted address; the host decides what it names. */
+const ImportSite = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
+
 const SourceProfileId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
 
 /** One profile of an installed browser, by the name that browser shows. */
@@ -96,6 +99,8 @@ export const BrowserProfilesCommand = Schema.Union(
     profile: StoredBrowserProfile,
     browser: CookieImportBrowserId,
     sourceProfile: SourceProfileId,
+    /** When present, only this site's cookies and its parent domains' are imported. */
+    site: Schema.optional(ImportSite),
   }).annotations(strict),
 );
 export type BrowserProfilesCommand = typeof BrowserProfilesCommand.Type;
@@ -137,6 +142,8 @@ export const BrowserProfilesResult = Schema.Union(
     sourceProfile: SourceProfileId,
     imported: Schema.Int.pipe(Schema.nonNegative()),
     skipped: Schema.Int.pipe(Schema.nonNegative()),
+    /** True when the import was limited to one site; the site itself is never returned. */
+    siteOnly: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("browser-profiles-refused"),
@@ -174,6 +181,8 @@ export const BrowserCookiesImported = Schema.Struct({
   sourceProfile: SourceProfileId,
   imported: Schema.Int.pipe(Schema.nonNegative()),
   skipped: Schema.Int.pipe(Schema.nonNegative()),
+  /** Whether the import was limited to one site. The site is not recorded. */
+  siteOnly: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type BrowserCookiesImported = typeof BrowserCookiesImported.Type;
 

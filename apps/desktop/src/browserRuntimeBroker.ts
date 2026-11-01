@@ -371,10 +371,12 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
   );
 }
 
-function isExpectedElement(value: unknown): value is { role: string; name: string } {
+function isExpectedElement(value: unknown): value is { role: string; name: string; url: string } {
   return (
     isRecord(value) &&
-    Object.keys(value).every((key) => key === "role" || key === "name") &&
+    Object.keys(value).every((key) => key === "role" || key === "name" || key === "url") &&
+    typeof value.url === "string" &&
+    value.url.length <= 4096 &&
     typeof value.role === "string" &&
     value.role.length <= 64 &&
     typeof value.name === "string" &&

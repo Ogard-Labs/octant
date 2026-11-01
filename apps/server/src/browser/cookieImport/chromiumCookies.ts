@@ -1,7 +1,13 @@
 import { createDecipheriv, createHash, pbkdf2Sync, timingSafeEqual } from "node:crypto";
 import type { ImportedCookie } from "@octant/contracts";
 import { openReadOnlySqlite } from "../../persistence/sqlitePort";
-import { importedCookieFrom, MAX_IMPORTED_COOKIES } from "./importedCookie";
+import {
+  cookieHostMatchesSite,
+  importedCookieFrom,
+  MAX_IMPORTED_COOKIES,
+  siteCookieHosts,
+  sqlHostList,
+} from "./importedCookie";
 
 // How a Chromium-family browser on macOS protects its cookie values: AES-128-CBC
 // with a key stretched from the "<Browser> Safe Storage" Keychain password.
@@ -97,6 +103,8 @@ export function readChromiumCookies(input: {
   readonly databasePath: string;
   readonly key: Buffer | undefined;
   readonly nowSeconds: number;
+  /** Only this site's cookies and its parent domains' are read; other rows are never decrypted. */
+  readonly site?: string;
 }): ChromiumCookieRead {
   let database;
   try {
@@ -118,9 +126,14 @@ export function readChromiumCookies(input: {
       ) ?? 0,
     );
     const partitioned = columns.includes("top_frame_site_key") ? ", top_frame_site_key" : "";
-    const rows = database.all(
-      `SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, has_expires, samesite${partitioned} FROM cookies LIMIT ${MAX_IMPORTED_COOKIES}`,
-    ) as ReadonlyArray<ChromiumCookieRow>;
+    const site = input.site;
+    const hosts = site === undefined ? [] : siteCookieHosts(site);
+    const where = site === undefined ? "" : ` WHERE host_key IN (${sqlHostList(hosts)})`;
+    const rows = (
+      database.all(
+        `SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, has_expires, samesite${partitioned} FROM cookies${where} LIMIT ${MAX_IMPORTED_COOKIES}`,
+      ) as ReadonlyArray<ChromiumCookieRow>
+    ).filter((row) => site === undefined || cookieHostMatchesSite(String(row.host_key), site));
     const needsKey = rows.filter((row) => encryptedLength(row) > 0).length;
     if (needsKey > 0 && input.key === undefined)
       return { status: "needs-key", encrypted: needsKey };

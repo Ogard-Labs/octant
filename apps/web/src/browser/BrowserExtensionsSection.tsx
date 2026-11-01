@@ -9,6 +9,7 @@ import type {
 } from "@octant/contracts/browser-profiles";
 import { browserProfileKey, describeExtensionAccess } from "@octant/domain";
 import { useCallback, useEffect, useState } from "react";
+import { BrowserExtensionImportDialog } from "./BrowserExtensionImportDialog";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -53,6 +54,7 @@ export function BrowserExtensionsSection(props: BrowserExtensionsSectionProps) {
   const [pending, setPending] = useState<Pending>();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const [importing, setImporting] = useState(false);
   const manage = client.manageExtensions;
   const manageProfiles = client.manageProfiles;
 
@@ -214,15 +216,37 @@ export function BrowserExtensionsSection(props: BrowserExtensionsSectionProps) {
         </div>
       ) : null}
       {loaded.kind === "ready" && props.pickExtensionFolder !== undefined ? (
-        <OctantButton
-          disabled={busy}
-          onClick={() => void install()}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          Install extension…
-        </OctantButton>
+        <div className="host-settings__controls">
+          <OctantButton
+            disabled={busy}
+            onClick={() => void install()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Install extension…
+          </OctantButton>
+          <OctantButton
+            disabled={busy}
+            onClick={() => setImporting(true)}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Import from another browser…
+          </OctantButton>
+        </div>
+      ) : null}
+      {importing ? (
+        <BrowserExtensionImportDialog
+          client={client}
+          onClose={(outcome) => {
+            setImporting(false);
+            if (outcome === undefined) return;
+            setNotice(outcome);
+            void refresh();
+          }}
+        />
       ) : null}
       {notice === undefined ? null : <SettingsState kind="empty">{notice}</SettingsState>}
       {pending?.kind === "enable" ? (

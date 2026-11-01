@@ -92,7 +92,11 @@ describe("DesktopBrowserRuntime", () => {
     await expect(
       runtime.act(
         contextId,
-        { kind: "click", target: "#save", expected: { role: "button", name: "Save" } },
+        {
+          kind: "click",
+          target: "#save",
+          expected: { role: "button", name: "Save", url: "https://example.com/" },
+        },
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({ name: "BrowserTargetStaleError" });

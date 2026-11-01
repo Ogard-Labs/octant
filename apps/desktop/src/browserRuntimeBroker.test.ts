@@ -126,7 +126,7 @@ describe("BrowserRuntimeBroker", () => {
       const action = {
         kind: "click",
         target: "#save",
-        expected: { role: "button", name: "Save" },
+        expected: { role: "button", name: "Save", url: "https://example.com/" },
       };
       const response = await broker.fetchForTest(
         request(broker.url, broker.token, { contextId, request: action }),

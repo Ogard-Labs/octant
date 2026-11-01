@@ -587,7 +587,7 @@ describe("BrowserAutomationService", () => {
       expect.objectContaining({
         kind: "click",
         target: "#save",
-        expected: { role: "button", name: "Save" },
+        expected: { role: "button", name: "Save", url: "https://example.com/start" },
       }),
       expect.anything(),
     );

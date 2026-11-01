@@ -261,7 +261,7 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
     Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY" | "include">
   > & {
     /** The role and name a snapshot ref recorded; the target must still match. */
-    readonly expected?: { readonly role: string; readonly name: string };
+    readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
   };
 
 export interface BrowserSurfaceRuntimeObservation {
@@ -627,7 +627,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             });
             if (
               found.mode !== "verify" ||
-              !browserRefStillMatches(request.expected, found.element)
+              !browserRefStillMatches(request.expected, found.element, observedUrl(contents))
             ) {
               throw new BrowserTargetStaleError();
             }
@@ -1511,6 +1511,12 @@ function recordFailedRequest(
     ...(method === "" ? {} : { method }),
     failure: failure === "" ? "The request did not complete." : failure,
   });
+}
+
+/** The page's address as an observation reports it, so a snapshot's can be compared. */
+function observedUrl(contents: BrowserSurfaceViewPort["webContents"]): string {
+  const url = contents.getURL();
+  return url === "" ? "about:blank" : redactedObservationUrl(url).slice(0, 4_096);
 }
 
 function redactedObservationUrl(value: string): string {

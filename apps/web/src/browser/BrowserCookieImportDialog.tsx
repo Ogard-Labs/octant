@@ -2,6 +2,7 @@ import type { BrowserAutomationClient } from "@octant/client-runtime/browser-aut
 import type { BrowserProfileSummary, CookieImportSource } from "@octant/contracts/browser-profiles";
 import { useEffect, useState } from "react";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
 export interface BrowserCookieImportDialogProps {
@@ -27,6 +28,8 @@ export function BrowserCookieImportDialog(props: BrowserCookieImportDialogProps)
   const [sources, setSources] = useState<Sources>({ kind: "loading" });
   const [browser, setBrowser] = useState("");
   const [sourceProfile, setSourceProfile] = useState("");
+  const [scope, setScope] = useState<"profile" | "site">("profile");
+  const [site, setSite] = useState("");
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
@@ -64,7 +67,8 @@ export function BrowserCookieImportDialog(props: BrowserCookieImportDialogProps)
 
   const chosen =
     sources.kind === "ready" ? sources.sources.find((s) => s.browser === browser) : undefined;
-  const ready = chosen !== undefined && sourceProfile !== "";
+  const ready =
+    chosen !== undefined && sourceProfile !== "" && (scope === "profile" || site.trim() !== "");
 
   async function importCookies(): Promise<void> {
     if (manage === undefined || chosen === undefined) return;
@@ -76,10 +80,13 @@ export function BrowserCookieImportDialog(props: BrowserCookieImportDialogProps)
         profile: props.profile.profile,
         browser: chosen.browser,
         sourceProfile,
+        ...(scope === "site" ? { site: site.trim() } : {}),
       });
       outcome =
         result.kind === "browser-cookies-imported"
-          ? `Imported ${String(result.imported)} cookies from ${chosen.label} into ${props.profile.label}${
+          ? `Imported ${String(result.imported)} cookies${
+              result.siteOnly === true ? " for that site" : ""
+            } from ${chosen.label} into ${props.profile.label}${
               result.skipped > 0 ? ` (${String(result.skipped)} left behind)` : ""
             }.`
           : result.kind === "browser-profiles-refused"
@@ -122,6 +129,25 @@ export function BrowserCookieImportDialog(props: BrowserCookieImportDialogProps)
               }))}
               value={sourceProfile}
             />
+            <OctantSelectField
+              aria-label="What to import"
+              onValueChange={(value) => setScope(value === "site" ? "site" : "profile")}
+              options={[
+                { id: "profile", label: "All cookies in this profile" },
+                { id: "site", label: "One website only" },
+              ]}
+              value={scope}
+            />
+            {scope === "site" ? (
+              <OctantInput
+                aria-label="Website to import cookies for"
+                autoComplete="off"
+                onChange={(event) => setSite(event.target.value)}
+                placeholder="github.com"
+                spellCheck={false}
+                value={site}
+              />
+            ) : null}
           </div>
         ) : (
           <p>
@@ -140,7 +166,9 @@ export function BrowserCookieImportDialog(props: BrowserCookieImportDialogProps)
     >
       Pick a browser on this Mac and one of its profiles. Octant copies that profile’s cookies into
       this profile, only now and only on this Mac, and sends them nowhere. macOS will ask you to
-      allow access to the browser’s cookie key; if you decline, nothing is imported.
+      allow access to the browser’s cookie key; if you decline, nothing is imported. To bring only
+      one website’s sign-in, choose “One website only”: Octant then imports just that site’s cookies
+      and its parent domains’.
     </OctantConfirmDialog>
   );
 }

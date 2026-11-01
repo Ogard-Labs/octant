@@ -652,7 +652,7 @@ export class BrowserAutomationService {
     return {
       kind: "resolved",
       request: { ...rest, target: entry.selector },
-      expected: { role: entry.role, name: entry.name },
+      expected: { role: entry.role, name: entry.name, url: owned.refs?.url ?? "about:blank" },
     };
   }
 

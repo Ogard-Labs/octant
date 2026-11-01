@@ -186,12 +186,12 @@ describe.skipIf(chrome === undefined)("the desktop Browser on a real page", () =
       kind: "type",
       target: name.selector,
       value: "Ada",
-      expected: { role: name.role, name: name.name },
+      expected: { role: name.role, name: name.name, url: `${origin}/form` },
     });
     const clicked = await host.act(contextId, {
       kind: "click",
       target: save.selector,
-      expected: { role: save.role, name: save.name },
+      expected: { role: save.role, name: save.name, url: `${origin}/form` },
     });
     expect(clicked.title).toBe("Saved Ada");
     const rename = entry(observed.snapshotRefs, "Rename save");
@@ -200,7 +200,7 @@ describe.skipIf(chrome === undefined)("the desktop Browser on a real page", () =
       host.act(contextId, {
         kind: "click",
         target: save.selector,
-        expected: { role: save.role, name: save.name },
+        expected: { role: save.role, name: save.name, url: `${origin}/form` },
       }),
     ).rejects.toThrow(/changed since the snapshot/);
     await page.close();
