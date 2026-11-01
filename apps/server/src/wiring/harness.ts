@@ -296,19 +296,20 @@ export function wireHarness(deps: HarnessDependencies) {
             scriptDirectory: harnessScriptDirectory,
             sshAgentSocket,
             // Below Full access a command reaches a registered server only
-            // through the host's relays and agent socket, which Seatbelt
-            // alone can open to it.
-            ...(process.platform === "darwin"
-              ? {
-                  serverAccess: (command: string, folder: string) =>
-                    openServerSshAccessFor(
-                      command,
-                      folder,
-                      shieldServerStore.serversFor(scope.projectId),
-                      { personAgentSocket: sshAgentSocket },
-                    ),
-                }
-              : {}),
+            // through the host's relays and agent socket: ports Seatbelt
+            // opens on macOS, sockets the capsule's forwarder dials on Linux.
+            serverAccess: (command: string, folder: string) =>
+              openServerSshAccessFor(
+                command,
+                folder,
+                shieldServerStore.serversFor(scope.projectId),
+                {
+                  personAgentSocket: sshAgentSocket,
+                  ...(harnessEgressEndpoint.kind === "unix-socket"
+                    ? { relays: "unix-socket" as const }
+                    : {}),
+                },
+              ),
             egress: {
               scope: {
                 threadId: decodeEgressAggregateId(scope.threadId),
