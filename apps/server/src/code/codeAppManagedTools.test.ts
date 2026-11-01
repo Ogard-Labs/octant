@@ -820,6 +820,7 @@ describe("Code app-managed tools", () => {
     expect(act).toHaveBeenLastCalledWith({
       windowId,
       capturedBy: "agent",
+      refuseStaleRevision: true,
       request: expect.objectContaining({
         kind: "press",
         value: "Enter",
@@ -833,6 +834,7 @@ describe("Code app-managed tools", () => {
     expect(act).toHaveBeenLastCalledWith({
       windowId,
       capturedBy: "agent",
+      refuseStaleRevision: true,
       request: expect.objectContaining({ kind: "scroll", deltaX: 100, deltaY: -500 }),
     });
     act.mockClear();
@@ -2324,7 +2326,8 @@ describe("Code tool families", () => {
     // the same answer, added about 85 bytes; its usage is in help.
     // Hover, select, drag, upload, and the four tab operations added their
     // names and five short arguments (about 305 bytes); their usage is in help.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(5_100);
+    // The steps operation and its list argument added about 70 bytes.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(5_170);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(
