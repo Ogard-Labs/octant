@@ -1,3 +1,4 @@
+import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { randomUUID } from "node:crypto";
@@ -1067,8 +1068,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           };
         },
         standingMergeAllowance: (thread) => {
-          const project = persistence.readProject(thread.projectId);
-          return project?.type === "code" && project.agentMerge === "enabled" ? ["project"] : [];
+          const run = persistence.automationProjection.runForThread(String(thread.id));
+          return standingMergeAllowanceFor({
+            thread,
+            project: persistence.readProject(thread.projectId),
+            run,
+            routine:
+              run === undefined
+                ? undefined
+                : persistence.automationProjection.getDefinition(run.automationId),
+          });
         },
         reviewFiles: {
           resolve: (input) => {
