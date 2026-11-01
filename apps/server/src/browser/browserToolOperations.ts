@@ -3,7 +3,13 @@ import type {
   BrowserAutomationSnapshot,
   ProviderToolImage,
 } from "@octant/contracts";
-import { MAX_BROWSER_UPLOAD_FILES } from "@octant/contracts";
+import {
+  BROWSER_RESIZE_BOUNDS,
+  MAX_BROWSER_UPLOAD_FILES,
+  MAX_BROWSER_WAIT_MS,
+  type BrowserWaitCondition,
+  type BrowserWaitFor,
+} from "@octant/contracts";
 import { browserToolImage } from "./browserToolImage";
 
 /**
@@ -48,7 +54,13 @@ export type BrowserToolInput = {
   | ({ readonly operation: "read-page" } & Partial<BrowserToolTarget>)
   | { readonly operation: "snapshot" | "screenshot" | "diagnostics" | "stop" }
   | { readonly operation: "scroll"; readonly deltaX?: number; readonly deltaY?: number }
-  | ({ readonly operation: "click" | "wait" } & BrowserToolTarget)
+  | ({ readonly operation: "click" } & BrowserToolTarget)
+  | ({ readonly operation: "wait" } & BrowserToolTarget)
+  | { readonly operation: "wait"; readonly waitFor: BrowserWaitFor }
+  | {
+      readonly operation: "resize";
+      readonly viewport?: { readonly width: number; readonly height: number };
+    }
   | { readonly operation: "press"; readonly key: string }
   | ({ readonly operation: "type"; readonly text: string } & BrowserToolTarget)
   | ({ readonly operation: "hover" } & BrowserToolTarget)
@@ -171,6 +183,27 @@ function parseBrowserToolRecord(
       ...(record.profile === undefined ? {} : { profile: record.profile }),
     };
   }
+  if (operation === "wait" && only("selector", "ref", "conditions", "match", "timeoutMs")) {
+    const waitFor = parseWaitFor(record);
+    if (waitFor === null) return undefined;
+    if (waitFor !== undefined) return { ...common, operation, waitFor };
+  }
+  if (operation === "resize" && only("width", "height")) {
+    if (record.width === undefined && record.height === undefined) return { ...common, operation };
+    const { width, height } = record;
+    if (
+      typeof width !== "number" ||
+      typeof height !== "number" ||
+      !Number.isInteger(width) ||
+      !Number.isInteger(height) ||
+      width < BROWSER_RESIZE_BOUNDS.minWidth ||
+      width > BROWSER_RESIZE_BOUNDS.maxWidth ||
+      height < BROWSER_RESIZE_BOUNDS.minHeight ||
+      height > BROWSER_RESIZE_BOUNDS.maxHeight
+    )
+      return undefined;
+    return { ...common, operation, viewport: { width, height } };
+  }
   if ((operation === "click" || operation === "wait") && only("selector", "ref")) {
     const named = target();
     return named === undefined ? undefined : { ...common, operation, ...named };
@@ -262,6 +295,7 @@ function parseBrowserToolRecord(
 }
 
 const ACTING_OPERATIONS: ReadonlySet<string> = new Set([
+  "resize",
   "navigate",
   "click",
   "type",
@@ -274,6 +308,89 @@ const ACTING_OPERATIONS: ReadonlySet<string> = new Set([
   "upload",
 ]);
 const INCLUDE_PARTS: ReadonlySet<unknown> = new Set(["text", "screenshot", "snapshot"]);
+
+/**
+ * A wait for conditions, read from the tool's own shape: `conditions` of
+ * `{text, present}`, `{urlContains}`, `{load}`, or `{selector|ref, state}`,
+ * with `match` and `timeoutMs`. A bare selector or ref with a `timeoutMs` is a
+ * wait for that element to be attached. Undefined means a plain element wait;
+ * null means the arguments are malformed.
+ */
+function parseWaitFor(record: Record<string, unknown>): BrowserWaitFor | undefined | null {
+  const { conditions, match, timeoutMs } = record;
+  if (
+    timeoutMs !== undefined &&
+    (typeof timeoutMs !== "number" ||
+      !Number.isInteger(timeoutMs) ||
+      timeoutMs < 1 ||
+      timeoutMs > MAX_BROWSER_WAIT_MS)
+  )
+    return null;
+  if (match !== undefined && match !== "all" && match !== "any") return null;
+  const limit = typeof timeoutMs === "number" ? { timeoutMs } : {};
+  if (conditions === undefined) {
+    if (match !== undefined) return null;
+    if (timeoutMs === undefined) return undefined;
+    const element = record.ref !== undefined ? { ref: record.ref } : { target: record.selector };
+    const one = parseCondition({ ...element, state: "attached" });
+    return one === undefined ? null : { conditions: [one], match: "all", ...limit };
+  }
+  if (record.selector !== undefined || record.ref !== undefined) return null;
+  if (!Array.isArray(conditions) || conditions.length === 0 || conditions.length > 5) return null;
+  const parsed: BrowserWaitCondition[] = [];
+  for (const entry of conditions) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
+    const one = parseCondition(entry as Record<string, unknown>);
+    if (one === undefined) return null;
+    parsed.push(one);
+  }
+  return { conditions: parsed, match: match ?? "all", ...limit };
+}
+
+const ELEMENT_STATES: ReadonlySet<unknown> = new Set([
+  "attached",
+  "detached",
+  "visible",
+  "hidden",
+  "enabled",
+  "disabled",
+]);
+
+function parseCondition(entry: Record<string, unknown>): BrowserWaitCondition | undefined {
+  const keys = Object.keys(entry);
+  const string = (value: unknown, max: number): value is string =>
+    typeof value === "string" && value.trim() !== "" && value.length <= max;
+  if (entry.text !== undefined) {
+    if (keys.some((key) => key !== "text" && key !== "present")) return undefined;
+    if (!string(entry.text, 1024)) return undefined;
+    if (entry.present !== undefined && typeof entry.present !== "boolean") return undefined;
+    return { kind: "text", text: entry.text, present: entry.present !== false };
+  }
+  if (entry.urlContains !== undefined) {
+    if (keys.length !== 1 || !string(entry.urlContains, 2048)) return undefined;
+    return { kind: "url", contains: entry.urlContains };
+  }
+  if (entry.load !== undefined) {
+    if (keys.length !== 1 || (entry.load !== "load" && entry.load !== "domcontentloaded")) {
+      return undefined;
+    }
+    return { kind: "load", state: entry.load };
+  }
+  if (
+    keys.some((key) => key !== "selector" && key !== "target" && key !== "ref" && key !== "state")
+  ) {
+    return undefined;
+  }
+  if (!ELEMENT_STATES.has(entry.state)) return undefined;
+  const state = entry.state as Extract<BrowserWaitCondition, { kind: "element" }>["state"];
+  if (entry.ref !== undefined) {
+    return typeof entry.ref === "string" && REF_PATTERN.test(entry.ref)
+      ? { kind: "element", ref: entry.ref, state }
+      : undefined;
+  }
+  const target = entry.selector ?? entry.target;
+  return string(target, 4096) ? { kind: "element", target, state } : undefined;
+}
 
 /** Absent is undefined; anything but a short list of distinct known parts is null. */
 function parseInclude(value: unknown): BrowserToolInclude | undefined | null {
@@ -328,7 +445,14 @@ export function browserToolAction(
       return { ...base, kind: "type", ...element(input), value: input.text };
     case "press":
       return { ...base, kind: "press", value: input.key };
+    case "resize":
+      return {
+        ...base,
+        kind: "resize",
+        ...(input.viewport === undefined ? {} : { viewport: input.viewport }),
+      };
     case "wait":
+      if ("waitFor" in input) return { ...base, kind: "wait", waitFor: input.waitFor };
       return { ...base, kind: "wait", ...element(input) };
     case "scroll":
       return {
@@ -460,6 +584,7 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.change === undefined ? {} : { changed: observation.change }),
               ...(observation.snapshot === undefined ? {} : { snapshot: observation.snapshot }),
               ...(observation.tabs === undefined ? {} : { tabs: observation.tabs }),
+              ...(observation.dialogs === undefined ? {} : { dialogs: observation.dialogs }),
               ...(bounded === undefined
                 ? {}
                 : {

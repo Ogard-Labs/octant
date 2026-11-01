@@ -3,8 +3,10 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/contracts";
 import {
+  BROWSER_RESIZE_BOUNDS,
   BrowserActionKind,
   BrowserObservationPart,
+  decodeBrowserWaitFor,
   decodeImportedCookie,
   MAX_BROWSER_UPLOAD_FILES,
   decodeStoredBrowserProfile,
@@ -15,6 +17,7 @@ import type { BrowserProfileStore } from "./browserProfileStore";
 import {
   BrowserNavigationBlockedError,
   BrowserTargetStaleError,
+  BrowserWaitTimedOutError,
   type BrowserSurfaceAction,
   type ReturnTypeOfBrowserSurfaceHost,
 } from "./browserSurfaceHost";
@@ -226,6 +229,12 @@ async function handleBrokerRequest(
     if (error instanceof Error && error.message.includes("not a native Project window")) {
       return failure("owner-unavailable", 409);
     }
+    if (error instanceof BrowserWaitTimedOutError) {
+      return Response.json(
+        { error: "wait-timed-out", message: error.message.slice(0, 1024) },
+        { status: 422 },
+      );
+    }
     if (error instanceof BrowserTargetStaleError) {
       return Response.json({ error: "target-stale" }, { status: 422 });
     }
@@ -355,6 +364,8 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "destinationExpected",
     "files",
     "tabId",
+    "waitFor",
+    "viewport",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   if (!(BrowserActionKind.literals as ReadonlyArray<unknown>).includes(value.kind)) return false;
@@ -377,6 +388,8 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
         value.files.every(
           (file) => typeof file === "string" && file.length <= 4096 && file.startsWith("/"),
         ))) &&
+    (value.waitFor === undefined || isWaitFor(value.waitFor)) &&
+    (value.viewport === undefined || isViewportSize(value.viewport)) &&
     (value.tabId === undefined ||
       (typeof value.tabId === "string" && /^t[1-9][0-9]{0,3}$/.test(value.tabId))) &&
     (value.include === undefined ||
@@ -385,6 +398,28 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
         value.include.every((part) =>
           (BrowserObservationPart.literals as ReadonlyArray<unknown>).includes(part),
         )))
+  );
+}
+
+function isWaitFor(value: unknown): boolean {
+  try {
+    decodeBrowserWaitFor(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isViewportSize(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Object.keys(value).every((key) => key === "width" || key === "height") &&
+    Number.isInteger(value.width) &&
+    Number.isInteger(value.height) &&
+    (value.width as number) >= BROWSER_RESIZE_BOUNDS.minWidth &&
+    (value.width as number) <= BROWSER_RESIZE_BOUNDS.maxWidth &&
+    (value.height as number) >= BROWSER_RESIZE_BOUNDS.minHeight &&
+    (value.height as number) <= BROWSER_RESIZE_BOUNDS.maxHeight
   );
 }
 

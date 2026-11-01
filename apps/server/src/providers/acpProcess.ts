@@ -41,6 +41,11 @@ import {
   acquireProviderRuntimeNetwork,
   type ProviderRuntimeNetworkPort,
   type ProviderRuntimeProxiedNetwork,
+  acquireProviderServerAccess,
+  serverAccessSeatbeltRules,
+  withServerAccess,
+  type ProviderServerAccess,
+  type ProviderServerAccessPort,
 } from "../network/providerRuntimeNetwork";
 
 export type { AcpSessionMode } from "./acpProfiles";
@@ -76,6 +81,8 @@ export interface AcpConfinementInput {
    * runtimes through the proxy.
    */
   readonly network?: ProviderRuntimeProxiedNetwork;
+  /** The folder through which the agent's own `ssh` reaches the Project's registered servers. */
+  readonly servers?: ProviderServerAccess;
   /** The person's own setup this session carries; absent keeps every deny. */
   readonly nativeSetup?: ProviderNativeSetup;
 }
@@ -135,6 +142,8 @@ export interface AcpProcessOptions {
   readonly stderrBytes?: number;
   /** Routes the runtime through its own egress proxy below Full access. */
   readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
+  /** The Project's registered servers, for the runtime's own `ssh` below Full access. */
+  readonly serverAccess?: ProviderServerAccessPort;
 }
 
 export interface AcpConfinementOptions {
@@ -493,6 +502,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           platform === "linux" ? denyPaths.filter((path) => pathExists(path)) : denyPaths;
         const extraRules = [
           ...loopbackRules,
+          ...(platform === "darwin" ? serverAccessSeatbeltRules(input.servers) : []),
           ...(platform === "darwin"
             ? denyPaths.flatMap((path) => [
                 seatbeltDenyRule("file-read*", path),
@@ -552,6 +562,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
                 temporaryDirectory,
+                ...(input.servers === undefined ? [] : [input.servers.folder]),
               ],
               privateHomeAllowPaths: [
                 root,
@@ -560,6 +571,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 ...hostReadPaths,
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
+                ...(input.servers === undefined ? [] : [input.servers.folder]),
               ],
               ...(extraRules.length === 0 ? {} : { extraRules }),
             }),
@@ -577,11 +589,14 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           command: launch.command,
           args: launch.args,
           cwd: root,
-          environment: {
-            ...input.environment,
-            ...hostAuthentication.environment,
-            ...input.network?.environment,
-          },
+          environment: withServerAccess(
+            {
+              ...input.environment,
+              ...hostAuthentication.environment,
+              ...input.network?.environment,
+            },
+            input.servers,
+          ),
         };
       }),
   };
@@ -1224,6 +1239,13 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
                 loopbackPorts: input.loopbackPorts ?? [],
                 environment,
               });
+        const servers =
+          input.purpose === "probe"
+            ? undefined
+            : yield* acquireProviderServerAccess(options.serverAccess, {
+                root: input.root,
+                executionPolicy: input.executionPolicy,
+              });
         const launch = yield* confinement.prepare({
           profile,
           binaryPath: input.binaryPath,
@@ -1236,6 +1258,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
           ...(network === undefined ? {} : { network }),
+          ...(servers === undefined ? {} : { servers }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         });
         const managed = yield* Effect.acquireRelease(

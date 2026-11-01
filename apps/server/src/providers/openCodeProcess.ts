@@ -42,6 +42,11 @@ import {
   acquireProviderRuntimeNetwork,
   type ProviderRuntimeNetworkPort,
   type ProviderRuntimeProxiedNetwork,
+  acquireProviderServerAccess,
+  serverAccessSeatbeltRules,
+  withServerAccess,
+  type ProviderServerAccess,
+  type ProviderServerAccessPort,
 } from "../network/providerRuntimeNetwork";
 
 export interface OpenCodeBinaryProbe {
@@ -92,6 +97,12 @@ export interface OpenCodeProcessStartInput {
    */
   readonly network?: ProviderRuntimeProxiedNetwork;
   /**
+   * The folder through which OpenCode's own `ssh` reaches the Project's
+   * registered servers, set by this port below Full access. A caller's value
+   * is ignored.
+   */
+  readonly servers?: ProviderServerAccess;
+  /**
    * The person let OpenCode load its own skills: the launch keeps the
    * `.claude/skills` and `.agents/skills` discovery OpenCode does by itself and
    * does not deny the `skill` permission. Its project configuration and
@@ -130,6 +141,8 @@ export interface OpenCodeProcessOptions {
   readonly startupTimeoutMs?: number;
   /** Routes the runtime through its own egress proxy below Full access. */
   readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
+  /** The Project's registered servers, for the runtime's own `ssh` below Full access. */
+  readonly serverAccess?: ProviderServerAccessPort;
 }
 
 export interface OpenCodeProbeOptions {
@@ -1019,6 +1032,7 @@ function prepareOpenCodeLaunch(
       const readRoots = existingAbsolutePaths([
         root,
         temporaryDirectory,
+        input.servers?.folder,
         configDirectory,
         configHome,
         cacheHome,
@@ -1030,6 +1044,7 @@ function prepareOpenCodeLaunch(
         binaryPath,
         configuredBinaryDirectory,
         temporaryDirectory,
+        input.servers?.folder,
         configDirectory,
         configHome,
         cacheHome,
@@ -1082,7 +1097,7 @@ function prepareOpenCodeLaunch(
           : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
       // OpenCode is a loopback server, and its OS rules open only its own
       // port and the tool bridge ports, so loopback stays off the proxy.
-      const environment =
+      const environment = withServerAccess(
         input.network === undefined
           ? profile.environment
           : {
@@ -1090,7 +1105,9 @@ function prepareOpenCodeLaunch(
               ...input.network.environment,
               NO_PROXY: "127.0.0.1,localhost,::1",
               no_proxy: "127.0.0.1,localhost,::1",
-            };
+            },
+        input.servers,
+      );
       const launch = confinement.prepare({
         executable: input.binaryPath,
         args,
@@ -1125,6 +1142,7 @@ function prepareOpenCodeLaunch(
                 ...loopbackPorts.map(
                   (bridgePort) => `(allow network-outbound (remote ip "localhost:${bridgePort}"))`,
                 ),
+                ...serverAccessSeatbeltRules(input.servers),
                 // Its provider listing resolves the other coding tools' home
                 // directories first, and a refusal there fails the listing.
                 ...openCodeDiscoveryRules(profile.environment.HOME),
@@ -1626,11 +1644,19 @@ export function makeOpenCodeProcessLive(
                 loopbackPorts: input.loopbackPorts ?? [],
                 environment: options.inheritedEnvironment ?? process.env,
               });
-        const { network: _ignored, ...requested } = input;
+        const servers = yield* acquireProviderServerAccess(options.serverAccess, {
+          root: input.cwd,
+          executionPolicy,
+        });
+        const { network: _ignored, servers: _ignoredServers, ...requested } = input;
         let terminate: (() => Promise<void>) | undefined;
         return yield* Effect.acquireReleaseInterruptible(
           acquireOpenCodeServer(
-            network === undefined ? requested : { ...requested, network },
+            {
+              ...requested,
+              ...(network === undefined ? {} : { network }),
+              ...(servers === undefined ? {} : { servers }),
+            },
             { ...resolvedOptions, runtimeConfig },
             runtime,
             probe.version,

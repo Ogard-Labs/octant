@@ -87,3 +87,37 @@ describe("native harness authority", () => {
     ).toBe(false);
   });
 });
+
+describe("native harness authority for a Work thread on a server", () => {
+  const workThread = {
+    id: threadId,
+    lifecycle: "active",
+    projectId,
+    bindingRevisionId: revisionId,
+    providerInstanceId,
+  } as never;
+  const harness = (holds: boolean) =>
+    createNativeHarnessAuthority({
+      hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+      persistence: {
+        readChatThread: () => undefined,
+        // The server Project is in its own catalog: the local one names nothing.
+        readProject: () => undefined,
+        readCodeThread: () => undefined,
+        readProviderInstance: () => ({ enabled: true }) as never,
+      },
+      workThreads: { read: () => workThread },
+      readThreadTaint: () => ({ externalContentIngested: false }) as never,
+      holdsServerWorkThread: () => holds,
+    });
+
+  it("holds its Project's derived binding, and nothing when the Project is not a server Work Project", () => {
+    expect(harness(true).resolve(threadId, "work")).toMatchObject({
+      mode: "work",
+      projectId,
+      rootId: revisionId,
+    });
+    expect(harness(false).resolve(threadId, "work")).toBeUndefined();
+    expect(harness(true).resolve(threadId, "code")).toBeUndefined();
+  });
+});

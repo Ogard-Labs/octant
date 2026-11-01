@@ -315,6 +315,16 @@ export interface NativeHarnessComposition {
     readonly windowId: string;
     readonly secrets?: ReadonlyArray<string>;
   }) => AppManagedToolSet | undefined;
+  /**
+   * A Work thread's tools in a server Project: the same tools as `forWork`,
+   * with the file tools and shell on the server and no delegation. Every
+   * command there asks the level's approver, with no remembered approval.
+   */
+  readonly forServerWork: (input: {
+    readonly thread: WorkThread;
+    readonly filesystem: NativeHarnessFileSystemPort;
+    readonly shell: NativeHarnessShellPort;
+  }) => AppManagedToolSet | undefined;
   readonly forAgentRun: (input: {
     readonly run: AgentRun;
     readonly authority: AgentRunAuthority;
@@ -1081,6 +1091,42 @@ export function createNativeHarnessComposition(
           ...secondOpinion({
             threadId,
             mode: "code",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
+        },
+      });
+    },
+    forServerWork: ({ thread, filesystem, shell }) => {
+      if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
+      const threadId = String(thread.id);
+      return compose({
+        threadId,
+        mode: "work",
+        ports: {
+          ...shared(threadId),
+          // No delegation: a child would run on this host, not on the server.
+          ...askUserFor({
+            parentThreadId: threadId,
+            mode: "work",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+            boundRoot: filesystem.root,
+            everyCommandAsks: true,
+          }),
+          filesystem,
+          shell,
+          ...webPorts(),
+          ...contextRemainingFor("work-thread", threadId),
+          ...journalLookupFor({
+            mode: "work",
+            providerInstanceId: thread.providerInstanceId,
+            latestSession: () => options.journal?.latestWorkSession(thread.id),
+            secrets: [],
+          }),
+          ...secondOpinion({
+            threadId,
+            mode: "work",
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),

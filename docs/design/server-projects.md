@@ -1,7 +1,7 @@
 # Server Projects
 
-This topic specification owns Code Projects bound to a folder on one of the
-person's registered servers, reached over SSH. Architecture owns the boundary
+This topic specification owns Code and Work Projects bound to a folder on one
+of the person's registered servers, reached over SSH. Architecture owns the boundary
 ([Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code),
 [Octant Shield: servers over SSH](../architecture.md#octant-shield), and the
 [Current Release Boundary](../architecture.md#current-release-boundary)).
@@ -13,8 +13,10 @@ on the server at every level; thread terminals there; the Project terminal;
 the Git tab and the dock's Review tool, whose Git runs on the server; a
 thread's own worktree on the server and its pull request
 ([Worktrees and pull requests](#worktrees-and-pull-requests)); and the Code
-sidebar, composer, and thread view that open them. Not built yet: the items
-under [Not built yet](#not-built-yet).
+sidebar, composer, and thread view that open them. On the host: Work Projects
+there, whose Work threads run on the Octant Harness with file tools and
+commands on the server ([Work Projects](#work-projects)). Not built yet: the
+items under [Not built yet](#not-built-yet).
 
 ## Outcome
 
@@ -54,6 +56,12 @@ hands are on the server.
   well over a hundred places; a separate catalog keeps every one of them
   unable to reach a server Project, instead of auditing each for a path that
   is not local.
+- A binding names its mode: Code (the default, and the only mode a binding
+  journaled before Work Projects names) or Work (`mode: "work"` on the bound
+  Project). A Code Project's record carries no mode at all, so it is exactly
+  what an older build journaled and reads. A Work Project's record names its
+  mode, so an older build cannot decode it and binds nothing for it rather
+  than reading it as a Code Project. A Project's mode never changes.
 - A server Project whose server was removed from the registry stays in the
   catalog and refuses every connection (`server-not-registered`) until the
   person removes the Project or registers the server again.
@@ -149,8 +157,8 @@ hands are on the server.
   pseudo-terminal here that runs only `ssh`. It carries no credential, Browser
   grant, or other folder from this host, and Plan starts none. When the
   connection drops the terminal ends; it is never restarted on this host.
-- **Project terminal.** A server Project's own terminal (the one with no
-  thread, opened from the dock's quick tools of a new task) is the same SSH
+- **Project terminal.** A Code server Project's own terminal (the one with
+  no thread, opened from the dock's quick tools of a new task) is the same SSH
   login shell in the folder, owned by the local window that opened it and
   journaled as a local Project terminal is. It has no other folder, no saved
   actions or suggestions (those read a Project's files on this host), and no
@@ -168,6 +176,37 @@ hands are on the server.
   closed, and a server thread opens only its own view.
 - **Checkpoints.** A turn on a server takes no checkpoint, so rewind and
   restore are not offered there; Git on the server is the way back.
+
+### Work Projects
+
+- **A Work Project on a server** is bound as a Code one is (same command,
+  same folder check, local window only, same catalog) with `mode: "work"`.
+  Its threads are Work threads; no Code thread, checkout, Git service, or
+  terminal resolves it, and a Code Project there holds no Work thread.
+- **Threads.** A Work thread there is an ordinary Work thread on this host's
+  journal, created against a binding revision derived from the Project alone
+  under a label of its own (`octant.server-work-project-binding.v1`), which
+  the catalog shows as the Project's `workBindingRevisionId`. It starts in the
+  Project's folder at the account's default Work access (a server Project
+  has no access override of its own) and stays there: moving it to another
+  Project or folder is refused. It takes no GitHub or Linear issue and no
+  terminal session at creation. _Rationale:_ the issue readers and the session
+  reader read this host's accounts and folders on the thread's behalf; the
+  narrower choice keeps the thread's sources on the server it works on.
+- **Turns.** A turn runs on the Octant Harness only, with the same file tools
+  and shell on the server as a Code thread there ([Threads](#threads)): the
+  same access levels and approvals, every command asking again below Full
+  access, every command journaled as `shield-remote-commands.ran@1`, and no
+  delegation. No tool of this host is offered: no Browser, Computer, side
+  task, routine, Canvas, or extension, and a turn that selects an extension
+  is refused. Nothing watches the folder for written files, and the Project's
+  status file and extra folders are not read, since each is a folder of this
+  host. A turn that cannot bind (a removed server, a runtime other than the
+  Octant Harness) is refused before it starts, and a call that cannot reach
+  the server runs nothing anywhere.
+- **Windows.** A window binds a server Work Project, and its threads, with no
+  folder of this host (`boundRoot: null`), so Work Files, Browser, and every
+  root-backed Work surface fail closed for it.
 
 ### Panels
 
@@ -262,7 +301,9 @@ hands are on the server.
 
 ## Not built yet
 
-- Work Projects on a server, and extra folders in a server Project.
+- The Work sidebar, composer, and thread view for a Work Project on a server,
+  and the choice of mode when binding one in Settings; the host side is built.
+- Extra folders in a server Project.
 - The file browser and tests for a server Project; the Git tab, the Review
   tool, managed worktrees, and pull requests are built.
 - Saved Project actions and their suggestions for a server Project; its

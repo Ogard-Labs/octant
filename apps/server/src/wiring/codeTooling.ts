@@ -186,7 +186,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             },
             suggestActions: suggestProjectActions,
             serverProject: (projectId) => {
-              const project = serverProjectStore.project(String(projectId));
+              const project = serverProjectStore.codeProject(String(projectId));
               if (project === undefined) return undefined;
               return {
                 bindingRevisionId: serverCodeCheckout(project).bindingRevisionId,

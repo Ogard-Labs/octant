@@ -102,8 +102,8 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
   const user = userInfo().username;
 
   beforeAll(async () => {
-    root = realpathSync(mkdtempSync(join(tmpdir(), "octant-ssh-test-")));
-    socketRoot = realpathSync(mkdtempSync("/tmp/octant-ssh-test-"));
+    root = realpathSync(mkdtempSync(join(tmpdir(), "octant-shield-ssh-test-")));
+    socketRoot = realpathSync(mkdtempSync("/tmp/octant-shield-ssh-test-"));
     for (const name of ["hostkey", "userkey"]) {
       spawnSync("/usr/bin/ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(root, name)]);
     }
