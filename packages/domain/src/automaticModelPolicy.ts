@@ -21,7 +21,7 @@ export const AUTOMATIC_MODEL_DISCLOSURE: Readonly<Record<AutomaticModelJob, stri
   "shield-judge":
     "What the Judge reviews goes to this provider: your recent messages, the pending action and the project's root. It never sees files, tool output or web pages.",
   "person-memory":
-    "What memory distils goes to this provider: the title of a finished thread and the messages you wrote in it, with secrets removed. It never sees answers, tool output or files.",
+    "What memory distils goes to this provider: the title of a finished thread, the messages you wrote in it and the memories already kept (so it does not repeat them), with secrets removed. It never sees answers, tool output or files.",
 };
 
 /** Settings' note for both jobs: one choice, no automatic switching. */

@@ -40,10 +40,18 @@ function atLimit(
     (candidate) => String(candidate.providerInstanceId) === String(providerInstanceId),
   );
   if (entry?.status !== "available") return false;
-  if (entry.limits.quota === "exhausted") return true;
-  return (entry.limits.rateLimitWindows ?? []).some(
-    (window) =>
-      window.status === "exhausted" &&
-      (window.resetsAt === undefined || Date.parse(window.resetsAt) > nowMs),
+  const { limits } = entry;
+  const future = (resetsAt: string | undefined) =>
+    resetsAt === undefined || Date.parse(resetsAt) > nowMs;
+  const windows = limits.rateLimitWindows ?? [];
+  // A window's reset time decides when its exhaustion ends; the aggregate
+  // quota flag has none, so it counts only when no window explains it.
+  if (windows.some((window) => window.status === "exhausted" && future(window.resetsAt))) {
+    return true;
+  }
+  if (windows.length === 0 && limits.quota === "exhausted") return true;
+  // HTTP providers report absolute buckets in rate-limit headers.
+  return [limits.requests, limits.tokens].some(
+    (bucket) => bucket.status === "available" && bucket.remaining === 0 && future(bucket.resetsAt),
   );
 }
