@@ -13,6 +13,7 @@ import {
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
 import {
+  escapeSeatbeltPath,
   makeProcessConfinementLive,
   ProcessConfinementError,
   seatbeltAllowLiteralMetadataRule,
@@ -131,6 +132,18 @@ export interface HarnessShellScriptInput {
     readonly endpoint: EgressProxyEndpoint;
     readonly token: string;
   };
+  /**
+   * Opens this command's way to the person's registered servers on top of
+   * `proxied` network: the loopback relay ports, the host-owned agent
+   * socket, and the user-database lookup `ssh` makes for the person's own
+   * account. Its wrappers go first on `PATH`. A launch without the egress
+   * proxy refuses it, and only a Seatbelt launch can carry it.
+   */
+  readonly serverAccess?: {
+    readonly binDirectory: string;
+    readonly relayPorts: ReadonlyArray<number>;
+    readonly agentSocket?: string | undefined;
+  };
 }
 
 export interface RepositoryTestProcessInput {
@@ -240,6 +253,11 @@ const MAX_ARGUMENTS = 64;
 const MAX_ARGUMENT_BYTES = 1_024;
 const MAX_TIMEOUT_MS = 60 * 60 * 1_000;
 const HARNESS_SHELL = "/bin/sh";
+/**
+ * `ssh` looks up the person's own account before it connects and stops with
+ * "No user exists for uid" when the user database is out of reach.
+ */
+const SSH_ACCOUNT_LOOKUP = "com.apple.system.opendirectoryd.libinfo";
 
 export class RepositoryTestProcessPort {
   readonly #platform: NodeJS.Platform;
@@ -327,6 +345,11 @@ export class RepositoryTestProcessPort {
       return unavailable(false);
     if (input.egressProxy !== undefined && this.#networkEgress === "none")
       return unavailable(false);
+    if (
+      input.serverAccess !== undefined &&
+      (input.egressProxy === undefined || this.#platform !== "darwin")
+    )
+      return unavailable(false);
     if (signal?.aborted) return cancelledBeforeSpawn();
     let launchInput: RepositoryTestProcessInput;
     try {
@@ -353,6 +376,26 @@ export class RepositoryTestProcessPort {
     }
     if (signal?.aborted) return cancelledBeforeSpawn();
     const proxy = input.egressProxy;
+    const servers = input.serverAccess;
+    if (servers !== undefined) {
+      try {
+        if (
+          !isAbsolute(servers.binDirectory) ||
+          !servers.relayPorts.every(
+            (port) => Number.isSafeInteger(port) && port > 0 && port <= 65_535,
+          ) ||
+          (servers.agentSocket !== undefined && !isAbsolute(servers.agentSocket))
+        )
+          throw new Error("Server access is invalid.");
+        launchInput = {
+          ...launchInput,
+          additionalReadRoots: [...(launchInput.additionalReadRoots ?? []), servers.binDirectory],
+          machLookupNames: [SSH_ACCOUNT_LOOKUP],
+        };
+      } catch {
+        return unavailable(false);
+      }
+    }
     return this.#launch(
       launchInput,
       { executable: HARNESS_SHELL, args: launchInput.argv.slice(1) },
@@ -363,7 +406,31 @@ export class RepositoryTestProcessPort {
             networkEgress: { kind: "proxied", endpoint: proxy.endpoint },
             // Added after validation: the lowercase forms are names a caller
             // may not set, and only these values may fill them.
-            environment: proxiedLaunchEnvironment(proxy.endpoint, proxy.token),
+            environment: {
+              ...proxiedLaunchEnvironment(proxy.endpoint, proxy.token),
+              ...(servers === undefined
+                ? {}
+                : {
+                    PATH: `${servers.binDirectory}${delimiter}${process.env.PATH ?? "/usr/bin:/bin"}`,
+                    ...(servers.agentSocket === undefined
+                      ? {}
+                      : { SSH_AUTH_SOCK: servers.agentSocket }),
+                  }),
+            },
+            ...(servers === undefined
+              ? {}
+              : {
+                  extraRules: [
+                    ...servers.relayPorts.map(
+                      (port) => `(allow network-outbound (remote ip "localhost:${String(port)}"))`,
+                    ),
+                    ...(servers.agentSocket === undefined
+                      ? []
+                      : [
+                          `(allow network-outbound (remote unix-socket (path-literal "${escapeSeatbeltPath(servers.agentSocket)}")))`,
+                        ]),
+                  ],
+                }),
           },
     );
   }
@@ -375,6 +442,8 @@ export class RepositoryTestProcessPort {
     proxied?: {
       readonly networkEgress: OsNetworkEgress;
       readonly environment: Readonly<Record<string, string>>;
+      /** Seatbelt rules a harness command's server access adds. */
+      readonly extraRules?: ReadonlyArray<string>;
     },
   ): Promise<RepositoryTestProcessResult> {
     let launch: { readonly command: string; readonly args: readonly string[] };
@@ -414,6 +483,7 @@ export class RepositoryTestProcessPort {
         if (input.allowSignal === true) {
           launchReadRules.push("(allow signal)");
         }
+        launchReadRules.push(...(proxied?.extraRules ?? []));
       }
       const additionalWriteRoots = [
         ...this.#additionalWritePaths,

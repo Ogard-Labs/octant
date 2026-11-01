@@ -72,6 +72,7 @@ import {
   type ThreadTaskProgressList,
   type ThreadWorkingDirectory,
   type WindowId,
+  type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
@@ -337,6 +338,12 @@ export interface WorkTurnServiceDependencies {
   };
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
+    readonly observeRemoteCommand?: (
+      threadId: string,
+      projectId: string | undefined,
+      event: ProviderRuntimeEvent,
+    ) => void;
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
@@ -1586,6 +1593,16 @@ export class WorkTurnService {
           ? {}
           : { outsideContentMarks: this.#outsideContentMarks }),
         ...(this.#forgeChanges === undefined ? {} : { forgeChanges: this.#forgeChanges }),
+        ...(this.#nativeHarness?.observeRemoteCommand === undefined || harnessScope === undefined
+          ? {}
+          : {
+              observeRemoteCommand: (event: ProviderRuntimeEvent) =>
+                this.#nativeHarness?.observeRemoteCommand?.(
+                  harnessScope.threadId,
+                  harnessScope.projectId === undefined ? undefined : String(harnessScope.projectId),
+                  event,
+                ),
+            }),
         ...(input.access === undefined ? {} : { access: input.access }),
         ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...nativeSetupOption(

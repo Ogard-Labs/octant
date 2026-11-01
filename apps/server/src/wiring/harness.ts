@@ -18,6 +18,7 @@ import {
   type OctantMode,
   type ProviderInstanceId,
   ToolEgressLaunchId,
+  type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { PersistenceService } from "../persistence/persistenceService";
@@ -75,6 +76,8 @@ import type { WorkspaceWiring } from "./workspace";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import { createShieldServerRouteHandler } from "../shield/shieldServerRoutes";
+import { openServerSshAccessFor } from "../shield/serverSshAccess";
+import { RuntimeRemoteCommands } from "../shield/runtimeRemoteCommands";
 import {
   personSshAgentSocket,
   readRunbookFile,
@@ -190,7 +193,18 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: shieldServerStore,
     sshAgentAvailable: () => sshAgentSocket() !== undefined,
+    projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
   });
+  const runtimeRemoteCommands = new RuntimeRemoteCommands((input) =>
+    shieldServerStore.recordRemoteCommand(input),
+  );
+  /** The Project a Code or Work thread belongs to, whose own server list applies. */
+  const threadProjectId = (threadId: string): string | undefined => {
+    const projectId =
+      persistence.readCodeThread(threadId as never)?.projectId ??
+      workThreadProjection.read(threadId as never)?.projectId;
+    return projectId === undefined ? undefined : String(projectId);
+  };
 
   const researchRouter = new ResearchRouter({
     searxngClient: {
@@ -269,6 +283,20 @@ export function wireHarness(deps: HarnessDependencies) {
             process: harnessProcessPort,
             scriptDirectory: harnessScriptDirectory,
             sshAgentSocket,
+            // Below Full access a command reaches a registered server only
+            // through the host's relays and agent socket, which Seatbelt
+            // alone can open to it.
+            ...(process.platform === "darwin"
+              ? {
+                  serverAccess: (command: string, folder: string) =>
+                    openServerSshAccessFor(
+                      command,
+                      folder,
+                      shieldServerStore.serversFor(scope.projectId),
+                      { personAgentSocket: sshAgentSocket },
+                    ),
+                }
+              : {}),
             egress: {
               scope: {
                 threadId: decodeEgressAggregateId(scope.threadId),
@@ -459,7 +487,7 @@ export function wireHarness(deps: HarnessDependencies) {
     authorizeThread: authorizeFollowUpThread,
   });
   const nativeHarnessObserver = new NativeHarnessTurnObserver({
-    serverContext: () => shieldServerStore.context(),
+    serverContext: (projectId) => shieldServerStore.context(projectId),
     sessions: nativeHarnessSessions,
     router: nativeHarnessRouter,
     isHarnessProvider: (providerInstanceId) => {
@@ -488,8 +516,14 @@ export function wireHarness(deps: HarnessDependencies) {
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
       nativeHarnessQuestions.answer(threadId, questionId, answer);
     },
+    observeRemoteCommand: (
+      threadId: string,
+      projectId: string | undefined,
+      event: ProviderRuntimeEvent,
+    ) => runtimeRemoteCommands.observe(threadId, projectId, event),
     contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) => [
       ...nativeHarnessObserver.contextFor(scope),
+      ...nativeHarnessObserver.runtimeServerNotes(scope),
       ...turnDecisionInstructions(scope.mode),
       FOLLOW_UP_SUGGESTION_INSTRUCTIONS,
     ],
@@ -612,7 +646,7 @@ export function wireHarness(deps: HarnessDependencies) {
           usage,
         },
       ),
-    servers: () => shieldServerStore.servers(),
+    servers: (threadId) => shieldServerStore.serversFor(threadProjectId(threadId)),
     protectedSecretPath: (path) => isProtectedSecretPath(path),
     // Places count for Shield only while Network limits are on, as they do
     // for the proxies, so turning the switch off returns every call to the
@@ -629,11 +663,15 @@ export function wireHarness(deps: HarnessDependencies) {
     record: (input) => shieldServerStore.recordForgeChange(input),
   });
   const nativeHarnessComposition = createNativeHarnessComposition({
-    recordRemoteCommand: (input) => shieldServerStore.recordRemoteCommand(input),
     forgeChanges: {
       branches: (threadId) => codeThreadBranches(persistence, threadId),
       record: (input) => shieldServerStore.recordForgeChange({ ...input, via: "octant-harness" }),
     },
+    recordRemoteCommand: (input) =>
+      shieldServerStore.recordRemoteCommand({
+        ...input,
+        projectId: threadProjectId(input.threadId),
+      }),
     protectedSecretPath: (path) => isProtectedSecretPath(path),
     tagSecretEgress: ({ threadId, readerThreadIds, command, workingDirectory }) =>
       readsSecretsThenEgress({

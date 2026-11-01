@@ -412,18 +412,31 @@ At Auto, Octant Shield lets a command through when the server's profile
 covers it, and asks you about anything else. Some actions always ask you,
 whatever the profile: firewall changes that can cut access, removing users or
 keys, disk and partition changes, deleting data, and reboots. SSH to a host
-you did not register always asks too. Every remote command is recorded with
-its host and exit status.
+you did not register always asks too. `scp` and `rsync` follow the same
+profiles: copying files down counts as a read, copying files up needs Admin,
+and a sync that deletes files always asks. In Ask first, the first connection
+to each server in a thread asks you and names the server, even if you allowed
+commands for the session. Every remote command is recorded with its host and,
+where the agent's runtime reports it, its exit status.
 
 Octant never reads your key files: `ssh` signs in through your SSH agent. You
 can point each server at a notes file (a runbook); agents read it as
-reference, and nothing written there changes what Shield allows. Only someone
-at this computer can change the list.
+reference, and nothing written there changes what Shield allows. A Project can
+use its own list of servers instead of the account's: pick the Project under
+**Servers**. Only someone at this computer can change either list.
 
-What this does not cover yet: below Full access an agent's command runs in a
-sandbox that cannot read your SSH config or open a connection to a server, so
-`ssh` connects only at Full access today, where commands are recorded but not
-reviewed. Exit status and runbook notes reach only Octant Harness threads.
+Below Full access, on a Mac, an Octant Harness command still runs in its
+sandbox. When it is a single `ssh`, `scp`, or `rsync` call to servers you
+registered, Octant opens a path to those servers for that command only. Your
+SSH agent signs in for it, and the command can neither read your keys nor
+change what your agent holds. The server must already be in your
+`known_hosts`, so connect once from your own terminal first. A server you
+reach through a jump host gets no path.
+
+What this does not cover yet: on Linux, a sandboxed command cannot reach a
+server. Commands that Claude Code, Codex, or another agent runs with its own
+shell keep the reach that agent's sandbox gives it. Octant records them when
+the agent says what it ran, and Codex also reports the exit status.
 
 ## Remote transport
 

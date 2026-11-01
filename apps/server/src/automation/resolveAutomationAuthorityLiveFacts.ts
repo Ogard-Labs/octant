@@ -46,6 +46,7 @@ export function resolveAutomationAuthorityLiveFacts(
       ? project.bindingHistory.at(-1)?.revisionId
       : undefined;
   const bindingRevisionMatches =
+    binding.kind !== "chat" &&
     latestBindingRevisionId !== undefined &&
     String(latestBindingRevisionId) === String(binding.bindingRevisionId);
   const codeBindingMatches =

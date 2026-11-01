@@ -27,6 +27,15 @@ Chat does not expose Terminal, Files, Diff, or Git surfaces. The server enforces
 
 The active Chat thread's composer shows a circular context-usage meter. Opening it shows the authoritative used-versus-available breakdown for that thread.
 
+## Routines
+
+You can schedule a Chat routine in Automation Center: choose **Chat**, pick a
+Chat Project, and say what to do and when. Each run starts a new Chat thread in
+that Project and sends it the task, on the model the routine names. A Chat
+routine keeps Chat's limits, so it has no files, commands, or Git and no mode
+to pick. A Chat thread's agent does not propose routines; you create them in
+Automation Center.
+
 ## Scoped memory
 
 Chat Projects support shared scoped memory that persists across threads within the same Project. Memory entries include decisions, facts, preferences, summaries, and outcomes. The Chat Project Overview is where you add, replace, retract, or transfer them. See [Shared Memory](/guide/memory) for details.

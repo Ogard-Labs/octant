@@ -215,6 +215,8 @@ export interface CodeTurnRunnerInput {
    * as it starts, so this records and never stops one.
    */
   readonly forgeChanges?: RuntimeForgeChangeObserver;
+  /** Told of every runtime event, for Octant Shield's record of remote commands. */
+  readonly observeRemoteCommand?: (event: ProviderRuntimeEvent) => void;
   readonly sanitizeProviderEvent: (
     input: CodeProviderEventSanitizerInput,
   ) => Effect.Effect<ProviderRuntimeEvent, CodeTurnFailure>;
@@ -436,6 +438,7 @@ export class CodeTurnRunner {
                 yield* idle.touch;
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
+                input.observeRemoteCommand?.(event);
                 timing = observeTurnMetrics(timing, event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (event.kind === "outside-content-result") {

@@ -20,6 +20,8 @@ import {
   type EventActor as EventActorValue,
 } from "@octant/contracts";
 import {
+  decodeShieldProjectServersClearedPayload,
+  decodeShieldProjectServersSetPayload,
   decodeShieldServerRemovedPayload,
   decodeShieldServerSetPayload,
   MAX_SHIELD_REMOTE_COMMAND_LENGTH,
@@ -40,6 +42,7 @@ import {
 } from "@octant/domain/forge-shell-change-policy";
 import {
   MAX_SHIELD_RUNBOOK_CONTEXT_LENGTH,
+  parseFileCopyInvocation,
   parseSshInvocation,
   registeredServerFor,
   shieldServerContext,
@@ -57,8 +60,11 @@ import { redactSecretShaped } from "../providers/providerApprovalCall";
  *
  * Every change is one `shield-servers.server-set@1` (the whole record) or
  * `shield-servers.server-removed@1`, journal first: a server whose event
- * cannot be appended is not registered. Only a person at a local window
- * changes the registry.
+ * cannot be appended is not registered. A Project may hold its own whole list
+ * (`shield-servers.project-servers-set@1`, under the Project's id), which
+ * replaces the account list for that Project's threads until
+ * `shield-servers.project-override-cleared@1`. Only a person at a local
+ * window changes either.
  */
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -102,6 +108,7 @@ export class ShieldServerStore {
   readonly #personActor: EventActorValue;
   readonly #hostActor: EventActorValue;
   readonly #servers = new Map<string, ShieldServer>();
+  readonly #projectServers = new Map<string, ReadonlyArray<ShieldServer>>();
   readonly #versions = new Map<string, number>();
 
   constructor(options: ShieldServerStoreOptions) {
@@ -113,6 +120,7 @@ export class ShieldServerStore {
   /** Rebuilds the registry from the journal, in journal order. A record that no longer decodes changes nothing. */
   load(): void {
     this.#servers.clear();
+    this.#projectServers.clear();
     let after = 0;
     for (;;) {
       const batch = this.#options.journal.replayAggregateType({
@@ -146,6 +154,83 @@ export class ShieldServerStore {
 
   servers(): ReadonlyArray<ShieldServer> {
     return [...this.#servers.values()];
+  }
+
+  /** The servers a thread in this Project reaches: its own list, else the account list. */
+  serversFor(projectId: string | undefined): ReadonlyArray<ShieldServer> {
+    return (
+      (projectId === undefined ? undefined : this.#projectServers.get(projectId)) ?? this.servers()
+    );
+  }
+
+  /** A Project's own list, or undefined while it follows the account list. */
+  projectOverride(projectId: string): ReadonlyArray<ShieldServer> | undefined {
+    return this.#projectServers.get(projectId);
+  }
+
+  /** Gives a Project its own whole list, journal first. */
+  setProjectServers(input: {
+    readonly projectId: string;
+    readonly servers: ReadonlyArray<ShieldServerFields>;
+    readonly principal: ShieldServerPrincipal;
+  }): ShieldServersChange {
+    if (input.principal !== "local-window") return refused("needs-local-window");
+    if (input.servers.length > MAX_SHIELD_SERVERS) return refused("too-many-servers");
+    const servers: ShieldServer[] = [];
+    for (const fields of input.servers) {
+      const checked = canonicalServer(
+        { serverId: decodeAggregateId(this.#options.uuid()), ...fields },
+        servers,
+      );
+      if (checked.kind === "refused") return checked;
+      servers.push(checked.server);
+    }
+    let projectId: AggregateId;
+    try {
+      projectId = decodeAggregateId(input.projectId);
+    } catch {
+      return refused("project-not-found");
+    }
+    const payload = { projectId, servers, principal: { kind: "local-window" as const } };
+    if (
+      !this.#append(
+        SHIELD_SERVERS_AGGREGATE,
+        String(projectId),
+        SHIELD_SERVERS_EVENT_NAMES.projectServersSet,
+        payload,
+        this.#personActor,
+      )
+    ) {
+      return refused("unavailable");
+    }
+    this.#apply(SHIELD_SERVERS_EVENT_NAMES.projectServersSet, payload);
+    return { kind: "changed" };
+  }
+
+  /** Returns a Project to the account list. */
+  clearProject(input: {
+    readonly projectId: string;
+    readonly principal: ShieldServerPrincipal;
+  }): ShieldServersChange {
+    if (input.principal !== "local-window") return refused("needs-local-window");
+    if (!this.#projectServers.has(input.projectId)) return { kind: "changed" };
+    const payload = {
+      projectId: decodeAggregateId(input.projectId),
+      principal: { kind: "local-window" as const },
+    };
+    if (
+      !this.#append(
+        SHIELD_SERVERS_AGGREGATE,
+        input.projectId,
+        SHIELD_SERVERS_EVENT_NAMES.projectOverrideCleared,
+        payload,
+        this.#personActor,
+      )
+    ) {
+      return refused("unavailable");
+    }
+    this.#apply(SHIELD_SERVERS_EVENT_NAMES.projectOverrideCleared, payload);
+    return { kind: "changed" };
   }
 
   register(input: {
@@ -192,14 +277,24 @@ export class ShieldServerStore {
    */
   recordRemoteCommand(input: {
     readonly threadId: string;
+    /** The thread's Project, whose own list names the server when it has one. */
+    readonly projectId?: string | undefined;
     readonly command: string;
     readonly status: ShieldRemoteCommandStatus;
     readonly exitCode?: number | undefined;
   }): "recorded" | "not-remote" | "unavailable" {
     const ssh = parseSshInvocation(input.command);
-    if (ssh.kind === "not-ssh") return "not-remote";
-    const host = ssh.host !== undefined && ALIAS.test(ssh.host) ? ssh.host : undefined;
-    const server = host === undefined ? undefined : registeredServerFor(this.servers(), host);
+    let named: string | undefined;
+    if (ssh.kind === "not-ssh") {
+      const copy = parseFileCopyInvocation(input.command);
+      if (copy.kind === "not-copy") return "not-remote";
+      named = copy.kind === "copy" ? copy.remotes[0]?.host : undefined;
+    } else {
+      named = ssh.host;
+    }
+    const host = named !== undefined && ALIAS.test(named) ? named : undefined;
+    const server =
+      host === undefined ? undefined : registeredServerFor(this.serversFor(input.projectId), host);
     const redacted = redactSecretShaped(input.command.trim());
     let threadId: AggregateId;
     try {
@@ -326,8 +421,8 @@ export class ShieldServerStore {
    * runbook's notes framed as context that grants nothing. Read when a turn
    * starts, so an edited runbook reaches the next turn.
    */
-  context(): string | undefined {
-    const servers = this.servers();
+  context(projectId?: string): string | undefined {
+    const servers = this.serversFor(projectId);
     const runbooks = new Map<string, string>();
     for (const server of servers) {
       if (server.runbookPath === undefined) continue;
@@ -344,22 +439,9 @@ export class ShieldServerStore {
   }
 
   #set(server: ShieldServer): ShieldServersChange {
-    const duplicate = [...this.#servers.values()].some(
-      (other) =>
-        String(other.serverId) !== String(server.serverId) &&
-        other.alias.toLowerCase() === server.alias.toLowerCase(),
-    );
-    if (duplicate) return refused("duplicate-alias");
-    if (server.runbookPath !== undefined && CREDENTIAL_FOLDER.test(server.runbookPath)) {
-      return refused("invalid-runbook-path");
-    }
-    const deployCommands = server.deployCommands
-      .map((command) => command.trim())
-      .filter((command) => command.length > 0);
-    if (deployCommands.some((command) => command.includes("\u0000") || /[\r\n]/.test(command))) {
-      return refused("invalid-deploy-command");
-    }
-    const canonical: ShieldServer = { ...server, deployCommands };
+    const checked = canonicalServer(server, [...this.#servers.values()]);
+    if (checked.kind === "refused") return checked;
+    const canonical = checked.server;
     const payload = { server: canonical, principal: { kind: "local-window" as const } };
     if (!this.#appendRegistry(SHIELD_SERVERS_EVENT_NAMES.serverSet, payload)) {
       return refused("unavailable");
@@ -376,6 +458,17 @@ export class ShieldServerStore {
     }
     if (eventName === SHIELD_SERVERS_EVENT_NAMES.serverRemoved) {
       this.#servers.delete(String(decodeShieldServerRemovedPayload(payload).serverId));
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.projectServersSet) {
+      const set = decodeShieldProjectServersSetPayload(payload);
+      this.#projectServers.set(String(set.projectId), set.servers);
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.projectOverrideCleared) {
+      this.#projectServers.delete(
+        String(decodeShieldProjectServersClearedPayload(payload).projectId),
+      );
     }
   }
 
@@ -422,8 +515,37 @@ export class ShieldServerStore {
   }
 }
 
-function refused(reason: ShieldServersRefusalReason): ShieldServersChange {
+function refused(reason: ShieldServersRefusalReason): ShieldServersChange & { kind: "refused" } {
   return { kind: "refused", reason };
+}
+
+/**
+ * A server as a list keeps it, checked against the others in that list: an
+ * alias unique without regard to case, no runbook among keys, and each
+ * deploy command on one trimmed line.
+ */
+function canonicalServer(
+  server: ShieldServer,
+  others: ReadonlyArray<ShieldServer>,
+):
+  | { readonly kind: "ok"; readonly server: ShieldServer }
+  | { readonly kind: "refused"; readonly reason: ShieldServersRefusalReason } {
+  const duplicate = others.some(
+    (other) =>
+      String(other.serverId) !== String(server.serverId) &&
+      other.alias.toLowerCase() === server.alias.toLowerCase(),
+  );
+  if (duplicate) return refused("duplicate-alias");
+  if (server.runbookPath !== undefined && CREDENTIAL_FOLDER.test(server.runbookPath)) {
+    return refused("invalid-runbook-path");
+  }
+  const deployCommands = server.deployCommands
+    .map((command) => command.trim())
+    .filter((command) => command.length > 0);
+  if (deployCommands.some((command) => command.includes("\u0000") || /[\r\n]/.test(command))) {
+    return refused("invalid-deploy-command");
+  }
+  return { kind: "ok", server: { ...server, deployCommands } };
 }
 
 /**

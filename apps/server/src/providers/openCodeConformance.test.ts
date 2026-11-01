@@ -3,7 +3,10 @@ import {
   decodeProviderSessionId,
   type ProviderModelId,
 } from "@octant/contracts";
-import { runProviderConformance } from "@octant/provider-sdk/conformance";
+import {
+  runProviderConformance,
+  runSessionCompactionConformance,
+} from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
 import type { Event } from "@opencode-ai/sdk/v2/types";
 import { mkdtempSync, realpathSync } from "node:fs";
@@ -11,7 +14,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { makeOpenCodeDriver, type OpenCodeClientPort } from "./openCodeDriver";
+import {
+  adaptBetaOpenCodeEvent,
+  makeOpenCodeDriver,
+  OpenCodeRouteError,
+  type OpenCodeClientPort,
+} from "./openCodeDriver";
 import {
   recordProviderChatConformanceEvidence,
   recordProviderConformanceEvidence,
@@ -279,6 +287,257 @@ describe("OpenCode provider conformance", () => {
       interrupted: true,
       resumed: true,
       released: true,
+    });
+  });
+
+  it.each([
+    ["opencode v2.2.0", "supported", true],
+    ["opencode v2.0.22", "unavailable", false],
+  ] as const)(
+    "holds a %s runtime to its %s session compaction claim",
+    async (version, claim, compacted) => {
+      const source = new EventSourceFixture();
+      let release: (() => void) | undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const harness = makeBetaHarnessDriver(
+        source,
+        {
+          onPrompt: (nativeId) => {
+            for (const event of recordedBetaTurn(nativeId)) source.emit(event);
+            source.emit(idleEvent(nativeId));
+          },
+          onAbort: () => undefined,
+        },
+        {
+          version,
+          compact: async (nativeId) => {
+            // OpenCode answers the route at once and reports the rest as events.
+            void held.then(() => {
+              for (const event of recordedCompaction(nativeId)) source.emit(event);
+            });
+          },
+        },
+      );
+      await expect(
+        runSessionCompactionConformance({
+          driver: harness.driver,
+          probeInput: { instanceId },
+          acquireInput: { instanceId, projectRoot, mode: "code" },
+          sessionStart: {
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          },
+          turns: [
+            {
+              sessionId,
+              prompt: "Remember the plan.",
+              attachments: [],
+              tools: [],
+            },
+            { sessionId, prompt: "Carry on.", attachments: [], tools: [] },
+          ],
+          resume: (handle) => ({
+            sessionId: handle.sessionId,
+            resumeCursor: handle.resumeCursor ?? {
+              driverKind: "opencode",
+              value: "provider-session",
+            },
+            executionPolicy: "approval-gated",
+          }),
+          compactionId: "80000000-0000-4000-8000-000000000204",
+          releaseCompaction: () => release?.(),
+          isReleased: harness.isReleased,
+        }),
+      ).resolves.toEqual({
+        claim,
+        compacted,
+        turnRefusedWhileCompacting: compacted,
+        released: true,
+      });
+    },
+  );
+
+  describe("a requested 2.x compaction that does not finish", () => {
+    const compactOnce = async (
+      onCompact: (nativeId: string, source: EventSourceFixture) => Promise<void>,
+      stopFirst = false,
+    ) => {
+      const source = new EventSourceFixture();
+      const harness = makeBetaHarnessDriver(
+        source,
+        { onPrompt: () => undefined, onAbort: () => undefined },
+        {
+          version: "opencode v2.2.0",
+          compact: (nativeId) => onCompact(nativeId, source),
+        },
+      );
+      return Effect.runPromise(
+        Effect.scoped(
+          harness.driver.acquire({ instanceId, projectRoot, mode: "code" }).pipe(
+            Effect.flatMap((connection) =>
+              Effect.gen(function* () {
+                yield* connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                });
+                const compact = connection.compact;
+                if (compact === undefined) throw new Error("expected a compact operation");
+                const compacting = yield* Effect.fork(
+                  compact({
+                    sessionId,
+                    compactionId: "80000000-0000-4000-8000-000000000205",
+                  }),
+                );
+                if (stopFirst) {
+                  yield* Effect.sleep("20 millis");
+                  yield* connection.stop(sessionId);
+                }
+                return yield* Effect.fromFiber(compacting);
+              }),
+            ),
+          ),
+        ),
+      );
+    };
+
+    it("refuses as nothing to compact when OpenCode names it, as 2.2.0 does for a new session", async () => {
+      await expect(
+        compactOnce(async (nativeId, source) => {
+          source.emit({
+            type: "session.compaction.failed",
+            properties: {
+              sessionID: nativeId,
+              reason: "manual",
+              error: {
+                type: "compaction.unavailable",
+                message: "Nothing to compact yet",
+              },
+            },
+          } as unknown as Event);
+          source.emit(idleEvent(nativeId));
+        }),
+      ).resolves.toEqual({ kind: "refused", reason: "nothing-to-compact" });
+    });
+
+    it("says the session is unchanged when OpenCode reports another failure", async () => {
+      await expect(
+        compactOnce(async (nativeId, source) => {
+          source.emit({
+            type: "session.compaction.failed",
+            properties: {
+              sessionID: nativeId,
+              reason: "manual",
+              error: { type: "compaction.failed", message: "provider said no" },
+            },
+          } as unknown as Event);
+          source.emit(idleEvent(nativeId));
+        }),
+      ).resolves.toEqual({
+        kind: "failed",
+        message: "OpenCode could not compact the session.",
+        sessionMayHaveChanged: false,
+      });
+    });
+
+    it("refuses as too old when the route is missing, and fails open when the answer is lost", async () => {
+      await expect(
+        compactOnce(async () => {
+          throw new OpenCodeRouteError("missing", 404);
+        }),
+      ).resolves.toEqual({
+        kind: "refused",
+        reason: "runtime-version-unsupported",
+      });
+      await expect(
+        compactOnce(async () => {
+          throw new Error("socket closed");
+        }),
+      ).resolves.toMatchObject({ kind: "failed", sessionMayHaveChanged: true });
+    });
+
+    it("fails with the history possibly changed when the run ends without a report", async () => {
+      await expect(
+        compactOnce(async (nativeId, source) => {
+          source.emit(idleEvent(nativeId));
+        }),
+      ).resolves.toMatchObject({ kind: "failed", sessionMayHaveChanged: true });
+    });
+
+    it("fails with the history possibly changed when the session is stopped mid-compaction", async () => {
+      await expect(compactOnce(async () => undefined, true)).resolves.toMatchObject({
+        kind: "failed",
+        sessionMayHaveChanged: true,
+      });
+    });
+  });
+
+  it("folds a recorded 2.2.0 compaction report into the events the driver reads", () => {
+    const calls = new Map<string, string>();
+    expect(
+      adaptBetaOpenCodeEvent(
+        {
+          type: "session.compaction.ended",
+          data: { sessionID: "ses_1", reason: "manual", text: "summary" },
+        },
+        calls,
+      ),
+    ).toMatchObject({ type: "session.next.compaction.ended" });
+    expect(
+      adaptBetaOpenCodeEvent(
+        {
+          type: "session.compaction.failed",
+          data: {
+            sessionID: "ses_1",
+            reason: "manual",
+            inputID: "msg_1",
+            error: {
+              type: "compaction.unavailable",
+              message: "Nothing to compact yet",
+            },
+          },
+        },
+        calls,
+      ),
+    ).toMatchObject({ type: "session.compaction.failed" });
+    expect(
+      adaptBetaOpenCodeEvent({
+        type: "session.execution.succeeded",
+        data: { sessionID: "ses_1" },
+      }),
+    ).toMatchObject({ type: "session.idle" });
+  });
+
+  it("reports file changes and compaction only from the 2.x release that was read", async () => {
+    const claims = async (version: string) => {
+      const harness = makeBetaHarnessDriver(
+        new EventSourceFixture(),
+        { onPrompt: () => undefined, onAbort: () => undefined },
+        { version },
+      );
+      const probe = await Effect.runPromise(Effect.scoped(harness.driver.probe({ instanceId })));
+      return {
+        fileChanges: probe.capabilities.fileChanges,
+        compaction: probe.capabilities.sessionCompaction,
+      };
+    };
+    expect(await claims("opencode v2.2.0")).toEqual({
+      fileChanges: "supported",
+      compaction: { chat: "supported", work: "supported", code: "supported" },
+    });
+    expect(await claims("opencode v2.10.1")).toMatchObject({
+      fileChanges: "supported",
+    });
+    expect(await claims("opencode v2.1.9")).toEqual({
+      fileChanges: "unsupported",
+      compaction: {
+        chat: "unavailable",
+        work: "unavailable",
+        code: "unavailable",
+      },
     });
   });
 
@@ -607,6 +866,24 @@ function runtimeEvents(sourceId: string): ReadonlyArray<Event> {
   ] as unknown as ReadonlyArray<Event>;
 }
 
+function idleEvent(sourceId: string): Event {
+  return {
+    type: "session.idle",
+    properties: { sessionID: sourceId },
+  } as unknown as Event;
+}
+
+/** What a 2.2.0 server reports for a manual compaction, after the folding the client does. */
+function recordedCompaction(sourceId: string): ReadonlyArray<Event> {
+  return [
+    {
+      type: "session.next.compaction.ended",
+      properties: { sessionID: sourceId, reason: "manual", text: "summary" },
+    },
+    idleEvent(sourceId),
+  ] as unknown as ReadonlyArray<Event>;
+}
+
 function recordedBetaTurn(sourceId: string): ReadonlyArray<Event> {
   return [
     {
@@ -690,8 +967,14 @@ function makeBetaHarnessDriver(
     ) => void;
     readonly onAbort: (sessionId: string) => void;
   },
-  options: { readonly mcp?: "refused" } = {},
+  options: {
+    readonly mcp?: "refused";
+    /** The runtime's `--version` line; 2.0.22 when unstated. */
+    readonly version?: string;
+    readonly compact?: (sessionId: string) => Promise<void>;
+  } = {},
 ) {
+  const version = options.version ?? "opencode v2.0.22";
   let released = false;
   let bridge: { readonly url: string; readonly session: string } | undefined;
   const launchScratch = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-launch-")));
@@ -701,7 +984,7 @@ function makeBetaHarnessDriver(
     model: { id: "claude-sonnet", providerID: "anthropic" },
   };
   const client: OpenCodeClientPort = {
-    health: async () => ({ healthy: true, version: "opencode v2.0.22" }),
+    health: async () => ({ healthy: true, version }),
     providers: async () => ({ all: [provider()], connected: ["anthropic"] }),
     subscribe: async () => source,
     createSession: async () => session,
@@ -726,6 +1009,7 @@ function makeBetaHarnessDriver(
     abort: async (nativeId) => {
       handlers.onAbort(nativeId);
     },
+    ...(options.compact === undefined ? {} : { compact: options.compact }),
     replyPermission: async () => undefined,
     replyQuestion: async () => undefined,
     deleteSession: async () => undefined,
@@ -743,7 +1027,7 @@ function makeBetaHarnessDriver(
               authorization: "Basic redacted",
               pid: process.pid,
               runtime: "beta" as const,
-              version: "opencode v2.0.22",
+              version,
               temporaryDirectory: launchScratch,
               url: new URL("http://127.0.0.1:1/"),
             }),

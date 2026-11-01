@@ -544,6 +544,12 @@ export interface CodeOperationRuntimeOptions {
   /** The harness around a turn: stable instructions in front, the reply observed after. */
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
+    readonly observeRemoteCommand?: (
+      threadId: string,
+      projectId: string | undefined,
+      event: ProviderRuntimeEvent,
+    ) => void;
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
@@ -4169,6 +4175,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.forgeChanges === undefined
             ? {}
             : { forgeChanges: this.#options.forgeChanges }),
+          ...(this.#options.nativeHarness?.observeRemoteCommand === undefined
+            ? {}
+            : {
+                observeRemoteCommand: (event: ProviderRuntimeEvent) =>
+                  this.#options.nativeHarness?.observeRemoteCommand?.(
+                    String(active.thread.id),
+                    String(active.thread.projectId),
+                    event,
+                  ),
+              }),
           sanitizeProviderEvent: ({ event }) =>
             Effect.try({
               try: () => sanitizeProviderEvent(event, active.checkoutRoot, active.secrets),

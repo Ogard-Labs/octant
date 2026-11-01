@@ -27,7 +27,11 @@ import {
   decodeProviderProbeResult,
   type ProviderApprovalCall,
 } from "@octant/contracts";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderConnection,
+  ProviderDriver,
+  ProviderSessionCompaction,
+} from "@octant/provider-sdk/driver";
 import {
   renderProviderTurnPrompt,
   unsupportedChatCapabilities,
@@ -47,7 +51,11 @@ import {
   createOpenCodeManagedToolsBridge,
   type OpenCodeManagedToolsBridge,
 } from "./openCodeManagedTools";
-import type { OpenCodeProcessPort, OpenCodeServerConnection } from "./openCodeProcess";
+import {
+  openCodeServesNativeRoutes,
+  type OpenCodeProcessPort,
+  type OpenCodeServerConnection,
+} from "./openCodeProcess";
 import type {
   ProviderDriverRuntimeRegistry,
   ProviderRuntimeRegistry,
@@ -88,6 +96,11 @@ export interface OpenCodeClientPort {
   readonly addMcpServer: (input: { readonly name: string; readonly url: string }) => Promise<void>;
   readonly disconnectMcpServer: (name: string) => Promise<void>;
   readonly abort: (sessionId: string) => Promise<void>;
+  /**
+   * Queues OpenCode's own compaction of the session; the result arrives as
+   * events. Only a runtime whose route was read offers it.
+   */
+  readonly compact?: ((sessionId: string) => Promise<void>) | undefined;
   readonly replyPermission: (
     sessionId: string,
     requestId: string,
@@ -173,6 +186,10 @@ interface SessionState {
   usageTotals: OpenCodeUsageTotals | undefined;
   /** A compaction was reported since the prompt's latest usage report. */
   compactionReported: boolean;
+  /** The compaction Octant asked OpenCode for, until the run that carries it ends. */
+  compaction?: PendingCompaction | undefined;
+  /** A prompt was sent and its run has not ended; the session ends it by retiring. */
+  turnSent?: boolean;
   managedTools: ManagedToolsLease | undefined;
   readonly stopMemory: { current: ProviderOutputStopReason | undefined };
 }
@@ -212,6 +229,22 @@ interface OpenCodeUsageTotals {
   costUsd: number;
 }
 
+interface PendingCompaction {
+  /** What OpenCode reported for the compaction; the run's end settles with it. */
+  outcome: ProviderSessionCompaction | undefined;
+  readonly settle: (outcome: ProviderSessionCompaction) => void;
+}
+
+/** A route answer that was not a success, with the status OpenCode gave. */
+export class OpenCodeRouteError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 interface PendingToolAnswer {
   readonly controller: AbortController;
   readonly resolve: (answer: ManagedToolAnswer) => void;
@@ -239,6 +272,13 @@ const capabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   harnessAutoReview: "unsupported",
+  // OpenCode compacts its own sessions only on a 2.x release whose route was
+  // read; 1.x and older 2.x releases refuse the request as too old.
+  sessionCompaction: {
+    chat: "unavailable",
+    work: "unavailable",
+    code: "unavailable",
+  },
   // A follow-up on another model of this instance resumes the same native
   // session: the driver resolves the resumed prompt's model from the thread's
   // current model first (then the cursor's binding, then the session record),
@@ -294,10 +334,19 @@ function openCodeChatCapabilities(
 /**
  * 2.x reports the operations this slice maps. Approvals are mapped through
  * the 2.x permission event and reply route. Questions stay unsupported:
- * 2.0.22 serves no question routes and asks through forms instead. File
- * changes stay unsupported until their events can be enforced.
+ * 2.0.22 serves no question routes and asks through forms instead. A reported
+ * file change is held to the grants the person gave (`failClosedBetaEvent`),
+ * so file changes are claimed from the first release read for the event.
  */
-function openCodeBetaCapabilities(reported: ProviderCapabilities): ProviderCapabilities {
+function openCodeBetaCapabilities(
+  reported: ProviderCapabilities,
+  version: string | undefined,
+): ProviderCapabilities {
+  // File changes and compaction are claimed only for a release whose events
+  // and routes were read (`openCodeServesNativeRoutes`); an older one keeps
+  // both off, and asks for a compaction are refused as too old.
+  const native = openCodeServesNativeRoutes(version);
+  const compaction = native ? ("supported" as const) : ("unavailable" as const);
   return {
     ...reported,
     resume: "supported",
@@ -305,7 +354,8 @@ function openCodeBetaCapabilities(reported: ProviderCapabilities): ProviderCapab
     toolActivity: "supported",
     approvals: "supported",
     userQuestions: "unsupported",
-    fileChanges: "unsupported",
+    fileChanges: native ? "supported" : "unsupported",
+    sessionCompaction: { chat: compaction, work: compaction, code: compaction },
     appManagedTools: reported.appManagedTools,
   };
 }
@@ -1052,6 +1102,30 @@ export function makeOfficialOpenCodeClient(
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
       );
     },
+    compact: beta
+      ? async (sessionId) => {
+          // `queue` waits behind running work instead of steering it.
+          const response = await fetch(
+            new URL(`/api/session/${encodeURIComponent(sessionId)}/compact`, server.url).toString(),
+            {
+              method: "POST",
+              headers: {
+                authorization: server.authorization,
+                "content-type": "application/json",
+                "x-opencode-directory": encodeURIComponent(projectRoot),
+              },
+              body: JSON.stringify({ delivery: "queue" }),
+              signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+            },
+          );
+          if (!response.ok) {
+            throw new OpenCodeRouteError(
+              `OpenCode 2 compaction failed with status ${response.status}.`,
+              response.status,
+            );
+          }
+        }
+      : undefined,
     replyPermission: async (sessionId, requestId, reply) => {
       if (beta) {
         // The pinned SDK 1.18.0 sends `{reply}`, which 2.0.22 answers 400;
@@ -1223,7 +1297,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               }
               return {
                 ...normalized,
-                capabilities: openCodeBetaCapabilities(normalized.capabilities),
+                capabilities: openCodeBetaCapabilities(normalized.capabilities, health.version),
               };
             }
             if (
@@ -1394,6 +1468,7 @@ function makeConnection(
     let runtimeOwnSkills = false;
     let runtimeOwnSetupKey = ownSetupKey(undefined);
     let runtimeKind: "legacy" | "beta" | undefined;
+    let runtimeVersion: string | undefined;
     let runtimeIsolated = false;
     let runtimeLoopbackPorts: ReadonlyArray<number> = [];
 
@@ -1443,6 +1518,14 @@ function makeConnection(
     };
     const retireState = (state: SessionState): void => {
       state.terminal = true;
+      // A compaction the run did not finish may have replaced the history.
+      state.compaction?.settle(
+        state.compaction.outcome ?? {
+          kind: "failed",
+          message: "OpenCode stopped before the compaction finished.",
+          sessionMayHaveChanged: true,
+        },
+      );
       if (state.sourceId !== undefined) childSessions.forget(state.sourceId);
       state.requestSources.clear();
       cancelPendingTools(state);
@@ -1594,6 +1677,7 @@ function makeConnection(
       runtimePolicy = undefined;
       runtimeOwnSkills = false;
       runtimeOwnSetupKey = ownSetupKey(undefined);
+      runtimeVersion = undefined;
       runtimeIsolated = false;
       runtimeLoopbackPorts = [];
       subscriptionReady = undefined;
@@ -1671,6 +1755,7 @@ function makeConnection(
             runtimeOwnSkills = ownSkills;
             runtimeOwnSetupKey = ownSetupKey(ownSetup);
             runtimeKind = started.runtime ?? "legacy";
+            runtimeVersion = started.version;
             runtimeIsolated = started.isolatedConfiguration === true;
             runtimeLoopbackPorts = loopbackPorts;
             client = nextClient;
@@ -1746,6 +1831,69 @@ function makeConnection(
       }
     };
 
+    /**
+     * Reads the events of a compaction Octant asked for. OpenCode reports how
+     * it went (`ended` or `failed`) and then ends the run it queued it on, so
+     * the request settles with the run: the trailing idle must not reach the
+     * turn mapper as a completed turn. Only a failure OpenCode names as
+     * "nothing to compact" attests the history was left alone; a run that
+     * stops without a report may have landed after the replacement.
+     */
+    const readCompactionEvent = (state: SessionState, event: OpenCodeEvent): boolean => {
+      const pending = state.compaction;
+      if (pending === undefined) return false;
+      const type = String(event.type);
+      const properties: unknown = Reflect.get(event, "properties");
+      const settleRun = () => {
+        pending.settle(
+          pending.outcome ?? {
+            kind: "failed",
+            message: "OpenCode stopped before the compaction finished.",
+            sessionMayHaveChanged: true,
+          },
+        );
+      };
+      switch (type) {
+        case "session.next.compaction.ended":
+          pending.outcome = { kind: "compacted" };
+          offer({
+            kind: "context-compacted",
+            trigger: "requested",
+            instanceId: options.instanceId,
+            sessionId: state.sessionId,
+            sequence: state.nextSequence++,
+            correlationId: state.correlationId,
+            occurredAt: clock() as UtcTimestamp,
+          });
+          return true;
+        case "session.compaction.failed": {
+          const error: unknown =
+            typeof properties === "object" && properties !== null
+              ? Reflect.get(properties, "error")
+              : undefined;
+          const kind =
+            typeof error === "object" && error !== null ? Reflect.get(error, "type") : undefined;
+          pending.outcome =
+            kind === "compaction.unavailable"
+              ? { kind: "refused", reason: "nothing-to-compact" }
+              : {
+                  kind: "failed",
+                  message: "OpenCode could not compact the session.",
+                  sessionMayHaveChanged: kind === "compaction.interrupted",
+                };
+          return true;
+        }
+        case "session.idle":
+        case "session.next.step.failed":
+        case "session.error":
+        case "session.execution.interrupted":
+          settleRun();
+          return true;
+        default:
+          return false;
+      }
+    };
+
     const ensureSubscription = (runtimeClient: OpenCodeClientPort) =>
       request(async () => {
         if (streamFailure !== undefined) throw streamFailure;
@@ -1775,7 +1923,7 @@ function makeConnection(
                       pending.push(event);
                       pendingBySource.set(sourceId, pending);
                     }
-                  } else {
+                  } else if (!readCompactionEvent(state, event)) {
                     mapAndOffer(
                       state,
                       event,
@@ -2210,6 +2358,11 @@ function makeConnection(
             if (state.terminal) {
               return Effect.fail(fail("protocol", "Provider session is already terminal."));
             }
+            // A turn queued behind a compaction would be planned over it, or
+            // take the compaction's end as its own.
+            if (state.compaction !== undefined) {
+              return Effect.fail(fail("unavailable", "OpenCode is compacting this session."));
+            }
             const observed = options.runtimeRegistry.observedState(options.instanceId);
             const model = observed?.models.find((candidate) => candidate.id === state.modelId);
             const runtimeClient = client;
@@ -2231,7 +2384,7 @@ function makeConnection(
             const rejected = validateChatTurnInput(
               input,
               runtimeKind === "beta"
-                ? openCodeBetaCapabilities(reportedCapabilities)
+                ? openCodeBetaCapabilities(reportedCapabilities, runtimeVersion)
                 : reportedCapabilities,
               model,
             );
@@ -2246,6 +2399,7 @@ function makeConnection(
                     Effect.gen(function* () {
                       const managedTools = state.managedTools;
                       state.usageTotals = undefined;
+                      state.turnSent = true;
                       return yield* request(() =>
                         runtimeClient.prompt({
                           sessionId: source,
@@ -2269,6 +2423,77 @@ function makeConnection(
               ),
             );
           }),
+        ),
+      compact: ({ sessionId }) =>
+        usableStateFor(sessionId).pipe(
+          Effect.flatMap(
+            ([source, state]): Effect.Effect<ProviderSessionCompaction, ProviderFailure> => {
+              if (state.terminal) {
+                return Effect.fail(fail("protocol", "Provider session is already terminal."));
+              }
+              if (state.turnSent === true || state.compaction !== undefined) {
+                return Effect.succeed({
+                  kind: "refused",
+                  reason: "turn-running",
+                });
+              }
+              const activeClient = client;
+              if (activeClient === undefined) {
+                return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
+              }
+              const compact = activeClient.compact;
+              if (
+                runtimeKind !== "beta" ||
+                !openCodeServesNativeRoutes(runtimeVersion) ||
+                compact === undefined
+              ) {
+                return Effect.succeed({
+                  kind: "refused",
+                  reason: "runtime-version-unsupported",
+                });
+              }
+              return Effect.async<ProviderSessionCompaction>((resume) => {
+                const pending: PendingCompaction = {
+                  outcome: undefined,
+                  settle: (outcome) => {
+                    if (state.compaction !== pending) return;
+                    state.compaction = undefined;
+                    resume(Effect.succeed(outcome));
+                  },
+                };
+                state.compaction = pending;
+                compact(source).catch((error: unknown) => {
+                  // An answered refusal queued nothing, so the history is
+                  // untouched; a request that timed out or lost its runtime
+                  // may still have started.
+                  const status = error instanceof OpenCodeRouteError ? error.status : undefined;
+                  pending.settle(
+                    status === 404 || status === 405
+                      ? {
+                          kind: "refused",
+                          reason: "runtime-version-unsupported",
+                        }
+                      : status === 409
+                        ? { kind: "refused", reason: "turn-running" }
+                        : status !== undefined && status < 500
+                          ? {
+                              kind: "failed",
+                              message: "OpenCode refused to compact the session.",
+                              sessionMayHaveChanged: false,
+                            }
+                          : {
+                              kind: "failed",
+                              message: "OpenCode did not confirm the compaction request.",
+                              sessionMayHaveChanged: true,
+                            },
+                  );
+                });
+                return Effect.sync(() => {
+                  if (state.compaction === pending) state.compaction = undefined;
+                });
+              });
+            },
+          ),
         ),
       interrupt: (sessionId) =>
         usableStateFor(sessionId).pipe(

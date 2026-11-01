@@ -8,9 +8,12 @@ import type {
 } from "@octant/contracts";
 import {
   classifyRemoteCommand,
+  fileCopyTier,
+  parseFileCopyInvocation,
   parseSshInvocation,
   profileAllows,
   registeredServerFor,
+  type FileCopyInvocation,
   type ShieldServerRule,
   type SshInvocation,
 } from "./shieldServerPolicy";
@@ -365,6 +368,10 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
         return decided(entry.verdict, entry.stage, entry.rule, entry.reason);
       }
     }
+    // A copy to or from a registered server is judged by its profile, after
+    // the hard lines above.
+    const copy = ssh.kind === "not-ssh" ? parseFileCopyInvocation(command) : undefined;
+    if (copy?.kind === "copy") return judgeFileCopyCall(copy, input);
     if (SSH_KEY_PATH_TEXT.test(command)) {
       return decided("deny", "deny-rule", "ssh-key-path", "Shield refuses to reach SSH keys.");
     }
@@ -626,6 +633,110 @@ function judgeSshCall(
     "hard-line",
     "beyond-server-profile",
     `The command goes beyond what ${server.alias}'s profile allows, so the person decides.`,
+  );
+}
+
+/**
+ * An `scp` or `rsync` call, read as `judgeSshCall` reads ssh: every server it
+ * names must be registered, signed in to as its user, with options that only
+ * tune the copy. A download reads the server and an upload is a
+ * configuration change (Admin); a deleting sync or a write to a sign-in path
+ * is a lock-out action, and secrets either way go to the person. The files on
+ * this computer must lie inside the Project, as a read or edit must.
+ */
+function judgeFileCopyCall(
+  copy: Extract<FileCopyInvocation, { kind: "copy" }>,
+  input: ShieldRuleInput,
+): ShieldRuleOutcome {
+  if (copy.keyPath) {
+    return decided("deny", "deny-rule", "ssh-key-path", "Shield refuses to reach SSH keys.");
+  }
+  const servers: ShieldServerRule[] = [];
+  for (const remote of copy.remotes) {
+    const server = registeredServerFor(input.servers ?? [], remote.host);
+    if (server === undefined) {
+      return decided(
+        "ask",
+        "hard-line",
+        "unregistered-server",
+        `${remote.host} is not a server the person registered, so the person decides.`,
+      );
+    }
+    if (remote.user !== undefined && remote.user !== server.user) {
+      return decided(
+        "ask",
+        "hard-line",
+        "server-user-mismatch",
+        `The call signs in as ${remote.user}, not the registered user ${server.user}, so the person decides.`,
+      );
+    }
+    servers.push(server);
+  }
+  if (!copy.optionsPlain) {
+    return decided(
+      "ask",
+      "hard-line",
+      "ssh-option",
+      "The copy uses an option that can run a program, tunnel, or reach something other than the server's shell, so the person decides.",
+    );
+  }
+  const tier = fileCopyTier(copy);
+  const first = servers[0]?.alias ?? "the server";
+  if (tier === "lockout") {
+    return decided(
+      "ask",
+      "hard-line",
+      "server-lockout",
+      `The copy can lock the person out of ${first} or delete data on it, so the person decides.`,
+    );
+  }
+  const secret = (text: string) =>
+    SSH_KEY_PATH_TEXT.test(text) || SECRET_PATH_TEXT.test(text) || SERVER_SECRET_PATH.test(text);
+  if (
+    copy.remotes.some((remote) => secret(` ${remote.path}`)) ||
+    copy.locals.some((local) => secret(` ${local}`))
+  ) {
+    return decided(
+      "ask",
+      "deny-rule",
+      "secret-path",
+      "The copy moves a file that holds secrets, so the person decides.",
+    );
+  }
+  const cwd = normalizePosixPath(input.call.workingDirectory);
+  const projectRoots = [input.boundRoot, ...(input.extraRoots ?? [])].map(normalizePosixPath);
+  const insideProject = (path: string) =>
+    projectRoots.some((root) => isInside(resolveFrom(path, cwd), root));
+  if (!copy.locals.every(insideProject)) {
+    return decided(
+      "ask",
+      "hard-line",
+      "copy-outside-project",
+      "The copy reaches files outside the Project on this computer, so the person decides.",
+    );
+  }
+  if (input.tainted && tier !== "read") {
+    return decided(
+      "ask",
+      "taint-limit",
+      "tainted-thread",
+      "This thread has read outside content, so the person decides on copies that change a server.",
+    );
+  }
+  if (tier === "unknown") return { kind: "needs-model" };
+  if (servers.every((server) => profileAllows(server.profile, tier))) {
+    return decided(
+      "allow",
+      "fast-allow",
+      "registered-server",
+      `A ${tier === "read" ? "download" : "upload"} on ${first}, within its profile.`,
+    );
+  }
+  return decided(
+    "ask",
+    "hard-line",
+    "beyond-server-profile",
+    `The copy goes beyond what ${first}'s profile allows, so the person decides.`,
   );
 }
 

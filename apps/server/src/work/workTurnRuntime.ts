@@ -112,6 +112,8 @@ export interface WorkTurnRuntimePort {
      * as it starts, so this records and never stops one.
      */
     readonly forgeChanges?: RuntimeForgeChangeObserver;
+    /** Told of every runtime event, for Octant Shield's record of remote commands. */
+    readonly observeRemoteCommand?: (event: ProviderRuntimeEvent) => void;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
     /**
      * Told of each compaction the runtime made by itself during this turn, so
@@ -388,6 +390,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             // Liveness only restarts the idle clock above; nothing else sees it.
             Stream.filter((event) => event.kind !== "liveness"),
             Stream.tap((event) => Effect.sync(() => meter.observe(event))),
+            Stream.tap((event) => Effect.sync(() => input.observeRemoteCommand?.(event))),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;

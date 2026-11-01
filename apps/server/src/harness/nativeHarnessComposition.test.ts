@@ -1269,6 +1269,21 @@ describe("native harness composition", () => {
       expect(harness.asked).toHaveBeenCalledOnce();
     });
 
+    it("asks the person about the first connection to each host in a thread, naming it, even when a remembered approval covers it", async () => {
+      const harness = setup({ remembered: true });
+      await harness.bash("ssh web1 uptime");
+      await harness.bash("ssh web1 df -h");
+      await harness.bash("scp db1:/var/log/a.log .");
+      await harness.bash("ls -la");
+      const asks = harness.asked.mock.calls.map(
+        ([ask]) => ask as { readonly summary: string; readonly singleUse?: boolean },
+      );
+      expect(asks.map((ask) => ask.singleUse === true)).toEqual([true, false, true, false]);
+      expect(asks[0]?.summary).toContain("First connection to web1 in this thread");
+      expect(asks[2]?.summary).toContain("First connection to db1 in this thread");
+      expect(asks[1]?.summary).not.toContain("First connection");
+    });
+
     it("records a remote command with its exit status under the thread", async () => {
       const harness = setup({ verdict: "allow", remoteRecord: "recorded" });
       const result = await harness.bash("ssh web1 uptime");

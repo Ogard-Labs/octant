@@ -1136,13 +1136,14 @@ than the level names.
 
 SSH to the person's own machines goes through the thread's shell, in Work
 and Code alike: a thread runs `ssh`, `scp`, or `rsync` as ordinary commands.
-Octant stores no SSH key, writes no SSH config, and adds no SSH transport of
-its own; the commands use the person's own SSH agent and configuration. No
-mode bans them: in Work as in Code they are commands at the thread's level.
-At Guarded, the first connection to each host in a thread asks the person,
-naming the host, even where a remembered approval would cover the command
-otherwise (allowed; not built yet: today an `ssh` command asks at Guarded as
-every command does, without naming the host apart). Network egress for shell commands follows the level: at Guarded
+Octant stores no SSH key and carries no SSH protocol of its own; the
+commands use the person's own SSH agent and, at Full access, their own
+configuration. Below Full access a command reaches a registered server
+through relays and an agent socket the host opens for that one command
+([Octant Shield](#octant-shield), servers as built). No mode bans them: in
+Work as in Code they are commands at the thread's level. At Guarded, the
+first connection to each host in a thread asks the person, naming the host,
+even where a remembered approval would cover the command otherwise. Network egress for shell commands follows the level: at Guarded
 and Reviewed it follows the Project's egress rules, so a host those
 rules do not allow is refused; at Full access the network is open.
 
@@ -2156,9 +2157,18 @@ rules below:
 **Routines (Automation Center).** A routine is a host-owned, Project-bound
 definition that starts an ordinary Work or Code thread with a fixed task prompt
 on a trigger: once, every N minutes (15 minutes to 30 days), or weekly at a
-local time in an IANA time zone. Chat routines are allowed, since a Chat
-thread has no file, shell, or Git authority for a routine to widen, but not
-built yet: today a routine targets a Work or Code Project. Each occurrence creates
+local time in an IANA time zone. A routine targets a Chat, Work, or Code
+Project. A **Chat routine** keeps Chat's authority, since a Chat thread has no
+file, shell, or Git authority for a routine to widen: its definition binds an
+active Chat Project (the receipt names the Project and its version, with no
+folder or binding revision), its authority snapshot grants no filesystem,
+shell, Git, or subagents, and the contract refuses a Chat definition that
+does. It has no level to pick and no follow-up (`same-thread`) target, and no
+thread's agent proposes one, because a Chat thread has no Environment to
+propose from. Each run creates a Chat thread in the Project through
+`create-chat-thread`, puts it on the routine's provider and model, and sends
+the task as one `send-chat-turn` under a submission identity derived from the
+occurrence, so a retry after a crash finds the turn it already sent. Each occurrence creates
 at most one new thread (target policy `new-thread`) and runs its first turn
 through the ordinary thread and turn services; a routine cannot do anything the
 thread it creates could not do. The one exception is a follow-up (target
@@ -2188,16 +2198,29 @@ the thread it came from.
   own, else Settings › Code › Access), and a Work run's turn is not narrowed
   below its thread's level, which a routine thread takes from Settings ›
   Work. Only a local window sets the opt-in: a paired device is refused at the
-  route, and a routine an agent proposes never has it. A Code
+  route, and a routine an agent proposes never has it. A person may instead
+  **pick a level on the routine itself** (`runLevel` on the definition, one of
+  Ask first, Accept edits, Auto, or Full access; at most one of this and the
+  Project opt-in, journaled and copied into each run's snapshot the same way).
+  It is the highest level a run may use, never a grant: a Code run's thread is
+  created at the lower of the pick and the level the Project's new threads
+  start at, and a Work run's turn takes the pick as its ceiling, so it is
+  clamped to the thread's own level (`clampWorkAccess`). A pick can therefore
+  lower a run below its Project's level and never raise it above what the
+  person allowed there. Only a local window sets it, a paired device is
+  refused at the route, a routine an agent proposes never has it, and a Chat
+  routine cannot carry it. _Rationale:_ the maintainer asked for a level "never
+  above what the person allowed"; the narrower reading, the Project's level
+  as the ceiling, keeps Full access a choice made where the Project's level is
+  set.
+  A Code
   routine may also be created with **Merge the pull requests it opens**
   (`agentMerge: "allowed"` on the definition, journaled with every revision and
   copied into each run's snapshot); only a local window sets it, a paired device
   is refused at the route, and a routine an agent proposes never has it. It
   lets the run's agent merge the pull request its own thread opened under the
   merge rules in [Git and pull requests](#modes-chat-work-and-code), with the
-  head and required checks enforced, while the live routine is enabled. Allowed;
-  not built yet: a level picked on the routine itself rather than taken from
-  its Project. A routine never runs at a level lower than the one
+  head and required checks enforced, while the live routine is enabled. A routine never runs at a level lower than the one
   its creator chose. Work runs bind the Project's confined root like an
   interactive Work thread. A Code first turn runs with
   the `agent` initiator, so approvals wait for a person.
@@ -3540,12 +3563,12 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   person marked trusted for that provider's own Project code in Octant; where
   the provider keeps its own folder-trust list, that list applies as well.
 
-  | Provider     | Today                                                                                                                                                                                              | Rule                                                                                                                                                                                                                 | Built                                                                                                                                                                                                                                                                                                                                                                   |
-  | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | Claude Code  | With the setup off: own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers start only with a trusted Project's, because `strictMcpConfig` governs both                                     |
-  | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                                    | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                               | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on and the person's tool servers on in Chat; its own subagents only at Full access, because their approvals never reach Octant                                                                                                                                                      |
-  | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                                                 | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills, Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents. Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                                    |
-  | OpenCode     | Shell and delegation follow the level in Work as in Code; Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`, never `always`                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                                 | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card. Not built yet: Reviewed through Octant Shield |
+  | Provider     | Today                                                                                                                                                                                              | Rule                                                                                                                                                                                                                 | Built                                                                                                                                                                                                                                                                                                                                                            |
+  | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Claude Code  | With the setup off: own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers start only with a trusted Project's, because `strictMcpConfig` governs both                              |
+  | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                                    | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                               | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on and the person's tool servers on in Chat; its own subagents only at Full access, because their approvals never reach Octant                                                                                                                                               |
+  | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                                                 | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills, Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents. Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                             |
+  | OpenCode     | Shell and delegation follow the level in Work as in Code; Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`, never `always`                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                                 | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card; Reviewed through Octant Shield at Auto |
 
   Every other provider keeps the deny rules for Project code and skills under
   [Extensions and skills](#extensions-and-skills) until it is promoted the
@@ -4625,7 +4648,7 @@ action.
 | Code on Octant Harness (journaled transcript)            | Octant Harness           | The harness connection's `compact` summarizes the transcript turns before the tail with the same endpoint and journals a `compacted` transcript event; later requests are built from the summary and the tail.                                                                                                                                                                                                                         | `nothing-to-compact`, `no-session`                            |
 | Codex app-server, any mode                               | Codex                    | `thread/compact/start` with the thread id (codex-cli 0.159.3 and 0.162.1 app-server schemas); the run is observed as a turn carrying the `contextCompaction` item.                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the method is not found    |
 | Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a user-role input that carries no tools and is not counted as a turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`. A resumed session sends its `compacting` status and a `rate_limit_event` before it initializes; the port holds both and delivers them after the initialized message. | `runtime-version-unsupported` when `compact` is not announced |
-| OpenCode, any mode                                       | Nobody yet               | Octant sends no compaction request, so the driver declares no `sessionCompaction`. OpenCode 2.0.26 serves `/api/session/:sessionID/compact`, but the adapter does not call it (see below). OpenCode's own compactions are observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                                              | `runtime-cannot-compact`                                      |
+| OpenCode 2.2.0 or newer, any mode                        | OpenCode                 | `POST /api/session/{sessionID}/compact` with `delivery: "queue"`, which answers at once with the queued item; the compaction is observed as `session.compaction.ended` (success) or `session.compaction.failed` (its `error.type` is `compaction.unavailable` for a session with nothing to compact yet), and the run it rode on ends with `session.execution.succeeded`.                                                              | `runtime-version-unsupported` on an older 2.x or any 1.x      |
 | Pi and Oh My Pi, any mode                                | Nobody yet               | Octant sends no compaction request, so the driver declares no `sessionCompaction`. Pi documents an RPC `compact` command (`packages/coding-agent/docs/rpc.md`), but the adapter does not send it (see below). Pi's own compactions are observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                                | `runtime-cannot-compact`                                      |
 | ACP agents                                               | Nobody                   | The protocol has no compaction request; the thread says so in place of the button.                                                                                                                                                                                                                                                                                                                                                     | `runtime-cannot-compact`                                      |
 | Any other adapter                                        | Nobody, unless it claims | An adapter compacts only by reporting the capability and implementing the seam below.                                                                                                                                                                                                                                                                                                                                                  | `runtime-cannot-compact`                                      |
@@ -4645,16 +4668,28 @@ changed it. The Claude adapter claims compaction when the runtime announces
 `compact` among its commands (Claude Code 2.1.296 does, read through the SDK's
 initialization without a model call), and settles a compaction once both the
 boundary and a successful `compact_result` are in, on a failed one, or at the
-latest on the result that closes the command. The OpenCode route and Pi command
-named in their rows come from those runtimes' published API descriptions and
-have not been probed against a pinned release: OpenCode's route only admits the
-request and reports completion on its session events, and Pi answers its
-command with the compaction data. Neither adapter sends its request yet. Each
-starts by recording the request, the completion signal, and the refusal for
-the release it pins; until that record exists it declares no
-`sessionCompaction`, so **Compact session** on an OpenCode or Pi thread is
-refused `runtime-cannot-compact`, and only the runtime's own compactions are
-observed.
+latest on the result that closes the command. The OpenCode adapter claims compaction from 2.2.0, the release whose
+OpenAPI description and event stream it was read against (a local server with
+no prompt sent: the route, the queued item it returns, and the events of a
+compaction of a session with nothing to compact); an older 2.x release and
+every 1.x release report `unavailable`. The route only admits the request, so
+the adapter holds the request open until the run the compaction rode on ends,
+and keeps that run's closing idle out of the turn mapper. A report of
+`session.compaction.ended` is a compaction that happened; a
+`compaction.unavailable` failure is refused as `nothing-to-compact` and
+attests the history was left alone; any other named failure is a failure that
+says the same; and a run that ends or a session that is stopped without a
+report may have changed the history. A turn offered while the compaction is
+pending is refused. The compaction summary and token figures were not read
+from a real model run, so no before-and-after figure is reported, and the
+success path is proven against recorded event shapes only. The Pi command named
+in its row comes from Pi's published API description and has not been probed
+against a pinned release: Pi answers its command with the compaction data.
+The Pi adapter does not send its request yet. It starts by recording the
+request, the completion signal, and the refusal for the release it pins;
+until that record exists it declares no `sessionCompaction`, so **Compact
+session** on a Pi thread is refused `runtime-cannot-compact`, and only the
+runtime's own compactions are observed.
 
 Every runtime also refuses, before anything is journaled, with `turn-running`
 (a turn is in flight; compaction never runs inside one), `compaction-running`,
@@ -4957,11 +4992,13 @@ Codex RPC itself.
   `compact` waits on it; a `/compact` the person typed into the session is the
   runtime's own, `automatic`), Octant Harness
   once its marker is journaled (`automatic` when its loop compacted to fit a
-  request mid-turn), and, as `automatic`, the OpenCode events and
-  Pi's `compaction_end` with a `result`, which those adapters already read to
-  tell a compacted window. They claim no requested compaction until their rows
-  are probed. OpenCode may announce one compaction under more than one of its
-  names, so its adapter reports the first since the latest usage report. A
+  request mid-turn), `requested` for OpenCode while the connection's `compact`
+  waits on its `session.compaction.ended`, and, as `automatic`, OpenCode's
+  other compactions and Pi's `compaction_end` with a `result`, which those
+  adapters already read to tell a compacted window. Pi claims no requested
+  compaction until its row is probed. OpenCode may announce one compaction
+  under more than one of its names, so its adapter reports the first since the
+  latest usage report. A
   Code turn leaves the event out of the turn's own events. It replaces the
   per-driver `windowCompacted` flags as the source of
   `promptRetention: "compacted"`: an adapter's usage reports say only whether
@@ -9101,7 +9138,7 @@ access` agree); a thread's own change is journaled as
   | `reasoning`               | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `unavailable`; `supported` when the agent reports a reasoning option or model            | `varies`: from each model's reported thinking                    | `unavailable` until a response carries reasoning                                  | `unavailable` until a response carries reasoning                 | `supported`                           |
   | `usage`                   | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `unsupported`; turns are not measured                                                    | `unavailable` until a reply reports counts                       | `unavailable` until a response reports usage                                      | `unavailable` until a response reports usage                     | `unsupported`; turns are not measured |
   | `toolActivity`            | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `supported`                                                                              | `unsupported`                                                    | `unsupported`                                                                     | `unsupported`                                                    | `unsupported`                         |
-  | `fileChanges`             | `supported`                                                                                   | `supported`                                                                                  | `unsupported`                                                                                            | `unavailable`                                                                                     | `unavailable`                                                                            | `unsupported`                                                    | `unsupported`                                                                     | `unsupported`                                                    | `unavailable`                         |
+  | `fileChanges`             | `supported`                                                                                   | `supported`                                                                                  | `unsupported`; `supported` from 2.2.0                                                                    | `unavailable`                                                                                     | `unavailable`                                                                            | `unsupported`                                                    | `unsupported`                                                                     | `unsupported`                                                    | `unavailable`                         |
   | `diffs`                   | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `unavailable`                                                                                     | `unavailable`                                                                            | `unsupported`                                                    | `unsupported`                                                                     | `unsupported`                                                    | `unavailable`                         |
   | `taskProgress`            | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `unavailable`                                                                                     | `supported`                                                                              | `unsupported`                                                    | `unsupported`                                                                     | `unsupported`                                                    | `unavailable`                         |
   | `nativeChildAgents`       | `unsupported`; Octant owns its delegation; Claude's own subagents are `nativeSetup.subagents` | `unsupported`; Octant owns its delegation; Codex's own subagents are `nativeSetup.subagents` | `unsupported`; its own delegation is `nativeSetup.subagents`                                             | `unsupported`                                                                                     | `unavailable`                                                                            | `unsupported`                                                    | `unsupported`                                                                     | `unsupported`                                                    | `unsupported`                         |
@@ -9111,9 +9148,9 @@ access` agree); a thread's own change is journaled as
   | `acpClientCapabilities`   | `absent`                                                                                      | `absent`                                                                                     | `absent`                                                                                                 | `absent`                                                                                          | `supported`                                                                              | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `modelSwitch`             | `supported`                                                                                   | `supported`                                                                                  | `supported`; the resume names the thread's current model on every prompt                                 | `absent`; same                                                                                    | `absent`; same                                                                           | `absent`; Octant replays history, so the model may change        | `absent`; Octant replays history, so the model may change                         | `absent`; Octant replays history, so the model may change        | `absent`                              |
   | `forceStop`               | `supported`                                                                                   | `unsupported`; one process serves every thread                                               | `unsupported`; one process serves every thread                                                           | `absent`                                                                                          | `absent`                                                                                 | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
-  | `sessionCompaction.chat`  | `supported`; `unavailable` when the install lacks `/compact`                                  | `supported`; `unavailable` before Codex 0.162.1                                              | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                 | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
-  | `sessionCompaction.work`  | as Chat                                                                                       | as Chat                                                                                      | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                 | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
-  | `sessionCompaction.code`  | as Chat                                                                                       | as Chat                                                                                      | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                 | `supported`; Octant Harness compacts its own transcript          | `supported`; Octant Harness compacts its own transcript                           | `supported`; Octant Harness compacts its own transcript          | `absent`                              |
+  | `sessionCompaction.chat`  | `supported`; `unavailable` when the install lacks `/compact`                                  | `supported`; `unavailable` before Codex 0.162.1                                              | `unavailable`; `supported` from 2.2.0                                                                    | `absent`                                                                                          | `absent`                                                                                 | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
+  | `sessionCompaction.work`  | as Chat                                                                                       | as Chat                                                                                      | as Chat                                                                                                  | `absent`                                                                                          | `absent`                                                                                 | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
+  | `sessionCompaction.code`  | as Chat                                                                                       | as Chat                                                                                      | as Chat                                                                                                  | `absent`                                                                                          | `absent`                                                                                 | `supported`; Octant Harness compacts its own transcript          | `supported`; Octant Harness compacts its own transcript                           | `supported`; Octant Harness compacts its own transcript          | `absent`                              |
   | `nativeArtifacts.chat`    | `unsupported`; Chat runs in Plan                                                              | `absent`                                                                                     | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                 | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `nativeArtifacts.work`    | `supported` once enabled on a claude.ai sign-in; else `unsupported` with a reason             | `absent`                                                                                     | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                 | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `nativeArtifacts.code`    | as Work                                                                                       | `absent`                                                                                     | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                 | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
@@ -9153,11 +9190,17 @@ access` agree); a thread's own change is journaled as
   - **Codex** has no user questions, so a question the model would ask is not
     offered. It takes image input only when a model reports it. Compaction
     needs Codex 0.162.1 or newer.
-  - **OpenCode** (first-class; these gaps are not built yet) reports no file
-    changes and no runtime compaction, carries a
-    session on to another of its models, and offers Octant's tools only on macOS in the
-    verified isolated configuration. A 2.x runtime whose confined jail cannot
-    serve a Git work tree is listing-only: models show, no turn is offered.
+  - **OpenCode** (first-class) reports file changes and runtime compaction
+    only from the 2.x release whose events and routes were read (2.2.0); an
+    older 2.x release reports no file changes, and it and every 1.x release
+    report compaction `unavailable` (not built yet for 1.x, whose server was
+    not read for either). It offers Octant's tools only on macOS
+    in the verified isolated configuration, which is the release and platform
+    boundary, not a gap. A 2.x runtime whose confined jail cannot serve a Git
+    work tree is listing-only: models show, no turn is offered. Rationale: a
+    capability is claimed only for a release whose server was read for it, and
+    the file-change grants and the compaction wait below hold the claim to
+    what the server reports.
   - **Pi** reports no user questions, file changes, diffs, or task progress,
     and offers Octant's tools only after its probe attests the tool bridge on
     the one release that bridge was read against.
@@ -10982,14 +11025,19 @@ command to exactly its thread and Project rules.
 - A per-server notes file (runbook) the person points to is given to the
   agent as context, never as authority.
 
-**Servers as built.** The registry is Settings › Access › Servers, one
-account list (no Project override yet): a server is its alias, user, profile,
+**Servers as built.** The registry is Settings › Access › Servers: an
+account list, and per Project an optional list of its own that replaces the
+account list for that Project's threads. A server is its alias, user, profile,
 the deploy commands the person described (Operate and Admin run them exactly
 as written), and an optional absolute runbook path. Each change is journaled
 whole, journal first, as `shield-servers.server-set@1` or
-`shield-servers.server-removed@1` on the `shield-servers` aggregate, and
-startup replays them; only a person at a local window changes them (`GET`/`POST
-/api/shield/servers`). An alias is unique without regard to case, as ssh
+`shield-servers.server-removed@1` on the `shield-servers` aggregate; a
+Project's list is journaled whole as `shield-servers.project-servers-set@1`
+under the Project's id, and `shield-servers.project-override-cleared@1`
+returns the Project to the account list. Startup replays them; only a person
+at a local window changes them (`GET`/`POST /api/shield/servers`, with
+`?projectId=` for a Project's list). The Judge, the confined path below, the
+record, and the notes all read the thread's Project's list. An alias is unique without regard to case, as ssh
 matches `Host` patterns, and a runbook inside a key or credential folder is
 refused. The rules are pure policy in `packages/domain/src/shieldServerPolicy.ts`,
 checked against the real-world command set in
@@ -11021,6 +11069,19 @@ applies them to every command that starts with `ssh`:
   any state change to SSH or network units, a power target, a recursive
   change on a system folder, removing an SSH or boot package, and `kill -1`
   are lock-out actions.
+- `scp` and `rsync` read the same way: every `[user@]host:path` operand
+  must name a registered server as its user, with options that only tune the
+  copy (`-e`, `--rsh`, `--rsync-path`, a daemon or URL operand, scp's `-3`,
+  `-A`, `-R`, `-S`, `-J`, `-F`, and non-plain `-o` go to the person; a key
+  file is refused). A download is a read; an upload is a configuration change
+  (Admin). A deleting sync (`--delete*`, `--remove-source-files`) or an
+  upload to a sign-in or boot path is a lock-out action; a secret path on the
+  server goes to the person, and a secret file on this computer is refused as
+  reading secrets then sending them out, as for any command. Every file on
+  this computer must lie inside the Project, else the person decides. An
+  rsync option the rules do not name, or a remote path the server's shell
+  would expand or run (legacy scp and rsync pass it to that shell), goes to
+  the model, and on a tainted thread to the person.
 
 Every `ssh` command an Octant Harness shell runs, at every level, is journaled
 under its thread as `shield-remote-commands.ran@1` with the host (left out
@@ -11031,18 +11092,61 @@ there. A command whose record cannot be journaled returns no output. Its
 output reaches the model as every harness command's does, through the
 Watcher. Each harness shell gets the person's SSH agent socket as
 `SSH_AUTH_SOCK` when the host process has one that is a live socket, and
-nothing that names a key. Work and Code turns on the Octant Harness carry the
-servers and their runbooks (the first 8 KB of each, read when the turn starts)
-as a notes block that says it grants nothing.
+nothing that names a key. Work and Code turns on every runtime carry the
+thread's servers and their runbooks (the first 8 KB of each, read when the
+turn starts) as a notes block that says it grants nothing; a provider
+runtime's turn gets the same block a harness turn does.
 
-Not built yet: a confined command reaching a server. Below Full access the
-harness sandbox keeps the private home (the SSH config with it) unreadable and
-opens only the egress proxy, so `ssh` connects at Full access only, where
-Shield records and does not judge. Also not built: the credential broker for
-SSH, exit status for commands a provider runtime runs itself (Shield's journaled
-decision is its record there), runbook context for provider runtimes, `scp`
-and `rsync` rules (they go to the model as before), naming a host apart at
-Guarded, and a Project override of the registry.
+**Confined commands.** Below Full access, on macOS, a harness command that
+is one plain `ssh`, `scp`, or `rsync` call to registered servers gets, for
+that command only, from the host (`apps/server/src/shield/serverSshAccess.ts`):
+
+- a loopback relay per server it names, which carries bytes to the address
+  the person's own `ssh -G <alias>` resolves and nowhere else; Seatbelt opens
+  only these ports beside the egress proxy, so the command reaches no other
+  host, and a server the person's config reaches through `ProxyJump` or
+  `ProxyCommand` gets no relay;
+- an agent socket the host owns, in a private folder, that passes the
+  person's SSH agent only the requests to list keys, sign a login, and bind a
+  session to a host key, and answers adding, removing, or locking a key with
+  a failure; the command's `SSH_AUTH_SOCK` names it;
+- an SSH config, a known-hosts file, and `ssh`, `scp`, and `rsync` wrappers
+  first on `PATH`, written into the command's own script folder, which it
+  reads and cannot write. Each server is its alias with the relay's port, the
+  registered user, the host keys the person's known-hosts files record for it
+  (read by `ssh-keygen -F` on the host), strict host key checking, and
+  forwarding, proxy commands, local commands, and connection sharing off;
+- the user-database lookup `ssh` makes for the person's own account.
+
+The secret guard's list is untouched: the key files stay unreadable, and the
+person's own config and known hosts are read only on the host. A command that
+does more than one plain call, or names no registered server, gets none of
+this and reaches no server. Rationale: Seatbelt cannot name a remote host, so
+per-server loopback relays are the narrowest network grant; an agent socket
+the host owns was chosen over the credential broker because the person's
+agent already holds the keys and never hands them out, and the filter keeps a
+command from changing what it holds. Not built: Linux, whose Bubblewrap
+capsule would need its forwarder to carry the relays; a provider runtime's
+own commands, which run in its own sandbox or the provider launch profile and
+keep today's reach.
+
+**Guarded.** The first connection to each host in a thread asks the person,
+naming the host ("First connection to web1 in this thread"), and is never
+covered by a remembered approval; once allowed, later commands to that host
+follow the level as any command does. The hosts are held in host memory, so a
+restart asks again. At Auto, Shield's rules decide first, as above.
+
+**Provider runtimes' own commands.** A runtime's shell commands that reach a
+server are recorded as `shield-remote-commands.ran@1` when the runtime names
+the command: Codex names every command and reports its exit status, and
+Claude Code names a command only when it is a plain `ssh`, `scp`, or `rsync`
+call, without an exit status. A Codex command's output from a server passes
+the Watcher as `remote-command` outside content. A runtime that names no
+command (OpenCode, ACP agents, Pi) keeps Shield's journaled decision as its
+record. A failure with no exit status is recorded as `unavailable`, since it
+may not have run.
+
+Not built yet: the credential broker for SSH.
 
 **Model and privacy.** By default Shield uses the thread's own provider
 account with that provider's smallest model, so no new party sees the work.
@@ -11291,8 +11395,7 @@ request and editing its title, body, or draft state, a person's
 merge of one pull request from a local window, a person's approval or request
 for changes there, an agent's merge on a Project setting or routine, and the
 Merge when ready and Auto-fix switches the person turns on there are built;
-the rest, Chat routines,
-and the key providers' skill folders and extra skill folders added in Settings,
+the rest, and the key providers' skill folders and extra skill folders added in Settings,
 are allowed and not built yet. Linked external secret stores are built for the
 1Password CLI, under [linked secret stores](#linked-secret-stores): a pointer
 in the credential broker, the value fetched at use and never kept.
