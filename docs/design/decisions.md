@@ -2248,6 +2248,7 @@ Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-capt
 The agent's Browser tool reads a page as an outline with element refs and acts by ref, with every operation admitted on the server and the same tool for every provider.
 
 - A snapshot lists headings, text, and controls with refs, states, and values. A credential field reads protected with no value, and a page that holds one shows no field values.
+- The snapshot and every ref action reach into frames and open shadow roots, with the credential check in every frame. A Private page's frames are read whatever their origin; a signed-in page reads a frame on another origin only when the context's approved origins include it.
 - Refs are kept and resolved on the server. A ref the latest snapshot did not list, or whose element no longer has the recorded role and name, is refused as stale before the action runs.
 - An action answers with the address, title, revision, and one line on what changed. Page text, a picture, or an outline come back only when the call includes them, and the runtime takes no picture an agent did not ask for. The person's activity preview keeps its picture through the host's peek.
 - The agent may hover, choose a list option, drag, press key chords, and open, list, switch and close tabs; a new tab reaches its page through the same origin admission as a navigation.

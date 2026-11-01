@@ -209,6 +209,12 @@ shown. Octant keeps the references itself and refuses one that no longer
 matches the page, so the agent snapshots again instead of acting on the wrong
 element.
 
+The outline includes what sits inside frames and inside web components (open
+shadow roots), and the agent can act there by reference too. Password fields
+stay protected in every frame. On a page in a Project or Personal profile, a
+frame from another website is left out unless you approved that website for
+the profile, because it may be signed in to your account there.
+
 After a click, typing, or another action, the agent hears back the page's
 address and title and one line on what changed, such as a new title or
 changed text. It gets the page's text, a picture, or a fresh outline only when
