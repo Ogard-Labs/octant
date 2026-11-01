@@ -163,6 +163,14 @@ export type BrowserViewportSize = typeof BrowserViewportSize.Type;
 export const BrowserElementRef = Schema.String.pipe(Schema.pattern(/^e[1-9][0-9]{0,3}$/));
 export type BrowserElementRef = typeof BrowserElementRef.Type;
 
+/**
+ * What an action may bring back beyond the page's address, title, and what
+ * changed. Each costs the model tokens, so an action returns none of them
+ * unless the call asks.
+ */
+export const BrowserObservationPart = Schema.Literal("text", "screenshot", "snapshot");
+export type BrowserObservationPart = typeof BrowserObservationPart.Type;
+
 /** The longest page outline an observation carries, in characters. */
 export const MAX_BROWSER_SNAPSHOT_OUTLINE_CHARACTERS = 32 * 1024;
 
@@ -180,6 +188,8 @@ export const BrowserActionRequest = Schema.Struct({
   deltaX: Schema.optional(Schema.Number.pipe(Schema.between(-2000, 2000))),
   deltaY: Schema.optional(Schema.Number.pipe(Schema.between(-2000, 2000))),
   expectedObservationRevision: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** Parts of the page to bring back after the action, besides what changed. */
+  include: Schema.optional(Schema.Array(BrowserObservationPart).pipe(Schema.maxItems(3))),
 }).annotations(strict);
 export type BrowserActionRequest = typeof BrowserActionRequest.Type;
 
@@ -243,6 +253,12 @@ export const BrowserObservation = Schema.Struct({
   title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   contentHash: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
   extractedText: Schema.optional(Schema.String.pipe(Schema.maxLength(65_536))),
+  /**
+   * One short line on what the action changed: the address, the title, the
+   * page's content, or nothing. It is how an agent learns the result without
+   * reading the whole page again.
+   */
+  change: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   /**
    * The page outline a `snapshot` action read: one line per element, with a
    * reference on each one an action can name. A credential field is listed as

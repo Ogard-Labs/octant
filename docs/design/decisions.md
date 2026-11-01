@@ -149,7 +149,7 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Built in Work: Auto, Ask first, Accept edits and Full access, set from Settings › Work and the composer, with the one-time warning; Work has no Plan.
 - Built in both: a Work Project and a Code Project can override the mode new threads start in; the first-run answer sets the default for new Work threads as well as Code; the thread header shows the level in force and the scope it came from; every level lowered at the global, Project or thread scope is journaled with who, when, from which level (absent when a Project override replaced the default it followed) and which scope.
 - Computer and Browser keep their ask at the first action in each app at every level, Full access included, by a separate maintainer decision.
-- Built in Code: Mistral Vibe's auto-approve mode, the one ACP profile that declares its own reviewer. Not built yet: an own reviewer for any other ACP agent.
+- Built in Code: Mistral Vibe's auto-approve mode, the one ACP profile that declares its own reviewer. Every other ACP agent reports no reviewer of its own, and its capability report says so; a profile gains one by declaring the mode that answers its prompts.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -632,9 +632,9 @@ A Work or Code Project has one main folder plus extra folders the person adds; e
 - The `@file` picker (Work and Code) lists and reads a file in an extra folder by its absolute path, only inside one of the Project's current extra folders; Code search covers the extra folders and marks each match with its folder; the harness shell and the ACP client file and terminal tools reach every Project folder.
 - The Code editor and the Files explorer open, read and save a file in an extra folder, named by its absolute path and placed by the same root authority; each extra folder is its own tree beneath the checkout's, and a search match there opens.
 - A Work artifact the host creates for a thread is placed in that thread's working directory, read from the thread and never from the request, and stays in the main folder without a thread; no thread works in an extra folder, so an artifact never lands in one.
-- Not built yet: the Terminal tab's control to start a thread terminal in an extra folder, and a live file watch of an extra folder in the explorer.
+- The Terminal tab's menu restarts a thread terminal in a listed extra folder, and the explorer watches the first two extra folders live (the rest relist on Refresh), placed by the same root authority and refused for any path that is not the root of a current extra folder.
 
-Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
+Status: Built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
 
 ## Agents and delegation
 
@@ -2226,10 +2226,11 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 
 - A snapshot lists headings, text, and controls with refs, states, and values. A credential field reads protected with no value, and a page that holds one shows no field values.
 - Refs are kept and resolved on the server. A ref the latest snapshot did not list, or whose element no longer has the recorded role and name, is refused as stale before the action runs.
+- An action answers with the address, title, revision, and one line on what changed. Page text, a picture, or an outline come back only when the call includes them, and the runtime takes no picture an agent did not ask for. The person's activity preview keeps its picture through the host's peek.
 - No password saving, no agent-written script in the page, and downloads stay blocked.
-- Not built yet: cheaper results, hover, select, drag, key chords, upload, tabs, batched steps, richer waits, dialogs, viewport size, the sign-in handoff, and fuller diagnostics.
+- Not built yet: hover, select, drag, key chords, upload, tabs, batched steps, richer waits, dialogs, viewport size, the sign-in handoff, and fuller diagnostics.
 
-Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot).
+Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot) and [Results](browser-agent-tool.md#results).
 
 ### Browser profiles and extensions
 
