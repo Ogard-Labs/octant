@@ -384,6 +384,7 @@ describe("the right sidebar surface", () => {
       <ServerCodeProjectsContext.Provider
         value={{
           projects: [{ projectId, name: "Service", location: "web1:/srv/service" }],
+          workProjects: [],
           refresh: vi.fn(),
         }}
       >
