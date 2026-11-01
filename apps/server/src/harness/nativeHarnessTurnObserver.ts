@@ -60,7 +60,7 @@ export interface NativeHarnessTurnObserverOptions {
    * Code: aliases, users, profiles, and runbook notes framed as context that
    * grants nothing.
    */
-  readonly serverContext?: () => string | undefined;
+  readonly serverContext?: (projectId: string | undefined) => string | undefined;
   readonly uuid: () => string;
   readonly clock: () => string;
 }
@@ -103,7 +103,7 @@ export class NativeHarnessTurnObserver {
     const redirect = this.#redirects.get(scope.threadId);
     this.#redirects.delete(scope.threadId);
     const goal = this.#goalContext(scope.threadId);
-    const servers = scope.mode === "chat" ? undefined : this.#serverContext();
+    const servers = scope.mode === "chat" ? undefined : this.#serverContext(scope.projectId);
     return [
       ...nativeHarnessInstructions(scope.mode),
       // Per-turn content, after the stable instructions, so the goal's
@@ -373,9 +373,22 @@ export class NativeHarnessTurnObserver {
     }
   }
 
-  #serverContext(): string | undefined {
+  /**
+   * The server notes a provider runtime's own Work or Code turn carries, the
+   * same block a harness turn gets from `contextFor`; nothing for a harness
+   * turn, which has it already, or for Chat.
+   */
+  runtimeServerNotes(scope: NativeHarnessTurnScope): ReadonlyArray<ProviderContextBlock> {
+    if (scope.mode === "chat" || this.#options.isHarnessProvider(scope.providerInstanceId)) {
+      return [];
+    }
+    const servers = this.#serverContext(scope.projectId);
+    return servers === undefined ? [] : [{ kind: "project-memory", text: servers }];
+  }
+
+  #serverContext(projectId: string | undefined): string | undefined {
     try {
-      return this.#options.serverContext?.();
+      return this.#options.serverContext?.(projectId);
     } catch {
       // Notes that cannot be read leave the turn without them; they never
       // gate one.

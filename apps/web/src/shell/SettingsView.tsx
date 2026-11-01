@@ -1268,6 +1268,7 @@ function ActiveSectionContent({
           <ShieldServersSettings
             client={props.shieldServersClient}
             focusedSetting={focusedSetting}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
           />
         </div>
       );
