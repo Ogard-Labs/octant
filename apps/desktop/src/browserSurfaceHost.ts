@@ -686,6 +686,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 maxRefs: MAX_BROWSER_SNAPSHOT_REFS,
                 maxNodes: MAX_BROWSER_SNAPSHOT_NODES,
                 protectCredentials: owned.policy.credentialFieldProtection,
+                // Every frame, which the in-page reader does not walk.
+                withholdValues: await hasSensitiveDocument(
+                  contentsView(owned),
+                  owned.policy.credentialFieldProtection,
+                ),
               });
               if (read.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
               refuseUnapprovedPage(owned, contents);

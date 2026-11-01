@@ -131,7 +131,7 @@ describe("BrowserRuntimeBroker", () => {
       const response = await broker.fetchForTest(
         request(broker.url, broker.token, { contextId, request: action }),
       );
-      expect(surface.act).toHaveBeenCalledWith(contextId, action, expect.anything());
+      expect(surface.act).toHaveBeenCalledWith(contextId, action);
       expect(response.status).toBe(422);
       expect(await response.json()).toEqual({ error: "target-stale" });
     } finally {

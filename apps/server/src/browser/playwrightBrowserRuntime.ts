@@ -704,6 +704,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       maxRefs: MAX_BROWSER_SNAPSHOT_REFS,
       maxNodes: MAX_BROWSER_SNAPSHOT_NODES,
       protectCredentials,
+      // Every frame and shadow root, which the in-page reader does not walk.
+      withholdValues: protectCredentials && (await sensitiveDocument(page)),
     });
     if (read.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
     const title = await page.title();

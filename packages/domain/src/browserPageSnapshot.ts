@@ -50,6 +50,11 @@ export type BrowserPageReadRequest =
       readonly maxRefs: number;
       readonly maxNodes: number;
       readonly protectCredentials: boolean;
+      /**
+       * The host already found a credential field somewhere on the page, in a
+       * frame or shadow root this reader does not walk. No field shows a value.
+       */
+      readonly withholdValues: boolean;
     }
   | { readonly mode: "verify"; readonly selector: string };
 
@@ -90,13 +95,16 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     "slider",
     "treeitem",
   ]);
-  const isCredential = (element: Element): boolean => {
+  const isEditable = (element: Element): boolean => {
     const tag = element.tagName.toLowerCase();
-    const editable =
+    return (
       tag === "input" ||
       tag === "textarea" ||
-      (element.getAttribute("contenteditable") ?? "false").toLowerCase() !== "false";
-    if (!editable) return false;
+      (element.getAttribute("contenteditable") ?? "false").toLowerCase() !== "false"
+    );
+  };
+  const isCredential = (element: Element): boolean => {
+    if (!isEditable(element)) return false;
     const type = (element.getAttribute("type") ?? "").toLowerCase();
     const hint = [
       type,
@@ -166,7 +174,8 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     }
     const alt = element.getAttribute("alt");
     if (alt !== null && alt.trim() !== "") return clip(alt, 120);
-    if (tag !== "input" && tag !== "select" && tag !== "textarea") {
+    // An editable element's text is what was typed into it, never its name.
+    if (tag !== "select" && !isEditable(element)) {
       const text = clip(element.textContent ?? "", 120);
       if (text !== "") return text;
     }
@@ -258,8 +267,16 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
   // A document that holds a credential field shows no field's value at all: a
   // sign-in form's other fields (the account name, a recovery answer) are part
   // of the same sign-in, and the rule elsewhere withholds the whole page.
-  const all = Array.from(document.querySelectorAll("*"));
-  const holdsCredential = request.protectCredentials && all.some(isCredential);
+  const roots: Array<Document | ShadowRoot> = [document];
+  for (let index = 0; index < roots.length; index += 1) {
+    for (const element of Array.from(roots[index]?.querySelectorAll("*") ?? [])) {
+      if (element.shadowRoot !== null) roots.push(element.shadowRoot);
+    }
+  }
+  const holdsCredential =
+    request.protectCredentials &&
+    (request.withholdValues ||
+      roots.some((root) => Array.from(root.querySelectorAll("*")).some(isCredential)));
   const nodes: BrowserPageSnapshotNode[] = [];
   const refs: BrowserPageSnapshotRef[] = [];
   let truncated = false;

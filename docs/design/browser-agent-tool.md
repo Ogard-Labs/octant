@@ -35,10 +35,12 @@ handoff, and fuller diagnostics are allowed; not built yet.
   and its value.
 - A credential field (a password, one-time code, card number, or anything the
   host's credential test matches) reads `protected` and never carries a value.
-  On a page that holds a credential field, no field shows a value at all.
+  On a page that holds a credential field anywhere (a frame and a shadow root
+  included), no field shows a value at all. An editable element is never named
+  by its own text, which is what was typed into it.
 - A snapshot carries no picture and no page text beyond the outline. It reads
-  the top document: an iframe is listed as `iframe "not included"`, and closed
-  shadow roots are not read.
+  the top document: an iframe is listed as `iframe "not included"`, and shadow
+  roots are not listed.
 - An outline is bounded: at most 400 refs, 800 lines, and 24 KiB of text. A
   longer page ends with `(outline truncated)`.
 - `click`, `type`, `wait`, and `read-page` accept `ref` in place of a CSS

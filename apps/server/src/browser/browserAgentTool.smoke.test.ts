@@ -30,6 +30,11 @@ const pages: Record<string, string> = {
     <button id="save" onclick="document.title = 'Saved ' + document.getElementById('name').value">Save</button>
     <button id="rename" onclick="document.getElementById('save').textContent = 'Store'">Rename save</button>
     <a href="/other">Elsewhere</a>`,
+  "/hidden-credential": `<!doctype html><title>Keys</title>
+    <label for="mail">Email</label><input id="mail" value="ada@example.com">
+    <div contenteditable id="token">sk-live-abc</div>
+    <div id="host"></div>
+    <script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = '<input type="password" value="hunter2">';</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
 };
 
@@ -132,6 +137,17 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       text: "guess",
     });
     expect(typed.result.failure?.category).toBe("credential-protected");
+    await tool.stop();
+  });
+
+  it("names no editable element by what was typed into it and finds a credential in a shadow root", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/hidden-credential` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
+    expect(outline).toMatch(/- textbox "Email" \[ref=e\d+\]$/m);
+    expect(outline).toMatch(/- textbox \[ref=e\d+\] protected$/m);
+    expect(outline).not.toContain("sk-live-abc");
+    expect(outline).not.toContain("ada@example.com");
     await tool.stop();
   });
 
