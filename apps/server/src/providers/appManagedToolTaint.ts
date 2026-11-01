@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ShieldWatcherLabel } from "@octant/contracts";
 import {
+  callPrintsSecretEnvironment,
   callReadsProtectedSecret,
   SHIELD_WATCHER_SOURCE_PREFIX,
   watchedTextOf,
@@ -95,25 +96,31 @@ function callNamesProtectedSecret(
   protectedSecretPath: ((path: string) => boolean) | undefined,
 ): boolean {
   if (protectedSecretPath === undefined) return false;
-  let args: unknown;
-  try {
-    args = JSON.parse(call.inputJson);
-  } catch {
-    return false;
-  }
-  return callReadsProtectedSecret(args, protectedSecretPath);
+  return callReadsProtectedSecret(parsedArguments(call), protectedSecretPath);
 }
 
-/** What the Watcher finds in one tool result, and in the paths its call named. */
+/**
+ * What the Watcher finds in one tool result, in the paths its call named, and
+ * in a shell call that printed a secret-holding environment variable.
+ */
 export function watchToolResult(
   call: { readonly inputJson: string },
   result: unknown,
   protectedSecretPath: ((path: string) => boolean) | undefined,
 ): ReadonlyArray<ShieldWatcherLabel> {
-  const labels = watchOutsideContent(watchedTextOf(result));
-  return callNamesProtectedSecret(call, protectedSecretPath)
-    ? [...labels, "secret-path-read"]
-    : labels;
+  const text = watchedTextOf(result);
+  const labels: ShieldWatcherLabel[] = [...watchOutsideContent(text)];
+  if (callNamesProtectedSecret(call, protectedSecretPath)) labels.push("secret-path-read");
+  if (callPrintsSecretEnvironment(parsedArguments(call), text)) labels.push("secret-env-print");
+  return labels;
+}
+
+function parsedArguments(call: { readonly inputJson: string }): unknown {
+  try {
+    return JSON.parse(call.inputJson);
+  } catch {
+    return undefined;
+  }
 }
 
 function taintSuccessfulResult(

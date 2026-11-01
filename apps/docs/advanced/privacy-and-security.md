@@ -152,8 +152,10 @@ if it later fails or you deny it, because by then the provider may already
 have the page. Where Octant can see what such a call returned, Octant Shield's Watcher reads
 it for text aimed at the agent, hidden or encoded text, and requests to send
 secrets out; a finding is tagged on the tool row, in Chat and Work as well as
-Code, and never shown to the Judge as text. Some providers do not show Octant
-the page, so their calls are marked but not read. An agent that reports a web search the same way as a search of
+Code, and never shown to the Judge as text. Octant reads what an ACP agent,
+an OpenCode web tool, and a standalone Codex search returned. A web search
+that Codex's model provider runs on its own servers does not show Octant the
+page, so it is marked but not read. An agent that reports a web search the same way as a search of
 your files cannot always be told apart, so that search may not mark the
 thread. If the provider's own reviewer is answering approvals in a Code
 thread, the turn stops at that point and says why, so you answer the next
@@ -261,6 +263,10 @@ it and which channel to use. You see that message in the tool row.
 Octant Shield watches for this too. Any call of Octant's own tools that names
 a protected file, refused or not, gets an "Outside content" tag on its tool
 row saying it reached for a protected secret file, and the thread is marked.
+A command in Octant's own shell that prints a variable whose name says it
+holds a secret, such as `echo $GITHUB_TOKEN` or an `env` listing that shows
+one, gets the same tag, saying it printed a secret-holding environment
+variable.
 When Shield answers approvals at **Auto**, it sends a command that touches a file on your list to you,
 the files you added included, and refuses one that also sends something off
 the computer. At **Full access** Shield decides nothing, so instead it records

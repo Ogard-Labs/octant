@@ -10849,7 +10849,6 @@ Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
 no prompts": a shell command there can read a protected file. Built, except
-the Watcher flagging a printed secret-holding environment variable, and
 short-lived credentials for the Google Cloud and Azure command lines.
 
 - **One list, every runtime.** The list is
@@ -10969,9 +10968,12 @@ short-lived credentials for the Google Cloud and Azure command lines.
   off the computer after the thread reached for a secret, or while naming
   one, is journaled as a `shield-tags.recorded@1` tag
   (`reads-secrets-then-egress`) under the thread. These never block, because
-  nothing else stands between a shell command and the file there. Allowed;
-  not built yet: the Watcher flagging a printed secret-holding environment
-  variable.
+  nothing else stands between a shell command and the file there. The Watcher
+  also flags a call of Octant's own shell that prints an environment variable
+  whose name says it holds a secret, as the `secret-env-print` label, at every
+  level: the command hands one to `echo`, `printf`, or `printenv`
+  (`echo $GITHUB_TOKEN`), or its output lists one with a value (`env`,
+  `export -p`).
   - _Rationale._ The Judge keeps its own patterns beside the list rather than
     replacing them: they also cover files the list leaves out (`.env`,
     `.gnupg`, a stray `.pem`), and a built-in group the person removes takes
@@ -10984,6 +10986,22 @@ short-lived credentials for the Google Cloud and Azure command lines.
     journaled withholds the command's output, as an unrecorded `ssh` command
     does; the command itself has already run. A provider runtime's own
     commands at Full access reach no Octant shell and are not tagged.
+  - _Rationale (printed variables)._ The name decides, never the value: a
+    word of the name is a secret noun (`TOKEN`, `SECRET`, `PASSWORD`, `AUTH`,
+    `API_KEY`, `ACCESS_KEY`, and the like), and a name ending in a word that
+    says where or which secret (`_FILE`, `_PATH`, `_SOCK`, `_ID`) holds none,
+    so `SSH_AUTH_SOCK` and `AWS_ACCESS_KEY_ID` are left alone. A variable
+    handed to another program (`curl -H "Authorization: Bearer $TOKEN"`) is a
+    use, which the Judge weighs, not a print. A `sh -c` body is read as a
+    command of its own, two levels deep; a command is read for its first 64
+    KB and 256 simple commands, so one padded past that is not seen, which
+    leaves the thread as guarded as before. Its output is read for `NAME=value`
+    lines, so a `.env` file a command prints is flagged as well. Only a call
+    with a shell command is read: a file tool's result is the file, which the
+    list covers. The
+    label is a record like `secret-path-read`; it does not feed the Full
+    access egress tag, which still keys on a protected path, so the tag means
+    what it meant.
 - **Measured friction** (macOS 27, below Full access, fake files in a
   throwaway home): a planted `~/.ssh/id_test` is refused while
   `~/.ssh/config`, `known_hosts`, and public keys read; `ssh-add -l` lists a
@@ -11069,10 +11087,12 @@ and the next call goes to the person.
 **Watcher.** The Watcher reads outside content as it enters the thread, with
 deterministic detectors and no model call. Built for every successful result
 of an app-managed tool and of a plugin MCP server, and of what an adapter sees
-a runtime's own web search or fetch return (an ACP agent's content items);
-allowed; not built yet: a runtime's own web result where it does not expose
-it (Codex, OpenCode), and remote command output of a runtime other than Codex
-(an Octant Harness command's output is an app-managed tool result and is read). It labels injection-shaped content: instructions aimed at the
+a runtime's own web search or fetch return (an ACP agent's content items,
+the results Codex reports on a standalone search, and the text items of an
+OpenCode web tool's result); a search Codex's model provider runs itself
+reports no results and is marked but not read. Allowed; not built yet:
+remote command output of a runtime other than Codex (an Octant Harness
+command's output is an app-managed tool result and is read). It labels injection-shaped content: instructions aimed at the
 agent, hidden or encoded text, requests to exfiltrate, and fake authority. It
 can only raise: it marks the thread tainted, puts a visible marker on that
 tool row, and tells the Judge "tainted". It never allows anything. It runs at
@@ -11401,7 +11421,9 @@ or hidden element), encoded text (`encoded-text`: base64 that decodes to
 prose, or an order to decode and run), a request to send secrets out
 (`exfiltration-request`), a false claim of authority (`fake-authority`), and a
 read of a path the secret guard protects (`secret-path-read`, raised only once
-the guard's list is handed to it). The host runs it over every successful
+the guard's list is handed to it), and a shell call that printed a
+secret-holding environment variable (`secret-env-print`; see
+[Secret guard](#secret-guard)). The host runs it over every successful
 result of an app-managed tool (the Octant Harness's tools and Octant's own
 tools for every runtime) and of a plugin MCP server, before the model reads
 it. Each label is journaled as an outside-content ingestion under the source
@@ -11422,9 +11444,15 @@ adapter sees the result text (an ACP agent puts it in the call's content items;
 carries the bounded text for the Watcher only: the turn runners run the detectors
 over it, journal each label beside the read, and drop the text, so it is never
 journaled, shown, or passed on. A label that cannot be journaled stops the turn
-as an unmarked read does. A runtime that does not expose the page (Codex's web
-search item names only its query, OpenCode's success event carries none) is
-marked but not read. The Chat and Work tool rows carry the same "Outside
+as an unmarked read does. Codex's web search item carries `results` (opaque
+JSON, codex-cli 0.164.0) when Codex ran a standalone search, and the adapter
+hands their string values over on completion; a search the model's provider
+runs itself reports `results` as null, so that search is marked but not read.
+OpenCode's tool success carries the result as content items (opencode 2.2.0
+`Tool.Content`), and the adapter hands over the text items of a call it marked
+(`webfetch`, `websearch`, `codesearch`, or a provider-run tool), never a file
+item. Both arrive after the model has the page, so the labels inform later
+calls rather than this one. The Chat and Work tool rows carry the same "Outside
 content" tag as Code's: the turn's tool steps hold the Watcher's labels for a
 runtime web tool and for an app-managed tool's result, and a later progress or
 result message keeps them. The Judge still never sees the text, only the labels.
