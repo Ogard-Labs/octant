@@ -241,7 +241,7 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
               type="button"
               variant="outline"
             >
-              Open Run {product} as itself
+              Open the Run as itself setting
             </OctantButton>
           }
           tone={runsAsItself ? "neutral" : "warning"}

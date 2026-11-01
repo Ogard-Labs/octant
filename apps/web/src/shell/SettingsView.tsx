@@ -2007,34 +2007,37 @@ function SkillsSection({
           marketplaceFetchesEnabled={props.settings.marketplaceFetchesEnabled}
           skillFoldersKey={`${JSON.stringify(props.settings.skillFolders)}:${skillFolderSaves}`}
           showHeading={false}
+          {...(props.providerToolingClient === undefined || props.providerController === undefined
+            ? {}
+            : {
+                accountTools: (
+                  <ProviderToolingPanel
+                    accounts={props.providerController.instances.flatMap((instance) =>
+                      instance.driverKind === "claude" || instance.driverKind === "codex"
+                        ? [
+                            {
+                              id: String(instance.id),
+                              displayName: instance.displayName,
+                              driverKind: instance.driverKind,
+                              nativeSetup: instance.nativeSetup === true,
+                            },
+                          ]
+                        : [],
+                    )}
+                    client={props.providerToolingClient}
+                    localHost
+                    onOpenRunAsItself={(accountId) =>
+                      onApplyDeepLink({
+                        section: "providers",
+                        setting: `provider-${accountId}-native-setup`,
+                      })
+                    }
+                  />
+                ),
+              })}
           {...(props.pickLocalPluginFolder === undefined
             ? {}
             : { pickLocalPluginFolder: props.pickLocalPluginFolder })}
-        />
-      )}
-      {props.providerToolingClient === undefined ||
-      props.providerController === undefined ? null : (
-        <ProviderToolingPanel
-          accounts={props.providerController.instances.flatMap((instance) =>
-            instance.driverKind === "claude" || instance.driverKind === "codex"
-              ? [
-                  {
-                    id: String(instance.id),
-                    displayName: instance.displayName,
-                    driverKind: instance.driverKind,
-                    nativeSetup: instance.nativeSetup === true,
-                  },
-                ]
-              : [],
-          )}
-          client={props.providerToolingClient}
-          localHost
-          onOpenRunAsItself={(accountId) =>
-            onApplyDeepLink({
-              section: "providers",
-              setting: `provider-${accountId}-native-setup`,
-            })
-          }
         />
       )}
       <SkillFoldersSection

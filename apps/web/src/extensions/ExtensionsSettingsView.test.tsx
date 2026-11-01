@@ -2525,4 +2525,27 @@ describe("Sign in to a server you added", () => {
     );
     expect(c.calls.some((call) => call.kind === "search-catalog")).toBe(false);
   });
+
+  it("offers Claude and Codex as a view of its own, from the Library, when the panel is given", async () => {
+    const user = userEvent.setup();
+    render(
+      <ExtensionsSettingsView
+        accountTools={<p>Account tools panel</p>}
+        client={client({ snapshot: installedSnapshot() })}
+        scope={scope}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Add it to an account" }));
+    expect(await screen.findByText("Account tools panel")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    expect(await screen.findByRole("button", { name: "Build Helper" })).toBeTruthy();
+  });
+
+  it("shows no Claude and Codex view when no panel is given", async () => {
+    render(
+      <ExtensionsSettingsView client={client({ snapshot: installedSnapshot() })} scope={scope} />,
+    );
+    await screen.findByRole("button", { name: "Build Helper" });
+    expect(screen.queryByRole("button", { name: "Claude and Codex" })).toBeNull();
+  });
 });

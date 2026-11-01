@@ -124,7 +124,7 @@ describe("ProviderToolingPanel", () => {
     expect(
       await screen.findByText(/reaches Octant threads only when Claude work runs as itself/),
     ).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Open Run Claude Code as itself" }));
+    await user.click(screen.getByRole("button", { name: "Open the Run as itself setting" }));
     expect(onOpenRunAsItself).toHaveBeenCalledWith(CLAUDE.id);
   });
 
