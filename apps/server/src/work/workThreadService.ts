@@ -31,6 +31,11 @@ import {
   type ProviderProbeResult,
   type WorkStatusDatedItem,
   type WorkTurnState,
+  type WorkTurnAccepted,
+  type WorkTurnUpdated,
+  decodeWorkTurnId,
+  decodeWorkTurnRequestId,
+  ProviderSessionId,
   type ThreadWorkingDirectory,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
@@ -119,6 +124,7 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WorkThreadProjection } from "./workThreadProjection";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
+const decodeProviderSessionId = Schema.decodeUnknownSync(ProviderSessionId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
@@ -174,7 +180,11 @@ export interface WorkThreadServiceDependencies {
   readonly projection: WorkThreadProjection;
   readonly turnProjection: {
     readonly listForThread: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
+    /** Takes a fork's carried turns once they are journaled; absent, a fork is refused. */
+    readonly apply?: (event: WorkTurnAccepted | WorkTurnUpdated) => void;
   };
+  /** Whether a thread is marked as having taken in outside content now. */
+  readonly isMarked?: (threadId: WorkThreadId) => boolean;
   readonly probeProvider?: (
     providerInstanceId: WorkThread["providerInstanceId"],
   ) => Promise<ProviderProbeResult>;
@@ -245,9 +255,8 @@ export class WorkThreadService {
   readonly #persistence: WorkThreadServiceDependencies["persistence"];
   readonly #projects: WorkThreadServiceDependencies["projects"];
   readonly #projection: WorkThreadProjection;
-  readonly #turnProjection: {
-    readonly listForThread: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
-  };
+  readonly #turnProjection: WorkThreadServiceDependencies["turnProjection"];
+  readonly #isMarked: WorkThreadServiceDependencies["isMarked"];
   readonly #probeProvider: WorkThreadServiceDependencies["probeProvider"];
   readonly #readProviderModel: WorkThreadServiceDependencies["readProviderModel"];
   readonly #uuid: () => string;
@@ -268,6 +277,7 @@ export class WorkThreadService {
     this.#probeProvider = dependencies.probeProvider;
     this.#readProviderModel = dependencies.readProviderModel;
     this.#turnProjection = dependencies.turnProjection;
+    this.#isMarked = dependencies.isMarked;
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
     this.#workingDirectories = dependencies.workingDirectories;
@@ -597,6 +607,9 @@ export class WorkThreadService {
         }
         return { kind: "thread-created", thread: created };
       }
+
+      if (command.kind === "fork-work-thread")
+        return await this.#fork(authenticatedWindowId, command);
 
       // Done on a Work thread is a person's mark. A routine, goal round, or
       // child-run delivery acts as the host, never as the person.
@@ -1335,6 +1348,177 @@ export class WorkThreadService {
         updatedAt: decodeTimestamp(this.#clock()),
       }
     );
+  }
+
+  /**
+   * Start a second Work thread carrying the source's conversation through one
+   * turn. The source is untouched. The fork copies the source's turns through
+   * that point under requests of its own, marked as carried, in one journal
+   * unit with its creation, so a crash never leaves a half-seeded fork; a
+   * carried turn ran in the source, so the fork's first turn on a provider
+   * that keeps its own session starts a new one with them as text. Provider,
+   * model, folder and Project come from the source; the fork starts at Ask
+   * first with no profile, running turn or session grant, and a marked source
+   * makes a marked fork.
+   */
+  async #fork(
+    authenticatedWindowId: WindowId,
+    command: Extract<WorkThreadCommand, { kind: "fork-work-thread" }>,
+  ): Promise<WorkThreadCommandResult> {
+    const turnProjection = this.#turnProjection;
+    if (turnProjection.apply === undefined)
+      throw this.#failure("unavailable", "Forking is unavailable on this host.");
+    const source = this.#projection.read(command.sourceThreadId);
+    if (source === undefined || source.lifecycle !== "active") {
+      throw this.#failure("invalid", "The thread to fork from is no longer available.");
+    }
+    const project = await this.#requireAccessibleActiveWorkProject(
+      authenticatedWindowId,
+      source.projectId,
+    );
+    if (this.#projection.read(command.threadId) !== undefined) {
+      throw this.#failure("invalid", "Work thread already exists.");
+    }
+    const turns = this.#turnProjection.listForThread(source.id);
+    const through = turns.findIndex(
+      (turn) => String(turn.requestId) === String(command.throughRequestId),
+    );
+    if (through === -1) {
+      throw this.#failure(
+        "invalid",
+        "That message is no longer part of this thread's conversation.",
+      );
+    }
+    const carried = turns.slice(0, through + 1);
+    if (
+      carried.some(
+        (turn) =>
+          turn.status === "accepted" || turn.status === "running" || turn.status === "waiting",
+      )
+    ) {
+      throw this.#failure(
+        "stale",
+        "A turn up to this point is still running. Wait for it to finish, then fork.",
+      );
+    }
+    const latestBinding = project.bindingHistory.at(-1);
+    if (latestBinding === undefined) {
+      throw this.#failure("stale", "Work Project binding changed; reload and retry.");
+    }
+    const now = decodeTimestamp(this.#clock());
+    const fork = decodeWorkThread({
+      id: command.threadId,
+      projectId: source.projectId,
+      title: command.title,
+      lifecycle: "active",
+      providerInstanceId: source.providerInstanceId,
+      modelId: source.modelId,
+      ...(source.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: source.modelOptionValues }),
+      bindingRevisionId: latestBinding.revisionId,
+      workingDirectory: source.workingDirectory ?? ("." as ThreadWorkingDirectory),
+      access: DEFAULT_WORK_ACCESS,
+      forkedFrom: {
+        threadId: source.id,
+        throughRequestId: command.throughRequestId,
+        carriedTurnCount: carried.length,
+      },
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const copies = carried.map((turn) => {
+      const requestId = decodeWorkTurnRequestId(this.#uuid());
+      const turnId = decodeWorkTurnId(this.#uuid());
+      const accepted: WorkTurnAccepted = {
+        kind: "turn-accepted",
+        requestId,
+        threadId: fork.id,
+        turnId,
+        projectId: fork.projectId,
+        authority: turn.authority,
+        // A session of the fork's own name: the source's is never resumed here.
+        providerSessionId: decodeProviderSessionId(this.#uuid()),
+        carriedFrom: { threadId: source.id, requestId: turn.requestId },
+        prompt: turn.prompt,
+        capabilities: turn.capabilities,
+        acceptedAt: turn.acceptedAt,
+      };
+      const updated: WorkTurnUpdated = {
+        kind: "turn-updated",
+        carried: true,
+        requestId,
+        threadId: fork.id,
+        turnId,
+        status: turn.status === "cancelled" || turn.status === "failed" ? turn.status : "completed",
+        ...(turn.response === undefined ? {} : { response: turn.response }),
+        transcript: turn.transcript,
+        ...(turn.failure === undefined ? {} : { failure: turn.failure }),
+        updatedAt: turn.updatedAt,
+      };
+      return { accepted, updated };
+    });
+    // The fork carries the source's conversation, so what the source read is
+    // in the fork's context from its first turn. A source a person cleared
+    // makes an unmarked fork, as a Code fork and a Chat branch do.
+    const mark: InheritedExternalContentMark | undefined =
+      this.#isMarked?.(source.id) === true
+        ? {
+            sourceLabel: "work-fork",
+            contentReference: `work-fork-${String(source.id)}-${String(command.throughRequestId)}`,
+          }
+        : undefined;
+    const journalFork = () => {
+      this.#append(fork.id, 0, "work.thread-created@1", { kind: "thread-created", thread: fork });
+      for (const copy of copies) {
+        this.#appendTurn(copy.accepted.requestId, 0, "work.turn-accepted@1", copy.accepted);
+        this.#appendTurn(copy.accepted.requestId, 1, "work.turn-updated@1", copy.updated);
+      }
+    };
+    if (mark === undefined) this.#inUnit(journalFork);
+    else {
+      const journaled = journalWithInheritedMark({
+        journal: this.#persistence.journal,
+        record: this.#recordExternalContentIngestion,
+        threadId: String(fork.id),
+        mark,
+        correlationId: () => this.#uuid(),
+        journalThread: journalFork,
+      });
+      if (journaled.status === "refused")
+        throw this.#failure("unavailable", INHERITED_MARK_REFUSAL);
+    }
+    this.#projection.apply({ kind: "thread-created", thread: fork });
+    for (const copy of copies) {
+      turnProjection.apply?.(copy.accepted);
+      turnProjection.apply?.(copy.updated);
+    }
+    return { kind: "thread-created", thread: fork };
+  }
+
+  /** One event of a fork's carried turn, on that turn's own stream. */
+  #appendTurn(
+    requestId: WorkTurnAccepted["requestId"],
+    expectedVersion: number,
+    eventName: "work.turn-accepted@1" | "work.turn-updated@1",
+    payload: WorkTurnAccepted | WorkTurnUpdated,
+  ): void {
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "work-turn", aggregateId: String(requestId) },
+      expectedVersion,
+      events: [
+        {
+          eventId: decodeEventId(this.#uuid()),
+          eventName,
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#uuid()),
+          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          occurredAt: decodeTimestamp(this.#clock()),
+          payload,
+        },
+      ],
+    });
   }
 
   /** Runs `body` as one journal unit where the journal offers one. */

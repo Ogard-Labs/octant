@@ -1499,8 +1499,90 @@ overwritten is refused as a `conflict` as well. Git alone queues only per
 checkout id, which would let a turn or a restore in another Project on the same
 folder, or a recovered start that captures nothing, run on a half-restored
 tree. Restore from here and Fork from here create a thread on its own worktree
-and are not subject to the check. Discard and revert also overwrite files and
-are not yet covered.
+and are not subject to the check. The files part of a rewind (below) is an
+in-place restore and takes the same check and the same serialization. Discard
+and revert also overwrite files and are not yet covered.
+
+**Rewind and fork instead of edit (maintainer decision, 2026-11-01).** Work
+and Code threads do not edit a sent message: editing rewrites what the model
+was told behind its back and leaves a session that still holds the old turn.
+Every message of a Work or Code thread instead offers **Fork from here** and
+**Rewind to here**. Restoring a marked checkpoint still forks; a thread can
+now also move back in place. Chat keeps its existing edit until a decision is
+made for it.
+
+- **Fork from here** on a reply forks through that reply, and on a person's
+  message through the reply before it; the first message of a thread offers
+  none, because nothing comes before it. A Code fork follows the fork rules
+  above. A Work fork is a new Work thread in the same Project that carries the
+  source's messages and finished replies through that point as text, starts at
+  Ask first with no inherited profile, running turn, or session grant, is
+  marked when its source is, and leaves the source untouched. The carried turns
+  are copied into the fork's own journal in the same unit that creates it,
+  each naming the source turn it came from, so every later read is of the
+  fork's own turns; attachments, tool steps, and changed-file records stay with
+  the source. Its first turn on a provider that keeps its own session starts a
+  new session with the carried turns as a disclosed text handoff; a host that
+  rebuilds the conversation reads them from the copies.
+- **Rewind to here** on a person's message removes that turn and every later
+  one; on a reply it removes the turns after it. The person chooses
+  conversation, files, or both, and is asked once, in a dialog that reads
+  `preview-code-rewind` first and shows how many turns leave and which files
+  differ from the checkpoint the files would come back from. Nothing changes
+  until they answer.
+- **Files** come back from Octant's own checkpoints: the checkpoint the first
+  removed turn captured before it ran, or, past Plan turns that wrote nothing,
+  the next one a writing turn captured. A writing turn without a capture
+  refuses the files part, as a fork does. The files part is journaled as an
+  ordinary `restore-checkpoint` result under its own operation, so Undo
+  restore offers the way back from it, and it runs first: a restore that does
+  not complete leaves the conversation as it was. A Code thread in a Project on
+  a registered server takes no checkpoints, a Plan thread writes nothing, and
+  Work takes no file checkpoints, so each rewinds the conversation only and
+  says why.
+- **Refusals.** A rewind is refused while a turn of the thread is starting,
+  running, or waiting. Its files part is refused while another thread has a
+  live writing turn on the same checkout root, by the in-place restore check
+  above. A conversation-only rewind touches no file, so another thread's
+  writing turn cannot conflict with it and does not refuse it.
+- **The journal stays authoritative.** Removed turns are never deleted. The
+  rewind's own completed result (`thread-rewound` for Code,
+  `work.thread-rewound@1` for Work) is the record that removes them: every
+  conversation read, the transcript, a fork point, a handoff, the context plan,
+  and export leave out each turn that started at or after the rewind's first
+  removed turn and before the rewind was journaled. Replay folds the same
+  records, so a rebuilt projection removes the same turns, and a turn sent
+  after a rewind is the thread's own again until a later rewind removes it.
+  Readers that place files or a copied session by the order turns ran (fork
+  and rewind file points, the harness session copy) still read removed turns,
+  because a removed turn captured the files the turn before it left. The
+  thread's usage figure counts the turns it holds; the usage ledger, the Usage
+  dashboard, and spend ceilings still count every turn that ran.
+- **Removed turns stop reaching the model.** A session recorded before the
+  rewind still holds them, so it is never resumed as it stands. A provider
+  that reports `sessionRollback` continues a copy of its own session cut back
+  at the last kept turn (`rewind-native-session`); today that is the Octant
+  Harness, whose transcript copy is the one a harness fork makes. Every other
+  provider reports it unsupported in its capability report, and the next turn
+  starts a fresh session with a disclosed text handoff of the kept turns
+  (`rewind`), journaled before the prompt is sent, as a provider switch's is.
+  A host that rebuilds the conversation itself each turn rebuilds it from the
+  kept turns. With no turn kept the thread starts again as it did at first,
+  and a fork's first turn carries its source's conversation again.
+- **The composer.** The person's message from the first removed turn returns
+  to the composer for editing, which is how a sent message is changed in Work
+  and Code.
+
+Rationale: provider-owned runtimes (Claude Code, Codex, OpenCode, ACP agents)
+each have their own way back in a session, but Octant could not prove any of
+them cuts at exactly the kept turn without a paid live turn, and a wrong cut
+would hand the model a turn the person removed while the transcript says it is
+gone. A fresh session with a disclosed handoff is the one path whose content
+the host chooses and journals, so those providers report `sessionRollback`
+unsupported until a driver proves its own rollback. Rewinding only the
+conversation changes nothing but the thread's own record, so it is gated as a
+read (it runs in Plan and asks for no approval); any rewind that puts files
+back is gated as the in-place restore it performs.
 
 A child AgentRun starts only when the thread's agent delegates through the
 Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.
@@ -4522,7 +4604,8 @@ turn, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native
 Chat editing refuses where rollback is unavailable, so it cannot replace the
-conversation behind the user's back. Resume refuses as `stale-resume` when the
+conversation behind the user's back. Work and Code threads rewind instead of
+editing (Modes, "Rewind and fork instead of edit"). Resume refuses as `stale-resume` when the
 cursor's binding names another provider instance, Octant session, Project
 root, mode, or native id, or, on OpenCode and Pi, whose sessions keep the model
 they started on, another model; the check runs before the runtime is asked or any live

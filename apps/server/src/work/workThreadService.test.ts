@@ -11,6 +11,9 @@ import {
   decodeWindowId,
   decodeWorkTurnAuthority,
   decodeWorkTurnState,
+  decodeWorkTurnRequestId,
+  decodeWorkTurnId,
+  WORK_TURN_CAPABILITIES,
   type EventEnvelope,
   type Project,
   type WorkThreadId,
@@ -21,6 +24,7 @@ import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { TerminalSessionImportPort } from "../terminalSessions/terminalSessionImports";
 import { WorkThreadProjection } from "./workThreadProjection";
+import { WorkTurnProjection } from "./workTurnProjection";
 import {
   WorkThreadService,
   WorkThreadServiceError,
@@ -1460,13 +1464,16 @@ function serviceFixture(
     readonly turns?: ReadonlyArray<WorkTurnState>;
     readonly recordExternalContentIngestion?: WorkThreadServiceDependencies["recordExternalContentIngestion"];
     readonly terminalSessions?: TerminalSessionImportPort;
+    readonly turnProjection?: WorkThreadServiceDependencies["turnProjection"];
+    readonly isMarked?: WorkThreadServiceDependencies["isMarked"];
+    readonly uuid?: () => string;
   } = {},
 ) {
   const projection = new WorkThreadProjection();
   for (const entry of options.threads ?? [thread()]) {
     projection.apply({ kind: "thread-created", thread: entry });
   }
-  const turnProjection = {
+  const turnProjection = options.turnProjection ?? {
     listForThread: vi.fn(
       (threadId: WorkThreadId): ReadonlyArray<WorkTurnState> =>
         (options.turns ?? []).filter((turn) => String(turn.threadId) === String(threadId)),
@@ -1536,7 +1543,8 @@ function serviceFixture(
     projects: projects as never,
     projection,
     turnProjection,
-    uuid: () => "72000000-0000-4000-8000-000000000099",
+    uuid: options.uuid ?? (() => "72000000-0000-4000-8000-000000000099"),
+    ...(options.isMarked === undefined ? {} : { isMarked: options.isMarked }),
     clock: () => now,
     workingDirectories,
     onWorkingDirectoryChanged,
@@ -2136,5 +2144,142 @@ describe("scheduling a Work thread's usage-limit resume", () => {
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
+
+describe("forking a Work thread from one of its turns", () => {
+  const forkId = decodeWorkThreadId("72000000-0000-4000-8000-000000000040");
+  const first = decodeWorkTurnRequestId("72000000-0000-4000-8000-000000000041");
+  const second = decodeWorkTurnRequestId("72000000-0000-4000-8000-000000000042");
+
+  /** A source thread with two finished turns, in a real turn projection. */
+  function sourceTurns() {
+    const turns = new WorkTurnProjection();
+    for (const [requestId, turn, prompt, response] of [
+      [first, "72000000-0000-4000-8000-000000000051", "Draft the brief", "Here is a draft"],
+      [second, "72000000-0000-4000-8000-000000000052", "Make it longer", "A longer draft"],
+    ] as const) {
+      turns.apply({
+        kind: "turn-accepted",
+        requestId,
+        threadId: ids.thread,
+        turnId: decodeWorkTurnId(turn),
+        projectId: ids.project,
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "model-a",
+        }),
+        providerSessionId: "72000000-0000-4000-8000-000000000060" as never,
+        resumeCursor: { driverKind: "pi", value: "source-session" },
+        prompt,
+        capabilities: WORK_TURN_CAPABILITIES,
+        acceptedAt: now,
+      });
+      turns.apply({
+        kind: "turn-updated",
+        requestId,
+        threadId: ids.thread,
+        turnId: decodeWorkTurnId(turn),
+        status: "completed",
+        response,
+        updatedAt: now,
+      });
+    }
+    return turns;
+  }
+
+  function forkFixture(options: { readonly marked?: boolean } = {}) {
+    const turns = sourceTurns();
+    let next = 100;
+    const record = vi.fn<
+      NonNullable<WorkThreadServiceDependencies["recordExternalContentIngestion"]>
+    >(() => ({
+      kind: "recorded",
+      taint: { externalContentIngested: true, ingestedSources: ["work-fork"] },
+    }));
+    const fixture = serviceFixture({
+      threads: [thread({ access: "full-access" })],
+      turnProjection: turns,
+      isMarked: () => options.marked === true,
+      recordExternalContentIngestion: record,
+      uuid: () => `72000000-0000-4000-8000-${String((next += 1)).padStart(12, "0")}`,
+    });
+    return { ...fixture, turns, record };
+  }
+
+  const forkThrough = (throughRequestId: typeof first) => ({
+    kind: "fork-work-thread",
+    threadId: forkId,
+    sourceThreadId: ids.thread,
+    throughRequestId,
+    title: "Draft brief (fork)",
+  });
+
+  it("carries the source's turns through the point into a new thread at Ask first, and leaves the source untouched", async () => {
+    const fixture = forkFixture();
+
+    const result = await fixture.service.execute(ids.window, forkThrough(first));
+    expect(result).toMatchObject({
+      kind: "thread-created",
+      thread: {
+        id: forkId,
+        projectId: ids.project,
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        // The source runs at Full access; the fork inherits none of it.
+        access: "ask-first",
+        forkedFrom: { threadId: ids.thread, throughRequestId: first, carriedTurnCount: 1 },
+      },
+    });
+    const carried = fixture.turns.listForThread(forkId);
+    expect(carried.map((turn) => [turn.prompt, turn.response, turn.status])).toEqual([
+      ["Draft the brief", "Here is a draft", "completed"],
+    ]);
+    // A carried copy names its source turn and none of the source's session.
+    expect(carried[0]?.carriedFrom).toEqual({ threadId: ids.thread, requestId: first });
+    expect(carried[0]?.resumeCursor).toBeUndefined();
+    expect(String(carried[0]?.requestId)).not.toBe(String(first));
+    expect(fixture.turns.listForThread(ids.thread).map((turn) => turn.requestId)).toEqual([
+      first,
+      second,
+    ]);
+    // The thread and its carried turns commit as one journal unit.
+    expect(fixture.persistence.journal.transaction).toHaveBeenCalledOnce();
+    expect(fixture.record).not.toHaveBeenCalled();
+  });
+
+  it("marks a fork of a marked source before it exists", async () => {
+    const fixture = forkFixture({ marked: true });
+
+    await fixture.service.execute(ids.window, forkThrough(second));
+    expect(fixture.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: forkId,
+        provenance: { origin: "external-content", sourceLabel: "work-fork" },
+        contentReference: `work-fork-${ids.thread}-${second}`,
+      }),
+    );
+    expect(fixture.record.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(fixture.turns.listForThread(forkId)).toHaveLength(2);
+  });
+
+  it("refuses a fork through a turn that is no longer in the thread, creating nothing", async () => {
+    const fixture = forkFixture();
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...forkThrough(first),
+        throughRequestId: decodeWorkTurnRequestId("72000000-0000-4000-8000-000000000049"),
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.projection.read(forkId)).toBeUndefined();
   });
 });

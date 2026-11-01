@@ -26,6 +26,19 @@ export const WorkThreadId = brandedUuid("WorkThreadId");
 export type WorkThreadId = typeof WorkThreadId.Type;
 
 /**
+ * Where a forked Work thread came from: the source thread and the turn it was
+ * forked through. Same brand as the turn request id, declared here because
+ * the turn contracts build on this file.
+ */
+export const WorkThreadForkOrigin = Schema.Struct({
+  threadId: WorkThreadId,
+  throughRequestId: Schema.UUID.pipe(Schema.brand("WorkTurnRequestId")),
+  /** Source turns the fork carried, oldest first, through the fork point. */
+  carriedTurnCount: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type WorkThreadForkOrigin = typeof WorkThreadForkOrigin.Type;
+
+/**
  * A note a person recorded with their Done mark on a named Work delivery
  * target. Present only when they wrote one; the mark itself is
  * `completionConfirmed`.
@@ -85,6 +98,8 @@ export const WorkThread = Schema.Struct({
    * {@link ThreadDocumentDelivery}.
    */
   documentDelivery: Schema.optional(ThreadDocumentDelivery),
+  /** Present on a fork: the thread and turn its carried conversation came from. */
+  forkedFrom: Schema.optional(WorkThreadForkOrigin),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,
@@ -117,6 +132,21 @@ export const CreateWorkThreadCommand = Schema.Struct({
   terminalSession: Schema.optional(TerminalSessionImportRequest),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
+
+/**
+ * Start a second Work thread that carries this thread's conversation through
+ * one turn. The source is untouched; the host picks the turns, provider and
+ * model from its own records and starts the fork at Ask first.
+ */
+export const ForkWorkThreadCommand = Schema.Struct({
+  kind: Schema.Literal("fork-work-thread"),
+  /** The new thread's id. */
+  threadId: WorkThreadId,
+  sourceThreadId: WorkThreadId,
+  throughRequestId: Schema.UUID.pipe(Schema.brand("WorkTurnRequestId")),
+  title: Schema.NonEmptyTrimmedString,
+}).annotations(strict);
+export type ForkWorkThreadCommand = typeof ForkWorkThreadCommand.Type;
 
 export const RenameWorkThreadCommand = Schema.Struct({
   kind: Schema.Literal("rename-work-thread"),
@@ -310,6 +340,7 @@ export type UpdateWorkSettingsCommand = typeof UpdateWorkSettingsCommand.Type;
 
 export const WorkThreadCommand = Schema.Union(
   CreateWorkThreadCommand,
+  ForkWorkThreadCommand,
   RenameWorkThreadCommand,
   ChangeWorkThreadLifecycleCommand,
   CompleteWorkThreadCommand,

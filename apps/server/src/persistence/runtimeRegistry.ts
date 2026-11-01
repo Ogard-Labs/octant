@@ -71,6 +71,7 @@ import {
   WorkSettingsUpdated,
   WorkTurnAccepted,
   WorkTurnUpdated,
+  WorkThreadRewound,
   WorkPromotionFrame,
   WorkResearchFrame,
   WorkRequestFrame,
@@ -610,6 +611,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.settings-updated@1", 1, WorkSettingsUpdated)
     .register("work.turn-accepted@1", 1, WorkTurnAccepted)
     .register("work.turn-updated@1", 1, WorkTurnUpdated)
+    .register("work.thread-rewound@1", 1, WorkThreadRewound)
     .register("work.artifact-mutation-recorded@1", 1, WorkArtifactMutationFrame)
     .register("work.promotion-recorded@1", 1, WorkPromotionFrame)
     .register("work.research-recorded@1", 1, WorkResearchFrame)

@@ -1,9 +1,11 @@
 import {
+  decodeWorkThreadRewound,
   decodeWorkTurnAccepted,
   decodeWorkTurnRequestId,
   decodeWorkTurnState,
   decodeWorkTurnUpdated,
   type WorkThreadId,
+  type WorkThreadRewound,
   type WorkTurnAccepted,
   type WorkTurnRequestId,
   type WorkTurnState,
@@ -21,8 +23,33 @@ import { hydrateJournalProjection } from "../persistence/journalHydration";
 export class WorkTurnProjection {
   readonly #byRequest = new Map<WorkTurnRequestId, WorkTurnState>();
   readonly #byThread = new Map<string, WorkTurnRequestId[]>();
+  /** Every journaled rewind, by its id, so a retried rewind answers from it. */
+  readonly #rewinds = new Map<string, WorkThreadRewound>();
+  /**
+   * Threads rewound since their last kept turn was accepted. The next turn
+   * must not take up the session that turn ran on, which still holds the
+   * removed turns; accepting a new turn ends it.
+   */
+  readonly #rewoundSinceLatest = new Set<string>();
 
-  apply(event: WorkTurnAccepted | WorkTurnUpdated): void {
+  apply(event: WorkTurnAccepted | WorkTurnUpdated | WorkThreadRewound): void {
+    if (event.kind === "thread-rewound") {
+      const rewound = decodeWorkThreadRewound(event);
+      if (this.#rewinds.has(String(rewound.rewindId))) return;
+      this.#rewinds.set(String(rewound.rewindId), rewound);
+      const threadKey = String(rewound.threadId);
+      const removed = new Set(rewound.removedRequestIds.map(String));
+      // The removed turns leave the thread's order only; their own records
+      // stay readable by request, so a retried send of one answers as before.
+      this.#byThread.set(
+        threadKey,
+        (this.#byThread.get(threadKey) ?? []).filter(
+          (requestId) => !removed.has(String(requestId)),
+        ),
+      );
+      this.#rewoundSinceLatest.add(threadKey);
+      return;
+    }
     if (event.kind === "turn-accepted") {
       const accepted = decodeWorkTurnAccepted(event);
       const existing = this.#byRequest.get(accepted.requestId);
@@ -36,6 +63,7 @@ export class WorkTurnProjection {
         providerSessionId: accepted.providerSessionId,
         ...(accepted.resumeCursor === undefined ? {} : { resumeCursor: accepted.resumeCursor }),
         ...(accepted.handoff === undefined ? {} : { handoff: accepted.handoff }),
+        ...(accepted.carriedFrom === undefined ? {} : { carriedFrom: accepted.carriedFrom }),
         status: "accepted",
         prompt: accepted.prompt,
         transcript: [{ role: "user", text: accepted.prompt }],
@@ -53,6 +81,7 @@ export class WorkTurnProjection {
       });
       this.#byRequest.set(accepted.requestId, turn);
       const threadKey = String(accepted.threadId);
+      this.#rewoundSinceLatest.delete(threadKey);
       const order = this.#byThread.get(threadKey) ?? [];
       if (!order.includes(accepted.requestId)) {
         this.#byThread.set(threadKey, [...order, accepted.requestId]);
@@ -107,6 +136,16 @@ export class WorkTurnProjection {
 
   lookup(requestId: WorkTurnRequestId): WorkTurnState | undefined {
     return this.#byRequest.get(decodeWorkTurnRequestId(requestId));
+  }
+
+  /** Whether the thread was rewound since its last kept turn was accepted. */
+  rewoundSinceLatest(threadId: WorkThreadId): boolean {
+    return this.#rewoundSinceLatest.has(String(threadId));
+  }
+
+  /** A journaled rewind, by its id. */
+  rewind(rewindId: string): WorkThreadRewound | undefined {
+    return this.#rewinds.get(rewindId);
   }
 
   latestForThread(threadId: WorkThreadId): WorkTurnState | undefined {
@@ -200,6 +239,8 @@ export function hydrateWorkTurnProjectionFromJournal(input: {
         input.projection.apply(event.payload as WorkTurnAccepted);
       } else if (event.eventName === "work.turn-updated@1") {
         input.projection.apply(event.payload as WorkTurnUpdated);
+      } else if (event.eventName === "work.thread-rewound@1") {
+        input.projection.apply(event.payload as WorkThreadRewound);
       }
     },
   });

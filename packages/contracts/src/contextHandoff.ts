@@ -53,3 +53,20 @@ export const ProviderSwitchConversationHandoff = Schema.Struct({
   hiddenReasoningTransferred: Schema.Literal(false),
 }).annotations(strict);
 export type ProviderSwitchConversationHandoff = typeof ProviderSwitchConversationHandoff.Type;
+
+/**
+ * What a Chat or Work turn started its session with after the person rewound
+ * the thread in place, when its provider keeps its conversation in a session
+ * of its own and cannot cut that session back: the turns the thread kept, as
+ * bounded, attributed text. The removed turns are not part of it.
+ */
+export const RewindConversationHandoff = Schema.Struct({
+  reason: Schema.Literal("rewind"),
+  messages: ContextHandoffMessages,
+  omissions: ContextHandoffOmissions,
+  /** Whether the thread had taken in outside content when the handoff was read. */
+  externalContentIngested: Schema.Boolean,
+  nativeSessionTransferred: Schema.Literal(false),
+  hiddenReasoningTransferred: Schema.Literal(false),
+}).annotations(strict);
+export type RewindConversationHandoff = typeof RewindConversationHandoff.Type;

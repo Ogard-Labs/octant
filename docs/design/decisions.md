@@ -555,9 +555,13 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 ### Forks, checkpoints and restore
 
-A fork is a managed-worktree creation the host resolves itself from a finished turn. A checkpoint is a user-marked point that copies no thread state, and restoring one always forks.
+A fork is a managed-worktree creation the host resolves itself from a finished turn. A checkpoint is a user-marked point that copies no thread state, and restoring one still forks. Work and Code threads rewind and fork instead of editing a sent message (maintainer decision, 2026-11-01): a thread can now move back in place.
 
 - A fork starts approval-gated with no inherited profile, running turn or session grant, and is refused when its text handoff cannot be built.
+- Every Work and Code message offers Fork from here (a reply forks through itself, a person's message through the reply before it) and Rewind to here, with a choice of conversation, files, or both, asked once with a preview of what changes. A Work fork is a new Work thread carrying the messages through that point as text. Chat keeps its edit until decided.
+- A rewind journals what it removed; every conversation read, handoff, context plan and replay leave those turns out, and the person's message comes back to the composer. Files come back from Octant's own checkpoints as an ordinary undoable restore that runs first. Server-Project Code threads, Plan threads and Work threads rewind the conversation only and say why.
+- A rewind is refused while the thread's turn runs; its files part also while another thread has a live writing turn on the same checkout root.
+- Removed turns stop reaching the model: a provider reporting `sessionRollback` (the Octant Harness) continues its own session cut back at the last kept turn; every other provider reports it unsupported and starts a fresh session with a disclosed text handoff of the kept turns.
 - A checkpoint is journaled on its own aggregate (marked, forgotten, restored). Chat branches through the marked turn; Code creates a thread on its own worktree at the recorded revision with a fresh delivery branch. The origin is untouched. _Here only._
 - A Code checkpoint is refused when the host never caught a revision. Forgetting retires the marker and leaves it readable. _Here only._
 - An in-place Git restore keeps its own name, is never presented as the same gesture, and is refused as a conflict while another thread has a live writing turn on the same checkout root.
