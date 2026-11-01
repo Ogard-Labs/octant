@@ -6,6 +6,7 @@ import {
   providerProcessFailureSummary,
   providerRefusalGuidance,
   providerRowReadinessLabel,
+  reviewVerdictsLabel,
 } from "./providerSettingsPresentation";
 
 describe("provider Settings presentation", () => {
@@ -338,5 +339,24 @@ describe("provider Settings presentation", () => {
       "OpenCode CLI exited with code 65 during launch.",
     );
     expect(providerProcessFailureSummary("OpenCode CLI", undefined)).toBeUndefined();
+  });
+});
+
+describe("reviewVerdictsLabel", () => {
+  const report = (harnessAutoReview: string, reviewVerdicts?: object) =>
+    ({ harnessAutoReview, ...(reviewVerdicts === undefined ? {} : { reviewVerdicts }) }) as never;
+
+  it("says plainly which verdicts a runtime's reviewer reports", () => {
+    expect(
+      reviewVerdictsLabel(report("supported", { allow: "supported", deny: "supported" })),
+    ).toBe("Approvals and denials");
+    expect(
+      reviewVerdictsLabel(report("supported", { allow: "unsupported", deny: "supported" })),
+    ).toBe("Denials only");
+    expect(reviewVerdictsLabel(report("supported"))).toBe("Not reported");
+  });
+
+  it("says nothing for a runtime with no reviewer of its own", () => {
+    expect(reviewVerdictsLabel(report("unsupported"))).toBeUndefined();
   });
 });

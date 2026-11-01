@@ -5,6 +5,7 @@ import {
   type WorkMutationRequest,
   type ProjectId,
   type WindowId,
+  type WorkThreadId,
 } from "@octant/contracts";
 import { classifyDestructiveChange, type WorkMutationKind } from "@octant/domain";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
@@ -31,10 +32,17 @@ export interface WorkMutationRouteDependencies {
         readonly posture: "full";
         readonly approved: boolean;
         readonly signal?: AbortSignal;
+        readonly directory?: string;
       },
     ): Promise<WorkMutationReply>;
   };
   readonly persistence: Pick<PersistenceService, "readProject">;
+  /** A Work thread's Project and working directory, for an artifact made for it. */
+  readonly readThread?: (
+    threadId: WorkThreadId,
+  ) =>
+    | { readonly projectId: ProjectId; readonly workingDirectory?: string | undefined }
+    | undefined;
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
@@ -101,6 +109,7 @@ export function createWorkMutationRouteHandler(dependencies: WorkMutationRouteDe
         authenticatedWindowId,
         mutation.projectId,
       );
+      const directory = threadDirectory(dependencies, mutation);
       const reply = await dependencies.service.mutate(mutation, {
         binding: {
           canonicalRoot: project.binding.canonicalRoot,
@@ -111,6 +120,7 @@ export function createWorkMutationRouteHandler(dependencies: WorkMutationRouteDe
         posture: "full",
         approved: userInitiatedMutationApproved(mutation),
         signal: request.signal,
+        ...(directory === undefined ? {} : { directory }),
       });
       return jsonResponse(decodeWorkMutationReply(reply), 200, origin);
     } catch (error) {
@@ -120,6 +130,26 @@ export function createWorkMutationRouteHandler(dependencies: WorkMutationRouteDe
       return failureResponse("Octant Work mutation service is unavailable.", 503, origin);
     }
   };
+}
+
+/**
+ * The folder a thread's new artifact belongs in: the thread's working
+ * directory, taken from the thread itself so a request cannot name one. A
+ * thread of another Project, or one that does not exist, is refused rather
+ * than ignored, so an artifact never lands in a folder the caller did not mean.
+ */
+function threadDirectory(
+  dependencies: Pick<WorkMutationRouteDependencies, "readThread">,
+  mutation: WorkMutationRequest,
+): string | undefined {
+  if (mutation.kind !== "create-artifact" || mutation.threadId === undefined) return undefined;
+  const thread = dependencies.readThread?.(mutation.threadId);
+  if (thread === undefined || String(thread.projectId) !== String(mutation.projectId)) {
+    throw new WorkMutationRouteRejected("Work thread is unavailable for this Project.", 404);
+  }
+  return thread.workingDirectory === undefined || thread.workingDirectory === "."
+    ? undefined
+    : thread.workingDirectory;
 }
 
 async function loadAccessibleWorkProject(

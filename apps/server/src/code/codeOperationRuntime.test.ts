@@ -2448,6 +2448,101 @@ describe("CodeOperationRuntime", () => {
       },
     );
 
+    it("journals a verdict the provider's own reviewer reported under the provider's name, and asks nobody", async () => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+        checkoutRoot: "/Users/dev/app",
+      });
+      const startOperation = operationId(41);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "review-verdict",
+            verdict: "allow",
+            toolCallId: "tool-1",
+            argument: "git status in /Users/dev/app/src",
+            riskLevel: "low",
+            reason: "Reads the working tree.",
+          }),
+        ),
+      );
+      await vi.waitFor(async () => {
+        const events = (
+          await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 50)
+        ).map((frame) => frame.event);
+        expect(events).toContainEqual({
+          kind: "approval-reviewed",
+          summary: "git status in [CHECKOUT]/src",
+          decision: {
+            reviewer: "provider",
+            verdict: "allow",
+            toolCallId: "tool-1",
+            riskLevel: "low",
+            reason: "Reads the working tree.",
+            decidedAt: expect.any(String),
+          },
+        });
+        expect(events.some((event) => event.kind === "approval-requested")).toBe(false);
+      });
+      expect(connection.answerApproval).not.toHaveBeenCalled();
+      await fixture.runtime.close();
+      fixture.close();
+    });
+
+    it("keeps a provider reviewer's reason within the journal's bound after a path is replaced", async () => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+        checkoutRoot: "/Users/dev/app",
+      });
+      const startOperation = operationId(42);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "review-verdict",
+            verdict: "deny",
+            reason: `/Users/dev/app ${"x".repeat(265)}`,
+          }),
+        ),
+      );
+      await vi.waitFor(async () => {
+        const events = (
+          await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 50)
+        ).map((frame) => frame.event);
+        const reviewed = events.find((event) => event.kind === "approval-reviewed");
+        expect(reviewed).toBeDefined();
+        const decision = (reviewed as { decision: { reason?: string } }).decision;
+        expect(Array.from(decision.reason ?? "").length).toBeLessThanOrEqual(280);
+      });
+      await fixture.runtime.close();
+      fixture.close();
+    });
+
     it("asks the person as before when Shield is not the thread's reviewer", async () => {
       const { connection, fixture, frames } = await runWith(undefined);
       await vi.waitFor(async () => {

@@ -1,15 +1,16 @@
-import type {
-  AutomationBlockReason,
-  AutomationDefinition,
-  AutomationDispatchIntent,
-  AutomationId,
-  AutomationRun,
-  AutomationRunFailureReason,
-  AutomationRuntimeLaunchClaim,
-  AutomationThreadId,
-  CodeThreadId,
-  WorkThreadId,
-  UtcTimestamp,
+import {
+  decodeChatThreadId,
+  type AutomationBlockReason,
+  type AutomationDefinition,
+  type AutomationDispatchIntent,
+  type AutomationId,
+  type AutomationRun,
+  type AutomationRunFailureReason,
+  type AutomationRuntimeLaunchClaim,
+  type AutomationThreadId,
+  type CodeThreadId,
+  type WorkThreadId,
+  type UtcTimestamp,
 } from "@octant/contracts";
 import { decideAutomationFollowUp, type AutomationFollowUpThreadFacts } from "@octant/domain";
 import {
@@ -25,6 +26,7 @@ import type { AutomationProjection } from "./automationProjection";
 import { deterministicAutomationUuid } from "./automationRunIdentity";
 import type {
   AutomationCapacityAdmissionPort,
+  AutomationChatDispatchPort,
   AutomationCodeDispatchPort,
   AutomationWorkDispatchPort,
 } from "./automationModeDispatchPorts";
@@ -42,6 +44,8 @@ export interface AutomationDispatchServiceOptions {
   readonly projection: AutomationProjection;
   readonly code: AutomationCodeDispatchPort;
   readonly work: AutomationWorkDispatchPort;
+  /** Absent, a Chat routine is refused as `unsupported-mode`. */
+  readonly chat?: AutomationChatDispatchPort;
   readonly capacity: AutomationCapacityAdmissionPort;
   readonly resolveFacts: (input: {
     readonly definition: AutomationDefinition;
@@ -88,6 +92,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   readonly #projection: AutomationProjection;
   readonly #code: AutomationCodeDispatchPort;
   readonly #work: AutomationWorkDispatchPort;
+  readonly #chat: AutomationChatDispatchPort | undefined;
   readonly #capacity: AutomationCapacityAdmissionPort;
   readonly #resolveFacts: AutomationDispatchServiceOptions["resolveFacts"];
   readonly #readFollowUpThread: AutomationDispatchServiceOptions["readFollowUpThread"];
@@ -102,6 +107,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     this.#projection = options.projection;
     this.#code = options.code;
     this.#work = options.work;
+    this.#chat = options.chat;
     this.#capacity = options.capacity;
     this.#resolveFacts = options.resolveFacts;
     this.#readFollowUpThread = options.readFollowUpThread;
@@ -167,6 +173,15 @@ export class AutomationDispatchService implements AutomationDispatchPort {
         );
         return;
       }
+      if (run.definitionSnapshot.mode === "chat" && this.#chat === undefined) {
+        this.#refuse(
+          definition,
+          run,
+          "unsupported-mode",
+          "Chat first-turn runtime is unavailable for Automation dispatch.",
+        );
+        return;
+      }
       const created =
         run.definitionSnapshot.targetPolicy === "same-thread"
           ? this.#targetOriginThread(definition, run)
@@ -185,12 +200,17 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     run = this.#projection.getRun(runId);
     if (run === undefined || run.runtimeLaunchClaim === undefined) return;
 
-    const capacity = this.#capacity.admit({
-      reservationId: String(run.firstTurnRequestId),
-      providerInstanceId: String(run.definitionSnapshot.executionProfile.providerInstanceId),
-      modelId: String(run.definitionSnapshot.executionProfile.modelId),
-      subjectThreadId: String(run.dispatchIntent!.threadId),
-    });
+    // The ordinary Chat turn path admits its own provider capacity, so a Chat
+    // run reserving here too would take a second slot for one turn.
+    const capacity =
+      run.definitionSnapshot.mode === "chat"
+        ? ({ kind: "admitted", release: () => undefined } as const)
+        : this.#capacity.admit({
+            reservationId: String(run.firstTurnRequestId),
+            providerInstanceId: String(run.definitionSnapshot.executionProfile.providerInstanceId),
+            modelId: String(run.definitionSnapshot.executionProfile.modelId),
+            subjectThreadId: String(run.dispatchIntent!.threadId),
+          });
     if (capacity.kind === "waiting") {
       // Leave the expired/absent claim path free for a later recovery offer.
       return;
@@ -284,12 +304,18 @@ export class AutomationDispatchService implements AutomationDispatchPort {
             title,
             scopeId: ROUTINE_HOST_SCOPE_ID,
           })
-        : await this.#work.createThread({
-            run,
-            threadId: threadId as unknown as WorkThreadId,
-            title,
-            scopeId: ROUTINE_HOST_SCOPE_ID,
-          });
+        : mode === "chat" && this.#chat !== undefined
+          ? await this.#chat.createThread({
+              run,
+              threadId: decodeChatThreadId(String(threadId)),
+              title,
+            })
+          : await this.#work.createThread({
+              run,
+              threadId: threadId as unknown as WorkThreadId,
+              title,
+              scopeId: ROUTINE_HOST_SCOPE_ID,
+            });
     if (outcome.kind === "failed") {
       this.#failRun(run, "thread-creation-failed", outcome.message);
       return undefined;
@@ -390,6 +416,14 @@ export class AutomationDispatchService implements AutomationDispatchPort {
         firstTurnRequestId: run.firstTurnRequestId,
         promptDigest: intent.promptDigest,
         scopeId: ROUTINE_HOST_SCOPE_ID,
+      });
+    }
+    if (run.definitionSnapshot.mode === "chat" && this.#chat !== undefined) {
+      return this.#chat.startOrRecoverFirstTurn({
+        run,
+        threadId: decodeChatThreadId(String(intent.threadId)),
+        firstTurnRequestId: run.firstTurnRequestId,
+        promptDigest: intent.promptDigest,
       });
     }
     return this.#work.startOrRecoverFirstTurn({

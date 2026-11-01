@@ -375,6 +375,32 @@ describe("resolveToolCall fail-closed order", () => {
     expect(decision.kind).toBe("allow");
   });
 
+  it("7. turns the outside-content gate down for exactly the threads whose level is Full access, in Work and Code", () => {
+    const computerUse = (
+      mode: "work" | "code",
+      executionPolicy: "auto-accept-edits" | "full-access",
+    ) =>
+      resolveToolCall(
+        baseInput({
+          mode,
+          capability: decodeToolActionCapability({ id: "computer-use", version: 1 }),
+          arguments: {
+            allowlist: [],
+            sensitiveFieldProtection: true,
+            visibleStopControl: true,
+            maxSessionDurationMs: 60_000,
+            processOwnershipRequired: true,
+          },
+          thread: { executionPolicy, approvalSatisfied: true, externalContentIngested: true },
+        }),
+      ).kind;
+    for (const mode of ["work", "code"] as const) {
+      expect([mode, computerUse(mode, "full-access")]).toEqual([mode, "allow"]);
+      // The same marked thread asks again once its level is set back below Full access.
+      expect([mode, computerUse(mode, "auto-accept-edits")]).toEqual([mode, "prompt"]);
+    }
+  });
+
   it("7. at Full access in Code nothing asks, irreversible and publish classes included", () => {
     for (const approvalClass of ToolApprovalClass.literals) {
       for (const irreversibleUnderTaint of [false, true]) {

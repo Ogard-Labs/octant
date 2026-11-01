@@ -73,6 +73,11 @@ hands are on the server.
   _Rationale:_ a shared control socket would be one more place a session
   could be borrowed from; one connection per call costs a login each time and
   keeps nothing open between calls.
+- Each call runs a short `sh` script through the login shell, its arguments
+  single-quoted, so the login shell must read POSIX single quotes (`sh`,
+  `bash`, `zsh`, `dash`, and `fish` do; `csh` and `tcsh` are not supported).
+  The script's own exit status 255 is reported as 254, so 255 always means
+  ssh itself failed.
 - **Fail closed.** When a call cannot reach the server (the connection drops,
   times out, is refused, or the host key does not match), that call is refused
   with `server-unreachable` and nothing runs anywhere else. There is no local

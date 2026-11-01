@@ -87,7 +87,7 @@ of the Project) shows the host's reason on the card. A thread's environment
 panel lists the Project's extra folders read-only, under the main folder, and
 shows nothing when there are none. The Files tool lists the extra folders'
 files after the main folder's, each file by its own name with its folder's
-full path beside the size, and the Overview's folder list adds each extra
+full path beside the size (in Code, each extra folder is a tree of its own beneath the checkout's, headed by its last component, and its files open in the editor), and the Overview's folder list adds each extra
 folder's top level labelled with the folder's name. Rules for what an extra folder grants are
 in [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders). Threads are rows
 in one card: the title alone on its line, then the state chip, the approval

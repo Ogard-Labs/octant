@@ -178,6 +178,7 @@ export function automationRunForDefinition(
       missedRunPolicy: definition.missedRunPolicy,
       targetPolicy: definition.targetPolicy,
       ...(definition.projectLevel === undefined ? {} : { projectLevel: definition.projectLevel }),
+      ...(definition.runLevel === undefined ? {} : { runLevel: definition.runLevel }),
       ...(definition.agentMerge === undefined ? {} : { agentMerge: definition.agentMerge }),
     },
     authoritySnapshot: {

@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
-import { basename, dirname, sep } from "node:path";
+import { mkdirSync, realpathSync } from "node:fs";
+import { basename, dirname, join, sep } from "node:path";
 import { decodeCodeThreadId, decodeProjectId } from "@octant/contracts";
 import type { ToolEgressRules } from "../harness/nativeHarnessEgressRules";
-import { ProviderRuntimeNetwork } from "../network/providerRuntimeNetwork";
+import {
+  ProviderRuntimeNetwork,
+  type RuntimeNetworkReviewer,
+} from "../network/providerRuntimeNetwork";
 import { SafeNetworkStore } from "../network/safeNetworkStore";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -14,17 +17,20 @@ const MANAGED_WORKTREES_FOLDER = ".octant-worktrees";
 /**
  * Safe networks and the provider runtime network. Both rebuild from the
  * journal here, before any provider launch is admitted. Runtimes run on the
- * proxy on macOS only: on Linux a runtime's private network namespace would
- * also cut the host loopback its tool bridge and OpenCode's own server use,
- * so Linux keeps open network for runtimes until the forwarder carries those
- * too (docs/architecture.md § Provider runtime network).
+ * proxy on macOS and Linux. A Linux capsule reaches its listener through a
+ * Unix socket and its tool bridges through the forwarder's loopback relay;
+ * OpenCode stays on open network there, because the host connects into its
+ * server and the capsule's private network would cut that
+ * (docs/architecture.md § Provider runtime network).
  */
 export function wireRuntimeNetwork(input: {
   readonly persistence: Pick<
     PersistenceService,
-    "journal" | "readProject" | "readProjects" | "readCodeThread"
+    "journal" | "readProject" | "readProjects" | "readCodeThread" | "dataDirectory"
   >;
   readonly toolEgressRules: Pick<ToolEgressRules, "projectRules" | "joinRecheck">;
+  /** Octant Shield, for an unlisted host a runtime at Auto asks for. */
+  readonly reviewer?: RuntimeNetworkReviewer;
   readonly platform?: NodeJS.Platform;
 }) {
   const { persistence, toolEgressRules } = input;
@@ -43,13 +49,28 @@ export function wireRuntimeNetwork(input: {
     clock: () => new Date().toISOString(),
   });
   safeNetworkStore.load();
+  const platform = input.platform ?? process.platform;
+  let socketDirectory: string | undefined;
+  if (platform === "linux") {
+    socketDirectory = join(persistence.dataDirectory, "runtime-network");
+    try {
+      mkdirSync(socketDirectory, { recursive: true, mode: 0o700 });
+    } catch {
+      // A folder that cannot be made fails each launch's listener, which
+      // refuses the runtime rather than opening its network.
+    }
+  }
   const providerRuntimeNetwork = new ProviderRuntimeNetwork({
     journal: persistence.journal,
     safeNetworks: safeNetworkStore,
     projectRules: (projectId) => toolEgressRules.projectRules(projectId),
     joinRecheck: (proxy) => toolEgressRules.joinRecheck(proxy),
     resolveProject: (root) => resolveRuntimeProject(persistence, root),
-    enforced: (input.platform ?? process.platform) === "darwin",
+    ...(input.reviewer === undefined ? {} : { reviewer: input.reviewer }),
+    enforced: platform === "darwin" || platform === "linux",
+    ...(socketDirectory === undefined
+      ? {}
+      : { socketDirectory, openRuntimes: new Set(["opencode"] as const) }),
     hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     uuid: randomUUID,
     clock: () => new Date().toISOString(),

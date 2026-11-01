@@ -342,6 +342,36 @@ export function decideProviderRuntimeEgress(request: RuntimeEgressRequest): Runt
 }
 
 /**
+ * The destination in canonical form when a trusted place names it at its
+ * port, else `undefined`. A harness command's proxy asks this after its
+ * thread and Project rules refuse, and only while the thread is untainted, so
+ * places widen a command exactly where a standing rule would. `localhost`
+ * passes only through a `this-mac` place, as an address does.
+ */
+export function safeNetworkPlaceAllows(
+  destination: { readonly host: string; readonly port: number },
+  places: ReadonlyArray<SafeNetworkPlace>,
+): { readonly host: string; readonly port: number } | undefined {
+  const { port } = destination;
+  if (places.length === 0 || !Number.isInteger(port) || port < 1 || port > 65_535) {
+    return undefined;
+  }
+  const raw = destination.host.toLowerCase();
+  if (raw === "localhost" || raw === "localhost.") {
+    return safeNetworkHoldsAddress(places, "127.0.0.1", port)
+      ? { host: "127.0.0.1", port }
+      : undefined;
+  }
+  if (parseNetworkAddress(raw) !== undefined) {
+    const host = raw.startsWith("[") ? raw.slice(1, -1) : raw;
+    return safeNetworkHoldsAddress(places, raw, port) ? { host, port } : undefined;
+  }
+  const name = canonicalToolEgressHost(destination.host);
+  if (name.kind !== "name") return undefined;
+  return placeNamesHost(places, name.host, port) ? { host: name.host, port } : undefined;
+}
+
+/**
  * Whether the proxy may connect to a private address a destination resolved
  * to, once the decision above allowed it. A public address needs no such
  * check. A private one passes inside a trusted range or tag, on loopback at

@@ -137,10 +137,15 @@ describe("automation contracts", () => {
     expect(() => decodeAutomationTrigger({ ...trigger, timeZone: "not/a-time-zone" })).toThrow();
   });
 
-  it("decodes a bounded definition and fails closed on Chat, excess, and unconfirmed targets", () => {
+  it("decodes a bounded definition and fails closed on a mode its binding does not match, excess, and unconfirmed targets", () => {
     expect(decodeAutomationDefinition(definition)).toEqual(definition);
     expect(() => decodeAutomationDefinition({ ...definition, unexpected: true })).toThrow();
-    expect(() => decodeAutomationDefinition({ ...definition, mode: "chat" })).toThrow();
+    expect(() =>
+      decodeAutomationEvent({
+        eventName: "automation-definition-created@1",
+        payload: { automation: { ...definition, mode: "chat" } },
+      }),
+    ).toThrow();
     expect(() =>
       decodeAutomationDefinition({
         ...definition,
@@ -153,6 +158,75 @@ describe("automation contracts", () => {
         taskPrompt: "x".repeat(10_000),
       }),
     ).toThrow();
+  });
+
+  // The persisted-definition policy runs when a definition rides in an event.
+  const persists = (automation: object) =>
+    decodeAutomationEvent({
+      eventName: "automation-definition-created@1",
+      payload: { automation },
+    });
+
+  it("decodes a Chat routine that keeps Chat's authority and has no level or thread to return to", () => {
+    const chatAuthority = {
+      ...approvalAuthority,
+      filesystem: false,
+      shell: false,
+      git: false,
+      subagents: false,
+    };
+    const chat = {
+      ...definition,
+      mode: "chat" as const,
+      binding: {
+        kind: "chat" as const,
+        hostId: "local",
+        projectId: ids.project,
+        projectVersion: 4,
+      },
+      executionProfile: { ...definition.executionProfile, mode: "chat" as const },
+      authorityProfile: {
+        ...definition.authorityProfile,
+        requested: chatAuthority,
+        effective: chatAuthority,
+      },
+      deliveryTarget: { ...target, mode: "chat" as const },
+    };
+    expect(persists(chat)).toMatchObject({ eventName: "automation-definition-created@1" });
+    // A folder, a shell, or Git would widen what Chat holds.
+    for (const widened of ["filesystem", "shell", "git", "subagents"] as const) {
+      expect(() =>
+        persists({
+          ...chat,
+          authorityProfile: {
+            ...chat.authorityProfile,
+            requested: { ...chatAuthority, [widened]: true },
+            effective: { ...chatAuthority, [widened]: true },
+          },
+        }),
+      ).toThrow();
+    }
+    expect(() => persists({ ...chat, projectLevel: "opted-in" })).toThrow();
+    expect(() => persists({ ...chat, runLevel: "ask-first" })).toThrow();
+    expect(() =>
+      persists({
+        ...chat,
+        targetPolicy: "same-thread",
+        originThreadId: ids.run,
+        trigger: { kind: "once", scheduledAt: weeklyDueAt },
+        nextDueAt: weeklyDueAt,
+        nextDueResolution: undefined,
+      }),
+    ).toThrow();
+  });
+
+  it("takes one level choice on a Work or Code routine: the Project's, or a named one", () => {
+    expect(persists({ ...definition, runLevel: "full-access" })).toBeDefined();
+    expect(persists({ ...definition, projectLevel: "opted-in" })).toBeDefined();
+    expect(() =>
+      persists({ ...definition, projectLevel: "opted-in", runLevel: "ask-first" }),
+    ).toThrow();
+    expect(() => persists({ ...definition, runLevel: "plan" })).toThrow();
   });
 
   it("validates definitions embedded in every persisted definition event", () => {

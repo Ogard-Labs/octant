@@ -1543,6 +1543,18 @@ export const ProviderCapabilities = Schema.Struct({
   citations: ProviderCapabilitySupport,
   harnessAutoReview: ProviderCapabilitySupport,
   /**
+   * Which per-call verdicts the runtime's own reviewer reports at Reviewed:
+   * `allow` for a call it approved without asking, `deny` for one it refused.
+   * A verdict the runtime does not report reads unsupported; Octant never
+   * infers one. Absent reads as unsupported for both.
+   */
+  reviewVerdicts: Schema.optional(
+    Schema.Struct({
+      allow: ProviderCapabilitySupport,
+      deny: ProviderCapabilitySupport,
+    }).annotations(strict),
+  ),
+  /**
    * Whether a thread may choose the runtime's own tool that publishes a
    * document to the person's account with the model's provider, outside this
    * host, per mode. Absent reads as unsupported in every mode. Supported means
@@ -2890,6 +2902,23 @@ export const ProviderRuntimeEvent = Schema.Union(
     requestId: Schema.NonEmptyTrimmedString,
     action: Schema.NonEmptyTrimmedString,
     description: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+  /**
+   * The runtime's own reviewer answered one approval itself, so the person was
+   * not asked. It reports only what the runtime sent: `allow` or `deny` for
+   * the call named by `toolCallId`, and the reviewer's risk grade and reason
+   * when it gave them. A runtime that reports no per-call verdict sends none
+   * and says so in `reviewVerdicts`. `argument` is the call reduced to one
+   * redacted, bounded line, as on `tool-start`.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("review-verdict"),
+    verdict: Schema.Literal("allow", "deny"),
+    toolCallId: Schema.optional(Schema.NonEmptyTrimmedString),
+    argument: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
+    riskLevel: Schema.optional(Schema.Literal("low", "medium", "high", "critical")),
+    reason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(280))),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

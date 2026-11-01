@@ -471,7 +471,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           sandboxPath,
         });
         const loopbackRules =
-          input.loopbackPorts === undefined || input.loopbackPorts.length === 0
+          platform !== "darwin" ||
+          input.loopbackPorts === undefined ||
+          input.loopbackPorts.length === 0
             ? []
             : input.loopbackPorts.map(
                 (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
@@ -513,6 +515,13 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 : { extraBoundRoots: input.extraFolders }),
               temporaryDirectory,
               networkEgress,
+              // On Linux the capsule reaches the tool bridges through the
+              // forwarder's loopback relay; Seatbelt opens them above.
+              ...(platform === "linux" &&
+              typeof networkEgress === "object" &&
+              (input.loopbackPorts?.length ?? 0) > 0
+                ? { loopbackRelayPorts: input.loopbackPorts }
+                : {}),
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
               // Chat and Plan have no shell: ACP terminal/* refusals only
               // cover providers that route shell through the protocol, so an

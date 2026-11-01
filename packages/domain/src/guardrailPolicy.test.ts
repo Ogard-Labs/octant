@@ -3,7 +3,9 @@ import {
   AUTO_UNSUPPORTED_REASON,
   defaultPermissionModeFor,
   guardrailLevelOf,
+  outsideContentRecordedOnly,
   permissionModeOf,
+  permissionModeOfWorkAccess,
   clampWorkAccess,
   chosenAutoReviewer,
   resolveAutoReviewer,
@@ -133,6 +135,13 @@ describe("Work levels", () => {
     expect(workThreadAccessOf("full-access")).toEqual(threadAccessOf("full-access"));
     expect(workAccessOfPermissionMode("plan")).toBeUndefined();
     expect(workAccessOfPermissionMode("accept-edits")).toBe("auto-accept-edits");
+  });
+
+  it("maps each Work level back to the Code mode that stands for it", () => {
+    for (const mode of ["auto", "ask-first", "accept-edits", "full-access"] as const) {
+      const access = workAccessOfPermissionMode(mode);
+      expect(access === undefined ? undefined : permissionModeOfWorkAccess(access)).toBe(mode);
+    }
   });
 
   it("records shell and Git at the level a Work turn ran with", () => {
@@ -289,5 +298,23 @@ describe("who reviews at Auto", () => {
         capabilities: { ...claudeOrCodex, shield: shieldRuns },
       }),
     ).toBe(false);
+  });
+});
+
+describe("outside content at each level", () => {
+  it("is recorded only for a Work or Code thread at Full access, and gates everywhere else", () => {
+    for (const mode of ["work", "code"] as const) {
+      expect(outsideContentRecordedOnly({ mode, executionPolicy: "full-access" })).toBe(true);
+      for (const executionPolicy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
+        expect([
+          mode,
+          executionPolicy,
+          outsideContentRecordedOnly({ mode, executionPolicy }),
+        ]).toEqual([mode, executionPolicy, false]);
+      }
+    }
+    expect(outsideContentRecordedOnly({ mode: "chat", executionPolicy: "full-access" })).toBe(
+      false,
+    );
   });
 });

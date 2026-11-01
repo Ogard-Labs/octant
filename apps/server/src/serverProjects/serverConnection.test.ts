@@ -121,6 +121,26 @@ describe.skipIf(!canRunThrowawaySshd)("a call on a throwaway server", () => {
     expect((await pending).status).toBe("unreachable");
   }, 40_000);
 
+  it("is unreachable when the server ends the session itself, whatever ssh prints", async () => {
+    // The session's own sshd process is the login shell's parent; killing it
+    // closes the connection from the server's side, as a restart would.
+    const call = await connection.run(server(), {
+      script: `kill -9 "$(ps -o ppid= -p "$PPID" | tr -d ' ')" "$PPID"; sleep 5`,
+      timeoutMs: 15_000,
+      maxOutputBytes: 1_024,
+    });
+    expect(call.status).toBe("unreachable");
+  });
+
+  it("keeps a script's own exit status apart from a lost connection", async () => {
+    const call = await connection.run(server(), {
+      script: "exit 255",
+      timeoutMs: 10_000,
+      maxOutputBytes: 1_024,
+    });
+    expect(call).toMatchObject({ status: "ran", exitCode: 254 });
+  });
+
   it("hangs up a timed-out terminal call's process on the server", async () => {
     const marker = join(sshd.root, "still-running");
     const call = await connection.run(server(), {

@@ -44,6 +44,7 @@ import {
 import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
 import { REQUIRED_GUARDS, sanitizeClaudeEnvironment } from "./claudeEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
+import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
 export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnClaudeCodeProcess"]>;
 
@@ -67,6 +68,13 @@ export interface ClaudeRuntimeConfinement {
    * take the fork and exec grants away from the process.
    */
   readonly runsCommands?: boolean;
+  /**
+   * The runtime's own network on the host's egress proxy. Every launch
+   * carries its proxy variables, so the process's inference and in-process
+   * web fetch go to the launch's listener; a Plan launch's OS rules then
+   * reach that listener and nothing else. Absent keeps open network.
+   */
+  readonly network?: ProviderRuntimeProxiedNetwork;
 }
 
 /**
@@ -974,7 +982,17 @@ function confineClaudeLaunch(
   options: ResolvedClaudeProcessOptions,
 ): { readonly spawnOptions: SpawnOptions; readonly release: () => void } {
   if (!CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy)) {
-    return { spawnOptions, release: () => undefined };
+    // Outside Plan the process is not wrapped: Claude's own sandbox holds
+    // its commands, and macOS refuses a sandbox inside another, so the proxy
+    // variables are what route the process. A client that ignores them keeps
+    // open network here; Plan's OS rules below do not depend on them.
+    return {
+      spawnOptions:
+        confinement.network === undefined
+          ? spawnOptions
+          : { ...spawnOptions, env: { ...spawnOptions.env, ...confinement.network.environment } },
+      release: () => undefined,
+    };
   }
   if (!isAbsolute(confinement.projectRoot) || !existsSync(confinement.projectRoot)) {
     throw new ProcessConfinementError(
@@ -1127,12 +1145,16 @@ function confineClaudeLaunch(
       // The runtime calls its own control plane, so it resolves the runtime
       // egress policy rather than the thread default. This driver
       // carries Code threads, and the policy no longer reads the mode.
-      networkEgress: materializeOsNetworkEgress(
-        resolveProviderRuntimeEgressPolicy({
-          mode: "code",
-          executionPolicy: confinement.executionPolicy,
-        }),
-      ),
+      // With limits on, the launch's own listener is all it reaches.
+      networkEgress:
+        confinement.network === undefined
+          ? materializeOsNetworkEgress(
+              resolveProviderRuntimeEgressPolicy({
+                mode: "code",
+                executionPolicy: confinement.executionPolicy,
+              }),
+            )
+          : { kind: "proxied", endpoint: confinement.network.endpoint },
       // Plan is read-only at the sandbox, not only in the provider's permission
       // layer: the checkout reads and never writes, and the runtime execs
       // nothing but itself, `/usr/bin/security` for a Keychain sign-in, and on
@@ -1156,6 +1178,7 @@ function confineClaudeLaunch(
         // granting the tree every Claude process of the user shares.
         env: {
           ...spawnOptions.env,
+          ...confinement.network?.environment,
           TMPDIR: temporaryDirectory,
           CLAUDE_CODE_TMPDIR: temporaryDirectory,
           ...(runsCommands

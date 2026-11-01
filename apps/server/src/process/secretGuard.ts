@@ -124,6 +124,22 @@ export function secretGuardRefusal(
 }
 
 /**
+ * Whether a path the agent wrote is one the list in force protects: an
+ * absolute path, or one under `~/` or `$HOME/`. A relative path answers no,
+ * since only its caller knows what it is relative to. Octant Shield asks this
+ * to flag and judge a call; it never allows anything.
+ */
+export function isProtectedSecretPath(
+  path: string,
+  options: { readonly platform?: NodeJS.Platform; readonly homeDirectory?: string } = {},
+): boolean {
+  const homeDirectory = options.homeDirectory ?? homedir();
+  const home = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/.exec(path);
+  const absolute = home === null ? path : `${homeDirectory}${path.slice(home[0].length)}`;
+  return secretGuardRefusal(absolute, { ...options, homeDirectory }) !== undefined;
+}
+
+/**
  * The refusal for a search (a grep, a glob, a listing) rooted at `root`, or
  * undefined. A search reads every file beneath its root, so a root at or
  * above an existing protected file is refused, naming that file: a search

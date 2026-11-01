@@ -1366,6 +1366,16 @@ export class WorkTurnService {
   }
 
   /**
+   * Octant Shield's decision on an approval a Work thread's own tools asked
+   * for (the Octant Harness's), shown as a review row on its running turn.
+   */
+  recordShieldReview(
+    review: Parameters<NonNullable<WorkTurnRuntimePort["recordShieldReview"]>>[0],
+  ): void {
+    this.#turnRuntime.recordShieldReview?.(review);
+  }
+
+  /**
    * A compaction of the thread's session ended. The thread's live feed carries
    * its receipt, or its failure, so a window waiting on it need not poll.
    */
