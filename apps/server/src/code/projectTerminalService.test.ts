@@ -874,6 +874,19 @@ describe("a server Project's terminal", () => {
     });
   });
 
+  it("ends the shell on removal even while the catalog still lists the Project", async () => {
+    const { service, terminals, events } = onServer().setup;
+    await service.execute(windowId, "local-window", start());
+
+    await service.revokeProject(projectId);
+
+    expect(terminals.terminated).toEqual([ids.terminal]);
+    expect(events().at(-1)?.payload).toMatchObject({
+      kind: "project-terminal-ended",
+      reason: "authority-revoked",
+    });
+  });
+
   it("keeps a running shell when its server Project is settled unchanged", async () => {
     const { service, terminals } = onServer().setup;
     await service.execute(windowId, "local-window", start());

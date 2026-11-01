@@ -218,7 +218,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         }
         // A removed server Project ends the shells logged in for it.
         if (event.eventName === SERVER_PROJECTS_EVENT_NAMES.removed) {
-          void projectTerminals.settleProject(
+          void projectTerminals.revokeProject(
             decodeServerProjectRemovedPayload(event.payload).projectId,
           );
         }

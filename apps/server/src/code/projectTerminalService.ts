@@ -297,6 +297,21 @@ export class ProjectTerminalService {
     await Promise.allSettled(ending);
   }
 
+  /**
+   * End every running terminal of a Project that is gone, without reading
+   * the catalog: a server Project's removal is committed to the journal
+   * before its catalog forgets it, so a settle at that moment would still
+   * find the Project and keep its shells.
+   */
+  async revokeProject(projectId: ProjectId): Promise<void> {
+    const ending: Array<Promise<void>> = [];
+    for (const owner of this.#owners.values()) {
+      if (owner.ended || String(owner.projectId) !== String(projectId)) continue;
+      ending.push(this.#end(owner.terminalId, owner, "authority-revoked"));
+    }
+    await Promise.allSettled(ending);
+  }
+
   async #suggest(windowId: WindowId, projectId: ProjectId): Promise<ProjectTerminalResult> {
     const authority = this.#authority(windowId, projectId);
     if (authority.kind === "refused") return refused(authority.reason, authority.message);
