@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import {
@@ -115,6 +115,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's file browser", () => {
 
   it("saves the editor's text, and refuses a save when the file changed on the server since", async () => {
     const browser = files();
+    chmodSync(join(root, "README.md"), 0o751);
     const opened = await browser.open({ path: path("README.md") });
     if (opened.status !== "editable") throw new Error("README.md did not open.");
     const saved = await browser.save({
@@ -128,6 +129,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's file browser", () => {
       metadata: { digest: sha("# Service\nedited here\n") },
     });
     expect(readFileSync(join(root, "README.md"), "utf8")).toBe("# Service\nedited here\n");
+    expect(statSync(join(root, "README.md")).mode & 0o777).toBe(0o751);
     writeFileSync(join(root, "README.md"), "changed on the server\n");
     expect(
       await browser.save({

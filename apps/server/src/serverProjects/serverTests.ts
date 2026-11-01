@@ -149,6 +149,9 @@ export function createServerRepositoryTests(
           stderr: new Uint8Array(),
           parserFailed: false,
           cleanupUncertain: ran.status !== "ran",
+          // The connection stops reading at the bound, so a cut-off run is
+          // not complete evidence even when it exited zero.
+          outputTruncated: ran.truncated,
         };
       },
       readArtifact: async (input) => {

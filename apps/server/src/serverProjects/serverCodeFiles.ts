@@ -76,8 +76,10 @@ for f; do
   printf '%s\\n' "$s"
 done`;
 
+/** The copy keeps the file's mode, so a save neither drops an executable bit nor widens a private file. */
 const PUT_SCRIPT = `exec 2>/dev/null
 t="$1.octant-save.$$"
+cp -p -- "$1" "$t" || { rm -f -- "$t"; exit 3; }
 cat > "$t" || { rm -f -- "$t"; exit 3; }
 mv -f -- "$t" "$1" || { rm -f -- "$t"; exit 3; }`;
 
