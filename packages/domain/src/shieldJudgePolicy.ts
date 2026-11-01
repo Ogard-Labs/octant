@@ -173,7 +173,7 @@ const SECRET_PATH_TEXT =
 
 /** Files on a server that hold its own secrets: password hashes, host keys, private TLS keys. */
 const SERVER_SECRET_PATH =
-  /\/etc\/(?:shadow|gshadow|sudoers)\b|ssh_host_\w*key\b|\/etc\/ssl\/private\b|\.ssh\/|\/root\/\./;
+  /\/etc\/(?:shadow|gshadow|sudoers)\b|ssh_host_\w{0,64}key\b|\/etc\/ssl\/private\b|\.ssh\/|\/root\/\./;
 
 const SSH_KEY_PATH_TEXT =
   /(?:^|[\s"'=:/])(?:\.ssh\/(?!known_hosts\b|config\b)\S+|id_(?:rsa|dsa|ecdsa|ed25519)\b)/i;
