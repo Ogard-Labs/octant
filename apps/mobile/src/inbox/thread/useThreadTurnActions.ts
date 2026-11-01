@@ -31,6 +31,8 @@ interface OpenRewind {
   readonly files: RewindSheetProps["files"];
   readonly rollback?: "native" | "handoff";
   readonly busy: boolean;
+  /** The Chat version the sheet was opened on; a rewind confirms only against it. */
+  readonly chatVersion?: number;
   readonly message?: string;
 }
 
@@ -131,7 +133,12 @@ export function useThreadTurnActions(input: ThreadTurnActionsInput) {
       return;
     }
     setNotice(undefined);
-    const base = { fromId, prompt: targets.rewindPrompt, busy: false } as const;
+    const base = {
+      fromId,
+      prompt: targets.rewindPrompt,
+      busy: false,
+      ...(input.chatThread === undefined ? {} : { chatVersion: input.chatThread.version }),
+    } as const;
     if (mode !== "code" || input.codeThread === undefined) {
       setOpen({
         ...base,
@@ -182,6 +189,19 @@ export function useThreadTurnActions(input: ThreadTurnActionsInput) {
     if (transport === undefined || identity === undefined || current === undefined) return;
     if (!gate.allowProductMutations) {
       setOpen({ ...current, message: gate.message });
+      return;
+    }
+    // The sheet named the turns this rewind removes. If the conversation moved
+    // since, the host would take the newer turns out unseen, so ask again.
+    if (
+      mode === "chat" &&
+      current.chatVersion !== undefined &&
+      input.chatThread?.version !== current.chatVersion
+    ) {
+      setOpen({
+        ...current,
+        message: "The conversation changed while this was open. Close it and try again.",
+      });
       return;
     }
     setOpen({ ...current, busy: true });
