@@ -37,7 +37,7 @@ export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string
 };
 
 /**
- * Entries were probed on 2026-10-20: each sign-in server answered a bare
+ * Entries were probed on 2026-10-20 (Doop on 2026-11-01): each sign-in server answered a bare
  * request with 401 and resource metadata, its authorization server published
  * metadata with PKCE S256 and dynamic client registration; each key server
  * answered 401 without registration; each open server answered without a
@@ -112,6 +112,14 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     description: "Read files, frames, and design context.",
     category: "popular",
     url: "https://mcp.figma.com/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "doop",
+    displayName: "Doop",
+    description: "Build and refine designs on a shared canvas, and open pull requests.",
+    category: "popular",
+    url: "https://doop.design/mcp",
     auth: { kind: "sign-in" },
   },
   {
