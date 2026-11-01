@@ -1011,6 +1011,23 @@ export class BrowserAutomationService {
     });
   }
 
+  /**
+   * What each ref of the thread's latest snapshot names. A saved flow describes
+   * an element by this role and name, and a replay finds one on a fresh page by
+   * them; the ref ids themselves never leave the server.
+   */
+  snapshotRefs(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+  ): ReadonlyArray<BrowserPageSnapshotRef> {
+    const context = this.inspectThread(windowId, threadId).context;
+    if (context === undefined || context.state !== "active") return [];
+    const owned = this.#contexts.get(context.contextId);
+    if (owned === undefined || owned.windowId !== windowId || owned.threadId !== threadId)
+      return [];
+    return [...(owned.refs?.byRef.values() ?? [])];
+  }
+
   inspectThread(windowId: WindowId, threadId: BrowserThreadId): BrowserAutomationSnapshot {
     const threadContexts = [...this.#contexts.values()]
       .filter(

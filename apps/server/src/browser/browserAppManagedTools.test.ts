@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { BrowserAutomationSnapshot, ToolActionAuthority } from "@octant/contracts";
 import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
 import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
+import { browserToolInputRecord, flowDecision } from "./browserFlows";
+import { parseBrowserToolInput } from "./browserToolOperations";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as never;
 const threadId = "20000000-0000-4000-8000-000000000001" as never;
@@ -649,6 +651,9 @@ describe("browser diagnostics reach the provider-facing result", () => {
       "tab-switch": { tabId: "t1" },
       "tab-close": { tabId: "t2" },
       steps: { steps: [{ operation: "snapshot" }] },
+      "flow-save": { name: "Check the form" },
+      "flow-list": {},
+      "flow-run": { name: "Check the form" },
       resize: { width: 390, height: 844 },
       "sign-in": { reason: "The dashboard needs your account." },
       "read-page": {},
@@ -1042,5 +1047,113 @@ describe("octant_browser resize and device emulation", () => {
     const { act, result } = resizeWith({ preset: "phone", colorScheme: "dark" }, "plan");
     expect((await result).result).toEqual({ error: "plan-mode-read-only" });
     expect(act).not.toHaveBeenCalled();
+  });
+});
+
+describe("octant_browser flow operations", () => {
+  const parse = (input: unknown) =>
+    parseBrowserToolInput(JSON.stringify(input), { allowProfile: true });
+
+  it("reads flow-save and flow-run with a name of 1 to 80 characters that is already trimmed", () => {
+    expect(parse({ operation: "flow-save", name: "Check the form" })).toEqual({
+      operation: "flow-save",
+      name: "Check the form",
+    });
+    expect(parse({ operation: "flow-run", name: "x".repeat(80) })?.operation).toBe("flow-run");
+    for (const name of ["", " padded ", "x".repeat(81), 3, undefined]) {
+      expect(parse({ operation: "flow-run", name })).toBeUndefined();
+      expect(parse({ operation: "flow-save", name })).toBeUndefined();
+    }
+    expect(parse({ operation: "flow-list" })).toEqual({ operation: "flow-list" });
+    expect(parse({ operation: "flow-list", name: "x" })).toBeUndefined();
+    expect(parse({ operation: "flow-run", name: "x", include: ["snapshot"] })).toBeUndefined();
+  });
+
+  it("keeps a flow operation out of a batch", () => {
+    for (const operation of [
+      { operation: "flow-run", name: "x" },
+      { operation: "flow-save", name: "x" },
+      { operation: "flow-list" },
+    ]) {
+      expect(parse({ operation: "steps", steps: [operation] })).toBeUndefined();
+    }
+  });
+
+  it("answers that flows are unavailable where the host keeps none", async () => {
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => snapshot(),
+        create: vi.fn(),
+        act: vi.fn(),
+        releaseThread: vi.fn(),
+      },
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    expect(
+      await tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({ operation: "flow-list" }),
+      }),
+    ).toMatchObject({ isError: true, result: { error: "browser-flows-unavailable" } });
+  });
+
+  it("writes an operation back as the tool takes it, and a stored step reads again to the same operation", () => {
+    for (const call of [
+      {
+        operation: "wait",
+        conditions: [{ text: "Saved", present: true }, { urlContains: "/done" }],
+        match: "any",
+        timeoutMs: 2000,
+      },
+      { operation: "wait", conditions: [{ ref: "e4", state: "visible" }], match: "all" },
+      { operation: "drag", ref: "e2", toRef: "e3" },
+      { operation: "resize", width: 390, height: 844 },
+      { operation: "type", ref: "e2", text: "Ada" },
+      { operation: "scroll", deltaY: 200 },
+      { operation: "navigate", url: "https://example.com/a" },
+    ]) {
+      const parsed = parse({ ...call, expectedObservationRevision: 4 });
+      if (parsed === undefined || parsed.operation === "steps") throw new Error("not parsed");
+      const record = browserToolInputRecord(parsed);
+      expect(record.expectedObservationRevision).toBeUndefined();
+      expect(parse(record)).toEqual(parse(call));
+    }
+  });
+
+  it("keeps reads and listings out of a flow and refuses what needs the person", () => {
+    const decide = (input: unknown) => {
+      const parsed = parse(input);
+      if (parsed === undefined) throw new Error("not parsed");
+      return flowDecision(parsed).kind;
+    };
+    for (const operation of ["snapshot", "screenshot", "read-page", "diagnostics", "tab-list"]) {
+      expect(decide({ operation })).toBe("unstored");
+    }
+    expect(decide({ operation: "click", selector: "#go" })).toBe("stored");
+    expect(decide({ operation: "upload", selector: "#f", files: ["a.pdf"] })).toBe(
+      "needs-a-person",
+    );
+    expect(decide({ operation: "sign-in" })).toBe("needs-a-person");
+    expect(decide({ operation: "stop" })).toBe("needs-a-person");
+    expect(decide({ operation: "navigate", url: "https://example.com", profile: "project" })).toBe(
+      "needs-a-person",
+    );
+    expect(decide({ operation: "navigate", url: "https://user:pw@example.com/" })).toBe(
+      "needs-a-person",
+    );
+    expect(decide({ operation: "navigate", url: "https://example.com/?code=1#top" })).toBe(
+      "needs-a-person",
+    );
+    expect(decide({ operation: "navigate", url: "https://example.com/?page=2#top" })).toBe(
+      "stored",
+    );
   });
 });

@@ -1180,6 +1180,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "browser profiles sign out signed in cookies project personal private site data clear sign-in",
         },
         {
+          id: settingId("browser-flows"),
+          label: "Browser flows",
+          scope: "host",
+          keywords: "browser flows saved replay record repeat agent steps",
+        },
+        {
           id: settingId("browser-extensions"),
           label: "Browser extensions",
           scope: "host",

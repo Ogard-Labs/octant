@@ -7,6 +7,7 @@ import {
   BROWSER_DEVICE_PRESETS,
   BROWSER_RESIZE_BOUNDS,
   BrowserColorScheme,
+  MAX_BROWSER_FLOW_NAME_LENGTH,
   MAX_BROWSER_UPLOAD_FILES,
   MAX_BROWSER_WAIT_MS,
   type BrowserDevicePreset,
@@ -35,11 +36,34 @@ export type BrowserToolTarget =
 /** What an action may bring back besides what changed; see the contract. */
 export type BrowserToolInclude = ReadonlyArray<"text" | "screenshot" | "snapshot">;
 
-/** One operation of a `steps` call: anything but a batch, an upload, stop, or help. */
+/** One operation of a `steps` call: anything but a batch, an upload, stop, a flow, or help. */
 export type BrowserToolStep = Exclude<
   BrowserToolInput,
-  { readonly operation: "steps" | "upload" | "stop" | "sign-in" }
+  {
+    readonly operation:
+      | "steps"
+      | "upload"
+      | "stop"
+      | "sign-in"
+      | "flow-save"
+      | "flow-list"
+      | "flow-run";
+  }
 >;
+
+/** The operations that save, list, and replay the Project's flows. */
+export type BrowserToolFlowInput = Extract<
+  BrowserToolInput,
+  { readonly operation: "flow-save" | "flow-list" | "flow-run" }
+>;
+
+export function isBrowserToolFlowInput(input: BrowserToolInput): input is BrowserToolFlowInput {
+  return (
+    input.operation === "flow-save" ||
+    input.operation === "flow-list" ||
+    input.operation === "flow-run"
+  );
+}
 
 /** How many operations one `steps` call may carry. */
 export const MAX_BROWSER_TOOL_STEPS = 10;
@@ -83,6 +107,8 @@ export type BrowserToolInput = {
   | { readonly operation: "tab-switch" | "tab-close"; readonly tabId: string }
   | { readonly operation: "steps"; readonly steps: ReadonlyArray<BrowserToolStep> }
   | { readonly operation: "sign-in"; readonly reason?: string }
+  | { readonly operation: "flow-save" | "flow-run"; readonly name: string }
+  | { readonly operation: "flow-list" }
 );
 
 /**
@@ -124,7 +150,8 @@ export function parseBrowserToolInput(
       one.operation === "steps" ||
       one.operation === "upload" ||
       one.operation === "stop" ||
-      one.operation === "sign-in"
+      one.operation === "sign-in" ||
+      isBrowserToolFlowInput(one)
     )
       return undefined;
     parsedSteps.push(one);
@@ -291,6 +318,18 @@ function parseBrowserToolRecord(
     return { ...common, operation, ...named, files: files as ReadonlyArray<string> };
   }
   if (operation === "tab-list" && only()) return { ...common, operation };
+  if (operation === "flow-list" && only()) return { ...common, operation };
+  if ((operation === "flow-save" || operation === "flow-run") && only("name")) {
+    // The stored name is trimmed, so the call must already be: a name that
+    // differs from itself once saved could never be run again.
+    const name = record.name;
+    return typeof name === "string" &&
+      name !== "" &&
+      name === name.trim() &&
+      name.length <= MAX_BROWSER_FLOW_NAME_LENGTH
+      ? { ...common, operation, name }
+      : undefined;
+  }
   if (operation === "sign-in" && only("reason")) {
     if (record.reason !== undefined && !text("reason", 300)) return undefined;
     return {
@@ -561,6 +600,9 @@ export function browserToolAction(
     case "stop":
     case "steps":
     case "sign-in":
+    case "flow-save":
+    case "flow-list":
+    case "flow-run":
       return undefined;
   }
 }
