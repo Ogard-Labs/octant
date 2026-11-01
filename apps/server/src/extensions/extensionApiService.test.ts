@@ -196,6 +196,27 @@ describe("extension inspection and lifecycle API service", () => {
     expect(captured[0]?.manifest.components[0]?.entryPoint).toBe("entry:server");
   });
 
+  it("asks the lifecycle to trust only when the install command says so", async () => {
+    const captured: Array<InspectedExtensionPackage> = [];
+    const state = lifecycle(captured);
+    const install = vi.spyOn(state, "install");
+    const resolved = resolvedPackage();
+    const service = new ExtensionApiService({
+      lifecycle: state,
+      resolver: { resolve: async () => resolved },
+    });
+    await service.execute({
+      kind: "inspect-package",
+      source: { kind: "catalog", catalogId: "octant", entryId: "api-fixture" },
+      expectedDigest: resolved.expectedDigest,
+    } as never);
+    const target = { extensionId, packageId, version: "1.0.0", digest: resolved.expectedDigest };
+    await service.execute({ kind: "install-package", ...target } as never);
+    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: false });
+    await service.execute({ kind: "install-package", ...target, trust: true } as never);
+    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: true });
+  });
+
   it("fails closed when lifecycle targets were not inspected or source resolution throws private details", async () => {
     const service = new ExtensionApiService({
       lifecycle: lifecycle([]),

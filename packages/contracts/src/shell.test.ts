@@ -94,6 +94,7 @@ const settings = {
   imageGeneration: { customSources: [] },
   computerUse: { enabled: true, automaticUpdates: true },
   standaloneSkillActivations: {},
+  skillFolders: { providers: [], folders: [] },
   rememberedBrowserOrigins: [],
   rememberedBrowserProfileSites: [],
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },

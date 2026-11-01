@@ -1020,10 +1020,33 @@ describe("ExtensionsSettingsView", () => {
     await waitFor(() =>
       expect(
         c.calls.some(
-          (command) => command.kind === "install-package" && command.version === "1.2.0",
+          (command) =>
+            command.kind === "install-package" &&
+            command.version === "1.2.0" &&
+            command.trust === undefined,
         ),
       ).toBe(true),
     );
+  });
+
+  it("installs untrusted on Confirm install and installs and trusts on Install and trust", async () => {
+    const c = client();
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+    fireEvent.click(viewButton(/marketplace/i));
+    const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
+    fireEvent.change(search, { target: { value: "build" } });
+    fireEvent.click(screen.getByRole("button", { name: /run search/i }));
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /inspect build helper/i }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /install and trust/i }));
+    await waitFor(() =>
+      expect(
+        c.calls.some((command) => command.kind === "install-package" && command.trust === true),
+      ).toBe(true),
+    );
+    expect(c.calls.filter((command) => command.kind === "set-source-trust")).toHaveLength(0);
   });
 
   it("clears stale catalog cards before a later marketplace search fails", async () => {

@@ -27,11 +27,24 @@ export const PROJECT_SKILL_ROOTS = [
   { segments: [".claude", "skills"] as const, sourcePrefix: "claude:", userFolder: ".claude" },
 ] as const;
 
+/**
+ * A skills folder outside the Project and user-global roots: a key provider's
+ * own folder, or one a person added in Settings. The folder is its own root,
+ * wherever it is, and its skills are shared like the user-global ones.
+ */
+export interface ExtraSkillRoot {
+  /** `provider:<id>` or `folder:<digest of the path>`; never the path itself. */
+  readonly sourceRef: string;
+  readonly path: string;
+}
+
 export interface SkillDiscoveryRootSet {
   readonly workingDirectory: string;
   readonly projectRoot: string;
   readonly projectRef: string;
   readonly userGlobalSkillsRoot: string;
+  /** Provider folders the person turned on and folders they added; none by default. */
+  readonly extraSkillRoots?: ReadonlyArray<ExtraSkillRoot>;
   /** The thread whose working directory this is; skills below the Project root belong to it. */
   readonly scope?: StandaloneSkillScope;
   /**
@@ -80,7 +93,16 @@ export class SkillDiscoveryService {
   async reconcile(): Promise<SkillCatalog> {
     const records: Array<StandaloneSkillRecord> = [];
     const seenGlobalRoots = new Set<string>();
+    const seenExtraRoots = new Set<string>();
     for (const roots of await this.#roots.resolve()) {
+      for (const extra of roots.extraSkillRoots ?? []) {
+        const key = `${extra.sourceRef}\u0000${resolve(extra.path)}`;
+        if (seenExtraRoots.has(key)) continue;
+        seenExtraRoots.add(key);
+        records.push(
+          ...(await this.#scanSkillsDirectory(extra.path, extra.sourceRef, undefined, {})),
+        );
+      }
       records.push(...(await this.#discoverProjectRoots(roots)));
       if (!seenGlobalRoots.has(resolve(roots.userGlobalSkillsRoot))) {
         seenGlobalRoots.add(resolve(roots.userGlobalSkillsRoot));
@@ -119,6 +141,7 @@ export class SkillDiscoveryService {
         }
       }
       await this.#watchDirectory(roots.userGlobalSkillsRoot, seen);
+      for (const extra of roots.extraSkillRoots ?? []) await this.#watchDirectory(extra.path, seen);
     }
   }
 
