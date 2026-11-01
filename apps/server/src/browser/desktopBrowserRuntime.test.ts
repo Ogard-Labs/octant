@@ -102,6 +102,26 @@ describe("DesktopBrowserRuntime", () => {
     ).rejects.toMatchObject({ name: "BrowserTargetStaleError" });
   });
 
+  it("reports a timed-out wait with the conditions that never held", async () => {
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch: vi.fn(async () =>
+        Response.json(
+          { error: "wait-timed-out", message: "The wait timed out after 300 ms. Not met: x." },
+          { status: 422 },
+        ),
+      ),
+    });
+
+    await expect(
+      runtime.act(contextId, { kind: "wait", target: "#x" }, new AbortController().signal),
+    ).rejects.toMatchObject({
+      name: "BrowserWaitTimedOutError",
+      message: "The wait timed out after 300 ms. Not met: x.",
+    });
+  });
+
   it("reports only native contexts whose renderer process disappeared", async () => {
     vi.useFakeTimers();
     try {
