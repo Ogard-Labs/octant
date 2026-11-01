@@ -243,6 +243,12 @@ describe("Octant Shield's Watcher", () => {
     "printenv NPM_TOKEN",
     "/usr/bin/printenv DB_PASSWORD",
     "sudo printenv STRIPE_SECRET_KEY",
+    `echo "token='$GITHUB_TOKEN'"`,
+    "if true; then echo $GITHUB_TOKEN; fi",
+    "for i in 1; do echo $NPM_TOKEN; done",
+    "(echo $GITHUB_TOKEN)",
+    "sh -c 'echo $GITHUB_TOKEN'",
+    'cd app && bash -lc "printenv DB_PASS"',
   ])("flags a command that prints a secret-holding variable: %s", (command) => {
     expect(callPrintsSecretEnvironment({ command }, "")).toBe(true);
   });
@@ -255,6 +261,8 @@ describe("Octant Shield's Watcher", () => {
     "env NODE_ENV=test bun run test",
     "env DB_PASSWORD",
     "printenv HOME",
+    "sh -c 'echo $HOME'",
+    "echo $AUTH_METHOD $PASS",
   ])("leaves a command that prints no secret-holding variable alone: %s", (command) => {
     expect(callPrintsSecretEnvironment({ command }, "")).toBe(false);
   });
@@ -268,6 +276,18 @@ describe("Octant Shield's Watcher", () => {
     expect(callPrintsSecretEnvironment({ command: "env" }, "HOME=/Users/a\nAPI_KEY=\n")).toBe(
       false,
     );
+    expect(callPrintsSecretEnvironment({ command: "bun run test" }, "PASS=12\nFAIL=0\n")).toBe(
+      false,
+    );
+  });
+
+  it("reads a long hostile command and output in linear time", () => {
+    const started = performance.now();
+    callPrintsSecretEnvironment(
+      { command: `${"sh -x -x -x -x ".repeat(4_000)}'${"'".repeat(20_000)}` },
+      `${"A".repeat(200)}=\n`.repeat(2_000),
+    );
+    expect(performance.now() - started).toBeLessThan(500);
   });
 
   it("reads only a shell command's printing, never another tool's result", () => {

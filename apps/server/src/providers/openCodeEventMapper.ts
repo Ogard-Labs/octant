@@ -522,6 +522,8 @@ export function mapOpenCodeEvent(
           return assertNever(event.properties.status);
       }
     case "session.idle":
+      // A call the turn left without an outcome never reports one now.
+      context.outsideContentCalls?.clear();
       return [completed(context, event.properties.sessionID)];
     case "session.error":
       return [mapProviderError(context, event.properties.error)];

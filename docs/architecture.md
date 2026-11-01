@@ -10941,8 +10941,13 @@ short-lived cloud credentials from the broker.
     says where or which secret (`_FILE`, `_PATH`, `_SOCK`, `_ID`) holds none,
     so `SSH_AUTH_SOCK` and `AWS_ACCESS_KEY_ID` are left alone. A variable
     handed to another program (`curl -H "Authorization: Bearer $TOKEN"`) is a
-    use, which the Judge weighs, not a print. Only a call with a shell command
-    is read: a file tool's result is the file, which the list covers. The
+    use, which the Judge weighs, not a print. A `sh -c` body is read as a
+    command of its own, two levels deep; a command is read for its first 64
+    KB and 256 simple commands, so one padded past that is not seen, which
+    leaves the thread as guarded as before. Its output is read for `NAME=value`
+    lines, so a `.env` file a command prints is flagged as well. Only a call
+    with a shell command is read: a file tool's result is the file, which the
+    list covers. The
     label is a record like `secret-path-read`; it does not feed the Full
     access egress tag, which still keys on a protected path, so the tag means
     what it meant.

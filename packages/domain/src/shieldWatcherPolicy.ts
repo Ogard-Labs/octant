@@ -186,6 +186,9 @@ export function isSecretHoldingVariable(name: string): boolean {
   return words.some(
     (word, index) =>
       SECRET_NAME_WORDS.has(word) ||
+      // A test runner's `PASS=12` and an `AUTH=on` switch say nothing secret;
+      // `DB_PASS` and `GITHUB_AUTH` do.
+      (index > 0 && QUALIFIED_SECRET_NAME_WORDS.has(word)) ||
       (index > 0 && SECRET_NAME_PAIRS.has(`${words[index - 1]}_${word}`)),
   );
 }
@@ -195,13 +198,12 @@ const SECRET_NAME_WORDS: ReadonlySet<string> = new Set([
   "TOKEN",
   "PASSWORD",
   "PASSWD",
-  "PASS",
   "PASSPHRASE",
   "APIKEY",
   "CREDENTIAL",
   "CREDENTIALS",
-  "AUTH",
 ]);
+const QUALIFIED_SECRET_NAME_WORDS: ReadonlySet<string> = new Set(["PASS", "AUTH"]);
 const SECRET_NAME_PAIRS: ReadonlySet<string> = new Set([
   "API_KEY",
   "ACCESS_KEY",
@@ -221,11 +223,18 @@ const NOT_A_SECRET_SUFFIX: ReadonlySet<string> = new Set([
   "USER",
   "USERNAME",
   "REGION",
+  "METHOD",
+  "TYPE",
+  "MODE",
+  "ENDPOINT",
+  "LENGTH",
+  "ENABLED",
+  "DISABLED",
 ]);
 
 /** Programs that print their arguments. */
 const PRINTERS: ReadonlySet<string> = new Set(["echo", "printf", "print"]);
-/** Words that run the program after them. */
+/** Words that run the program after them, or open a compound command around it. */
 const COMMAND_PREFIXES: ReadonlySet<string> = new Set([
   "sudo",
   "command",
@@ -233,7 +242,20 @@ const COMMAND_PREFIXES: ReadonlySet<string> = new Set([
   "exec",
   "time",
   "nohup",
+  "if",
+  "then",
+  "elif",
+  "else",
+  "while",
+  "until",
+  "do",
+  "!",
+  "{",
 ]);
+/** `sh -c '…'` and its kin: the quoted body is a command line of its own. */
+const SHELL_BODY =
+  /(?:^|[\s;&|(])(?:sh|bash|zsh|dash)[ \t]+(?:-[A-Za-z]+[ \t]+){0,4}-[A-Za-z]*c[ \t]+(?:'([^']*)'|"([^"]*)")/g;
+const MAX_SHELL_DEPTH = 2;
 const MAX_COMMAND_LENGTH = 64 * 1024;
 const MAX_SIMPLE_COMMANDS = 256;
 const VARIABLE_REFERENCE = /\$\{?([A-Za-z_][A-Za-z0-9_]*)/g;
@@ -242,10 +264,15 @@ const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const LISTED_VARIABLE =
   /^[ \t]*(?:export[ \t]+|declare[ \t]+-[a-zA-Z]+[ \t]+|typeset[ \t]+-[a-zA-Z]+[ \t]+)?([A-Za-z_][A-Za-z0-9_]{0,255})=(.*)$/gm;
 
-function commandPrintsSecretVariable(command: string): boolean {
-  // A single-quoted span expands nothing, so `echo '$TOKEN'` prints the name.
-  const expanding = command.slice(0, MAX_COMMAND_LENGTH).replace(/'[^']*'/g, "''");
-  const simpleCommands = expanding.split(/[;&|\n]+|\$\(|`|\)/).slice(0, MAX_SIMPLE_COMMANDS);
+function commandPrintsSecretVariable(command: string, depth = 0): boolean {
+  const bounded = command.slice(0, MAX_COMMAND_LENGTH);
+  if (depth < MAX_SHELL_DEPTH) {
+    for (const match of bounded.matchAll(SHELL_BODY)) {
+      if (commandPrintsSecretVariable(match[1] ?? match[2] ?? "", depth + 1)) return true;
+    }
+  }
+  const expanding = withoutSingleQuotedSpans(bounded);
+  const simpleCommands = expanding.split(/[;&|\n()]+|`/).slice(0, MAX_SIMPLE_COMMANDS);
   return simpleCommands.some((simple) => {
     const words = simple
       .trim()
@@ -274,6 +301,35 @@ function commandPrintsSecretVariable(command: string): boolean {
     }
     return false;
   });
+}
+
+/**
+ * The command with each single-quoted span emptied, since such a span expands
+ * nothing (`echo '$TOKEN'` prints the name). A quote inside double quotes is
+ * an ordinary character, so `echo "a='$TOKEN'"` still expands.
+ */
+function withoutSingleQuotedSpans(command: string): string {
+  let result = "";
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index] ?? "";
+    if (quote === "'") {
+      if (character === "'") {
+        quote = undefined;
+        result += character;
+      }
+      continue;
+    }
+    if (character === "\\" && quote === undefined) {
+      result += character + (command[index + 1] ?? "");
+      index += 1;
+      continue;
+    }
+    if (character === '"') quote = quote === '"' ? undefined : '"';
+    else if (character === "'" && quote === undefined) quote = "'";
+    result += character;
+  }
+  return result;
 }
 
 function outputListsSecretVariable(output: string): boolean {
