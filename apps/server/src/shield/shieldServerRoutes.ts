@@ -168,7 +168,7 @@ export function createShieldServerRouteHandler(dependencies: ShieldServerRouteDe
             kind: "shield-servers-updated",
             view: view(dependencies, known ? projectId : undefined),
           }
-        : refused(change.reason);
+        : refused(change.reason, change.message);
     return json(result, result.kind === "shield-servers-updated" ? 200 : 409, origin);
   };
 }
@@ -233,6 +233,7 @@ const MESSAGES: Readonly<Record<ShieldServersRefusalReason, string>> = {
     "That runbook is in a folder that holds keys or credentials, so Octant will not read it.",
   "invalid-deploy-command": "Write each deploy command on one line.",
   "server-not-found": "That server is not registered.",
+  "server-has-projects": "Projects are bound to that server, so its alias and user cannot change.",
   "too-many-servers": "No more servers can be registered.",
   "project-not-found": "That Project does not exist on this computer.",
   "signs-in-with-agent": "That server signs in with your SSH agent, so it has no key here.",
@@ -240,6 +241,9 @@ const MESSAGES: Readonly<Record<ShieldServersRefusalReason, string>> = {
   unavailable: "The change could not be recorded, so nothing changed.",
 };
 
-function refused(reason: ShieldServersRefusalReason): ShieldServersCommandResult {
-  return { kind: "shield-servers-refused", reason, message: MESSAGES[reason] };
+function refused(
+  reason: ShieldServersRefusalReason,
+  message: string = MESSAGES[reason],
+): ShieldServersCommandResult {
+  return { kind: "shield-servers-refused", reason, message };
 }

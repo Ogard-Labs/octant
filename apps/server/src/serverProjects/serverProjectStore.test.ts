@@ -286,6 +286,27 @@ describe("server Project catalog", () => {
     });
   });
 
+  it("binds nothing when the server is pointed at another host during the folder check", async () => {
+    let servers: ReadonlyArray<ShieldServer> = [web];
+    const store = storeOn(
+      openJournal(scratch()),
+      answering(() => {
+        servers = [{ ...web, alias: "staging" }];
+        return resolvedTo("/srv/app");
+      }).connection,
+      () => servers,
+    );
+    expect(
+      await store.bind({
+        name: "App",
+        serverId: String(web.serverId),
+        folder: "/srv/app",
+        principal: "local-window",
+      }),
+    ).toMatchObject({ kind: "refused", reason: "server-not-registered" });
+    expect(store.projects()).toEqual([]);
+  });
+
   it("changes the catalog only for a local window's request", async () => {
     const store = storeOn(
       openJournal(scratch()),

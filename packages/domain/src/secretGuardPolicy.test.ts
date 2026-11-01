@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  builtInProtectedFiles,
   commandPathWords,
   NO_PROTECTED_FILES_CHANGES,
   SECRET_REDACTION,
@@ -10,6 +11,7 @@ import {
   redactSecrets,
   redactSecretsInValue,
   resolveProtectedFiles,
+  serverProtectedPathPattern,
 } from "./secretGuardPolicy";
 
 const HOME = "/Users/person";
@@ -211,5 +213,86 @@ describe("paths a shell command names", () => {
       "token",
       "https://x.test",
     ]);
+  });
+});
+
+describe("the secret guard's list on a person's server", () => {
+  const onServer = (path: string, choice = NO_PROTECTED_FILES_CHANGES) =>
+    new RegExp(serverProtectedPathPattern(choice), "imu").test(path);
+
+  it("protects every home entry of the list, on both platforms, below any folder", () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      for (const rule of builtInProtectedFiles(platform)) {
+        for (const entry of rule.entries) {
+          if (entry.base !== "home" || entry.kind !== "path") continue;
+          expect(onServer(`/home/deploy/${entry.path}`), entry.path).toBe(true);
+          expect(onServer(`/root/${entry.path}/inside`), entry.path).toBe(true);
+          expect(onServer(entry.path), entry.path).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("protects files the list names by pattern, at their depth", () => {
+    expect(onServer("/home/d/.config/google-chrome/Default/Cookies")).toBe(true);
+    expect(onServer("/home/d/.mozilla/firefox/abc.default/logins.json")).toBe(true);
+    expect(onServer("/Users/d/Library/Keychains/ABC/keychain-2.db")).toBe(true);
+    expect(onServer("/home/d/.config/a/b/c/d/e/f/Cookies")).toBe(false);
+  });
+
+  it("keeps the folders and key files a server has always refused", () => {
+    for (const path of [
+      "/srv/.ssh/config",
+      "/srv/.aws/config",
+      "/srv/.gnupg/x",
+      "/srv/.kube/x",
+      "/srv/.docker/x",
+      "/srv/.config/gh/x",
+      "/srv/tls/site.PEM",
+      "/srv/a.key",
+      "/srv/a.p12",
+      "/srv/a.pfx",
+      "/srv/a.ppk",
+    ]) {
+      expect(onServer(path), path).toBe(true);
+    }
+  });
+
+  it("leaves a Project's ordinary files alone", () => {
+    for (const path of [
+      "/srv/app/src/main.ts",
+      "/srv/app/credentials.md",
+      "/srv/app/monkey",
+      "/srv/app/.sshd/notes",
+      "/srv/app/.config/gcloud/properties",
+      "/srv/app/Cookies",
+    ]) {
+      expect(onServer(path), path).toBe(false);
+    }
+  });
+
+  it("follows the person's additions and removed groups", () => {
+    const choice = { added: ["~/notes/plan", "/etc/app/token", "relative"], removed: [] as const };
+    expect(onServer("/home/d/notes/plan/a", choice)).toBe(true);
+    expect(onServer("/etc/app/token", choice)).toBe(true);
+    expect(onServer("/srv/etc/app/token", choice)).toBe(false);
+    expect(onServer("/srv/relative", choice)).toBe(false);
+    const removed = { added: [], removed: ["ssh-private-keys", "cloud-credentials"] } as const;
+    expect(onServer("/home/d/.ssh/id_ed25519", removed)).toBe(false);
+    expect(onServer("/home/d/.aws/credentials", removed)).toBe(false);
+    expect(onServer("/home/d/.netrc", removed)).toBe(true);
+  });
+
+  it("matches nothing when the person removed every group", () => {
+    const choice = {
+      added: [],
+      removed: builtInProtectedFiles("linux").map((rule) => rule.id),
+    };
+    expect(onServer("/home/d/.netrc", choice)).toBe(false);
+    expect(serverProtectedPathPattern(choice)).toBe("^$");
+  });
+
+  it("stays a pattern every grep reads: no JavaScript-only syntax", () => {
+    expect(serverProtectedPathPattern(NO_PROTECTED_FILES_CHANGES)).not.toMatch(/\(\?|\\d|\\w/);
   });
 });

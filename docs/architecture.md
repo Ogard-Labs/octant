@@ -11533,6 +11533,9 @@ command to exactly its thread and Project rules.
   remote output passes through the Watcher.
 - A per-server notes file (runbook) the person points to is given to the
   agent as context, never as authority.
+- A Project bound to a folder on a server is judged by that server's profile
+  too, and never by this host's safe places or protected paths
+  ([Server Projects](design/server-projects.md#threads)).
 
 **Servers as built.** The registry is Settings › Access › Servers: an
 account list, and per Project an optional list of its own that replaces the

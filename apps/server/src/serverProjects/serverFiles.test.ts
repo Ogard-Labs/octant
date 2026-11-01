@@ -1,6 +1,8 @@
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { applyProtectedFilesChoice } from "../process/secretGuard";
 import { ServerConnection } from "./serverConnection";
 import { ServerFileSystem } from "./serverFiles";
 import {
@@ -148,6 +150,73 @@ describe.skipIf(!canRunThrowawaySshd)("the harness's file tools on a server fold
     ]);
     const keys = await tools.grep({ pattern: "PRIVATE" });
     expect(keys.kind === "matches" && keys.matches).toEqual([]);
+  });
+
+  describe("with the folder bound to a home folder", () => {
+    const SECRETS = [
+      ".config/gcloud/application_default_credentials.json",
+      ".azure/accessTokens.json",
+      ".cargo/credentials.toml",
+      ".config/git/credentials",
+      ".claude/.credentials.json",
+      ".codex/auth.json",
+      ".config/1Password/vault.sqlite",
+      "backup/client.p12",
+    ];
+
+    beforeAll(() => {
+      for (const secret of SECRETS) {
+        mkdirSync(dirname(join(root, secret)), { recursive: true });
+        writeFileSync(join(root, secret), "SECRETVALUE\n");
+      }
+      rmSync(join(root, "innocent.txt"), { force: true });
+      symlinkSync(join(root, ".codex/auth.json"), join(root, "innocent.txt"));
+    });
+    afterEach(() => applyProtectedFilesChoice(NO_PROTECTED_FILES_CHANGES));
+
+    it.each(SECRETS)("refuses %s before any byte travels", async (secret) => {
+      expect(await files().read({ path: secret })).toMatchObject({
+        kind: "refused",
+        reason: "protected-file",
+      });
+    });
+
+    it("refuses a link with an innocent name on the server's own check", async () => {
+      expect(await files().read({ path: "innocent.txt" })).toMatchObject({
+        reason: "protected-file",
+      });
+    });
+
+    it("searches and lists past them without sending them here", async () => {
+      const sent: string[] = [];
+      const watching = new ServerFileSystem({
+        connection: {
+          run: async (...call) => {
+            const answer = await connection.run(...call);
+            if (answer.status === "ran") sent.push(answer.output.toString("latin1"));
+            return answer;
+          },
+        },
+        server: () => ({ alias: sshd.alias, user: sshd.user }),
+        root,
+      });
+      const found = await watching.grep({ pattern: "SECRETVALUE" });
+      expect(found.kind === "matches" && found.matches).toEqual([]);
+      expect(sent.join("")).not.toContain("SECRETVALUE");
+      const listed = await watching.glob({ pattern: "**/*" });
+      expect(JSON.stringify(listed)).not.toContain("credentials");
+      const folder = await watching.read({ path: ".codex/.." });
+      expect(JSON.stringify(folder)).not.toContain(".git-credentials");
+    });
+
+    it("follows the person's own list, added paths and removed groups alike", async () => {
+      writeFileSync(join(root, "notes.txt"), "mine\n");
+      applyProtectedFilesChoice({ added: ["~/notes.txt"], removed: ["provider-sign-ins"] });
+      expect(await files().read({ path: "notes.txt" })).toMatchObject({
+        reason: "protected-file",
+      });
+      expect(await files().read({ path: ".codex/auth.json" })).toMatchObject({ kind: "file" });
+    });
   });
 
   it("reaches nothing, and changes nothing anywhere, when the server cannot be reached", async () => {

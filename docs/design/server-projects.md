@@ -64,6 +64,16 @@ hands are on the server.
   what an older build journaled and reads. A Work Project's record names its
   mode, so an older build cannot decode it and binds nothing for it rather
   than reading it as a Code Project. A Project's mode never changes.
+- **A bound server stays that host.** While a Project is bound to a server, the
+  server's alias and user cannot change: the edit is refused with a message
+  naming the Projects. Its profile and deploy commands stay editable, since they
+  describe the same host. A bind whose server is pointed elsewhere during the
+  folder check binds nothing. _Rationale:_ a Project's folder was checked on the
+  host the alias named, so renaming it would send the next turn, Git command, or
+  terminal to another host at the same path, with the folder unchecked there.
+  Refusing is the narrower fix: a fresh check before every use would add a state
+  every surface must honor, and removing the Project or registering a new server
+  already says what the person means.
 - A server Project whose server was removed from the registry stays in the
   catalog and refuses every connection (`server-not-registered`) until the
   person removes the Project or registers the server again.
@@ -104,10 +114,23 @@ hands are on the server.
   and connected), so the profiles deny the socket and its folder. An unconfined
   process already runs as the person and can reach their SSH agent, so the
   socket gives it nothing new.
-- Each call runs a short `sh` script through the login shell, its arguments
-  single-quoted, so the login shell must read POSIX single quotes (`sh`,
-  `bash`, `zsh`, `dash`, and `fish` do; `csh` and `tcsh` are not supported).
-  The script's own exit status 255 is reported as 254, so 255 always means
+- **No login shell parses a call.** ssh hands its remote command to the
+  person's login shell, so each call sends one fixed `sh -c` decoder and then
+  the script and every argument encoded: single-quoted words of plain bytes and
+  octal escapes that `sh` turns back with `printf %b`. A file path, grep pattern,
+  branch name, or command never reaches the login shell as text it could read.
+  A thread terminal's startup goes the same way, then `sh` replaces itself with
+  the person's own shell. `sh`, `bash`, `dash`, `zsh`, `fish`, `tcsh`, and `csh`
+  all work; a server needs a POSIX `sh`. An argument holding a NUL byte, and a
+  call past about 120 KiB on the wire, are refused here and nothing runs.
+  _Rationale:_ every shell quotes differently. Measured on fish 3.6, `\'` inside
+  single quotes ended the word and ran what followed, before any level or
+  approval saw it; on csh and tcsh a backtick ran and a newline was an error.
+  A rule per shell would have to be right for every shell, including ones not
+  yet tried, so no shell is given anything to interpret. Octal rather than
+  base64 needs no program beyond `sh`'s own `printf`. A value is split into
+  several words because csh refuses one past about 8 KiB.
+- The script's own exit status 255 is reported as 254, so 255 always means
   ssh itself failed.
 - **Fail closed.** When a call cannot reach the server (the connection drops,
   times out, is refused, or the host key does not match), that call is refused
@@ -135,6 +158,27 @@ hands are on the server.
   it does locally: Plan is read-only, Guarded asks for every command and edit,
   Accept edits waives edits inside the folder, Reviewed hands each request to
   the chosen reviewer, and Full access asks nobody.
+- **Reviewed on a server.** Shield judges a server Project's call by that
+  server's action profile, as it judges a command that names the server over
+  ssh. A command is placed in the same tiers: one the profile includes passes,
+  one it does not goes to the person, and a lock-out, or anything naming a
+  protected path or a server's own secret, goes to the person at every profile.
+  A command no tier names goes to the model at Operate and Admin, which is told
+  the server and its profile, and to the person at Read-only, so a Read-only
+  server stays read-only. A file edit counts as a configuration change, as an
+  upload does, so it needs Admin; a read inside the folder passes. This host's
+  safe places, protected paths, and Project commands judge nothing there. A
+  Project whose server left the registry goes to the person.
+- **Outside content on a server.** The Watcher reads every result that comes
+  back from a server and marks the thread when it finds injection-shaped text.
+  Shield treats a server thread as having read outside content from its first
+  call, and sends commands that change the server, and reach-out commands, to
+  the person. A plain read does not by itself put the thread's outside-content
+  mark on. _Rationale:_ a file on a server can carry an injection, but the mark
+  makes every later edit and command ask afresh at every level below Full access,
+  so marking each read would turn Accept edits and Reviewed into Guarded on a
+  server after the first file. The Watcher's finding, which does set it, and
+  Shield's standing assumption keep the gate where the risk shows.
 - **No sandbox on the server.** Octant has no OS confinement and no egress
   rules on the server at any level, so below Full access the approval is the
   only guard on a command there. A remembered approval therefore does not
@@ -143,12 +187,41 @@ hands are on the server.
   this host's sandbox, and carrying it to a server with none would widen what
   the person agreed to. Full access is no sandbox and no prompts, as locally.
 - **Files.** The file tools resolve every path on the server to its real path
-  and refuse one outside the folder, judged on this host. A path in a key or
-  credential folder (`.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`,
-  `.config/gh`) or a credential file (`.netrc`, `.git-credentials`, `.npmrc`,
-  `.pypirc`, `*.pem`, `*.key`) is refused at every level, as the secret
-  guard's tools refuse one locally. A search uses the server's `find` and
-  `grep -E`, so its pattern is a POSIX extended expression there.
+  and refuse one outside the folder, judged on this host. A search uses the
+  server's `find` and `grep -E`, so its pattern is a POSIX extended expression
+  there.
+- **Protected paths.** The file tools, the Files panel and file editor, `@` path
+  mentions, and search refuse the secret guard's list at every level, Full
+  access included, as the guard's tools refuse it locally. It is one list
+  (`serverProtectedPathPattern` in the secret guard policy), so the two cannot
+  drift, and the person's own changes in Settings › Permissions › Protected
+  files apply: an added `~/x` or absolute path, and a removed group. The server
+  applies it to the real path before printing a byte, this host applies it again
+  to what comes back, and search and listing pass over a protected file without
+  naming it or sending its lines here. How it reads on a server:
+  - A home entry matches below any folder, since the server's home is not known
+    here and `/root/.aws/credentials` is as secret as the login user's. Both
+    platforms' entries apply, since a server may be either.
+  - A group also refuses its whole folder, and key files by name anywhere:
+    `.ssh`, `.aws`, `.kube`, `.docker`, `.config/gh`, `.gnupg`, and `*.pem`,
+    `*.key`, `*.p12`, `*.pfx`, `*.ppk`. _Rationale:_ the local list leaves SSH
+    `config` and similar readable because local programs need them; these are
+    Octant's file tools, and a server already refused the folders.
+  - Entries under Octant's data and runtime folders are left out, since they
+    name this host's folders. An entry's exception is not kept (no regular
+    expression `grep -E` reads can say it). An added absolute path means that
+    path on the server.
+- **What a command can still read.** The list binds Octant's own tools only.
+  Octant has no sandbox on a server, so a shell command run there can read
+  anything the login user can, and its output comes back to this host. What
+  stands in front of one is the level: Plan runs no command, Guarded and Accept
+  edits ask the person for each one, Reviewed hands each to its reviewer (Shield
+  sends a command naming a protected path or a server's own secret to the
+  person, but reads only the command's words, so a path built at run time is not
+  seen), and Full access asks nobody. A person's terminal is their own login.
+  The Git tab and Review show the contents of tracked files, so a credential
+  committed to the repository is visible there, and Tests run the folder's own
+  commands.
 - **Commands and Git.** A command runs with `sh -c` in the folder on the
   server, with the thread's timeout and output bound. Git runs there as a
   command. Every command is journaled on the thread as
@@ -257,10 +330,10 @@ hands are on the server.
   Project's own, or the thread's own worktree. The Tests panel runs there
   too. Each path is
   resolved to its real path on the server and refused there before any byte
-  travels when it is outside the folder or in a key or credential location
-  (the file tools' rule). A listing names only real folders and files, never
+  travels when it is outside the folder or protected
+  ([Threads](#threads)). A listing names only real folders and files, never
   a link, skips `.git` and `node_modules` as a local listing does, and leaves
-  out credential locations; it keeps the local listing's entry and depth
+  out protected paths; it keeps the local listing's entry and depth
   bounds. A file's identity is its real path on the server, and a save is
   refused as a conflict when the file's content changed since it was opened,
   compared by digest. Saving is the person's own action, so it asks no
@@ -356,6 +429,7 @@ hands are on the server.
 - Real servers are untested: the connection, folder check, file tools,
   commands, terminals, the Git tab, the Review tool's history, Files, Tests
   and worktrees were exercised against a throwaway local `sshd` only, and
-  pull requests against a stand-in for `gh`, never GitHub. Linux
-  hosts are likewise untested; the connection uses only `ssh` options both
-  platforms share.
+  pull requests against a stand-in for `gh`, never GitHub. The connection and
+  file tools also ran against a throwaway Linux container's `sshd` with bash,
+  dash, zsh, fish 3.6, tcsh, and csh as login shells. Linux hosts are likewise
+  untested; the connection uses only `ssh` options both platforms share.

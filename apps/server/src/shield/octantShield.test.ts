@@ -62,6 +62,13 @@ function shieldWith(
   });
 }
 
+const readOnlyServer = {
+  alias: "web1",
+  user: "deploy",
+  profile: "read-only" as const,
+  deployCommands: [],
+};
+
 describe("Octant Shield on the host", () => {
   it("answers nothing for a thread it does not review, so the person is asked as before", async () => {
     const shield = shieldWith(undefined, { reviewing: () => undefined });
@@ -134,10 +141,70 @@ describe("Octant Shield on the host", () => {
       threadId: "t",
       call: bash("bun run test"),
       boundRoot: root,
-      rootOnServer: true,
+      rootOnServer: { server: readOnlyServer, protectedPath: () => false },
     });
     expect(projectCommands).not.toHaveBeenCalled();
     expect(decision?.rule).not.toBe("project-command");
+  });
+
+  it("keeps a read-only server read-only for a Project's own command, and asks the model nothing", async () => {
+    const { port } = fakeModel({ status: "answered", text: '{"verdict":"allow","reason":"ok"}' });
+    const shield = shieldWith(port);
+    const onServer = { server: readOnlyServer, protectedPath: () => false };
+    for (const command of ["sudo systemctl restart nginx", "rm -rf ./data", "make deploy"]) {
+      const decision = await shield.review({
+        threadId: "t",
+        call: bash(command),
+        boundRoot: root,
+        rootOnServer: onServer,
+      });
+      expect(decision?.verdict).toBe("ask");
+    }
+    expect(port.complete).not.toHaveBeenCalled();
+    expect(
+      await shield.review({
+        threadId: "t",
+        call: bash("ls -la"),
+        boundRoot: root,
+        rootOnServer: onServer,
+      }),
+    ).toMatchObject({ verdict: "allow", rule: "registered-server" });
+  });
+
+  it("judges a server path by the server's list and not by this host's", async () => {
+    const { port } = fakeModel({ status: "answered", text: '{"verdict":"ask","reason":"unsure"}' });
+    const hostProtects = vi.fn(() => true);
+    const safePlaces = vi.fn(() => []);
+    const shield = shieldWith(port, { protectedSecretPath: hostProtects, safePlaces });
+    const decision = await shield.review({
+      threadId: "t",
+      call: bash("cat /srv/app/a.txt"),
+      boundRoot: root,
+      rootOnServer: { server: readOnlyServer, protectedPath: () => false },
+    });
+    expect(hostProtects).not.toHaveBeenCalled();
+    expect(safePlaces).not.toHaveBeenCalled();
+    expect(decision).toMatchObject({ verdict: "allow", rule: "registered-server" });
+    expect(
+      await shield.review({
+        threadId: "t",
+        call: bash("cat /srv/app/a.txt"),
+        boundRoot: root,
+        rootOnServer: { server: readOnlyServer, protectedPath: () => true },
+      }),
+    ).toMatchObject({ verdict: "ask", rule: "secret-path" });
+  });
+
+  it("sends a Project whose server left the registry to the person", async () => {
+    const { port } = fakeModel({ status: "answered", text: "{}" });
+    expect(
+      await shieldWith(port).review({
+        threadId: "t",
+        call: bash("ls"),
+        boundRoot: root,
+        rootOnServer: { server: undefined, protectedPath: () => false },
+      }),
+    ).toMatchObject({ verdict: "ask", rule: "unregistered-server" });
   });
 
   it("allows a status read on a registered server by its profile, and asks for any other host", async () => {

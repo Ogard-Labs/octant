@@ -212,6 +212,11 @@ export function wireHarness(deps: HarnessDependencies) {
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
     readRunbook: readRunbookFile,
+    projectsBoundTo: (serverId) =>
+      serverProjectStore
+        .projects()
+        .filter((project) => String(project.serverId) === serverId)
+        .map((project) => project.name),
   });
   shieldServerStore.load();
   const sshAgentSocket = () => personSshAgentSocket(process.env.SSH_AUTH_SOCK);

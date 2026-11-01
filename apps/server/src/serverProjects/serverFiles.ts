@@ -20,6 +20,7 @@ import {
   type NativeHarnessReadResult,
   type NativeHarnessWriteResult,
 } from "../harness/nativeHarnessFileSystem";
+import { currentServerProtectedPattern, isProtectedPathOnServer } from "../process/secretGuard";
 import type { ServerAddress, ServerCall, ServerConnection } from "./serverConnection";
 
 /**
@@ -38,33 +39,32 @@ import type { ServerAddress, ServerCall, ServerConnection } from "./serverConnec
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_LISTING_BYTES = 8 * 1024 * 1024;
 
-/**
- * Key and credential folders and files, refused at every level as the secret
- * guard refuses them on this host. The guard's own list names this host's
- * paths, so a server's are matched by name.
- */
-const SERVER_CREDENTIAL_PATH =
-  /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.config\/gh)(?:\/|$)|(?:^|\/)\.(?:netrc|git-credentials|npmrc|pypirc)$|\.(?:pem|key)$/i;
+const PROTECTED_ON_SERVER_MESSAGE =
+  "This path is protected by the secret guard's list, here matched on the server, so Octant's file tools do not open it. Use the server's own credential setup instead. The list is in Settings › Permissions › Protected files.";
 
+/**
+ * Refused at every level, by the secret guard's own list in force on this
+ * host (the person's changes included), as its tools refuse a path locally.
+ */
 export function serverCredentialPathRefusal(path: string): string | undefined {
-  return SERVER_CREDENTIAL_PATH.test(path)
-    ? "This path is in a key or credential location on the server, so Octant's file tools do not open it. Use the server's own credential setup instead."
-    : undefined;
+  return isProtectedPathOnServer(path) ? PROTECTED_ON_SERVER_MESSAGE : undefined;
 }
 
-/** The credential locations `SERVER_CREDENTIAL_PATH` names, as `case` patterns on the server. */
-const CREDENTIAL_CASE =
-  "*/.ssh|*/.ssh/*|*/.aws|*/.aws/*|*/.gnupg|*/.gnupg/*|*/.kube|*/.kube/*|*/.docker|*/.docker/*|*/.config/gh|*/.config/gh/*|*/.netrc|*/.git-credentials|*/.npmrc|*/.pypirc|*.pem|*.key";
+/** Puts the list in force in `$protected` for a script that reads it. */
+export function withProtectedPaths(script: string): string {
+  return `protected='${currentServerProtectedPattern().replaceAll("'", `'\\''`)}'\n${script}`;
+}
 
 /**
- * Resolves `$1` and refuses one outside the folder `$2`, or one in a
- * credential location, before printing anything: a link with an innocent
- * name never carries a key's bytes to this host.
+ * Resolves `$1` and refuses one outside the folder `$2`, or one the list
+ * protects, before printing anything: a link with an innocent name never
+ * carries a key's bytes to this host. A `grep` that cannot answer refuses.
  */
 export const RESOLVE_INSIDE = `exec 2>/dev/null
 r=$(realpath -- "$1") || { printf 'm'; exit 0; }
 case "$r" in "$2"|"$2"/*) ;; *) printf 'x'; exit 0;; esac
-case "$r" in ${CREDENTIAL_CASE}) printf 'k'; exit 0;; esac
+printf '%s\\n' "$r" | grep -Eiq -e "$protected"
+[ "$?" -eq 1 ] || { printf 'k'; exit 0; }
 printf '%s\\0' "$r"`;
 
 const READ_SCRIPT = `${RESOLVE_INSIDE}
@@ -118,10 +118,11 @@ const GREP_SCRIPT = `${RESOLVE_INSIDE}
 printf '\\0'
 grep -E -e "$3" /dev/null
 [ "$?" -le 1 ] || exit 2
-find "$r" \\( -name .git -o -name node_modules -o -name .ssh -o -name .aws -o -name .gnupg \\
-  -o -name .kube -o -name .docker -o -path '*/.config/gh' \\) -prune -o -type f \\
-  ! -name '*.pem' ! -name '*.key' ! -name .netrc ! -name .git-credentials ! -name .npmrc \\
-  ! -name .pypirc -name "\${4:-*}" -print0 |
+nl=$(printf '\\n_')
+nl=\${nl%_}
+find "$r" \\( -name .git -o -name node_modules \\) -prune -o -type f ! -path "*$nl*" \\
+  -name "\${4:-*}" -print |
+  grep -Eiv -e "$protected" | tr '\\n' '\\0' |
   xargs -0 grep -HnIE --null -e "$3" -- /dev/null
 exit 0`;
 
@@ -183,7 +184,10 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
       const entries = payload
         .toString("utf8")
         .split("\0")
-        .filter((entry) => entry.length > 1)
+        .filter(
+          (entry) =>
+            entry.length > 1 && guard(posix.join(resolved.path, entry.slice(1))) === undefined,
+        )
         .map((entry) => ({
           name: entry.slice(1),
           kind:
@@ -296,7 +300,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     const paths: string[] = [];
     let truncated = resolved.truncated;
     for (const path of resolved.rest.toString("utf8").split("\0")) {
-      if (path === "" || !this.#inside(path)) continue;
+      if (path === "" || !this.#inside(path) || guard(path) !== undefined) continue;
       if (!matcher.test(posix.relative(base, path))) continue;
       if (paths.length >= MAX_GLOB_RESULTS) {
         truncated = true;
@@ -386,7 +390,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     if (first === undefined || first === 0x6d /* m */) return refusedWith("path-not-found");
     if (first === 0x78 /* x */) return refusedWith("path-escapes-root");
     if (first === 0x6b /* k */) {
-      return guard("/.ssh") ?? refusedWith("protected-file");
+      return { kind: "refused", reason: "protected-file", message: PROTECTED_ON_SERVER_MESSAGE };
     }
     const nul = call.output.indexOf(0);
     if (nul === -1) return refusedWith("path-not-found");
@@ -415,7 +419,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
       });
     }
     return this.#options.connection.run(server, {
-      script,
+      script: withProtectedPaths(script),
       args,
       ...(stdin === undefined ? {} : { stdin }),
       timeoutMs: CALL_TIMEOUT_MS,

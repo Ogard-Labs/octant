@@ -1099,22 +1099,25 @@ export function classifyRemoteCommand(
   readonly tier: ShieldRemoteCommandTier;
   /** Every word the remote command runs with, quotes removed: what a path check reads. */
   readonly words: string;
+  /** The same words one by one, so a path holding a space stays whole. */
+  readonly wordList: ReadonlyArray<string>;
 } {
   const { segments, expands } = remoteSegments(remote);
   const words = segments.map((segment) => segment.words.join(" ")).join(" ; ");
-  if (segments.length === 0) return { tier: "unknown", words };
+  const wordList = segments.flatMap((segment) => segment.words);
+  if (segments.length === 0) return { tier: "unknown", words, wordList };
   const tiers = segments.map((segment) => segmentTier(segment, deployCommands));
-  if (tiers.includes("lockout")) return { tier: "lockout", words };
+  if (tiers.includes("lockout")) return { tier: "lockout", words, wordList };
   const described = deployCommands.some((deploy) => collapse(deploy) === collapse(remote));
-  if (described) return { tier: "operate", words };
-  if (expands || tiers.includes("unknown")) return { tier: "unknown", words };
+  if (described) return { tier: "operate", words, wordList };
+  if (expands || tiers.includes("unknown")) return { tier: "unknown", words, wordList };
   let highest: "read" | "operate" | "admin" = "read";
   for (const tier of tiers) {
     if (tier === "read" || tier === "operate" || tier === "admin") {
       if (TIER_RANK[tier] > TIER_RANK[highest]) highest = tier;
     }
   }
-  return { tier: highest, words };
+  return { tier: highest, words, wordList };
 }
 
 /** The registered server an ssh host names; ssh matches `Host` aliases without regard to case. */
