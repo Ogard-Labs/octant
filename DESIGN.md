@@ -2194,7 +2194,7 @@ Profile, Deploy commands (one per line, shown for Operate and Admin), and
 Runbook path. A refusal from the host shows inline in the alert role.
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here
-([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a
+([Workspace](docs/design/workspace.md)). A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent
 ([Terminal Browser grant](docs/design/terminal-browser-grant.md#the-window)).

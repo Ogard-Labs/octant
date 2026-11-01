@@ -15,10 +15,10 @@ again to return to the list. The main navigation sidebar stays the same width.
 | Mode | Binding                      | Authority                             |
 | ---- | ---------------------------- | ------------------------------------- |
 | Chat | Virtual (no filesystem root) | Scoped memory only, no shell or files |
-| Work | One OS-confined folder       | Confined filesystem within the root   |
+| Work | One OS-confined folder       | Files, shell, and Git within the root |
 | Code | One folder, sandboxed        | Git, shell, and tools within the root |
 
-Planned: Work and Code get the same authority under the same guardrail level; Work differs by hiding developer tools until you turn them on. Not built yet.
+Work and Code get the same authority under the same guardrail level. A Work Project differs only in what it shows: developer surfaces such as Git panels, the worktree picker, and the Project terminal stay hidden until you turn on **Developer tools** on the Project page. That switch changes what the Project shows, not what its threads may do.
 
 Chat Projects are virtual, memory-scoped containers with no implicit filesystem or shell authority. Work Projects bind one selected directory. Code Projects bind one selected directory; Git features light up when that directory is a repository.
 
