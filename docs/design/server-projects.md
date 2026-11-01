@@ -310,8 +310,10 @@ hands are on the server.
 
 ## Not built yet
 
-- Work Files, research sources, and the status file and due dates for a Work
-  Project on a server; its threads are built.
+- Work Files, research sources, the status file and due dates, and the
+  Project terminal for a Work Project on a server; its threads are built. A
+  local Work Project shows its terminal through its Developer tools switch on
+  its overview, and a Work Project on a server has neither yet.
 - Extra folders in a server Project.
 - The file browser and tests for a server Project; the Git tab, the Review
   tool, managed worktrees, and pull requests are built.
