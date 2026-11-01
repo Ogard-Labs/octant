@@ -166,7 +166,8 @@ Below Full access, secret files stay out of every agent's reach by an operating-
 - Known key formats and broker-issued values are redacted from runtime output, transcripts, the journal, exports and the service log, at every level.
 - Octant Shield's Judge sends a command that reaches a secret file to the person and refuses one that reads secrets then sends something off the computer; it reads the person's protected list beside its own patterns.
 - Built: the Watcher's `secret-path-read` label on every call of Octant's own tools that names a protected path, refused or not; the Watcher's `secret-env-print` label on a call of Octant's own shell that prints an environment variable whose name says it holds a secret, by the name alone; the Judge reading the list in force; a journaled `reads-secrets-then-egress` tag on an Octant Harness command at Full access.
-- Not built yet: short-lived cloud credentials from the broker.
+- Built: the AWS command line in Octant's own shell gets a one-hour session the broker makes with AWS STS from a key pair the person pointed at a linked store; the pair never leaves the broker.
+- Not built yet: short-lived credentials for the Google Cloud and Azure command lines.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Secret guard](../architecture.md#secret-guard).
 
@@ -983,6 +984,7 @@ API keys live in the host credential store and are reached only through the loop
 - Changing an endpoint's base URL, or switching its key and sign-in binding, deletes the stored credential before the change is journaled.
 - Directory sign-in and cloud request signing run through the broker. The server never holds a signing key, and the broker signs only inside the scope stored at sign-in.
 - A person may link a secret store they already use, and the broker resolves it at use by opaque reference; Octant keeps only the store name and item address.
+- The AWS command line's key pair may point at two items in a linked store; Octant's own shell then gets only a short-lived session the broker makes from it.
 
 Status: Built. Since: 2026-10-26. Detail: [Architecture: Providers](../architecture.md#providers) and [Enterprise provider identity](enterprise-provider-identity.md).
 

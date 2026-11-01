@@ -87,9 +87,11 @@ import {
   readRunbookFile,
   ShieldServerStore,
 } from "../shield/shieldServerStore";
+import { awsCliEnvironment } from "../secretStores/awsCliEnvironment";
+import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 
-export type HarnessDependencies = Pick<ServerStart, "persistence"> &
+export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
     | "agentRunParentAuthority"
@@ -174,6 +176,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessRoutingStore,
     nativeHarnessSessions,
     nativeHarnessTranscripts,
+    options,
     persistence,
     providerDataDirectory,
     runningWorkTurnAccess,
@@ -199,6 +202,16 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   shieldServerStore.load();
   const sshAgentSocket = () => personSshAgentSocket(process.env.SSH_AUTH_SOCK);
+  // The AWS command line's short-lived session, when the person pointed its
+  // key pair at a linked secret store; the long-lived pair stays in the broker.
+  const secretStoreBroker =
+    options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+      ? undefined
+      : makeSecretStoreBrokerClient({
+          url: options.credentialBrokerUrl,
+          token: options.credentialBrokerToken,
+        });
+  const cloudCliEnvironment = () => awsCliEnvironment(secretStoreBroker);
   const shieldServerRoutes = createShieldServerRouteHandler({
     windowAuthorityStore,
     store: shieldServerStore,
@@ -299,6 +312,7 @@ export function wireHarness(deps: HarnessDependencies) {
             process: harnessProcessPort,
             scriptDirectory: harnessScriptDirectory,
             sshAgentSocket,
+            cloudCliEnvironment,
             // Below Full access a command reaches a registered server only
             // through the host's relays and agent socket: ports Seatbelt
             // opens on macOS, sockets the capsule's forwarder dials on Linux.
@@ -795,16 +809,19 @@ export function wireHarness(deps: HarnessDependencies) {
       process: harnessProcessPort,
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
+      cloudCliEnvironment,
     }),
     offlineShell: createNativeHarnessShell({
       process: harnessOfflineProcessPort,
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
+      cloudCliEnvironment,
     }),
     fullAccessShell: createNativeHarnessShell({
       process: harnessFullAccessProcessPort,
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
+      cloudCliEnvironment,
     }),
     ...(harnessProxiedShell === undefined
       ? {}

@@ -10515,6 +10515,39 @@ access` agree); a thread's own change is journaled as
     gone or its store locked by then); if it cannot be put back, the new pointer
     is removed and the answer says so, so an unjournaled pointer never stays
     active.
+  - **AWS command line.** Settings › Secret stores › AWS command line points
+    the AWS command line at the two items that hold the person's access key
+    pair (`point-aws-cli-key`; the broker proves both resolve now, as for a
+    provider key). The pointer lives beside the linked stores in
+    `linked-secret-stores.json`, and naming items, it holds no value. Each
+    Octant Harness shell command, at every level, asks the broker
+    (`/v1/cloud-cli/aws/session`) as it starts; the broker reads both items,
+    asks AWS STS for a session with `GetSessionToken` (one hour, signed with
+    the platform's Signature Version 4 like cloud request signing), and
+    returns the session alone, which the command gets as `AWS_ACCESS_KEY_ID`,
+    `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, and
+    `AWS_CREDENTIAL_EXPIRATION`. The long-lived pair never leaves the broker
+    and is never kept. A session is handed out again while more than 15
+    minutes of it are left, and forgotten when the pointer changes or is
+    removed; an unlinked store hands out none. A failed attempt answers for
+    30 seconds before the store and AWS are asked again, and a command waits
+    at most 15 seconds for its session, then runs without one. The session's secret and token
+    are noted as issued, so redaction removes them wherever a command's output
+    is kept. A locked store, a missing item, a refused key, or an unreachable
+    AWS gives the command no credentials, and the AWS command line says it
+    found none. A change journals both items in one append as two
+    `credential-reference.set` or `credential-reference.cleared` records
+    (target `aws-cli-key`, part `access-key-id` or `secret-access-key`), and
+    a change the journal refuses is undone as a provider key's is. A provider
+    runtime's own commands get no session: its process outlives one.
+    - _Rationale._ The person pointing the pair is the grant, so every
+      harness command gets the session, a marked thread's included: the
+      command still passes the thread's level, its approvals, Shield at Auto,
+      and the egress rules, and a session without multi-factor sign-in cannot
+      call IAM. `GetSessionToken` over `AssumeRole` because it needs no role
+      for the person to set up and gives the same reach as the pair, never
+      more. One hour so a long command does not lose its credentials midway;
+      AWS's shortest, 15 minutes, would cut off a long sync.
 - **Organization sign-in on a host without the desktop app.** An Azure AI
   Foundry endpoint that signs in with a directory account and opted in to it
   (`deviceCodeSignIn`) signs in with a device code from
@@ -10948,7 +10981,7 @@ Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
 no prompts": a shell command there can read a protected file. Built, except
-short-lived cloud credentials from the broker.
+short-lived credentials for the Google Cloud and Azure command lines.
 
 - **One list, every runtime.** The list is
   `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
@@ -11016,9 +11049,16 @@ short-lived cloud credentials from the broker.
   Git over HTTPS through the system credential helper, which reaches the
   keychain through the Security framework; provider, connector, and package
   keys through the credential broker; cluster access through a `KUBECONFIG`
-  the person keeps outside the list. Cloud command-line tools getting
-  short-lived credentials from the broker when linked is allowed; not built
-  yet.
+  the person keeps outside the list. The AWS command line in Octant's own
+  shell gets a short-lived session from the broker once the person points its
+  key pair at a linked store ([AWS command line](#linked-secret-stores)).
+  Allowed; not built yet: the Google Cloud and Azure command lines.
+  - _Rationale._ AWS first because a session needs nothing on disk: the
+    session's three values go in the command's environment, which the AWS
+    command line and every AWS SDK read before any file. The Google Cloud
+    command line takes a token only from a file it names, and the Azure
+    command line takes none from its environment, so each needs more than an
+    environment and is left for its own change.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
   read and write) and Claude Code's file tools, through Octant's tool gate,

@@ -66,6 +66,18 @@ const StoreAndReference = {
   reference: SecretStoreItemReference,
 } as const;
 
+/**
+ * The two items that hold the person's AWS access key pair, for the AWS command
+ * line in Octant's own shell. The broker reads them only to ask AWS for a
+ * short-lived session and hands out that session alone.
+ */
+export const AwsCliKeyReference = Schema.Struct({
+  store: SecretStoreKind,
+  accessKeyIdReference: SecretStoreItemReference,
+  secretAccessKeyReference: SecretStoreItemReference,
+}).annotations(strict);
+export type AwsCliKeyReference = typeof AwsCliKeyReference.Type;
+
 export const SecretStoresCommand = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("link-store"), store: SecretStoreKind }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("unlink-store"), store: SecretStoreKind }).annotations(
@@ -88,6 +100,12 @@ export const SecretStoresCommand = Schema.Union(
     kind: Schema.Literal("read-provider-key-reference"),
     instanceId: ProviderInstanceId,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("point-aws-cli-key"),
+    ...AwsCliKeyReference.fields,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("clear-aws-cli-key") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("read-aws-cli-key") }).annotations(strict),
 );
 export type SecretStoresCommand = typeof SecretStoresCommand.Type;
 
@@ -153,6 +171,11 @@ export const SecretStoresResult = Schema.Union(
     reference: Schema.NullOr(Schema.Struct(StoreAndReference).annotations(strict)),
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("secret-stores-aws-cli-key"),
+    /** The items the AWS command line's key pair comes from, or null when it has none. */
+    reference: Schema.NullOr(AwsCliKeyReference),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("secret-stores-refused"),
     reason: SecretStoreRefusalReason,
     message: Message,
@@ -172,6 +195,11 @@ const CredentialTarget = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("connector-secret"),
     secretId: Schema.UUID,
+  }).annotations(strict),
+  /** One half of the AWS command line's key pair; a change journals both halves together. */
+  Schema.Struct({
+    kind: Schema.Literal("aws-cli-key"),
+    part: Schema.Literal("access-key-id", "secret-access-key"),
   }).annotations(strict),
 );
 
