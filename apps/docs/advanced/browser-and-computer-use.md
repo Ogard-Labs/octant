@@ -114,13 +114,17 @@ read and change the pages it runs on, including what the agent reads there.
   allowed turns off everywhere and asks again, showing only what is new.
 - **Use** an extension from the puzzle-piece button in the Browser toolbar,
   which appears when one is on in the page's profile. Choose an extension to open
-  its popup or options page. While the agent drives the page, the button shows
+  its popup or options page. An extension with no popup gets a click instead, as
+  it would from a toolbar icon. While the agent drives the page, the button shows
   how many extensions are on, and the agent's site question says so.
 - **Remove** turns an extension off in every profile and deletes its copy.
 - Only you, at a window on this Mac, install or enable extensions. The agent,
   plugins, skills, and a paired phone cannot; a phone can see the list.
 - Extensions that call parts of the browser Octant does not provide fail inside
-  the extension. Popups that need `chrome.tabs` do not work yet.
+  the extension. `chrome.tabs` works for what a popup needs: it sees only the
+  pages of the same profile in the same window, shows page addresses and titles
+  only to an extension that asked for the `tabs` permission, and opens or changes
+  a page only on a site the page already allows.
 
 ### Browser captures
 

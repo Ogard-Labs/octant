@@ -1023,4 +1023,103 @@ describe("BrowserSurfaceHost stored profiles", () => {
     expect(host.state(contextId)).toBeDefined();
     expect(host.state(privatePage)).toBeDefined();
   });
+
+  describe("pages offered to an extension of the same profile", () => {
+    let nextId = 100;
+    const identified = () => {
+      const base = view();
+      return { ...base, webContents: { ...base.webContents, id: (nextId += 1) } };
+    };
+    const shellWindow = () => ({
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      isDestroyed: () => false,
+      webContents: { send: vi.fn() },
+    });
+    const bounds = { x: 0, y: 0, width: 400, height: 300 };
+
+    async function setup() {
+      const host = createBrowserSurfaceHost({ createView: () => identified() });
+      const owner = { windowId: "window-a", threadId };
+      const personalPage = contextId;
+      const privatePage = "60000000-0000-4000-8000-000000000003";
+      const otherWindow = "60000000-0000-4000-8000-000000000004";
+      await host.createContext({
+        contextId: personalPage,
+        owner,
+        policy: policyIn({ kind: "personal" }),
+      });
+      await host.createContext({ contextId: privatePage, owner, policy: policyIn() });
+      await host.createContext({
+        contextId: otherWindow,
+        owner: { windowId: "window-b", threadId },
+        policy: policyIn({ kind: "personal" }),
+      });
+      host.attach(personalPage, owner, shellWindow(), bounds);
+      return host;
+    }
+
+    it("lists the profile's own pages in the window and never a Private page or another window's", async () => {
+      const host = await setup();
+      const tabs = host.profileTabs({ kind: "personal" }, "window-a");
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0]).toMatchObject({ url: "https://example.com/", active: true });
+      expect(
+        host.profileTabs({ kind: "project", projectId: projectId as never }, "window-a"),
+      ).toEqual([]);
+      expect(host.profileTabs({ kind: "personal" }, "window-c")).toEqual([]);
+    });
+
+    it("opens a page for an extension only at an origin the page already admits", async () => {
+      const host = await setup();
+      const refused = await host.openProfileTab(
+        { kind: "personal" },
+        "window-a",
+        "https://elsewhere.test/",
+      );
+      expect(refused).toEqual({ status: "origin-refused" });
+      const opened = await host.openProfileTab(
+        { kind: "personal" },
+        "window-a",
+        "https://example.com/next",
+      );
+      expect(opened.status).toBe("tab");
+      expect(host.profileTabs({ kind: "personal" }, "window-a")).toHaveLength(2);
+      expect(await host.openProfileTab({ kind: "personal" }, "window-a", undefined)).toEqual({
+        status: "tab-limit",
+      });
+    });
+
+    it("has no page to open into when the profile is not on screen in that window", async () => {
+      const host = await setup();
+      expect(
+        await host.openProfileTab({ kind: "personal" }, "window-b", "https://example.com/"),
+      ).toEqual({
+        status: "no-page",
+      });
+    });
+
+    it("navigates and selects only a page of that profile and window", async () => {
+      const host = await setup();
+      const [page] = host.profileTabs({ kind: "personal" }, "window-a");
+      const moved = await host.updateProfileTab({ kind: "personal" }, "window-a", page?.id ?? -1, {
+        url: "https://example.com/other",
+      });
+      expect(moved.status).toBe("tab");
+      expect(
+        await host.updateProfileTab({ kind: "personal" }, "window-a", page?.id ?? -1, {
+          url: "https://elsewhere.test/",
+        }),
+      ).toEqual({ status: "origin-refused" });
+      expect(
+        await host.updateProfileTab(
+          { kind: "project", projectId: projectId as never },
+          "window-a",
+          page?.id ?? -1,
+          {},
+        ),
+      ).toEqual({
+        status: "no-page",
+      });
+    });
+  });
 });

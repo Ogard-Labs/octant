@@ -9430,7 +9430,8 @@ access` agree); a thread's own change is journaled as
   enabled per profile after the person reads what they can read and change, and
   never load into a Private page; an update that asks for more turns off
   everywhere until reconfirmed, and the desktop app loads them into the profile's
-  Electron session. A signed-in page's approval from a phone-started turn waits
+  Electron session, with `chrome.tabs` for the profile's own pages and
+  `chrome.action.onClicked` answered by the app. A signed-in page's approval from a phone-started turn waits
   for a local window, and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution

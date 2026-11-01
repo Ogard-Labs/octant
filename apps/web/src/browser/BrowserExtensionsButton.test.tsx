@@ -108,4 +108,29 @@ describe("BrowserExtensionsButton", () => {
       ),
     );
   });
+
+  it("lets the person choose an extension that has no popup page, so its toolbar click reaches it", async () => {
+    const user = userEvent.setup();
+    const openBrowserExtensionPopup = vi.fn(async () => ({ opened: true }));
+    render(
+      <BrowserExtensionsButton
+        agentDriving={false}
+        client={client([extension({ name: "Clicker", hasPopup: false })])}
+        hostBridge={{ openBrowserExtensionPopup } as unknown as OctantHostBridge}
+        profile={{ kind: "personal" }}
+        refreshKey="a"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Extensions" }));
+    const item = await screen.findByRole("menuitem", { name: "Clicker" });
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(item);
+
+    await waitFor(() =>
+      expect(openBrowserExtensionPopup).toHaveBeenCalledWith(
+        expect.objectContaining({ extensionId: "a".repeat(32), kind: "popup" }),
+      ),
+    );
+  });
 });

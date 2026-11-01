@@ -2214,7 +2214,7 @@ Browser pages may keep sign-in in a Project or Personal profile. Private remains
 - On a profile page the agent needs a site approval for each origin and profile, for reading too. Credential fields stay protected.
 - Routines, subagents, paired devices and terminal grants are refused on profile pages.
 - An extension is installed and enabled only by a person at a local window. Install never enables, and no agent, plugin or skill can install or enable.
-- Profiles, their stores, site approvals, refusals, sign out, and extension install, per-profile enablement, and popups are built. Two pieces of the popup design are declared and not built: `chrome.tabs` support for popups and the `chrome.action.onClicked` event.
+- Profiles, their stores, site approvals, refusals, sign out, extension install, per-profile enablement, and popups are built. A popup, an options page, and an extension's background worker get `chrome.tabs` (query, get, create, update, sendMessage) for the profile's own pages in the window only, and an extension with no popup page gets `chrome.action.onClicked`. An extension opens a page only to an origin the page already admits, and sees tab addresses only with the `tabs` permission.
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Profiles](browser-profiles.md#profiles) and [The agent on a signed-in page](browser-profiles.md#the-agent-on-a-signed-in-page).
 

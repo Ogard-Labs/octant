@@ -20,6 +20,7 @@ function fakeView() {
     native: { name: "view" },
     setBounds: vi.fn(),
     webContents: {
+      id: 7,
       loadURL: vi.fn(async () => undefined),
       close: vi.fn(),
       isDestroyed: () => false,
@@ -274,5 +275,41 @@ describe("extension popup request", () => {
     ]) {
       expect(() => validateExtensionPopupRequest(bad)).toThrow(TypeError);
     }
+  });
+
+  it("gives the page the tabs preload and tells which window and profile an open popup belongs to", async () => {
+    const fake = fakeView();
+    const createView = vi.fn(() => fake.view);
+    const host = createExtensionPopupHost({
+      store: { extensionPage: () => "chrome-extension://abc/popup.html" },
+      preloadPath: "/app/extensionBridgePreload.cjs",
+      createView,
+    });
+    await host.open({
+      windowId: "w1",
+      window: shellWindow(),
+      profile: { kind: "personal" },
+      extensionId,
+      kind: "popup",
+      bounds: { x: 0, y: 0, width: 300, height: 300 },
+    });
+
+    expect(createView).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webPreferences: expect.objectContaining({
+          preload: "/app/extensionBridgePreload.cjs",
+          sandbox: true,
+          contextIsolation: true,
+        }),
+      }),
+    );
+    expect(host.contextOf(7)).toEqual({
+      windowId: "w1",
+      profile: { kind: "personal" },
+      extensionId,
+    });
+    expect(host.contextOf(8)).toBeUndefined();
+    host.close("w1");
+    expect(host.contextOf(7)).toBeUndefined();
   });
 });

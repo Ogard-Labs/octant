@@ -153,6 +153,8 @@ describe("BrowserRuntimeBroker profiles", () => {
       clear: vi.fn(async () => undefined),
       syncExtensions: vi.fn(async () => undefined),
       extensionPage: vi.fn(() => undefined),
+      extensionOfElectronId: vi.fn(() => undefined),
+      extensionActionScope: vi.fn(() => undefined),
       importCookies: vi.fn(async (_profile: unknown, cookies: ReadonlyArray<unknown>) => ({
         imported: cookies.length,
         skipped: 0,
