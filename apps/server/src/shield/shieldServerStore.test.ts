@@ -548,4 +548,49 @@ describe("Settings › Servers route", () => {
     await post({ kind: "remove-server", serverId: keyedId });
     expect(deleted).toEqual([keyedId, keyedId]);
   });
+
+  it("keeps a Project's keyed servers and their keys when the person edits the Project's list", async () => {
+    const store = storeOn(openJournal(scratch()));
+    const windowId = decodeWindowId("00000000-0000-4000-8000-000000000471");
+    const capability = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDA";
+    const windows = new WindowAuthorityStore();
+    windows.register({ windowId, capability, now: 0 });
+    const deleted: string[] = [];
+    const handler = createShieldServerRouteHandler({
+      windowAuthorityStore: windows,
+      store,
+      sshAgentAvailable: () => false,
+      projectExists: (id) => id === projectId,
+      sshKeys: {
+        ensure: async () => "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample",
+        delete: async (serverId) => {
+          deleted.push(serverId);
+          return true;
+        },
+      },
+      now: () => 1,
+    });
+    const keyed = { ...web, alias: "keyed", signIn: "octant-key" as const };
+    store.register({ server: keyed, principal: "local-window" });
+    const accountId = String(store.servers()[0]?.serverId);
+    const save = (servers: ReadonlyArray<unknown>) =>
+      handler(
+        new Request(`http://127.0.0.1/api/shield/servers?projectId=${projectId}`, {
+          method: "POST",
+          body: JSON.stringify({ kind: "set-project-servers", projectId, servers }),
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+    // The Project's own list starts as a copy of the account list: the copy is the same server.
+    await save([keyed]);
+    expect(String(store.projectOverride(projectId)?.[0]?.serverId)).toBe(accountId);
+    // Adding another server keeps the keyed one's id, so its installed key still signs in.
+    await save([keyed, { ...web, alias: "db1" }]);
+    expect(String(store.projectOverride(projectId)?.[0]?.serverId)).toBe(accountId);
+    expect(deleted).toEqual([]);
+    // The account still signs in with that key, so dropping the Project's copy keeps it.
+    await save([{ ...web, alias: "db1" }]);
+    expect(deleted).toEqual([]);
+    store.remove({ serverId: accountId, principal: "local-window" });
+  });
 });

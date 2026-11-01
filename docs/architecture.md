@@ -11275,7 +11275,10 @@ give out only the key's public line and a signature, and sign only an SSH
 public-key login request (RFC 4252, or OpenSSH's host-bound form) for that
 very key; no route returns the private key, so neither the server process nor
 a command ever holds it. The person adds the public line to the server's
-`authorized_keys` themselves. _Rationale:_ the broker makes the key rather
+`authorized_keys` themselves. A server keeps its id when a Project's list is
+saved again (by its alias), and a Project's copy of an account server shares
+that server's id, so editing a list never orphans an installed key; a key is
+deleted once no list names its server with `octant-key`. _Rationale:_ the broker makes the key rather
 than importing one, so Octant never reads a key file and a key the person
 uses elsewhere never enters Octant; and it signs logins only, so the socket a
 command holds cannot sign anything it could use elsewhere.
