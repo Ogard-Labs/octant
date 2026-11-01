@@ -12,11 +12,12 @@ keeps.
 
 Status: built. The page snapshot and element refs (frames and open shadow
 roots included), short results, hover, select, drag, key chords, upload, tabs,
-batched steps, waits, settling, dialogs, viewport size, the sign-in handoff,
-and diagnostics with a cursor are built on the headless and desktop Browsers.
-Flows (recording a run, saving it in the Project, and replaying it by name) are
-built in Work and Code; the person can list and delete a Project's flows in
-Settings, and runs one by asking the agent.
+batched steps, waits, settling, dialogs, viewport size and device emulation
+(presets, touch, color scheme), the sign-in handoff, and diagnostics with a
+cursor are built on the headless and desktop Browsers. Flows (recording a run,
+saving it in the Project, and replaying it by name) are built in Work and Code;
+the person can list and delete a Project's flows in Settings, and runs one by
+asking the agent.
 
 ## One tool for every provider
 
@@ -346,13 +347,51 @@ runs, not when it was recorded.
   every dialog; the desktop Browser applies it while an agent's action runs,
   and a dialog that opens while the person drives stays theirs. The desktop
   Browser leaves alone a page whose developer tools someone else attached.
-- **Viewport.** `resize` sets the page to a width of 320 to 3840 and a height
-  of 320 to 2160 CSS pixels, and `resize` with neither restores the page's own
-  size. It acts only on the agent's own page, the thread's Browser context: the
-  headless Browser sets its viewport, and the desktop Browser emulates the size
-  inside the pane without moving or resizing the person's view, so the person
-  sees the page at that size until it is restored. A paired device cannot
-  resize.
+- **Viewport and device.** `resize` makes the agent's page look like another
+  device. Each field changes only what it names, and `resize` with none of them
+  restores the page's own size, touch, and color scheme together.
+  - A `preset` names a whole device: `phone` (390 by 844, pixel ratio 3,
+    mobile), `phone-landscape` (844 by 390, ratio 3, mobile), `tablet` (820 by
+    1180, ratio 2, mobile), or `desktop` (1280 by 800, ratio 1, not mobile). A
+    mobile preset also turns touch on, and `desktop` turns it off, unless the
+    call sets `touch` too. A preset beside `width` or `height` is refused.
+  - `width` and `height` together set a plain size of 320 to 3840 by 320 to
+    2160 CSS pixels, with pixel ratio 1 and no mobile flag.
+  - `touch` true makes the page a touch device: touch events, `pointer: coarse`,
+    and `navigator.maxTouchPoints` above 0. A `click` on a touch page then
+    reaches it as a tap (a touch start and end at the element's center) where
+    the runtime can send one, and the page sees the touch events a finger
+    sends. A page that tests `'ontouchstart' in window` once, as it loads,
+    needs a navigation to see the change. `touch` false turns it off.
+  - `colorScheme` is `light` or `dark`, which sets `prefers-color-scheme`, or
+    `default`, which returns the page to the scheme it had before.
+  - The answer's `emulation` says what the page now reports about itself,
+    measured in the page: its width, height, pixel ratio, whether it is a touch
+    device, and its color scheme.
+  - It acts only on the agent's own page, the thread's Browser context, and
+    on the tab in front when it runs: emulation belongs to that tab, a new tab
+    starts without it, and a restore acts on the tab in front. The headless Browser sets that page's
+    viewport, media, and touch through its protocol session. The desktop
+    Browser uses the view's device emulation for the size, so the person's
+    window and other contexts do not move or restyle, and the debugger protocol
+    for touch and color scheme. Those protocol overrides last only while the
+    debugger is attached, so the desktop Browser keeps its own attachment on a
+    page while touch or a color scheme is emulated and lets it go on restore.
+    A page whose developer tools someone else attached is left alone: touch and
+    color scheme are refused there (`Browser automation control is already in
+use`), a size still applies. The person sees the page at the emulated size
+    until it is restored. A paired device cannot resize or emulate, and Plan
+    mode refuses it like any other operation.
+- Rationale: emulation is optional fields on `resize` rather than a separate
+  operation. The operation already means "change how the page is sized, and
+  restore it", it keeps one restore that undoes everything, and the model learns
+  no new verb; the fields stay narrow because each is a fixed host action with
+  an enumerated value. Presets are a short fixed list, not free numbers, so the
+  pixel ratio and mobile flag the agent can set are only those of a real device,
+  and a size without a preset can never claim to be mobile. Touch on a mobile
+  preset follows the device it names, because a phone without touch tests
+  nothing. The answer reports what the page measures instead of echoing the
+  request, so an emulation that did not take hold shows.
 - Rationale: answering a dialog by a fixed rule instead of asking keeps the
   agent from deciding what the page asked the person, and dismissing a
   confirm is the answer that changes nothing. Bounding the viewport to common
@@ -471,6 +510,11 @@ Several threads of one Project may each drive their own page at the same time.
 - `apps/desktop/src/browserSurfaceHost.realPage.test.ts` drives the desktop
   Browser's action code against a real Chromium page standing in for Electron's
   view.
+- Both of those also prove device emulation: a phone preset gives a 390 wide
+  page with a coarse pointer and a tap that arrives as touch, dark mode matches
+  `prefers-color-scheme: dark`, and a bare `resize` undoes all three.
+  `apps/server/src/browser/browserAppManagedTools.test.ts` covers the arguments
+  and their refusals.
 - `apps/server/src/browser/browserAutomationService.test.ts` covers ref
   resolution and refusal on the server.
 - `apps/server/src/browser/browserThreadOwnership.test.ts` covers one thread's
