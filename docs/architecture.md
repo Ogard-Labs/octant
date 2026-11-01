@@ -8155,6 +8155,27 @@ names, or every provider when it names none; a package with MCP servers adds
 that a provider which cannot carry Octant's tools refuses a turn that selects
 them. The card never claims more than the activation ladder would grant.
 
+**Library.** Settings › Skills & Extensions opens on the Library, one
+searchable grid over connectors, plugins, skills and MCP servers. It is a
+projection: it joins the bundled connector list, the installed extension
+snapshot, the Marketplace results a person already searched for in this
+session, and the read-only local look at what Claude Code and Codex already
+have, and it adds no read of its own, so opening it fetches nothing and the
+Marketplace fetches switch changes nothing about it. Each card shows its
+source, provider, where it stands on the ladder (not installed, needs trust,
+off, on, blocked) and an authority level taken from the capabilities its
+components declare (instructions low; tool servers, network, browser, apps
+and agents medium; files, commands, screen control, credentials, hooks,
+other apps and Apple tooling high; a connector is medium and says which host
+receives requests). Trust and turning on run the same commands as the
+Installed view, one click each, and never together: installing implies
+neither, except a connector, whose one confirmed act installs, trusts and
+turns on. Install, review and connect stay in Marketplace, Connectors and
+Installed, which the Library opens. A connector shows a lettered tile and
+every item a designed fallback, because a bundled logo needs its own source
+and licence record and none exists for these vendors; provider-native items
+use the bundled provider marks.
+
 **Connectors catalog.** Settings › Skills & Extensions has a Connectors view:
 a bundled, first-party list of hosted MCP servers (`connectorCatalog` in
 `@octant/domain`), each with a name, one line, a category, the vendor's own

@@ -1,7 +1,8 @@
 import { BookOpen, ChevronDown, ChevronUp, Puzzle, Search, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
+  DiscoveredAgentToolingListing,
   ExtensionCatalogEntry,
   ExtensionCommand,
   ExtensionCommandFailure,
@@ -34,6 +35,8 @@ import { AddMcpServerDialog } from "./AddMcpServerDialog";
 import { DiscoveredToolingSection } from "./DiscoveredToolingSection";
 import { McpServerSignInControl } from "./McpServerSignInControl";
 import { ConnectorsView } from "./ConnectorsView";
+import { LibraryView } from "./LibraryView";
+import { buildLibrary, type LibraryItem } from "./libraryModel";
 import { providerFit } from "./providerFit";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -380,6 +383,8 @@ export interface ExtensionsSettingsViewProps {
    * still does not fetch.
    */
   readonly marketplaceFetchesEnabled?: boolean;
+  /** The view that opens first; the Library when omitted. */
+  readonly initialView?: "library" | "installed" | "marketplace" | "connectors";
   /** Changes when the skill folders in Settings change, so discovery runs again. */
   readonly skillFoldersKey?: string;
   /**
@@ -413,9 +418,11 @@ const INSTALLED_SKILL_PREVIEW_LIMIT = 12;
 export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const scope = props.scope ?? DEFAULT_EXTENSION_SETTINGS_SCOPE;
   const marketplaceFetchesEnabled = props.marketplaceFetchesEnabled ?? true;
-  const [view, setView] = useState<"installed" | "marketplace" | "connectors">("installed");
+  const [view, setView] = useState<"library" | "installed" | "marketplace" | "connectors">(
+    props.initialView ?? "library",
+  );
   const viewSwitch = (
-    <OctantToggleGroup<"installed" | "marketplace" | "connectors">
+    <OctantToggleGroup<"library" | "installed" | "marketplace" | "connectors">
       aria-label="View"
       onValueChange={(value) => {
         const selected = value[0];
@@ -423,6 +430,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       }}
       value={[view]}
     >
+      <OctantToggleGroupItem value="library">Library</OctantToggleGroupItem>
       <OctantToggleGroupItem value="installed">Installed</OctantToggleGroupItem>
       <OctantToggleGroupItem value="marketplace">Marketplace</OctantToggleGroupItem>
       <OctantToggleGroupItem value="connectors">Connectors</OctantToggleGroupItem>
@@ -463,6 +471,32 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [installedSkillQuery, setInstalledSkillQuery] = useState("");
   const [showAllInstalledSkills, setShowAllInstalledSkills] = useState(false);
   const installedSkillSearch = useRef<HTMLInputElement>(null);
+  const [discovered, setDiscovered] = useState<DiscoveredAgentToolingListing>();
+  const [scanFailed, setScanFailed] = useState(false);
+  const [libraryBusyId, setLibraryBusyId] = useState<string>();
+  const libraryItems = useMemo(
+    () => buildLibrary({ snapshot, marketplace: marketplaceEntries, discovered }),
+    [snapshot, marketplaceEntries, discovered],
+  );
+  // The same read-only look at Claude Code and Codex on this computer that
+  // Installed makes; the Library shows what it found and adds nothing.
+  useEffect(() => {
+    if (view !== "library") return;
+    let cancelled = false;
+    props.client
+      .listDiscoveredTooling()
+      .then((found) => {
+        if (cancelled) return;
+        setDiscovered(found);
+        setScanFailed(false);
+      })
+      .catch(() => {
+        if (!cancelled) setScanFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.client, view, discoveredRevision]);
 
   const importLocalPlugin = useCallback(
     async (selection: Readonly<{ receiptId: string; displayName: string }>) => {
@@ -914,6 +948,20 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     );
   }
 
+  const libraryPackage = (item: LibraryItem) =>
+    snapshot.packages.find((pkg) => String(pkg.extensionId) === item.packageRef?.extensionId);
+  const libraryLifecycle = (
+    item: LibraryItem,
+    command: (pkg: ExtensionSnapshot["packages"][number]) => ExtensionCommand,
+  ) => {
+    const pkg = libraryPackage(item);
+    if (pkg === undefined) return;
+    setLibraryBusyId(String(pkg.extensionId));
+    void runLifecycle(command(pkg), `${pkg.extensionId}:${pkg.packageId}`).finally(() =>
+      setLibraryBusyId(undefined),
+    );
+  };
+
   const catalogOffline = effective?.catalogStatus === "offline";
   const installedPackages = snapshot.packages.filter((pkg) => pkg.activation.installed);
   const standaloneSkills = snapshot.skills ?? [];
@@ -973,7 +1021,36 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           </p>
         </>
       )}
-      {view === "installed" ? (
+      {view === "library" ? (
+        <LibraryView
+          actions={viewSwitch}
+          busyExtensionId={libraryBusyId}
+          disabled={installing || importingLocal}
+          items={libraryItems}
+          loading={status === "loading" && snapshot.packages.length === 0}
+          marketplaceFetchesEnabled={marketplaceFetchesEnabled}
+          onOpen={(target) => setView(target)}
+          onPluginDesired={(item, desired) =>
+            libraryLifecycle(item, (pkg) => ({
+              kind: "set-plugin-desired",
+              commandVersion: COMMAND_VERSION,
+              extensionId: pkg.extensionId,
+              expectedStateVersion: pkg.stateVersion,
+              desired,
+            }))
+          }
+          onTrust={(item, trusted) =>
+            libraryLifecycle(item, (pkg) => ({
+              kind: "set-source-trust",
+              commandVersion: COMMAND_VERSION,
+              extensionId: pkg.extensionId,
+              expectedStateVersion: pkg.stateVersion,
+              trusted,
+            }))
+          }
+          scanFailed={scanFailed}
+        />
+      ) : view === "installed" ? (
         <>
           <SettingsSection
             actions={viewSwitch}

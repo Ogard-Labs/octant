@@ -139,7 +139,7 @@ describe("installing a plugin from npm in Settings", () => {
     const fake = client(false, (command) =>
       command.kind === "resolve-npm-package" ? preview("1.0.0") : undefined,
     );
-    render(<ExtensionsSettingsView client={fake} />);
+    render(<ExtensionsSettingsView initialView="installed" client={fake} />);
     const user = await openMarketplace();
 
     await user.type(screen.getByLabelText("npm package name"), "@example/demo");
@@ -186,7 +186,7 @@ describe("installing a plugin from npm in Settings", () => {
           }
         : undefined,
     );
-    render(<ExtensionsSettingsView client={fake} />);
+    render(<ExtensionsSettingsView initialView="installed" client={fake} />);
     const user = await openMarketplace();
 
     await user.type(screen.getByLabelText("npm package name"), "@example/demo");
@@ -200,7 +200,13 @@ describe("installing a plugin from npm in Settings", () => {
 
   it("does not look anything up while marketplace fetches are off", async () => {
     const fake = client(false, () => undefined);
-    render(<ExtensionsSettingsView client={fake} marketplaceFetchesEnabled={false} />);
+    render(
+      <ExtensionsSettingsView
+        initialView="installed"
+        client={fake}
+        marketplaceFetchesEnabled={false}
+      />,
+    );
     await openMarketplace();
 
     expect((screen.getByLabelText("npm package name") as HTMLInputElement).disabled).toBe(true);
@@ -222,7 +228,7 @@ describe("installing a plugin from npm in Settings", () => {
       if (command.kind === "resolve-npm-package") return preview("1.1.0");
       return undefined;
     });
-    render(<ExtensionsSettingsView client={fake} />);
+    render(<ExtensionsSettingsView initialView="installed" client={fake} />);
     const user = userEvent.setup();
 
     expect(await screen.findByText("@example/demo@1.0.0")).toBeTruthy();
@@ -268,7 +274,7 @@ describe("installing a plugin from npm in Settings", () => {
           } as never)
         : undefined,
     );
-    render(<ExtensionsSettingsView client={fake} />);
+    render(<ExtensionsSettingsView initialView="installed" client={fake} />);
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "Check for update" }));
