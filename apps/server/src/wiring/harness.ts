@@ -316,6 +316,7 @@ export function wireHarness(deps: HarnessDependencies) {
                 shieldServerStore.serversFor(scope.projectId),
                 {
                   personAgentSocket: sshAgentSocket,
+                  keys: serverSshKeys,
                   ...(harnessEgressEndpoint.kind === "unix-socket"
                     ? { relays: "unix-socket" as const }
                     : {}),

@@ -537,7 +537,8 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
     try {
       const result = await client.command({ kind: "show-server-key", serverId: server.serverId });
       if (result.kind === "shield-server-key") return { kind: "key", publicKey: result.publicKey };
-      if (result.kind === "shield-servers-refused") return { kind: "problem", message: result.message };
+      if (result.kind === "shield-servers-refused")
+        return { kind: "problem", message: result.message };
     } catch {
       // Shown below as the same plain problem.
     }

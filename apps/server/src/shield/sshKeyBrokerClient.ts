@@ -17,6 +17,8 @@ export interface ServerSshKeys {
   readonly publicKey: (serverId: string) => Promise<string | undefined>;
   /** The SSH signature blob over `data`, which the broker signs only as a login for this key. */
   readonly signLogin: (serverId: string, data: Buffer) => Promise<Buffer | undefined>;
+  /** Forgets the server's key; true once the broker holds none for it. */
+  readonly delete: (serverId: string) => Promise<boolean>;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -28,7 +30,7 @@ export function makeServerSshKeysBrokerClient(
 ): ServerSshKeys {
   const fetch = options.fetch ?? globalThis.fetch;
   const call = async (
-    operation: "ensure" | "public" | "sign",
+    operation: "ensure" | "public" | "sign" | "delete",
     body: Readonly<Record<string, string>>,
   ): Promise<Record<string, unknown> | undefined> => {
     if (!UUID_PATTERN.test(body.serverId ?? "")) return undefined;
@@ -58,6 +60,7 @@ export function makeServerSshKeysBrokerClient(
   return {
     ensure: async (serverId) => publicLineOf(await call("ensure", { serverId })),
     publicKey: async (serverId) => publicLineOf(await call("public", { serverId })),
+    delete: async (serverId) => (await call("delete", { serverId }))?.deleted === true,
     signLogin: async (serverId, data) => {
       const value = await call("sign", { serverId, data: data.toString("base64") });
       return typeof value?.signature === "string" && BASE64.test(value.signature)

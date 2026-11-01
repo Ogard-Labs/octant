@@ -58,6 +58,25 @@ describe("SSH keys Octant keeps", () => {
     expect(await ensureSshKey(store, OTHER)).not.toBe(line);
   });
 
+  it("makes one key when two requests for a server arrive at once", async () => {
+    const store = memoryStore();
+    let sets = 0;
+    const counting: CredentialStore = {
+      ...store,
+      set: async (id, value) => {
+        sets += 1;
+        await store.set(id, value);
+      },
+    };
+    const [first, second] = await Promise.all([
+      ensureSshKey(counting, SERVER),
+      ensureSshKey(counting, SERVER),
+    ]);
+    expect(first).toBe(second);
+    expect(sets).toBe(1);
+    expect(await sshPublicKey(store, SERVER)).toBe(first);
+  });
+
   it("signs a login request for its own key, with a signature the public key verifies", async () => {
     const store = memoryStore();
     const line = await ensureSshKey(store, SERVER);

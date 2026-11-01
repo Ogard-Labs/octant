@@ -24,13 +24,29 @@ export type SshKeySignature =
   | { readonly status: "missing" }
   | { readonly status: "refused" };
 
-/** The key's public line, making the key first when the server has none. */
-export async function ensureSshKey(store: CredentialStore, serverId: string): Promise<string> {
-  if (await store.has(serverId)) return publicLineOf(await store.resolve(serverId));
-  const { privateKey } = generateKeyPairSync("ed25519");
-  const pem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
-  await store.set(serverId, pem);
-  return publicLineOf(pem);
+/** Each store's key making in progress, by server id. */
+const ensuring = new WeakMap<CredentialStore, Map<string, Promise<string>>>();
+
+/**
+ * The key's public line, making the key first when the server has none. Two
+ * requests for one server at once share one making, and the line is read back
+ * from the store, so the person is never shown a key the store does not hold
+ * (a Secret Service store replaces an item with the same attributes).
+ */
+export function ensureSshKey(store: CredentialStore, serverId: string): Promise<string> {
+  const pending = ensuring.get(store) ?? new Map<string, Promise<string>>();
+  ensuring.set(store, pending);
+  const running = pending.get(serverId);
+  if (running !== undefined) return running;
+  const made = (async () => {
+    if (!(await store.has(serverId))) {
+      const { privateKey } = generateKeyPairSync("ed25519");
+      await store.set(serverId, privateKey.export({ format: "pem", type: "pkcs8" }).toString());
+    }
+    return publicLineOf(await store.resolve(serverId));
+  })().finally(() => pending.delete(serverId));
+  pending.set(serverId, made);
+  return made;
 }
 
 /** The key's public line, or undefined when the server has no key. */

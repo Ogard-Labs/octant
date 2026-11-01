@@ -107,7 +107,11 @@ describe("ShieldServersSettings", () => {
 
     await user.type(within(form).getByLabelText("Host alias"), "db-1");
     await user.type(within(form).getByLabelText("Login user"), "ops");
-    await chooseSelectFieldOption(user, within(form).getByRole("combobox", { name: "Profile" }), "Operate");
+    await chooseSelectFieldOption(
+      user,
+      within(form).getByRole("combobox", { name: "Profile" }),
+      "Operate",
+    );
     await user.type(
       within(form).getByLabelText("Deploy commands (one per line)"),
       "systemctl restart app{Enter}{Enter}  ./deploy.sh  ",
@@ -198,7 +202,11 @@ describe("ShieldServersSettings", () => {
     const form = await screen.findByRole("form", { name: "Add a server" });
 
     expect(within(form).queryByLabelText("Deploy commands (one per line)")).toBeNull();
-    await chooseSelectFieldOption(user, within(form).getByRole("combobox", { name: "Profile" }), "Admin");
+    await chooseSelectFieldOption(
+      user,
+      within(form).getByRole("combobox", { name: "Profile" }),
+      "Admin",
+    );
     expect(within(form).getByLabelText("Deploy commands (one per line)")).toBeVisible();
   });
 

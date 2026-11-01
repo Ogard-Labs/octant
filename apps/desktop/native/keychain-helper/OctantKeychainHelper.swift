@@ -42,8 +42,8 @@ private let pushPlatformCredentialService = "app.octant.push-platform-credential
 private let pushPlatformCredentialNamespace = "push-platform-credential"
 // The SSH sign-in keys Octant made for registered servers live in a service of
 // their own. The broker makes each key and signs with it; no route reads one
-// back, and a set never replaces a key, so a server's key changes only after
-// the person removes it.
+// back, and a set never replaces a key: a server's key is deleted when the
+// person removes the server or stops signing in with it.
 private let sshKeyService = "app.octant.ssh-keys.v1"
 private let sshKeyNamespace = "ssh-key"
 // An owner device's unlock key: a P-256 key made in the Secure Enclave that

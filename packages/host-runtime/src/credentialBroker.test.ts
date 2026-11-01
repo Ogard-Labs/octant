@@ -746,9 +746,9 @@ describe("startCredentialBroker", () => {
       expect(await (await call("/v1/ssh-keys/public", { serverId })).json()).toEqual(ensured);
       // No route of any namespace reads the stored key back.
       expect((await call("/v1/ssh-keys/resolve", { serverId })).status).toBe(404);
-      expect(
-        (await call("/v1/credentials/resolve", { providerInstanceId: serverId })).status,
-      ).toBe(404);
+      expect((await call("/v1/credentials/resolve", { providerInstanceId: serverId })).status).toBe(
+        404,
+      );
       const answer = await call("/v1/ssh-keys/sign", {
         serverId,
         data: Buffer.from("not a login").toString("base64"),

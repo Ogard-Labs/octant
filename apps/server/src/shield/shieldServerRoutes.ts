@@ -36,7 +36,7 @@ export interface ShieldServerRouteDependencies {
     | "serverById"
   >;
   /** The keys Octant keeps for servers that sign in with one; absent without a credential broker. */
-  readonly sshKeys?: Pick<ServerSshKeys, "ensure">;
+  readonly sshKeys?: Pick<ServerSshKeys, "ensure" | "delete">;
   readonly projectExists: (projectId: string) => boolean;
   /** Whether the person's SSH agent socket is there for SSH sessions to use. */
   readonly sshAgentAvailable: () => boolean;
@@ -129,6 +129,15 @@ export function createShieldServerRouteHandler(dependencies: ShieldServerRouteDe
       const shown = await showServerKey(dependencies, String(command.serverId), principal);
       return json(shown, shown.kind === "shield-server-key" ? 200 : 409, origin);
     }
+    // Keys that may stop being needed: the server changed or removed, or a
+    // Project list's servers before it is replaced.
+    const keyedBefore = (
+      command.kind === "set-project-servers" || command.kind === "clear-project-override"
+        ? (dependencies.store.projectOverride(String(command.projectId)) ?? [])
+        : command.kind === "register-server"
+          ? []
+          : [dependencies.store.serverById(String(command.serverId))]
+    ).flatMap((server) => (server?.signIn === "octant-key" ? [String(server.serverId)] : []));
     const change: ShieldServersChange =
       command.kind === "set-project-servers"
         ? dependencies.store.setProjectServers({
@@ -147,6 +156,7 @@ export function createShieldServerRouteHandler(dependencies: ShieldServerRouteDe
                   principal,
                 })
               : dependencies.store.remove({ serverId: String(command.serverId), principal });
+    if (change.kind === "changed") await forgetUnusedKeys(dependencies, keyedBefore);
     const projectId =
       command.kind === "set-project-servers" || command.kind === "clear-project-override"
         ? String(command.projectId)
@@ -161,6 +171,23 @@ export function createShieldServerRouteHandler(dependencies: ShieldServerRouteDe
         : refused(change.reason);
     return json(result, result.kind === "shield-servers-updated" ? 200 : 409, origin);
   };
+}
+
+/**
+ * A key the person removed the server for, or stopped signing in with, is
+ * deleted from the broker, so a line still in that server's `authorized_keys`
+ * matches no key anyone holds. A key another list still names for the same
+ * server id stays. A failure leaves the key; it signs only that server's
+ * logins and only when a registered server asks.
+ */
+async function forgetUnusedKeys(
+  dependencies: ShieldServerRouteDependencies,
+  serverIds: ReadonlyArray<string>,
+): Promise<void> {
+  for (const serverId of serverIds) {
+    if (dependencies.store.serverById(serverId)?.signIn === "octant-key") continue;
+    await dependencies.sshKeys?.delete(serverId).catch(() => false);
+  }
 }
 
 /**

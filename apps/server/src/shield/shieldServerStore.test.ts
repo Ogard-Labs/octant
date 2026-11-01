@@ -459,6 +459,7 @@ describe("Settings › Servers route", () => {
     const windows = new WindowAuthorityStore();
     windows.register({ windowId, capability, now: 0 });
     const ensured: string[] = [];
+    const deleted: string[] = [];
     let brokerAnswers = true;
     const handler = createShieldServerRouteHandler({
       windowAuthorityStore: windows,
@@ -469,6 +470,10 @@ describe("Settings › Servers route", () => {
         ensure: async (serverId) => {
           ensured.push(serverId);
           return brokerAnswers ? "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample" : undefined;
+        },
+        delete: async (serverId) => {
+          deleted.push(serverId);
+          return true;
         },
       },
       now: () => 1,
@@ -520,5 +525,27 @@ describe("Settings › Servers route", () => {
     expect(await (await handler(remote))?.json()).toMatchObject({ reason: "needs-local-window" });
     // Only the person's own window here made a key; the paired device asked nothing of the broker.
     expect(ensured).toEqual([keyedId, keyedId]);
+
+    const post = (command: unknown) =>
+      handler(
+        new Request(url, {
+          method: "POST",
+          body: JSON.stringify(command),
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+    // Changing a server that signs in with the person's agent touches no key.
+    await post({ kind: "change-server", serverId: agentId, server: { ...web, profile: "admin" } });
+    expect(deleted).toEqual([]);
+    // Switching the keyed server to the person's agent forgets its key.
+    await post({ kind: "change-server", serverId: keyedId, server: { ...web, alias: "keyed" } });
+    expect(deleted).toEqual([keyedId]);
+    await post({
+      kind: "change-server",
+      serverId: keyedId,
+      server: { ...web, alias: "keyed", signIn: "octant-key" },
+    });
+    await post({ kind: "remove-server", serverId: keyedId });
+    expect(deleted).toEqual([keyedId, keyedId]);
   });
 });
