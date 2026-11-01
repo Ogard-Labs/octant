@@ -9,13 +9,14 @@ of the person's registered servers, reached over SSH. Architecture owns the boun
 **Delivery state.** Built: the server Project catalog, its journal and replay,
 the SSH connection, and the folder check at binding (`/api/server-projects`);
 Code threads there on the Octant Harness, with file tools, commands, and Git
-on the server at every level; thread terminals there; the Git tab, whose Git
-runs on the server; a thread's own worktree on the server and its pull
-request ([Worktrees and pull requests](#worktrees-and-pull-requests)); and
-the Code sidebar, composer, and thread view that open them. On the host: Work
-Projects there, whose Work threads run on the Octant Harness with file tools
-and commands on the server ([Work Projects](#work-projects)). Not built yet:
-the items under [Not built yet](#not-built-yet).
+on the server at every level; thread terminals there; the Project terminal;
+the Git tab and the dock's Review tool, whose Git runs on the server; a
+thread's own worktree on the server and its pull request
+([Worktrees and pull requests](#worktrees-and-pull-requests)); and the Code
+sidebar, composer, and thread view that open them. On the host: Work Projects
+there, whose Work threads run on the Octant Harness with file tools and
+commands on the server ([Work Projects](#work-projects)). Not built yet: the
+items under [Not built yet](#not-built-yet).
 
 ## Outcome
 
@@ -156,6 +157,16 @@ hands are on the server.
   pseudo-terminal here that runs only `ssh`. It carries no credential, Browser
   grant, or other folder from this host, and Plan starts none. When the
   connection drops the terminal ends; it is never restarted on this host.
+- **Project terminal.** A Code server Project's own terminal (the one with
+  no thread, opened from the dock's quick tools of a new task) is the same SSH
+  login shell in the folder, owned by the local window that opened it and
+  journaled as a local Project terminal is. It has no other folder, no saved
+  actions or suggestions (those read a Project's files on this host), and no
+  browser beside it. A server removed from the registry refuses the next
+  start; removing the Project ends its shells. Its posture is recorded as
+  Full access. _Rationale:_ the posture says what holds the shell, and on a
+  server nothing does: Octant has no sandbox there, and the person opening
+  their own shell is the approval, as it is for a local Project terminal.
 - **Fail closed in a turn.** A file call that cannot reach the server is
   refused `target-unavailable` and a command reports the shell unavailable;
   the next call tries the server again. Nothing a server thread asks for runs
@@ -214,6 +225,12 @@ hands are on the server.
   _Rationale:_ locally the global config is hidden because the sandbox hides
   it; the server has no sandbox, and the person's own `git` there would read
   it, so hiding it would be stricter than the server itself.
+- **Review tool.** The dock's Review tool opens for a server thread. Its
+  working tree is the Git tab's diff, and its local commits and history are
+  read by Git on the server in the folder, read-only, through the same
+  connection rules; nothing is read on this host. A server that cannot be
+  reached or left the registry shows them unavailable. Reading is allowed at
+  every level, Plan included, as locally.
 - **Plan changes nothing.** At Plan every Git change from the tab is refused
   on a server. _Rationale:_ locally Plan's read-only rule is a confinement
   around Git; Octant has none on the server, so refusing is the only way to
@@ -288,15 +305,15 @@ hands are on the server.
 - The Work sidebar, composer, and thread view for a Work Project on a server,
   and the choice of mode when binding one in Settings; the host side is built.
 - Extra folders in a server Project.
-- The file browser and tests for a server Project, and the dock's Review
-  tool there; the Git tab, managed worktrees, and pull requests are built.
-- The Project terminal (the thread-less one) for a server Project; thread
-  terminals are built.
+- The file browser and tests for a server Project; the Git tab, the Review
+  tool, managed worktrees, and pull requests are built.
+- Saved Project actions and their suggestions for a server Project; its
+  Project terminal is built.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,
-  commands, terminals, the Git tab and worktrees were exercised against a
-  throwaway local `sshd` only, and pull requests against a stand-in for
-  `gh`, never GitHub. Linux
+  commands, terminals, the Git tab, the Review tool's history and worktrees
+  were exercised against a throwaway local `sshd` only, and pull requests
+  against a stand-in for `gh`, never GitHub. Linux
   hosts are likewise untested; the connection uses only `ssh` options both
   platforms share.

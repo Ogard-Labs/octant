@@ -27,11 +27,27 @@ const unavailable: GitHistoryResult = {
 const LOG_FORMAT = "%H%x00%P%x00%an%x00%aI%x00%s";
 const OID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
-/** Local reads only. The host resolves the authorized root before calling this port. */
+/**
+ * Where a history's Git runs when it is not this host's: a server Project's
+ * Git on its server. `run` is one read-only command in `root`.
+ */
+export interface GitHistoryElsewhere {
+  readonly realpath: (root: string) => Promise<string>;
+  readonly run: (
+    root: string,
+    args: ReadonlyArray<string>,
+    signal: AbortSignal | undefined,
+    acceptTruncated: boolean,
+  ) => Promise<{ readonly ok: boolean; readonly text: string }>;
+}
+
+/** Read-only. The host resolves the authorized root before calling this port. */
 export class GitHistoryPort {
   readonly #sandbox: ReturnType<typeof createGitSeatbeltConfinement>;
-  constructor(options: GitSeatbeltPortOptions = {}) {
+  readonly #elsewhere: GitHistoryElsewhere | undefined;
+  constructor(options: GitSeatbeltPortOptions = {}, elsewhere?: GitHistoryElsewhere) {
     this.#sandbox = createGitSeatbeltConfinement({ ...options, networkEgress: "none" });
+    this.#elsewhere = elsewhere;
   }
 
   async read(
@@ -43,11 +59,11 @@ export class GitHistoryPort {
   ): Promise<GitHistoryResult> {
     try {
       const query = decodeGitHistoryQuery(input);
-      const canonicalRoot = await realpath(root);
+      const canonicalRoot = await (this.#elsewhere?.realpath ?? realpath)(root);
       if (
         !isAbsolute(canonicalRoot) ||
         signal?.aborted ||
-        (await gitHistoryMetadata(canonicalRoot)) === undefined
+        (this.#elsewhere === undefined && (await gitHistoryMetadata(canonicalRoot)) === undefined)
       )
         return unavailable;
       if (query.kind === "commit")
@@ -309,6 +325,14 @@ export class GitHistoryPort {
     signal?: AbortSignal,
     acceptTruncated = false,
   ): Promise<{ readonly ok: boolean; readonly text: string }> {
+    if (this.#elsewhere !== undefined) {
+      return this.#elsewhere.run(
+        root,
+        ["-c", "core.quotePath=false", ...args],
+        signal,
+        acceptTruncated,
+      );
+    }
     const metadata = await gitHistoryMetadata(root);
     if (metadata === undefined) return { ok: false, text: "" };
     const binaryDirectory = dirname(this.#sandbox.gitExecutable);

@@ -18,6 +18,7 @@ import {
 } from "react";
 import { ZenProjectResearchDock, ZenProjectTerminalCard } from "./deferredSurfaces";
 import type { OctantHostBridge } from "./hostBridge";
+import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import "../styles/start-quick-tools.css";
@@ -105,6 +106,10 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
   const [starting, setStarting] = useState(false);
   const [message, setMessage] = useState<string>();
   const runningTerminal = useRef<CodeTerminalId | undefined>(undefined);
+  // A server Project's terminal is a login on its server. It has no other
+  // folder here, and the browser would be this computer's, so neither is offered.
+  const onServer =
+    serverCodeProjectFor(useServerCodeProjects().projects, props.projectId) !== undefined;
 
   // A shell opened here stops when the panel goes or the Project changes.
   useEffect(() => {
@@ -179,7 +184,7 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
             label={starting ? "Starting terminal…" : "Terminal"}
             onSelect={() => void openTerminal()}
           />
-          {(services.extraFolders?.(props.projectId) ?? []).map((folder) => (
+          {(onServer ? [] : (services.extraFolders?.(props.projectId) ?? [])).map((folder) => (
             <QuickToolRow
               disabled={starting}
               icon={SquareTerminal}
@@ -188,15 +193,17 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
               onSelect={() => void openTerminal(folder)}
             />
           ))}
-          <QuickToolRow
-            disabled={starting}
-            icon={Globe}
-            label="Browser"
-            onSelect={() => {
-              setMessage(undefined);
-              setOpen({ kind: "browser" });
-            }}
-          />
+          {onServer ? null : (
+            <QuickToolRow
+              disabled={starting}
+              icon={Globe}
+              label="Browser"
+              onSelect={() => {
+                setMessage(undefined);
+                setOpen({ kind: "browser" });
+              }}
+            />
+          )}
           {message === undefined ? null : (
             <OctantAlert className="start-quick-tools__message" tone="warning">
               {message}

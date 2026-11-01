@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ActorId,
   ReplayCursor,
+  decodeBindingRevisionId,
   decodeCodeTerminalId,
   decodeProject,
   decodeProjectId,
@@ -184,6 +185,9 @@ function harness(
     readonly access?: (window: string, project: string) => boolean;
     readonly root?: string | undefined;
     readonly resolveRoot?: () => Promise<string | undefined>;
+    readonly serverProject?: ConstructorParameters<
+      typeof ProjectTerminalService
+    >[0]["serverProject"];
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-project-terminal-"));
@@ -215,6 +219,7 @@ function harness(
     actor,
     uuid: () => `91000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     clock: () => now,
+    ...(options.serverProject === undefined ? {} : { serverProject: options.serverProject }),
   });
   const events = () =>
     journal
@@ -765,5 +770,129 @@ describe("Project terminals", () => {
       clock: () => now,
     });
     expect(readRunningProjectTerminals(connection)).toEqual([]);
+  });
+});
+
+describe("a server Project's terminal", () => {
+  const serverRevision = "90000000-0000-4000-8000-0000000000aa";
+  const login = { command: "ssh", args: ["-tt", "--", "web1"], environment: {} };
+  const onServer = (registered: { value: boolean } = { value: true }) => {
+    const serverProjectId = { value: true };
+    return {
+      registered,
+      serverProjectId,
+      setup: harness({
+        projects: new Map(),
+        serverProject: (id) =>
+          String(id) === ids.project && serverProjectId.value
+            ? {
+                bindingRevisionId: decodeBindingRevisionId(serverRevision),
+                login: () => (registered.value ? login : undefined),
+              }
+            : undefined,
+      }),
+    };
+  };
+
+  it("logs in on the server with nothing of this host's and records the shell", async () => {
+    const { service, terminals, events } = onServer().setup;
+
+    const result = await service.execute(windowId, "local-window", start());
+
+    expect(result).toMatchObject({
+      kind: "project-terminal",
+      terminal: { state: "running", posture: "full-access" },
+    });
+    expect(terminals.launches).toHaveLength(1);
+    const launch = terminals.launches[0];
+    expect(launch?.server).toEqual(login);
+    expect(launch?.credentialReferences).toEqual([]);
+    expect(launch?.extraFolders).toBeUndefined();
+    expect(launch?.launcher).toBeUndefined();
+    expect(events()).toEqual([
+      {
+        name: "code.project-terminal-started@1",
+        payload: expect.objectContaining({
+          projectId: ids.project,
+          bindingRevisionId: serverRevision,
+          posture: "full-access",
+        }),
+      },
+    ]);
+  });
+
+  it("starts no shell for another folder, a paired device, another window, or a server that left the registry", async () => {
+    const { setup, registered } = onServer();
+    const { service, terminals } = setup;
+
+    expect(
+      refusal(
+        await service.execute(windowId, "local-window", { ...start(), folder: "/srv/other" }),
+      ),
+    ).toBe("unavailable");
+    expect(refusal(await service.execute(windowId, "remote-device", start()))).toBe("unauthorized");
+    expect(refusal(await service.execute(otherWindowId, "local-window", start()))).toBe(
+      "unauthorized",
+    );
+    registered.value = false;
+    expect(refusal(await service.execute(windowId, "local-window", start()))).toBe("unavailable");
+    expect(terminals.launches).toEqual([]);
+  });
+
+  it("types no saved action and suggests none there", async () => {
+    const { service, terminals } = onServer().setup;
+    await service.execute(windowId, "local-window", start());
+
+    const ran = await service.execute(windowId, "local-window", {
+      kind: "run-action",
+      projectId,
+      terminalId,
+      actionId: "92000000-0000-4000-8000-000000000001",
+    } as ProjectTerminalCommand);
+    const suggested = await service.execute(windowId, "local-window", {
+      kind: "suggest-actions",
+      projectId,
+    });
+
+    expect(refusal(ran)).toBe("unavailable");
+    expect(refusal(suggested)).toBe("unavailable");
+    expect(terminals.writes).toEqual([]);
+  });
+
+  it("ends the shell when the person removes the server Project", async () => {
+    const { setup, serverProjectId } = onServer();
+    const { service, terminals, events } = setup;
+    await service.execute(windowId, "local-window", start());
+
+    serverProjectId.value = false;
+    await service.settleProject(projectId);
+
+    expect(terminals.terminated).toEqual([ids.terminal]);
+    expect(events().at(-1)?.payload).toMatchObject({
+      kind: "project-terminal-ended",
+      reason: "authority-revoked",
+    });
+  });
+
+  it("ends the shell on removal even while the catalog still lists the Project", async () => {
+    const { service, terminals, events } = onServer().setup;
+    await service.execute(windowId, "local-window", start());
+
+    await service.revokeProject(projectId);
+
+    expect(terminals.terminated).toEqual([ids.terminal]);
+    expect(events().at(-1)?.payload).toMatchObject({
+      kind: "project-terminal-ended",
+      reason: "authority-revoked",
+    });
+  });
+
+  it("keeps a running shell when its server Project is settled unchanged", async () => {
+    const { service, terminals } = onServer().setup;
+    await service.execute(windowId, "local-window", start());
+
+    await service.settleProject(projectId);
+
+    expect(terminals.terminated).toEqual([]);
   });
 });

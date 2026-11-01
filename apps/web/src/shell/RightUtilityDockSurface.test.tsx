@@ -10,6 +10,7 @@ import {
 } from "./rightUtilityDockModel";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeProjectId } from "@octant/contracts/projects";
+import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
 import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
 import { StartQuickToolsContext, StartQuickToolsPlacementContext } from "./StartQuickTools";
 
@@ -369,6 +370,45 @@ describe("the right sidebar surface", () => {
     expect(within(projectTools).getByRole("button", { name: "Browser" })).toBeEnabled();
     expect(within(projectTools).getByText("Other tools open once the task starts")).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Tools open once the task starts" })).toBeNull();
+  });
+
+  it("offers a server Project's terminal and no browser of this computer", () => {
+    const projectId = decodeProjectId("30000000-0000-4000-8000-000000000002");
+    const services = {
+      hostId: LOCAL_HOST_ID,
+      projectTerminalClient: { execute: vi.fn() } as never,
+      projectBrowserClient: { execute: vi.fn() } as never,
+      extraFolders: () => ["/Users/person/elsewhere"],
+    };
+    render(
+      <ServerCodeProjectsContext.Provider
+        value={{
+          projects: [{ projectId, name: "Service", location: "web1:/srv/service" }],
+          refresh: vi.fn(),
+        }}
+      >
+        <StartQuickToolsContext.Provider value={services}>
+          <StartQuickToolsPlacementContext.Provider value={{ projectId, chooseProject: vi.fn() }}>
+            <RightUtilityDockSurface
+              launchableSurfaces={[]}
+              onCloseTab={vi.fn()}
+              onOpenTab={vi.fn()}
+              onSelectSurface={vi.fn()}
+              resolution={{ kind: "closed", reason: "no-surface" }}
+              tabs={[]}
+              toolsAwaitingThread={[terminal, browser]}
+            />
+          </StartQuickToolsPlacementContext.Provider>
+        </StartQuickToolsContext.Provider>
+      </ServerCodeProjectsContext.Provider>,
+    );
+
+    const projectTools = screen.getByRole("complementary", { name: "Project tools" });
+    expect(
+      within(projectTools)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Terminal"]);
   });
 });
 
