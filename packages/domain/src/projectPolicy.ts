@@ -13,6 +13,7 @@ import {
   type CanonicalProjectBinding,
   type ChatProject,
   type CodeProject,
+  type CodeProjectAgentMerge,
   type CodeProjectPullRequestBackgroundRefresh,
   type CodeAccessPersistence,
   type WorkProject,
@@ -490,6 +491,27 @@ export function changeCodeProjectPullRequestBackgroundRefresh(
     version: nextVersion(project),
     updatedAt,
   };
+}
+
+/**
+ * Allow or stop a Code agent merging the pull request its thread owns without
+ * asking for each merge. Absence reads as disabled, so a Project merges only on
+ * the person's request until the person says otherwise. Rejects a non-Code
+ * Project and a no-op change so the journal never carries an event that changed
+ * nothing.
+ */
+export function changeCodeProjectAgentMerge(
+  project: Project,
+  agentMerge: CodeProjectAgentMerge,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have an agent merge setting");
+  }
+  if ((project.agentMerge ?? "disabled") === agentMerge) {
+    reject("invalid-lifecycle", "Code Project agent merge is already selected");
+  }
+  return { ...project, agentMerge, version: nextVersion(project), updatedAt };
 }
 
 /**

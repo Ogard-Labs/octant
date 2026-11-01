@@ -2415,6 +2415,7 @@ describe("the pull request as an agent tool", () => {
   function pullRequestTools(
     threadOverrides: Partial<CodeThread> = {},
     answer: "approved" | "denied" = "approved",
+    standingMerge?: () => "project" | "routine" | undefined,
   ) {
     const request = vi.fn(async () =>
       answer === "approved"
@@ -2447,6 +2448,7 @@ describe("the pull request as an agent tool", () => {
       executeOperation,
       terminal: { read: async () => ({}) as never },
       pullRequestApproval: { request },
+      ...(standingMerge === undefined ? {} : { standingMerge }),
     });
     return { tools, request, executeOperation };
   }
@@ -2566,6 +2568,29 @@ describe("the pull request as an agent tool", () => {
       }),
     );
     expect(merged).toMatchObject({ result: { status: "merged" }, isError: false });
+  });
+
+  it("merges without asking when a stored choice allows it, but still asks for a comment", async () => {
+    const { tools, request, executeOperation } = pullRequestTools({}, "approved", () => "project");
+    const merged = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "merge", method: "squash", headSha: "a".repeat(40) }),
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "merge-pull-request",
+        authorization: { kind: "standing", allowedBy: "project" },
+      }),
+    );
+    expect(merged).toMatchObject({ result: { status: "merged" }, isError: false });
+
+    await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "comment", body: "Fixed." }),
+    });
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
   it("sends nothing to GitHub when the person declines a merge or a comment", async () => {

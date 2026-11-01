@@ -444,6 +444,37 @@ describe("DockProjectPullRequestReviewTool", () => {
       });
     });
 
+    it("approves on the head being read, and requests changes only with a note", async () => {
+      const user = userEvent.setup();
+      const act = vi.fn(done);
+      const view = renderActions(act);
+      const note = await screen.findByRole("textbox", { name: "Review" });
+      expect(screen.getByRole("button", { name: "Request changes" })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: "Approve" }));
+      expect(act).toHaveBeenLastCalledWith({
+        kind: "approve",
+        ...query,
+        headSha: "9".repeat(40),
+      });
+      await user.type(note, "Rename the flag.");
+      await user.click(screen.getByRole("button", { name: "Request changes" }));
+      expect(act).toHaveBeenLastCalledWith({
+        kind: "request-changes",
+        ...query,
+        headSha: "9".repeat(40),
+        body: "Rename the flag.",
+      });
+      view.unmount();
+
+      const merged = decodeCodeProjectPullRequestDetailView({
+        ...detailView(),
+        detail: { ...detailView().detail, pullRequestState: "merged" },
+      });
+      renderActions(act, readContext(), merged);
+      await screen.findByRole("textbox", { name: "Comment" });
+      expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    });
+
     it("closes an open pull request and reopens a closed one, never offering either once merged", async () => {
       const user = userEvent.setup();
       const act = vi.fn(done);

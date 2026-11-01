@@ -74,6 +74,7 @@ function fixture(
     comment: vi.fn(options.forge?.comment ?? (async () => done)),
     replyToReviewThread: vi.fn(options.forge?.replyToReviewThread ?? (async () => done)),
     retarget: vi.fn(options.forge?.retarget ?? (async () => done)),
+    review: vi.fn(options.forge?.review ?? (async () => done)),
     readContext: vi.fn(
       options.forge?.readContext ??
         (async () => ({
@@ -184,6 +185,119 @@ describe("project pull-request actions", () => {
       }
     },
   );
+
+  describe("reviews", () => {
+    const head = "a".repeat(40);
+    const open = { 12: { state: "open" as const, headBranch: "feature/x", baseBranch: "main" } };
+
+    it("approves or requests changes on the head the person read, and journals only the note's length", async () => {
+      const { service, forge, store } = fixture({ summaries: open });
+      try {
+        expect(
+          await service.act(
+            windowId,
+            { kind: "approve", ...target, headSha: head },
+            signal(),
+            "local-window",
+          ),
+        ).toEqual({ status: "done" });
+        expect(forge.review).toHaveBeenLastCalledWith(
+          { owner: "octant", name: "octant", number: 12, event: "approve", headSha: head },
+          expect.any(AbortSignal),
+        );
+        await service.act(
+          windowId,
+          { kind: "request-changes", ...target, headSha: head, body: "rename the secret flag" },
+          signal(),
+          "local-window",
+        );
+        expect(forge.review).toHaveBeenLastCalledWith(
+          expect.objectContaining({ event: "request-changes", body: "rename the secret flag" }),
+          expect.any(AbortSignal),
+        );
+        const text = JSON.stringify(store.recorded());
+        expect(text).not.toContain("secret flag");
+        expect(store.recorded().map((event) => event.payload)).toMatchObject([
+          { action: "approve", result: { status: "done" } },
+          { action: "request-changes", bodyBytes: 22, result: { status: "done" } },
+        ]);
+      } finally {
+        store.close();
+      }
+    });
+
+    it("answers stale when the head moves between the read and the post", async () => {
+      let reads = 0;
+      const { service, forge, store } = fixture({
+        forge: {
+          summary: async () => {
+            reads += 1;
+            return {
+              status: "read",
+              state: "open",
+              headBranch: "feature/x",
+              baseBranch: "main",
+              headSha: reads === 1 ? head : "b".repeat(40),
+            };
+          },
+        },
+      });
+      try {
+        expect(
+          await service.act(
+            windowId,
+            { kind: "approve", ...target, headSha: head },
+            signal(),
+            "local-window",
+          ),
+        ).toEqual({ status: "refused", reason: "stale" });
+        expect(forge.review).toHaveBeenCalledTimes(1);
+        expect(store.recorded()[0]?.payload).toMatchObject({
+          result: { status: "refused", reason: "stale" },
+        });
+      } finally {
+        store.close();
+      }
+    });
+
+    it("refuses a review for a head that moved, a closed pull request, and a paired device", async () => {
+      const moved = fixture({ summaries: open });
+      const closed = fixture({
+        summaries: { 12: { state: "closed", headBranch: "feature/x", baseBranch: "main" } },
+      });
+      try {
+        expect(
+          await moved.service.act(
+            windowId,
+            { kind: "approve", ...target, headSha: "b".repeat(40) },
+            signal(),
+            "local-window",
+          ),
+        ).toEqual({ status: "refused", reason: "stale" });
+        expect(
+          await closed.service.act(
+            windowId,
+            { kind: "approve", ...target, headSha: head },
+            signal(),
+            "local-window",
+          ),
+        ).toEqual({ status: "refused", reason: "not-open" });
+        expect(
+          await moved.service.act(
+            windowId,
+            { kind: "approve", ...target, headSha: head },
+            signal(),
+            "remote-device",
+          ),
+        ).toEqual({ status: "refused", reason: "not-authorized" });
+        expect(moved.forge.review).not.toHaveBeenCalled();
+        expect(closed.forge.review).not.toHaveBeenCalled();
+      } finally {
+        moved.store.close();
+        closed.store.close();
+      }
+    });
+  });
 
   it("journals a comment's length and never its text", async () => {
     const { service, store } = fixture();

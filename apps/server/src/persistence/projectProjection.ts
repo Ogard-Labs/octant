@@ -10,6 +10,7 @@ import {
   decodeCodeProjectNewThreadWorkspaceChanged,
   decodeCodeProjectPermissionModeChanged,
   decodeCodeProjectAutoReviewerChanged,
+  decodeCodeProjectAgentMergeChanged,
   decodeCodeProjectPullRequestBackgroundRefreshChanged,
   decodeProjectProviderPolicyChanged,
   decodeProjectNativeProvidersChanged,
@@ -185,6 +186,8 @@ const projectDecoders = {
     decodeCodeProjectNewThreadWorkspaceChanged(payload).project,
   "project.code-pull-request-background-refresh-changed@1": (payload: unknown) =>
     decodeCodeProjectPullRequestBackgroundRefreshChanged(payload).project,
+  "project.code-agent-merge-changed@1": (payload: unknown) =>
+    decodeCodeProjectAgentMergeChanged(payload).project,
   "project.provider-policy-changed@1": (payload: unknown) =>
     decodeProjectProviderPolicyChanged(payload).project,
   "project.native-providers-changed@1": (payload: unknown) =>

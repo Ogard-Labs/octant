@@ -4894,7 +4894,10 @@ describe("CodeOperationRuntime", () => {
     const head = "c".repeat(40);
 
     function actionFixture(
-      overrides: Partial<CodeOperationPullRequestActions> & { readonly approved?: boolean },
+      overrides: Partial<CodeOperationPullRequestActions> & {
+        readonly approved?: boolean;
+        readonly standing?: ReadonlyArray<"project" | "routine">;
+      },
     ) {
       const done = { status: "done" as const };
       const actions = {
@@ -4926,6 +4929,7 @@ describe("CodeOperationRuntime", () => {
         pullRequestTarget: true,
         gitRemotes: remotes,
         approvalValidator: () => overrides.approved ?? true,
+        ...(overrides.standing === undefined ? {} : { standingMergeAllowance: overrides.standing }),
         pullRequestPort: {
           ensure: async () => ({ status: "unavailable" }),
           update: async () => ({ status: "none" }),
@@ -5134,6 +5138,53 @@ describe("CodeOperationRuntime", () => {
         state: "completed",
       });
       for (const each of [refusedFixture, failing, unknown, merged]) each.fixture.close();
+    });
+
+    it("merges without a per-act approval only while a stored choice still allows it", async () => {
+      const base = {
+        kind: "merge-pull-request" as const,
+        method: "squash" as const,
+        headSha: head,
+        authorization: { kind: "standing", allowedBy: "project" } as const,
+      };
+      const allowed = actionFixture({ approved: false, standing: ["project"] });
+      expect(
+        await allowed.fixture.runtime.execute(windowId, { ...base, ...scope(200) }),
+      ).toMatchObject({ kind: "pull-request-state", state: "merged" });
+      expect(allowed.actions.merge).toHaveBeenCalledTimes(1);
+
+      // The setting was switched off, or the claim names a choice that is not
+      // stored: the command's word is not enough.
+      const off = actionFixture({ approved: false, standing: [] });
+      expect(await off.fixture.runtime.execute(windowId, { ...base, ...scope(201) })).toMatchObject(
+        { kind: "operation-failed", failure: { category: "unauthorized" } },
+      );
+      const wrongSource = actionFixture({ approved: false, standing: ["routine"] });
+      expect(
+        await wrongSource.fixture.runtime.execute(windowId, { ...base, ...scope(202) }),
+      ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+      expect(off.actions.merge).not.toHaveBeenCalled();
+      expect(wrongSource.actions.merge).not.toHaveBeenCalled();
+
+      // A stored choice never waives the head or the required checks.
+      const moved = actionFixture({ approved: false, standing: ["project"] });
+      expect(
+        await moved.fixture.runtime.execute(windowId, {
+          ...base,
+          headSha: "d".repeat(40),
+          ...scope(203),
+        }),
+      ).toMatchObject({ state: "unavailable", failureCode: "sha-mismatch" });
+      const failing = actionFixture({
+        approved: false,
+        standing: ["project"],
+        requiredChecks: async () => "failing",
+      });
+      expect(
+        await failing.fixture.runtime.execute(windowId, { ...base, ...scope(204) }),
+      ).toMatchObject({ state: "unavailable", failureCode: "checks-not-passing" });
+      for (const each of [moved, failing]) expect(each.actions.merge).not.toHaveBeenCalled();
+      for (const each of [allowed, off, wrongSource, moved, failing]) each.fixture.close();
     });
 
     it("refuses to merge a pull request that is closed or already merged", async () => {
@@ -6779,6 +6830,8 @@ function runtimeFixture(options: {
   terminalExit?: { readonly exitCode: number };
   pullRequestPort?: Parameters<typeof createCodeOperationRuntime>[0]["pullRequestPort"];
   pullRequestTarget?: boolean;
+  /** The standing merge permissions the stored choices give the thread. */
+  standingMergeAllowance?: ReadonlyArray<"project" | "routine">;
   repositoryTestDiscovery?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["repositoryTestDiscovery"];
@@ -7134,6 +7187,9 @@ function runtimeFixture(options: {
     credentialResolver: options.credentialResolver ?? { resolve: async () => options.credential },
     supportsAttachments: () => true,
     takeProductFeedbackForTurn: createProductFeedbackTurnPort({ service: feedback }),
+    ...(options.standingMergeAllowance === undefined
+      ? {}
+      : { standingMergeAllowance: () => options.standingMergeAllowance ?? [] }),
     resolvePullRequestTarget: async () =>
       options.pullRequestTarget === true
         ? {

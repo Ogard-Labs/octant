@@ -336,6 +336,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           loadContext={props.onLoadActionContext}
           onAct={props.onAct}
           pullRequestState={detail.pullRequestState}
+          headSha={detail.headSha}
           {...(props.onRefresh === undefined ? {} : { onChanged: props.onRefresh })}
         />
       )}

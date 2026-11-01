@@ -57,13 +57,20 @@ export type RemoteMergeDecision =
   | { readonly decision: "refuse"; readonly reason: RemoteMergeRefusal };
 
 /**
- * A merge from a paired phone or web client, or an agent's merge on request.
- * Only the person's own client may ask, with an explicit confirmation of the
- * head they reviewed; the required checks must be passing (or the repository
- * must require none). A state the host cannot read is refused, never assumed.
+ * A merge from a paired phone or web client, or an agent's merge on request or
+ * on a standing permission the person stored (the Project setting or a
+ * routine). Only the person's own client may ask, with an explicit confirmation
+ * of the head they reviewed, or an agent holding that permission with the head
+ * it read; the required checks must be passing (or the repository must require
+ * none). A state the host cannot read is refused, never assumed.
  */
 export function decideRemotePullRequestMerge(input: {
-  readonly caller: "local-window" | "remote-device" | "agent-on-request" | "agent-on-its-own";
+  readonly caller:
+    | "local-window"
+    | "remote-device"
+    | "agent-on-request"
+    | "agent-on-standing-permission"
+    | "agent-on-its-own";
   readonly confirmed: boolean;
   readonly requiredChecks: RequiredChecksState;
 }): RemoteMergeDecision {
