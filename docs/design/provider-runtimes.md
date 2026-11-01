@@ -41,6 +41,17 @@ state per provider. A native child run, a native
 web read, and a provider's review verdict are journaled where the runtime
 reports them; where it does not, the capability report says so.
 
+Codex reports each finished review of its own reviewer as
+`item/autoApprovalReview/completed` (observed in the codex-cli 0.164.0
+app-server schema, where it is marked unstable, so the adapter reads only the
+ids, the status, the reviewed item, the risk grade, and the rationale, and
+treats the rest as optional). `approved` and `denied` are verdicts; `timedOut`,
+`aborted`, and `inProgress` are not. Claude Code reports a refusal by its
+automatic-mode reviewer as a `permission_denied` system message with the reason
+type `classifier` (Agent SDK 0.3.211), and nothing for a call it approved. A
+denial for any other reason keeps being an unsupported message. Mistral Vibe's
+`auto-approve` mode sends no per-call verdict over ACP.
+
 ## Claude Code
 
 For a selected Haiku model in Plan, the adapter supplies a query-local

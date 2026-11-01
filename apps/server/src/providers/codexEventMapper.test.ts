@@ -2089,4 +2089,81 @@ describe("mapCodexMessage", () => {
       ),
     ).toEqual([{ kind: "ignored" }]);
   });
+
+  describe("Codex's own reviewer", () => {
+    const completed = (review: object, extra: object = {}) =>
+      notification("item/autoApprovalReview/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        reviewId: "review-1",
+        targetItemId: "provider-command-1",
+        action: {
+          type: "command",
+          command: "bun run test TOKEN=abc123def456",
+          cwd: "/tmp/project",
+        },
+        review,
+        ...extra,
+      } as never);
+
+    it("reports an approval against the call it covered, with the reduced command", () => {
+      const ctx = context();
+      map(
+        ctx,
+        notification("item/started", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: commandItem,
+          startedAtMs: 10,
+        }),
+      );
+
+      const results = map(
+        ctx,
+        completed({ status: "approved", riskLevel: "low", rationale: "Runs the repo's tests." }),
+      );
+
+      expect(results).toMatchObject([
+        {
+          kind: "event",
+          event: {
+            kind: "review-verdict",
+            verdict: "allow",
+            toolCallId: "tool-1",
+            riskLevel: "low",
+            reason: "Runs the repo's tests.",
+          },
+        },
+      ]);
+      expect(JSON.stringify(results)).not.toContain("abc123def456");
+    });
+
+    it("reports a denial, and names no call that never started", () => {
+      const results = map(context(), completed({ status: "denied", rationale: null }));
+
+      expect(results).toHaveLength(1);
+      expect(results[0]).toMatchObject({ event: { kind: "review-verdict", verdict: "deny" } });
+      expect(JSON.stringify(results)).not.toContain("toolCallId");
+    });
+
+    it.each(["inProgress", "timedOut", "aborted"])(
+      "reports no verdict for a review that ended %s",
+      (status) => {
+        expect(map(context(), completed({ status }))).toEqual([{ kind: "ignored" }]);
+      },
+    );
+
+    it("lets a review start pass without a verdict", () => {
+      expect(
+        map(
+          context(),
+          notification("item/autoApprovalReview/started", {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            reviewId: "review-1",
+          } as never),
+        ),
+      ).toEqual([{ kind: "ignored" }]);
+    });
+  });
 });

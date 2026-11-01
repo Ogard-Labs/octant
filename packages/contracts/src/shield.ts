@@ -70,6 +70,28 @@ export const ShieldDecision = Schema.Struct({
 }).annotations(strict);
 export type ShieldDecision = typeof ShieldDecision.Type;
 
+/**
+ * One verdict the provider's own reviewer reported for one call. `reviewer` is
+ * always the provider: a verdict the provider reported is never presented as
+ * Octant Shield's or the person's. Only what the runtime sent is kept.
+ */
+export const ProviderReviewDecision = Schema.Struct({
+  reviewer: Schema.Literal("provider"),
+  verdict: Schema.Literal("allow", "deny"),
+  /** The call it covered, matching a tool row in the same turn, when the runtime named one. */
+  toolCallId: Schema.optional(Schema.NonEmptyTrimmedString),
+  riskLevel: Schema.optional(Schema.Literal("low", "medium", "high", "critical")),
+  reason: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SHIELD_REASON_LENGTH)),
+  ),
+  decidedAt: UtcTimestamp,
+}).annotations(strict);
+export type ProviderReviewDecision = typeof ProviderReviewDecision.Type;
+
+/** A reviewer's decision on one call: Octant Shield's or the provider's. */
+export const ReviewDecision = Schema.Union(ShieldDecision, ProviderReviewDecision);
+export type ReviewDecision = typeof ReviewDecision.Type;
+
 export const decodeShieldDecision = Schema.decodeUnknownSync(ShieldDecision);
 
 export {

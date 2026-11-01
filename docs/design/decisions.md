@@ -202,7 +202,7 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes](../archit
 At the Reviewed level a reviewer stands in for the person's click: the provider's own reviewer where it has one, otherwise Octant Shield.
 
 - The person chooses the reviewer in Settings › Access with a Project override; the provider's own is the default where it exists (built for Code in Settings › Code › Access and on a Code Project's overview).
-- A verdict the provider reports is journaled with the provider as approver and shown like a person's approval (not built yet: today the journal records the thread setting, not per-call verdicts).
+- A verdict the provider reports is journaled with the provider as approver and shown like a person's approval, with the call it covered. Built in Code: Codex reports approvals and denials, Claude Code only denials; Mistral Vibe's auto-approve mode reports none over ACP. The capability report says which (`reviewVerdicts`), and the host never infers a verdict from a call that ran.
 - Taint withdraws the provider's own reviewer for irreversible, publish and new-egress classes.
 - Built in Code for the two key CLI providers and for Mistral Vibe's auto-approve mode.
 

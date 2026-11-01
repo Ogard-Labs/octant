@@ -4493,6 +4493,22 @@ function normalizedOperationEvent(
         "Provider approval requested.",
     };
   }
+  // The provider's own reviewer answered a call itself. It is journaled under
+  // the provider's name beside the tool rows, and nobody was asked.
+  if (event.category === "review" && event.verdict !== undefined) {
+    return {
+      kind: "approval-reviewed",
+      summary: boundProviderSummary(event.text ?? "Tool call") ?? "Tool call",
+      decision: {
+        reviewer: "provider",
+        verdict: event.verdict,
+        ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
+        ...(event.riskLevel === undefined ? {} : { riskLevel: event.riskLevel }),
+        ...(event.reason === undefined ? {} : { reason: event.reason }),
+        decidedAt: event.occurredAt,
+      },
+    };
+  }
   if (event.category === "question" && event.requestId !== undefined) {
     active.questions.add(event.requestId);
     return {

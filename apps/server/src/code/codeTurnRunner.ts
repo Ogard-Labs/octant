@@ -102,6 +102,7 @@ export type CodeTurnEventCategory =
   | "message"
   | "tool"
   | "approval"
+  | "review"
   | "question"
   | "observation"
   | "task-progress"
@@ -133,6 +134,10 @@ export interface CodeTurnEvent {
   readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
   readonly toolName?: string;
+  /** The provider reviewer's verdict and reason; only on `review`. */
+  readonly reason?: string;
+  readonly verdict?: "allow" | "deny";
+  readonly riskLevel?: "low" | "medium" | "high" | "critical";
   /** A page a finished tool call published outside this host. */
   readonly published?: ThreadPublishedPage;
   /** The finished call's result brought outside content into the thread. */
@@ -908,6 +913,16 @@ function normalizeProviderEvent(
         ),
         executionPolicy: input.thread.executionPolicy,
         permissionPersistence: input.thread.permissionPersistence,
+      });
+    case "review-verdict":
+      return Effect.succeed({
+        ...base,
+        category: "review",
+        verdict: event.verdict,
+        ...(event.toolCallId === undefined ? {} : { toolCallId: text(event.toolCallId) }),
+        ...(event.argument === undefined ? {} : { text: text(event.argument) }),
+        ...(event.riskLevel === undefined ? {} : { riskLevel: event.riskLevel }),
+        ...(event.reason === undefined ? {} : { reason: text(event.reason) }),
       });
     case "user-input-request":
       return Effect.succeed({

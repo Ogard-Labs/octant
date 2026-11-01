@@ -407,6 +407,18 @@ export type ClaudeDecodedMessage =
         readonly input: { readonly [key: string]: ClaudeJsonValue };
       }[];
     }
+  | {
+      /**
+       * Claude's automatic-mode reviewer refused a call. The runtime reports
+       * only these refusals (`permission_denied` with the `classifier`
+       * reason); a call it approved runs with no notice.
+       */
+      readonly kind: "review-denied";
+      readonly sessionId: string;
+      readonly toolUseId: string;
+      readonly toolName: string;
+      readonly reason?: string;
+    }
   | { readonly kind: "ignored" };
 
 export interface ClaudeUserMessage {
