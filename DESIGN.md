@@ -2195,6 +2195,12 @@ saying lock-out and destructive actions always ask. A server row shows
 deploys it has, with quiet Change and Remove; the form is Alias, User,
 Profile, Deploy commands (one per line, shown for Operate and Admin), and
 Runbook path. A refusal from the host shows inline in the alert role.
+Below it, **Code Projects on your servers** lists each server Project as its
+name and `alias:folder` in the code font with a quiet Remove, and a form of
+Project name, Server (`user@alias`), and Folder on the server whose button
+reads **Bind folder** and **Checking the folder…** while the host checks it
+over SSH; with no registered server the form is replaced by a line asking for
+one ([Server Projects](docs/design/server-projects.md)).
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here
 ([Workspace](docs/design/workspace.md)). A Browser request from a

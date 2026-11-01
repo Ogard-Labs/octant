@@ -230,6 +230,12 @@ import {
   ShieldServerSetPayload,
 } from "@octant/contracts/shield-servers";
 import {
+  SERVER_PROJECTS_EVENT_NAMES,
+  ServerProjectBoundPayload,
+  ServerProjectRemovedPayload,
+  ServerProjectRenamedPayload,
+} from "@octant/contracts/server-projects";
+import {
   RUNTIME_NETWORK_EVENT_NAMES,
   RuntimeNetworkDecisionsRecordedPayload,
   RuntimeNetworkLaunchStartedPayload,
@@ -549,6 +555,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       ShieldProjectServersClearedPayload,
     )
     .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES.bound, 1, ServerProjectBoundPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES.renamed, 1, ServerProjectRenamedPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES.removed, 1, ServerProjectRemovedPayload)
     .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.placesSet, 1, SafeNetworksPlacesSetPayload)

@@ -104,6 +104,7 @@ export default defineConfig({
             { text: "Language Services", link: "/advanced/language-services" },
             { text: "Run and Debug", link: "/advanced/debugging" },
             { text: "Git and Worktrees", link: "/advanced/git-worktrees" },
+            { text: "Code Projects on your servers", link: "/advanced/server-projects" },
             { text: "Code Thread Board", link: "/advanced/code-board" },
             { text: "Browser and Computer Use", link: "/advanced/browser-and-computer-use" },
             { text: "Browser for a CLI in a terminal", link: "/advanced/terminal-browser" },

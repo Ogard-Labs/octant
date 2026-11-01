@@ -299,7 +299,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundar
 Mobile maturity, a ciphertext-only hosted relay, language services and a debugger, enterprise identity, disposable desktops, outside provider drivers, the compliance package, and the hub-and-spoke topology are authorized post-preview work, each built only once its specification documents its boundaries.
 
 - The authorization covers design and implementation; creating an account, spending money, submitting to a store, deploying a hosted service, or weakening an invariant each needs a separate maintainer action.
-- Remote SSH development environments are allowed and not built; that is a scheduling choice.
+- Remote SSH development environments are in scope; a Code Project on a registered server is partly built ([Server Projects](server-projects.md)).
 - Release-scope choices (public store distribution, the Windows sequence, the full language-services companion) are the maintainer's to schedule and protect no invariant by themselves.
 
 Status: Partly built. Since: 2026-10-26. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
@@ -535,7 +535,8 @@ An agent reaches a remote machine with `ssh` through the thread's shell, in Work
 
 - At Guarded, the first connection to each host in a thread asks the person, naming the host.
 - Network egress for shell commands follows the level: Project rules at Guarded and Reviewed, open at Full access.
-- A remote SSH Project binding is allowed as a scheduling choice and is not built; the earlier binding was removed and old journals still replay.
+- A Code Project may be bound to a folder on a registered server, in a catalog of its own; the connection uses this host's `ssh` and the person's agent, forwards nothing, refuses an unknown host key, and fails closed with no local fallback. Built: the catalog, the connection, and the folder check. Not built yet: threads and terminals there ([Server Projects](server-projects.md)).
+- The earlier SSH target binding was removed and old journals still replay; its `remote-root` threads keep refusing every operation.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
