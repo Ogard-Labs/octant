@@ -569,3 +569,85 @@ describe("what person memory does not learn back", () => {
     expect(h.journalText()).not.toContain("Secret diary");
   });
 });
+
+describe("person memory under timing and volume", () => {
+  it("keeps nothing from a call that was still running when the person forgot everything", async () => {
+    const h = harness([
+      { id: THREAD_1, completedAt: later, title: "Invoices", personMessages: ["CSV"] },
+    ]);
+    h.advance(later);
+    h.store.since();
+    let answer: (value: PersonMemoryModelAnswer) => void = () => undefined;
+    const pending = new Promise<PersonMemoryModelAnswer>((resolve) => {
+      answer = resolve;
+    });
+    const sweep = new PersonMemorySweep({
+      store: h.store,
+      sources: [
+        {
+          mode: "chat",
+          threads: () => [{ id: THREAD_1, completedAt: later }],
+          read: () => ({
+            title: "Invoices",
+            providerInstanceId: PROVIDER,
+            modelId: SMALL,
+            personMessages: ["CSV"],
+          }),
+        },
+      ],
+      model: {
+        resolve: ({ thread }) => ({
+          model: { providerInstanceId: thread.providerInstanceId, modelId: SMALL },
+          driverKind: "fake",
+        }),
+        complete: () => pending,
+        recordUsage: () => undefined,
+      },
+      namesProtectedPath: () => false,
+    });
+    const running = sweep.pass();
+    await Promise.resolve();
+    h.advance("2026-11-01T11:30:00.000Z");
+    h.store.change(decodePersonMemoryCommand({ kind: "forget-person-memory", confirmed: true }));
+    answer({
+      status: "answered",
+      text: JSON.stringify({
+        summary: "Invoices.",
+        entries: [{ kind: "preference", content: "Prefers CSV." }],
+      }),
+    });
+    await running;
+    expect(h.store.view().entries).toEqual([]);
+    expect(h.store.view().rememberedThreads).toBe(0);
+  });
+
+  it("does not let threads of a Project kept out use up a pass", async () => {
+    const threads: FakeThread[] = Array.from({ length: 12 }, (_, index) => ({
+      id: `aaaaaaaa-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`,
+      completedAt: later,
+      projectId: PROJECT_A,
+      title: `Payroll ${index}`,
+      personMessages: ["pay"],
+    }));
+    threads.push({
+      id: THREAD_3,
+      completedAt: later,
+      projectId: PROJECT_B,
+      title: "Shop",
+      personMessages: ["CSV"],
+    });
+    const h = harness(threads);
+    h.store.change(
+      decodePersonMemoryCommand({
+        kind: "change-person-memory-settings",
+        expectedVersion: h.store.view().version,
+        settings: { ...h.store.settings(), excludedProjectIds: [PROJECT_A] },
+      }),
+    );
+    h.advance(later);
+    const results = await h.sweep.pass();
+    expect(
+      results.filter((result) => result.outcome === "remembered").map((result) => result.threadId),
+    ).toEqual([THREAD_3]);
+  });
+});

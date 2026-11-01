@@ -163,13 +163,16 @@ export class PersonMemorySweep {
         if (!isMentionable(thread.id)) continue;
         const ref = { mode: source.mode, threadId: decodeMentionableThreadId(thread.id) };
         if (store.isRemembered(ref) || store.leavesNoTrace(ref)) continue;
-        started += 1;
         let outcome: PersonMemoryDistillOutcome;
         try {
           outcome = await this.distill(source, thread.id, thread.completedAt);
         } catch {
           outcome = "unavailable";
         }
+        // Only an attempt spends the pass's budget: a thread skipped before
+        // any call (a Project kept out) is never remembered, and counting it
+        // would let the same skipped threads use up every pass.
+        if (outcome !== "skipped") started += 1;
         results.push({ mode: source.mode, threadId: thread.id, outcome });
       }
     }

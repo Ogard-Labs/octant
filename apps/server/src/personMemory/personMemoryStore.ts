@@ -117,6 +117,12 @@ export class PersonMemoryStore {
   readonly #entries = new Map<string, PersonMemoryEntry>();
   readonly #digests = new Map<string, PersonMemoryThreadDigest>();
   readonly #untraced = new Map<string, PersonMemoryUntracedThread & { readonly version: number }>();
+  /**
+   * Threads purged, deleted, or marked to leave no trace while this host ran.
+   * A distillation already waiting on its model call for one of them must
+   * not write what it learned once the thread's memory was erased.
+   */
+  readonly #gone = new Set<string>();
   readonly #unsubscribe: () => void;
 
   constructor(dependencies: PersonMemoryStoreDependencies) {
@@ -243,6 +249,10 @@ export class PersonMemoryStore {
   }): "remembered" | "skipped" {
     const thread = { mode: input.source.mode, threadId: input.source.threadId };
     if (this.isRemembered(thread)) return "skipped";
+    // The answer may arrive after the person forgot everything, switched
+    // memory off and on, or erased this thread: it then stays unwritten.
+    if (this.#gone.has(threadKey(thread))) return "skipped";
+    if (this.#since !== undefined && input.source.endedAt < this.#since) return "skipped";
     if (!this.threadTakesPart({ ...thread, projectId: input.source.projectId })) return "skipped";
     const digest: PersonMemoryThreadDigest = { source: input.source, summary: input.summary };
     try {
@@ -350,6 +360,7 @@ export class PersonMemoryStore {
       version: envelope.version,
     });
     // Marking a thread erases what was already remembered from it.
+    this.#gone.add(key);
     this.#forgetThread(thread);
   }
 
@@ -502,6 +513,7 @@ export class PersonMemoryStore {
         thread = { mode: "chat", threadId: String(decodeChatDeleted(event.payload).threadId) };
       }
       if (thread === undefined) continue;
+      this.#gone.add(threadKey(thread));
       // A purge already took the mark (it names the thread as `threadId`); a
       // plain delete did not, and the mark carries the thread's title.
       if (this.#untraced.delete(threadKey(thread))) {
