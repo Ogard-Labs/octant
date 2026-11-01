@@ -47,7 +47,7 @@ interface Harness {
   readonly op: FakeOnePassword;
   readonly requests: Array<{ url: string; headers: Headers; body: string }>;
   readonly clock: { now: number };
-  readonly sts: { status: number };
+  readonly sts: { status: number; gate: Promise<void> | undefined };
   readonly post: (path: string, body?: unknown) => Promise<{ status: number; text: string }>;
 }
 
@@ -62,12 +62,13 @@ async function harness(): Promise<Harness> {
   op.addItem(SECRET_REFERENCE, LONG_LIVED_SECRET);
   const requests: Harness["requests"] = [];
   const clock = { now: START };
-  const sts = { status: 200 };
+  const sts: Harness["sts"] = { status: 200, gate: undefined };
   const linked = makeLinkedSecretStores({
     statePath: join(mkdtempSync(join(tmpdir(), "octant-aws-cli-")), "state.json"),
     adapters: [makeOnePasswordAdapter({ executablePath: op.executablePath, env: op.env })],
   });
   const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    await sts.gate;
     requests.push({
       url: String(input),
       headers: new Headers(init?.headers),
@@ -200,12 +201,14 @@ describe("AWS command-line sessions from a linked store", () => {
     });
 
     h.sts.status = 200;
+    h.clock.now += 31_000;
     h.op.setMode("locked");
     expect(JSON.parse((await h.post("/v1/cloud-cli/aws/session")).text)).toEqual({
       status: "locked",
     });
 
     h.op.setMode("ready");
+    h.clock.now += 31_000;
     await h.post("/v1/cloud-cli/aws/session");
     await h.post("/v1/secret-stores/unlink", { store: "onepassword" });
     // A session issued before the unlink is not handed out after it.
@@ -216,6 +219,42 @@ describe("AWS command-line sessions from a linked store", () => {
     expect(JSON.parse((await h.post("/v1/cloud-cli/aws/reference")).text)).toMatchObject({
       status: "linked",
     });
+  });
+
+  it("answers a failure for half a minute before asking the store and AWS again", async () => {
+    const h = await linkedHarness();
+    await h.post("/v1/cloud-cli/aws/point", pointer);
+    h.sts.status = 403;
+
+    await h.post("/v1/cloud-cli/aws/session");
+    await h.post("/v1/cloud-cli/aws/session");
+    expect(h.requests).toHaveLength(1);
+
+    h.sts.status = 200;
+    h.clock.now += 31_000;
+    expect(JSON.parse((await h.post("/v1/cloud-cli/aws/session")).text)).toMatchObject({
+      status: "issued",
+    });
+    expect(h.requests).toHaveLength(2);
+  });
+
+  it("keeps no session from a request that was in flight when the pointer was cleared", async () => {
+    const h = await linkedHarness();
+    await h.post("/v1/cloud-cli/aws/point", pointer);
+    let release = () => {};
+    h.sts.gate = new Promise((resolve) => {
+      release = resolve;
+    });
+
+    const inFlight = h.post("/v1/cloud-cli/aws/session");
+    await h.post("/v1/cloud-cli/aws/clear");
+    await h.post("/v1/cloud-cli/aws/point", pointer);
+    release();
+    await inFlight;
+    h.sts.gate = undefined;
+
+    await h.post("/v1/cloud-cli/aws/session");
+    expect(h.requests).toHaveLength(2);
   });
 
   it("clears the pointer and forgets the session it issued", async () => {

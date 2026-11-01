@@ -308,6 +308,10 @@ describe("the AWS command line through a linked store", () => {
     ).toMatchObject({ kind: "secret-stores-refused", reason: "item-missing" });
     await expect(awsCliEnvironment(client)).resolves.toEqual({});
     await expect(awsCliEnvironment(undefined)).resolves.toEqual({});
+    // A broker that never answers does not hold the command.
+    await expect(
+      awsCliEnvironment({ awsCliSession: () => new Promise(() => {}) }, 10),
+    ).resolves.toEqual({});
   });
 
   it("undoes a pointer the journal refused, and journals a clear with both items", async () => {

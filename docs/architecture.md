@@ -10386,7 +10386,9 @@ access` agree); a thread's own change is journaled as
     `AWS_CREDENTIAL_EXPIRATION`. The long-lived pair never leaves the broker
     and is never kept. A session is handed out again while more than 15
     minutes of it are left, and forgotten when the pointer changes or is
-    removed; an unlinked store hands out none. The session's secret and token
+    removed; an unlinked store hands out none. A failed attempt answers for
+    30 seconds before the store and AWS are asked again, and a command waits
+    at most 15 seconds for its session, then runs without one. The session's secret and token
     are noted as issued, so redaction removes them wherever a command's output
     is kept. A locked store, a missing item, a refused key, or an unreachable
     AWS gives the command no credentials, and the AWS command line says it

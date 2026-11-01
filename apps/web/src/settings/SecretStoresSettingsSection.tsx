@@ -296,6 +296,18 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
                 scope="host"
                 settingId="secret-store-aws-cli"
               >
+                <OctantButton
+                  disabled={
+                    busy ||
+                    linkedStore === undefined ||
+                    awsKeyIdReference.trim() === "" ||
+                    awsSecretReference.trim() === ""
+                  }
+                  size="sm"
+                  type="submit"
+                >
+                  {awsKey === null || awsKey === undefined ? "Use these items" : "Replace"}
+                </OctantButton>
                 {awsKey === null || awsKey === undefined ? null : (
                   <OctantButton
                     disabled={busy}
@@ -324,7 +336,7 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
                   id="secret-store-aws-key-id"
                   maxLength={512}
                   onChange={(event) => setAwsKeyIdReference(event.target.value)}
-                  placeholder="op://Vault/AWS/access key id"
+                  placeholder="op://Vault/AWS/key id"
                   spellCheck={false}
                   value={awsKeyIdReference}
                 />
@@ -347,22 +359,10 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
                   id="secret-store-aws-secret"
                   maxLength={512}
                   onChange={(event) => setAwsSecretReference(event.target.value)}
-                  placeholder="op://Vault/AWS/secret access key"
+                  placeholder="op://Vault/AWS/secret"
                   spellCheck={false}
                   value={awsSecretReference}
                 />
-                <OctantButton
-                  disabled={
-                    busy ||
-                    linkedStore === undefined ||
-                    awsKeyIdReference.trim() === "" ||
-                    awsSecretReference.trim() === ""
-                  }
-                  size="sm"
-                  type="submit"
-                >
-                  {awsKey === null || awsKey === undefined ? "Use these items" : "Replace"}
-                </OctantButton>
               </SettingRow>
             </div>
           </form>

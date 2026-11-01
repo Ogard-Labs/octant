@@ -44,6 +44,12 @@ export interface AwsCliSessions {
 export const AWS_CLI_SESSION_SECONDS = 3_600;
 /** A session is handed out again only while this much of it is left. */
 const REUSE_REMAINING_MS = 15 * 60_000;
+/**
+ * How long a failed attempt answers for itself before the store and AWS are
+ * asked again, so a busy turn with a locked store or a rotated key does not
+ * read both items, and sign a refused request, for every command.
+ */
+const FAILURE_PAUSE_MS = 30_000;
 const STS_HOST = "sts.amazonaws.com";
 const STS_REGION = "us-east-1";
 const MAX_STS_RESPONSE_BYTES = 64 * 1_024;
@@ -63,8 +69,27 @@ export function createAwsCliSessions(options: {
     | { readonly key: string; readonly session: AwsCliSession; readonly endsAt: number }
     | undefined;
   let pending: { readonly key: string; readonly result: Promise<AwsCliSessionResult> } | undefined;
+  let failed:
+    | { readonly key: string; readonly result: AwsCliSessionResult; readonly until: number }
+    | undefined;
+  // Bumped by `forget`, so an attempt that started before a change cannot
+  // leave its session behind after it.
+  let generation = 0;
 
   const issue = async (pointer: AwsCliPointer, key: string): Promise<AwsCliSessionResult> => {
+    const started = generation;
+    const result = await attempt(pointer);
+    if (started !== generation) return result;
+    if (result.status === "issued") {
+      const endsAt = Date.parse(result.expiration);
+      if (Number.isFinite(endsAt)) held = { key, session: result, endsAt };
+    } else {
+      failed = { key, result, until: now() + FAILURE_PAUSE_MS };
+    }
+    return result;
+  };
+
+  const attempt = async (pointer: AwsCliPointer): Promise<AwsCliSessionResult> => {
     const accessKeyId = await options.linked.read(pointer.store, pointer.accessKeyIdReference);
     if (accessKeyId.status !== "read") return accessKeyId;
     const secretAccessKey = await options.linked.read(
@@ -79,12 +104,7 @@ export function createAwsCliSessions(options: {
     if (!ACCESS_KEY_ID.test(pair.accessKeyId) || !SECRET_ACCESS_KEY.test(pair.secretAccessKey)) {
       return { status: "refused" };
     }
-    const result = await requestSession(pair, fetchPort, now(), timeoutMs);
-    if (result.status === "issued") {
-      const endsAt = Date.parse(result.expiration);
-      if (Number.isFinite(endsAt)) held = { key, session: result, endsAt };
-    }
-    return result;
+    return requestSession(pair, fetchPort, now(), timeoutMs);
   };
 
   return {
@@ -100,6 +120,9 @@ export function createAwsCliSessions(options: {
       if (held !== undefined && held.key === key && held.endsAt - now() > REUSE_REMAINING_MS) {
         return held.session;
       }
+      if (failed !== undefined && failed.key === key && now() < failed.until) {
+        return failed.result;
+      }
       if (pending?.key === key) return pending.result;
       const result = issue(pointer, key);
       pending = { key, result };
@@ -110,8 +133,10 @@ export function createAwsCliSessions(options: {
       }
     },
     forget: () => {
+      generation += 1;
       held = undefined;
       pending = undefined;
+      failed = undefined;
     },
   };
 }
@@ -174,6 +199,10 @@ async function requestSession(
 }
 
 async function boundedText(response: Response): Promise<string | undefined> {
+  const declared = response.headers.get("content-length");
+  if (declared !== null && /^\d+$/.test(declared) && Number(declared) > MAX_STS_RESPONSE_BYTES) {
+    return undefined;
+  }
   try {
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > MAX_STS_RESPONSE_BYTES) return undefined;
