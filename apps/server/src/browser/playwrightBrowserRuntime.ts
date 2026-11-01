@@ -844,15 +844,27 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     } else {
       const selector = required(request.target, "Click actions require a selector or point.");
       const center = await page.locator(playwrightSelector(selector)).evaluate((element) => {
-        element.scrollIntoView({ block: "center", inline: "center" });
+        // Instant, so a page with smooth scrolling is measured where it ends.
+        element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
         const rect = element.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
-        const hit = document.elementFromPoint(cx, cy);
+        // The topmost element at the point, looked for inside open shadow
+        // roots too, and whether it sits in the target, across shadow hosts.
+        let hit = document.elementFromPoint(cx, cy);
+        while (hit?.shadowRoot) {
+          const inner = hit.shadowRoot.elementFromPoint(cx, cy);
+          if (inner === null || inner === hit) break;
+          hit = inner;
+        }
+        let node: Node | null = hit;
+        while (node !== null && node !== element) {
+          node = node.parentNode instanceof ShadowRoot ? node.parentNode.host : node.parentNode;
+        }
         return {
           x: cx,
           y: cy,
-          reachable: rect.width >= 1 && rect.height >= 1 && hit !== null && element.contains(hit),
+          reachable: rect.width >= 1 && rect.height >= 1 && hit !== null && node === element,
         };
       });
       // Playwright's own click waits for the element to be reachable; a tap

@@ -65,9 +65,13 @@ const pages: Record<string, string> = {
     <p>Width <span id="width"></span></p>
     <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
   "/device": `<!doctype html><title>Device</title><meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>html { scroll-behavior: smooth; }</style>
     <button id="tap" style="width:120px;height:48px">Tap</button>
     <p id="log"></p>
+    <div id="far" style="margin-top: 3000px"></div>
     <script>
+      document.getElementById('far').attachShadow({ mode: 'open' }).innerHTML = '<button style="width:120px;height:48px">Far tap</button>';
+      document.getElementById('far').shadowRoot.querySelector('button').addEventListener('click', () => log('far'));
       const log = (what) => { document.getElementById('log').textContent += what + ' '; };
       addEventListener('touchstart', () => log('touchstart'));
       document.getElementById('tap').addEventListener('click', () => log('click'));
@@ -770,6 +774,14 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     });
     expect(tapped.result.page?.text).toContain("w390 coarse=true dark=true");
     expect(tapped.result.page?.text).toMatch(/touchstart click/);
+    // Off screen on a smooth-scrolling page and inside a shadow root: still tapped.
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    const far = await tool.call({
+      operation: "click",
+      ref: refFor(outline, /"Far tap"/),
+      include: ["text"],
+    });
+    expect(far.result.page?.text).toMatch(/far/);
     // Each field changes only what it names.
     const light = await tool.call({
       operation: "resize",
