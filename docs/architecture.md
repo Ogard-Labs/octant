@@ -8110,7 +8110,8 @@ in `~/.codex/config.toml`; and the plugins each has installed (Claude Code's
 cache and claude.ai-synced folders under `~/.claude/plugins`, Codex's
 `~/.codex/plugins/cache`). Listing changes nothing: no server or plugin is
 imported, trusted or enabled until the person clicks that one item, and
-Octant never writes to the other tools' files. The listing names each item
+Octant never writes to the other tools' files itself (the one way it changes an
+account's own tools is below). The listing names each item
 by an opaque id and shows a command line or address, never a path or a
 value. Adding a found server is the same act as Add MCP server: `${VAR}`
 and the tools' token variables are filled from the host environment only in
@@ -8128,7 +8129,69 @@ import for review and install; the folder loader reads all three layouts
 Agent Plugins package in memory, keeping its skills and MCP servers and
 leaving its commands, agents and hooks behind, with a note saying so. This
 is the one place the home folder's `.claude` is read, and only for this
-explicit listing; it is still never a skill root. **Project pins.** A plugin can be pinned to a Work or Code Project from its
+explicit listing; it is still never a skill root. **Tools on a Claude Code or
+Codex account.** Settings › Skills & Extensions › Library › Claude and Codex
+lets the person add or remove an MCP server, a plugin marketplace, or a plugin
+on one Claude Code or Codex account by running that program's own commands
+against the account's own folder (`claude mcp add|remove`, `claude plugin
+marketplace add|remove`, `claude plugin install|uninstall`; `codex mcp
+add|remove`, `codex plugin marketplace add|remove`, `codex plugin add|remove`;
+the lists come from `claude mcp list`, `claude plugin list --json`,
+`claude plugin marketplace list --json`, `codex mcp list --json`, `codex plugin
+list --json`, and `codex plugin marketplace list --json`, read from the
+installed Claude Code 2.1.314 and Codex 0.164.0). This is the single exception
+to "Octant never writes to the other tools' files": the file is still written
+only by the provider, never by Octant, and the rule that follows holds. **The
+person reads the exact command first**, as the shell-quoted command line with
+the account's folder variable and a `<secret>` placeholder, plus a plain
+sentence on what it adds, and chooses Run this command once; `plan` returns a
+plan id and a digest of what would run, `apply` runs only that plan, once,
+within ten minutes, in the window that asked, and refuses when the account or
+its folder changed since (`changed-plan`). **Local window only**: every step
+needs the window capability, a request forwarded from a paired device is
+refused (`not-a-local-window`), and no agent tool or route reaches it, since
+an agent holds no window capability. **No shell**: the program is started with
+an argument list, every value is validated first (names are
+`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, a web address must parse as http or https
+without credentials, a marketplace is `owner/repo`, an https address, or an
+absolute folder path, nothing may start with a dash where a name or source is
+expected, length is bounded, and no control character passes), a value after
+`--` is one argument whatever it contains, and the scope is named (`user`) on
+every Claude Code command so the account changes and not the folder Octant
+happens to run in. The child gets a minimal environment (the account's folder
+variable and the same pass-through list the account's launch uses, no inherited
+provider keys), no input, a 45 second limit for a list and 120 seconds for a
+change, and 64 KiB of output, scrubbed of the secret before it is returned or
+logged. **Secrets**: neither program takes a secret on its command line safely
+(`-e`, `--env`, `-H`, `--oauth-client-secret` are arguments other programs can
+read), so Octant passes none that way. The one exception is Claude Code's
+OAuth client secret, which its `--client-secret` option reads from the
+`MCP_CLIENT_SECRET` environment variable: the value is held in the credential
+broker's namespace for MCP servers under the plan id until the person runs the
+command, given to the child through that variable only, and removed after the
+run or when the plan expires. For Codex only the name of the variable it reads
+a bearer token from is accepted, never the token; a plain setting that looks
+like a key is refused. **Journal**: `provider.tooling-applied@1`, its own
+single-event aggregate, names the provider, the account, the command kind, the
+name the person gave, whether it succeeded, and whether a secret was used;
+it carries no address, argument, value, or secret. **What stays forbidden**:
+hand-editing a provider's config files, running a command the person was not
+shown, doing this from a paired device, doing it from an agent, passing a
+secret on a command line, accepting a marketplace's own install command for
+the person (the program's `--yes` is never passed), and any command the
+installed version lacks (the section says so and offers nothing). A tool added
+this way lives in the provider's own folder, so it reaches an Octant thread only
+while that account runs as itself ([Key providers run as
+themselves](#providers)) or at Full access; the panel says so and links to
+that switch. Rationale: the maintainer asked for a GUI to add tools to Claude
+Code and Codex per account; the provider's own commands are the supported way
+to change those files and keep them valid across versions, a shown command
+with a one-time confirmation keeps the person's authority over what runs, and
+an argument list with validation closes the shell-injection and
+option-injection routes that a free-text command would open. Listing runs
+`claude mcp list`, which asks Claude Code to health-check each configured
+server, so a list can take several seconds and starts the person's own
+servers. **Project pins.** A plugin can be pinned to a Work or Code Project from its
 card in Settings (Use in a Project, one switch per active Project). A pin is
 the person's standing choice to offer that plugin on every turn in that
 Project without naming it with `@` each time; it is journaled as its own

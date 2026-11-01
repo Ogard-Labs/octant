@@ -967,3 +967,16 @@
   gap: var(--oct-space-2);
   margin: var(--oct-space-3) 0;
 }
+
+/* The provider's own words after a command ran or a list was read. Plain text
+   in the alert's ink, wrapped, and bounded so a long answer scrolls. */
+.provider-tooling__output {
+  max-height: 240px;
+  overflow: auto;
+  margin: var(--oct-space-2) 0 0;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

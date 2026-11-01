@@ -381,8 +381,49 @@ from here: its row says which, and you add it by hand with the value
 entered. **Review and import** reads one plugin for
 the usual review and Install; a Claude Code plugin keeps its skills and MCP
 servers, and its commands, agents and hooks are left out, which the review
-says. Octant never writes to the other tools' files. The section appears
+says. Octant never writes to the other tools' files itself. The section appears
 only in the Octant window on this host.
+
+### Add tools to a Claude Code or Codex account
+
+**Settings → Skills & Extensions → Library → Claude and Codex** lets you add
+or remove an MCP server, a plugin marketplace, or a plugin on one Claude Code
+or Codex account, for the account you pick. Octant does it by running that
+program's own commands against the account's own folder (for example
+`claude mcp add`, `claude plugin install`, `codex mcp add`, `codex plugin add`);
+it never edits the program's files itself. The page also lists what the
+account already has, with a **Remove** button on each.
+
+Every change takes two steps:
+
+1. Fill in the form and choose **Review command**. Octant shows the exact
+   command, quoted the way you would type it, and a plain sentence on what it
+   adds. Nothing has run yet.
+2. Choose **Run this command**. It runs once, as shown. Octant records that you
+   ran it (the account, the kind of command, and the name you gave it) but not
+   any address, argument or secret.
+
+Some rules to know:
+
+- **A tool added here reaches Octant threads only when the account runs as
+  itself.** Turn that on with **Run Claude Code as itself** (or **Run Codex as
+  itself**) in [Settings → Providers](/advanced/providers#let-a-provider-run-as-itself),
+  or work at Full access. The page links to the switch. Until then the program
+  has the tool in its own app, but an Octant thread does not load it.
+- **Secrets are not typed into commands.** Neither program takes a secret on its
+  command line without other programs on your computer being able to read it,
+  so Octant does not pass one that way. For Claude Code you can give an OAuth
+  client secret for a hosted server; Octant keeps it in the credential store until you
+  run the command and hands it over through the environment, and the command you
+  review shows `<secret>`. For Codex you can name the environment variable it
+  reads a bearer token from, but not the token. A setting that looks like a key
+  is refused. For a hosted service that needs a key, use a Connector.
+- **Only from the Octant window on this computer.** A paired device cannot use
+  this, and neither can an agent.
+- **Nothing is invented.** If your copy of Claude Code or Codex has no command for
+  plugins or marketplaces, the page says so and offers nothing for it.
+- Listing asks Claude Code to check each configured server, so it can take a few
+  seconds.
 
 ### Where a plugin works
 

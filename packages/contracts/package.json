@@ -72,6 +72,7 @@
     "./canvas-export-folder": "./src/canvasExportFolder.ts",
     "./canvas-public-share": "./src/canvasPublicShare.ts",
     "./guardrail-lowering": "./src/guardrailLowering.ts",
+    "./provider-tooling": "./src/providerTooling.ts",
     "./protected-files": "./src/protectedFiles.ts",
     "./person-memory": "./src/personMemory.ts",
     "./computer-use": "./src/computerUse.ts",

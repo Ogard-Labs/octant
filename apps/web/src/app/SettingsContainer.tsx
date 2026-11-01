@@ -110,6 +110,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     safeNetworksClient,
     secretStoresClient,
     shieldServersClient,
+    providerToolingClient,
     serverProjectsClient,
     usageClient,
     usageDashboardClient,
@@ -209,6 +210,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(safeNetworksClient === undefined ? {} : { safeNetworksClient })}
       {...(secretStoresClient === undefined ? {} : { secretStoresClient })}
       {...(shieldServersClient === undefined ? {} : { shieldServersClient })}
+      {...(providerToolingClient === undefined ? {} : { providerToolingClient })}
       {...(serverProjectsClient === undefined ? {} : { serverProjectsClient })}
       {...(replicaMembershipClient === undefined ? {} : { replicaMembershipClient })}
       replicaSyncStatusClient={replicaSyncStatusClient}

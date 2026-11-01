@@ -18,6 +18,7 @@ import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-cl
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
+import type { ProviderToolingClient } from "@octant/client-runtime/provider-tooling-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
@@ -88,6 +89,7 @@ export interface ShellSettingsSurfaceProps {
   readonly safeNetworksClient?: SafeNetworksClient;
   readonly secretStoresClient?: SecretStoresClient;
   readonly shieldServersClient?: ShieldServersClient;
+  readonly providerToolingClient?: ProviderToolingClient;
   readonly serverProjectsClient?: ServerProjectsClient;
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   readonly replicaSyncStatusClient?: ReplicaSyncStatusClient;
@@ -190,6 +192,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.shieldServersClient === undefined
               ? {}
               : { shieldServersClient: props.shieldServersClient })}
+            {...(props.providerToolingClient === undefined
+              ? {}
+              : { providerToolingClient: props.providerToolingClient })}
             {...(props.serverProjectsClient === undefined
               ? {}
               : { serverProjectsClient: props.serverProjectsClient })}

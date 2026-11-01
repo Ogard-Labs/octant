@@ -1249,8 +1249,14 @@ A person connects an MCP server from Settings in a local window only. It becomes
 - The Connectors view is a bundled first-party catalog that fetches nothing to render. The host accepts a connector id only at that entry's own address.
 - Hosted-server sign-in follows the protocol's authorization flow with PKCE, and the grant lives in the broker. A paired device can read the state and nothing more.
 - A Project pin offers a plugin on every turn in a Project but grants nothing; every tool call still asks.
+- A person may add or remove an MCP server, a plugin marketplace, or a plugin on one Claude Code or Codex account from Settings › Skills & Extensions › Library › Claude and Codex, by Octant running that program's own commands against the account's own folder; Octant never writes those files itself. Rationale: the provider's commands are the supported way to change its files, and a shown command with one confirmation keeps the person in charge of what runs.
+- The exact command is shown first (the account's folder variable and a `<secret>` placeholder included) and runs only after the person chooses Run this command once, as the plan that was shown, within ten minutes, from the window that asked, and only if the account has not changed.
+- It is refused on a paired device and unreachable to an agent, since every step needs the local window's capability. The program is started with an argument list and no shell; every value is validated; Claude Code commands name the user scope.
+- A secret is never an argument. Claude Code's OAuth client secret goes through the credential broker to the child's environment; Codex takes only the name of a bearer-token variable; a plain setting that looks like a key is refused.
+- Each change is journaled (`provider.tooling-applied@1`) with the provider, account, command kind, name and outcome, and no value or secret. A version of the program without a command says so and Octant offers nothing for it.
+- A tool added this way reaches an Octant thread only while the account runs as itself or at Full access, and the panel says so and links to that switch.
 
-Status: Built. Since: 2026-10-20. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
+Status: Built. Since: 2026-10-20 (Connectors); 2026-11-01 (Claude and Codex tools). Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
 
 ### Computer use and device tools
 

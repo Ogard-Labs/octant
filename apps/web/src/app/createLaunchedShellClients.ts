@@ -57,6 +57,10 @@ import {
 } from "@octant/client-runtime/extension-client";
 import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import {
+  createProviderToolingClient,
+  type ProviderToolingClient,
+} from "@octant/client-runtime/provider-tooling-client";
+import {
   createShieldServersClient,
   type ShieldServersClient,
 } from "@octant/client-runtime/shield-servers-client";
@@ -204,6 +208,8 @@ export interface LaunchedShellClients {
   readonly secretStoresClient: SecretStoresClient | undefined;
   /** Absent when the base URL is one the client refuses; the registry is local-window only. */
   readonly shieldServersClient: ShieldServersClient | undefined;
+  /** Settings › Skills & Extensions › Claude and Codex; absent off this computer. */
+  readonly providerToolingClient: ProviderToolingClient | undefined;
   /** Absent when the base URL is one the client refuses; the catalog is local-window only. */
   readonly serverProjectsClient: ServerProjectsClient | undefined;
   /** Absent off a local host: creating, joining, and revoking are host authority. */
@@ -296,6 +302,11 @@ export function createLaunchedShellClients(
     shieldServersClient = undefined;
   }
 
+  // Changing an account's own tools is host authority: the client holds the
+  // window capability, so only the window on this computer has one.
+  const providerToolingClient: ProviderToolingClient | undefined =
+    createProviderToolingClient(port);
+
   let serverProjectsClient: ServerProjectsClient | undefined;
   try {
     serverProjectsClient = createServerProjectsClient(port);
@@ -370,6 +381,7 @@ export function createLaunchedShellClients(
     replicaStoreSettingsClient,
     secretStoresClient,
     shieldServersClient,
+    providerToolingClient,
     serverProjectsClient,
     replicaMembershipClient,
     replicaSyncStatusClient: createReplicaSyncStatusClient(port),

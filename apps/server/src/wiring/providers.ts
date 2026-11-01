@@ -145,6 +145,10 @@ import {
   localUsageHistorySourceKey,
 } from "../providers/providerUsageHistorySources";
 import { createExtensionRouteHandler } from "../extensionRoutes";
+import { createProviderToolingRouteHandler } from "../providerToolingRoutes";
+import { ProviderToolingService } from "../providers/providerToolingService";
+import { runProviderToolingProcess } from "../providers/providerToolingProcess";
+import { makeProviderToolingJournalRecorder } from "../providers/providerToolingJournal";
 import { ExtensionApiService } from "../extensions/extensionApiService";
 import { ExtensionActivationService } from "../extensions/extensionActivationService";
 import { createPersistedExtensionActivationPolicy } from "../extensions/persistedExtensionActivationPolicy";
@@ -1036,6 +1040,35 @@ export function wireProviders(deps: ProvidersDependencies) {
     // One store for the host: the folder picker issues a receipt through the
     // extension routes, and installing a Browser extension consumes it.
     const localPluginImportReceipts = new LocalPluginImportReceiptStore();
+    // Adding or removing a tool on a Claude Code or Codex account runs that
+    // provider's own command against the account's folder. The secret an OAuth
+    // client needs waits in the broker's namespace for MCP servers until the
+    // person confirms the command, then goes to the command through its
+    // environment.
+    const providerToolingRoutes = createProviderToolingRouteHandler({
+      windowAuthorityStore,
+      service: new ProviderToolingService({
+        readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+        runner: runProviderToolingProcess,
+        hostEnvironment: () => process.env,
+        homeDirectory: homedir(),
+        workingDirectory: join(providerDataDirectory, "provider-tooling"),
+        ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+          ? {}
+          : {
+              secrets: makeMcpServerCredentialBrokerClient({
+                url: options.credentialBrokerUrl,
+                token: options.credentialBrokerToken,
+              }),
+            }),
+        record: makeProviderToolingJournalRecorder({
+          journal: persistence.journal,
+          actorId: OCTANT_LOCAL_ACTOR_ID,
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        }),
+      }),
+    });
     const extensionRoutes = createExtensionRouteHandler({
       service: extensionApiService,
       windowAuthorityStore,
@@ -1851,6 +1884,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       extensionLifecycleService,
       extensionPackageStore,
       extensionRoutes,
+      providerToolingRoutes,
       generatedImageStore,
       imageJobService,
       localPluginImportReceipts,

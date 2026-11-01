@@ -1221,6 +1221,17 @@ function projectEvents(): ReadonlyArray<readonly [string, unknown]> {
       { scope: "global", surface: "work", from: "ask-first", to: "full-access" },
     ],
     [
+      "provider.tooling-applied@1",
+      {
+        provider: "claude",
+        providerInstanceId: "80000000-0000-4000-8000-0000000000a1",
+        commandKind: "mcp-add-url",
+        name: "hosted",
+        outcome: "succeeded",
+        usedSecret: false,
+      },
+    ],
+    [
       "project.code-auto-reviewer-changed@1",
       { project: { ...codeProject, autoReviewer: "octant-shield" } },
     ],

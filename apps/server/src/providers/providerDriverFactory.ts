@@ -185,10 +185,7 @@ export function makeProviderDriver(
           "Another Codex account already uses that home directory.",
         );
       }
-      const codexHome =
-        instance.configuration.codexHome ??
-        hostDirectoryOrDefault(hostEnvironment.CODEX_HOME) ??
-        defaultProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, homedir());
+      const codexHome = effectiveCodexAccountHome(instance, hostEnvironment, homedir());
       return makeCodexDriver({
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
@@ -324,6 +321,23 @@ export function makeProviderDriver(
     default:
       throw new ProviderDriverConfigurationError();
   }
+}
+
+/**
+ * The folder a Codex account runs against: its own, else the host's
+ * `CODEX_HOME` overlay, else the default. The launch and the tooling commands
+ * a person runs on the account both read it here, so they name one folder.
+ */
+export function effectiveCodexAccountHome(
+  instance: Extract<ProviderInstance, { readonly driverKind: "codex" }>,
+  hostEnvironment: NodeJS.ProcessEnv,
+  homeDirectory: string,
+): string {
+  return (
+    instance.configuration.codexHome ??
+    hostDirectoryOrDefault(hostEnvironment.CODEX_HOME) ??
+    defaultProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, homeDirectory)
+  );
 }
 
 function hostDirectoryOrDefault(directory: string | undefined): string | undefined {
