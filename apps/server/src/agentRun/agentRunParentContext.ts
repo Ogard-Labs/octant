@@ -388,7 +388,7 @@ export function admittedParentWorkContext(
 
 export interface AdmittedChatConversationInput {
   readonly threadId: ChatThreadId;
-  readonly purpose: Extract<ConversationSelectionPurpose, "provider-switch" | "branch">;
+  readonly purpose: Extract<ConversationSelectionPurpose, "provider-switch" | "branch" | "rewind">;
   readonly externalContentIngested: boolean;
   /**
    * A turn already in the thread whose prompt the new session is sent as the

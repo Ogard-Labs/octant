@@ -5607,37 +5607,6 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns).toEqual(beforeResume.turns);
   });
 
-  it("preserves native history when an earlier message cannot be edited in place", async () => {
-    const { service, fakeDriver } = openFixture({ nativeConversation: true });
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: "Native edit",
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected thread.");
-    await service.execute({
-      kind: "send-chat-turn",
-      threadId: created.thread.id,
-      expectedVersion: created.thread.version,
-      prompt: "Original request",
-    });
-    const before = service.read(created.thread.id);
-    const turn = before.turns[0];
-    if (turn === undefined) throw new Error("Expected turn.");
-    await expect(
-      service.execute({
-        kind: "edit-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: before.thread.version,
-        turnId: turn.id,
-        prompt: "Changed request",
-      }),
-    ).rejects.toThrow("Send a correction as a new message");
-    expect(fakeDriver.startedSessionIds).toHaveLength(1);
-    expect(fakeDriver.sentTurns).toHaveLength(1);
-    expect(service.read(created.thread.id).turns).toEqual(before.turns);
-  });
-
   it("sends accepted prior transcript and unresolved work as provider context", async () => {
     const { service, fakeDriver } = openFixture();
     const created = await service.execute({
@@ -7786,7 +7755,7 @@ describe("ChatService", () => {
     }
   });
 
-  it("does not reuse a summary that covers the turns an edit supersedes", async () => {
+  it("does not reuse a summary that covers the turns a rewind removed", async () => {
     const probe = probeFixture();
     const sent: Array<SentTurn> = [];
     const fixture = openFixture({
@@ -7800,7 +7769,7 @@ describe("ChatService", () => {
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
-      title: "Edited after compaction",
+      title: "Rewound after compaction",
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
 
@@ -7830,15 +7799,21 @@ describe("ChatService", () => {
       ),
     ).toBeGreaterThan(0);
 
-    // Revising the second turn re-runs the thread from before it, so turn 1 and
-    // everything after it is superseded conversation.
-    const edited = service.read(created.thread.id).turns[1]!;
+    // Rewinding to the second turn removes it and every later one, so a
+    // summary that reaches into that material must not come back.
+    const rewoundTo = service.read(created.thread.id).turns[1]!;
     const before = sent.length;
-    const revision = await service.execute({
-      kind: "edit-chat-turn",
+    const rewind = await service.execute({
+      kind: "rewind-chat-thread",
       threadId: created.thread.id,
-      turnId: edited.id,
+      turnId: rewoundTo.id,
       expectedVersion: version,
+    });
+    if (rewind.kind !== "thread-rewound") throw new Error("Expected thread-rewound result.");
+    const revision = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: rewind.thread.version,
       prompt: "Revised second turn",
     });
     if (revision.kind !== "turn-created") throw new Error("Expected turn-created result.");
@@ -7850,8 +7825,8 @@ describe("ChatService", () => {
           ?.attempts.some((attempt) => attempt.outcome === "completed") === true,
     );
 
-    // A summary journaled before the edit stands for turn 1 and later, so
-    // reusing it would put back exactly the conversation the edit excludes —
+    // A summary journaled before the rewind stands for turn 1 and later, so
+    // reusing it would put back exactly the conversation the person removed —
     // whether it covers that material wholly or only in part.
     const dispatched = sent
       .slice(before)
@@ -8829,219 +8804,232 @@ describe("ChatService", () => {
     });
   });
 
-  describe("revising and branching a conversation", () => {
-    it("re-runs an edited message without rewriting the journal or replaying superseded turns", async () => {
-      const { service, contextHarness, persistence } = openFixture();
-      const planSpy = vi.spyOn(contextHarness, "planTurn");
+  describe("rewinding and branching a conversation", () => {
+    async function twoTurnThread(
+      fixture: ReturnType<typeof openFixture>,
+      prompts: readonly [string, string],
+    ) {
+      const { service } = fixture;
       const created = await service.execute({
         kind: "create-chat-thread",
         hostId: "local",
-        title: "Edit",
+        title: "Rewind",
       });
       if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-
       const first = await service.execute({
         kind: "send-chat-turn",
         threadId: created.thread.id,
         expectedVersion: service.read(created.thread.id).thread.version,
-        prompt: "First question",
+        prompt: prompts[0],
       });
       if (first.kind !== "turn-created") throw new Error("Expected turn-created result.");
-      await service.execute({
+      const second = await service.execute({
         kind: "send-chat-turn",
         threadId: created.thread.id,
         expectedVersion: service.read(created.thread.id).thread.version,
-        prompt: "Second question",
+        prompt: prompts[1],
       });
-      const beforeEdit = service.read(created.thread.id);
-      const journaledBeforeEdit = countRows(
+      if (second.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      return { threadId: created.thread.id, first: first.turn, second: second.turn };
+    }
+
+    it("rewinds without rewriting the journal and keeps removed turns out of the next turn's context", async () => {
+      const fixture = openFixture();
+      const { service, contextHarness, persistence } = fixture;
+      const planSpy = vi.spyOn(contextHarness, "planTurn");
+      const { threadId, first, second } = await twoTurnThread(fixture, [
+        "First question",
+        "Second question",
+      ]);
+      const beforeRewind = service.read(threadId);
+      const journaledBefore = countRows(
         persistence.connection,
         "SELECT COUNT(*) AS count FROM event_journal WHERE aggregate_id = ?",
-        String(created.thread.id),
+        String(threadId),
       );
 
-      const edited = await service.execute({
-        kind: "edit-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: beforeEdit.thread.version,
-        turnId: first.turn.id,
-        prompt: "First question, revised",
+      const rewound = await service.execute({
+        kind: "rewind-chat-thread",
+        threadId,
+        expectedVersion: beforeRewind.thread.version,
+        turnId: second.id,
       });
-      if (edited.kind !== "turn-created") throw new Error("Expected turn-created result.");
-      expect(edited.turn.supersedes).toBe(first.turn.id);
+      if (rewound.kind !== "thread-rewound") throw new Error("Expected thread-rewound result.");
+      expect(rewound.fromTurnId).toBe(second.id);
+      expect(rewound.removedTurnIds).toEqual([second.id]);
+      expect(rewound.thread.version).toBe(beforeRewind.thread.version + 1);
 
-      // The journal only grew: the superseded turn and the turn that followed
-      // it are still there, and their content is still readable.
-      const afterEdit = service.read(created.thread.id);
-      expect(afterEdit.turns.map((turn) => turn.id)).toEqual([
-        ...beforeEdit.turns.map((turn) => turn.id),
-        edited.turn.id,
-      ]);
+      // The journal only grew: the removed turn is still there and readable.
+      const afterRewind = service.read(threadId);
+      expect(afterRewind.turns.map((turn) => turn.id)).toEqual([first.id, second.id]);
+      expect(afterRewind.turns[1]?.rewound?.rewindId).toBe(rewound.rewindId);
+      expect(afterRewind.turns[0]?.rewound).toBeUndefined();
       expect(
         countRows(
           persistence.connection,
           "SELECT COUNT(*) AS count FROM event_journal WHERE aggregate_id = ?",
-          String(created.thread.id),
+          String(threadId),
         ),
-      ).toBeGreaterThan(journaledBeforeEdit);
-      expect(
-        persistence.readChatContent(String(beforeEdit.turns[0]!.userMessageRef.contentId))?.body,
-      ).toBe("First question");
+      ).toBeGreaterThan(journaledBefore);
+      expect(persistence.readChatContent(String(second.userMessageRef.contentId))?.body).toBe(
+        "Second question",
+      );
+      expect(activeChatTurns(afterRewind.turns).map((turn) => turn.id)).toEqual([first.id]);
 
-      // The re-run is planned against the conversation as it stood before the
-      // revised message, so neither the superseded prompt, nor the reply to it,
-      // nor the exchange that followed it re-enters context.
-      const planned = planSpy.mock.calls.at(-1)?.[0];
-      expect(planned?.entries.filter((entry) => entry.category === "conversation")).toEqual([]);
-      expect(planned?.entries.map((entry) => entry.label)).toContain("First question, revised");
-      expect(activeChatTurns(afterEdit.turns).map((turn) => turn.id)).toEqual([edited.turn.id]);
-    });
-
-    it("finds an edited message by its current text and no longer by the text it replaced", async () => {
-      const { service, persistence } = openFixture();
-      const created = await service.execute({
-        kind: "create-chat-thread",
-        hostId: "local",
-        title: "Edit search",
-      });
-      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-      const first = await service.execute({
-        kind: "send-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: service.read(created.thread.id).thread.version,
-        prompt: "zebra original wording",
-      });
-      if (first.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      // The next message sees the kept turn and never the removed one.
       await service.execute({
         kind: "send-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: service.read(created.thread.id).thread.version,
-        prompt: "walrus follow up",
+        threadId,
+        expectedVersion: afterRewind.thread.version,
+        prompt: "Third question",
       });
+      const planned = planSpy.mock.calls.at(-1)?.[0];
+      const conversation = planned?.entries
+        .filter((entry) => entry.category === "conversation")
+        .map((entry) => entry.label);
+      expect(conversation?.join("\n")).toContain("First question");
+      expect(conversation?.join("\n")).not.toContain("Second question");
+      expect(planned?.entries.map((entry) => entry.label)).toContain("Third question");
+    });
+
+    it("rewinds a whole thread and starts it again as it did at first", async () => {
+      const fixture = openFixture({ nativeConversation: true });
+      const { service, fakeDriver } = fixture;
+      const { threadId, first } = await twoTurnThread(fixture, ["One", "Two"]);
+      await service.execute({
+        kind: "rewind-chat-thread",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        turnId: first.id,
+      });
+      expect(activeChatTurns(service.read(threadId).turns)).toEqual([]);
+
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        prompt: "Fresh start",
+      });
+      const last = fakeDriver.sentTurns.at(-1);
+      // A new session with no handoff: nothing was kept to hand over.
+      expect(last?.context?.some((block) => block.text === "One")).toBe(false);
+      expect(service.read(threadId).turns.at(-1)?.attempts[0]?.handoff).toBeUndefined();
+    });
+
+    it("starts a fresh session with a disclosed handoff of the kept turns when its provider keeps the conversation", async () => {
+      const fixture = openFixture({ nativeConversation: true });
+      const { service, fakeDriver } = fixture;
+      const { threadId, second } = await twoTurnThread(fixture, [
+        "Kept question",
+        "Removed question",
+      ]);
+      const sessionsBefore = fakeDriver.startedSessionIds.length;
+      await service.execute({
+        kind: "rewind-chat-thread",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        turnId: second.id,
+      });
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        prompt: "After the rewind",
+      });
+      // The session that ran the removed turn is never taken up again.
+      expect(fakeDriver.startedSessionIds.length).toBe(sessionsBefore + 1);
+      const attempt = service.read(threadId).turns.at(-1)?.attempts[0];
+      expect(attempt?.handoff?.reason).toBe("rewind");
+      const sent = fakeDriver.sentTurns.at(-1);
+      const texts = (sent?.context ?? []).map((block) => block.text).join("\n");
+      expect(texts).toContain("Kept question");
+      expect(texts).not.toContain("Removed question");
+    });
+
+    it("takes a rewound turn out of transcript search and rebuilds the same index on replay", async () => {
+      const fixture = openFixture();
+      const { service, persistence } = fixture;
+      const { threadId, second } = await twoTurnThread(fixture, [
+        "zebra original wording",
+        "walrus follow up",
+      ]);
       expect(service.searchTranscript("zebra").hits).toHaveLength(1);
       expect(service.searchTranscript("walrus").hits).toHaveLength(1);
 
-      const edited = await service.execute({
-        kind: "edit-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: service.read(created.thread.id).thread.version,
-        turnId: first.turn.id,
-        prompt: "zebra revised wording",
+      await service.execute({
+        kind: "rewind-chat-thread",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        turnId: second.id,
       });
-      if (edited.kind !== "turn-created") throw new Error("Expected turn-created result.");
 
-      // The superseded turn and the turn that followed it are no longer shown.
-      expect(service.searchTranscript("original").hits).toEqual([]);
       expect(service.searchTranscript("walrus").hits).toEqual([]);
-      const found = service.searchTranscript("revised").hits;
-      expect(found.map((hit) => hit.turnId)).toEqual([edited.turn.id]);
-      expect(service.searchTranscript("zebra").hits.map((hit) => hit.turnId)).toEqual([
-        edited.turn.id,
-      ]);
-      // Every hit can be revealed: the thread window holds the turn it names.
-      const revealed = persistence.readChatThreadWindow(created.thread.id, {
-        limit: 10,
-        anchor: { kind: "through", turnId: found[0]!.turnId },
-      });
-      expect(revealed.kind).toBe("window");
+      expect(service.searchTranscript("zebra").hits).toHaveLength(1);
 
-      // A replay of the journal rebuilds the same index.
       rebuildProjection({
         connection: persistence.connection,
         journal: persistence.journal,
         projection: new ChatProjection(),
         clock: () => new Date().toISOString(),
       });
-      expect(service.searchTranscript("original").hits).toEqual([]);
       expect(service.searchTranscript("walrus").hits).toEqual([]);
-      expect(service.searchTranscript("revised").hits.map((hit) => hit.turnId)).toEqual([
-        edited.turn.id,
+      expect(service.searchTranscript("zebra").hits).toHaveLength(1);
+      expect(activeChatTurns(service.read(threadId).turns).map((turn) => String(turn.id))).toEqual([
+        String(service.read(threadId).turns[0]!.id),
       ]);
     });
 
-    it("pages a window over the conversation as it stands and refuses one anchored on a superseded turn", async () => {
-      const { service } = openFixture();
-      const created = await service.execute({
-        kind: "create-chat-thread",
-        hostId: "local",
-        title: "Windowed edit",
-      });
-      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-      const threadId = created.thread.id;
-      const first = await service.execute({
-        kind: "send-chat-turn",
-        threadId,
-        expectedVersion: service.read(threadId).thread.version,
-        prompt: "First question",
-      });
-      if (first.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    it("pages a window over the conversation as it stands and refuses one anchored on a rewound turn", async () => {
+      const fixture = openFixture();
+      const { service } = fixture;
+      const { threadId, first, second } = await twoTurnThread(fixture, [
+        "First question",
+        "Second question",
+      ]);
       await service.execute({
-        kind: "send-chat-turn",
+        kind: "rewind-chat-thread",
         threadId,
         expectedVersion: service.read(threadId).thread.version,
-        prompt: "Second question",
+        turnId: second.id,
       });
-      const edited = await service.execute({
-        kind: "edit-chat-turn",
-        threadId,
-        expectedVersion: service.read(threadId).thread.version,
-        turnId: first.turn.id,
-        prompt: "First question, revised",
-      });
-      if (edited.kind !== "turn-created") throw new Error("Expected turn-created result.");
 
       const window = service.readWindow(threadId, { limit: 30 });
-      expect(window.view.turns.map((turn) => turn.id)).toEqual([edited.turn.id]);
-      expect(window).toMatchObject({ hasEarlier: false, hasLater: false, supersededTurnCount: 2 });
-      // The window carries the same thread version a command must present.
+      expect(window.view.turns.map((turn) => turn.id)).toEqual([first.id]);
+      expect(window).toMatchObject({ hasEarlier: false, hasLater: false, supersededTurnCount: 1 });
       expect(window.view.thread.version).toBe(service.read(threadId).thread.version);
-      expect(() => service.readWindow(threadId, { limit: 30, before: first.turn.id })).toThrow(
+      expect(() => service.readWindow(threadId, { limit: 30, before: second.id })).toThrow(
         expect.objectContaining({ failure: expect.objectContaining({ category: "stale" }) }),
       );
     });
 
-    it("refuses a stale edit and an edit of an already superseded turn", async () => {
-      const { service } = openFixture();
-      const created = await service.execute({
-        kind: "create-chat-thread",
-        hostId: "local",
-        title: "Stale edit",
-      });
-      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-      const sent = await service.execute({
-        kind: "send-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: service.read(created.thread.id).thread.version,
-        prompt: "Original",
-      });
-      if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
-      const current = service.read(created.thread.id).thread.version;
+    it("refuses a stale rewind, a rewind of a turn already removed, and a rewind while a reply runs", async () => {
+      const fixture = openFixture();
+      const { service } = fixture;
+      const { threadId, first, second } = await twoTurnThread(fixture, ["Original", "Later"]);
+      const current = service.read(threadId).thread.version;
 
       await expect(
         service.execute({
-          kind: "edit-chat-turn",
-          threadId: created.thread.id,
+          kind: "rewind-chat-thread",
+          threadId,
           expectedVersion: (current - 1) as AggregateVersion,
-          turnId: sent.turn.id,
-          prompt: "Refused",
+          turnId: second.id,
         }),
       ).rejects.toMatchObject({ failure: { category: "stale" } });
-      expect(service.read(created.thread.id).turns).toHaveLength(1);
+      expect(activeChatTurns(service.read(threadId).turns)).toHaveLength(2);
 
       await service.execute({
-        kind: "edit-chat-turn",
-        threadId: created.thread.id,
+        kind: "rewind-chat-thread",
+        threadId,
         expectedVersion: current,
-        turnId: sent.turn.id,
-        prompt: "Revised once",
+        turnId: first.id,
       });
       await expect(
         service.execute({
-          kind: "edit-chat-turn",
-          threadId: created.thread.id,
-          expectedVersion: service.read(created.thread.id).thread.version,
-          turnId: sent.turn.id,
-          prompt: "Revised again",
+          kind: "rewind-chat-thread",
+          threadId,
+          expectedVersion: service.read(threadId).thread.version,
+          turnId: second.id,
         }),
       ).rejects.toMatchObject({ failure: { category: "invalid" } });
     });

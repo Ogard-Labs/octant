@@ -2330,7 +2330,15 @@ describe("useChatController thread windows", () => {
     return {
       threadWindow,
       thread: vi.fn(async () => view(active)),
-      /** An edit of the turn at `index`: it and everything after it leave the conversation. */
+      /** A rewind to just before the turn at `index`: it and everything after it leave. */
+      rewind(index: number) {
+        superseded += active.length - index;
+        active = active.slice(0, index);
+      },
+      /**
+       * An edit of the turn at `index`, as a journal written before Chat dropped
+       * editing holds one: it and everything after it leave the conversation.
+       */
       edit(index: number) {
         superseded += active.length - index;
         active = [...active.slice(0, index), exchange(count + superseded, index)];
@@ -2393,10 +2401,10 @@ describe("useChatController thread windows", () => {
     });
   });
 
-  it("drops the turns an edit superseded when the newest window is read again", async () => {
+  it("drops the turns a rewind removed when the newest window is read again", async () => {
     const host = windowHost(45);
     const execute = vi.fn(async () => {
-      host.edit(40);
+      host.rewind(40);
       return decodeChatCommandResult({ kind: "thread-updated", thread: bootstrap().threads[0]! });
     });
     const { result } = renderWindowed(host, { execute });
@@ -2405,20 +2413,16 @@ describe("useChatController thread windows", () => {
 
     await act(async () => {
       await result.current.execute({
-        kind: "edit-chat-turn",
+        kind: "rewind-chat-thread",
         threadId,
         expectedVersion: result.current.activeView!.thread.version,
         turnId: turnIdAt(40) as never,
-        prompt: "Revised",
       });
     });
 
     await waitFor(() => expect(result.current.transcriptWindow?.supersededTurnCount).toBe(5));
-    // The earlier pages stay, the revised turns go, and the new turn ends the run.
-    expect(indexes(result.current.activeView)).toEqual([
-      ...Array.from({ length: 40 }, (_, i) => i),
-      50,
-    ]);
+    // The earlier pages stay and the removed turns go.
+    expect(indexes(result.current.activeView)).toEqual(Array.from({ length: 40 }, (_, i) => i));
   });
 
   it("starts again from the newest page when the page it walked back from is gone", async () => {

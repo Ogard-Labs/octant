@@ -101,12 +101,36 @@ Side Chat can only read. It cannot send the source thread messages, approve, ste
 
 ## Turn actions
 
-Edit, branch, checkpoint, and copy live in each turn's **More actions** menu
-(the ⋯ control that appears when the turn is hovered or focused). The same
-items are on the turn's context menu, so right-click is never the only route.
-A branch or a restored thread made from a thread marked as having read
+Fork, rewind, checkpoint, and copy live in each message's **More actions** menu
+(the ⋯ control that appears when the message is hovered or focused). The same
+items are on the message's context menu, so right-click is never the only route.
+A fork or a restored thread made from a thread marked as having read
 outside content starts marked too, because it carries the same conversation.
-A thread whose mark you cleared makes an unmarked branch.
+A thread whose mark you cleared makes an unmarked fork.
+
+## Fork and rewind
+
+You cannot edit a message you already sent in Chat. Each message, yours and the
+reply, has two ways back instead.
+
+**Fork from here** starts a new Chat thread that carries the conversation up
+to that point and leaves this thread as it is. On your message it forks through
+the reply before it, so your first message has none; on a reply it forks
+through that reply.
+
+**Rewind to here…** takes this thread back in place. On your message it removes
+that message and everything after it; on a reply, everything after the reply,
+so the last reply has none. You are asked once before anything changes. The
+removed messages no longer reach the model, and your message comes back to the
+composer, above any draft already there, to change and send again. Chat has no
+files, so a rewind changes the conversation only. Octant refuses a rewind while
+a response is running or the thread is compacting.
+
+The removed messages stay in the thread's history. The transcript notes how many
+earlier messages were revised or rewound. A provider that keeps the conversation
+in its own session starts a new session after a rewind and Octant hands it the
+messages you kept as text; the note under the reply says so. Threads edited in an
+earlier version still open and read as they did.
 Retrying a failed or interrupted response stays on the turn itself; a
 completed response carries a **Regenerate** control next to its timestamp and
 copy control — asking for a different answer to the same message. The previous

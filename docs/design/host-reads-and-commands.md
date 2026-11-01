@@ -91,15 +91,15 @@ whole-thread read beside it before reading anything, and is a
 
 A Chat window answers `ChatThreadWindow`: the unchanged `ChatThreadView` shape
 holding only the page, plus the bounds and `supersededTurnCount`. It pages over
-the active conversation, so an anchor an edit has superseded is `stale` like
-one the thread never held, and the revised-message count comes from the host
+the active conversation, so an anchor an edit or a rewind has left out is
+`stale` like one the thread never held, and the left-out-message count comes from the host
 rather than from the loaded turns. The view's bodies, attachments, sources, and
 route receipts are the page's own; the newest page also carries what belongs to
 no turn yet, an attachment waiting for the next message and a route receipt
 whose turn was never accepted, so a receipt for a turn on an unloaded page is
 never mistaken for an orphan. `through` is the page that ends with the named
-turn. Transcript search indexes only the active conversation: an edit drops the
-revised turn and every turn after it from the index, so a hit always names a
+turn. Transcript search indexes only the active conversation: an edit or
+a rewind drops the turns it left out from the index, so a hit always names a
 turn this window can show, and an edited message is found by its current text.
 A jump to a turn that is not loaded (a transcript search hit) reads that
 page and shows it as one detached range in place of the newest turns, which

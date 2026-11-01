@@ -1626,13 +1626,12 @@ and are not subject to the check. The files part of a rewind (below) is an
 in-place restore and takes the same check and the same serialization. Discard
 and revert also overwrite files and are not yet covered.
 
-**Rewind and fork instead of edit (maintainer decision, 2026-11-01).** Work
-and Code threads do not edit a sent message: editing rewrites what the model
-was told behind its back and leaves a session that still holds the old turn.
-Every message of a Work or Code thread instead offers **Fork from here** and
+**Rewind and fork instead of edit (maintainer decision, 2026-11-01).** Chat,
+Work and Code threads do not edit a sent message: editing rewrites what the
+model was told behind its back and leaves a session that still holds the old
+turn. Every message of a thread instead offers **Fork from here** and
 **Rewind to here**. Restoring a marked checkpoint still forks; a thread can
-now also move back in place. Chat keeps its existing edit until a decision is
-made for it.
+now also move back in place. Chat's differences are under **Chat** below.
 
 - **Fork from here** on a reply forks through that reply, and on a person's
   message through the reply before it; the first message of a thread offers
@@ -1693,8 +1692,59 @@ made for it.
   kept turns. With no turn kept the thread starts again as it did at first,
   and a fork's first turn carries its source's conversation again.
 - **The composer.** The person's message from the first removed turn returns
-  to the composer for editing, which is how a sent message is changed in Work
-  and Code.
+  to the composer for editing, which is how a sent message is changed in Chat,
+  Work and Code.
+- **Chat.** Chat follows these rules with the differences below. It has no
+  files and gains no filesystem or shell authority: the rewind dialog says so
+  and offers the conversation only, with no preview read and no checkpoint
+  restore, and the command (`rewind-chat-thread`) carries only the thread, its
+  expected version and the first turn to remove, so provider, model and
+  Project scope stay the server's.
+  - **Fork from here** is the Chat branch (`branch-chat-thread`, above and
+    below) and keeps its rules: it copies message text and completed replies,
+    never the source's session, and starts a new session with a `branch`
+    handoff when the provider keeps its conversation in one. On a reply it
+    branches through that turn; on a person's message, through the turn before
+    it, so the first message offers none. The reply's own Fork control is the
+    same action.
+  - **Rewind to here** on a person's message removes that turn and every later
+    one; on a reply it removes the turns after it, so the last reply offers
+    none. It is asked once, in the same dialog, and is refused while a
+    response is running, while the thread is compacting, when the thread or its
+    Project is not active, on a stale version, and for a turn that is not part
+    of the active conversation. Nothing changes until the person answers.
+  - **The journal stays authoritative.** The rewind appends one
+    `chat.thread-rewound@1` event, which names the removed turns and carries the
+    thread's next version. The projection marks each removed turn `rewound`;
+    the turn and its attempts stay journaled. `activeChatTurns` leaves a
+    rewound turn out as it does a superseded one, so the transcript, the window
+    and its count of left-out turns, context planning, handoffs, mentions,
+    subagent context, export, search and the message queue read the kept
+    conversation. Replay marks the same turns. A turn sent after a rewind is
+    the thread's own again.
+  - **Old journals with edits.** Chat once edited a sent message by appending a
+    turn that names the one it replaced (`supersedes`). The command is gone and
+    nothing writes that marker, but the field, the fold and the display stay: a
+    journal that holds edits replays and shows the same conversation it always
+    did, and a rewound edit does not bring back the turn it replaced.
+  - **Removed turns stop reaching the model.** Chat does not use
+    `sessionRollback`. A provider that keeps its conversation in a session of
+    its own starts a new session with a disclosed `rewind` handoff of the kept
+    turns, journaled with the attempt before the prompt is sent, and with no
+    turn kept starts as it did at first. A conversation the host holds is
+    rebuilt from the kept turns, a harness session that ran the removed turns
+    is not continued, and a compaction summary that reaches past the kept turns
+    is not reused.
+  - **The composer.** The client already holds the removed message, so the
+    command returns no text: the person's message goes back to the composer
+    above any draft already there once the host has journaled the rewind.
+
+  Rationale: Chat could copy the Work cut of a provider's own session only by
+  trusting a runtime to cut at exactly the kept turn, which no provider has
+  proven without a paid live turn, and its Octant Harness conversation is
+  rebuilt from the journal anyway. The handoff or the rebuild is the path whose
+  content the host chooses and journals, so Chat takes it for every provider
+  and leaves `sessionRollback` to Work and Code.
 
 Rationale: provider-owned runtimes (Claude Code, Codex, OpenCode, ACP agents)
 each have their own way back in a session, but Octant could not prove any of
@@ -3490,7 +3540,7 @@ or .zip>` write the same files, built by one host command
   contiguous run of whole turns, bounded by count and by text, and the
   journal and projection stay complete ([thread windows](design/host-reads-and-commands.md#thread-windows)).
   Chat pages over the active conversation only and counts the turns edits
-  superseded, so nothing derived from the whole thread goes partial; the
+  superseded or rewinds removed, so nothing derived from the whole thread goes partial; the
   Markdown copy and the thread's totals read the whole thread first. A Code
   page carries the usage of every older turn, so the thread's totals stay
   whole, and its window read starts from the newest turns without scanning the
@@ -4739,10 +4789,10 @@ Claude Code, Codex, and OpenCode resume cursors carry a durable task binding
 started on), written by the driver when the session starts and journaled with the
 turn, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
-follow-ups; Chat retries retain that identity and native scratch files. Native
-Chat editing refuses where rollback is unavailable, so it cannot replace the
-conversation behind the user's back. Work and Code threads rewind instead of
-editing (Modes, "Rewind and fork instead of edit"). Resume refuses as `stale-resume` when the
+follow-ups; Chat retries retain that identity and native scratch files. Chat,
+Work and Code threads rewind instead of editing, so no turn replaces the
+conversation behind the user's back (Modes, "Rewind and fork instead of
+edit"). Resume refuses as `stale-resume` when the
 cursor's binding names another provider instance, Octant session, Project
 root, mode, or native id, or, on OpenCode and Pi, whose sessions keep the model
 they started on, another model; the check runs before the runtime is asked or any live
@@ -5010,7 +5060,7 @@ server checks it before any side effect:
     leaves the thread unable to take a turn, so it has no session to carry on
     and refuses `no-session`, as the runtime path already did.
   - A Chat thread that is not active (archived) refuses `project-unavailable`
-    through the check every Chat send, edit, retry and resume makes first. A
+    through the check every Chat send, rewind, retry and resume makes first. A
     Code thread whose Project is no longer an active Code Project refuses
     `project-unavailable` by the rule a Code turn's Project access applies
     (`hasActiveProject`). Neither has a folder binding to move.
@@ -5313,7 +5363,7 @@ watched has ended.
   can't show it." Actions: **Compact** and Cancel.
 - While it runs, the popover reads "Compacting…", the composer's send is
   disabled with "Compacting session" as the reason, and no new turn starts.
-  The server enforces the last part, not the window: a Chat send, edit, retry,
+  The server enforces the last part, not the window: a Chat send, rewind, retry,
   resume or delivered subagent result is refused `waiting`, a Work turn
   `stale`, and a Code turn `waiting`, with "This session is being compacted.
   Send again when it finishes." A subagent result, and a usage-limit
@@ -5680,7 +5730,7 @@ turn does not continue either: the host rebuilds the history in a fresh
 session from that plan (Chat also compacts what it dropped, as for any
 host-planned turn), so what the model reads is what the plan journals rather
 than whatever the session's own window fitting kept. Anything else (the
-first turn, a failed or parked turn, a retry, an edit, a branch, an earlier
+first turn, a failed or parked turn, a retry, a rewind, a branch, an earlier
 turn regenerated or resumed after the previous turn ran, another provider or
 model) rebuilds the history on the host in a fresh session, as before, and the
 next message continues that one. Resuming never widens a thread: the harness refuses a
@@ -5961,7 +6011,7 @@ the model at another size.
   thread's provider in the thread's own mode; a number past the end refuses
   as `journal-message-missing`. A Chat or Work session the host rebuilt
   because the previous one could not continue (a host compaction, a retry
-  or edit, a regenerated earlier turn, or a model or provider change) is a
+  or rewind, a regenerated earlier turn, or a model or provider change) is a
   new conversation, so a lookup reads only the one the
   running turn uses; an earlier one stays in the journal for people, replay,
   and export but is not reachable from the tool. Rationale: the rebuilt
