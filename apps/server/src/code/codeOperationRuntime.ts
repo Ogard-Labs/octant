@@ -412,6 +412,12 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly supportsModelSwitch?: (thread: CodeThread) => boolean;
   /**
+   * Whether the thread's provider reports it can cut its own session back
+   * (`sessionRollback`), which a rewind's preview names. A host that cannot
+   * say so previews a rewind as continuing with a text handoff.
+   */
+  readonly supportsSessionRollback?: (thread: CodeThread) => boolean;
+  /**
    * Whether the thread's session is being compacted. A turn is refused
    * meanwhile: it would resume the session the runtime is rewriting.
    */
@@ -442,6 +448,8 @@ export interface CodeOperationRuntimeOptions {
   readonly providerSwitchContext?: (input: {
     readonly thread: CodeThread;
     readonly excludeOperationId: CodeOperationId;
+    /** Why the previous session is left behind; the receiving model is told which. */
+    readonly purpose?: "provider-switch" | "rewind";
     /**
      * For a forked thread, the source it inherited its conversation from,
      * already authorized for the window sending the turn, read through the
@@ -1159,6 +1167,11 @@ export function createCodeOperationRuntime(
     ...(options.supportsAttachments === undefined
       ? {}
       : { supportsAttachments: options.supportsAttachments }),
+    conversationTurns: (threadId, read) =>
+      codeThreadTurns((page) => events.conversation(page), threadId, read),
+    ...(options.supportsSessionRollback === undefined
+      ? {}
+      : { supportsSessionRollback: options.supportsSessionRollback }),
     events,
     ...(options.resolveThreadMentionContext === undefined
       ? {}
@@ -1214,6 +1227,7 @@ export function createCodeOperationRuntime(
     const resumeCursor = session?.resumeCursor;
     if (
       session === undefined ||
+      recovered.rewoundAfterSession !== undefined ||
       resumeCursor === undefined ||
       String(session.providerInstanceId) !== String(thread.providerInstanceId) ||
       String(session.checkoutId) !== String(thread.checkoutId) ||
@@ -1727,9 +1741,17 @@ export function createCodeOperationRuntime(
       if (options.persistence.readCodeCheckout(source.checkoutId)?.kind === "remote-root") {
         return { status: "refused", reason: "unavailable" };
       }
-      const turns = codeThreadTurns((page) => events.conversation(page), source.id);
-      if (turns === undefined) return { status: "refused", reason: "not-found" };
-      const choice = chooseCodeForkPoint(turns, throughOperationId);
+      const turns = codeThreadTurns((page) => events.conversation(page), source.id, {
+        includeRewound: true,
+      });
+      const shown = codeThreadTurns((page) => events.conversation(page), source.id);
+      if (turns === undefined || shown === undefined)
+        return { status: "refused", reason: "not-found" };
+      const choice = chooseCodeForkPoint(
+        turns,
+        throughOperationId,
+        new Set(shown.map((turn) => String(turn.operationId))),
+      );
       if (choice.kind === "refused") return { status: "refused", reason: choice.reason };
       if (choice.kind === "checkpoint") return forkPointFrom(choice.checkpoint);
       // The named turn is the newest: the checkout as it stands now is its result.
@@ -2038,6 +2060,24 @@ function approvalPrompt(
           ...(command.checkpoint.head === undefined
             ? ["HEAD: no commits"]
             : [`HEAD: ${command.checkpoint.head}`]),
+        ].join("\n");
+        break;
+      case "rewind-code-thread":
+        message =
+          command.scope === "conversation"
+            ? "Rewind this thread's conversation?"
+            : "Rewind this thread and put the files back?";
+        // The host picks the checkpoint from its own record, so the prompt
+        // names what is at risk rather than a tree the command never carried.
+        effectDetail = [
+          command.scope === "files"
+            ? "The files go back to how they were before the chosen message."
+            : "The chosen message and every later one leave the conversation.",
+          ...(command.scope === "conversation"
+            ? []
+            : [
+                "Uncommitted work not saved in that checkpoint is overwritten; Undo restore puts it back.",
+              ]),
         ].join("\n");
         break;
       case "discard-git-changes":
@@ -2359,8 +2399,41 @@ const INHERITED_HANDOFF_REFUSALS: Record<InheritedHandoffRefusal, string> = {
     "The conversation up to the fork point is too long to choose recent messages to hand over. Restore the previous provider or start a new task.",
 };
 
+/**
+ * Why the first turn after a rewind did not start because the kept turns
+ * could not be handed to a fresh session. Each names what the person can do;
+ * none starts the session with less than the thread shows.
+ */
+const REWIND_HANDOFF_REFUSALS: Record<ProviderSwitchHandoffRefusal, string> = {
+  unsupported:
+    "This host cannot hand a rewound thread's kept turns to a fresh session. Rewind to the first message or start a new task.",
+  "thread-unavailable":
+    "This task is no longer available, so its kept turns cannot be handed to a fresh session.",
+  "foreign-thread":
+    "The conversation read for the handoff does not belong to this task, so nothing was handed over. Send the message again.",
+  "foreign-project":
+    "The conversation read for the handoff does not belong to this task's Project, so nothing was handed over. Send the message again.",
+  "source-point-unavailable":
+    "This task has no recorded conversation left to hand to a fresh session. Rewind to the first message or start a new task.",
+  "source-empty":
+    "The turns this task kept have no readable messages to hand to a fresh session. Rewind to the first message or start a new task.",
+  "source-changed":
+    "This task's conversation changed while it was being read for the handoff. Send the message again.",
+  "source-unavailable":
+    "This task's kept turns could not be read for the handoff. Send the message again.",
+  "invalid-page":
+    "This task's kept turns could not be read consistently for the handoff. Send the message again.",
+  "history-window-exceeded":
+    "This task's kept history is too long to choose recent messages to hand over. Rewind further back or start a new task.",
+  "handoff-unreadable":
+    "The conversation this message was prepared with after the rewind can no longer be read. Send the message again.",
+  "handoff-unsaved":
+    "The kept turns could not be saved for the fresh session, so the message was not sent. Send it again.",
+};
+
 type HandoffRefusal =
   | { readonly subject: "switch"; readonly reason: ProviderSwitchHandoffRefusal }
+  | { readonly subject: "rewind"; readonly reason: ProviderSwitchHandoffRefusal }
   | { readonly subject: "fork"; readonly reason: CodeForkHandoffRefusal }
   | { readonly subject: "inherited"; readonly reason: InheritedHandoffRefusal };
 
@@ -2368,6 +2441,8 @@ function handoffRefusalMessage(refusal: HandoffRefusal): string {
   switch (refusal.subject) {
     case "switch":
       return PROVIDER_SWITCH_HANDOFF_REFUSALS[refusal.reason];
+    case "rewind":
+      return REWIND_HANDOFF_REFUSALS[refusal.reason];
     case "fork":
       return CODE_FORK_HANDOFF_REFUSALS[refusal.reason];
     case "inherited":
@@ -2509,17 +2584,38 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return failStart(
         "The task's provider session could not be recovered. Retry after reloading the task.",
       );
-    const previous = recovered.session;
+    // A rewind journaled after the thread's session leaves that session
+    // holding turns the thread no longer has, so it is never resumed as it
+    // stands. With turns kept, the turn starts a new session from them: a
+    // copy of the session cut back at the last kept turn where the provider
+    // can make one, otherwise the kept turns as a disclosed text handoff.
+    // With none kept, the thread starts again as it did at first.
+    const rewind = recovered.rewoundAfterSession;
+    let lastKeptTurn: CodeOperationId | undefined;
+    if (rewind !== undefined) {
+      const shown = codeThreadTurns((page) => this.#events.conversation(page), input.thread.id);
+      if (shown === undefined)
+        return failStart(
+          "This thread's conversation could not be read after its rewind. Send the message again.",
+        );
+      lastKeptTurn = shown.findLast(
+        (turn) => String(turn.operationId) !== String(command.operationId),
+      )?.operationId;
+    }
+    const previous =
+      rewind !== undefined && lastKeptTurn === undefined ? undefined : recovered.session;
     const priorTurn = recovered.priorTurn;
     const priorTurnSettled = recovered.priorTurnSettled;
     // The composer offers another model of the same provider in a started
     // thread. A provider that can resume onto the new model keeps the
     // conversation; one that cannot starts a fresh session with the same
     // disclosed handoff a provider switch takes, rather than wedging the
-    // thread on a refusal it cannot act on.
+    // thread on a refusal it cannot act on. A rewind with turns kept takes
+    // the same path: a session the turn will not resume.
     const providerSwitch =
       previous?.kind === "provider-session-ready" &&
-      (String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
+      (rewind !== undefined ||
+        String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
         (String(previous.modelId) !== String(input.thread.modelId) &&
           this.#options.supportsModelSwitch?.(input.thread) !== true))
         ? previous
@@ -2536,11 +2632,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // one with a disclosed text handoff of the thread's own conversation. The
     // handoff is chosen before anything else is prepared, so a refusal names
     // its reason and leaves nothing behind.
-    const switchHandoff = await this.#providerSwitchHandoff(
+    let switchHandoff = await this.#providerSwitchHandoff(
       input.thread,
       command.operationId,
       providerSwitch,
       input.windowId,
+      rewind === undefined ? "provider-switch" : "rewind",
     );
     if (switchHandoff?.status === "refused")
       return failStart(handoffRefusalMessage(switchHandoff.refusal));
@@ -2662,6 +2759,56 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       if (seeded !== undefined) {
         resumeCursor = seeded;
         forkSeeded = true;
+      }
+    }
+    // A rewound thread whose provider can copy its own session cut back at
+    // the last kept turn continues that copy, so the provider keeps the kept
+    // turns' tool activity and never sees the removed ones. Otherwise the text
+    // handoff chosen above goes, and a recovered start that disclosed a copy
+    // and can no longer make one refuses rather than send something else.
+    if (
+      rewind !== undefined &&
+      !remoteThread &&
+      providerSwitch !== undefined &&
+      lastKeptTurn !== undefined &&
+      switchHandoff?.status === "ready" &&
+      switchHandoff.journaled !== "text"
+    ) {
+      if (input.admissionCurrent?.() === false) return refuseRevokedAdmission();
+      const seeded = await this.#options
+        .forkProviderSession?.({
+          fork: input.thread,
+          origin: { threadId: input.thread.id, throughOperationId: lastKeptTurn },
+          sessionId: decodeProviderSessionId(input.sessionId),
+          checkoutRoot: input.checkoutRoot,
+          secrets,
+        })
+        .catch(() => undefined);
+      if (seeded !== undefined) {
+        resumeCursor = seeded;
+        // The copy's history is the kept turns', not the newest turn's (a
+        // removed one), so the window counts it as a copied session.
+        forkSeeded = true;
+        switchHandoff = {
+          status: "ready",
+          blocks: [],
+          ...(switchHandoff.journaled === undefined
+            ? {
+                record: {
+                  kind: "context-handoff-attached",
+                  reason: "rewind-native-session",
+                  previousSessionId: providerSwitch.sessionId,
+                  throughOperationId: lastKeptTurn,
+                  providerInstanceId: input.thread.providerInstanceId,
+                  modelId: input.thread.modelId,
+                  nativeSessionTransferred: true,
+                },
+              }
+            : { journaled: switchHandoff.journaled }),
+        };
+      } else if (switchHandoff.journaled === "native-session") {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(REWIND_HANDOFF_REFUSALS["handoff-unreadable"]);
       }
     }
     // Otherwise the fork reads its source's conversation through the fork
@@ -2869,6 +3016,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     operationId: CodeOperationId,
     previous: Extract<CodeOperationEvent, { readonly kind: "provider-session-ready" }> | undefined,
     windowId: WindowId,
+    /** Why the previous session is not resumed: another provider or model, or a rewind. */
+    reason: "provider-switch" | "rewind" = "provider-switch",
   ): Promise<
     | {
         readonly status: "ready";
@@ -2897,7 +3046,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       (frame) => frame.event.kind === "context-handoff-attached",
     )?.event;
     if (journaled?.kind === "context-handoff-attached") {
-      const subject = journaled.reason === "provider-switch" ? "switch" : "fork";
+      const leftSession =
+        journaled.reason === "provider-switch" ||
+        journaled.reason === "rewind" ||
+        journaled.reason === "rewind-native-session";
+      const subject = leftSession
+        ? journaled.reason === "provider-switch"
+          ? "switch"
+          : "rewind"
+        : "fork";
       const sameOrigin = (origin: NonNullable<CodeThread["forkedFrom"]>) =>
         thread.forkedFrom !== undefined &&
         String(thread.forkedFrom.threadId) === String(origin.threadId) &&
@@ -2907,19 +3064,23 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       if (
         String(journaled.providerInstanceId) !== String(thread.providerInstanceId) ||
         String(journaled.modelId) !== String(thread.modelId) ||
-        (journaled.reason === "provider-switch" &&
+        (leftSession &&
           previous !== undefined &&
           String(journaled.previousSessionId) !== String(previous.sessionId)) ||
-        (journaled.reason !== "provider-switch" && !sameOrigin(journaled.forkedFrom))
+        ((journaled.reason === "fork" || journaled.reason === "fork-native-session") &&
+          !sameOrigin(journaled.forkedFrom))
       )
         return refused({ subject, reason: "source-changed" });
       if (
-        journaled.reason === "provider-switch" &&
+        (journaled.reason === "provider-switch" || journaled.reason === "rewind") &&
         journaled.inherited !== undefined &&
         !sameOrigin(journaled.inherited.forkedFrom)
       )
         return refused({ subject: "inherited", reason: "source-changed" });
-      if (journaled.reason === "fork-native-session")
+      if (
+        journaled.reason === "fork-native-session" ||
+        journaled.reason === "rewind-native-session"
+      )
         return { status: "ready", blocks: [], journaled: "native-session" };
       try {
         const text = await this.#options.evidence.read?.(journaled.content);
@@ -2934,8 +3095,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }
     }
     if (previous === undefined) return undefined;
+    const own = reason === "rewind" ? "rewind" : "switch";
     const select = this.#options.providerSwitchContext;
-    if (select === undefined) return refused({ subject: "switch", reason: "unsupported" });
+    if (select === undefined) return refused({ subject: own, reason: "unsupported" });
     // A fork carries the conversation it inherited. The source is authorized
     // for this window before anything is read out of it; a source that can no
     // longer be read refuses the switch rather than handing the new provider
@@ -2958,24 +3120,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       selection = select({
         thread,
         excludeOperationId: operationId,
+        purpose: reason,
         ...(inheritedFrom === undefined ? {} : { inheritedFrom }),
       });
     } catch {
-      return refused({ subject: "switch", reason: "source-unavailable" });
+      return refused({ subject: own, reason: "source-unavailable" });
     }
     if (selection.status === "unavailable")
       return refused(
         selection.part === "inherited"
           ? { subject: "inherited", reason: selection.reason }
-          : { subject: "switch", reason: selection.reason },
+          : { subject: own, reason: selection.reason },
       );
     // The selector is handed this thread, but what it read is checked here too:
     // a handoff is the thread's own conversation, never another thread's or
     // another Project's that a reader happened to return.
     if (selection.source.mode !== "code" || selection.source.threadId !== String(thread.id))
-      return refused({ subject: "switch", reason: "foreign-thread" });
+      return refused({ subject: own, reason: "foreign-thread" });
     if (selection.source.projectId !== String(thread.projectId))
-      return refused({ subject: "switch", reason: "foreign-project" });
+      return refused({ subject: own, reason: "foreign-project" });
     // The same holds for what a fork inherited: exactly the authorized source,
     // in this thread's Project, and present whenever it was asked for.
     const inherited = selection.inherited;
@@ -2994,7 +3157,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       blocks: selection.blocks,
       record: {
         kind: "context-handoff-attached",
-        reason: "provider-switch",
+        reason,
         previousProviderInstanceId: previous.providerInstanceId,
         previousModelId: previous.modelId,
         previousSessionId: previous.sessionId,
@@ -4163,7 +4326,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 if (pending !== undefined) {
                   const record = pending.record;
                   let event: HandoffAttached;
-                  if (record.reason === "fork-native-session") event = record;
+                  if (
+                    record.reason === "fork-native-session" ||
+                    record.reason === "rewind-native-session"
+                  )
+                    event = record;
                   else {
                     let content: CodeEvidenceReference;
                     try {
@@ -5084,6 +5251,7 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
     unstage: (input) => git.unstage(input),
     checkpoint: (input) => git.checkpoint(input),
     restoreCheckpoint: (input) => git.restoreCheckpoint(input),
+    changesSince: (input) => git.changesSince(input),
     compareBranch: (input) => git.compareBranch(input),
     readBranchDiff: async (input) => {
       const result = await git.readDiff({

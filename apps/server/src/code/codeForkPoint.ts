@@ -17,6 +17,7 @@ const MAX_FORK_PAGES = 64;
 export function codeThreadTurns(
   conversation: (input: ReadCodeConversationInput) => CodeConversationPage,
   threadId: CodeThreadId,
+  options: { readonly includeRewound?: boolean } = {},
 ): ReadonlyArray<CodeConversationTurn> | undefined {
   const turns: CodeConversationTurn[] = [];
   let cursor = 0;
@@ -25,6 +26,7 @@ export function codeThreadTurns(
       threadId,
       afterCursor: cursor,
       limit: MAX_CODE_CONVERSATION_PAGE_SIZE,
+      ...(options.includeRewound === true ? { includeRewound: true } : {}),
     });
     turns.push(...listed.turns);
     if (!listed.hasMore || listed.nextCursor <= cursor) return turns;
@@ -49,16 +51,52 @@ export type CodeForkPointChoice =
   | { readonly kind: "capture-now" }
   | { readonly kind: "refused"; readonly reason: "not-found" | "not-settled" | "unrecorded" };
 
+/**
+ * `turns` is every turn in the order they ran, rewound ones included: a turn a
+ * rewind removed still captured the files the turn before it left, so the
+ * state after a kept turn is read past it. `shown` names the turns the thread
+ * still shows; a fork from a removed turn is refused as not found.
+ */
 export function chooseCodeForkPoint(
   turns: ReadonlyArray<CodeConversationTurn>,
   throughOperationId: string,
+  shown?: ReadonlySet<string>,
 ): CodeForkPointChoice {
   const named = turns.findIndex((turn) => String(turn.operationId) === throughOperationId);
-  if (named === -1) return { kind: "refused", reason: "not-found" };
+  if (named === -1 || (shown !== undefined && !shown.has(throughOperationId)))
+    return { kind: "refused", reason: "not-found" };
   if (turns[named]?.status !== "completed") return { kind: "refused", reason: "not-settled" };
   for (const turn of turns.slice(named + 1)) {
     if (turn.checkpoint !== undefined) return { kind: "checkpoint", checkpoint: turn.checkpoint };
     if (turn.executionPolicy !== "plan") return { kind: "refused", reason: "unrecorded" };
   }
   return { kind: "capture-now" };
+}
+
+/**
+ * Which recorded state rewinding the files to just before `fromOperationId`
+ * puts back: the checkpoint that turn captured before it ran, or, past Plan
+ * turns that wrote nothing, the next one a writing turn captured. A writing
+ * turn without a capture may have written files nobody recorded, so it
+ * refuses rather than guess. When only Plan turns ran since, no turn changed
+ * a file and there is nothing to put back.
+ *
+ * `turns` is every turn in the order they ran, rewound ones included.
+ */
+export type CodeRewindFilePoint =
+  | { readonly kind: "checkpoint"; readonly checkpoint: CodeCheckpoint }
+  | { readonly kind: "unchanged" }
+  | { readonly kind: "refused"; readonly reason: "not-found" | "unrecorded" };
+
+export function chooseCodeRewindFilePoint(
+  turns: ReadonlyArray<CodeConversationTurn>,
+  fromOperationId: string,
+): CodeRewindFilePoint {
+  const from = turns.findIndex((turn) => String(turn.operationId) === fromOperationId);
+  if (from === -1) return { kind: "refused", reason: "not-found" };
+  for (const turn of turns.slice(from)) {
+    if (turn.checkpoint !== undefined) return { kind: "checkpoint", checkpoint: turn.checkpoint };
+    if (turn.executionPolicy !== "plan") return { kind: "refused", reason: "unrecorded" };
+  }
+  return { kind: "unchanged" };
 }

@@ -792,6 +792,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
+        supportsSessionRollback: (thread) =>
+          providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
+            .sessionRollback === "supported",
         compactionRunning: (threadId) =>
           contextHarness.compactionRunning(
             decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
@@ -812,9 +815,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               globalSequence,
             ),
         },
-        providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
+        providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom, purpose }) =>
           selectCodeConversation(thread.id, {
-            purpose: "provider-switch",
+            purpose: purpose ?? "provider-switch",
             excludeOperationId: String(excludeOperationId),
             ...(inheritedFrom === undefined
               ? {}
@@ -1061,8 +1064,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                   ? instance.driverKind
                   : undefined;
               },
+              // The copied session holds every turn that ran on it, rewound
+              // ones too, so turns are placed in it by the order they ran.
               sourceTurns: (threadId) =>
-                codeThreadTurns((page) => codeBoardEventStore.conversation(page), threadId),
+                codeThreadTurns((page) => codeBoardEventStore.conversation(page), threadId, {
+                  includeRewound: true,
+                }),
               sourceConversations: (threadId) =>
                 codeBoardEventStore.providerConversationsOfTurns(threadId),
             },

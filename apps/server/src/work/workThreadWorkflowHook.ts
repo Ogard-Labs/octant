@@ -82,5 +82,9 @@ function recordIfLifecycleFact(
 function isLifecycleCommand(input: unknown): boolean {
   if (typeof input !== "object" || input === null || !("kind" in input)) return false;
   const kind = (input as { readonly kind?: unknown }).kind;
-  return kind === "create-work-thread" || kind === "change-work-thread-lifecycle";
+  return (
+    kind === "create-work-thread" ||
+    kind === "fork-work-thread" ||
+    kind === "change-work-thread-lifecycle"
+  );
 }

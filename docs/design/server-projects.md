@@ -164,8 +164,9 @@ hands are on the server.
 - **Windows.** A window binds a server Project with no folder of this host
   (`boundRoot: null`), so Files, Browser, and every root-backed surface fail
   closed, and a server thread opens only its own view.
-- **Checkpoints.** A turn on a server takes no checkpoint, so rewind and
-  restore are not offered there; Git on the server is the way back.
+- **Checkpoints.** A turn on a server takes no checkpoint, so restoring
+  files is not offered there and Rewind to here rewinds the conversation
+  only, saying why; Git on the server is the way back for files.
 
 ### Work Projects
 

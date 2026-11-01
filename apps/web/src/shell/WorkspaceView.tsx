@@ -283,7 +283,11 @@ export interface WorkspaceViewProps {
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   readonly onFocus: (paneId: PaneId) => void;
   readonly onOpenCodeThread: (threadId: CodeThreadId, title: string, projectId?: ProjectId) => void;
-  readonly onOpenWorkThread?: (threadId: WorkThreadId, projectId: ProjectId) => void;
+  readonly onOpenWorkThread?: (
+    threadId: WorkThreadId,
+    projectId: ProjectId,
+    title?: string,
+  ) => void;
   /** Opens one repository file as a Code file tab, from the file explorer. */
   readonly onOpenCodeFile?: (input: {
     readonly threadId: import("@octant/contracts/code").CodeThreadId;
@@ -1906,6 +1910,12 @@ function renderNonCodeTab(
                 {...(props.onWorkThreadUpdated === undefined
                   ? {}
                   : { onThreadUpdated: props.onWorkThreadUpdated })}
+                {...(props.onOpenWorkThread === undefined
+                  ? {}
+                  : {
+                      onOpenWorkThread: (opened) =>
+                        props.onOpenWorkThread?.(opened.id, opened.projectId, opened.title),
+                    })}
               />
             </ThreadActivityPictureInPicture>
           </WorkThreadEnvironment>
