@@ -445,7 +445,7 @@ const CATEGORY_TONES: Readonly<Record<string, ContextTone>> = {
   "current-request": 9,
   "project-instructions": 10,
   "tool-results": 11,
-  "person-memory": 11,
+  "person-memory": 2,
   "project-memory": 12,
   "memory-files": 12,
   "octant-policy": 13,

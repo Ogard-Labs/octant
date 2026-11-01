@@ -132,12 +132,18 @@ export function parsePersonMemoryDistillation(reply: string): DistilledThread {
 }
 
 function sameMemory(left: string, right: string): boolean {
-  const normalize = (value: string) =>
-    value
+  // Words compared without case or closing punctuation, trimmed by hand: a
+  // trailing-run pattern backtracks on long runs of spaces or punctuation.
+  const normalize = (value: string) => {
+    const words = value
       .toLowerCase()
-      .replace(/[\s.!?,;:]+$/u, "")
-      .replace(/\s+/g, " ")
-      .trim();
+      .split(/\s/u)
+      .filter((word) => word.length > 0)
+      .join(" ");
+    let end = words.length;
+    while (end > 0 && ".!?,;:".includes(words.charAt(end - 1))) end -= 1;
+    return words.slice(0, end);
+  };
   return normalize(left) === normalize(right);
 }
 
