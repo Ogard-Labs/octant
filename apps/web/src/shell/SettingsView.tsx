@@ -79,6 +79,7 @@ import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
+import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { SafeNetworksSettings } from "../settings/SafeNetworksSettings";
@@ -96,6 +97,7 @@ import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
 import { SecretStoresClientContext } from "../settings/SecretStoresClientContext";
 import { SecretStoresSettingsSection } from "../settings/SecretStoresSettingsSection";
+import { PersonMemorySettings } from "../settings/PersonMemorySettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
@@ -225,6 +227,7 @@ export interface SettingsViewProps {
   >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
+  readonly personMemoryClient?: PersonMemoryClient;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   /** Settings › Computer use › the monthly cap for desktops that bill; absent where the host has no route to it. */
@@ -305,6 +308,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   host: "The host process: its status, startup, notifications, and maintenance.",
   permissions:
     "The files no agent may touch, and what you have already allowed: websites, extension tools, and public links.",
+  memory:
+    "What Octant remembers about you across threads and Projects, and how to keep things out of it.",
   access: "The network places and your own servers agents may reach below Full access.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
   "secret-stores":
@@ -1347,6 +1352,19 @@ function ActiveSectionContent({
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           )}
+        </div>
+      );
+    case "memory":
+      return (
+        <div className="settings-section-stack" id="settings-memory">
+          <PersonMemorySettings
+            client={props.personMemoryClient}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+            {...(props.providerController === undefined
+              ? {}
+              : { providerSnapshot: props.providerController.snapshot })}
+            {...(focusedSetting === undefined ? {} : { focusedSetting })}
+          />
         </div>
       );
     case "data":

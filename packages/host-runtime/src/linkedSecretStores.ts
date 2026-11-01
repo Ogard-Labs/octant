@@ -85,6 +85,21 @@ export interface LinkedSecretStores {
   readonly read: (kind: LinkedSecretStoreKind, reference: string) => Promise<LinkedSecretRead>;
   /** Proves a reference resolves without returning the value. */
   readonly check: (kind: LinkedSecretStoreKind, reference: string) => Promise<LinkedSecretCheck>;
+  /** Where the AWS command line's key pair lives, if the person pointed it at items. */
+  readonly awsCliPointer: () => Promise<AwsCliPointer | undefined>;
+  /** Writes or removes that pointer. It names items; it never holds their values. */
+  readonly setAwsCliPointer: (pointer: AwsCliPointer | undefined) => Promise<void>;
+}
+
+/**
+ * The two items that hold the person's AWS access key pair. The broker reads
+ * them only to ask AWS for a short-lived session, and hands out that session
+ * alone (see `awsCliSessions.ts`).
+ */
+export interface AwsCliPointer {
+  readonly store: LinkedSecretStoreKind;
+  readonly accessKeyIdReference: string;
+  readonly secretAccessKeyReference: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +308,7 @@ export interface LinkedSecretStoresOptions {
 
 interface LinkedState {
   readonly stores: Readonly<Partial<Record<LinkedSecretStoreKind, { readonly linkedAt: string }>>>;
+  readonly aws?: AwsCliPointer;
 }
 
 export function linkedSecretStoresStatePath(dataDirectory: string): string {
@@ -321,7 +337,8 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
             : undefined;
         if (typeof linkedAt === "string") result[kind] = { linkedAt };
       }
-      return { stores: result };
+      const aws = awsCliPointerOf((parsed as { aws?: unknown }).aws);
+      return aws === undefined ? { stores: result } : { stores: result, aws };
     } catch {
       return { stores: {} };
     }
@@ -362,13 +379,14 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       const tool = await adapter.probe();
       if (tool !== "ready") return { status: tool };
       const state = await load();
-      await save({ stores: { ...state.stores, [kind]: { linkedAt: now() } } });
+      await save({ ...state, stores: { ...state.stores, [kind]: { linkedAt: now() } } });
       return { status: "linked" };
     },
     unlink: async (kind) => {
       const state = await load();
       const { [kind]: _removed, ...rest } = state.stores;
-      await save({ stores: rest });
+      // A pointer stays, and fails closed until the store is linked again.
+      await save({ ...state, stores: rest });
     },
     isLinked: async (kind) => (await load()).stores[kind] !== undefined,
     isValidReference: (kind, reference) => adapterFor(kind)?.isValidReference(reference) ?? false,
@@ -387,5 +405,26 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       const result = await adapter.read(reference);
       return result.status === "read" ? { status: "found" } : result;
     },
+    awsCliPointer: async () => (await load()).aws,
+    setAwsCliPointer: async (pointer) => {
+      const { aws: _removed, ...state } = await load();
+      await save(pointer === undefined ? state : { ...state, aws: pointer });
+    },
   };
+}
+
+function awsCliPointerOf(value: unknown): AwsCliPointer | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { store, accessKeyIdReference, secretAccessKeyReference } = value as Record<
+    string,
+    unknown
+  >;
+  if (
+    !isLinkedSecretStoreKind(store) ||
+    typeof accessKeyIdReference !== "string" ||
+    typeof secretAccessKeyReference !== "string"
+  ) {
+    return undefined;
+  }
+  return { store, accessKeyIdReference, secretAccessKeyReference };
 }

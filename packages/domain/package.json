@@ -18,6 +18,7 @@
     "./chat-message-parts": "./src/chatMessageParts.ts",
     "./code-policy": "./src/codePolicy.ts",
     "./guardrail-policy": "./src/guardrailPolicy.ts",
+    "./person-memory-policy": "./src/personMemoryPolicy.ts",
     "./secret-guard-policy": "./src/secretGuardPolicy.ts",
     "./shield-judge-policy": "./src/shieldJudgePolicy.ts",
     "./shield-server-policy": "./src/shieldServerPolicy.ts",

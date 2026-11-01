@@ -20,8 +20,13 @@ const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const SECRET_STORES_AGGREGATE_ID = decodeAggregateId("00000000-0000-4000-8000-0000000000c8");
 
 export interface SecretStoresJournal {
-  /** Appends a record; throws when it cannot, so the caller can undo its change. */
-  readonly record: (record: SecretStoreJournalRecord) => void;
+  /**
+   * Appends a record, or several as one append that lands whole or not at all;
+   * throws when it cannot, so the caller can undo its change.
+   */
+  readonly record: (
+    record: SecretStoreJournalRecord | ReadonlyArray<SecretStoreJournalRecord>,
+  ) => void;
 }
 
 /**
@@ -36,8 +41,11 @@ export function secretStoresJournal(options: {
   readonly now: () => string;
 }): SecretStoresJournal {
   return {
-    record: (record) => {
-      const payload = decodeSecretStoreJournalRecord(record);
+    record: (input) => {
+      const records: ReadonlyArray<SecretStoreJournalRecord> = isRecordList(input)
+        ? input
+        : [input];
+      const payloads = records.map((record) => decodeSecretStoreJournalRecord(record));
       options.journal.append({
         aggregate: {
           aggregateType: SECRET_STORE_AGGREGATE_TYPE,
@@ -48,19 +56,23 @@ export function secretStoresJournal(options: {
           SECRET_STORE_AGGREGATE_TYPE,
           String(SECRET_STORES_AGGREGATE_ID),
         ),
-        events: [
-          {
-            eventId: decodeEventId(options.uuid()),
-            eventName: SECRET_STORE_EVENT_NAME,
-            eventVersion: 1,
-            hostId: LOCAL_HOST_ID,
-            correlationId: decodeCorrelationId(options.uuid()),
-            actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
-            occurredAt: options.now(),
-            payload,
-          },
-        ],
+        events: payloads.map((payload) => ({
+          eventId: decodeEventId(options.uuid()),
+          eventName: SECRET_STORE_EVENT_NAME,
+          eventVersion: 1,
+          hostId: LOCAL_HOST_ID,
+          correlationId: decodeCorrelationId(options.uuid()),
+          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          occurredAt: options.now(),
+          payload,
+        })),
       });
     },
   };
+}
+
+function isRecordList(
+  input: SecretStoreJournalRecord | ReadonlyArray<SecretStoreJournalRecord>,
+): input is ReadonlyArray<SecretStoreJournalRecord> {
+  return Array.isArray(input);
 }

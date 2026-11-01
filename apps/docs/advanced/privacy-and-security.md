@@ -61,6 +61,15 @@ action; export and purge are separate confirmed operations on the same
 Data & storage page. What you have allowed (remembered websites, remembered
 tool approvals, public links) is on Settings → Permissions.
 
+Person memory (Settings → Memory) is kept in the same journal on this host.
+Octant writes it from your own messages after you put a thread away, using one
+small model request per thread on that thread's provider, and every new thread
+starts with it. It is on by default. You can turn it off, keep a Project or a
+thread out, and edit, delete, or forget every entry; deleting erases the
+entries from the journal. It never leaves the host except inside a provider
+request for a thread that uses it, and a thread on one provider can receive
+what was learned on another. See [Memory across Projects](/guide/memory#memory-across-projects).
+
 An unsent composer draft is ordinary local client storage on the machine
 where it was typed. It never enters the journal, diagnostics, or a provider
 request until you send it. Deleting or purging the thread removes that
@@ -253,6 +262,9 @@ keeps working:
 - **API keys and tokens** go through Octant's credential broker. Link the key
   in Octant, and the runtime receives it in its environment. For a cluster,
   point `KUBECONFIG` at a file you keep outside the protected list.
+- **The AWS command line** in Octant's own shell gets a session that lasts one
+  hour once you point its key pair at items in a linked password manager
+  ([Use API keys from a secret store](../guide/secret-stores.md)).
 
 When an agent asks for a protected file, the refusal says which group refused
 it and which channel to use. You see that message in the tool row.
@@ -425,7 +437,12 @@ to each server in a thread asks you and names the server, even if you allowed
 commands for the session. Every remote command is recorded with its host and,
 where the agent's runtime reports it, its exit status.
 
-Octant never reads your key files: `ssh` signs in through your SSH agent. You
+Octant never reads your key files: `ssh` signs in through your SSH agent.
+Or, for a server, choose **Sign in with: A key Octant keeps**. Octant then
+makes a key for that server alone and keeps it in your system's keychain.
+Press **Show key** and add the line it shows to `~/.ssh/authorized_keys` for
+that user on the server. Octant signs that server's logins with it and never
+hands the key to an agent or a command. You
 can point each server at a notes file (a runbook); agents read it as
 reference, and nothing written there changes what Shield allows. A Project can
 use its own list of servers instead of the account's: pick the Project under
@@ -434,7 +451,8 @@ use its own list of servers instead of the account's: pick the Project under
 Below Full access, on a Mac or on Linux, an Octant Harness command still
 runs in its sandbox. When it is a single `ssh`, `scp`, or `rsync` call to servers you
 registered, Octant opens a path to those servers for that command only. Your
-SSH agent signs in for it, and the command can neither read your keys nor
+SSH agent signs in for it, or, for a server that uses a key Octant keeps,
+Octant's key store does, and the command can neither read your keys nor
 change what your agent holds. The server must already be in your
 `known_hosts`, so connect once from your own terminal first. A server you
 reach through a jump host gets no path.
