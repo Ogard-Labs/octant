@@ -1,3 +1,4 @@
+import type { RuntimeNetworkReviewer } from "../network/providerRuntimeNetwork";
 import type { ShieldReviewPort } from "./octantShield";
 
 /**
@@ -58,4 +59,39 @@ export async function shieldAllowsNetwork(
   return decision.verdict === "allow"
     ? { allowed: true, reason: decision.reason }
     : { allowed: false };
+}
+
+/**
+ * Octant Shield as the provider runtime network's reviewer. The launch names
+ * its thread directly (a Work request's session) or by its provider session,
+ * which a running Code turn holds; a launch whose thread neither names gets
+ * `ask`. Shield's allow lets the host through for that launch alone.
+ */
+export function createShieldRuntimeNetworkReviewer(input: {
+  readonly shield: () => ShieldReviewPort | undefined;
+  readonly threadOfSession: (sessionId: string) => string | undefined;
+}): RuntimeNetworkReviewer {
+  return {
+    review: async (request) => {
+      let threadId = request.threadId;
+      if (threadId === undefined && request.sessionId !== undefined) {
+        try {
+          threadId = input.threadOfSession(request.sessionId);
+        } catch {
+          threadId = undefined;
+        }
+      }
+      if (threadId === undefined) return { answer: "ask" };
+      const review = await shieldAllowsNetwork(input.shield(), {
+        threadId,
+        host: request.host,
+        port: request.port,
+        via: request.runtime,
+        boundRoot: request.root,
+      });
+      return review.allowed
+        ? { answer: "allow", reviewer: "octant-shield", reason: review.reason ?? "" }
+        : { answer: "ask" };
+    },
+  };
 }

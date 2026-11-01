@@ -62,16 +62,21 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { FoundationsWiring } from "./foundations";
 import type { HarnessStateWiring } from "./harnessState";
 import type { SafeNetworkStore } from "../network/safeNetworkStore";
-import { shieldAllowsNetwork } from "../shield/shieldNetworkReview";
+import {
+  createShieldRuntimeNetworkReviewer,
+  shieldAllowsNetwork,
+} from "../shield/shieldNetworkReview";
+import { threadOfActiveSession } from "../code/codeOperationRuntime";
 
 export type IntegrationsDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "windowAuthorityStore" | "codeActiveTurns"> &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<HarnessStateWiring, "shieldHolder">;
 
 export function wireIntegrations(deps: IntegrationsDependencies) {
   const {
+    codeActiveTurns,
     externalContentIngestionStore,
     options,
     persistence,
@@ -238,6 +243,10 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     const { projectExists, providerRuntimeNetwork, safeNetworkStore } = wireRuntimeNetwork({
       persistence,
       toolEgressRules,
+      reviewer: createShieldRuntimeNetworkReviewer({
+        shield: () => shieldHolder.port,
+        threadOfSession: (sessionId) => threadOfActiveSession(codeActiveTurns, sessionId),
+      }),
     });
     safeNetworksForCommands = safeNetworkStore;
     // Settings › Access › Safe networks; only a local window changes a list.

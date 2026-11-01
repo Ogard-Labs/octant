@@ -1,7 +1,7 @@
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { OctantShield, type ShieldModelPort, type ShieldThreadFacts } from "./octantShield";
-import { shieldAllowsNetwork } from "./shieldNetworkReview";
+import { createShieldRuntimeNetworkReviewer, shieldAllowsNetwork } from "./shieldNetworkReview";
 
 const root = "/Users/dev/app";
 
@@ -97,5 +97,47 @@ describe("Octant Shield on an unlisted host", () => {
     });
     expect(elsewhere.shown).toEqual([]);
     await expect(shieldAllowsNetwork(undefined, request)).resolves.toEqual({ allowed: false });
+  });
+});
+
+describe("Octant Shield as the runtime network's reviewer", () => {
+  const request = {
+    host: "pypi.org",
+    port: 443,
+    runtime: "claude-sandbox" as const,
+    projectId: "project-1",
+    root,
+  };
+
+  it("judges a launch's host under the thread its session belongs to", async () => {
+    const shield = shieldAnswering("allow");
+    const sessions: string[] = [];
+    const reviewer = createShieldRuntimeNetworkReviewer({
+      shield: () => shield.port,
+      threadOfSession: (sessionId) => {
+        sessions.push(sessionId);
+        return sessionId === "session-1" ? "thread-1" : undefined;
+      },
+    });
+    await expect(
+      reviewer.review({ ...request, sessionId: "session-1", threadId: undefined }),
+    ).resolves.toMatchObject({ answer: "allow", reviewer: "octant-shield" });
+    expect(shield.prompts.join("\n")).toContain("pypi.org:443");
+    expect(sessions).toEqual(["session-1"]);
+  });
+
+  it("asks the person when no thread holds the launch's session", async () => {
+    const shield = shieldAnswering("allow");
+    const reviewer = createShieldRuntimeNetworkReviewer({
+      shield: () => shield.port,
+      threadOfSession: () => undefined,
+    });
+    await expect(
+      reviewer.review({ ...request, sessionId: "gone", threadId: undefined }),
+    ).resolves.toEqual({ answer: "ask" });
+    await expect(
+      reviewer.review({ ...request, sessionId: undefined, threadId: undefined }),
+    ).resolves.toEqual({ answer: "ask" });
+    expect(shield.prompts).toEqual([]);
   });
 });

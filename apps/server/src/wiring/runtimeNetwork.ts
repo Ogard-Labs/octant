@@ -3,7 +3,10 @@ import { realpathSync } from "node:fs";
 import { basename, dirname, sep } from "node:path";
 import { decodeCodeThreadId, decodeProjectId } from "@octant/contracts";
 import type { ToolEgressRules } from "../harness/nativeHarnessEgressRules";
-import { ProviderRuntimeNetwork } from "../network/providerRuntimeNetwork";
+import {
+  ProviderRuntimeNetwork,
+  type RuntimeNetworkReviewer,
+} from "../network/providerRuntimeNetwork";
 import { SafeNetworkStore } from "../network/safeNetworkStore";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -25,6 +28,8 @@ export function wireRuntimeNetwork(input: {
     "journal" | "readProject" | "readProjects" | "readCodeThread"
   >;
   readonly toolEgressRules: Pick<ToolEgressRules, "projectRules" | "joinRecheck">;
+  /** Octant Shield, for an unlisted host a runtime at Auto asks for. */
+  readonly reviewer?: RuntimeNetworkReviewer;
   readonly platform?: NodeJS.Platform;
 }) {
   const { persistence, toolEgressRules } = input;
@@ -49,6 +54,7 @@ export function wireRuntimeNetwork(input: {
     projectRules: (projectId) => toolEgressRules.projectRules(projectId),
     joinRecheck: (proxy) => toolEgressRules.joinRecheck(proxy),
     resolveProject: (root) => resolveRuntimeProject(persistence, root),
+    ...(input.reviewer === undefined ? {} : { reviewer: input.reviewer }),
     enforced: (input.platform ?? process.platform) === "darwin",
     hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     uuid: randomUUID,

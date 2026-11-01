@@ -1101,10 +1101,18 @@ function probeSdk(
     const environment = yield* environmentFactory(options.authentication, environmentOptions);
     // Acquired before the query, so it is released after the query closes.
     const probeRoot = yield* privateProbeRoot;
+    // A probe is a Plan launch of its own, on a listener of its own.
+    const network = yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+      runtime: "claude",
+      root: probeRoot,
+      executionPolicy: "plan",
+      environment: environment.environment,
+    });
     const query = yield* options.sdk.openQuery({
       binaryPath: options.binaryPath,
       projectRoot: probeRoot,
       authEnvironment: environment.environment,
+      ...(network === undefined ? {} : { network }),
       model: PROBE_MODEL,
       executionPolicy: "plan",
       tools: CLAUDE_PLAN_TOOLS,
@@ -1296,10 +1304,17 @@ function makeClaudeContextFacts(
           options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory },
         );
         const probeRoot = yield* privateProbeRoot;
+        const network = yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+          runtime: "claude",
+          root: probeRoot,
+          executionPolicy: "plan",
+          environment: environment.environment,
+        });
         const query = yield* options.sdk.openQuery({
           binaryPath: options.binaryPath,
           projectRoot: probeRoot,
           authEnvironment: environment.environment,
+          ...(network === undefined ? {} : { network }),
           model: PROBE_MODEL,
           executionPolicy: "plan",
           tools: CLAUDE_PLAN_TOOLS,
@@ -1348,7 +1363,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         : undefined,
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], workRequest }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -1371,6 +1386,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         extraFolders,
         mode,
         factories,
+        workRequest === undefined ? undefined : String(workRequest.threadId),
       );
     },
   };
@@ -1383,6 +1399,8 @@ function makeConnection(
   extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
+  /** The Work thread this connection serves, which names it to the network reviewer. */
+  workThreadId?: string,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -1843,6 +1861,20 @@ function makeConnection(
           signal,
         );
         const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
+        // Claude's own process: its inference and in-process web fetch. It
+        // runs at Auto under the same reviewer as its command sandbox.
+        const ownNetwork = await runSetupEffect(
+          acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+            runtime: "claude",
+            root: projectRoot,
+            executionPolicy: input.executionPolicy,
+            environment: environment.environment,
+            autoReview: input.autoApprove === true,
+            sessionId: String(input.sessionId),
+            ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
+          }).pipe(Effect.provideService(Scope.Scope, scope)),
+          signal,
+        );
         const runtimeVersion = await runSetupEffect(
           options.process.probeVersion(options.binaryPath),
           signal,
@@ -1857,7 +1889,13 @@ function makeConnection(
             options.process.probeSubscription(
               options.binaryPath,
               environment.environment,
-              confined ? { projectRoot, executionPolicy: input.executionPolicy } : undefined,
+              confined
+                ? {
+                    projectRoot,
+                    executionPolicy: input.executionPolicy,
+                    ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
+                  }
+                : undefined,
             ),
             signal,
           );
@@ -1915,6 +1953,8 @@ function makeConnection(
                 root: projectRoot,
                 executionPolicy: input.executionPolicy,
                 autoReview: input.autoApprove === true,
+                sessionId: String(input.sessionId),
+                ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
                 // The sandbox points its commands at a bare port and sends no
                 // proxy credentials.
                 authentication: "none",
@@ -2299,6 +2339,7 @@ function makeConnection(
                   : environment.environment,
                 nativeSetup,
               ),
+              ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,

@@ -85,6 +85,10 @@ export interface ProviderRuntimeNetworkStartInput {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   /** The thread runs at Auto, so an unlisted host may go to the reviewer before it is refused. */
   readonly autoReview?: boolean;
+  /** The provider session the launch serves, which names its thread to the reviewer. */
+  readonly sessionId?: string;
+  /** The thread itself, where the launch knows it (a Work request's session). */
+  readonly threadId?: string;
   /**
    * `none` for a client that cannot send the launch token: Claude's sandbox
    * points its commands at a bare loopback port.
@@ -116,8 +120,9 @@ export type RuntimeNetworkReview =
   | { readonly answer: "ask" | "deny" };
 
 /**
- * The reviewer hook. Octant Shield's Judge plugs in here; until a reviewer is
- * composed, every unlisted host at Auto goes to the person as at Ask first.
+ * The reviewer hook, where Octant Shield's Judge plugs in. A launch whose
+ * thread the reviewer cannot name, or whose thread Shield does not review,
+ * gets `ask`, and its unlisted hosts go to the person as at Ask first.
  */
 export interface RuntimeNetworkReviewer {
   readonly review: (request: {
@@ -125,6 +130,10 @@ export interface RuntimeNetworkReviewer {
     readonly port: number;
     readonly runtime: RuntimeNetworkRuntime;
     readonly projectId: string | undefined;
+    /** The folder the runtime works in. */
+    readonly root: string;
+    readonly sessionId: string | undefined;
+    readonly threadId: string | undefined;
   }) => Promise<RuntimeNetworkReview>;
 }
 
@@ -362,6 +371,9 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
                   ...destination,
                   runtime: input.runtime,
                   projectId,
+                  root: input.root,
+                  sessionId: input.sessionId,
+                  threadId: input.threadId,
                 });
                 if (review.answer !== "allow") return;
                 // Journal first: an allowance whose record is not written lets nothing through.
