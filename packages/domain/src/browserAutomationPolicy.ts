@@ -50,8 +50,41 @@ export function evaluateBrowserAction(
     }
   }
   if (request.kind === "press") {
-    if (request.value === undefined || !SUPPORTED_BROWSER_KEYS.has(request.value)) {
-      return { kind: "denied", reason: "Press action requires a supported browser key." };
+    if (request.value === undefined || parseBrowserKeyChord(request.value) === undefined) {
+      return {
+        kind: "denied",
+        reason: "Press action requires a supported browser key or key chord.",
+      };
+    }
+  }
+  if (
+    (request.kind === "hover" ||
+      request.kind === "select" ||
+      request.kind === "drag" ||
+      request.kind === "upload") &&
+    request.target === undefined
+  ) {
+    return { kind: "denied", reason: `A ${request.kind} action requires an element.` };
+  }
+  if (request.kind === "select" && request.value === undefined) {
+    return { kind: "denied", reason: "Select action requires the option to choose." };
+  }
+  if (request.kind === "drag" && request.destination === undefined) {
+    return { kind: "denied", reason: "Drag action requires where to drop." };
+  }
+  if (request.kind === "upload" && (request.files === undefined || request.files.length === 0)) {
+    return { kind: "denied", reason: "Upload action requires the files to send." };
+  }
+  if (
+    (request.kind === "tab-select" || request.kind === "tab-close") &&
+    request.tabId === undefined
+  ) {
+    return { kind: "denied", reason: `A ${request.kind} action requires a tab.` };
+  }
+  if (request.kind === "tab-open" && request.target !== undefined) {
+    // A new tab reaches its page through the same admission as a navigation.
+    if (!checkOriginAllowed(request.target, context.policy)) {
+      return { kind: "denied", reason: "Navigation target origin is not in the allowlist." };
     }
   }
   if (request.kind !== "scroll" && (request.deltaX !== undefined || request.deltaY !== undefined)) {
@@ -67,6 +100,32 @@ export function evaluateBrowserAction(
     }
   }
   return { kind: "allowed" };
+}
+
+const BROWSER_KEY_MODIFIERS = ["Control", "Alt", "Shift", "Meta"] as const;
+export type BrowserKeyModifier = (typeof BROWSER_KEY_MODIFIERS)[number];
+
+/**
+ * A key, or a chord of modifiers and one key, such as `Control+A` or
+ * `Meta+Shift+K`. The key is a named key, a letter, a digit, or F1 to F12;
+ * each modifier appears at most once. Anything else is not a key an agent may
+ * press.
+ */
+export function parseBrowserKeyChord(
+  value: string,
+): { readonly modifiers: ReadonlyArray<BrowserKeyModifier>; readonly key: string } | undefined {
+  const parts = value.split("+");
+  const key = parts.pop();
+  if (key === undefined || parts.length > BROWSER_KEY_MODIFIERS.length) return undefined;
+  const modifiers: BrowserKeyModifier[] = [];
+  for (const part of parts) {
+    const modifier = BROWSER_KEY_MODIFIERS.find((candidate) => candidate === part);
+    if (modifier === undefined || modifiers.includes(modifier)) return undefined;
+    modifiers.push(modifier);
+  }
+  const named = SUPPORTED_BROWSER_KEYS.has(key) || key === "Space";
+  if (!named && !/^(?:[A-Za-z0-9]|F[1-9]|F1[0-2])$/.test(key)) return undefined;
+  return { modifiers, key };
 }
 
 const SUPPORTED_BROWSER_KEYS = new Set([
@@ -152,6 +211,18 @@ export function remoteBrowserActionReach(kind: BrowserActionKind): BrowserPolicy
   }
   if (kind === "close-tab") {
     return { kind: "denied", reason: "Closing a host browser tab is not a remote action." };
+  }
+  // Choosing an option, dragging, sending a file, and changing tabs decide what
+  // the page holds or shows, as typing and navigating do.
+  if (
+    kind === "select" ||
+    kind === "drag" ||
+    kind === "upload" ||
+    kind === "tab-open" ||
+    kind === "tab-select" ||
+    kind === "tab-close"
+  ) {
+    return { kind: "denied", reason: `A ${kind} action is not a remote action.` };
   }
   return { kind: "allowed" };
 }

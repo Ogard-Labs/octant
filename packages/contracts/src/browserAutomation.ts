@@ -139,6 +139,14 @@ export const BrowserActionKind = Schema.Literal(
   "close-tab",
   "observe-diagnostics",
   "snapshot",
+  "hover",
+  "select",
+  "drag",
+  "upload",
+  "tab-list",
+  "tab-open",
+  "tab-select",
+  "tab-close",
 );
 export type BrowserActionKind = typeof BrowserActionKind.Type;
 
@@ -171,6 +179,15 @@ export type BrowserElementRef = typeof BrowserElementRef.Type;
 export const BrowserObservationPart = Schema.Literal("text", "screenshot", "snapshot");
 export type BrowserObservationPart = typeof BrowserObservationPart.Type;
 
+/** One tab of a browsing context, named for the agent as `t1`, `t2`, ... */
+export const BrowserTabId = Schema.String.pipe(Schema.pattern(/^t[1-9][0-9]{0,3}$/));
+export type BrowserTabId = typeof BrowserTabId.Type;
+
+/** How many files one upload may send. */
+export const MAX_BROWSER_UPLOAD_FILES = 5;
+/** The largest file an upload may send. */
+export const MAX_BROWSER_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
+
 /** The longest page outline an observation carries, in characters. */
 export const MAX_BROWSER_SNAPSHOT_OUTLINE_CHARACTERS = 32 * 1024;
 
@@ -183,6 +200,22 @@ export const BrowserActionRequest = Schema.Struct({
   target: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
   /** An element of the latest snapshot, in place of a CSS selector `target`. */
   ref: Schema.optional(BrowserElementRef),
+  /** Where a `drag` drops: a CSS selector, or a ref of the latest snapshot. */
+  destination: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
+  destinationRef: Schema.optional(BrowserElementRef),
+  /**
+   * The files an `upload` sends, relative to the thread's workspace. They are
+   * named here for the record only: the host resolves them itself, and a
+   * caller cannot hand a runtime a path.
+   */
+  files: Schema.optional(
+    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_BROWSER_UPLOAD_FILES),
+    ),
+  ),
+  /** The tab a `tab-select` or `tab-close` names. */
+  tabId: Schema.optional(BrowserTabId),
   value: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(65_536))),
   point: Schema.optional(BrowserViewportPoint),
   deltaX: Schema.optional(Schema.Number.pipe(Schema.between(-2000, 2000))),
@@ -286,6 +319,17 @@ export const BrowserObservation = Schema.Struct({
     ),
   ),
   viewport: Schema.optional(BrowserViewportSize),
+  /** The context's tabs, after a tab action. */
+  tabs: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        tabId: BrowserTabId,
+        url: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
+        title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+        active: Schema.Boolean,
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(16)),
+  ),
   /** Present only on an explicit `screenshot` action that the host was asked to keep. */
   capture: Schema.optional(BrowserCaptureOutcome),
   revision: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
