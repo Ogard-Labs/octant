@@ -297,7 +297,11 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<
     HarnessWiring,
-    "hostShield" | "nativeHarnessComposition" | "nativeHarnessHooks" | "onHarnessRecoveryLifted"
+    | "hostShield"
+    | "nativeHarnessComposition"
+    | "nativeHarnessHooks"
+    | "onHarnessRecoveryLifted"
+    | "runtimeForgeChanges"
   > & {
     /** Wired by wireChat; read only after startup. */
     readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
@@ -357,6 +361,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     liveTurns,
     machineChangeFeed,
     hostShield,
+    runtimeForgeChanges,
     nativeHarnessComposition,
     nativeHarnessHooks,
     onHarnessQuestionAsked,
@@ -1015,6 +1020,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         outsideContentMarks: runtimeOutsideContentMarks,
+        forgeChanges: runtimeForgeChanges,
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
         resolveProviderCapabilities: (thread) =>

@@ -115,6 +115,51 @@ export const ShieldTagRecordedPayload = Schema.Struct({
 }).annotations(strict);
 export type ShieldTagRecordedPayload = typeof ShieldTagRecordedPayload.Type;
 
+/**
+ * A push or pull-request change Octant saw a shell command make, journaled
+ * under the thread with who ran it and the command. Octant Harness commands
+ * are seen before they run, so one that crosses a hard line (a merge or a
+ * plain force-push the person did not ask for, a push to another thread's
+ * branch) is refused and recorded as refused. A provider runtime reports its
+ * command only as it starts, so Octant records what it saw and flags a hard
+ * line it could not stop. `unreadable` means the target hid behind an
+ * expansion.
+ */
+export const SHIELD_FORGE_CHANGES_AGGREGATE = "shield-forge-changes";
+export const SHIELD_FORGE_CHANGE_EVENT_NAMES = {
+  observed: "shield-forge-changes.observed@1",
+} as const;
+export const ShieldForgeChangeKind = Schema.Literal("push", "force-push", "merge", "pull-request");
+export type ShieldForgeChangeKind = typeof ShieldForgeChangeKind.Type;
+export const ShieldForgeHardLine = Schema.Literal(
+  "merge-not-asked",
+  "force-push-not-asked",
+  "other-thread-branch",
+);
+export type ShieldForgeHardLine = typeof ShieldForgeHardLine.Type;
+/** `refused` before it ran, `ran` once it ended, `seen-after-start` when Octant could only watch. */
+export const ShieldForgeChangeOutcome = Schema.Literal("refused", "ran", "seen-after-start");
+export type ShieldForgeChangeOutcome = typeof ShieldForgeChangeOutcome.Type;
+export const MAX_SHIELD_FORGE_CHANGE_BRANCHES = 8;
+
+export const ShieldForgeChangeObservedPayload = Schema.Struct({
+  threadId: AggregateId,
+  via: Schema.Literal("octant-harness", "provider-runtime"),
+  changes: Schema.Array(ShieldForgeChangeKind).pipe(Schema.minItems(1), Schema.maxItems(4)),
+  branches: Schema.optional(
+    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))).pipe(
+      Schema.maxItems(MAX_SHIELD_FORGE_CHANGE_BRANCHES),
+    ),
+  ),
+  unreadable: Schema.Boolean,
+  outcome: ShieldForgeChangeOutcome,
+  hardLine: Schema.optional(ShieldForgeHardLine),
+  command: Schema.String.pipe(Schema.maxLength(MAX_SHIELD_TAGGED_COMMAND_LENGTH)),
+  exitCode: Schema.optional(Schema.Int),
+  recordedAt: UtcTimestamp,
+}).annotations(strict);
+export type ShieldForgeChangeObservedPayload = typeof ShieldForgeChangeObservedPayload.Type;
+
 export {
   SHIELD_WATCHER_LABELS,
   ShieldWatcherLabel,

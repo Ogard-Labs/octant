@@ -3,6 +3,7 @@ import {
   MAX_SHIELD_REASON_LENGTH,
   SHIELD_WATCHER_LABELS,
   type GuardrailLevel,
+  type SafeNetworkPlace,
   type ShieldDecision,
   type ShieldModelChoice,
   type ShieldStage,
@@ -91,6 +92,8 @@ export interface ShieldThreadFacts {
   readonly servers?: () => ReadonlyArray<ShieldServerRule>;
   /** The secret guard's list in force: whether a path is one it protects. */
   readonly protectedSecretPath?: (path: string) => boolean;
+  /** The places trusted for a Project while Network limits are on; none while they are off. */
+  readonly safePlaces?: (projectId: string | undefined) => ReadonlyArray<SafeNetworkPlace>;
 }
 
 export interface OctantShieldOptions {
@@ -217,6 +220,7 @@ export class OctantShield {
       ...(facts.protectedSecretPath === undefined
         ? {}
         : { protectedSecretPath: facts.protectedSecretPath }),
+      safePlaces: facts.safePlaces?.(reviewing.projectId) ?? [],
       level: reviewing.level,
       personMessages: facts.personMessages(request.threadId),
       watcherLabels,

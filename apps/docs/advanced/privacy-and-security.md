@@ -354,7 +354,10 @@ Claude's own command sandbox at it. Full access stays open network.
 Octant Harness commands also reach the places you trust, on top of their
 thread's and Project's network rules, while limits are on. Once a thread has
 read outside content, its commands stop using those places, as they stop
-using standing rules, until you confirm hosts for a command.
+using standing rules, until you confirm hosts for a command. The same goes
+for Claude's own process and its sandbox: once their thread has read
+outside content, they stop using your places until you clear the mark.
+Runtimes that serve a folder rather than one thread keep them.
 
 **Safe networks** lists the places you trust, once for every Project and,
 if you want, a different list for one Project. A place is one of:
@@ -376,7 +379,10 @@ decide. At Auto, when Octant Shield is the thread's reviewer, Shield is asked
 first about a host nothing lists, for Claude and for Octant Harness commands.
 If Shield allows it, the host is let through for that one runtime launch or
 command, and the decision shows in the thread; otherwise the refusal stands.
-Shield is never asked once a thread has read outside content.
+Shield is never asked once a thread has read outside content. When Shield
+answers an approval for a web fetch or a network request whose every address
+is a place you trust, it allows it at once without asking its model, while
+limits are on and the thread has read no outside content.
 
 What this does not cover yet:
 

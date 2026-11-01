@@ -974,8 +974,11 @@ describe("native harness composition", () => {
       readonly fullAccessTag?: "recorded" | "not-tagged" | "unavailable";
       /** A host without the egress rules runs every command on `shell`. */
       readonly withoutEgressRules?: boolean;
+      /** How each push or pull-request change's record goes. */
+      readonly forgeRecord?: "recorded" | "unavailable";
     }) => {
       const recorded = vi.fn((_record: unknown) => input.remoteRecord ?? ("not-remote" as const));
+      const forgeRecorded = vi.fn((_record: unknown) => input.forgeRecord ?? ("recorded" as const));
       const tagged = vi.fn((_tag: unknown) => input.fullAccessTag ?? ("not-tagged" as const));
       const ran: string[] = [];
       const asked = vi.fn(async (_ask: unknown) => "approved" as const);
@@ -1006,6 +1009,17 @@ describe("native harness composition", () => {
           },
         },
         recordRemoteCommand: recorded,
+        ...(input.forgeRecord === undefined
+          ? {}
+          : {
+              forgeChanges: {
+                branches: () => ({
+                  ownBranch: "feature/mine",
+                  otherThreadBranches: ["feature/theirs"],
+                }),
+                record: forgeRecorded,
+              },
+            }),
         ...(input.fullAccessTag === undefined
           ? {}
           : input.withoutEgressRules === true
@@ -1046,8 +1060,52 @@ describe("native harness composition", () => {
           inputJson: JSON.stringify({ command }),
           signal: new AbortController().signal,
         });
-      return { ran, asked, reviewed, shown, review, bash, recorded, tagged };
+      return { ran, asked, reviewed, shown, review, bash, recorded, tagged, forgeRecorded };
     };
+
+    it("refuses a Full access merge or a push to another thread's branch before it runs, and journals it", async () => {
+      const harness = setup({ fullAccessTag: "not-tagged", forgeRecord: "recorded" });
+      expect(await harness.bash("gh pr merge 7 --squash")).toMatchObject({
+        isError: true,
+        result: { error: "forge-merge-not-asked" },
+      });
+      expect(await harness.bash("git push origin feature/theirs")).toMatchObject({
+        result: { error: "forge-other-thread-branch" },
+      });
+      expect(await harness.bash("git push --force")).toMatchObject({
+        result: { error: "forge-force-push-not-asked" },
+      });
+      expect(harness.ran).toEqual([]);
+      expect(harness.forgeRecorded).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: String(autoThread.id),
+          outcome: "refused",
+          hardLine: "merge-not-asked",
+          command: "gh pr merge 7 --squash",
+        }),
+      );
+    });
+
+    it("runs and journals an ordinary push at Full access, and withholds its output when the record fails", async () => {
+      const harness = setup({ fullAccessTag: "not-tagged", forgeRecord: "recorded" });
+      expect(await harness.bash("git push -u origin feature/mine")).toMatchObject({
+        result: { output: "sent" },
+      });
+      expect(harness.forgeRecorded).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "ran", exitCode: 0 }),
+      );
+      const failing = setup({ fullAccessTag: "not-tagged", forgeRecord: "unavailable" });
+      expect(JSON.stringify(await failing.bash("git push"))).not.toContain("sent");
+    });
+
+    it("leaves a merge below Full access to Shield and journals it once it ran", async () => {
+      const harness = setup({ verdict: "allow", forgeRecord: "recorded" });
+      await harness.bash("gh pr merge 7");
+      expect(harness.ran).toEqual(["gh pr merge 7"]);
+      expect(harness.forgeRecorded).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "ran" }),
+      );
+    });
 
     it("tags a Full access command that sends a secret out, and runs it all the same", async () => {
       const harness = setup({ verdict: "allow", fullAccessTag: "recorded" });

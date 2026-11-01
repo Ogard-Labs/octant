@@ -247,6 +247,17 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
         shield: () => shieldHolder.port,
         threadOfSession: (sessionId) => threadOfActiveSession(codeActiveTurns, sessionId),
       }),
+      // A launch's thread is the one it names, or the one whose running turn
+      // holds its session; a launch neither names (a probe) has no thread.
+      threadTainted: ({ threadId, sessionId }) => {
+        const thread =
+          threadId ??
+          (sessionId === undefined ? undefined : threadOfActiveSession(codeActiveTurns, sessionId));
+        return (
+          thread !== undefined &&
+          readThreadExternalContentTaint(persistence.connection, thread).externalContentIngested
+        );
+      },
     });
     safeNetworksForCommands = safeNetworkStore;
     // Settings › Access › Safe networks; only a local window changes a list.

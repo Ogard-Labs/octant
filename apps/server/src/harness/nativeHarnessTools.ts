@@ -78,6 +78,8 @@ export interface NativeHarnessShellRun {
   readonly exitCode?: number;
   readonly output: string;
   readonly truncated: boolean;
+  /** Why an `unavailable` command never ran, when Octant refused it on purpose. */
+  readonly refusal?: { readonly reason: string; readonly message: string };
 }
 
 export interface NativeHarnessShellPort {
@@ -568,7 +570,11 @@ async function execute(
         callId,
         ...(signal === undefined ? {} : { signal }),
       });
-      if (run.status === "unavailable") return refused("shell-unavailable");
+      if (run.status === "unavailable") {
+        return run.refusal === undefined
+          ? refused("shell-unavailable")
+          : refused(run.refusal.reason, run.refusal.message);
+      }
       if (run.status === "cancelled") return refused("tool-interrupted");
       const bounded = boundedTail(run.output, MAX_SHELL_OUTPUT_BYTES);
       return {
@@ -768,7 +774,11 @@ async function checkGoalCriterion(
     callId,
     ...(signal === undefined ? {} : { signal }),
   });
-  if (run.status === "unavailable") return refused("shell-unavailable");
+  if (run.status === "unavailable") {
+    return run.refusal === undefined
+      ? refused("shell-unavailable")
+      : refused(run.refusal.reason, run.refusal.message);
+  }
   if (run.status === "cancelled") return refused("tool-interrupted");
   const met = run.status === "ran" && run.exitCode === 0;
   const changed = await port.recordCheck({

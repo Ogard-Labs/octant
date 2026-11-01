@@ -5,6 +5,7 @@ import { decodeCodeThreadId, decodeProjectId } from "@octant/contracts";
 import type { ToolEgressRules } from "../harness/nativeHarnessEgressRules";
 import {
   ProviderRuntimeNetwork,
+  type ProviderRuntimeNetworkOptions,
   type RuntimeNetworkReviewer,
 } from "../network/providerRuntimeNetwork";
 import { SafeNetworkStore } from "../network/safeNetworkStore";
@@ -31,6 +32,8 @@ export function wireRuntimeNetwork(input: {
   readonly toolEgressRules: Pick<ToolEgressRules, "projectRules" | "joinRecheck">;
   /** Octant Shield, for an unlisted host a runtime at Auto asks for. */
   readonly reviewer?: RuntimeNetworkReviewer;
+  /** Whether a launch's thread is marked, which suspends its places. */
+  readonly threadTainted?: ProviderRuntimeNetworkOptions["threadTainted"];
   readonly platform?: NodeJS.Platform;
 }) {
   const { persistence, toolEgressRules } = input;
@@ -67,6 +70,7 @@ export function wireRuntimeNetwork(input: {
     joinRecheck: (proxy) => toolEgressRules.joinRecheck(proxy),
     resolveProject: (root) => resolveRuntimeProject(persistence, root),
     ...(input.reviewer === undefined ? {} : { reviewer: input.reviewer }),
+    ...(input.threadTainted === undefined ? {} : { threadTainted: input.threadTainted }),
     enforced: platform === "darwin" || platform === "linux",
     ...(socketDirectory === undefined
       ? {}

@@ -291,6 +291,7 @@ export function startOctantServer(
       toolEgressRules,
       providerRuntimeNetwork,
       safeNetworkRoutes,
+      safeNetworkStore,
     } = yield* wireIntegrations({
       codeActiveTurns,
       externalContentIngestionStore,
@@ -453,6 +454,7 @@ export function startOctantServer(
       workThreadProjection,
     });
     const {
+      runtimeForgeChanges,
       followUpCreation,
       restartContinuation,
       followUpSuggestionRoutes,
@@ -470,6 +472,7 @@ export function startOctantServer(
       hostShield,
       threadWork,
     } = wireHarness({
+      safeNetworkStore,
       projectService,
       agentRunInteractions,
       shieldHolder,
@@ -652,6 +655,7 @@ export function startOctantServer(
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       hostShield,
+      runtimeForgeChanges,
       onHarnessQuestionAsked,
       onHarnessQuestionSettled,
       onHarnessRecoveryLifted,
@@ -855,6 +859,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      runtimeForgeChanges,
       nativeHarnessSessions,
       restartContinuation,
       guardChatAttachmentPurge,

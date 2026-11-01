@@ -1,5 +1,6 @@
 import type {
   GuardrailLevel,
+  SafeNetworkPlace,
   ShieldStage,
   ShieldVerdict,
   ShieldWatcherLabel,
@@ -13,6 +14,7 @@ import {
   type ShieldServerRule,
   type SshInvocation,
 } from "./shieldServerPolicy";
+import { safeNetworkPlaceAllows } from "./safeNetworkPolicy";
 import { commandPathWords } from "./secretGuardPolicy";
 
 /**
@@ -29,8 +31,8 @@ import { commandPathWords } from "./secretGuardPolicy";
  * 2. Taint limits. On a thread marked by outside content Shield cannot allow
  *    irreversible, publish, or new-egress calls.
  * 3. Fast allow rules, with no model call: reads and edits inside the bound
- *    root, the Project's own test or build command, read-only Git, and SSH to
- *    a registered server within its profile.
+ *    root, the Project's own test or build command, read-only Git, SSH to
+ *    a registered server within its profile, and egress to a safe network.
  * 4. The model, for everything else.
  *
  * An `ssh` command is judged by the server rules alone (`judgeSshCall`):
@@ -85,6 +87,12 @@ export interface ShieldRuleInput {
    * absolute path, or a `~/` or `$HOME/` one as the agent wrote it.
    */
   readonly protectedSecretPath?: ((path: string) => boolean) | undefined;
+  /**
+   * The places the person trusts for the thread's Project (Settings › Access ›
+   * Safe networks), given only while Network limits are on. A network call
+   * whose every destination is one of them passes by rule.
+   */
+  readonly safePlaces?: ReadonlyArray<SafeNetworkPlace> | undefined;
 }
 
 /**
@@ -473,7 +481,47 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
       return decided("allow", "fast-allow", "read-only-git", "A Git command that only reads.");
     }
   }
+  // Only a call that names its destinations: a shell command can send more
+  // than its words show (`curl -d @file`), so it is never read for a place.
+  const places = input.safePlaces ?? [];
+  if (
+    places.length > 0 &&
+    (command === undefined || command.length === 0) &&
+    (call.kind === "fetch" || call.approvalClass === "network-access") &&
+    call.urls.length > 0 &&
+    call.urls.every((url) => {
+      const destination = networkDestinationOf(url);
+      return destination !== undefined && safeNetworkPlaceAllows(destination, places) !== undefined;
+    })
+  ) {
+    return decided("allow", "fast-allow", "safe-network", "Egress to a place the person trusts.");
+  }
   return { kind: "needs-model" };
+}
+
+const DEFAULT_PORTS: Readonly<Record<string, number>> = { "http:": 80, "https:": 443 };
+
+/**
+ * The host and port a call reaches: an `http` or `https` address, or the
+ * `host:port` a proxied launch names. Anything else names no place.
+ */
+function networkDestinationOf(
+  text: string,
+): { readonly host: string; readonly port: number } | undefined {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    let url: URL;
+    try {
+      url = new URL(text);
+    } catch {
+      return undefined;
+    }
+    const defaultPort = DEFAULT_PORTS[url.protocol];
+    if (defaultPort === undefined || url.hostname.length === 0) return undefined;
+    return { host: url.hostname, port: url.port === "" ? defaultPort : Number(url.port) };
+  }
+  const match = /^(\[[0-9a-f:.]+\]|[^\s/:@[\]]+):(\d{1,5})$/i.exec(text);
+  if (match === null) return undefined;
+  return { host: match[1] ?? "", port: Number(match[2]) };
 }
 
 /**

@@ -4,7 +4,12 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { decodeWindowId, SHIELD_TAGS_AGGREGATE } from "@octant/contracts";
+import {
+  decodeWindowId,
+  SHIELD_FORGE_CHANGES_AGGREGATE,
+  SHIELD_TAGS_AGGREGATE,
+} from "@octant/contracts";
+import { forgeShellChanges } from "@octant/domain/forge-shell-change-policy";
 import {
   SHIELD_REMOTE_COMMANDS_AGGREGATE,
   type ShieldServerFields,
@@ -151,6 +156,62 @@ describe("Shield server registry", () => {
         recordedAt: "2026-10-31T12:00:00.000Z",
       },
       expect.objectContaining({ tag: "reads-secrets-then-egress" }),
+    ]);
+  });
+
+  it("journals a push or pull-request change with what Octant did, and nothing for other commands", () => {
+    const journal = openJournal(scratch());
+    const store = storeOn(journal);
+    const command = "git push --force origin feature/x # token=abcdefghijklmnop";
+    expect(
+      store.recordForgeChange({
+        threadId,
+        via: "octant-harness",
+        changes: forgeShellChanges(command),
+        outcome: "refused",
+        hardLine: "force-push-not-asked",
+        command,
+      }),
+    ).toBe("recorded");
+    expect(
+      store.recordForgeChange({
+        threadId,
+        via: "provider-runtime",
+        changes: forgeShellChanges("gh pr merge 3"),
+        outcome: "seen-after-start",
+        hardLine: "merge-not-asked",
+        command: "gh pr merge 3",
+      }),
+    ).toBe("recorded");
+    expect(
+      store.recordForgeChange({
+        threadId,
+        via: "octant-harness",
+        changes: forgeShellChanges("bun test"),
+        outcome: "ran",
+        command: "bun test",
+      }),
+    ).toBe("no-change");
+    const records = journal
+      .replayAggregateType({
+        aggregateType: SHIELD_FORGE_CHANGES_AGGREGATE,
+        afterSequence: 0,
+        limit: 10,
+      })
+      .map((envelope) => envelope.payload);
+    expect(records).toEqual([
+      {
+        threadId,
+        via: "octant-harness",
+        changes: ["force-push"],
+        branches: ["feature/x"],
+        unreadable: false,
+        outcome: "refused",
+        hardLine: "force-push-not-asked",
+        command: "git push --force origin feature/x # [redacted]",
+        recordedAt: "2026-10-31T12:00:00.000Z",
+      },
+      expect.objectContaining({ via: "provider-runtime", changes: ["merge"] }),
     ]);
   });
 

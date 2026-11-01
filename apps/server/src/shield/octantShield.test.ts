@@ -81,6 +81,33 @@ describe("Octant Shield on the host", () => {
     expect(port.complete).not.toHaveBeenCalled();
   });
 
+  it("lets a network call to a place trusted for the thread's Project through without the model", async () => {
+    const { port } = fakeModel({ status: "answered", text: "{}" });
+    const asked: Array<string | undefined> = [];
+    const shield = shieldWith(port, {
+      safePlaces: (projectId) => {
+        asked.push(projectId);
+        return [{ kind: "domain", domain: "internal.example" }];
+      },
+    });
+    const call: ShieldCall = {
+      tool: "network",
+      kind: "fetch",
+      approvalClass: "network-access",
+      paths: [],
+      urls: ["git.internal.example:443"],
+      arguments: "{}",
+      workingDirectory: root,
+    };
+    await expect(shield.review({ threadId: "t", call, boundRoot: root })).resolves.toMatchObject({
+      verdict: "allow",
+      stage: "fast-allow",
+      rule: "safe-network",
+    });
+    expect(asked).toEqual(["project-1"]);
+    expect(port.complete).not.toHaveBeenCalled();
+  });
+
   it("decides by rule without calling the model", async () => {
     const { port } = fakeModel({ status: "answered", text: "{}" });
     const shield = shieldWith(port);

@@ -8,8 +8,10 @@ import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
+import { createRuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import {
   AggregateId,
+  type CodeThread,
   decodeCodeThreadId,
   decodeNativeHarnessTurnId,
   LOCAL_HOST_ID,
@@ -18,6 +20,7 @@ import {
   ToolEgressLaunchId,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import type { PersistenceService } from "../persistence/persistenceService";
 import { ResearchRouter } from "../chat/research/researchRouter";
 import { SearxngClient } from "../chat/research/searxngClient";
 import { ThreadWorkService } from "../chat/threadWorkService";
@@ -102,7 +105,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
     | "threadFollowUpSuggestions"
     | "turnMetrics"
   > &
-  Pick<IntegrationsWiring, "toolEgressRules"> &
+  Pick<IntegrationsWiring, "toolEgressRules" | "safeNetworkStore"> &
   Pick<WorkspaceWiring, "contextHarness" | "goalService"> &
   Pick<
     ProvidersWiring,
@@ -133,6 +136,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
 
 export function wireHarness(deps: HarnessDependencies) {
   const {
+    safeNetworkStore,
     agentRunAdmission,
     agentRunEligibleTargets,
     agentRunInteractions,
@@ -610,11 +614,26 @@ export function wireHarness(deps: HarnessDependencies) {
       ),
     servers: () => shieldServerStore.servers(),
     protectedSecretPath: (path) => isProtectedSecretPath(path),
+    // Places count for Shield only while Network limits are on, as they do
+    // for the proxies, so turning the switch off returns every call to the
+    // thread's and Project's own rules.
+    safePlaces: (projectId) =>
+      safeNetworkStore.limitsOn() ? safeNetworkStore.placesFor(projectId) : [],
     scratchRoot: harnessWorkDirectory,
   });
   shieldHolder.port = hostShield;
+  // A provider runtime's own shell reports a command only as it starts, so
+  // its pushes and pull-request changes are recorded, never stopped.
+  const runtimeForgeChanges = createRuntimeForgeChangeObserver({
+    branches: (threadId) => codeThreadBranches(persistence, threadId),
+    record: (input) => shieldServerStore.recordForgeChange(input),
+  });
   const nativeHarnessComposition = createNativeHarnessComposition({
     recordRemoteCommand: (input) => shieldServerStore.recordRemoteCommand(input),
+    forgeChanges: {
+      branches: (threadId) => codeThreadBranches(persistence, threadId),
+      record: (input) => shieldServerStore.recordForgeChange({ ...input, via: "octant-harness" }),
+    },
     protectedSecretPath: (path) => isProtectedSecretPath(path),
     tagSecretEgress: ({ threadId, readerThreadIds, command, workingDirectory }) =>
       readsSecretsThenEgress({
@@ -755,6 +774,7 @@ export function wireHarness(deps: HarnessDependencies) {
   // what later areas add.
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   return {
+    runtimeForgeChanges,
     followUpCreation,
     restartContinuation,
     followUpSuggestionRoutes,
@@ -775,3 +795,34 @@ export function wireHarness(deps: HarnessDependencies) {
 }
 
 export type HarnessWiring = ReturnType<typeof wireHarness>;
+
+/**
+ * A Code thread's own delivery branch and the branches the other active
+ * threads of its Project work on, which its shell never pushes to. A Work
+ * thread has no branch of its own and no Code threads beside it.
+ */
+export function codeThreadBranches(
+  persistence: Pick<PersistenceService, "readCodeThread" | "readCodeThreads">,
+  threadId: string,
+): { readonly ownBranch?: string; readonly otherThreadBranches: ReadonlyArray<string> } {
+  let thread: CodeThread | undefined;
+  try {
+    thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+  } catch {
+    thread = undefined;
+  }
+  if (thread === undefined) return { otherThreadBranches: [] };
+  const own = thread;
+  return {
+    ownBranch: own.deliveryTarget.branchIntent,
+    otherThreadBranches: persistence
+      .readCodeThreads()
+      .filter(
+        (other) =>
+          String(other.projectId) === String(own.projectId) &&
+          String(other.id) !== String(own.id) &&
+          other.lifecycle === "active",
+      )
+      .map((other) => other.deliveryTarget.branchIntent),
+  };
+}

@@ -222,6 +222,7 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Built: the Watcher, deterministic detectors with no model, over every app-managed tool result and plugin MCP result before the model reads it; each label is journaled as an outside-content source that marks the thread, reaches the Judge as a kind, tags the Code tool row (quietly at Full access) and marks the Code board card; where an adapter sees what a runtime's own web search or fetch returned (an ACP agent's content items), the Watcher reads that text too, and Chat and Work tool rows carry the same tag as Code's.
 - Built: the server registry in Settings › Access › Servers (alias, user, Read-only, Operate or Admin profile, described deploys, runbook path), journaled and replayed, local window only; the Judge's SSH rules (a plain ssh call to a registered server as its user passes within its profile, an unregistered host, a key path, a tunnelling option, a lock-out or destructive remote command, or a remote secret read goes to the person or is refused) checked on a real-world command set; every Octant Harness `ssh` command journaled with host and exit status at every level; the person's SSH agent socket handed to harness shells; runbooks given to harness turns as notes that grant nothing.
 - Built: the secret guard's list handed to the Watcher and the Judge, and a journaled tag for a secret-then-network command at Full access.
+- Built: the Judge's fast allow for egress to a safe network, for a call that names its destinations (never a shell command), only while Network limits are on and only on an untainted thread.
 - Not built yet: the shared levels in Work; a confined command reaching a registered server (ssh connects at Full access only), the credential broker for SSH, exit status and runbook context for provider runtimes' own commands, `scp` and `rsync` rules, and a Project override of the registry; the Watcher cannot read a runtime's own web result where the runtime does not expose it (Codex, OpenCode); the false-allow rate of a real model is unmeasured.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
@@ -236,8 +237,8 @@ The person names trusted places (hosts, domains, address ranges, private-network
 - With limits on, below Full access every wrapped provider runtime runs on its own egress proxy and reaches only its provider's endpoints, its Project's egress rules and these places; Claude's command sandbox sends its network to the same proxy. Full access stays open network, and so does every runtime while limits are off.
 - A refused host is refused with the host named and listed under Recently refused, where the person can trust it.
 - No place or range may reach a link-local address, and a name nothing lists is refused before any lookup.
-- Built on macOS and Linux for provider runtimes, Claude's own process (Plan, its probes and its in-process web fetch) included, and for Octant Harness commands, behind the Network limits switch (off by default). A Linux capsule reaches its listener through a Unix socket and its tool bridges through the forwarder's loopback relay; OpenCode keeps open network on Linux because the host connects into its server. Taint suspends places for a harness command as it suspends standing rules.
-- With limits on, Octant Shield reviews an unlisted host where it is the thread's reviewer at Auto: for Claude's own process and sandbox, and for harness commands, whose allowance is one call rule. Anything else goes to the person.
+- Built on macOS and Linux for provider runtimes, Claude's own process (Plan, its probes and its in-process web fetch) included, and for Octant Harness commands, behind the Network limits switch (off by default). A Linux capsule reaches its listener through a Unix socket and its tool bridges through the forwarder's loopback relay; OpenCode keeps open network on Linux because the host connects into its server. Taint suspends places for a harness command as it suspends standing rules, and for a runtime launch that names its thread (Claude's own process and sandbox) while that thread is marked; a launch no thread holds keeps them.
+- With limits on, Octant Shield reviews an unlisted host where it is the thread's reviewer at Auto: for Claude's own process and sandbox, and for harness commands, whose allowance is one call rule. Anything else goes to the person. The Judge also allows by rule a call whose every named destination is a trusted place, on an untainted thread.
 - Outside Plan Claude's own process is not wrapped, so only its proxy variables route it. No real runtime turn has run on its proxy yet.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Provider runtime network](../architecture.md#provider-runtime-network) and [Octant Shield](../architecture.md#octant-shield).
@@ -696,7 +697,8 @@ A Code thread may push its own branch and open, update and stack pull requests f
 - Each action journals the actor, repository, number and head SHA, and Octant stores no forge token.
 - Built: push, amend with force-with-lease, plain force-push on approval, open (ready, draft, stacked), edit, labels of existing labels only, comments and review replies (approved for each post at every level), close and reopen, and an agent's merge on request or on a stored Project or routine choice.
 - The review pane carries the person's own label, comment, review-reply, approve, request-changes, close and reopen controls; the labels and review threads they name are read through a desktop-window-only query, and a label the repository lacks is never offered. A review is recorded on the head the person read and refused when it moved; no agent, routine or paired device reviews.
-- At Guarded and Reviewed a Code agent's shell can still reach forge credentials, and a change made that way is journaled only as a shell command (known gap).
+- Built: every push, merge and pull-request change Octant reads in a shell command is journaled under the thread (`shield-forge-changes.observed@1`) with who ran it and what happened; at Full access an Octant Harness command that merges, force-pushes plainly, forces or deletes a branch other than the thread's own, or pushes to another thread's branch is refused before it runs, and a provider runtime's command, seen only as it starts, is recorded with the hard line it crossed. A target behind an expansion is recorded as unreadable.
+- At Guarded and Reviewed a Code agent's shell can still reach forge credentials, and a change made that way is journaled as a forge change where Octant sees it, but none of the pull-request rules applies to it (known gap).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -1114,7 +1116,7 @@ Every harness tool call is authorized under the thread's current authority befor
 - The offered tools follow the mode. A call is judged by the narrower of the thread's stored posture and the running turn's posture, so a turn narrowed to Plan refuses writes and commands.
 - A direct-endpoint request goes only to the configured base URL and follows no redirect. Web fetches refuse private destinations and carry no credential.
 - Only harness results that bring in outside content taint the thread. On a tainted thread, shell, edit, write, check and web-fetch need a single-use confirmation, and remembered approvals stop covering them.
-- A tainted thread's search query is refused when it looks like it carries data, before any request leaves; at Full access in Code the refusal does not apply.
+- A tainted thread's search query is refused when it looks like it carries data, before any request leaves; it is a guard the person lowers with the outside-content gate, so at Full access in Work and Code the refusal does not apply.
 - At Full access in Code a tainted thread records the taint and asks no confirmation.
 - Every tool result is hard-capped with a truncation marker and paging, and nothing variable enters the stable request prefix. _Here only._
 
@@ -2237,7 +2239,7 @@ Status: Built. Since: —. Detail: [Terminal Browser grant: Current behavior](te
 On a tainted thread the harness refuses a web search query that looks like it carries data, before any request leaves.
 
 - Refused patterns include long text, URLs, email addresses, long hex runs, escaped bytes, base64 and high-entropy tokens.
-- At Full access in Code the query is not refused; the mark is only recorded.
+- It is a guard, not a privacy rule: the person lowers it with the outside-content gate by choosing Full access for a thread or a Project's new threads, so at Full access in Work and Code the query is not refused and the mark is only recorded.
 
 Status: Built. Since: —. Detail: [Search queries on a tainted thread](search-query-taint.md#refused-patterns).
 

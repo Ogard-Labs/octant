@@ -11,6 +11,7 @@ import {
   type ProviderExecutionPolicy,
   type ProviderInstanceId,
   type ProviderModelId,
+  type SafeNetworkPlace,
   type ShieldModelChoice,
   type ShieldWatcherLabel,
   type TurnUsage,
@@ -88,6 +89,8 @@ export interface HostShieldDependencies {
    * Judge asks about a file the person added as it asks about a built-in one.
    */
   readonly protectedSecretPath?: (path: string) => boolean;
+  /** The places trusted for a Project while Network limits are on; none while they are off. */
+  readonly safePlaces?: (projectId: string | undefined) => ReadonlyArray<SafeNetworkPlace>;
   /** A folder outside every Project, where Shield's one-shot sessions start. */
   readonly scratchRoot: string;
   readonly clock?: () => string;
@@ -209,6 +212,7 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
       ...(deps.protectedSecretPath === undefined
         ? {}
         : { protectedSecretPath: deps.protectedSecretPath }),
+      ...(deps.safePlaces === undefined ? {} : { safePlaces: deps.safePlaces }),
     },
     ...(deps.spendCeiling === undefined && deps.recordUsage === undefined
       ? {}

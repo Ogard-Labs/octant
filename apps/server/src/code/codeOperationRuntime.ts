@@ -142,6 +142,7 @@ import type {
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
+import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
   decodeAgentRunAdmittedContext,
@@ -563,6 +564,8 @@ export interface CodeOperationRuntimeOptions {
   readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
   /** Marks a thread whose runtime read outside content with its own tools. */
   readonly outsideContentMarks?: RuntimeOutsideContentMarking;
+  /** Journals the pushes and pull-request changes a runtime's own shell starts. */
+  readonly forgeChanges?: RuntimeForgeChangeObserver;
   /**
    * Reads whether a thread has ingested untrusted external content. Used to
    * clamp harness-delegated approvals back to user-answered prompts when taint
@@ -4163,6 +4166,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.outsideContentMarks === undefined
             ? {}
             : { outsideContentMarks: this.#options.outsideContentMarks }),
+          ...(this.#options.forgeChanges === undefined
+            ? {}
+            : { forgeChanges: this.#options.forgeChanges }),
           sanitizeProviderEvent: ({ event }) =>
             Effect.try({
               try: () => sanitizeProviderEvent(event, active.checkoutRoot, active.secrets),
