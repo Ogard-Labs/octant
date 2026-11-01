@@ -614,6 +614,26 @@ function versionNumbers(version: string): readonly [number, number, number] | un
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
+/**
+ * The first 2.x release whose server was read for the routes Octant maps for
+ * file changes (`file.edited`, `session.diff`) and for its own compaction
+ * (`POST /api/session/{id}/compact` and the `session.compaction.*` events). Older
+ * 2.x releases and every 1.x release stay unreported until read the same way.
+ */
+const OPEN_CODE_2_NATIVE_ROUTES_SINCE = [2, 2, 0] as const;
+
+/** Whether this runtime version string names a 2.x release read for the routes above. */
+export function openCodeServesNativeRoutes(version: string | undefined): boolean {
+  const match = /^opencode2? v(\d+)\.(\d+)\.(\d+)/.exec(version ?? "");
+  if (match === null) return false;
+  const numbers = [Number(match[1]), Number(match[2]), Number(match[3])];
+  for (const [index, floor] of OPEN_CODE_2_NATIVE_ROUTES_SINCE.entries()) {
+    const value = numbers[index] ?? 0;
+    if (value !== floor) return value > floor;
+  }
+  return true;
+}
+
 /** Isolation guards are attested only for the runtime version verified by the hostile fixture. */
 export function supportsOpenCodeIsolation(version: string): boolean {
   // 2.0.x has no `--pure`; the private profile and guards alone kept the
