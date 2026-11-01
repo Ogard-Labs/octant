@@ -1135,9 +1135,9 @@ than the level names.
 
 SSH to the person's own machines goes through the thread's shell, in Work
 and Code alike: a thread runs `ssh`, `scp`, or `rsync` as ordinary commands.
-Octant stores no SSH key and carries no SSH protocol of its own; the
-commands use the person's own SSH agent and, at Full access, their own
-configuration. Below Full access a harness command reaches a registered
+Octant carries no SSH protocol of its own; the commands use the person's own
+SSH agent, or for a server the person chose it for a key Octant made and
+keeps in the credential broker, and, at Full access, their own configuration. Below Full access a harness command reaches a registered
 server through relays and an agent socket the host opens for that one command
 ([Octant Shield](#octant-shield), servers as built). No mode bans them: in
 Work as in Code they are commands at the thread's level. At Guarded, the
@@ -11304,7 +11304,9 @@ command to exactly its thread and Project rules.
 account list, and per Project an optional list of its own that replaces the
 account list for that Project's threads. A server is its alias, user, profile,
 the deploy commands the person described (Operate and Admin run them exactly
-as written), and an optional absolute runbook path. Each change is journaled
+as written), an optional absolute runbook path, and how it signs in: the
+person's SSH agent (`ssh-agent`, the default and what a server registered
+before the choice means) or a key Octant keeps (`octant-key`). Each change is journaled
 whole, journal first, as `shield-servers.server-set@1` or
 `shield-servers.server-removed@1` on the `shield-servers` aggregate; a
 Project's list is journaled whole as `shield-servers.project-servers-set@1`
@@ -11389,7 +11391,12 @@ servers gets, for that command only, from the host
 - an agent socket the host owns, in a private folder, that passes the
   person's SSH agent only the requests to list keys, sign a login, and bind a
   session to a host key, and answers adding, removing, or locking a key with
-  a failure; the command's `SSH_AUTH_SOCK` names it;
+  a failure; the command's `SSH_AUTH_SOCK` names it. A server that signs in
+  with a key Octant keeps gets, in the same folder, an agent socket of its
+  own that lists only that key and hands each sign request for it to the
+  credential broker; the server's config names that socket, so its login
+  never falls back to the person's agent, and with no key in the broker it
+  offers none;
 - an SSH config, a known-hosts file, and `ssh`, `scp`, and `rsync` wrappers
   first on `PATH`, written into the command's own script folder, which it
   reads and cannot write. Each server is its alias with the relay's port, the
@@ -11403,10 +11410,9 @@ The secret guard's list is untouched: the key files stay unreadable, and the
 person's own config and known hosts are read only on the host. A command that
 does more than one plain call, or names no registered server, gets none of
 this and reaches no server. Rationale: Seatbelt cannot name a remote host, so
-per-server loopback relays are the narrowest network grant; an agent socket
-the host owns was chosen over the credential broker because the person's
-agent already holds the keys and never hands them out, and the filter keeps a
-command from changing what it holds. On Linux the forwarder carries a
+per-server loopback relays are the narrowest network grant; the person's own
+agent stays the default because it already holds their keys and never hands
+them out, and the filter keeps a command from changing what it holds. On Linux the forwarder carries a
 server's port straight to its relay rather than through the egress proxy as
 a `CONNECT`, as the tool bridge's ports go: the relay already reaches one
 address and nothing else, the proxy would refuse that address as private,
@@ -11430,7 +11436,25 @@ command (OpenCode, ACP agents, Pi) keeps Shield's journaled decision as its
 record. A failure with no exit status is recorded as `unavailable`, since it
 may not have run.
 
-Not built yet: the credential broker for SSH.
+**The credential broker for SSH.** For a server registered to sign in with
+a key Octant keeps, the credential broker makes an Ed25519 key the first time
+the person asks for it (**Show key** in Settings, `show-server-key` on
+`POST /api/shield/servers`, a local window only, for a server whose sign-in
+is `octant-key`) and keeps it in a credential namespace of its own (the
+`app.octant.ssh-keys.v1` Keychain service, the `octant.ssh-keys.v1` Secret
+Service attribute), keyed by the server's id. Its routes (`/v1/ssh-keys/ensure`,
+`public`, `sign`, `delete`, in `packages/host-runtime/src/sshKeyBroker.ts`)
+give out only the key's public line and a signature, and sign only an SSH
+public-key login request (RFC 4252, or OpenSSH's host-bound form) for that
+very key; no route returns the private key, so neither the server process nor
+a command ever holds it. The person adds the public line to the server's
+`authorized_keys` themselves. A server keeps its id when a Project's list is
+saved again (by its alias), and a Project's copy of an account server shares
+that server's id, so editing a list never orphans an installed key; a key is
+deleted once no list names its server with `octant-key`. _Rationale:_ the broker makes the key rather
+than importing one, so Octant never reads a key file and a key the person
+uses elsewhere never enters Octant; and it signs logins only, so the socket a
+command holds cannot sign anything it could use elsewhere.
 
 **Model and privacy.** By default Shield uses the thread's own provider
 account with that provider's smallest model, so no new party sees the work.
