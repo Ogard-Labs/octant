@@ -20,8 +20,6 @@ How to read an entry:
   owning specification. It was carried over from the former decision archive
   on 2026-10-31 so no rule still in force is lost; this document is its home
   until the owner absorbs it.
-- The last section lists rules the maintainer decided on 2026-10-31 that no
-  specification states yet.
 
 A change to a decision updates its owning specification and its entry here in
 the same pull request ([Changing the design](README.md#changing-the-design)).
@@ -33,7 +31,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 5         | 4       | 1            | 0                   |
 | [Guardrails and review](#guardrails-and-review)                                       | 8         | 0       | 7            | 1                   |
-| [Key providers](#key-providers)                                                       | 1         | 0       | 0            | 1                   |
+| [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 2         | 2       | 0            | 0                   |
@@ -44,13 +42,13 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
-| [Persistence](#persistence)                                                           | 9         | 8       | 1            | 0                   |
+| [Persistence](#persistence)                                                           | 10        | 9       | 1            | 0                   |
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 8         | 7       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 6       | 0            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 7       | 1            | 0                   |
-| [Authority and approvals](#authority-and-approvals)                                   | 7         | 5       | 2            | 0                   |
-| [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 2            | 2                   |
+| [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
+| [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 3            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 5       | 3            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
@@ -60,7 +58,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 4         | 4       | 0            | 0                   |
+| [Browser](#browser)                                                                   | 5         | 5       | 0            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 5       | 1            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 3       | 0            | 0                   |
@@ -68,8 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 5         | 0       | 0            | 5                   |
-| **All areas**                                                                         | **222**   | **175** | **34**       | **13**              |
+| **All areas**                                                                         | **221**   | **179** | **38**       | **4**               |
 
 ## Principles and hard lines
 
@@ -147,10 +144,10 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Any level can be set globally, per Project and per thread; the narrowest scope wins, and Full access shows a one-time warning the first time a machine or Project picks it.
 - Lowering is journaled with who, when, from which level and at which scope; the thread header shows the level in force and where it came from (not built yet).
 - Plan is an overlay on any level and always read-only; subagents start at their parent's level and never exceed it; a routine runs at the level its creator picked.
-- Older recorded "Trusted" or "Off" levels replay as Full access.
+- A retired level recorded before these four existed replays as Full access.
 - Built in Code: Ask first, Accept edits, Auto with the key CLI providers' own reviewers, Plan, and Full access with no sandbox and no prompts for every runtime, with a first-run default, a Settings › Code › Access default, a Project override, and the one-time warning.
 - Built in Work: Auto, Ask first, Accept edits and Full access, set from Settings › Work and the composer, with the one-time warning; Work has no Plan.
-- Not built yet: a Work Project override, an ACP agent's own reviewer, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
+- Not built yet: a Work Project override, an ACP agent's own reviewer, and the thread header indicator.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -249,9 +246,10 @@ The person registers their own servers with an action profile, and SSH to a regi
 - Keys stay out of the agent: the SSH session gets the person's SSH agent or the credential broker, and Shield refuses reads of key paths.
 - SSH to an unregistered host goes to the person; destructive or lock-out actions go to the person at every level below Full access.
 - Every remote command and its exit status is journaled with the host, remote output passes through the Watcher, and a per-server runbook is context, never authority.
-- Today an agent reaches the person's machines with `ssh` through its shell under the thread's level; no Octant transport or stored key is added.
+- Built: the server registry in Settings › Access › Servers, the Judge's SSH rules by profile, every Octant Harness `ssh` command journaled with host and exit status, the person's SSH agent socket handed to harness shells, and runbooks given to harness turns as notes that grant nothing. SSH connects at Full access only; no Octant transport or stored key is added.
+- Not built yet: a confined command reaching a registered server, the credential broker for SSH, exit status and runbook context for provider runtimes' own commands, remote output through the Watcher, `scp` and `rsync` rules, and a Project override of the registry.
 
-Status: Designed, not built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield) and [Modes](../architecture.md#modes-chat-work-and-code).
+Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield) and [Modes](../architecture.md#modes-chat-work-and-code).
 
 ## Key providers
 
@@ -656,7 +654,7 @@ Agent-to-agent messaging is a host-delivered channel, and seeing sibling threads
 - Message bodies never enter the journal; delivery marks the recipient as having read outside content, and delivery is at least once.
 - A source turn may make at most three thread-message sends, and a target turn started by that tool is never offered the tool. _Here only._
 - `octant_threads` lists, reads and waits only; a read marks the caller, and a turn may make 8 reads and 4 waits.
-- Acknowledgement events and a sender read-back of what became of a message are not built (not built yet).
+- The acknowledgement event and its projection exist, but nothing acknowledges a delivered message and the sender has no read-back of what became of it (not built yet).
 
 Status: Built. Since: 2026-10-12. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -868,7 +866,7 @@ Only a person at a local window may clear a thread's mark, recording that they r
 - The clear route is loopback-only; no tool, command, model output, agent message or host-run turn (routine, goal loop, resume, child delivery) can clear.
 - A clear removes the mark only: nothing leaves the model's context, and the next ingestion marks the thread again.
 - A clear is refused while a turn is running or queued, and a stale version is refused.
-- Approval prompts do not yet say that the mark is why they ask (not built yet).
+- An approval on a marked thread says that the mark is why it asks and what marked the thread.
 
 Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).
 
@@ -908,6 +906,14 @@ Unsent drafts stay on the client that typed them. Messages submitted while a tur
 
 Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).
 
+### Local diagnostics export
+
+A person can export a local diagnostics bundle to share by their own choice; Octant sends nothing by itself and keeps no telemetry.
+
+- The bundle is written locally and leaves the machine only when the person sends it.
+
+Status: Built. Since: 2026-10-31. Detail: [Architecture: Persistence](../architecture.md#persistence).
+
 ## Providers
 
 ### Provider layer and honest capability
@@ -946,7 +952,7 @@ API keys live in the host credential store and are reached only through the loop
 - Provider sign-in is delegated (tokens stay with the provider runtime) or host-driven (tokens stay in the broker as opaque references). An API-key path stays available beside every sign-in.
 - Changing an endpoint's base URL, or switching its key and sign-in binding, deletes the stored credential before the change is journaled.
 - Directory sign-in and cloud request signing run through the broker. The server never holds a signing key, and the broker signs only inside the scope stored at sign-in.
-- A person may link an external secret store that the broker resolves at use by opaque reference (not built yet).
+- A person may link a secret store they already use, and the broker resolves it at use by opaque reference; Octant keeps only the store name and item address.
 
 Status: Built. Since: 2026-10-26. Detail: [Architecture: Providers](../architecture.md#providers) and [Enterprise provider identity](enterprise-provider-identity.md).
 
@@ -1282,9 +1288,9 @@ Approvals are independent categories, and grants are scoped and journaled. Plan 
 - The terminal CLI sends Full access exactly when the Project remembers it.
 - Three provider tool requests denied in one Code turn end it as interrupted, with the reason journaled, so a provider cannot loop a person's refusals.
 - A refusal that fails closed on authority names a recovery a person can perform (a user action, a restart or elapsed time), shown where the person is; recovery never widens automatic admission.
-- New Code threads start in the mode chosen at first run, which Settings and a Code Project can change; Work threads on the shared levels are not built yet.
+- New Code threads start in the mode chosen at first run, which Settings and a Code Project can change; Work threads take the same levels, set by the host.
 
-Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Approvals](../architecture.md#security-and-authority).
+Status: Built. Since: —. Detail: [Architecture: Security and authority, Approvals](../architecture.md#security-and-authority).
 
 ### Provider auto-review
 
@@ -1293,7 +1299,7 @@ A thread's `autoApprove` flag says who answers a prompt, not what is permitted.
 - Both prompting postures (approval-gated and auto-accept-edits) delegate to the provider's reviewer when `autoApprove` is set and the provider reports `harnessAutoReview: "supported"`; taint and capability clamp delegation off (unknown taint counts as ingested).
 - Categories, the sandbox, egress and credential reach stay Octant's whatever the provider reviewer answers; an auto-accept-edits waiver outranks the delegation.
 - On one provider runtime, approval-gated honours permission grants the person saved in that runtime for the same repository; Octant's denies still win and Octant never writes such a grant.
-- Octant Shield answering these prompts at Reviewed is not built yet.
+- Octant Shield answers these prompts on a Code thread or a Work thread where it is the reviewer, on every runtime that routes them to Octant.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Approvals](../architecture.md#security-and-authority).
 
@@ -1380,10 +1386,10 @@ A Work thread launches exactly as a Code thread at the same level would, shell i
 
 - It never runs commands under a weaker guard than the level names.
 - Each provider runs a Work session as it runs a Code session: prompts to the person at Guarded, a reviewer at Reviewed, no prompts at Full access.
-- Octant Harness gains the shell port a Code harness thread has, under the same harness authority.
-- An ACP agent whose shell runs in-process, with no protocol request, cannot be asked per command and reports unsupported at Guarded and Reviewed.
+- Built: Claude Code, Codex, OpenCode, Pi and ACP agents start Work sessions with their shell and Git at the thread's level, and the Octant Harness has the shell port a Code harness thread has, under the same harness authority.
+- Not built yet: an ACP agent whose shell runs in-process, with no protocol request, cannot be asked per command and does not yet report unsupported at Guarded and Reviewed.
 
-Status: Designed, not built. Since: —. Detail: [Architecture: Security and authority, Sandbox](../architecture.md#security-and-authority).
+Status: Partly built. Since: —. Detail: [Architecture: Modes, Work shell and Git](../architecture.md#modes-chat-work-and-code) and [Security and authority, Sandbox](../architecture.md#security-and-authority).
 
 ### Provider capability matrix
 
@@ -1428,7 +1434,7 @@ Publishing a Work or Code file to the provider's hosted service is a person-auth
 - Every publish asks, at every posture including Full access, and an approved publish passes the gate again before the runtime continues; an answer is never reused for a later publish.
 - The file must be inside the bound Project and outside the login keychain folder; the host keeps the page link, title and a bounded snapshot of what the person approved.
 - Plan never offers the tool, Chat never publishes, agent-run child sessions are never offered it, and paired devices cannot choose it.
-- At Full access nothing would ask, publishing included (not built yet).
+- Today Full access asks too; the rule that nothing asks there, publishing included, is not built yet.
 
 Status: Built. Since: 2026-10-27. Detail: [Architecture: Security and authority, Hosted artifact publishing](../architecture.md#security-and-authority).
 
@@ -2228,6 +2234,15 @@ On a tainted thread the harness refuses a web search query that looks like it ca
 
 Status: Built. Since: —. Detail: [Search queries on a tainted thread](search-query-taint.md#refused-patterns).
 
+### Browser profiles with cookie import
+
+Browser pages can keep sign-ins in named profiles, and a person may import cookies from another browser into a profile.
+
+- Octant never opens another browser's profile in place; the person's explicit pick of a browser and one of its profiles is the only way its cookies reach a Project or Personal profile.
+- A Chromium-family browser's cookie key comes through the macOS Keychain prompt; a refusal imports nothing. Cookies are never logged, journaled, returned to a window, or sent off the Mac, and the journal records the source, the profile, and counts.
+
+Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
+
 ## Provider runtimes
 
 ### Key provider sandbox and approvals
@@ -2629,32 +2644,3 @@ Desktop providers are plugin contributions through the `desktop-provider` seam; 
 - The drivers are built against recorded and fake providers; no host offers one yet, and live smokes are owed.
 
 Status: Partly built. Since: 2026-10-28. Detail: [Disposable desktops: provider seam](disposable-desktops.md#provider-seam), [authority](disposable-desktops.md#authority) and [billed placements](disposable-desktops.md#expiry-and-teardown-when-the-daemons-host-may-die).
-
-## Decided, pending a specification update
-
-The maintainer decided these rules on 2026-10-31. No current specification states them yet; each one's owner is "pending spec update", and the specification change that adopts it moves the entry into its area. Until then they are design direction, not built behaviour, and where one narrows a rule above (Full access means no sandbox), this entry is the newer decision.
-
-### Linked external secret stores
-
-A person may link an external secret store, which the credential broker resolves by opaque reference at the moment of use.
-
-- No secret value is copied into Octant's journal or settings; the broker reads it when a provider or tool needs it.
-
-Status: Designed, not built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) ("allowed; not built yet"); requirements pending spec update.
-
-### Browser profiles with cookie import
-
-Browser pages can keep sign-ins in named profiles, and a person may import cookies from another browser into a profile.
-
-- Octant never opens another browser's profile in place; the person's explicit pick of a browser and one of its profiles is the only way its cookies reach a Project or Personal profile.
-- A Chromium-family browser's cookie key comes through the macOS Keychain prompt; a refusal imports nothing. Cookies are never logged, journaled, returned to a window, or sent off the Mac, and the journal records the source, the profile, and counts.
-
-Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
-
-### Local diagnostics export
-
-A person can export a local diagnostics bundle to share by their own choice; Octant sends nothing by itself and keeps no telemetry.
-
-- The bundle is written locally and leaves the machine only when the person sends it.
-
-Status: Designed, not built. Since: 2026-10-31. Detail: pending spec update (owner to be [Architecture: Persistence](../architecture.md#persistence)).
