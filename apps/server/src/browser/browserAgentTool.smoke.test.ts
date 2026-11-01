@@ -40,7 +40,7 @@ const pages: Record<string, string> = {
     <div id="host"></div>
     <script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = '<input type="password" value="hunter2">';</script>`,
   "/moves-on": `<!doctype html><title>Moves on</title><button id="save">Save</button>
-    <script>setTimeout(() => { location.href = "/moved"; }, 300);</script>`,
+    <script>setTimeout(() => { location.href = "/moved"; }, 2500);</script>`,
   "/moved": `<!doctype html><title>Moved</title><button id="save">Save</button>`,
   "/controls": `<!doctype html><title>Controls</title>
     <nav id="menu" onmouseenter="document.getElementById('item').hidden = false">Menu
@@ -61,6 +61,7 @@ const pages: Record<string, string> = {
     <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.id = 'done'; p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
     <button id="later" onclick="setTimeout(() => { document.title = 'Settled'; }, 150)">Later</button>
     <button id="ask" onclick="const ok = confirm('Delete everything?'); alert(ok ? 'deleted' : 'kept'); document.title = ok ? 'Deleted' : 'Kept'">Ask</button>
+    <fieldset disabled><input id="locked" aria-label="Locked"></fieldset>
     <p>Width <span id="width"></span></p>
     <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
@@ -240,7 +241,7 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     const tool = agentTool();
     await tool.call({ operation: "navigate", url: `${origin}/moves-on` });
     const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await new Promise((resolve) => setTimeout(resolve, 3_200));
     const clicked = await tool.call({ operation: "click", ref: refFor(outline, /"Save"/) });
     expect(clicked.result.failure?.category).toBe("stale");
     await tool.stop();
@@ -596,6 +597,14 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
         /timed out after 300 ms.*"Never there" present.*"Saved at last" absent/,
       ),
     });
+    // A control a disabled fieldset disables is disabled, though it has no
+    // attribute of its own.
+    const inherited = await tool.call({
+      operation: "wait",
+      conditions: [{ selector: "#locked", state: "disabled" }],
+      timeoutMs: 1_000,
+    });
+    expect(inherited.isError).toBe(false);
     const tooLong = await tool.call({ operation: "wait", selector: "#go", timeoutMs: 60_000 });
     expect(tooLong.result).toEqual({ error: "invalid-browser-input" });
     await tool.stop();

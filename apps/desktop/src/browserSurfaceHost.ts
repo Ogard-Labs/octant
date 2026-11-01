@@ -256,6 +256,8 @@ interface OwnedSurface {
    * on write, oldest first out, so a page that logs in a loop cannot grow this
    * while the agent looks elsewhere.
    */
+  /** Dialogs answered during an action that then failed, owed to the next answer. */
+  unreportedDialogs: DialogReport[];
   consoleErrors: Array<{ text: string; url?: string }>;
   failedRequests: Array<{ url: string; method?: string; failure: string }>;
 }
@@ -614,6 +616,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         control: "idle",
         shellWindow: undefined,
         blockedNavigationUrl: undefined,
+        unreportedDialogs: [],
         consoleErrors: [],
         failedRequests: [],
       };
@@ -689,7 +692,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         owned.control = "agent";
         owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
-        const dialogs: DialogReport[] = [];
+        // Dialogs an earlier action answered before it failed come first.
+        const dialogs: DialogReport[] = owned.unreportedDialogs.splice(0);
         const releaseDialogs = await guardDialogs(contentsView(owned), dialogs);
         try {
           const observed = await (async (): Promise<BrowserSurfaceRuntimeObservation> => {
@@ -923,6 +927,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // Every dialog the page raised during the action is reported once,
           // with how the fixed policy answered it.
           return dialogs.length === 0 ? observed : { ...observed, dialogs: dialogs.slice(0, 8) };
+        } catch (error) {
+          // The action failed after the page raised a dialog: the answer the
+          // policy gave is reported with the next action that succeeds.
+          owned.unreportedDialogs.push(...dialogs.slice(-8));
+          throw error;
         } finally {
           // Released before the surface is handed back, whatever the action did;
           // a page that went away with its tab has nothing left to detach.
