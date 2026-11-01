@@ -112,3 +112,43 @@ export type ProjectBrowserResult = typeof ProjectBrowserResult.Type;
 
 export const decodeProjectBrowserCommand = Schema.decodeUnknownSync(ProjectBrowserCommand);
 export const decodeProjectBrowserResult = Schema.decodeUnknownSync(ProjectBrowserResult);
+
+/** The most live agent pages a Project's tab strip lists, one per thread context. */
+export const MAX_PROJECT_AGENT_PAGES = 64;
+
+/** A window's request to list the live agent pages of one Project's threads. */
+export const ProjectAgentPagesCommand = Schema.Struct({
+  projectId: ProjectId,
+  mode: ProjectBrowserMode,
+}).annotations(strict);
+export type ProjectAgentPagesCommand = typeof ProjectAgentPagesCommand.Type;
+
+/**
+ * One thread's live page, named and nothing more: no text, no picture, no
+ * address beyond its host. The strip shows the picture the floating preview
+ * already shows by asking the thread's own route for it.
+ *
+ * `signedIn` stands in for `title` and `host` when a paired device asks about a
+ * page in a stored profile, which carries the person's account.
+ */
+export const ProjectAgentPage = Schema.Struct({
+  threadId: BrowserThreadId,
+  contextId: BrowserContextId,
+  threadTitle: Schema.String.pipe(Schema.maxLength(512)),
+  title: Schema.optional(Schema.String.pipe(Schema.maxLength(1024))),
+  host: Schema.optional(Schema.String.pipe(Schema.maxLength(253))),
+  /** An agent action is running on the page, or ran moments ago. */
+  agentActive: Schema.Boolean,
+  signedIn: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type ProjectAgentPage = typeof ProjectAgentPage.Type;
+
+export const ProjectAgentPages = Schema.Struct({
+  projectId: ProjectId,
+  mode: ProjectBrowserMode,
+  pages: Schema.Array(ProjectAgentPage).pipe(Schema.maxItems(MAX_PROJECT_AGENT_PAGES)),
+}).annotations(strict);
+export type ProjectAgentPages = typeof ProjectAgentPages.Type;
+
+export const decodeProjectAgentPagesCommand = Schema.decodeUnknownSync(ProjectAgentPagesCommand);
+export const decodeProjectAgentPages = Schema.decodeUnknownSync(ProjectAgentPages);

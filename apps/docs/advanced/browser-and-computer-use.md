@@ -522,6 +522,26 @@ itself can set or remove a recipe or enter its key, so **Disposable desktop**
 appears only there: a paired phone or browser doesn't show a Project's
 settings, and the host refuses a recipe change from either.
 
+### Several threads at once
+
+Threads of one Project can each have their own page open and work at the same
+time. Each thread's agent can use only its own page and its own tabs, never
+another thread's, and one thread waiting on its page does not hold up another.
+
+To see them together, open the Project's browser (the Browser quick tool on the
+Project, or the docked Project browser). When any thread of the Project has a
+live page, a tab strip appears under its title: **Your page** for your own
+browser, then one tab for each thread's page. Each tab shows the page's title
+(or its site if it has none) and the title of the thread that owns it, with an
+**Agent active** mark while that thread's agent is driving the page. Choose a
+tab to see that thread's page as its preview shows it. You can look but not
+click in it, and **Open thread** takes you to the thread. Choose **Your page**
+to go back to your own browser. Nothing in the strip moves a page from one
+thread to another.
+
+A paired device sees the same tabs, but a page in a signed-in profile reads
+"Signed-in page — open it on this Mac."
+
 ## Picture in Picture
 
 When an agent has a Browser open for a Work or Code thread and you cannot see

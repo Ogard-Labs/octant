@@ -9918,6 +9918,16 @@ access` agree); a thread's own change is journaled as
   Archiving the Project, relinking its root, turning its mode off, the window
   moving to another Project, or the window's authority ending closes it. On the desktop app the page is a live native view; elsewhere the
   host drives a headless page and shows its picture.
+- **Parallel thread pages.** A thread's Browser page is reachable only through
+  that thread: its agent tool, a subagent's, and a terminal grant are each built
+  for one thread, and the automation service refuses an agent action that names
+  a context another thread owns, though the two threads of a Project hold the
+  same authority. Actions queue per context, never across contexts, on the
+  headless and the desktop Browser. The list of a Project's live agent pages is
+  a server route for a window that holds the Project and the thread: it returns
+  names (page title and host, thread id and title, whether an agent drives it)
+  and never page text or a picture, and a paired device is told a stored-profile
+  page exists and nothing more.
 - **Browser profiles and extensions.** A Browser page is Private (in-memory,
   per browsing context) unless the person at a local window puts it in their
   Project's persistent profile or the host's Personal profile; a profile page
