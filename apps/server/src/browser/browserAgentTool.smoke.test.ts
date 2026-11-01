@@ -106,13 +106,14 @@ function agentTool() {
     });
     return answer as {
       readonly isError: boolean;
+      readonly images?: ReadonlyArray<unknown>;
       readonly result: {
         readonly failure?: { readonly category: string };
         readonly page?: Record<string, unknown> & { readonly snapshot?: string };
       };
     };
   };
-  return { call, stop: () => call({ operation: "stop" }) };
+  return { call, service, stop: () => call({ operation: "stop" }) };
 }
 
 function refFor(outline: string | undefined, line: RegExp): string {
@@ -201,6 +202,64 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     await tool.call({ operation: "navigate", url: `${origin}/other` });
     const gone = await tool.call({ operation: "click", ref: elsewhere });
     expect(gone.result.failure?.category).toBe("stale");
+    await tool.stop();
+  });
+
+  it("answers an action with what changed and no page text or picture unless asked", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+    await tool.call({ operation: "type", selector: "#name", text: "Ada" });
+    const clicked = await tool.call({ operation: "click", selector: "#save" });
+    expect(clicked.result.page).toMatchObject({ changed: 'Title is now "Saved Ada".' });
+    expect(clicked.images).toBeUndefined();
+    expect(clicked.result.page).not.toHaveProperty("text");
+    expect(clicked.result.page).not.toHaveProperty("snapshot");
+    expect(clicked.result.page).not.toHaveProperty("contentHash");
+    expect(tool.service.inspectThread(windowId, threadId).observation?.screenshotDataUrl).toBe(
+      undefined,
+    );
+
+    const renamed = await tool.call({
+      operation: "click",
+      selector: "#rename",
+      include: ["snapshot", "text", "screenshot"],
+    });
+    expect(renamed.result.page?.changed).toBe("The page's text changed.");
+    expect(renamed.result.page?.snapshot).toMatch(/- button "Store" \[ref=e\d+\]/);
+    expect(renamed.result.page?.text).toContain("Store");
+    expect(renamed.images).toHaveLength(1);
+    const store = await tool.call({
+      operation: "click",
+      ref: refFor(renamed.result.page?.snapshot, /"Store"/),
+    });
+    expect(store.isError).toBe(false);
+
+    const read = await tool.call({ operation: "read-page" });
+    expect(read.result.page).not.toHaveProperty("changed");
+    await tool.stop();
+  });
+
+  it("keeps the person's activity preview picture after an action that took none", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+    const clicked = await tool.call({ operation: "click", selector: "#save" });
+    const preview = await tool.service.peekThread(windowId, threadId);
+    expect(preview.observation?.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    // The Browser pane, which polls the context by its id, gets one too.
+    const contextId = preview.context?.contextId;
+    if (contextId === undefined) throw new Error("No context.");
+    await new Promise((resolve) => setTimeout(resolve, 1_600));
+    const pane = await tool.service.peekContext(windowId, threadId, contextId);
+    expect(pane.observation?.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    // The preview's picture does not make the agent's next action stale.
+    const next = await tool.call({
+      operation: "click",
+      selector: "#save",
+      expectedObservationRevision: clicked.result.page?.observationRevision,
+    });
+    expect(next.result.page?.observationRevision).toBe(
+      Number(clicked.result.page?.observationRevision) + 1,
+    );
     await tool.stop();
   });
 });

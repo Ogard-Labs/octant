@@ -805,6 +805,11 @@ export interface CodeSearchFilesInput {
 export interface CodeWatchFilesInput {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
+  /**
+   * One of the Project's extra folders, by absolute path, to watch instead of
+   * the checkout. The root authority places it or the watch is refused.
+   */
+  readonly folder?: CodeRelativePath | undefined;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -2659,9 +2664,11 @@ export class CodeService {
       authenticatedWindowId,
       authorized.effectiveThread,
       authorized.checkout,
-      CODE_LISTING_ROOT_PROBE_PATH,
+      input.folder ?? CODE_LISTING_ROOT_PROBE_PATH,
     );
-    if (root === undefined) {
+    // A named folder is watched only as a whole: a path inside one, or one the
+    // authority placed in the checkout, is not a folder the Project lists.
+    if (root === undefined || (input.folder !== undefined && root.folderRoot !== true)) {
       throw this.#failure("unavailable", "Code file authority is unavailable.");
     }
     const revocation = new AbortController();

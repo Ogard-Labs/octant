@@ -22,6 +22,11 @@ import {
   type LinkedSecretStores,
 } from "./linkedSecretStores";
 import {
+  createAwsCliSessions,
+  handleAwsCliBrokerRoute,
+  type AwsCliSessions,
+} from "./awsCliSessions";
+import {
   createHostOAuthRuntime,
   handleHostOAuthBrokerRoute,
   isHostOAuthGrantMaterial,
@@ -77,6 +82,11 @@ const ROUTES = new Set([
   "/v1/secret-stores/reference",
   "/v1/secret-stores/clear",
   "/v1/secret-stores/restore",
+  "/v1/cloud-cli/aws/reference",
+  "/v1/cloud-cli/aws/point",
+  "/v1/cloud-cli/aws/restore",
+  "/v1/cloud-cli/aws/clear",
+  "/v1/cloud-cli/aws/session",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -88,6 +98,7 @@ const ROUTES = new Set([
   "/v1/cloud-iam/revoke",
 ]);
 const SECRET_STORE_PREFIX = "/v1/secret-stores/";
+const AWS_CLI_PREFIX = "/v1/cloud-cli/aws/";
 const REPLICA_DEVICE_KEY_PREFIX = "/v1/replica-device-keys/";
 const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
 const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
@@ -105,6 +116,11 @@ const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], 
   indeterminate: 500,
   failed: 500,
 };
+
+interface LinkedBrokerStores {
+  readonly stores: LinkedSecretStores;
+  readonly awsCli: AwsCliSessions;
+}
 
 export interface CredentialBroker {
   readonly url: string;
@@ -197,6 +213,19 @@ export async function startCredentialBroker(
     ...(oauth?.now === undefined ? {} : { now: oauth.now }),
     ...(oauth?.sleep === undefined ? {} : { sleep: oauth.sleep }),
   });
+  // The AWS command line's sessions read the linked stores' items, so they
+  // exist only where a store can be linked.
+  const linked =
+    linkedSecretStores === undefined
+      ? undefined
+      : {
+          stores: linkedSecretStores,
+          awsCli: createAwsCliSessions({
+            linked: linkedSecretStores,
+            ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
+            ...(oauth?.now === undefined ? {} : { now: oauth.now }),
+          }),
+        };
   let brokerUrl: string | undefined;
   const server = createServer((incoming, outgoing) => {
     void handleIncoming(
@@ -213,7 +242,7 @@ export async function startCredentialBroker(
       mcpServerCredentials,
       desktopProviderCredentials,
       pushPlatformCredentials,
-      linkedSecretStores,
+      linked,
       sshKeys,
     ).then(
       ({ destroyIncoming, response }) => {
@@ -290,7 +319,7 @@ export async function startCredentialBroker(
         mcpServerCredentials,
         desktopProviderCredentials,
         pushPlatformCredentials,
-        linkedSecretStores,
+        linked,
         sshKeys,
       ),
   });
@@ -310,7 +339,7 @@ async function handleIncoming(
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
   pushPlatformCredentials: CredentialStore | undefined,
-  linkedSecretStores: LinkedSecretStores | undefined,
+  linked: LinkedBrokerStores | undefined,
   sshKeys: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
@@ -348,7 +377,7 @@ async function handleIncoming(
         mcpServerCredentials,
         desktopProviderCredentials,
         pushPlatformCredentials,
-        linkedSecretStores,
+        linked,
         sshKeys,
       ),
     ),
@@ -369,7 +398,7 @@ async function handleBrokerRequest(
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
   pushPlatformCredentials: CredentialStore | undefined,
-  linkedSecretStores: LinkedSecretStores | undefined,
+  linked: LinkedBrokerStores | undefined,
   sshKeys: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
@@ -394,12 +423,25 @@ async function handleBrokerRequest(
     return handleCloudIamBrokerRoute(url.pathname, request, cloudIam);
   }
 
+  if (url.pathname.startsWith(AWS_CLI_PREFIX)) {
+    if (linked === undefined) return failure("not-found", 404);
+    const body = await readJsonRecord(request);
+    if (body.kind === "too-large") return failure("too-large", 413);
+    if (body.kind === "invalid") return failure("invalid-request", 400);
+    return handleAwsCliBrokerRoute(
+      url.pathname.slice(AWS_CLI_PREFIX.length),
+      body.value,
+      linked.stores,
+      linked.awsCli,
+    );
+  }
+
   if (url.pathname.startsWith(SECRET_STORE_PREFIX)) {
-    if (linkedSecretStores === undefined) return failure("not-found", 404);
+    if (linked === undefined) return failure("not-found", 404);
     return handleSecretStoreRoute(
       url.pathname.slice(SECRET_STORE_PREFIX.length),
       request,
-      linkedSecretStores,
+      linked.stores,
       { provider: store, "mcp-server": mcpServerCredentials },
     );
   }
@@ -441,7 +483,7 @@ async function handleBrokerRequest(
       "secretId",
       request,
       mcpServerCredentials,
-      linkedSecretStores,
+      linked?.stores,
     );
   }
 
@@ -525,7 +567,7 @@ async function handleBrokerRequest(
     // the signer may read it.
     if (isCloudIamGrantMaterial(credential)) return failure("cloud-iam-material", 403);
     if (isLinkedSecretMaterial(credential)) {
-      return followLinkedSecret(credential, linkedSecretStores);
+      return followLinkedSecret(credential, linked?.stores);
     }
     return Response.json({ credential });
   } catch (error) {

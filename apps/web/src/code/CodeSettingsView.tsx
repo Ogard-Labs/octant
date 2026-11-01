@@ -50,8 +50,8 @@ const AUTO_REVIEWER_OPTIONS: ReadonlyArray<{ readonly id: AutoReviewer; readonly
   ];
 
 /** The Shield model choice as one select value; empty is each thread's own provider. */
-const THREAD_PROVIDER_MODEL = "thread-provider";
-const modelValue = (choice: ShieldModelChoice | undefined) =>
+export const THREAD_PROVIDER_MODEL = "thread-provider";
+export const modelValue = (choice: ShieldModelChoice | undefined) =>
   choice === undefined
     ? THREAD_PROVIDER_MODEL
     : `${String(choice.providerInstanceId)}/${String(choice.modelId)}`;
@@ -61,7 +61,7 @@ const modelValue = (choice: ShieldModelChoice | undefined) =>
  * catalogued models, local ones included. The default is each thread's own
  * provider account with that provider's smallest model.
  */
-function shieldModelOptions(
+export function shieldModelOptions(
   snapshot: ProviderRegistrySnapshot | undefined,
   current: ShieldModelChoice | undefined,
 ): ReadonlyArray<{

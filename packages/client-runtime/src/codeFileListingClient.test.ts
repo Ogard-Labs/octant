@@ -75,6 +75,16 @@ describe("code file listing client", () => {
     ).rejects.toMatchObject({ status: 401, message: "Code request is unauthorized." });
   });
 
+  it("asks the host to watch an extra folder by its absolute path", async () => {
+    const fetchImpl = vi.fn(async () => new Response("", { status: 200 }));
+    await client(fetchImpl as unknown as typeof globalThis.fetch)
+      .watch({ threadId, checkoutId, folder: "/Users/me/notes" }, new AbortController().signal)
+      .next();
+
+    const url = new URL(String((fetchImpl.mock.calls[0] as unknown as [string])[0]));
+    expect(url.searchParams.get("folder")).toBe("/Users/me/notes");
+  });
+
   it("tells a refused watch apart from a dropped one", async () => {
     const unauthorized = new Response("", { status: 401 });
     const unavailable = new Response("", { status: 503 });

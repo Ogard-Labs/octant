@@ -684,6 +684,15 @@ export interface ChatServiceOptions {
     readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
   /**
+   * The person-memory block for this thread's turn, or undefined when the
+   * turn gets none (memory off, the thread or its Project kept out, or a
+   * principal other than a window on this host).
+   */
+  readonly personMemoryBlock?: (input: {
+    readonly thread: ChatThread;
+    readonly windowId: WindowId | undefined;
+  }) => string | undefined;
+  /**
    * The native harness around a turn on a provider it drives: stable
    * instructions in front of the context, and the completed reply observed
    * for follow-ups and the advisor. Absent means turns run without it.
@@ -984,6 +993,7 @@ export class ChatService {
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
+  readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
   /**
@@ -1056,6 +1066,8 @@ export class ChatService {
     }
     if (options.resolveComputerUseTools !== undefined)
       this.#resolveComputerUseTools = options.resolveComputerUseTools;
+    if (options.personMemoryBlock !== undefined)
+      this.#personMemoryBlock = options.personMemoryBlock;
     if (options.contextMaintenanceTimeoutMs !== undefined) {
       this.#contextMaintenanceTimeoutMs = options.contextMaintenanceTimeoutMs;
     }
@@ -4183,6 +4195,10 @@ export class ChatService {
     // request by (the session sends its transcript again with every request),
     // what a requested compaction summarizes from, and what decides whether
     // the conversation still fits. Only the send leaves it out.
+    const personMemoryText = this.#personMemoryBlock?.({
+      thread,
+      windowId: executionContext?.windowId,
+    });
     const planWith = (sideChatContext: string | undefined) =>
       this.#planContext(
         thread,
@@ -4201,6 +4217,7 @@ export class ChatService {
         handoff?.blocks,
         offersCanvasTool(tools?.definitions),
         appToolHostLines(tools?.definitions),
+        personMemoryText,
       );
     let context = planWith(sideChatSourceContext);
     // A plan that leaves earlier conversation out to fit cannot be met by the
@@ -5225,6 +5242,8 @@ export class ChatService {
      */
     canvasOffered = false,
     toolHostLines: ReadonlyArray<string> = [],
+    /** What Octant remembers about the person, placed before Project memory. */
+    personMemoryText?: string,
   ): ChatTurnContextPlan {
     const providerInstanceId = decodeProviderInstanceId(thread.providerInstanceId);
     const subject = decodeContextSubjectRef({
@@ -5591,6 +5610,21 @@ export class ChatService {
           { kind: "instructions", text: line },
         ),
       ),
+      ...(personMemoryText === undefined
+        ? []
+        : [
+            contextEntry(
+              this.#contextEntry(
+                thread,
+                "person-memory",
+                personMemoryText,
+                Math.max(16, Math.ceil(personMemoryText.length / 4)),
+                "compressible",
+                { kind: "memory", referenceId: "person-memory" },
+              ),
+              { kind: "person-memory", text: personMemoryText },
+            ),
+          ]),
       ...memoryEntries,
       ...summaryEntries,
       ...transcriptEntries,
@@ -6162,6 +6196,7 @@ export class ChatService {
       | "current-request"
       | "conversation"
       | "workspace-context"
+      | "person-memory"
       | "project-memory"
       | "octant-tools",
     body: string,

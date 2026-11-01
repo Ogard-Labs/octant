@@ -120,6 +120,14 @@ interface OwnedContext {
   refs:
     | { readonly url: string | undefined; readonly byRef: Map<string, BrowserPageSnapshotRef> }
     | undefined;
+  /**
+   * The page's text hash as last seen, kept apart from the observation: a
+   * snapshot or a credential page carries none, and the next action still
+   * needs it to say whether the page changed.
+   */
+  contentHash: string | undefined;
+  /** When a preview last asked the runtime for a picture of the page. */
+  peekedAt: number | undefined;
   readonly evidence: ToolEvidence[];
   failure: BrowserAutomationFailure | undefined;
   creation?: Promise<void>;
@@ -278,6 +286,8 @@ export class BrowserAutomationService {
       observation: undefined,
       observationRevision: 0,
       refs: undefined,
+      contentHash: undefined,
+      peekedAt: undefined,
       evidence: [],
       failure: undefined,
     };
@@ -496,6 +506,15 @@ export class BrowserAutomationService {
           "interrupted",
         );
       }
+      const change = describeChange(
+        input.request.kind,
+        {
+          url: owned.observation?.url,
+          title: owned.observation?.title,
+          contentHash: owned.contentHash,
+        },
+        observed,
+      );
       const observation: BrowserObservation = {
         contextId: owned.record.contextId,
         actionId: owned.record.actionId,
@@ -506,6 +525,7 @@ export class BrowserAutomationService {
         ...(observed.contentHash === undefined ? {} : { contentHash: observed.contentHash }),
         ...(observed.extractedText === undefined ? {} : { extractedText: observed.extractedText }),
         ...(observed.snapshot === undefined ? {} : { snapshot: observed.snapshot }),
+        ...(change === undefined ? {} : { change }),
         ...(observed.screenshotDataUrl === undefined
           ? {}
           : { screenshotDataUrl: observed.screenshotDataUrl }),
@@ -549,7 +569,8 @@ export class BrowserAutomationService {
       // picture of that page is kept.
       const capture = await this.#keepCapture(owned, input, observed);
       owned.observation = capture === undefined ? observation : { ...observation, capture };
-      if (input.request.kind === "snapshot") {
+      if (observed.contentHash !== undefined) owned.contentHash = observed.contentHash;
+      if (observed.snapshotRefs !== undefined) {
         owned.refs = {
           url: observed.url,
           byRef: new Map((observed.snapshotRefs ?? []).map((entry) => [entry.ref, entry])),
@@ -865,22 +886,60 @@ export class BrowserAutomationService {
     signal?: AbortSignal,
   ): Promise<BrowserAutomationSnapshot> {
     const owned = this.#current(windowId, threadId);
+    if (owned !== undefined) await this.#refreshPicture(owned, signal);
+    return this.inspectThread(windowId, threadId);
+  }
+
+  /**
+   * One context as it stands, with a fresh picture when the last one is
+   * stale: the Browser pane that holds a context's id polls this, and an
+   * agent's action no longer leaves a picture behind for it.
+   */
+  async peekContext(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    contextId: BrowserContextId,
+    signal?: AbortSignal,
+  ): Promise<BrowserAutomationSnapshot> {
+    const owned = this.#contexts.get(contextId);
+    if (
+      owned !== undefined &&
+      owned.windowId === windowId &&
+      String(owned.threadId) === String(threadId) &&
+      // A native page is on the person's screen already; only a headless one
+      // is seen as a picture.
+      owned.record.presentation !== "native-live" &&
+      this.#authorityIsActive(owned)
+    ) {
+      await this.#refreshPicture(owned, signal);
+    }
+    return this.inspect(windowId, threadId, contextId);
+  }
+
+  async #refreshPicture(owned: OwnedContext, signal: AbortSignal | undefined): Promise<void> {
     // Called on the runtime, never detached: a runtime's peek reaches for its
     // own state, and a bare reference to it arrived there with no `this`.
     const runtime = this.#runtime;
     if (
-      owned !== undefined &&
       runtime.peek !== undefined &&
       // A live context is "running" for as long as it exists; "waiting" is one
       // still being created, whose page is not there to look at yet.
       owned.status === "running" &&
-      !this.#observedWithin(owned, PEEK_INTERVAL_MS)
+      !this.#pictureFresh(owned)
     ) {
+      owned.peekedAt = this.#now();
       try {
         const observed = await runtime.peek(
           owned.record.contextId,
           signal ?? new AbortController().signal,
         );
+        // A fresh picture of the same page is not a new page: keeping the
+        // revision lets an agent's next action, which names the revision its
+        // last action returned, still run while a preview is open.
+        const samePage =
+          owned.observation !== undefined &&
+          observed.url === owned.observation.url &&
+          observed.title === owned.observation.title;
         owned.observation = {
           contextId: owned.record.contextId,
           actionId: owned.record.actionId,
@@ -893,7 +952,7 @@ export class BrowserAutomationService {
             ? {}
             : { screenshotDataUrl: observed.screenshotDataUrl }),
           ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
-          revision: ++owned.observationRevision,
+          revision: samePage ? owned.observationRevision : ++owned.observationRevision,
           observedAt: this.#clock() as BrowserObservation["observedAt"],
           stale: false,
         };
@@ -905,13 +964,27 @@ export class BrowserAutomationService {
         );
       }
     }
-    return this.inspectThread(windowId, threadId);
   }
 
-  #observedWithin(owned: OwnedContext, intervalMs: number): boolean {
-    const observedAt = owned.observation?.observedAt;
-    if (observedAt === undefined || owned.observation?.stale === true) return false;
-    return Date.parse(this.#clock()) - Date.parse(observedAt) < intervalMs;
+  /**
+   * Whether the preview's picture is recent enough to skip a peek. An agent's
+   * action no longer takes a picture unless asked, so an observation without
+   * one does not count: the preview peeks right after the action instead,
+   * at most once per interval.
+   */
+  #pictureFresh(owned: OwnedContext): boolean {
+    if (owned.peekedAt !== undefined && this.#now() - owned.peekedAt < PEEK_INTERVAL_MS) {
+      return true;
+    }
+    const observation = owned.observation;
+    if (
+      observation?.observedAt === undefined ||
+      observation.stale ||
+      observation.screenshotDataUrl === undefined
+    ) {
+      return false;
+    }
+    return Date.parse(this.#clock()) - Date.parse(observation.observedAt) < PEEK_INTERVAL_MS;
   }
 
   async releaseThread(
@@ -1150,6 +1223,47 @@ export class BrowserAutomationService {
     owned.status = status;
     return snapshot(owned);
   }
+}
+
+/**
+ * One line on what an action did to the page, from what the page was before
+ * and after. Reading the page changes nothing, so a read says nothing; a page
+ * whose text the host withheld (a credential form) cannot be compared.
+ */
+function describeChange(
+  kind: BrowserActionRequest["kind"],
+  before: {
+    readonly url: string | undefined;
+    readonly title: string | undefined;
+    readonly contentHash: string | undefined;
+  },
+  after: {
+    readonly url?: string;
+    readonly title?: string;
+    readonly contentHash?: string;
+  },
+): string | undefined {
+  if (
+    kind === "extract-text" ||
+    kind === "snapshot" ||
+    kind === "screenshot" ||
+    kind === "observe-diagnostics"
+  ) {
+    return undefined;
+  }
+  const changes: string[] = [];
+  if (after.url !== before.url) changes.push(`Now at ${after.url ?? "a blank page"}.`);
+  if (after.title !== before.title && after.title !== undefined) {
+    changes.push(`Title is now ${JSON.stringify(after.title.slice(0, 200))}.`);
+  }
+  if (after.contentHash === undefined) {
+    changes.push("The page holds a credential field, so its content was not compared.");
+  } else if (before.contentHash !== undefined && after.contentHash !== before.contentHash) {
+    changes.push("The page's text changed.");
+  } else if (changes.length === 0 && before.contentHash !== undefined) {
+    changes.push("Nothing visible on the page changed.");
+  }
+  return changes.length === 0 ? undefined : changes.join(" ").slice(0, 1024);
 }
 
 function modeOf(authority: ToolActionAuthority): ToolActionAuthority["mode"] {

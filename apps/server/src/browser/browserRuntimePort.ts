@@ -143,7 +143,9 @@ export interface BrowserProfileStorePort {
  * ever needed the action itself.
  */
 export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
-  Partial<Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY">> & {
+  Partial<
+    Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY" | "include">
+  > & {
     /**
      * Set when `target` came from a snapshot ref: the page must still be at the
      * snapshot's address (as an observation reports it) and the element there

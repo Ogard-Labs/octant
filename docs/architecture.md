@@ -1174,10 +1174,121 @@ which Chat's no-filesystem rule does not cover, and the switch says so. Octant-m
 Canvas) are unaffected; they run on the host, not in the provider's
 environment.
 
-Provider-owned memory stays off in every mode. Octant's memory is scoped to a
-Project, and a provider's global memory reaches across all of them: Codex runs
+Provider-owned memory stays off in every mode. A provider's global memory
+follows its own rules into every Project, outside Octant's controls: Codex runs
 with `features.memories` off, which also keeps its memory folder out of its
-sandbox's readable roots, and Claude runs with no setting sources.
+sandbox's readable roots, and Claude runs with no setting sources. Octant keeps
+two memories of its own instead: Project memory, scoped to one Project, and
+person memory below.
+
+### Person memory
+
+Decided 2026-11-01: Octant should know what other work the person has done
+outside the current Project, the way a person expects of a chat assistant, and
+the person can turn it off. Memory is automatic and on by default; no entry
+asks for confirmation, because confirming each one was rejected as too much
+friction. Project memory is unchanged and stays Project-scoped; person memory
+is a layer beside it that belongs to the person on this host. It is built,
+except where a bullet says otherwise.
+
+- **What is kept.** Short entries about the person and their work, each one
+  kind of `preference`, `working-style`, or `past-work`, at most 400
+  characters, and for each remembered thread one digest: its title, mode,
+  Project, provider, end time, and a summary of at most 600 characters. Every
+  entry keeps the threads it came from as its sources (an entry learned again
+  from a later thread gains that thread as a second source rather than a
+  duplicate). The person can read, edit, and delete each entry and see its
+  sources in Settings › Memory, and Forget everything erases all entries and
+  digests at once.
+- **When it is written.** After a thread ends: a Chat, Work, or Code thread
+  the person completed (put away) after memory was turned on. A sweep of the
+  three modes' completed threads runs five minutes after start and then
+  hourly, and distills
+  each such thread at most once, so a thread that was reopened and completed
+  again is not distilled twice. Threads completed before memory existed are
+  never back-filled, so turning it on never starts a burst of model calls.
+  Forgetting everything, switching memory back on, letting a Project back
+  in, or allowing a thread again moves that start to the moment of the
+  change, so nothing that ended while memory was off, kept out, or just
+  forgotten is learned afterwards. A
+  thread with nothing the person wrote is recorded as remembered without a
+  call.
+- **What the distiller reads.** Only what the person wrote in the thread and
+  its title: never the agent's answers, tool output, attachments, or files.
+  Rationale: an agent's answer can carry outside content (a web page, a tool
+  result the Watcher marked) or the contents of a file it read, and a memory
+  entry must never be made on outside content's say-so or from a protected
+  path; the person's own words carry neither unless the person put them there.
+  It also reads the same way in every mode, through reads the host already
+  makes for Octant Shield. Secrets are redacted (the same secret shapes as
+  approvals, plus private-key blocks) before the text reaches the model and
+  again before anything is stored, and an entry or summary that still names a
+  protected path is dropped.
+- **The model call.** One tool-less, single-use session per ended thread, in a
+  scratch folder outside every Project, on the thread's own provider with that
+  provider's smallest model, unless Settings › Memory picks another. Its usage
+  is recorded against the thread as a `person-memory` usage row, so the person
+  sees it in the usage dashboard. A reply that read outside content is thrown
+  away. The call sits behind one seam (`personMemoryDistillationAllowed`) that
+  answers per provider kind, so background use can later be limited for one
+  provider without touching the rest; today it allows every kind. Open risk:
+  whether a provider's terms allow background calls on a subscription sign-in
+  is not settled, and the seam is where an answer would land.
+- **Where it goes.** Every new Chat, Work, and Code thread, on every provider,
+  gets one `person-memory` context block through Octant's own context
+  assembly, placed after Octant's instructions and before Project memory and
+  the conversation. It holds the entries that existed when the thread was
+  created (so it is the same text on every turn and a provider's prompt cache
+  keeps its prefix; an entry the person edits or deletes changes it, which
+  re-sends the standing context once), newest first, capped at 2,000
+  characters. Its text opens by saying it is data about the person from
+  earlier threads, not instructions, and each line names its kind. The
+  context inspector lists it as Person memory in Chat and Work, so a person
+  can see when it was used; a Code window, which is counted by part, counts
+  it with Octant's instructions.
+- **Searching past threads.** `octant_past_threads` is a read-only host tool,
+  offered in Chat, Work, and Code beside the thread's other host tools. It
+  searches the digests and entries above and answers with at most five short
+  excerpts, each naming its thread, mode, Project, and date. It reads no
+  thread transcript, no file, and no other Project's folder, and it grants no
+  file, shell, or Project authority: what it returns is what memory already
+  holds. Each call shows in the thread as a tool step.
+- **Controls (Settings › Memory).** One switch for all of it, on by default:
+  off stops writing, the block, and the tool, and keeps what is stored until
+  the person forgets it. A second switch for searching past threads. Per
+  Project, Keep out of memory: that Project's threads are not distilled,
+  entries and digests whose every source is in it are not shown to other
+  threads or found by search, and its own threads get no block and no tool.
+  Per thread, Leave no trace (from the thread's menu, listed in Settings
+  where it can be undone): the thread is not distilled, gets no block and no
+  tool, and what was already remembered from it is erased when it is marked.
+- **Deleting.** Deleting an entry or forgetting everything erases those
+  events from the journal, not only from the view. Purging or deleting a
+  thread erases its digest, removes it from every entry's sources, and erases
+  each entry that came only from it.
+- **Storage.** Entries, digests, settings, and Leave-no-trace marks are
+  journal events (`person-memory-*` aggregates) held in host memory and
+  rebuilt from the journal at start, so they are local, owner-only, and in no
+  diagnostics or telemetry. A thread's digest names the thread as `threadId`,
+  so a thread purge takes it with the thread. Export my data does not carry
+  person memory yet (allowed; not built yet).
+- **Who may read it.**
+  - A local window: read and change everything in Settings › Memory.
+  - A paired device: the memory routes refuse it, and a turn it sends gets no
+    block and no tool, because a device may be granted only some Projects and
+    memory crosses them.
+  - A turn the host starts as itself (a routine's run, a delivered child
+    result, a turn resumed after a usage limit): no block and no tool, since
+    no person is at the window. A provider session that held the block is
+    sent its standing context again once without it.
+  - A subagent (child run): neither; it receives only what its lead passes it.
+  - A hub, spoke, or peer host: person memory stays on the host that wrote
+    it and is never synced or relayed.
+  - A provider: sees memory only in a thread on that provider that uses it.
+    Memory learned in a thread on one provider can reach a thread on another,
+    and Settings › Memory says so in those words.
+- **First run.** The first-run flow says in one sentence that Octant
+  remembers across threads and that Settings › Memory turns it off.
 
 Work is not cut off from a person's integrations. Work is for files,
 browsers, and documents, and what separates it from Code is which developer
@@ -2766,8 +2877,18 @@ Git start in the main folder. Built.
   path, the root authority places it in one of the Project's current extra
   folders after resolving the checkout, and the folder is then the file's
   root. The explorer lists each extra folder as its own tree beneath the
-  checkout's, labelled with the folder's last component. An extra folder has
-  no file watch, so its tree relists on Refresh, and a save there is
+  checkout's, labelled with the folder's last component. The host watches an
+  extra folder as it does the checkout: the explorer opens a watch for each
+  of the first two folders, naming it by the absolute path the Project lists, and the root
+  authority places that path as the root of a current extra folder or the
+  watch is refused (a path inside a folder, or one that resolves into the
+  checkout, is not a folder to watch). A notice names paths relative to that
+  folder and the folder's tree relists on it and on Refresh. Further folders relist on
+  Refresh only. _Rationale:_ each watch is a long-lived HTTP/1.1 stream and a
+  browser allows about six per origin, shared with the checkout's watch and the
+  window's other streams, so a Project with many folders could starve ordinary
+  requests; multiplexing the watches over one stream is left for a larger
+  change. A save there is
   journaled like any other save of the thread.
 - **Terminals and Project actions.** A Project terminal starts in the main
   folder unless the person picks an extra folder, and a saved action runs
@@ -2781,8 +2902,14 @@ Git start in the main folder. Built.
   Project folder that exists as a Project terminal does, and its start command
   may name an extra folder to start in, compared as the exact path the Project
   lists; the host refuses any other, and a folder missing on disk is left out
-  of the binding. The Terminal tab does not offer that pick yet: a thread
-  terminal started from it still opens in the thread's working directory.
+  of the binding. The Terminal tab's menu offers **Restart in** each extra
+  folder (a Project with none shows no pick, and Plan shows none). The pick
+  stops a running shell and starts a fresh one in that folder, because a
+  running shell cannot change where it started; the first terminal a tab opens
+  still starts in the thread's working directory.
+  _Rationale:_ restarting on the pick, rather than a separate start control,
+  keeps one terminal per tab and reuses the stop-then-start path the Browser
+  grant already takes.
 - **Work files.** A path relative to the main folder is always the main
   folder's; a file in an extra folder is named by its absolute path, and the
   host honours an absolute path only inside one of the Project's current
@@ -2814,9 +2941,6 @@ Git start in the main folder. Built.
   checkout and then each extra folder under the shared budgets, and a match
   there carries its folder; choosing it opens the file in the editor by the
   folder's path joined to the match's.
-- **Not yet.** The Terminal tab has no control to start a thread terminal in
-  an extra folder, and an extra folder has no live file watch in the
-  explorer.
 
 ## Agent task display
 
@@ -8246,8 +8370,16 @@ mechanisms are:
   provider's hosted service included. A review reply posted under the
   person's name still asks at every level.
   Built in Code for Mistral Vibe's auto-approve mode, the one ACP profile that
-  declares its own reviewer; allowed, not built yet: an own reviewer for any
-  other ACP agent.
+  declares its own reviewer. Every other ACP agent reports
+  `harnessAutoReview` `unsupported`, and Settings › Providers › Capabilities
+  says "Own reviewer: None. Octant Shield reviews at Auto." A profile gains a
+  reviewer by declaring `ownReviewer` and the mode that answers its prompts;
+  none is declared without that mode being confirmed on the agent.
+  _Rationale:_ the other profiles' modes either ask for every call or approve
+  every call without review (`auto-edit`, `yolo`, `bypass`), and Goose's
+  `smart_approve` is already the mode its Guarded level uses, so offering it as
+  a reviewer would make Reviewed and Guarded the same thing. Naming a mode as a
+  reviewer without evidence would claim a review that does not happen.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
@@ -10385,6 +10517,39 @@ access` agree); a thread's own change is journaled as
     gone or its store locked by then); if it cannot be put back, the new pointer
     is removed and the answer says so, so an unjournaled pointer never stays
     active.
+  - **AWS command line.** Settings › Secret stores › AWS command line points
+    the AWS command line at the two items that hold the person's access key
+    pair (`point-aws-cli-key`; the broker proves both resolve now, as for a
+    provider key). The pointer lives beside the linked stores in
+    `linked-secret-stores.json`, and naming items, it holds no value. Each
+    Octant Harness shell command, at every level, asks the broker
+    (`/v1/cloud-cli/aws/session`) as it starts; the broker reads both items,
+    asks AWS STS for a session with `GetSessionToken` (one hour, signed with
+    the platform's Signature Version 4 like cloud request signing), and
+    returns the session alone, which the command gets as `AWS_ACCESS_KEY_ID`,
+    `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, and
+    `AWS_CREDENTIAL_EXPIRATION`. The long-lived pair never leaves the broker
+    and is never kept. A session is handed out again while more than 15
+    minutes of it are left, and forgotten when the pointer changes or is
+    removed; an unlinked store hands out none. A failed attempt answers for
+    30 seconds before the store and AWS are asked again, and a command waits
+    at most 15 seconds for its session, then runs without one. The session's secret and token
+    are noted as issued, so redaction removes them wherever a command's output
+    is kept. A locked store, a missing item, a refused key, or an unreachable
+    AWS gives the command no credentials, and the AWS command line says it
+    found none. A change journals both items in one append as two
+    `credential-reference.set` or `credential-reference.cleared` records
+    (target `aws-cli-key`, part `access-key-id` or `secret-access-key`), and
+    a change the journal refuses is undone as a provider key's is. A provider
+    runtime's own commands get no session: its process outlives one.
+    - _Rationale._ The person pointing the pair is the grant, so every
+      harness command gets the session, a marked thread's included: the
+      command still passes the thread's level, its approvals, Shield at Auto,
+      and the egress rules, and a session without multi-factor sign-in cannot
+      call IAM. `GetSessionToken` over `AssumeRole` because it needs no role
+      for the person to set up and gives the same reach as the pair, never
+      more. One hour so a long command does not lose its credentials midway;
+      AWS's shortest, 15 minutes, would cut off a long sync.
 - **Organization sign-in on a host without the desktop app.** An Azure AI
   Foundry endpoint that signs in with a directory account and opted in to it
   (`deviceCodeSignIn`) signs in with a device code from
@@ -10818,7 +10983,7 @@ Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
 no prompts": a shell command there can read a protected file. Built, except
-short-lived cloud credentials from the broker.
+short-lived credentials for the Google Cloud and Azure command lines.
 
 - **One list, every runtime.** The list is
   `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
@@ -10886,9 +11051,16 @@ short-lived cloud credentials from the broker.
   Git over HTTPS through the system credential helper, which reaches the
   keychain through the Security framework; provider, connector, and package
   keys through the credential broker; cluster access through a `KUBECONFIG`
-  the person keeps outside the list. Cloud command-line tools getting
-  short-lived credentials from the broker when linked is allowed; not built
-  yet.
+  the person keeps outside the list. The AWS command line in Octant's own
+  shell gets a short-lived session from the broker once the person points its
+  key pair at a linked store ([AWS command line](#linked-secret-stores)).
+  Allowed; not built yet: the Google Cloud and Azure command lines.
+  - _Rationale._ AWS first because a session needs nothing on disk: the
+    session's three values go in the command's environment, which the AWS
+    command line and every AWS SDK read before any file. The Google Cloud
+    command line takes a token only from a file it names, and the Azure
+    command line takes none from its environment, so each needs more than an
+    environment and is left for its own change.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
   read and write) and Claude Code's file tools, through Octant's tool gate,

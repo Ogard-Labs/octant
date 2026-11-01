@@ -2,6 +2,7 @@ import { browserToolImage } from "./browserToolImage";
 import {
   browserToolAction,
   browserToolResult,
+  browserToolWantsScreenshot,
   parseBrowserToolInput,
 } from "./browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
@@ -267,7 +268,7 @@ export function createBrowserAppManagedTools(
       ) {
         return failure("browser-screenshot-unavailable");
       }
-      return browserToolResult(acted, input.operation === "screenshot");
+      return browserToolResult(acted, browserToolWantsScreenshot(input));
     },
   };
   return withToolFamilyHelp(tools, BROWSER_TOOL_HELP);

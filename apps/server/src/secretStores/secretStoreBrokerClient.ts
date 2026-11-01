@@ -5,7 +5,11 @@
  * and never a guess. No answer carries what an item resolves to.
  */
 
-import type { SecretStoreKind, SecretStoreToolState } from "@octant/contracts/secret-stores";
+import type {
+  AwsCliKeyReference,
+  SecretStoreKind,
+  SecretStoreToolState,
+} from "@octant/contracts/secret-stores";
 
 export type SecretStoreNamespace = "provider" | "mcp-server";
 export type SecretStoreBrokerDown = { readonly status: "broker-unavailable" };
@@ -32,7 +36,53 @@ export type ReferenceAnswer =
   | { readonly status: "none" }
   | { readonly status: "linked"; readonly store: SecretStoreKind; readonly reference: string };
 
+export type AwsCliReferenceAnswer =
+  | { readonly status: "none" }
+  | { readonly status: "linked"; readonly pointer: AwsCliKeyReference };
+
+/**
+ * A short-lived AWS session for one command, or why there is none. The
+ * long-lived key pair never reaches the server; only this session does.
+ */
+export type AwsCliSessionAnswer =
+  | {
+      readonly status: "issued";
+      readonly accessKeyId: string;
+      readonly secretAccessKey: string;
+      readonly sessionToken: string;
+      readonly expiration: string;
+    }
+  | {
+      readonly status:
+        | "none"
+        | "locked"
+        | "missing"
+        | "unavailable"
+        | "not-linked"
+        | "invalid-reference"
+        | "refused";
+    };
+
 export interface SecretStoreBrokerClient {
+  readonly awsCliReference: () => Promise<AwsCliReferenceAnswer | SecretStoreBrokerDown>;
+  /** Points the AWS command line at two items, after the broker proved both resolve now. */
+  readonly pointAwsCli: (
+    pointer: AwsCliKeyReference,
+  ) => Promise<
+    { readonly status: Exclude<PointStatus, "key-already-stored"> } | SecretStoreBrokerDown
+  >;
+  /** Puts an earlier pointer back without reading its items, for undoing a change. */
+  readonly restoreAwsCli: (
+    pointer: AwsCliKeyReference,
+  ) => Promise<
+    { readonly status: "pointed" | "not-linked" | "invalid-reference" } | SecretStoreBrokerDown
+  >;
+  readonly clearAwsCli: () => Promise<
+    | { readonly status: "cleared"; readonly pointer: AwsCliKeyReference }
+    | { readonly status: "none" }
+    | SecretStoreBrokerDown
+  >;
+  readonly awsCliSession: () => Promise<AwsCliSessionAnswer | SecretStoreBrokerDown>;
   readonly status: () => Promise<
     | { readonly status: "ok"; readonly stores: ReadonlyArray<BrokerStoreStatus> }
     | SecretStoreBrokerDown
@@ -105,7 +155,10 @@ export function makeSecretStoreBrokerClient(
   ): Promise<Record<string, unknown> | undefined> => {
     try {
       const response = await fetchPort(
-        new URL(`/v1/secret-stores/${operation}`, options.url).toString(),
+        new URL(
+          operation.startsWith("/") ? operation : `/v1/secret-stores/${operation}`,
+          options.url,
+        ).toString(),
         {
           method: "POST",
           redirect: "error",
@@ -126,8 +179,72 @@ export function makeSecretStoreBrokerClient(
     }
   };
   const isKind = (value: unknown): value is SecretStoreKind => value === "onepassword";
+  const awsPointerOf = (answer: Record<string, unknown>): AwsCliKeyReference | undefined =>
+    isKind(answer.store) &&
+    typeof answer.accessKeyIdReference === "string" &&
+    typeof answer.secretAccessKeyReference === "string"
+      ? {
+          store: answer.store,
+          accessKeyIdReference: answer.accessKeyIdReference,
+          secretAccessKeyReference: answer.secretAccessKeyReference,
+        }
+      : undefined;
+  const AWS = "/v1/cloud-cli/aws/";
 
   return {
+    awsCliReference: async () => {
+      const answer = await post(`${AWS}reference`, {});
+      if (answer?.status === "none") return { status: "none" };
+      const pointer = answer?.status === "linked" ? awsPointerOf(answer) : undefined;
+      return pointer === undefined ? DOWN : { status: "linked", pointer };
+    },
+    pointAwsCli: async (pointer) => {
+      const status = (await post(`${AWS}point`, pointer))?.status;
+      return typeof status === "string" &&
+        (status === "pointed" || (CHECK_STATUSES.includes(status) && status !== "found"))
+        ? { status: status as Exclude<PointStatus, "key-already-stored"> }
+        : DOWN;
+    },
+    restoreAwsCli: async (pointer) => {
+      const status = (await post(`${AWS}restore`, pointer))?.status;
+      return status === "pointed" || status === "not-linked" || status === "invalid-reference"
+        ? { status }
+        : DOWN;
+    },
+    clearAwsCli: async () => {
+      const answer = await post(`${AWS}clear`, {});
+      if (answer?.status === "none") return { status: "none" };
+      const pointer = answer?.status === "cleared" ? awsPointerOf(answer) : undefined;
+      return pointer === undefined ? DOWN : { status: "cleared", pointer };
+    },
+    awsCliSession: async () => {
+      const answer = await post(`${AWS}session`, {});
+      const status = answer?.status;
+      if (
+        status === "issued" &&
+        typeof answer?.accessKeyId === "string" &&
+        typeof answer.secretAccessKey === "string" &&
+        typeof answer.sessionToken === "string" &&
+        typeof answer.expiration === "string"
+      ) {
+        return {
+          status,
+          accessKeyId: answer.accessKeyId,
+          secretAccessKey: answer.secretAccessKey,
+          sessionToken: answer.sessionToken,
+          expiration: answer.expiration,
+        };
+      }
+      return status === "none" ||
+        status === "locked" ||
+        status === "missing" ||
+        status === "unavailable" ||
+        status === "not-linked" ||
+        status === "invalid-reference" ||
+        status === "refused"
+        ? { status }
+        : DOWN;
+    },
     status: async () => {
       const answer = await post("status", {});
       const stores = answer?.stores;
