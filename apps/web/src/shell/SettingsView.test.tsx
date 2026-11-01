@@ -1567,7 +1567,7 @@ describe("SettingsView", () => {
       execute: vi.fn(),
       importLocalPluginReceipt: vi.fn(),
       addUserMcpServer: vi.fn() as never,
-      listDiscoveredTooling: vi.fn() as never,
+      listDiscoveredTooling: vi.fn(async () => ({ servers: [], plugins: [], notes: [] })),
       mcpServerSignIn: vi.fn() as never,
       projectPins: vi.fn() as never,
       applyDiscoveredTooling: vi.fn() as never,

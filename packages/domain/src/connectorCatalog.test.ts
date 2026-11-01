@@ -25,4 +25,14 @@ describe("the connectors catalog", () => {
     ]);
     expect(searchConnectorCatalog("LINEAR").map((entry) => entry.id)).toEqual(["linear"]);
   });
+
+  it("lists Doop as a sign-in connector at its own address", () => {
+    const doop = connectorCatalog().find((entry) => entry.id === "doop");
+    expect(doop).toMatchObject({
+      displayName: "Doop",
+      url: "https://doop.design/mcp",
+      auth: { kind: "sign-in" },
+    });
+    expect(searchConnectorCatalog("doop").map((entry) => entry.id)).toEqual(["doop"]);
+  });
 });

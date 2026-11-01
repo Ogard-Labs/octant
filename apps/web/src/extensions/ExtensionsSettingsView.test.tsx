@@ -305,7 +305,9 @@ describe("ExtensionsSettingsView", () => {
       .fn()
       .mockResolvedValueOnce(installedSnapshot())
       .mockReturnValueOnce(pending.promise);
-    render(<ExtensionsSettingsView client={{ ...c, snapshot }} scope={scope} />);
+    render(
+      <ExtensionsSettingsView initialView="installed" client={{ ...c, snapshot }} scope={scope} />,
+    );
     const title = await screen.findByText("Build Helper");
     fireEvent.click(screen.getByRole("button", { name: /trust source/i }));
     await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2));
@@ -317,7 +319,9 @@ describe("ExtensionsSettingsView", () => {
 
   it("uses open collection sections for installed packages and standalone skills", async () => {
     const c = client({ snapshot: installedSnapshot({ activation: baseActivation() }) });
-    const { container } = render(<ExtensionsSettingsView client={c} scope={scope} />);
+    const { container } = render(
+      <ExtensionsSettingsView initialView="installed" client={c} scope={scope} />,
+    );
 
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Extension packages" })).toBeVisible(),
@@ -337,7 +341,7 @@ describe("ExtensionsSettingsView", () => {
       componentEffectiveState: { kind: "effective" } as never,
     });
     const c = client({ snapshot });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
 
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     expect(screen.getByText("1.2.0")).toBeInTheDocument();
@@ -349,7 +353,7 @@ describe("ExtensionsSettingsView", () => {
   it("hides uninstalled lifecycle tombstones from the Installed tab", async () => {
     const snapshot = installedSnapshot({ activation: baseActivation({ installed: false }) });
     const c = client({ snapshot });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
 
     await waitFor(() =>
       expect(screen.getByText("No extension packages are installed.")).toBeInTheDocument(),
@@ -414,7 +418,7 @@ describe("ExtensionsSettingsView", () => {
     } as unknown as ExtensionSnapshot;
     const c = client({ snapshot });
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
 
     await waitFor(() => expect(screen.getByText("Project review")).toBeInTheDocument());
     expect(screen.getByText("Global review")).toBeInTheDocument();
@@ -539,7 +543,7 @@ describe("ExtensionsSettingsView", () => {
     } as unknown as ExtensionSnapshot;
     const c = client({ snapshot });
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
 
     await waitFor(() => expect(screen.getByText("Claude root review")).toBeInTheDocument());
     expect(screen.getByText("Project skill · Needs review")).toBeInTheDocument();
@@ -581,7 +585,7 @@ describe("ExtensionsSettingsView", () => {
     }));
     const c = client({ snapshot: { ...base, skills } as unknown as ExtensionSnapshot });
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
 
     await screen.findByText("Skill 0");
     const list = screen.getByRole("list", { name: "Standalone skills" });
@@ -632,7 +636,7 @@ describe("ExtensionsSettingsView", () => {
       }),
     });
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
 
     const enable = await screen.findByRole("switch", { name: "Enable Review helper" });
     expect(enable).toHaveAttribute("aria-checked", "false");
@@ -649,7 +653,7 @@ describe("ExtensionsSettingsView", () => {
       }),
     });
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
 
     const disable = await screen.findByRole("switch", { name: "Enable Review helper" });
     expect(disable).toHaveAttribute("aria-checked", "true");
@@ -671,7 +675,7 @@ describe("ExtensionsSettingsView", () => {
         effectiveState: { kind: "blocked", reason: "host-prohibited" },
       }),
     });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
 
     const toggle = await screen.findByRole("switch", { name: "Enable Review helper" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
@@ -681,7 +685,7 @@ describe("ExtensionsSettingsView", () => {
   it("shows an honest blocked state and reason when a component is not effective", async () => {
     const snapshot = installedSnapshot();
     const c = client({ snapshot });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
 
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     expect(screen.getByRole("status", { name: /blocked/i })).toBeInTheDocument();
@@ -711,7 +715,7 @@ describe("ExtensionsSettingsView", () => {
       });
       document.body.innerHTML = "";
       const c = client({ snapshot });
-      render(<ExtensionsSettingsView client={c} scope={scope} />);
+      render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
       await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
       expect(screen.getByText(new RegExp(state, "i"))).toBeInTheDocument();
     }
@@ -726,7 +730,7 @@ describe("ExtensionsSettingsView", () => {
         publisher: { pinned, selected, held: "publisher-changed" },
       }),
     });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
 
     const keys = screen.getByLabelText("Publisher keys");
@@ -765,7 +769,7 @@ describe("ExtensionsSettingsView", () => {
         publisher: { pinned, held: "publisher-changed" },
       }),
     });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
 
     expect(screen.getByText(/This version is unsigned/)).toBeInTheDocument();
@@ -782,7 +786,7 @@ describe("ExtensionsSettingsView", () => {
         publisher: { pinned, selected, held: "publisher-changed" },
       }),
     });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
 
     expect(screen.getByRole("button", { name: "Trust source" })).toBeDisabled();
@@ -797,7 +801,7 @@ describe("ExtensionsSettingsView", () => {
         publisher: { pinned, selected, held: "publisher-changed" },
       }),
     });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
 
     expect(screen.getByRole("button", { name: "Revoke trust" })).toBeEnabled();
@@ -820,7 +824,7 @@ describe("ExtensionsSettingsView", () => {
         ],
       }),
     });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
 
     expect(screen.getAllByText(/Another publisher signed/)).toHaveLength(1);
@@ -829,7 +833,7 @@ describe("ExtensionsSettingsView", () => {
 
   it("trusts, enables the plugin, enables the component, and uninstalls through the client", async () => {
     const c = client();
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
 
     // Wait for the refreshed snapshot and the command to settle before the next action.
@@ -869,7 +873,7 @@ describe("ExtensionsSettingsView", () => {
       componentEffectiveState: { kind: "blocked", reason: "quarantined" } as never,
     });
     const c = client({ snapshot });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /enable plugin/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /enable component/i })).toBeDisabled();
@@ -892,7 +896,7 @@ describe("ExtensionsSettingsView", () => {
       componentEffectiveState: { kind: "blocked", reason: "quarantined" } as never,
     });
     const c = client({ snapshot });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     const disablePluginButton = screen.getByRole("button", { name: /disable plugin/i });
     expect(disablePluginButton).not.toBeDisabled();
@@ -923,7 +927,7 @@ describe("ExtensionsSettingsView", () => {
       componentEffectiveState: { kind: "blocked", reason: "draining" } as never,
     });
     const c = client({ snapshot });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     const disableComponentButton = screen.getByRole("button", { name: /disable component/i });
     expect(disableComponentButton).not.toBeDisabled();
@@ -957,7 +961,7 @@ describe("ExtensionsSettingsView", () => {
       componentEffectiveState: { kind: "blocked", reason: "broken" } as never,
     });
     const c = client({ snapshot });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     const revokeButton = screen.getByRole("button", { name: /revoke trust/i });
     expect(revokeButton).not.toBeDisabled();
@@ -970,7 +974,7 @@ describe("ExtensionsSettingsView", () => {
   });
 
   it("marks the current view in the Installed / Marketplace switch", async () => {
-    render(<ExtensionsSettingsView client={client()} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={client()} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
 
     expect(viewButton(/installed/i)).toHaveAttribute("aria-pressed", "true");
@@ -980,7 +984,7 @@ describe("ExtensionsSettingsView", () => {
   });
 
   it("keeps each marketplace search hint short enough to read whole at phone width", async () => {
-    render(<ExtensionsSettingsView client={client()} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={client()} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     fireEvent.click(viewButton(/marketplace/i));
 
@@ -997,7 +1001,7 @@ describe("ExtensionsSettingsView", () => {
 
   it("searches the marketplace, inspects a package, then requires explicit confirmation before install", async () => {
     const c = client();
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     fireEvent.click(viewButton(/marketplace/i));
 
@@ -1031,7 +1035,7 @@ describe("ExtensionsSettingsView", () => {
 
   it("installs untrusted on Confirm install and installs and trusts on Install and trust", async () => {
     const c = client();
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     fireEvent.click(viewButton(/marketplace/i));
     const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
@@ -1084,7 +1088,7 @@ describe("ExtensionsSettingsView", () => {
       return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
     }) as never;
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     fireEvent.click(await findViewButton(/marketplace/i));
     const search = screen.getByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "build" } });
@@ -1101,7 +1105,9 @@ describe("ExtensionsSettingsView", () => {
 
   it("clears catalog cards when a refreshed effective snapshot becomes offline", async () => {
     const available = client();
-    const view = render(<ExtensionsSettingsView client={available} scope={scope} />);
+    const view = render(
+      <ExtensionsSettingsView initialView="installed" client={available} scope={scope} />,
+    );
     fireEvent.click(await findViewButton(/marketplace/i));
     const search = screen.getByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "build" } });
@@ -1115,7 +1121,9 @@ describe("ExtensionsSettingsView", () => {
       snapshot,
       effective: effectiveSnapshot(snapshot, { catalogStatus: "offline" }),
     });
-    view.rerender(<ExtensionsSettingsView client={offline} scope={scope} />);
+    view.rerender(
+      <ExtensionsSettingsView initialView="installed" client={offline} scope={scope} />,
+    );
 
     fireEvent.click(await findViewButton(/marketplace/i));
     expect(await screen.findByRole("status", { name: /catalog unavailable/i })).toBeInTheDocument();
@@ -1149,7 +1157,7 @@ describe("ExtensionsSettingsView", () => {
       return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
     }) as never;
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     fireEvent.click(await findViewButton(/marketplace/i));
     const search = screen.getByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "demo" } });
@@ -1172,7 +1180,7 @@ describe("ExtensionsSettingsView", () => {
       return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
     }) as never;
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     fireEvent.click(await findViewButton(/marketplace/i));
     const search = screen.getByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "nothing" } });
@@ -1218,7 +1226,7 @@ describe("ExtensionsSettingsView", () => {
       }
       return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
     }) as never;
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     fireEvent.click(viewButton(/marketplace/i));
 
@@ -1289,7 +1297,7 @@ describe("ExtensionsSettingsView", () => {
       }
       return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
     }) as never;
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     fireEvent.click(viewButton(/marketplace/i));
 
@@ -1377,7 +1385,7 @@ describe("ExtensionsSettingsView", () => {
       }
       return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
     }) as never;
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     fireEvent.click(viewButton(/marketplace/i));
 
@@ -1419,7 +1427,7 @@ describe("ExtensionsSettingsView", () => {
       snapshot,
       effective: effectiveSnapshot(snapshot, { catalogStatus: "offline" }),
     });
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     fireEvent.click(viewButton(/marketplace/i));
     expect(await screen.findByRole("status", { name: /catalog unavailable/i })).toBeInTheDocument();
@@ -1438,7 +1446,7 @@ describe("ExtensionsSettingsView", () => {
       }
       return { kind: "extension-state-updated", snapshot } as ExtensionCommandResult;
     }) as never;
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /uninstall/i }));
     await waitFor(() => expect(screen.getByText(/^waiting$/i)).toBeInTheDocument());
@@ -1456,7 +1464,7 @@ describe("ExtensionsSettingsView", () => {
         }
       })();
     }) as never;
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() =>
       expect(screen.getByRole("status", { name: /extensions unavailable/i })).toBeInTheDocument(),
     );
@@ -1525,7 +1533,7 @@ describe("ExtensionsSettingsView", () => {
       return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
     }) as never;
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     fireEvent.click(viewButton(/marketplace/i));
 
@@ -1623,7 +1631,7 @@ describe("ExtensionsSettingsView", () => {
       return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
     }) as never;
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
     fireEvent.click(viewButton(/marketplace/i));
 
@@ -1713,7 +1721,7 @@ describe("ExtensionsSettingsView", () => {
         return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
       }) as never;
 
-      render(<ExtensionsSettingsView client={c} scope={scope} />);
+      render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
       await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
       fireEvent.click(viewButton(/marketplace/i));
 
@@ -1816,7 +1824,7 @@ describe("ExtensionsSettingsView", () => {
       return { kind: "extension-state-updated", snapshot: emptySnapshot } as ExtensionCommandResult;
     }) as never;
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     fireEvent.click(await findViewButton(/marketplace/i));
     fireEvent.change(screen.getByRole("searchbox", { name: /search skills\.sh and npm/i }), {
       target: { value: "frontend" },
@@ -1894,7 +1902,7 @@ describe("ExtensionsSettingsView", () => {
       return { kind: "extension-state-updated", snapshot } as ExtensionCommandResult;
     }) as never;
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     fireEvent.click(await findViewButton(/marketplace/i));
     fireEvent.change(screen.getByRole("searchbox", { name: /search skills\.sh and npm/i }), {
       target: { value: "frontend" },
@@ -1955,7 +1963,7 @@ describe("ExtensionsSettingsView", () => {
       return { kind: "extension-state-updated", snapshot } as ExtensionCommandResult;
     }) as never;
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     fireEvent.click(await findViewButton(/marketplace/i));
     fireEvent.change(screen.getByRole("searchbox", { name: /search skills\.sh and npm/i }), {
       target: { value: "frontend" },
@@ -2015,7 +2023,7 @@ describe("ExtensionsSettingsView", () => {
       return { kind: "extension-state-updated", snapshot: emptySnapshot } as ExtensionCommandResult;
     }) as never;
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     fireEvent.click(await findViewButton(/marketplace/i));
     const search = screen.getByRole("searchbox", { name: /search skills\.sh and npm/i });
     fireEvent.change(search, { target: { value: "react" } });
@@ -2032,7 +2040,14 @@ describe("ExtensionsSettingsView", () => {
     const snapshot = installedSnapshot({ activation: baseActivation({ installed: false }) });
     const c = client({ snapshot });
 
-    render(<ExtensionsSettingsView client={c} marketplaceFetchesEnabled={false} scope={scope} />);
+    render(
+      <ExtensionsSettingsView
+        initialView="installed"
+        client={c}
+        marketplaceFetchesEnabled={false}
+        scope={scope}
+      />,
+    );
     fireEvent.click(await findViewButton(/marketplace/i));
     expect(
       screen.getByText(
@@ -2051,7 +2066,7 @@ describe("local Agent Plugin import", () => {
     const snapshot = installedSnapshot({ activation: baseActivation({ installed: false }) });
     const c = client({ snapshot });
 
-    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
     await waitFor(() =>
       expect(screen.getByText("No extension packages are installed.")).toBeInTheDocument(),
     );
@@ -2111,6 +2126,7 @@ describe("local Agent Plugin import", () => {
 
     render(
       <ExtensionsSettingsView
+        initialView="installed"
         client={c}
         pickLocalPluginFolder={pickLocalPluginFolder}
         scope={scope}
@@ -2169,6 +2185,7 @@ describe("local Agent Plugin import", () => {
 
     render(
       <ExtensionsSettingsView
+        initialView="installed"
         client={c}
         pickLocalPluginFolder={async () => ({ receiptId: "R".repeat(43), displayName: "lua" })}
         scope={scope}
@@ -2236,6 +2253,7 @@ describe("local Agent Plugin import", () => {
 
     render(
       <ExtensionsSettingsView
+        initialView="installed"
         client={c}
         pickLocalPluginFolder={async () => ({ receiptId: "R".repeat(43), displayName: "debugpy" })}
         scope={scope}
@@ -2286,6 +2304,7 @@ describe("Use in a Project", () => {
       });
     render(
       <ExtensionsSettingsView
+        initialView="installed"
         client={{ ...c, projectPins, toolGrantsAvailable: true }}
         scope={scope}
       />,
@@ -2313,6 +2332,7 @@ describe("Use in a Project", () => {
     // column, so "Use in a Project" and its sentence wrapped one word a line.
     const { container } = render(
       <ExtensionsSettingsView
+        initialView="installed"
         client={{
           ...client({
             snapshot: installedSnapshot({
@@ -2410,6 +2430,7 @@ describe("Sign in to a server you added", () => {
     const mcpServerSignIn = vi.fn(async () => ({ kind: "signed-out" }) as const);
     render(
       <ExtensionsSettingsView
+        initialView="installed"
         client={{ ...client({ snapshot }), mcpServerSignIn, toolGrantsAvailable: true }}
         scope={scope}
       />,
@@ -2458,7 +2479,11 @@ describe("Sign in to a server you added", () => {
       ],
     } as never;
     const { container } = render(
-      <ExtensionsSettingsView client={client({ snapshot })} scope={scope} />,
+      <ExtensionsSettingsView
+        initialView="installed"
+        client={client({ snapshot })}
+        scope={scope}
+      />,
     );
     await screen.findByText("Docs search", { selector: ".extcard-name" });
     const cards = [...container.querySelectorAll("li.extcard")].map((card) => [
@@ -2476,6 +2501,7 @@ describe("Sign in to a server you added", () => {
     const mcpServerSignIn = vi.fn(async () => ({ kind: "signed-out" }) as const);
     render(
       <ExtensionsSettingsView
+        initialView="installed"
         client={{ ...client(), mcpServerSignIn, toolGrantsAvailable: false }}
         scope={scope}
       />,
@@ -2483,5 +2509,20 @@ describe("Sign in to a server you added", () => {
     await screen.findByText("Build Helper");
     expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
     expect(mcpServerSignIn).not.toHaveBeenCalled();
+  });
+
+  it("opens on the Library, trusts an installed package from its card, and contacts no registry", async () => {
+    const user = userEvent.setup();
+    const c = client({ snapshot: installedSnapshot() });
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    await user.click(await screen.findByRole("button", { name: "Build Helper" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Trust this source" }));
+    await waitFor(() =>
+      expect(c.calls).toContainEqual(
+        expect.objectContaining({ kind: "set-source-trust", trusted: true }),
+      ),
+    );
+    expect(c.calls.some((call) => call.kind === "search-catalog")).toBe(false);
   });
 });
