@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { browserPageTransport, createBrowserGuestStore } from "./browserHubGuest";
+import {
+  browserOwnerMergeUnlock,
+  browserPageTransport,
+  createBrowserGuestStore,
+} from "./browserHubGuest";
 
 const PAGE = "https://hub.tail1234.ts.net:8443";
 
@@ -57,5 +61,29 @@ describe("what a browser keeps about its hub", () => {
     });
 
     expect(await store.load()).toBeUndefined();
+  });
+});
+
+describe("a browser's unlock for a merge its page's host asks for", () => {
+  it("does not ask for a passkey when the browser never joined a hub as an owner", async () => {
+    let asked = 0;
+    const unlock = browserOwnerMergeUnlock({
+      store: { load: async () => undefined },
+      deviceKeyStore: {} as never,
+      credentials: async () => {
+        asked += 1;
+        return undefined;
+      },
+      pageOrigin: PAGE,
+    });
+
+    expect(
+      await unlock({
+        hostMemberId: "11111111-1111-4111-8111-111111111111",
+        path: "/api/code/project-pull-requests/merge",
+        body: "{}",
+      }),
+    ).toEqual({ status: "no-owner-device" });
+    expect(asked).toBe(0);
   });
 });

@@ -1,3 +1,4 @@
+import type { OwnerUnlockNotGiven } from "@octant/client-runtime";
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import type {
   CodeProjectPullRequestDetailObserved,
@@ -114,7 +115,7 @@ export type ShellActions = {
   readonly mergeProjectPullRequest: (
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
-  ) => Promise<CodeProjectPullRequestMergeOutcome>;
+  ) => Promise<CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven>;
   readonly moveCodeThread: CodeController["moveThread"];
   readonly moveProject: ProjectController["move"];
   readonly noteCanvasReferences: NonNullable<WorkspaceViewProps["onCanvasReferencesObserved"]>;

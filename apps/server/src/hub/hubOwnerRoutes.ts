@@ -15,6 +15,7 @@
 
 import { createHash } from "node:crypto";
 import {
+  CODE_OWNER_UNLOCKED_MERGE_PATHS,
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
@@ -121,7 +122,15 @@ const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
+  ...CODE_OWNER_UNLOCKED_MERGE_PATHS,
 ]);
+
+/**
+ * A paired client's merge is answered on the host's product routes, not here,
+ * but its challenge is issued here, to an owner this route authenticated, for
+ * the merge route's own method, path, and body hash.
+ */
+const MERGE_ROUTES: ReadonlySet<string> = new Set(CODE_OWNER_UNLOCKED_MERGE_PATHS);
 
 /**
  * The actions that always need their own fresh challenge, whatever session is
@@ -181,7 +190,7 @@ export interface HubOwnerRouteOptions {
   readonly now?: () => number;
 }
 
-interface OwnerScope {
+export interface OwnerScope {
   readonly host: "hub" | "spoke";
   readonly roster: Parameters<typeof authorizeOwnerRequest>[0]["roster"];
   readonly owners: ReadonlyArray<HostOwnerRecord>;
@@ -191,6 +200,46 @@ interface OwnerScope {
 }
 
 type Refusal = { readonly status: number; readonly kind: string };
+
+/** Which of this host's owner lists an action is judged against: the hub's, the spoke's, or none. */
+export function ownerScopeFor(
+  options: Pick<HubOwnerRouteOptions, "hub" | "spoke">,
+  route: string,
+): OwnerScope | Refusal {
+  // A hub whose role is off keeps its roster and owners, but they hold no
+  // owner powers: a former hub that joined another hub answers only as a spoke.
+  const hub = options.hub.status().enabled ? options.hub.ownerContext() : undefined;
+  const spoke = options.spoke.ownerContext();
+  const hubScope: OwnerScope | undefined =
+    hub === undefined
+      ? undefined
+      : {
+          host: "hub",
+          roster: hub.roster,
+          owners: hub.owners,
+          grant: undefined,
+          inactiveDeviceMemberIds: hub.inactiveDeviceMemberIds,
+          ownerListRevision: hub.ownerListRevision,
+        };
+  const spokeScope: OwnerScope | undefined =
+    spoke === undefined
+      ? undefined
+      : {
+          host: "spoke",
+          roster: spoke.roster,
+          owners: spoke.owners,
+          grant: spoke.grant,
+          inactiveDeviceMemberIds: spoke.inactiveDeviceMemberIds,
+          ownerListRevision: spoke.ownerListRevision,
+        };
+  if (HUB_ONLY.has(route)) {
+    return hubScope ?? { status: 403, kind: "hub-role-off" };
+  }
+  if (EITHER.has(route)) {
+    return hubScope ?? spokeScope ?? { status: 403, kind: "not-a-member" };
+  }
+  return spokeScope ?? { status: 403, kind: "not-a-spoke" };
+}
 
 export function createHubOwnerRouteHandler(
   options: HubOwnerRouteOptions,
@@ -207,43 +256,11 @@ export function createHubOwnerRouteHandler(
     }
   };
 
-  const scopeFor = (requested: OwnerRoute, body: string): OwnerScope | Refusal => {
-    const route =
-      requested === HUB_OWNER_ROUTES.challenge ? (challengedRoute(body) ?? requested) : requested;
-    // A hub whose role is off keeps its roster and owners, but they hold no
-    // owner powers: a former hub that joined another hub answers only as a spoke.
-    const hub = options.hub.status().enabled ? options.hub.ownerContext() : undefined;
-    const spoke = options.spoke.ownerContext();
-    const hubScope: OwnerScope | undefined =
-      hub === undefined
-        ? undefined
-        : {
-            host: "hub",
-            roster: hub.roster,
-            owners: hub.owners,
-            grant: undefined,
-            inactiveDeviceMemberIds: hub.inactiveDeviceMemberIds,
-            ownerListRevision: hub.ownerListRevision,
-          };
-    const spokeScope: OwnerScope | undefined =
-      spoke === undefined
-        ? undefined
-        : {
-            host: "spoke",
-            roster: spoke.roster,
-            owners: spoke.owners,
-            grant: spoke.grant,
-            inactiveDeviceMemberIds: spoke.inactiveDeviceMemberIds,
-            ownerListRevision: spoke.ownerListRevision,
-          };
-    if (HUB_ONLY.has(route)) {
-      return hubScope ?? { status: 403, kind: "hub-role-off" };
-    }
-    if (EITHER.has(route)) {
-      return hubScope ?? spokeScope ?? { status: 403, kind: "not-a-member" };
-    }
-    return spokeScope ?? { status: 403, kind: "not-a-spoke" };
-  };
+  const scopeFor = (requested: OwnerRoute, body: string): OwnerScope | Refusal =>
+    ownerScopeFor(
+      options,
+      requested === HUB_OWNER_ROUTES.challenge ? (challengedRoute(body) ?? requested) : requested,
+    );
 
   return async (request) => {
     const url = new URL(request.url);
@@ -375,8 +392,11 @@ export function createHubOwnerRouteHandler(
     switch (route) {
       case HUB_OWNER_ROUTES.challenge: {
         const asked = decodeOwnerChallengeRequest(json());
-        // A challenge is for one of the actions below, never for itself or a read.
-        if (!UNLOCKED_ROUTES.has(asked.path)) return refused(400, "invalid");
+        // A challenge is for one of the actions below or a paired client's
+        // merge, never for itself or a read.
+        if (!UNLOCKED_ROUTES.has(asked.path) && !MERGE_ROUTES.has(asked.path)) {
+          return refused(400, "invalid");
+        }
         const issued = options.unlock.issue({
           ownerMemberId: String(input.senderMemberId),
           request: asked,
@@ -544,7 +564,11 @@ export function createHubOwnerRouteHandler(
 }
 
 function readUnlockProof(request: Request): OwnerUnlockProof | undefined {
-  const header = request.headers.get(OWNER_UNLOCK_HEADER);
+  return readUnlockProofHeader(request.headers.get(OWNER_UNLOCK_HEADER));
+}
+
+/** The unlock proof an owner device sends beside its request, or undefined when it is absent or does not decode. */
+export function readUnlockProofHeader(header: string | null): OwnerUnlockProof | undefined {
   if (header === null) return undefined;
   try {
     return decodeOwnerUnlockProof(JSON.parse(Buffer.from(header, "base64url").toString("utf8")));

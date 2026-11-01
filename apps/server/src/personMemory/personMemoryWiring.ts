@@ -61,6 +61,8 @@ export function createPersonMemorySweep(input: {
   readonly workPersonMessages: (threadId: string, limit: number) => ReadonlyArray<string>;
   readonly codePersonMessages: (threadId: string, limit: number) => ReadonlyArray<string>;
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
+  /** Why the account the person chose cannot be asked now; undefined when it can. */
+  readonly accountUnavailable: (providerInstanceId: ProviderInstanceId) => string | undefined;
   readonly scratchRoot: string;
   readonly protectedSecretPath: (path: string) => boolean;
 }): PersonMemorySweep {
@@ -141,6 +143,11 @@ export function createPersonMemorySweep(input: {
           })();
         const instance = persistence.readProviderInstance(model.providerInstanceId);
         if (instance === undefined || !instance.enabled) return undefined;
+        // A chosen account that is not ready or is at its limit makes the
+        // thread wait for a later pass; it is never distilled on another.
+        if (chosen !== undefined && input.accountUnavailable(chosen.providerInstanceId)) {
+          return undefined;
+        }
         return { model, driverKind: String(instance.driverKind) };
       },
       complete: async ({ model, instructions, prompt, timeoutMs }) => {

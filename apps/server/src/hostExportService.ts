@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts/host-export";
 import { decodeUtcTimestamp, type UtcTimestamp } from "@octant/contracts/events";
 import type { HostId } from "@octant/contracts/host";
+import type { PersonMemoryEntry } from "@octant/contracts/person-memory";
 import type { ProjectMemoryView } from "@octant/contracts/projects";
 import type { ThreadExportBundle, ThreadExportOutcome } from "@octant/contracts/thread-export";
 import type {
@@ -79,6 +80,9 @@ export interface HostExportServiceOptions {
   };
   readonly projectMemory: {
     readonly read: (projectId: string) => ProjectMemoryView | Promise<ProjectMemoryView>;
+  };
+  readonly personMemory: {
+    readonly entries: () => ReadonlyArray<PersonMemoryEntry>;
   };
   readonly canvases: {
     readonly list: (input: {
@@ -173,6 +177,9 @@ export class HostExportService {
     const projectDropped = yield* this.#projectPages(limit);
     if (projectDropped === undefined) return;
     unrepresentable += projectDropped;
+    const memoryDropped = yield* this.#personMemoryPages(limit);
+    if (memoryDropped === undefined) return;
+    unrepresentable += memoryDropped;
     const canvasDropped = yield* this.#canvasPages(limit);
     if (canvasDropped === undefined) return;
     unrepresentable += canvasDropped;
@@ -264,6 +271,25 @@ export class HostExportService {
     return dropped;
   }
 
+  async *#personMemoryPages(limit: number): AsyncGenerator<HostExportPage, number | undefined> {
+    const entries = this.#options.personMemory.entries();
+    let dropped = 0;
+    for (let start = 0; start < entries.length; start += limit) {
+      const kept = [];
+      for (const entry of entries.slice(start, start + limit)) {
+        if (threadExportContainsForbiddenKey(entry)) {
+          dropped += 1;
+          continue;
+        }
+        kept.push(entry);
+      }
+      if (kept.length > 0 && !(yield* this.#emit({ kind: "person-memory", entries: kept }))) {
+        return undefined;
+      }
+    }
+    return dropped;
+  }
+
   async *#canvasPages(limit: number): AsyncGenerator<HostExportPage, number | undefined> {
     let cursor: string | undefined;
     let dropped = 0;
@@ -351,15 +377,17 @@ export class HostExportService {
           ? page.projects.length
           : page.kind === "project-memory"
             ? page.projectMemory.length
-            : page.kind === "canvases"
-              ? page.canvases.length
-              : page.kind === "usage"
-                ? page.usage.length
-                : page.kind === "retention-windows"
-                  ? page.windows.length
-                  : page.kind === "retention-tombstones"
-                    ? page.tombstones.length
-                    : 1;
+            : page.kind === "person-memory"
+              ? page.entries.length
+              : page.kind === "canvases"
+                ? page.canvases.length
+                : page.kind === "usage"
+                  ? page.usage.length
+                  : page.kind === "retention-windows"
+                    ? page.windows.length
+                    : page.kind === "retention-tombstones"
+                      ? page.tombstones.length
+                      : 1;
     this.#observeResident?.(page.kind, count);
     if (threadExportContainsForbiddenKey(page)) {
       yield { kind: "refused", reason: "unrepresentable" };
@@ -378,6 +406,7 @@ export interface HostExportLiveDependencies {
   readonly listWorkThreadIds: () => ReadonlyArray<string>;
   readonly listProjects: () => ReadonlyArray<HostExportProjectSource>;
   readonly readProjectMemory: (projectId: string) => ProjectMemoryView;
+  readonly personMemoryEntries: () => ReadonlyArray<PersonMemoryEntry>;
   readonly listCanvases: () => ReadonlyArray<unknown>;
   readonly readSettings: () => HostExportSettingsSource;
   readonly listProjectIds: () => ReadonlyArray<string>;
@@ -419,6 +448,7 @@ export function createLiveHostExportService(input: HostExportLiveDependencies): 
         pageHostExportSlice(input.listProjects(), cursor, limitOf(limit)),
     },
     projectMemory: { read: (projectId) => input.readProjectMemory(projectId) },
+    personMemory: { entries: () => input.personMemoryEntries() },
     canvases: {
       list: ({ cursor, limit }) =>
         pageHostExportSlice(input.listCanvases(), cursor, limitOf(limit)),

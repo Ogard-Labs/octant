@@ -150,6 +150,70 @@ describe("mobile pull-request merge", () => {
     });
   });
 
+  it("unlocks on this owner phone and sends the same merge again when the host asks for an owner unlock", async () => {
+    const sent: Array<{ body: string | undefined; proof: string | undefined }> = [];
+    const hostMemberId = "11111111-1111-4111-8111-111111111111";
+    const transport: MobileRemoteTransport = {
+      hostId: "host-1",
+      authenticatedFetch: (async (request: { body?: string; headers?: Record<string, string> }) => {
+        const proof = request.headers?.["x-octant-owner-unlock"];
+        sent.push({ body: request.body, proof });
+        return jsonResponse(
+          proof === undefined
+            ? { status: "owner-unlock-required", reason: "missing", hostMemberId }
+            : {
+                status: "merged",
+                number: 12,
+                method: "squash",
+                mergedAt: "2026-11-01T12:00:00.000Z",
+              },
+        );
+      }) as MobileRemoteTransport["authenticatedFetch"],
+    };
+    const unlock = vi.fn(async () => ({ status: "signed" as const, proof: "c2lnbmVk" }));
+
+    const outcome = await mergeMobilePullRequest(
+      transport,
+      { ...target, method: "squash", headSha: head },
+      unlock,
+    );
+
+    expect(outcome).toMatchObject({ status: "merged", number: 12 });
+    expect(unlock).toHaveBeenCalledWith({
+      hostMemberId,
+      path: "/api/code/project-pull-requests/merge",
+      body: sent[0]?.body,
+    });
+    expect(sent.map((entry) => entry.proof)).toEqual([undefined, "c2lnbmVk"]);
+    expect(sent[1]?.body).toBe(sent[0]?.body);
+  });
+
+  it("merges nothing and says why when the person cancels the unlock or the phone is not an owner", async () => {
+    const asked = transportFor({
+      merge: {
+        status: "owner-unlock-required",
+        reason: "missing",
+        hostMemberId: "11111111-1111-4111-8111-111111111111",
+      },
+    });
+    calls.length = 0;
+
+    const cancelled = await mergeMobilePullRequest(
+      asked,
+      { ...target, method: "squash", headSha: head },
+      async () => ({ status: "not-unlocked", reason: "cancelled" }),
+    );
+    const notOwner = await mergeMobilePullRequest(asked, {
+      ...target,
+      method: "squash",
+      headSha: head,
+    });
+
+    expect(cancelled).toEqual({ status: "owner-unlock-not-given", reason: "cancelled" });
+    expect(notOwner).toEqual({ status: "owner-unlock-not-given", reason: "no-owner-device" });
+    expect(calls).toHaveLength(2);
+  });
+
   it("turns Merge when ready on with the confirmed head and off without one", async () => {
     calls.length = 0;
     const transport = transportFor({

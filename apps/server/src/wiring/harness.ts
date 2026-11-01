@@ -6,6 +6,7 @@ import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHar
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
+import { createAutomaticModelAccountCheck } from "../automaticModels/automaticModelAccount";
 import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
@@ -124,6 +125,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "nativeHarnessLeadFallback"
     | "nativeHarnessTranscripts"
     | "providerDataDirectory"
+    | "providerUsageLimitsService"
   > &
   Pick<
     HarnessStateWiring,
@@ -168,6 +170,7 @@ export function wireHarness(deps: HarnessDependencies) {
     goalService,
     nativeHarnessApprovals,
     providerRuntimeRegistry,
+    providerUsageLimitsService,
     shieldHolder,
     spendCeiling,
     nativeHarnessLeadFallback,
@@ -628,6 +631,13 @@ export function wireHarness(deps: HarnessDependencies) {
       return undefined;
     }
   };
+  // The account the person chose for an automatic call is asked as it is: off,
+  // not ready or at its limit, it is reported and no other account is tried.
+  const automaticModelAccountUnavailable = createAutomaticModelAccountCheck({
+    readProviderInstance: (id) => persistence.readProviderInstance(id),
+    readiness: (id) => providerRuntimeRegistry.observedState(id)?.readiness,
+    limits: () => providerUsageLimitsService.snapshot(),
+  });
   const readTurnExecutionPolicy = codeTurnExecutionPolicyReader({
     readCodeThread: (threadId) => persistence.readCodeThread(threadId),
     codeSessionAuthority,
@@ -644,6 +654,7 @@ export function wireHarness(deps: HarnessDependencies) {
       });
     },
     chosenModel: () => persistence.readCodeSettings()?.settings.shieldModel,
+    chosenModelUnavailable: (choice) => automaticModelAccountUnavailable(choice.providerInstanceId),
     readTurnExecutionPolicy: (threadId) => readTurnExecutionPolicy(threadId),
     // Work threads are reviewed at Auto as Code threads are; a Work turn's
     // level is its running turn's, else the thread's own.
@@ -729,6 +740,7 @@ export function wireHarness(deps: HarnessDependencies) {
           return text === undefined ? [] : [text];
         }),
     resolveDriver: resolveConfiguredDriver,
+    accountUnavailable: automaticModelAccountUnavailable,
     scratchRoot: harnessWorkDirectory,
     protectedSecretPath: (path) => isProtectedSecretPath(path),
   });

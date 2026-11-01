@@ -97,6 +97,7 @@ import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
 import { SecretStoresClientContext } from "../settings/SecretStoresClientContext";
 import { SecretStoresSettingsSection } from "../settings/SecretStoresSettingsSection";
+import { AutomaticModelSettings } from "../settings/AutomaticModelSettings";
 import { PersonMemorySettings } from "../settings/PersonMemorySettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
@@ -988,7 +989,6 @@ function ActiveSectionContent({
             <CodeSettingsView
               focusedSetting={focusedSetting}
               onUpdate={props.codeController.updateSettings}
-              providerSnapshot={props.providerController?.snapshot}
               settings={props.codeController.bootstrap.settings}
             />
           )}
@@ -1091,6 +1091,15 @@ function ActiveSectionContent({
                 ? {}
                 : { usageLimitsClient: props.providerUsageLimitsClient })}
               providerController={props.providerController}
+            />
+          </div>
+          <div hidden={harnessEndpointOpen} id="settings-automatic-models">
+            <AutomaticModelSettings
+              codeSettings={props.codeController?.bootstrap?.settings}
+              onCodeUpdate={props.codeController?.updateSettings ?? (async () => false)}
+              personMemoryClient={props.personMemoryClient}
+              providerSnapshot={props.providerController.snapshot}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           </div>
           <ProviderCatalogSection
@@ -1360,9 +1369,6 @@ function ActiveSectionContent({
           <PersonMemorySettings
             client={props.personMemoryClient}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
-            {...(props.providerController === undefined
-              ? {}
-              : { providerSnapshot: props.providerController.snapshot })}
             {...(focusedSetting === undefined ? {} : { focusedSetting })}
           />
         </div>

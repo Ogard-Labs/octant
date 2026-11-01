@@ -2869,6 +2869,44 @@ describe("CodeService managed thread creation", () => {
     expect(appended).toEqual(["code.checkout-observed@1", "code.thread-created@1"]);
   });
 
+  it("binds a worktree made on a server as a remote-root checkout this host never resolves", async () => {
+    const port = mockCreationPort({
+      prepare: async () => ({
+        status: "prepared" as const,
+        preparation: { ...preparation(), checkoutKind: "remote-root" as const },
+      }),
+    });
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    const result = await fixture.service.execute(ids.window, managedCommand);
+
+    if (result?.kind !== "managed-thread-created")
+      throw new Error("expected managed-thread-created");
+    expect(result.checkout).toMatchObject({
+      id: managedCheckoutId,
+      kind: "remote-root",
+      head: { kind: "none" },
+    });
+    expect(result.thread.deliveryTarget.branchIntent).toBe("feature/managed");
+  });
+
+  it("makes no worktree on a server for a Plan thread", async () => {
+    const port = mockCreationPort({
+      prepare: async () => ({
+        status: "prepared" as const,
+        preparation: { ...preparation(), checkoutKind: "remote-root" as const },
+      }),
+    });
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    await expect(
+      fixture.service.execute(ids.window, { ...managedCommand, executionPolicy: "plan" }),
+    ).rejects.toMatchObject({
+      failure: { message: expect.stringContaining("Plan changes nothing") },
+    });
+    expect(port.commit).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the Project is outside the authenticated window without preparing or committing", async () => {
     const port = mockCreationPort();
     const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
