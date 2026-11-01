@@ -10907,9 +10907,21 @@ thread counts as tainted. A Code tool row whose result was outside content
 carries the tag "Outside content", followed by what the Watcher found, in the
 warning role; at Full access the tag stays quiet. A Code board card carries a
 small mark while the thread is marked, in the warning role when a label was
-found. A runtime's own web search or fetch, whose result goes straight to its
-model, still marks the thread but is not read by the Watcher, and Chat and
-Work tool rows do not show the tag yet.
+found. A runtime's own web search or fetch hands its result straight to its model, so
+the thread is marked when the call starts and nothing can be withheld. Where the
+adapter sees the result text (an ACP agent puts it in the call's content items;
+`rawOutput` is never read), it sends an `outside-content-result` event, which
+carries the bounded text for the Watcher only: the turn runners run the detectors
+over it, journal each label beside the read, and drop the text, so it is never
+journaled, shown, or passed on. A label that cannot be journaled stops the turn
+as an unmarked read does. A runtime that does not expose the page (Codex's web
+search item names only its query, OpenCode's success event carries none) is
+marked but not read. The Chat and Work tool rows carry the same "Outside
+content" tag as Code's: the turn's tool steps hold the Watcher's labels for a
+runtime web tool and for an app-managed tool's result, and a later progress or
+result message keeps them. The Judge still never sees the text, only the labels.
+The secret guard's protected-files list is not yet handed to the Watcher or the
+Judge, so `secret-path-read` is not raised until that list exists on this branch.
 
 **Build order.** (1) Octant Harness; (2) every runtime through the approval
 path; (3) the picker and Settings; (4) the Watcher; (5) safe networks; (6)

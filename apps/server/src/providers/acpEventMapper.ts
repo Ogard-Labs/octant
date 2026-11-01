@@ -8,6 +8,7 @@ import type {
   UtcTimestamp,
   ProviderApprovalCall,
 } from "@octant/contracts";
+import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
 import type { AcpServerNotification, AcpServerRequest } from "./acpProtocol";
 import { outsideContentTarget, outsideContentToolName } from "./outsideContentRead";
 import { providerApprovalCall } from "./providerApprovalCall";
@@ -23,6 +24,8 @@ interface AcpToolState {
   kind?: string;
   /** Set once the call has marked the thread as reading outside content. */
   outsideContentReported?: true;
+  /** The source the read was reported under, so its result is handed to the Watcher under it. */
+  outsideContentSource?: "web-search" | "web-fetch";
 }
 
 export interface AcpEventContext {
@@ -193,7 +196,10 @@ function mapTool(
   if (title !== undefined) state.title = title;
   if (toolKind !== undefined) state.kind = toolKind;
   // An agent may name the kind only once the call is under way.
-  const read = outsideContentRead(context, state, update);
+  const read = [
+    ...outsideContentRead(context, state, update),
+    ...outsideContentResult(context, state, update),
+  ];
   const status = string(update.status);
   if (status === "completed") {
     state.terminal = true;
@@ -253,6 +259,7 @@ function outsideContentRead(
         : undefined;
   if (source === undefined) return [];
   state.outsideContentReported = true;
+  state.outsideContentSource = source;
   const target = outsideContentTarget(
     source === "web-fetch" ? (string(input?.url) ?? state.title) : query,
   );
@@ -265,6 +272,36 @@ function outsideContentRead(
       toolName: outsideContentToolName(state.title),
       source,
       ...(target === undefined ? {} : { target }),
+    }),
+  ];
+}
+
+/**
+ * The text an outside-content call returned, when the agent put it in the
+ * call's content items. Only the Watcher reads it: `rawOutput` stays unread
+ * for the reason `toolFailureReason` gives, and nothing here is journaled.
+ */
+function outsideContentResult(
+  context: AcpEventContext,
+  state: AcpToolState,
+  update: Readonly<Record<string, unknown>>,
+): ReadonlyArray<AcpMappedNotification> {
+  if (state.outsideContentSource === undefined || !Array.isArray(update.content)) return [];
+  let text = "";
+  for (const item of update.content) {
+    const entry = record(item);
+    if (entry?.type !== "content") continue;
+    const part = string(record(entry.content)?.text);
+    if (part !== undefined) text += `${text === "" ? "" : "\n"}${part}`;
+  }
+  if (text.trim() === "") return [];
+  return [
+    event(context, {
+      kind: "outside-content-result",
+      toolCallId: state.toolCallId,
+      toolName: outsideContentToolName(state.title),
+      source: state.outsideContentSource,
+      text: text.slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS),
     }),
   ];
 }

@@ -149,7 +149,11 @@ web search or page fetch the provider runs with its own built-in tool, such as
 Codex's web search or OpenCode's web fetch, and a tool the model's provider
 runs on its own servers. The thread is marked as soon as the call starts, even
 if it later fails or you deny it, because by then the provider may already
-have the page. An agent that reports a web search the same way as a search of
+have the page. Where Octant can see what such a call returned, Octant Shield's Watcher reads
+it for text aimed at the agent, hidden or encoded text, and requests to send
+secrets out; a finding is tagged on the tool row, in Chat and Work as well as
+Code, and never shown to the Judge as text. Some providers do not show Octant
+the page, so their calls are marked but not read. An agent that reports a web search the same way as a search of
 your files cannot always be told apart, so that search may not mark the
 thread. If the provider's own reviewer is answering approvals in a Code
 thread, the turn stops at that point and says why, so you answer the next

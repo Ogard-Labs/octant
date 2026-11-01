@@ -426,6 +426,20 @@ export class CodeTurnRunner {
                 if (event.kind === "liveness") return;
                 timing = observeTurnMetrics(timing, event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
+                if (event.kind === "outside-content-result") {
+                  // The Watcher reads what the adapter saw of the page. Like
+                  // the read it follows, it runs before the budget or a
+                  // cancel is looked at.
+                  if (
+                    outsideContentMarks.watch(String(input.thread.id), event).status === "refused"
+                  ) {
+                    yield* connection
+                      .interrupt(input.sessionId)
+                      .pipe(Effect.catchAll(() => Effect.void));
+                    return yield* fail("failed", RUNTIME_OUTSIDE_CONTENT_REFUSAL);
+                  }
+                  return;
+                }
                 if (event.kind === "outside-content-read") {
                   // Marked before the budget or a cancel is looked at: what
                   // the runtime read reached its model either way. The tool
@@ -473,7 +487,12 @@ export class CodeTurnRunner {
                   return yield* fail("failed", "Provider event sanitization failed closed.");
                 }
                 // Marked above; never a turn event.
-                if (sanitizedEvent.kind === "outside-content-read") return;
+                if (
+                  sanitizedEvent.kind === "outside-content-read" ||
+                  sanitizedEvent.kind === "outside-content-result"
+                ) {
+                  return;
+                }
                 const sighting = compactions.observe(sanitizedEvent);
                 if (sighting !== undefined && input.onAutomaticCompaction !== undefined) {
                   const record = input.onAutomaticCompaction;
@@ -761,7 +780,13 @@ function normalizeProviderEvent(
   input: CodeTurnRunnerInput,
   event: Exclude<
     ProviderRuntimeEvent,
-    { readonly kind: "context-compacted" | "liveness" | "outside-content-read" }
+    {
+      readonly kind:
+        | "context-compacted"
+        | "liveness"
+        | "outside-content-read"
+        | "outside-content-result";
+    }
   >,
   /** Whether the runtime compacted the session earlier in this turn. */
   compacted: boolean,

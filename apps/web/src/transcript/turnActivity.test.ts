@@ -57,6 +57,26 @@ describe("turn activity", () => {
     ]);
   });
 
+  it("carries the Watcher's tag from a Chat or Work turn's recorded tool step to its row", () => {
+    const activity = toolStepsActivity(
+      [
+        {
+          toolCallId: "fetch-1",
+          toolName: "webfetch",
+          state: "completed",
+          outsideContent: { labels: ["agent-instructions"] },
+        },
+        { toolCallId: "read-1", toolName: "Read", state: "completed" },
+      ],
+      false,
+    );
+    expect(activity?.rows).toMatchObject([
+      { id: "fetch-1", outsideContent: { labels: ["agent-instructions"] } },
+      { id: "read-1" },
+    ]);
+    expect(activity?.rows[1]).not.toHaveProperty("outsideContent");
+  });
+
   it("shows a Work step Octant Shield answered as a review row, not a tool call", () => {
     const decision = {
       reviewer: "octant-shield",

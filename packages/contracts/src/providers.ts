@@ -2611,6 +2611,9 @@ export const ProviderApprovalCall = Schema.Struct({
 }).annotations(strict);
 export type ProviderApprovalCall = typeof ProviderApprovalCall.Type;
 
+/** The most of a runtime tool's result the Watcher is handed. */
+export const OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS = 65_536;
+
 export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -2656,6 +2659,21 @@ export const ProviderRuntimeEvent = Schema.Union(
     toolName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
     source: Schema.Literal("web-search", "web-fetch", "hosted-tool"),
     target: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
+  }).annotations(strict),
+  /**
+   * What one of the runtime's own outside-content tools returned, as far as
+   * the adapter can see it: the text of the call's result, bounded. It exists
+   * only for Octant Shield's Watcher to read and is never journaled, shown, or
+   * handed to a model. An adapter whose runtime does not expose a result sends
+   * none, and the read is still marked.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("outside-content-result"),
+    toolCallId: Schema.NonEmptyTrimmedString,
+    toolName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+    source: Schema.Literal("web-search", "web-fetch", "hosted-tool"),
+    text: Schema.NonEmptyString.pipe(Schema.maxLength(OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS)),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
