@@ -554,6 +554,27 @@ export async function handBrowserToPerson(input: {
 }
 
 /**
+ * The refusal an agent Browser call gets while the page is the person's. A
+ * sign-in hand-off and a take-over are one hold; the answer says which, so the
+ * agent tells the person it is waiting rather than retrying.
+ */
+export function heldForPersonAnswer(
+  holding: NonNullable<BrowserAutomationSnapshot["waitingForPerson"]>,
+): BrowserToolAnswer {
+  if (holding === "sign-in") {
+    return { result: { error: "browser-waiting-for-person" }, isError: true };
+  }
+  return {
+    result: {
+      error: "browser-person-took-over",
+      message:
+        "The person took over the page. Browser calls wait until they hand it back; say that you are waiting instead of retrying.",
+    },
+    isError: true,
+  };
+}
+
+/**
  * A page the person can sign in on: the desktop app's own Browser, which they
  * type into directly. A headless page reaches the person as a picture, and
  * typing into its password field is refused like any other relayed typing.
@@ -623,6 +644,13 @@ export async function runBrowserToolSteps(
  * revision, and what changed, plus whatever the operation read or the call
  * asked to include. A text hash is the server's to compare, not the model's.
  */
+/** The one line an answer carries when the person used the page; see the spec. */
+const PERSON_USED_PAGE_NOTES = {
+  used: "The person used the page since you last looked. Take a fresh snapshot before acting.",
+  "handed-back":
+    "The person took the page and handed it back, so your call did not run. This is a fresh snapshot of the page now.",
+} as const;
+
 export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = false) {
   const image = includeScreenshot
     ? browserToolImage(snapshot.observation?.screenshotDataUrl)
@@ -638,6 +666,9 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
     result: {
       status: snapshot.status,
       ...(snapshot.failure === undefined ? {} : { failure: snapshot.failure }),
+      ...(snapshot.personUsedPage === undefined
+        ? {}
+        : { note: PERSON_USED_PAGE_NOTES[snapshot.personUsedPage] }),
       ...(observation === undefined
         ? {}
         : {

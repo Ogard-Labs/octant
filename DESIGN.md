@@ -1423,7 +1423,10 @@ tools that do not fit gather behind a count. Several Browsers are one Browser
 tab there: their pages sit in a row of their own at the top of the Browser,
 with a + for a new page, and closing the Browser tab closes every page. The
 Browser's toolbar groups back, forward, and reload in one rounded capsule
-beside a pill-shaped address field. Environment is opened from that band or Add tool. Zen
+beside a pill-shaped address field, followed by the driver indicator and a
+quiet ghost **Take over** button (secondary **Hand back** while the person has
+the page), both extra-small, which drop their words below 720px and keep their
+names. Environment is opened from that band or Add tool. Zen
 remains in the bottom-left identity menu.
 
 Zen is a desk. Every card is a window: its title bar moves it, every edge and

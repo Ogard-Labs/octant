@@ -10042,6 +10042,10 @@ access` agree); a thread's own change is journaled as
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
   so a paired client cannot take the host browser to a new origin.
+  A paired client also cannot take the page over from the agent or hand it
+  back; that hold is the person's at a window of this computer, checked by the
+  route, and the gateway does not admit its paths
+  ([Person and agent together](design/browser-agent-tool.md#person-and-agent-together)).
   - **Pairing budgets.** Hello and claim share ten requests per source per
     minute and sixty per host. A window waiting for approval polls its ticket's
     status once a second for up to the ticket's five minutes, which that budget

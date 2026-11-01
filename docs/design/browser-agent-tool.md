@@ -12,8 +12,9 @@ keeps.
 
 Status: built. The page snapshot and element refs, short results, hover,
 select, drag, key chords, upload, tabs, batched steps, waits, settling, dialogs,
-viewport size, the sign-in handoff, and diagnostics with a cursor are built on
-the headless and desktop Browsers.
+viewport size, the sign-in handoff, person and agent together (the person's
+input kept, Take over and Hand back), and diagnostics with a cursor are built
+on the headless and desktop Browsers.
 
 ## One tool for every provider
 
@@ -272,6 +273,93 @@ only after the person approves it.
   by an agent. The page keeps its profile; a Private page's sign-in lasts as
   long as the page, and a Project or Personal page keeps it for the next page
   in that profile ([Browser profiles](browser-profiles.md#profiles)).
+
+## Person and agent together
+
+The page is the person's as much as the agent's. Neither takes it from the
+other without saying so, and the server, not the pane, decides.
+
+### The person's input is kept
+
+- On the desktop Browser, the person's keys and clicks reach the page while the
+  agent acts. Nothing is dropped, and nothing in the page is held back. The
+  agent's own input comes through the debugger and never through the person's
+  input path, so the two are told apart by how they arrive. A pointer moving
+  over the page, a key coming up, and a scroll are not the person using it.
+- On the headless Browser, the person acts only through the pane's relayed
+  actions; one that changes what the page shows or holds (navigate, click, type,
+  press, hover, choose, drag, a tab change) counts the same way. A screenshot,
+  scroll, or read does not.
+- **Person input drops the agent's refs.** The desktop Browser tells the server
+  which pages the person used. The server drops the snapshot's refs as a
+  navigation does, and notes that the person used the page.
+- **The agent is told once.** The next answer to an agent Browser call carries
+  one line, `note`: "The person used the page since you last looked. Take a
+  fresh snapshot before acting." It is said once per stretch of the person's
+  input, on whatever the call answers, a refusal included.
+- **An agent action never overwrites what the person is typing.** The action in
+  flight when the person started finishes. After the person's input, the next
+  agent action that clicks, types, presses a key, hovers, chooses, drags, or
+  uploads is refused as `stale` and does not run, whether it names a ref or a
+  selector, until the agent has taken a snapshot (a `snapshot` operation or an
+  `include` of one). Reading, waiting, scrolling, screenshots, diagnostics, tab
+  listing, and navigating still run. A snapshot that was already in flight when
+  the person typed does not clear it: it began before their input.
+- Rationale: refusing only a ref would leave a selector, a bare `press`, and a
+  `type` into the focused field free to land in a field the person is typing
+  in, so the narrowest rule that protects their text refuses every action that
+  sends a key or a click until the agent has read the page again. Refusing
+  costs the agent one snapshot; overwriting costs the person their text. The
+  in-flight action finishes because it cannot be taken back without leaving the
+  page half changed.
+
+### Take over and Hand back
+
+- While a page is open, the Browser pane's toolbar carries **Take over** beside
+  the driver indicator, on the desktop and the headless Browser alike. One click
+  holds every agent Browser call on that page for the person: the sign-in
+  hold, under another name (`waitingForPerson` is `take-over`), not a second
+  mechanism. The pane then reads "You have the page" and shows **Hand back**
+  in place of Take over. Hand back releases the hold.
+- While held, an agent Browser call is refused with `browser-person-took-over`
+  and a message saying the person took over and that it should say it is
+  waiting rather than retry. The check runs again right before an action
+  runs, as it does for a sign-in. `stop` still works and ends the page and
+  the hold with it.
+- The person's own relayed actions are not held: on the headless Browser they
+  are how the person drives the page. Every one counts as the person using it.
+- After **Hand back**, the first agent call that would click, type, press,
+  hover, choose, drag, or upload is not run: it is answered with a fresh
+  snapshot, the way **Continue** answers a sign-in, with a `note` saying the
+  person handed the page back and the call did not run. Other calls run as
+  they would and carry the ordinary note that the person used the page. The
+  agent's refs are good again from that snapshot.
+- One hold at a time per page: while the agent's sign-in ask is open, Take over
+  is refused, and Hand back never ends a sign-in; only its card does. A second
+  Take over is the same one. The page stays open while the person holds it, and
+  for as long as they keep using it; with no input for 11 minutes it ends like
+  any page whose session ran out.
+- Taking over changes no authority. It keeps the agent out and adds nothing for
+  anyone to do on the page, so it is not journaled, as the sign-in hold is not.
+- **Who may.** Take over and Hand back are the person's, from a window of this
+  computer that can see the thread, through `/api/browser/contexts/take-over`
+  and `/api/browser/contexts/hand-back`. The route checks the window's
+  capability and its authority over the thread; the service refuses a routine's
+  window and a page that is not there, in another window, or whose authority
+  ended. A routine, a subagent, and a terminal CLI never reach it: it is not
+  an operation of the agent tool. A paired device may not take over or hand
+  back, and the gateway does not admit the paths for it.
+- Rationale: a paired device may tap, press, and scroll a Private page today
+  (`remoteBrowserActionReach`), but it cannot type, choose, or navigate, and
+  holding the agent out of a page is only worth something to a person who can
+  use it. Refusing the device keeps the route's authority exactly the local
+  window's, adds no remote surface for the gateway to list, and means a phone
+  can never lock the agent out of the desktop's page. A paired device that
+  wants the agent to stop can stop the turn, as it can today.
+- Rationale: reusing the sign-in hold keeps one place that decides the page is
+  the person's, so every agent path (Work, Code, a batch's steps, an action
+  that waited on an approval) already checks it. The refusal names a different
+  reason because "waiting for the person to sign in" would be false.
 
 ## Diagnostics
 

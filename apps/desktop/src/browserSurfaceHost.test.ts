@@ -333,9 +333,24 @@ describe("BrowserSurfaceHost", () => {
     const mouseGate = vi
       .mocked(created.webContents.on)
       .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
+    // The person's click during the agent's action is delivered, not dropped,
+    // and reported so the server can drop the agent's refs.
+    const personInput = vi.fn();
+    const stopListening = host.onPersonInput(personInput);
     const preventMouseRace = vi.fn();
     mouseGate?.({ preventDefault: preventMouseRace }, { type: "mouseDown" });
-    expect(preventMouseRace).toHaveBeenCalledOnce();
+    expect(preventMouseRace).not.toHaveBeenCalled();
+    expect(personInput).toHaveBeenCalledExactlyOnceWith(contextId);
+    // A pointer drifting over the page is not the person using it.
+    mouseGate?.({ preventDefault: preventMouseRace }, { type: "mouseMove" });
+    expect(personInput).toHaveBeenCalledOnce();
+    const keyGate = vi
+      .mocked(created.webContents.on)
+      .mock.calls.find(([event]) => event === "before-input-event")?.[1];
+    keyGate?.({ preventDefault: preventMouseRace }, { type: "keyDown", key: "a" });
+    expect(preventMouseRace).not.toHaveBeenCalled();
+    expect(personInput).toHaveBeenCalledTimes(2);
+    stopListening();
     const userCommand = Promise.resolve(
       host.command(contextId, { windowId: "window-a", threadId }, "reload"),
     );

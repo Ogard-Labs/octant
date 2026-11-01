@@ -524,6 +524,67 @@ describe("browser diagnostics reach the provider-facing result", () => {
     });
   }
 
+  it("refuses every call while the person has the page, but still lets stop release it", async () => {
+    const act = vi.fn(async () => snapshot());
+    const releaseThread = vi.fn(async () => snapshot());
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => snapshot({ context: activeContext(), waitingForPerson: "take-over" }),
+        create: vi.fn(),
+        act,
+        releaseThread,
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    for (const input of [{ operation: "snapshot" }, { operation: "click", selector: "#go" }]) {
+      const held = await tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify(input),
+      });
+      expect(held.isError).toBe(true);
+      expect(held.result).toMatchObject({
+        error: "browser-person-took-over",
+        message: expect.stringMatching(/took over/),
+      });
+    }
+    expect(act).not.toHaveBeenCalled();
+    await tools.execute({ name: "octant_browser", inputJson: '{"operation":"stop"}' });
+    expect(releaseThread).toHaveBeenCalledOnce();
+  });
+
+  it("says in one line that the person used the page, and in the handed-back case that the call did not run", async () => {
+    for (const [used, text] of [
+      ["used", /person used the page since you last looked/],
+      ["handed-back", /handed it back, so your call did not run/],
+    ] as const) {
+      const tools = toolsFor(
+        { revision: 3 },
+        vi.fn(async () =>
+          snapshot({
+            status: "running",
+            context: activeContext(),
+            observation: { revision: 3 } as never,
+            personUsedPage: used,
+          }),
+        ),
+      );
+      const result = await tools.execute({
+        name: "octant_browser",
+        inputJson: '{"operation":"read-page"}',
+      });
+      expect(result.result).toMatchObject({ note: expect.stringMatching(text) });
+    }
+  });
+
   it.each([
     "data:text/html;base64,aGVsbG8=",
     "data:image/png;base64,%%%",

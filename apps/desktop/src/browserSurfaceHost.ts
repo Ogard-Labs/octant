@@ -408,6 +408,16 @@ const ISOLATED_WORLD_ID = 1_001;
  */
 const MAX_USER_GRANTED_ORIGINS = 128;
 
+/**
+ * Whether an input event is a key or a click that can change a field or press
+ * a control. A pointer moving over the page, a key coming up, and the page
+ * scrolling change nothing the agent's refs name.
+ */
+function isPersonInput(input: unknown): boolean {
+  if (typeof input !== "object" || input === null || !("type" in input)) return true;
+  return input.type === "keyDown" || input.type === "char" || input.type === "mouseDown";
+}
+
 export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const surfaces = new Map<string, OwnedSurface>();
   const surfaceByWebContents = new Map<number, OwnedSurface>();
@@ -417,6 +427,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (id !== undefined) surfaceByWebContents.delete(id);
   };
   const goneListeners = new Set<(contextId: string) => void>();
+  const personInputListeners = new Set<(contextId: string) => void>();
   const stateChannel = options.stateChannel ?? DESKTOP_IPC_CHANNELS.browserSurfaceState;
 
   const surface = (contextId: string): OwnedSurface => {
@@ -605,11 +616,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       owned.control = "user";
       publish(contextId, owned);
     });
-    const gateUserInput = (event: unknown) => {
-      if (owned.control === "agent") {
-        (event as { preventDefault?: () => void }).preventDefault?.();
-        return;
+    // Everything that reaches these handlers is the person's: the agent drives
+    // the page through the debugger, which does not pass through them. The
+    // person's input is delivered, never dropped, while the agent works; the
+    // server learns of it so the agent's snapshot is not trusted afterwards.
+    const gateUserInput = (_event: unknown, input?: unknown) => {
+      if (isPersonInput(input)) {
+        for (const listener of personInputListeners) listener(contextId);
       }
+      // An action in flight keeps the surface until it ends; its end hands it back.
+      if (owned.control === "agent") return;
       owned.control = "user";
       publish(contextId, owned);
     };
@@ -624,6 +640,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
 
   return Object.freeze({
     available: (): boolean => true,
+    /** The person typed or clicked in a page of this host. */
+    onPersonInput: (listener: (contextId: string) => void): (() => void) => {
+      personInputListeners.add(listener);
+      return () => personInputListeners.delete(listener);
+    },
     onContextGone: (listener: (contextId: string) => void): (() => void) => {
       goneListeners.add(listener);
       return () => goneListeners.delete(listener);

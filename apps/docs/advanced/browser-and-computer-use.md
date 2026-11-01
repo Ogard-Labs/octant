@@ -230,6 +230,19 @@ agent waits and never sees what you type. Press **Continue** and the agent
 picks up from the page you left. A routine, a subagent, a program in a
 terminal, or a turn started from your phone cannot ask this.
 
+You and the agent can use the same page. If you type or click while the agent
+is working, your keys and clicks go through; nothing is dropped. The agent is
+told that you used the page, and it will not click or type again until it has
+looked at the page afresh, so it never writes over what you were typing.
+
+To work on the page without the agent, press **Take over** in the Browser's
+toolbar. The agent's Browser calls are refused while you have the page, and the
+toolbar says "You have the page". Press **Hand back** when you are done; the
+agent's next step is answered with a fresh look at the page you left. Only you,
+at this computer, can take over or hand back: a turn started from your phone,
+a routine, a subagent, or a program in a terminal cannot. If you walk away, a
+page you took over closes after 11 minutes without use, like any other page.
+
 To find out why a page misbehaves, the agent can read the page's console
 errors (and warnings if it asks), requests that failed, and requests that came
 back with an error status such as 404 or 500. It sees only the address and the

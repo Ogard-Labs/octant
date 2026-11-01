@@ -185,6 +185,34 @@ describe("BrowserAutomationClient", () => {
     ]);
   });
 
+  it("takes the page over and hands it back by thread, and reads what the host holds", async () => {
+    const requests: Array<{ readonly path: string; readonly body: unknown }> = [];
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch: vi.fn(async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        requests.push({ path, body: JSON.parse(String(init?.body)) });
+        return Response.json({
+          status: "ready",
+          threadId,
+          evidence: [],
+          ...(path.endsWith("/take-over") ? { waitingForPerson: "take-over" } : {}),
+        });
+      }),
+      windowCapability: capability,
+    });
+
+    const taken = await client.takeOver?.({ threadId: threadId as any });
+    const handed = await client.handBack?.({ threadId: threadId as any });
+
+    expect(taken?.waitingForPerson).toBe("take-over");
+    expect(handed?.waitingForPerson).toBeUndefined();
+    expect(requests).toEqual([
+      { path: "/api/browser/contexts/take-over", body: { threadId } },
+      { path: "/api/browser/contexts/hand-back", body: { threadId } },
+    ]);
+  });
+
   it("maps request aborts to interrupted", async () => {
     const controller = new AbortController();
     const client = createBrowserAutomationClient({

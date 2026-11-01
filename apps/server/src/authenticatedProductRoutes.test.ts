@@ -510,6 +510,9 @@ describe("authenticated product route dispatch", () => {
       "/api/browser/contexts/release",
       "/api/browser/contexts/cancel",
       "/api/browser/contexts/stop",
+      // Holding the agent out of a page is the person's, at this computer.
+      "/api/browser/contexts/take-over",
+      "/api/browser/contexts/hand-back",
     ]) {
       expect(
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),

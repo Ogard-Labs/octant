@@ -183,7 +183,10 @@ function agentTool(
       readonly isError: boolean;
       readonly images?: ReadonlyArray<unknown>;
       readonly result: {
-        readonly failure?: { readonly category: string };
+        readonly error?: string;
+        readonly message?: string;
+        readonly note?: string;
+        readonly failure?: { readonly category: string; readonly message?: string };
         readonly page?: Record<string, unknown> & { readonly snapshot?: string };
       };
     };
@@ -704,6 +707,55 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     });
     expect((await declined.call({ operation: "snapshot" })).isError).toBe(false);
     await declined.stop();
+  });
+
+  it("holds the agent while the person has the page, keeps the person's typing, and resumes with a fresh snapshot", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    const nameRef = refFor(outline, /"Name"/);
+
+    expect(tool.service.takeOver(windowId, threadId).waitingForPerson).toBe("take-over");
+    const held = await tool.call({ operation: "click", ref: refFor(outline, /"Save"/) });
+    expect(held.isError).toBe(true);
+    expect(held.result.error).toBe("browser-person-took-over");
+    expect(held.result.message).toMatch(/took over/);
+    expect((await tool.call({ operation: "snapshot" })).result.error).toBe(
+      "browser-person-took-over",
+    );
+
+    // The person types in the pane; their relayed action is not held.
+    const context = tool.service.inspectThread(windowId, threadId).context;
+    if (context === undefined) throw new Error("no page");
+    const person = await tool.service.act({
+      windowId,
+      request: {
+        actionId: context.actionId,
+        contextId: context.contextId,
+        correlationId: context.correlationId,
+        authority: context.authority,
+        kind: "type",
+        target: "#name",
+        value: "Grace",
+      },
+    });
+    expect(person.failure).toBeUndefined();
+
+    expect(tool.service.handBack(windowId, threadId).waitingForPerson).toBeUndefined();
+    // The agent's text would have overwritten the person's; its call is
+    // answered with a fresh snapshot instead and the field keeps "Grace".
+    const resumed = await tool.call({ operation: "type", ref: nameRef, text: "Ada" });
+    expect(resumed.isError).toBe(false);
+    expect(resumed.result.note).toMatch(/handed it back/);
+    expect(resumed.result.page?.snapshot).toMatch(/- textbox "Name" \[ref=e\d+\] value="Grace"/);
+    const after = await tool.call({
+      operation: "type",
+      ref: refFor(resumed.result.page?.snapshot, /"Name"/),
+      text: "Ada",
+    });
+    expect(after.isError).toBe(false);
+    expect(after.result.note).toBeUndefined();
+    await tool.stop();
   });
 
   it("refuses to ask for a sign-in on a routine, subagent, terminal, or paired-device turn", async () => {

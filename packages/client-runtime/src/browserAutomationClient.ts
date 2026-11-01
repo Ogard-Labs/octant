@@ -69,6 +69,18 @@ export interface BrowserAutomationClient {
     signal?: AbortSignal,
   ): Promise<BrowserAutomationSnapshot>;
   act(input: BrowserActionCommand, signal?: AbortSignal): Promise<BrowserAutomationSnapshot>;
+  /**
+   * The person takes the thread's page, which holds every agent Browser call on
+   * it, and hands it back. Absent on a client that cannot.
+   */
+  takeOver?(
+    input: BrowserThreadContextCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserAutomationSnapshot>;
+  handBack?(
+    input: BrowserThreadContextCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserAutomationSnapshot>;
   cancel(
     input: BrowserContextCancelCommand,
     signal?: AbortSignal,
@@ -169,6 +181,22 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/actions",
         decodeBrowserActionCommand(input),
+        decodeHostAnswer(BrowserAutomationSnapshot),
+        signal,
+      ),
+    takeOver: (input, signal) =>
+      post(
+        options,
+        "/api/browser/contexts/take-over",
+        decodeBrowserThreadContextCommand(input),
+        decodeHostAnswer(BrowserAutomationSnapshot),
+        signal,
+      ),
+    handBack: (input, signal) =>
+      post(
+        options,
+        "/api/browser/contexts/hand-back",
+        decodeBrowserThreadContextCommand(input),
         decodeHostAnswer(BrowserAutomationSnapshot),
         signal,
       ),

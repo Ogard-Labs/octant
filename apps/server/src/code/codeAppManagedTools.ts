@@ -6,6 +6,7 @@ import {
   browserToolWantsScreenshot,
   parseBrowserToolInput,
   handBrowserToPerson,
+  heldForPersonAnswer,
   runBrowserToolSteps,
   signInPageRefusal,
   type BrowserToolAnswer,
@@ -1139,7 +1140,9 @@ async function browserTool(
   if (postureFailure !== undefined) return failure(postureFailure);
   let snapshot = options.browser.inspectThread(options.windowId, threadId);
   // While the person signs in, the page is theirs; see Work's tool.
-  if (snapshot.waitingForPerson !== undefined) return failure("browser-waiting-for-person");
+  if (snapshot.waitingForPerson !== undefined) {
+    return heldForPersonAnswer(snapshot.waitingForPerson);
+  }
   if (input.operation === "sign-in") {
     const refusal =
       options.browserSignIn === undefined
@@ -1249,9 +1252,10 @@ async function browserTool(
     }
   }
   // The page may have been handed to the person while an approval waited.
-  if (options.browser.inspectThread(options.windowId, threadId).waitingForPerson !== undefined) {
+  const heldNow = options.browser.inspectThread(options.windowId, threadId).waitingForPerson;
+  if (heldNow !== undefined) {
     await releaseUpload?.();
-    return failure("browser-waiting-for-person");
+    return heldForPersonAnswer(heldNow);
   }
   // The service keeps the copies until the page closes; see Work's tool.
   const release = releaseUpload;
