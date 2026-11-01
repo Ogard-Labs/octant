@@ -21,6 +21,11 @@ import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { isRoutineHostScope } from "../routineHostScope";
 import { BrowserExtensionService } from "../browser/browserExtensionService";
 import { BrowserProfileService } from "../browser/browserProfileService";
+import {
+  BrowserFlowRecorder,
+  BrowserFlowService,
+  type BrowserFlowToolPort,
+} from "../browser/browserFlows";
 import { createBrowserCookieReader } from "../browser/cookieImport/browserCookieReader";
 import { readKeychainPasswordWithSecurityTool } from "../browser/cookieImport/keychainPassword";
 import { ProjectBrowserService } from "../browser/projectBrowserService";
@@ -298,6 +303,27 @@ export function wireBrowser(deps: BrowserDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    // The Project's saved Browser flows and the recorder of each page's run.
+    // Both live as long as the host, because a turn's tool set is rebuilt each
+    // turn and the run it recorded must outlive it.
+    const browserFlowService = new BrowserFlowService({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      readProject: persistence.readProject,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    const browserFlows: BrowserFlowToolPort = {
+      service: browserFlowService,
+      recorder: new BrowserFlowRecorder(),
+      caller: (windowId) =>
+        browserToolApprovalService.isPairedDevice(windowId)
+          ? "paired-device"
+          : browserToolApprovalService.isUnattendedScope(windowId)
+            ? "unattended"
+            : "person",
+    };
     // Notes the user points at the running product. The service owns the
     // authority check and resolves the element itself; the crop lives in the
     // same purgeable evidence store the rest of Code's bulk content uses, and
@@ -355,6 +381,8 @@ export function wireBrowser(deps: BrowserDependencies) {
     return {
       browserAutomationService,
       browserExtensionService,
+      browserFlowService,
+      browserFlows,
       browserProfileService,
       browserToolApprovalService,
       liveProjectBrowsers,

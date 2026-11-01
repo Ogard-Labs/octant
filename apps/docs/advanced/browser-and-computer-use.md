@@ -287,6 +287,29 @@ agent that does not advertise HTTP MCP, unless Octant verified that exact
 release accepts it anyway. Nothing is routed to another model or
 provider in its place.
 
+### Saved flows
+
+When the agent has done a check once, it can save it as a flow in the Project
+and repeat it later without working out each step again. Ask, for example, "save
+that as a flow called Order check", and later "run the Order check flow". A flow
+is a fixed list of the steps the agent took, with the element each one used
+described by its role and name, and the page address path and title expected
+after each step. It holds no page text and no script.
+
+Each step of a replay is checked as if the agent had made it by hand: you are
+asked about a site you have not allowed, Plan mode refuses it, and a page that
+needs your sign-in is never part of a flow. The replay stops at the first step
+that fails, finds no single matching element (a button that changed its name,
+say), or leaves the page at a different address or title than before, and the
+agent tells you which step and what it found instead. A routine can run a flow on
+a private page but cannot save one, and a turn started from your phone can do
+neither.
+
+Settings › Data & storage › Browser flows lists the flows of every Project with
+their step count and starting address, and deletes one. A flow is stored on this
+Mac with the Project, goes when the Project is erased, and is not part of a
+thread export.
+
 ### When a Browser call does not go through
 
 Each of these is a named, visible result; none of them leaves the agent

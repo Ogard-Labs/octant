@@ -1,4 +1,5 @@
 import {
+  BROWSER_FLOW_AGGREGATE_TYPE,
   NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE,
   TOOL_EGRESS_PROJECT_AGGREGATE,
   TOOL_EGRESS_THREAD_AGGREGATE,
@@ -347,6 +348,11 @@ export function erasePurgedProjectData(input: {
     [
       `${TOOL_EGRESS_PROJECT_AGGREGATE}:${projectId}`,
       { aggregateType: TOOL_EGRESS_PROJECT_AGGREGATE, aggregateId: projectId },
+    ],
+    // The Project's saved Browser flows are its data, so an erase takes them.
+    [
+      `${BROWSER_FLOW_AGGREGATE_TYPE}:${projectId}`,
+      { aggregateType: BROWSER_FLOW_AGGREGATE_TYPE, aggregateId: projectId },
     ],
     [
       `${CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE}:${projectId}`,

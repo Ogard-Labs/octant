@@ -166,7 +166,7 @@ export type RemoteDependencies = Pick<
     | "providerService"
   > &
   Pick<WorkspaceWiring, "shellService"> &
-  Pick<BrowserWiring, "browserExtensionService" | "browserProfileService"> &
+  Pick<BrowserWiring, "browserExtensionService" | "browserFlowService" | "browserProfileService"> &
   Pick<
     CodeToolingWiring,
     | "debugConfigurationApprovals"
@@ -212,6 +212,7 @@ function deviceIsActive(
 export function wireRemote(deps: RemoteDependencies) {
   const {
     browserExtensionService,
+    browserFlowService,
     browserProfileService,
     agentMessageService,
     agentRunAdmission,
@@ -1067,6 +1068,7 @@ export function wireRemote(deps: RemoteDependencies) {
         .forgetProfile(profile)
         .then(() => browserProfileService.eraseProject(decodeProjectId(projectId)))
         .catch(() => undefined);
+      browserFlowService.forget(decodeProjectId(projectId));
       toolEgressRules.forgetProject(projectId);
       languageServerApprovals.forgetProject(decodeProjectId(projectId));
       // The erase removed this Project's confirmations and session records;
