@@ -44,6 +44,7 @@ import {
 } from "../network/providerRuntimeNetwork";
 import {
   acquireProviderServerAccess,
+  serverAccessSeatbeltRules,
   withServerAccess,
   type ProviderServerAccess,
   type ProviderServerAccessPort,
@@ -503,6 +504,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           platform === "linux" ? denyPaths.filter((path) => pathExists(path)) : denyPaths;
         const extraRules = [
           ...loopbackRules,
+          ...(platform === "darwin" ? serverAccessSeatbeltRules(input.servers) : []),
           ...(platform === "darwin"
             ? denyPaths.flatMap((path) => [
                 seatbeltDenyRule("file-read*", path),

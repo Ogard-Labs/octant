@@ -35,6 +35,7 @@ import {
 } from "../network/providerRuntimeNetwork";
 import {
   acquireProviderServerAccess,
+  serverAccessSeatbeltRules,
   withServerAccess,
   type ProviderServerAccess,
   type ProviderServerAccessPort,
@@ -788,6 +789,7 @@ export function prepareCodexLaunch(input: {
         ? {
             extraRules: [
               ...CODEX_SEATBELT_SERVICE_RULES,
+              ...serverAccessSeatbeltRules(input.servers),
               ...authorityEntries.map((path) => seatbeltDenyRule("file-write*", path)),
             ],
           }

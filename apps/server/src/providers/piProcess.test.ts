@@ -488,6 +488,7 @@ describe("Pi process boundary", () => {
       }),
     );
     expect(launch.args[1]).toContain(folder);
+    expect(launch.args[1]).toContain("com.apple.system.opendirectoryd.libinfo");
     expect(launch.environment.SSH_AUTH_SOCK).toBe(join(folder, "agent"));
     expect(launch.environment.PATH).toBe(`${join(folder, "bin")}:/usr/bin`);
   });

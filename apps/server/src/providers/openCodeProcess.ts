@@ -45,6 +45,7 @@ import {
 } from "../network/providerRuntimeNetwork";
 import {
   acquireProviderServerAccess,
+  serverAccessSeatbeltRules,
   withServerAccess,
   type ProviderServerAccess,
   type ProviderServerAccessPort,
@@ -1143,6 +1144,7 @@ function prepareOpenCodeLaunch(
                 ...loopbackPorts.map(
                   (bridgePort) => `(allow network-outbound (remote ip "localhost:${bridgePort}"))`,
                 ),
+                ...serverAccessSeatbeltRules(input.servers),
                 // Its provider listing resolves the other coding tools' home
                 // directories first, and a refusal there fails the listing.
                 ...openCodeDiscoveryRules(profile.environment.HOME),

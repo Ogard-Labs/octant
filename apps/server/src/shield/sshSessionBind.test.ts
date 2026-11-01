@@ -64,12 +64,18 @@ function rsa(signatureType: "rsa-sha2-256" | "ssh-rsa" = "rsa-sha2-256"): HostKe
     signs: (data) =>
       Buffer.concat([
         sshString(signatureType),
-        sshString(sign(signatureType === "ssh-rsa" ? "sha1" : "sha256", data, privateKey as KeyObject)),
+        sshString(
+          sign(signatureType === "ssh-rsa" ? "sha1" : "sha256", data, privateKey as KeyObject),
+        ),
       ]),
   };
 }
 
-function bindMessage(key: HostKey, sessionId: Buffer, options: { readonly forwarding?: boolean; readonly signedBy?: HostKey } = {}) {
+function bindMessage(
+  key: HostKey,
+  sessionId: Buffer,
+  options: { readonly forwarding?: boolean; readonly signedBy?: HostKey } = {},
+) {
   return Buffer.concat([
     Buffer.from([27]),
     sshString("session-bind@openssh.com"),
@@ -95,7 +101,9 @@ describe("an ssh session's binding to its server's host key", () => {
 
   it("refuses a binding another key signed, a SHA-1 signature, or a malformed message", () => {
     const key = ed25519();
-    expect(verifiedSessionBinding(bindMessage(key, sessionId, { signedBy: ed25519() }))).toBeUndefined();
+    expect(
+      verifiedSessionBinding(bindMessage(key, sessionId, { signedBy: ed25519() })),
+    ).toBeUndefined();
     expect(verifiedSessionBinding(bindMessage(rsa("ssh-rsa"), sessionId))).toBeUndefined();
     const good = bindMessage(key, sessionId);
     expect(verifiedSessionBinding(good.subarray(0, good.length - 1))).toBeUndefined();
@@ -104,15 +112,21 @@ describe("an ssh session's binding to its server's host key", () => {
   });
 
   it("says when the binding came through a forwarded agent", () => {
-    expect(verifiedSessionBinding(bindMessage(ecdsa(), sessionId, { forwarding: true }))?.forwarding).toBe(
-      true,
-    );
+    expect(
+      verifiedSessionBinding(bindMessage(ecdsa(), sessionId, { forwarding: true }))?.forwarding,
+    ).toBe(true);
   });
 
   it("reads the session id a login request names and the key a known-hosts line records", () => {
     const key = ed25519();
-    expect(loginSessionId(Buffer.concat([sshString(sessionId), Buffer.from([50])]))).toEqual(sessionId);
-    expect(hostKeyOfKnownHostLine(`web1 ssh-ed25519 ${key.blob.toString("base64")}`)).toEqual(key.blob);
-    expect(hostKeyOfKnownHostLine(`@cert-authority * ssh-ed25519 ${key.blob.toString("base64")}`)).toBeUndefined();
+    expect(loginSessionId(Buffer.concat([sshString(sessionId), Buffer.from([50])]))).toEqual(
+      sessionId,
+    );
+    expect(hostKeyOfKnownHostLine(`web1 ssh-ed25519 ${key.blob.toString("base64")}`)).toEqual(
+      key.blob,
+    );
+    expect(
+      hostKeyOfKnownHostLine(`@cert-authority * ssh-ed25519 ${key.blob.toString("base64")}`),
+    ).toBeUndefined();
   });
 });

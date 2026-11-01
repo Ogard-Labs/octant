@@ -1,5 +1,6 @@
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
+import { seatbeltAllowMachLookupRule } from "../process/seatbeltProfile";
 import type { RuntimeServerAccess } from "./runtimeServerAccess";
 
 /**
@@ -16,7 +17,10 @@ export interface ProviderServerAccessPort {
 }
 
 /** What a launch adds: a folder to read, wrappers first on `PATH`, and its agent socket. */
-export type ProviderServerAccess = Pick<RuntimeServerAccess, "folder" | "binDirectory" | "agentSocket">;
+export type ProviderServerAccess = Pick<
+  RuntimeServerAccess,
+  "folder" | "binDirectory" | "agentSocket"
+>;
 
 /**
  * Opens the folder for the life of the launch's scope, below Full access
@@ -52,6 +56,21 @@ export function acquireProviderServerAccess(
   );
 }
 
+/**
+ * What a macOS runtime profile adds for the folder: `ssh` looks up the
+ * person's own account before it connects, and inside the profile stopped
+ * with "No user exists for uid" until the user database was reachable.
+ */
+export function serverAccessSeatbeltRules(
+  servers: ProviderServerAccess | undefined,
+): ReadonlyArray<string> {
+  return servers === undefined
+    ? []
+    : [seatbeltAllowMachLookupRule("com.apple.system.opendirectoryd.libinfo")];
+}
+
+const DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+
 /** The launch's environment with the wrappers first on its `PATH` and the agent socket set. */
 export function withServerAccess(
   environment: NodeJS.ProcessEnv,
@@ -61,7 +80,8 @@ export function withServerAccess(
   const path = environment.PATH;
   return {
     ...environment,
-    PATH: path === undefined || path === "" ? servers.binDirectory : `${servers.binDirectory}:${path}`,
+    // A launch with no `PATH` keeps the system's default after the wrappers.
+    PATH: `${servers.binDirectory}:${path === undefined || path === "" ? DEFAULT_PATH : path}`,
     SSH_AUTH_SOCK: servers.agentSocket,
   };
 }

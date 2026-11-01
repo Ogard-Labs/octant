@@ -1138,7 +1138,9 @@ and Code alike: a thread runs `ssh`, `scp`, or `rsync` as ordinary commands.
 Octant carries no SSH protocol of its own; the commands use the person's own
 SSH agent, or for a server the person chose it for a key Octant made and
 keeps in the credential broker, and, at Full access, their own configuration. Below Full access a harness command reaches a registered
-server through relays and an agent socket the host opens for that one command
+server through relays and an agent socket the host opens for that one command,
+and a provider runtime's own commands through a folder and an agent socket
+the host opens for its launch
 ([Octant Shield](#octant-shield), servers as built). No mode bans them: in
 Work as in Code they are commands at the thread's level. At Guarded, the
 first connection to each host in a thread asks the person, naming the host,
@@ -11244,8 +11246,7 @@ server's port straight to its relay rather than through the egress proxy as
 a `CONNECT`, as the tool bridge's ports go: the relay already reaches one
 address and nothing else, the proxy would refuse that address as private,
 and macOS's Seatbelt rule likewise opens the relay beside the proxy, not
-through it. Not built: a provider runtime's own commands, which run in its
-own sandbox or the provider launch profile and keep today's reach.
+through it. A provider runtime's own commands reach a server as below.
 
 **Guarded.** The first connection to each host in a thread asks the person,
 naming the host ("First connection to web1 in this thread"), and is never
@@ -11262,6 +11263,53 @@ the Watcher as `remote-command` outside content. A runtime that names no
 command (OpenCode, ACP agents, Pi) keeps Shield's journaled decision as its
 record. A failure with no exit status is recorded as `unavailable`, since it
 may not have run.
+
+A runtime runs its shell commands itself, so Octant cannot open a path per
+command as it does for a harness command. Below Full access, outside Plan
+(which runs no shell), each launch of Codex, OpenCode, an ACP agent, Pi, or
+Claude Code gets instead, for its life, from the host
+(`apps/server/src/shield/runtimeServerAccess.ts`):
+
+- a private folder it reads and cannot write (a read root of its OS
+  profile; on Linux bound read-only into its capsule) holding an SSH config,
+  a known-hosts file, and `ssh`, `scp`, and `rsync` wrappers first on its
+  `PATH`. Each of the Project's registered servers is its alias at the
+  address the person's own `ssh -G` resolves, with the registered user, the
+  host keys the person's known-hosts files record, strict host key checking,
+  and forwarding, proxy commands, local commands, and connection sharing off;
+  a server reached through `ProxyJump` or `ProxyCommand` gets no entry;
+- an agent socket in that folder, named by its `SSH_AUTH_SOCK`, that signs a
+  login only on a connection `ssh` first bound, with OpenSSH's
+  `session-bind@openssh.com`, to the host key of one of the Project's
+  registered servers (the host key's signature over the session id is
+  checked), for that session, as that server's registered user, and never
+  on a forwarded or second binding. It lists the person's agent's keys and
+  passes them only listing and signing; for a server that signs in with a
+  key Octant keeps it offers that key and has the credential broker sign,
+  and never signs for it with the person's agent. Several registered
+  servers on one machine share its host key; the login's user picks among
+  them. It reads the Project's
+  list again at each binding, so a server removed meanwhile signs nothing;
+- on macOS, the user-database lookup `ssh` makes for the person's own
+  account, in the runtime's profile.
+
+Claude Code's own process runs outside Octant's profile below Full access,
+so a command it runs outside its own sandbox could rewrite the folder; the
+agent socket's host-key check, which lives on the host, still decides what
+signs. Reaching the address is the runtime's own network: open while Network limits
+are off. With limits on, a runtime's own `ssh` reaches no server, since its
+OS rules open only its egress proxy, which carries no SSH. A runtime's own
+sandbox applies on top: Claude Code's reads only the Project and reaches the
+network only through its proxy, and Codex's turns the network off, so `ssh`
+works there only for a command the runtime runs outside its sandbox, after
+its own approval, as in the provider's own app. Each command still reaches
+Shield as the runtime asks about it. _Rationale:_ a launch-wide grant is the
+narrowest a runtime allows, so the agent socket, not the network, limits it
+to registered servers: a login signs only after the server has proved it
+holds a registered host key, so the runtime's `ssh` can sign in nowhere else
+whatever address it dials; an `ssh` older than OpenSSH 8.9 sends no binding
+and gets no signature. A per-launch relay under Network limits is not part of
+this; it would need each runtime's profile to open the relays.
 
 **The credential broker for SSH.** For a server registered to sign in with
 a key Octant keeps, the credential broker makes an Ed25519 key the first time

@@ -1735,6 +1735,7 @@ describe("ACP probe confinement", () => {
       }),
     );
     expect(seatbeltProfile(launch)).toContain(folder);
+    expect(seatbeltProfile(launch)).toContain("com.apple.system.opendirectoryd.libinfo");
     expect(launch.environment.SSH_AUTH_SOCK).toBe(join(folder, "agent"));
     expect(launch.environment.PATH?.split(":")[0]).toBe(join(folder, "bin"));
   });

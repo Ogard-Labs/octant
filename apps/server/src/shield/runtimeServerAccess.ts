@@ -52,7 +52,7 @@ export interface RuntimeServerAccessOptions {
 type AccessServer = Pick<ShieldServer, "serverId" | "alias" | "user" | "signIn">;
 
 /** A name or address `ssh -G` printed that a config line can carry as it is. */
-const PLAIN_HOSTNAME = /^[A-Za-z0-9._:%-]+$/;
+const PLAIN_HOSTNAME = /^[A-Za-z0-9._:-]+$/;
 
 /**
  * Opens the folder for the servers `servers()` names now. The agent reads the

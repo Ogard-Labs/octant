@@ -445,8 +445,14 @@ change what your agent holds. The server must already be in your
 `known_hosts`, so connect once from your own terminal first. A server you
 reach through a jump host gets no path.
 
-What this does not cover yet: commands that Claude Code, Codex, or another
-agent runs with its own shell keep the reach that agent's sandbox gives it. Octant records them when
+Commands that Claude Code, Codex, or another agent runs with its own shell
+get a similar path for the whole session: a small SSH setup that names only
+your registered servers, and a sign-in that works only after the server has
+proved, with its host key, that it is one of them. They use the agent's own
+network, so with **Network limits** on they cannot reach a server. The
+agent's own sandbox still applies: inside Claude Code's or Codex's sandbox,
+`ssh` stays blocked, as it does in their own apps, until you approve running
+the command outside it. Octant records them when
 the agent says what it ran, and Codex also reports the exit status.
 
 ## Remote transport

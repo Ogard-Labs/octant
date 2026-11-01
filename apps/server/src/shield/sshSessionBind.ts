@@ -111,7 +111,12 @@ function hostKeySigned(hostKey: Buffer, data: Buffer, signature: Buffer): boolea
       const e = key.string();
       const n = key.string();
       if (hash === undefined || e === undefined || n === undefined || !key.done()) return false;
-      return verify(hash, data, publicKey({ kty: "RSA", e: url(unsigned(e)), n: url(unsigned(n)) }), raw);
+      return verify(
+        hash,
+        data,
+        publicKey({ kty: "RSA", e: url(unsigned(e)), n: url(unsigned(n)) }),
+        raw,
+      );
     }
   } catch {
     return false;

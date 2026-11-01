@@ -763,7 +763,12 @@ describe("Codex launch confinement", () => {
     const prepared = prepareCodexLaunch({
       binaryPath: "/bin/sh",
       args: ["-c", "true"],
-      authority: { kind: "thread", root: tmpdir(), mode: "code", executionPolicy: "approval-gated" },
+      authority: {
+        kind: "thread",
+        root: tmpdir(),
+        mode: "code",
+        executionPolicy: "approval-gated",
+      },
       environment: { HOME: homedir(), PATH: "/usr/bin:/bin" },
       confinement: {
         prepare: (input) => {

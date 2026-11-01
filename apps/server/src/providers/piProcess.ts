@@ -51,6 +51,7 @@ import {
 } from "../network/providerRuntimeNetwork";
 import {
   acquireProviderServerAccess,
+  serverAccessSeatbeltRules,
   withServerAccess,
   type ProviderServerAccess,
   type ProviderServerAccessPort,
@@ -704,7 +705,14 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 ...credentialPaths,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
               ],
-              ...(bridgeRule === undefined ? {} : { extraRules: [bridgeRule] }),
+              ...(platform === "darwin" && (bridgeRule !== undefined || input.servers !== undefined)
+                ? {
+                    extraRules: [
+                      ...(bridgeRule === undefined ? [] : [bridgeRule]),
+                      ...serverAccessSeatbeltRules(input.servers),
+                    ],
+                  }
+                : {}),
               ...(linuxBridgeRelay.length === 0 ? {} : { loopbackRelayPorts: linuxBridgeRelay }),
             }),
           catch: (error) =>

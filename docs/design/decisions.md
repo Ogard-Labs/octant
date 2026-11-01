@@ -226,7 +226,7 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Built: the secret guard's list handed to the Watcher and the Judge, and a journaled tag for a secret-then-network command at Full access.
 - Not readable: a web search Codex's model provider runs itself reports no results, so it is marked but not read.
 - Built: the Judge's fast allow for egress to a safe network, for a call that names its destinations (never a shell command), only while Network limits are on and only on an untainted thread.
-- Not built yet: a provider runtime's own confined commands reaching a registered server; the false-allow rate of a real model is unmeasured.
+- Not built yet: the false-allow rate of a real model is unmeasured.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
 
@@ -258,7 +258,8 @@ The person registers their own servers with an action profile, and SSH to a regi
 - Built: the server registry in Settings › Access › Servers with a Project's own list replacing the account list for its threads; the Judge's rules by profile for `ssh`, `scp`, and `rsync` (a download reads, an upload is Admin, a deleting sync is a lock-out action); every remote command journaled with its host, and its exit status where the runtime reports it (the Octant Harness and Codex); remote output through the Watcher (harness and Codex); runbooks given to every runtime's Work and Code turns as notes that grant nothing; at Guarded the first connection to each host in a thread asks, naming the host, and no remembered approval covers it.
 - Built on macOS and Linux: below Full access a harness command that is one plain `ssh`, `scp`, or `rsync` call reaches only the registered servers it names, through per-command relays (loopback ports Seatbelt opens on macOS; on Linux sockets the capsule's forwarder carries a port inside the capsule to) and an agent socket the host owns that only lists keys and signs; the key files stay unreadable and the secret guard's list is unchanged. Octant carries no SSH protocol of its own.
 - Built: the credential broker for SSH. A server can sign in with a key Octant keeps instead of the person's agent; Settings › Access › Servers shows its public line for the person to add to the server, and a confined command's login for that server goes through an agent socket of its own that only the broker signs for, never falling back to the person's agent.
-- Not built yet: a provider runtime's own commands reaching a registered server below Full access, and a command record (with exit status) for runtimes that do not name their commands (OpenCode, ACP agents, Pi), which keep Shield's journaled decision as their record.
+- Built: a provider runtime's own commands (Codex, OpenCode, ACP agents, Pi, Claude Code) reach the Project's registered servers below Full access, outside Plan, through a read-only folder the launch gets (an SSH config, known hosts, and wrappers first on `PATH`) and an agent socket that signs a login only on a connection bound to a registered server's recorded host key, as its registered user; reaching the address is the runtime's own network, so with Network limits on its `ssh` reaches no server, and a runtime's own sandbox still applies on top.
+- Not built yet: a command record (with exit status) for runtimes that do not name their commands (OpenCode, ACP agents, Pi), which keep Shield's journaled decision as their record.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield) and [Modes](../architecture.md#modes-chat-work-and-code).
 

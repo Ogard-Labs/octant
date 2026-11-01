@@ -101,8 +101,13 @@ export async function openRuntimeServerAgent(
 }
 
 interface ConnectionState {
-  /** The one server this connection proved it reached; undefined until then. */
-  bound: { readonly binding: SessionBinding; readonly server: RuntimeAgentServer } | undefined;
+  /**
+   * The servers this connection proved it reached: every registered server
+   * with that host key, since two aliases or users on one machine share it.
+   */
+  bound:
+    | { readonly binding: SessionBinding; readonly servers: ReadonlyArray<RuntimeAgentServer> }
+    | undefined;
   /** A second or forwarded binding was offered: this connection signs nothing. */
   refused: boolean;
 }
@@ -179,14 +184,14 @@ async function bind(
     state.bound = undefined;
     return failure();
   }
-  const server = (await options.servers()).find((candidate) =>
+  const servers = (await options.servers()).filter((candidate) =>
     candidate.hostKeys.some((key) => key.equals(binding.hostKey)),
   );
-  if (server === undefined) {
+  if (servers.length === 0) {
     state.refused = true;
     return failure();
   }
-  state.bound = { binding, server };
+  state.bound = { binding, servers };
   return frame(Buffer.from([AGENT_SUCCESS]));
 }
 
@@ -244,7 +249,9 @@ async function signLogin(
   const sessionId = login.string();
   if (sessionId === undefined || !sessionId.equals(bound.binding.sessionId)) return failure();
   if (login.byte() !== USERAUTH_REQUEST) return failure();
-  if (login.string()?.toString("utf8") !== bound.server.user) return failure();
+  const user = login.string()?.toString("utf8");
+  const server = bound.servers.find((candidate) => candidate.user === user);
+  if (server === undefined) return failure();
   if (login.string()?.toString("latin1") !== "ssh-connection") return failure();
   const method = login.string()?.toString("latin1");
   if (method !== "publickey" && method !== HOSTBOUND_PUBLICKEY) return failure();
@@ -256,13 +263,13 @@ async function signLogin(
     return failure();
   }
   if (!login.done()) return failure();
-  if (bound.server.octantKey?.equals(blob) === true) {
-    const signature = await options.signWithOctantKey(bound.server.serverId, data);
+  if (server.octantKey?.equals(blob) === true) {
+    const signature = await options.signWithOctantKey(server.serverId, data);
     return signature === undefined
       ? failure()
       : frame(Buffer.concat([Buffer.from([14]), sshString(signature)]));
   }
-  if (bound.server.octantOnly === true) return failure();
+  if (server.octantOnly === true) return failure();
   const upstream = options.personAgentSocket();
   if (upstream === undefined) return failure();
   const reply = await ask(upstream, frame(message));
