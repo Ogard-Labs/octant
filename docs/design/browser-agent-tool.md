@@ -238,7 +238,10 @@ only after the person approves it.
 ## Asking the person to sign in
 
 - `sign-in` (with an optional `reason`, at most 300 characters) hands the open
-  page to the person when it needs an account. It needs a page open already.
+  page to the person when it needs an account. It needs a page open already, in
+  the desktop app's own Browser: a headless page reaches the person only as a
+  picture, and typing into its password field is refused like any other
+  relayed typing, so there it is refused (`sign-in-needs-the-app-browser`).
 - The person sees a card in the thread: "The agent asks you to sign in on
   example.com", the reason, and **Continue** and **Cancel**. Work shows it with
   the thread's Browser approvals and Code with the Browser requests in its
