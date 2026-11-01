@@ -442,7 +442,9 @@ async function openSocketDirectory(
   closers: Array<() => Promise<void>>,
 ): Promise<string> {
   const parent = await realpath(options.socketParent ?? tmpdir());
-  const socketDirectory = await mkdtemp(join(parent, "octant-ssh-"));
+  // Not `octant-ssh-`: confined launches are denied every socket under that
+  // prefix in /tmp, where a server Project keeps its shared connections.
+  const socketDirectory = await mkdtemp(join(parent, "octant-shield-ssh-"));
   closers.push(() => rm(socketDirectory, { recursive: true, force: true }));
   return socketDirectory;
 }
