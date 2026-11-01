@@ -5,6 +5,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
 import { registeredServerFor, remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
+import { openKeyAgent } from "./sshKeyAgent";
+import type { ServerSshKeys } from "./sshKeyBrokerClient";
 
 /**
  * How a confined command reaches the person's registered servers without the
@@ -13,12 +15,17 @@ import { registeredServerFor, remoteHostsNamedBy } from "@octant/domain/shield-s
  *
  * For one command the host opens, and closes when the command ends:
  *
- * - a loopback relay per server the command names, which carries bytes to
- *   that server's address and nowhere else; the sandbox opens only these
- *   ports, so `ssh` reaches no other host;
+ * - a relay per server the command names, which carries bytes to that
+ *   server's address and nowhere else. On macOS it is a loopback port the
+ *   Seatbelt profile opens alone; on Linux it is a Unix socket the capsule's
+ *   forwarder carries one loopback port inside the capsule to, since
+ *   Bubblewrap's private network cannot name a host port. Either way `ssh`
+ *   reaches no other host;
  * - an SSH agent socket the host owns, which passes the person's agent only
  *   the requests that list keys and sign a login, so the command can neither
- *   read a key nor add, remove, or lock one;
+ *   read a key nor add, remove, or lock one. A server that signs in with a
+ *   key Octant keeps gets an agent socket of its own instead, which offers
+ *   that key alone and has the credential broker sign;
  * - an SSH config, known-hosts file, and `ssh`/`scp`/`rsync` wrappers in the
  *   command's own read-only script folder, so the command cannot rewrite
  *   them. The config names each server by its alias, with the person's
@@ -32,12 +39,26 @@ import { registeredServerFor, remoteHostsNamedBy } from "@octant/domain/shield-s
 export interface ServerSshAccess {
   /** Put first on the command's `PATH`: `ssh`, `scp`, and `rsync` that use the config below. */
   readonly binDirectory: string;
-  /** Loopback ports the sandbox may connect to, one per server. */
+  /** macOS: host loopback ports the sandbox may connect to, one per server. */
   readonly relayPorts: ReadonlyArray<number>;
+  /**
+   * Linux: per server, the loopback port the config names inside the capsule
+   * and the host relay's socket the forwarder carries it to.
+   */
+  readonly relaySockets: ReadonlyArray<ServerRelaySocket>;
+  /** The private folder that holds the host's sockets, which a Linux capsule binds read-only. */
+  readonly socketDirectory: string | undefined;
   /** The host-owned agent socket, when the person has an agent. */
   readonly agentSocket: string | undefined;
+  /** One agent socket per server that signs in with a key Octant keeps. */
+  readonly keySockets: ReadonlyArray<string>;
   /** Closes the relays and the agent socket. Safe to call more than once. */
   readonly close: () => Promise<void>;
+}
+
+export interface ServerRelaySocket {
+  readonly port: number;
+  readonly socketPath: string;
 }
 
 /** A server as the person's SSH config resolves its alias on this computer. */
@@ -63,7 +84,18 @@ export interface ServerSshAccessOptions {
   ) => Promise<ReadonlyArray<string>>;
   /** Where the agent sockets live: a socket path must stay under 104 bytes. */
   readonly socketParent?: string;
+  /**
+   * `unix-socket` for a Linux capsule, whose forwarder carries a port inside
+   * it to each relay's socket; `loopback` (the default) for Seatbelt.
+   */
+  readonly relays?: "loopback" | "unix-socket";
+  /** The keys Octant keeps for servers that sign in with one; absent without a credential broker. */
+  readonly keys?: Pick<ServerSshKeys, "publicKey" | "signLogin"> | undefined;
 }
+
+/** A registered server as a command's access needs it. */
+export type ServerSshAccessServer = Pick<ShieldServer, "alias" | "user"> &
+  Partial<Pick<ShieldServer, "serverId" | "signIn">>;
 
 const SSH = "/usr/bin/ssh";
 const SCP = "/usr/bin/scp";
@@ -73,6 +105,11 @@ const RESOLVE_TIMEOUT_MS = 5_000;
 const MAX_SOCKET_PATH = 103;
 /** The agent protocol's own bound on one message. */
 const MAX_AGENT_MESSAGE = 256 * 1024;
+/**
+ * The first loopback port a Linux capsule's forwarder listens on for a
+ * server; the capsule's network is its own, so a fixed range is enough.
+ */
+const CAPSULE_RELAY_FIRST_PORT = 2201;
 const AGENT_FAILURE = Buffer.from([0, 0, 0, 1, 5]);
 const AGENT_REQUEST_IDENTITIES = 11;
 const AGENT_SIGN_REQUEST = 13;
@@ -88,7 +125,7 @@ const SESSION_BIND = "session-bind@openssh.com";
 export function openServerSshAccessFor(
   command: string,
   directory: string,
-  servers: ReadonlyArray<Pick<ShieldServer, "alias" | "user">>,
+  servers: ReadonlyArray<ServerSshAccessServer>,
   options: ServerSshAccessOptions,
 ): Promise<ServerSshAccess | undefined> {
   const named = remoteHostsNamedBy(command).flatMap((host) => {
@@ -104,7 +141,7 @@ export function openServerSshAccessFor(
  * nothing to open or a path cannot be written safely into the config.
  */
 export async function openServerSshAccess(
-  servers: ReadonlyArray<Pick<ShieldServer, "alias" | "user">>,
+  servers: ReadonlyArray<ServerSshAccessServer>,
   directory: string,
   options: ServerSshAccessOptions,
 ): Promise<ServerSshAccess | undefined> {
@@ -117,9 +154,20 @@ export async function openServerSshAccess(
   const close = async () => {
     for (const closer of closers.splice(0).reverse()) await closer().catch(() => undefined);
   };
+  const unixRelays = options.relays === "unix-socket";
   try {
-    const agentSocket = await openAgentProxy(options, closers);
+    const octantKeys = options.keys !== undefined && servers.some(usesOctantKey);
+    const socketDirectory =
+      unixRelays || octantKeys || options.personAgentSocket() !== undefined
+        ? await openSocketDirectory(options, closers)
+        : undefined;
+    const agentSocket =
+      socketDirectory === undefined
+        ? undefined
+        : await openAgentProxy(options, socketDirectory, closers);
     const relayPorts: number[] = [];
+    const relaySockets: ServerRelaySocket[] = [];
+    const keySockets: string[] = [];
     const entries: string[] = [];
     const knownHosts: string[] = [];
     for (const server of servers) {
@@ -127,18 +175,51 @@ export async function openServerSshAccess(
       // A jump host or proxy program would run outside the relay; the
       // command gets no path to that server, and ssh says it cannot resolve it.
       if (resolved === undefined || resolved.proxied) continue;
-      const relay = await openRelay(resolved.hostname, resolved.port);
-      closers.push(relay.close);
-      relayPorts.push(relay.port);
+      let port: number;
+      if (unixRelays && socketDirectory !== undefined) {
+        const socketPath = join(socketDirectory, `relay-${String(relaySockets.length)}`);
+        if (!socketPathFits(socketPath)) throw new Error("The relay socket path is too long.");
+        closers.push(
+          (await openRelay(resolved.hostname, resolved.port, { path: socketPath })).close,
+        );
+        port = CAPSULE_RELAY_FIRST_PORT + relaySockets.length;
+        relaySockets.push({ port, socketPath });
+      } else {
+        const relay = await openRelay(resolved.hostname, resolved.port, {
+          port: 0,
+          host: "127.0.0.1",
+        });
+        closers.push(relay.close);
+        port = relay.port;
+        relayPorts.push(port);
+      }
       for (const line of await knownHostLines(resolved.hostKeyName, resolved.knownHostsFiles).catch(
         () => [],
       )) {
         const rewritten = knownHostLineFor(server.alias, line);
         if (rewritten !== undefined) knownHosts.push(rewritten);
       }
-      entries.push(configEntry(server, relay.port, sshDirectory, agentSocket));
+      // The person chose Octant's key for this server, so its login never
+      // falls back to their agent: without a key here it offers none.
+      let identityAgent = usesOctantKey(server) ? undefined : agentSocket;
+      if (usesOctantKey(server) && options.keys !== undefined && socketDirectory !== undefined) {
+        const keySocket = join(socketDirectory, `key-${String(keySockets.length)}`);
+        if (!socketPathFits(keySocket)) throw new Error("The key socket path is too long.");
+        const keyAgent = await openKeyAgent(
+          keySocket,
+          String(server.serverId),
+          `octant ${server.alias}`,
+          options.keys,
+        );
+        if (keyAgent !== undefined) {
+          closers.push(keyAgent.close);
+          keySockets.push(keySocket);
+          identityAgent = keySocket;
+        }
+      }
+      entries.push(configEntry(server, port, sshDirectory, identityAgent));
     }
-    if (relayPorts.length === 0) {
+    if (relayPorts.length + relaySockets.length === 0) {
       await close();
       return undefined;
     }
@@ -152,11 +233,23 @@ export async function openServerSshAccess(
     await writeWrapper(binDirectory, "ssh", `exec ${SSH} -F '${config}' "$@"`);
     await writeWrapper(binDirectory, "scp", `exec ${SCP} -F '${config}' "$@"`);
     await writeWrapper(binDirectory, "rsync", `exec ${RSYNC} --rsh="${SSH} -F '${config}'" "$@"`);
-    return { binDirectory, relayPorts, agentSocket, close };
+    return {
+      binDirectory,
+      relayPorts,
+      relaySockets,
+      socketDirectory,
+      agentSocket,
+      keySockets,
+      close,
+    };
   } catch {
     await close();
     return undefined;
   }
+}
+
+function usesOctantKey(server: ServerSshAccessServer): boolean {
+  return server.signIn === "octant-key" && server.serverId !== undefined;
 }
 
 /** A path the config and the wrappers can carry inside quotes. */
@@ -301,10 +394,11 @@ function closer(server: Server, sockets: Set<Socket>): () => Promise<void> {
   };
 }
 
-/** A loopback listener that carries each connection to one server's address and nowhere else. */
+/** A listener that carries each connection to one server's address and nowhere else. */
 async function openRelay(
   hostname: string,
   port: number,
+  at: ListenOptions,
 ): Promise<{ readonly port: number; readonly close: () => Promise<void> }> {
   const sockets = new Set<Socket>();
   const server = createServer((client) => {
@@ -320,13 +414,31 @@ async function openRelay(
     client.pipe(upstream);
     upstream.pipe(client);
   });
-  await listen(server, { port: 0, host: "127.0.0.1" });
+  await listen(server, at);
   const address = server.address();
-  if (address === null || typeof address === "string") {
+  if (address === null || (typeof address === "string") !== (at.path !== undefined)) {
     await closer(server, sockets)();
-    throw new Error("The relay has no port.");
+    throw new Error("The relay is not listening.");
   }
-  return { port: address.port, close: closer(server, sockets) };
+  return {
+    port: typeof address === "string" ? 0 : address.port,
+    close: closer(server, sockets),
+  };
+}
+
+/** A private folder for this command's sockets, removed when it ends. */
+async function openSocketDirectory(
+  options: ServerSshAccessOptions,
+  closers: Array<() => Promise<void>>,
+): Promise<string> {
+  const parent = await realpath(options.socketParent ?? tmpdir());
+  const socketDirectory = await mkdtemp(join(parent, "octant-ssh-"));
+  closers.push(() => rm(socketDirectory, { recursive: true, force: true }));
+  return socketDirectory;
+}
+
+function socketPathFits(path: string): boolean {
+  return Buffer.byteLength(path) <= MAX_SOCKET_PATH && quotable(path);
 }
 
 /**
@@ -337,17 +449,13 @@ async function openRelay(
  */
 async function openAgentProxy(
   options: ServerSshAccessOptions,
+  socketDirectory: string,
   closers: Array<() => Promise<void>>,
 ): Promise<string | undefined> {
   const upstreamPath = options.personAgentSocket();
   if (upstreamPath === undefined) return undefined;
-  const parent = await realpath(options.socketParent ?? tmpdir());
-  const socketDirectory = await mkdtemp(join(parent, "octant-ssh-"));
-  closers.push(() => rm(socketDirectory, { recursive: true, force: true }));
   const socketPath = join(socketDirectory, "agent");
-  if (Buffer.byteLength(socketPath) > MAX_SOCKET_PATH || !quotable(socketPath)) {
-    throw new Error("The agent socket path is too long.");
-  }
+  if (!socketPathFits(socketPath)) throw new Error("The agent socket path is too long.");
   const sockets = new Set<Socket>();
   const server = createServer((client) => relayAgent(client, upstreamPath, sockets));
   await listen(server, { path: socketPath });

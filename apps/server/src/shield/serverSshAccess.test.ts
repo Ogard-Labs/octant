@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -11,6 +12,12 @@ import {
 import { createServer, connect, type AddressInfo } from "node:net";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
+import {
+  CredentialStoreFailure,
+  startCredentialBroker,
+  type CredentialBroker,
+  type CredentialStore,
+} from "@octant/host-runtime";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
@@ -20,6 +27,24 @@ import {
   openServerSshAccessFor,
   resolveWithPersonConfig,
 } from "./serverSshAccess";
+import { makeServerSshKeysBrokerClient, type ServerSshKeys } from "./sshKeyBrokerClient";
+
+const KEYED = "5e7e0000-0000-4000-8000-0000000000c1";
+const KEYLESS = "5e7e0000-0000-4000-8000-0000000000c2";
+
+function memoryStore(): CredentialStore {
+  const entries = new Map<string, string>();
+  return {
+    set: async (id, value) => void entries.set(id, value),
+    has: async (id) => entries.has(id),
+    resolve: async (id) => {
+      const value = entries.get(id);
+      if (value === undefined) throw new CredentialStoreFailure("missing");
+      return value;
+    },
+    delete: async (id) => void entries.delete(id),
+  };
+}
 
 describe("the host-owned agent socket", () => {
   const message = (type: number, body: Buffer = Buffer.alloc(0)) => {
@@ -54,8 +79,15 @@ describe("the host-owned agent socket", () => {
 });
 
 // A throwaway sshd and ssh-agent on loopback, owned by this test: no real
-// host and no key of the person's is ever involved.
-const canRun = process.platform === "darwin" && existsSync("/usr/sbin/sshd");
+// host and no key of the person's is ever involved. On Linux the command runs
+// in Bubblewrap, so the test needs it there.
+const linux = process.platform === "linux";
+const canRun =
+  existsSync("/usr/sbin/sshd") &&
+  (process.platform === "darwin" || (linux && existsSync("/usr/bin/bwrap")));
+const sftpServer = ["/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server"].find((path) =>
+  existsSync(path),
+);
 
 describe.skipIf(!canRun)("a confined command reaching a registered server", () => {
   const started: ChildProcess[] = [];
@@ -65,6 +97,8 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
   let personConfig = "";
   let sshdPort = 0;
   let remoteFile = "";
+  let broker: CredentialBroker | undefined;
+  let keys: ServerSshKeys | undefined;
   const user = userInfo().username;
 
   beforeAll(async () => {
@@ -89,7 +123,7 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
         "UsePAM no",
         "StrictModes no",
         `PidFile ${join(root, "sshd.pid")}`,
-        "Subsystem sftp /usr/libexec/sftp-server",
+        `Subsystem sftp ${sftpServer ?? "internal-sftp"}`,
       ].join("\n"),
     );
     started.push(
@@ -110,13 +144,34 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
     );
     writeFileSync(
       personConfig,
-      `Host web1\n  HostName 127.0.0.1\n  Port ${String(sshdPort)}\n  UserKnownHostsFile ${join(root, "person_known_hosts")}\nHost jumped\n  HostName 127.0.0.1\n  ProxyJump web1\n`,
+      [
+        `Host web1 keyed keyless\n  HostName 127.0.0.1\n  Port ${String(sshdPort)}\n  UserKnownHostsFile ${join(root, "person_known_hosts")}`,
+        "Host jumped\n  HostName 127.0.0.1\n  ProxyJump web1\n",
+      ].join("\n"),
     );
+    // The key Octant keeps for one server, made by a real broker, which the
+    // person adds to that server's authorized keys.
+    broker = await startCredentialBroker(
+      memoryStore(),
+      undefined,
+      undefined,
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      undefined,
+      memoryStore(),
+    );
+    keys = makeServerSshKeysBrokerClient({ url: broker.url, token: broker.token });
+    appendFileSync(join(root, "authorized_keys"), `${(await keys.ensure(KEYED)) ?? ""}\n`);
     remoteFile = join(root, "remote.log");
     writeFileSync(remoteFile, "served-by-sshd\n");
   }, 30_000);
 
-  afterAll(() => {
+  afterAll(async () => {
+    await broker?.close();
     for (const child of started) child.kill();
     rmSync(root, { recursive: true, force: true });
     rmSync(socketRoot, { recursive: true, force: true });
@@ -125,6 +180,8 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
   const servers = [
     { alias: "web1", user },
     { alias: "jumped", user },
+    { alias: "keyed", user, serverId: KEYED as never, signIn: "octant-key" as const },
+    { alias: "keyless", user, serverId: KEYLESS as never, signIn: "octant-key" as const },
   ];
 
   function confinedShell() {
@@ -138,6 +195,10 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
       temporaryDirectory: work,
       harnessShellScriptDirectory: scripts,
     });
+    // A Linux launch reaches its proxy through a socket in a folder of its
+    // own, where the capsule's forwarder is written. Nothing listens there:
+    // only the server relays carry bytes.
+    const egressFolder = realpathSync(mkdtempSync(join(socketRoot, "egress-")));
     const shell = createNativeHarnessShell({
       process: port,
       scriptDirectory: scripts,
@@ -149,7 +210,12 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
           status: "listening",
           launch: {
             // No egress proxy listens here: only the server relays carry bytes.
-            proxy: { endpoint: { kind: "loopback", port: 9 }, token: "token" },
+            proxy: {
+              endpoint: linux
+                ? { kind: "unix-socket", path: join(egressFolder, "proxy.sock") }
+                : { kind: "loopback", port: 9 },
+              token: "token",
+            },
             finish: async () => ({ status: "summarized", summary: {} as never }),
           } as never,
         }),
@@ -159,6 +225,8 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
           personAgentSocket: () => agentSocket,
           resolve: (alias) => resolveWithPersonConfig(alias, personConfig),
           socketParent: socketRoot,
+          keys,
+          ...(linux ? { relays: "unix-socket" as const } : {}),
         }),
     });
     return { shell, checkout };
@@ -173,6 +241,26 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
     });
     expect(run.output).toContain("confined-hello");
     expect(run).toMatchObject({ status: "ran", exitCode: 0 });
+  }, 30_000);
+
+  it("signs in with the key Octant keeps for a server, and never with the person's agent for it", async () => {
+    const { shell, checkout } = confinedShell();
+    const keyed = await shell.run({
+      command: "ssh keyed echo keyed-hello",
+      cwd: checkout,
+      timeoutMs: 20_000,
+    });
+    expect(keyed.output).toContain("keyed-hello");
+    expect(keyed).toMatchObject({ status: "ran", exitCode: 0 });
+    // The person's agent holds a key the server accepts, but this server was
+    // registered to sign in with Octant's key, and the broker holds none for it.
+    const keyless = await shell.run({
+      command: "ssh keyless echo keyless-hello",
+      cwd: checkout,
+      timeoutMs: 20_000,
+    });
+    expect(keyless.output).not.toContain("keyless-hello\n");
+    expect(keyless.status === "ran" ? keyless.exitCode : undefined).not.toBe(0);
   }, 30_000);
 
   it("copies a file down with scp and rsync into the folder", async () => {

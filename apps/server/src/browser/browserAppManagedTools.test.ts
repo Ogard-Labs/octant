@@ -639,6 +639,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
     // the operation itself rather than a missing field.
     const minimalInput: Readonly<Record<string, unknown>> = {
       navigate: { url: "https://example.com/" },
+      snapshot: {},
       "read-page": {},
       click: { selector: "#go" },
       type: { selector: "#name", text: "octant" },

@@ -193,6 +193,7 @@ export function startSecretServiceCredentialBroker(
     makeStore({ namespace: "desktop-provider-credential" }),
     undefined,
     linkedSecretStores,
+    makeStore({ namespace: "ssh-key" }),
   );
 }
 

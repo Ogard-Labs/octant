@@ -134,15 +134,20 @@ export interface HarnessShellScriptInput {
   };
   /**
    * Opens this command's way to the person's registered servers on top of
-   * `proxied` network: the loopback relay ports, the host-owned agent
-   * socket, and the user-database lookup `ssh` makes for the person's own
-   * account. Its wrappers go first on `PATH`. A launch without the egress
-   * proxy refuses it, and only a Seatbelt launch can carry it.
+   * `proxied` network: on macOS the loopback relay ports and the
+   * user-database lookup `ssh` makes for the person's own account, on Linux
+   * the forwarder's server relays and the host's socket folder, read-only;
+   * and the host-owned agent socket. Its wrappers go first on `PATH`. A
+   * launch without the egress proxy refuses it.
    */
   readonly serverAccess?: {
     readonly binDirectory: string;
     readonly relayPorts: ReadonlyArray<number>;
+    readonly relaySockets?: ReadonlyArray<{ readonly port: number; readonly socketPath: string }>;
+    readonly socketDirectory?: string | undefined;
     readonly agentSocket?: string | undefined;
+    /** Agent sockets for servers that sign in with a key Octant keeps, in the same folder. */
+    readonly keySockets?: ReadonlyArray<string>;
   };
 }
 
@@ -347,7 +352,8 @@ export class RepositoryTestProcessPort {
       return unavailable(false);
     if (
       input.serverAccess !== undefined &&
-      (input.egressProxy === undefined || this.#platform !== "darwin")
+      (input.egressProxy === undefined ||
+        (this.#platform !== "darwin" && this.#platform !== "linux"))
     )
       return unavailable(false);
     if (signal?.aborted) return cancelledBeforeSpawn();
@@ -379,18 +385,40 @@ export class RepositoryTestProcessPort {
     const servers = input.serverAccess;
     if (servers !== undefined) {
       try {
+        const relaySockets = servers.relaySockets ?? [];
+        const socketDirectory = servers.socketDirectory;
+        // Each platform carries its own kind of relay: a host port Seatbelt
+        // opens, or a socket in the bound folder the Linux forwarder dials.
+        const linux = this.#platform === "linux";
         if (
           !isAbsolute(servers.binDirectory) ||
           !servers.relayPorts.every(
             (port) => Number.isSafeInteger(port) && port > 0 && port <= 65_535,
           ) ||
-          (servers.agentSocket !== undefined && !isAbsolute(servers.agentSocket))
+          (servers.agentSocket !== undefined && !isAbsolute(servers.agentSocket)) ||
+          !(servers.keySockets ?? []).every(
+            (path) => socketDirectory !== undefined && dirname(path) === socketDirectory,
+          ) ||
+          (linux
+            ? servers.relayPorts.length > 0 ||
+              socketDirectory === undefined ||
+              !isAbsolute(socketDirectory) ||
+              ![
+                ...relaySockets.map((relay) => relay.socketPath),
+                ...(servers.keySockets ?? []),
+                servers.agentSocket,
+              ].every((path) => path === undefined || dirname(path) === socketDirectory)
+            : relaySockets.length > 0)
         )
           throw new Error("Server access is invalid.");
         launchInput = {
           ...launchInput,
-          additionalReadRoots: [...(launchInput.additionalReadRoots ?? []), servers.binDirectory],
-          machLookupNames: [SSH_ACCOUNT_LOOKUP],
+          additionalReadRoots: [
+            ...(launchInput.additionalReadRoots ?? []),
+            servers.binDirectory,
+            ...(linux && socketDirectory !== undefined ? [socketDirectory] : []),
+          ],
+          ...(linux ? {} : { machLookupNames: [SSH_ACCOUNT_LOOKUP] }),
         };
       } catch {
         return unavailable(false);
@@ -419,18 +447,23 @@ export class RepositoryTestProcessPort {
             },
             ...(servers === undefined
               ? {}
-              : {
-                  extraRules: [
-                    ...servers.relayPorts.map(
-                      (port) => `(allow network-outbound (remote ip "localhost:${String(port)}"))`,
-                    ),
-                    ...(servers.agentSocket === undefined
-                      ? []
-                      : [
-                          `(allow network-outbound (remote unix-socket (path-literal "${escapeSeatbeltPath(servers.agentSocket)}")))`,
-                        ]),
-                  ],
-                }),
+              : this.#platform === "linux"
+                ? { serverRelays: servers.relaySockets ?? [] }
+                : {
+                    extraRules: [
+                      ...servers.relayPorts.map(
+                        (port) =>
+                          `(allow network-outbound (remote ip "localhost:${String(port)}"))`,
+                      ),
+                      ...[
+                        ...(servers.agentSocket === undefined ? [] : [servers.agentSocket]),
+                        ...(servers.keySockets ?? []),
+                      ].map(
+                        (socket) =>
+                          `(allow network-outbound (remote unix-socket (path-literal "${escapeSeatbeltPath(socket)}")))`,
+                      ),
+                    ],
+                  }),
           },
     );
   }
@@ -444,6 +477,8 @@ export class RepositoryTestProcessPort {
       readonly environment: Readonly<Record<string, string>>;
       /** Seatbelt rules a harness command's server access adds. */
       readonly extraRules?: ReadonlyArray<string>;
+      /** The Linux forwarder's relays to a harness command's registered servers. */
+      readonly serverRelays?: ReadonlyArray<{ readonly port: number; readonly socketPath: string }>;
     },
   ): Promise<RepositoryTestProcessResult> {
     let launch: { readonly command: string; readonly args: readonly string[] };
@@ -508,6 +543,9 @@ export class RepositoryTestProcessPort {
         ],
         ...(additionalWriteRoots.length === 0 ? {} : { additionalWriteRoots }),
         ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
+        ...(proxied?.serverRelays === undefined || proxied.serverRelays.length === 0
+          ? {}
+          : { serverRelays: proxied.serverRelays }),
         ...(this.#platform === "darwin" && launchReadRules.length > 0
           ? { extraRules: launchReadRules }
           : {}),

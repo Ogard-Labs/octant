@@ -22,6 +22,7 @@ const REPLICA_STORE_CREDENTIAL_SERVICE = "app.octant.replica-store-credentials.v
 const MCP_SERVER_CREDENTIAL_SERVICE = "app.octant.mcp-server-credentials.v1";
 const DESKTOP_PROVIDER_CREDENTIAL_SERVICE = "app.octant.desktop-provider-credentials.v1";
 const PUSH_PLATFORM_CREDENTIAL_SERVICE = "app.octant.push-platform-credentials.v1";
+const SSH_KEY_CREDENTIAL_SERVICE = "app.octant.ssh-keys.v1";
 
 const ARTIFACT_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relative: string }> = [
   { name: "Apple toolchain artifacts", relative: "artifacts" },
@@ -164,6 +165,7 @@ export function desktopCredentialStore(): HostDataMapCredentialStoreInput {
       { service: MCP_SERVER_CREDENTIAL_SERVICE },
       { service: DESKTOP_PROVIDER_CREDENTIAL_SERVICE },
       { service: PUSH_PLATFORM_CREDENTIAL_SERVICE },
+      { service: SSH_KEY_CREDENTIAL_SERVICE },
     ],
   };
 }

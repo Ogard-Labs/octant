@@ -419,23 +419,28 @@ to each server in a thread asks you and names the server, even if you allowed
 commands for the session. Every remote command is recorded with its host and,
 where the agent's runtime reports it, its exit status.
 
-Octant never reads your key files: `ssh` signs in through your SSH agent. You
+Octant never reads your key files: `ssh` signs in through your SSH agent.
+Or, for a server, choose **Sign in with: A key Octant keeps**. Octant then
+makes a key for that server alone and keeps it in your system's keychain.
+Press **Show key** and add the line it shows to `~/.ssh/authorized_keys` for
+that user on the server. Octant signs that server's logins with it and never
+hands the key to an agent or a command. You
 can point each server at a notes file (a runbook); agents read it as
 reference, and nothing written there changes what Shield allows. A Project can
 use its own list of servers instead of the account's: pick the Project under
 **Servers**. Only someone at this computer can change either list.
 
-Below Full access, on a Mac, an Octant Harness command still runs in its
-sandbox. When it is a single `ssh`, `scp`, or `rsync` call to servers you
+Below Full access, on a Mac or on Linux, an Octant Harness command still
+runs in its sandbox. When it is a single `ssh`, `scp`, or `rsync` call to servers you
 registered, Octant opens a path to those servers for that command only. Your
-SSH agent signs in for it, and the command can neither read your keys nor
+SSH agent signs in for it, or, for a server that uses a key Octant keeps,
+Octant's key store does, and the command can neither read your keys nor
 change what your agent holds. The server must already be in your
 `known_hosts`, so connect once from your own terminal first. A server you
 reach through a jump host gets no path.
 
-What this does not cover yet: on Linux, a sandboxed command cannot reach a
-server. Commands that Claude Code, Codex, or another agent runs with its own
-shell keep the reach that agent's sandbox gives it. Octant records them when
+What this does not cover yet: commands that Claude Code, Codex, or another
+agent runs with its own shell keep the reach that agent's sandbox gives it. Octant records them when
 the agent says what it ran, and Codex also reports the exit status.
 
 ## Remote transport

@@ -61,6 +61,13 @@ export function proxiedLaunchEnvironment(
  * proxy decides and records it as any other request. A provider runtime's
  * tool bridge uses it. A refusal closes the connection.
  *
+ * `forwarder <socket> <port> --server-relay <port> <relay-socket> ...` also
+ * listens on each such loopback port inside the capsule and carries each
+ * connection byte for byte to that Unix socket, which is a host relay to one
+ * registered server's address and nowhere else. A harness command's `ssh`
+ * uses it, as Seatbelt's per-port rule does on macOS; the host relay, not
+ * this forwarder, decides where the bytes go.
+ *
  * `forwarder <socket> <port> --child-seccomp <filter> <command> [args...]`
  * opens the filter file before anything else runs and hands it to the
  * command as file descriptor 3. That form starts a launch whose own process
@@ -89,6 +96,12 @@ while (rest[0] === "--loopback") {
   if (!/^[0-9]{1,5}$/.test(rest[1] || "")) refuse("invalid loopback relay");
   loopbackPorts.push(Number(rest[1]));
   rest.splice(0, 2);
+}
+const serverRelays = [];
+while (rest[0] === "--server-relay") {
+  if (!/^[0-9]{1,5}$/.test(rest[1] || "") || !(rest[2] || "").startsWith("/")) refuse("invalid server relay");
+  serverRelays.push({ port: Number(rest[1]), path: rest[2] });
+  rest.splice(0, 3);
 }
 let childFilter;
 if (rest[0] === "--child-seccomp") {
@@ -167,6 +180,17 @@ function listenLoopback(index, then) {
     listenLoopback(index + 1, then),
   );
 }
+function listenServerRelays(index, then) {
+  if (index >= serverRelays.length) return then();
+  const target = serverRelays[index];
+  const relayServer = net.createServer({ allowHalfOpen: true }, (client) => {
+    relay(client, net.connect({ path: target.path, allowHalfOpen: true }));
+  });
+  relayServer.on("error", (error) => refuse("cannot listen on a server relay: " + error.message));
+  relayServer.listen({ host: "127.0.0.1", port: target.port, exclusive: true }, () =>
+    listenServerRelays(index + 1, then),
+  );
+}
 function listenInbound(then) {
   if (inbound === undefined) return then();
   let started = false;
@@ -182,7 +206,7 @@ function listenInbound(then) {
   inboundServer.listen({ path: inbound.path, exclusive: true });
 }
 server.on("error", (error) => refuse("cannot listen: " + error.message));
-listenInbound(() => listenLoopback(0, () => server.listen({ host: "127.0.0.1", port: Number(portText), exclusive: true }, () => {
+listenInbound(() => listenLoopback(0, () => listenServerRelays(0, () => server.listen({ host: "127.0.0.1", port: Number(portText), exclusive: true }, () => {
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = spawn(executable, args, {
@@ -195,5 +219,5 @@ listenInbound(() => listenLoopback(0, () => server.listen({ host: "127.0.0.1", p
     const number = signal === null ? 0 : os.constants.signals[signal] || 0;
     process.exit(code === null ? 128 + number : code);
   });
-})));
+}))));
 `;

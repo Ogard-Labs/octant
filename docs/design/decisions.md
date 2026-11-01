@@ -58,7 +58,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 5         | 5       | 0            | 0                   |
+| [Browser](#browser)                                                                   | 6         | 5       | 1            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 5       | 1            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 3       | 0            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **221**   | **186** | **32**       | **3**               |
+| **All areas**                                                                         | **222**   | **186** | **33**       | **3**               |
 
 ## Principles and hard lines
 
@@ -225,7 +225,7 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Built: the server registry in Settings › Access › Servers (alias, user, Read-only, Operate or Admin profile, described deploys, runbook path), journaled and replayed, local window only; the Judge's SSH rules (a plain ssh call to a registered server as its user passes within its profile, an unregistered host, a key path, a tunnelling option, a lock-out or destructive remote command, or a remote secret read goes to the person or is refused) checked on a real-world command set; every Octant Harness `ssh` command journaled with host and exit status at every level; the person's SSH agent socket handed to harness shells; runbooks given to harness turns as notes that grant nothing.
 - Built: the secret guard's list handed to the Watcher and the Judge, and a journaled tag for a secret-then-network command at Full access.
 - Built: the Judge's fast allow for egress to a safe network, for a call that names its destinations (never a shell command), only while Network limits are on and only on an untainted thread.
-- Not built yet: a confined command reaching a registered server on Linux (macOS only) and a provider runtime's own confined commands reaching one; the credential broker for SSH; the Watcher reading a runtime's own web result where the runtime does not expose it (Codex, OpenCode); the false-allow rate of a real model is unmeasured.
+- Not built yet: a provider runtime's own confined commands reaching a registered server; the Watcher reading a runtime's own web result where the runtime does not expose it (Codex, OpenCode); the false-allow rate of a real model is unmeasured.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
 
@@ -251,11 +251,13 @@ The person registers their own servers with an action profile, and SSH to a regi
 
 - A server is a host alias from the person's SSH config, a user, and a profile: Read-only, Operate, or Admin.
 - Keys stay out of the agent: the SSH session gets the person's SSH agent or the credential broker, and Shield refuses reads of key paths.
+- The credential broker for SSH makes an Ed25519 key per server the person chose it for, keeps it in a namespace of its own, gives out only its public line, and signs only an SSH login request for that key; no route returns the key.
 - SSH to an unregistered host goes to the person; destructive or lock-out actions go to the person at every level below Full access.
 - Every remote command and its exit status is journaled with the host, remote output passes through the Watcher, and a per-server runbook is context, never authority.
 - Built: the server registry in Settings › Access › Servers with a Project's own list replacing the account list for its threads; the Judge's rules by profile for `ssh`, `scp`, and `rsync` (a download reads, an upload is Admin, a deleting sync is a lock-out action); every remote command journaled with its host, and its exit status where the runtime reports it (the Octant Harness and Codex); remote output through the Watcher (harness and Codex); runbooks given to every runtime's Work and Code turns as notes that grant nothing; at Guarded the first connection to each host in a thread asks, naming the host, and no remembered approval covers it.
-- Built on macOS: below Full access a harness command that is one plain `ssh`, `scp`, or `rsync` call reaches only the registered servers it names, through per-command loopback relays and an agent socket the host owns that only lists keys and signs; the key files stay unreadable and the secret guard's list is unchanged. Octant stores no key and carries no SSH protocol of its own.
-- Not built yet: confined server access on Linux, the credential broker for SSH, and a command record (with exit status) for runtimes that do not name their commands (OpenCode, ACP agents, Pi), which keep Shield's journaled decision as their record.
+- Built on macOS and Linux: below Full access a harness command that is one plain `ssh`, `scp`, or `rsync` call reaches only the registered servers it names, through per-command relays (loopback ports Seatbelt opens on macOS; on Linux sockets the capsule's forwarder carries a port inside the capsule to) and an agent socket the host owns that only lists keys and signs; the key files stay unreadable and the secret guard's list is unchanged. Octant carries no SSH protocol of its own.
+- Built: the credential broker for SSH. A server can sign in with a key Octant keeps instead of the person's agent; Settings › Access › Servers shows its public line for the person to add to the server, and a confined command's login for that server goes through an agent socket of its own that only the broker signs for, never falling back to the person's agent.
+- Not built yet: a provider runtime's own commands reaching a registered server below Full access, and a command record (with exit status) for runtimes that do not name their commands (OpenCode, ACP agents, Pi), which keep Shield's journaled decision as their record.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield) and [Modes](../architecture.md#modes-chat-work-and-code).
 
@@ -405,7 +407,7 @@ App-owned tools are capability families: one tool per object with an operation e
 - A family whose grant or capability is off is omitted rather than advertised and refused; help never reaches the family's executor.
 - A runtime connection binds its tool catalogue before it sends its prompt and accepts only the expected in-process server and offered tool names. A catalogue change cannot overlap a running tool-enabled turn. _Here only._
 - Late, duplicate or cancelled tool answers are refused, and per-request cancellation reaches the executor even while it waits for approval. _Here only._
-- Browser read-page accepts an optional CSS selector. Screenshots reach the provider through its image-result channel, not as encoded bytes in text, and origin approval and task authority apply before capture. _Here only._
+- Browser read-page accepts an optional CSS selector or snapshot ref. Screenshots reach the provider through its image-result channel, not as encoded bytes in text, and origin approval and task authority apply before capture. _Here only._
 - A missing, malformed or oversized capture is refused.
 
 Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
@@ -536,7 +538,7 @@ An agent reaches a remote machine with `ssh` through the thread's shell, in Work
 
 - At Guarded, the first connection to each host in a thread asks the person, naming the host.
 - Network egress for shell commands follows the level: Project rules at Guarded and Reviewed, open at Full access.
-- A Code Project may be bound to a folder on a registered server, in a catalog of its own; the connection uses this host's `ssh` and the person's agent, forwards nothing, refuses an unknown host key, and fails closed with no local fallback. Built: the catalog, the connection, the folder check, Octant Harness Code threads with files, commands and Git on the server at every level (a remembered approval never covers a command there), and thread terminals as logins on the server. Not built yet: Work Projects there, host-side Git panels, files, tests, worktrees and pull requests for them ([Server Projects](server-projects.md)). Its tests ran against a throwaway local `sshd` only, never a real server.
+- A Code Project may be bound to a folder on a registered server, in a catalog of its own; the connection uses this host's `ssh` and the person's agent, forwards nothing, refuses an unknown host key, and fails closed with no local fallback. Built: the catalog, the connection, the folder check, Octant Harness Code threads with files, commands and Git on the server at every level (a remembered approval never covers a command there), thread terminals as logins on the server, and the Git tab with Git on the server (Plan changes nothing there). Not built yet: Work Projects there, files, tests, worktrees and pull requests for them ([Server Projects](server-projects.md)). Its tests ran against a throwaway local `sshd` only, never a real server.
 - The earlier SSH target binding was removed and old journals still replay; its `remote-root` threads keep refusing every operation.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -2216,6 +2218,17 @@ Only an explicit screenshot is kept, and it stays with the thread.
 - A thread keeps its newest 32 captures. Captures leave the host only in the local owner's thread or data export.
 
 Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept) and [Retention](browser-captures.md#retention).
+
+### Browser for agents
+
+The agent's Browser tool reads a page as an outline with element refs and acts by ref, with every operation admitted on the server and the same tool for every provider.
+
+- A snapshot lists headings, text, and controls with refs, states, and values. A credential field reads protected with no value, and a page that holds one shows no field values.
+- Refs are kept and resolved on the server. A ref the latest snapshot did not list, or whose element no longer has the recorded role and name, is refused as stale before the action runs.
+- No password saving, no agent-written script in the page, and downloads stay blocked.
+- Not built yet: cheaper results, hover, select, drag, key chords, upload, tabs, batched steps, richer waits, dialogs, viewport size, the sign-in handoff, and fuller diagnostics.
+
+Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot).
 
 ### Browser profiles and extensions
 

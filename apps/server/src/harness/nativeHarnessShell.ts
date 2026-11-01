@@ -140,7 +140,12 @@ async function runScript(
               serverAccess: {
                 binDirectory: servers.binDirectory,
                 relayPorts: servers.relayPorts,
+                ...(servers.relaySockets === undefined
+                  ? {}
+                  : { relaySockets: servers.relaySockets }),
+                socketDirectory: servers.socketDirectory,
                 agentSocket: servers.agentSocket,
+                ...(servers.keySockets === undefined ? {} : { keySockets: servers.keySockets }),
               },
             }),
       },
