@@ -390,6 +390,16 @@ absent rather than imitating them:
   never estimates the window. Resume is `precise` only where the agent
   advertises `loadSession` or session resume.
 
+An agent whose shell runs in-process and sends no `session/request_permission`
+or `terminal/*` request before a command leaves Octant nothing to ask about.
+Its profile sets `shellWithoutRequest`, and a Work or Code session at Guarded
+or Reviewed is refused as `unsupported` before its process starts, with a
+sentence pointing to Full access; Full access runs it, and Chat and Plan have
+no shell. Rationale: an approval Octant never sees is no approval, and
+running it anyway would put a weaker guard under the level than the level
+names. No
+shipped profile sets it.
+
 These are read from `ProviderRuntimeIntegration.context`, which the host
 derives from the driver's reported capabilities
 (`packages/domain/src/providerRuntimeIntegration.ts`); a renderer never
@@ -501,7 +511,8 @@ Nothing is inferred from the registry entry alone.
    to them; a mode with no safe mapping is refused by the profile.
 5. **Prompt.** A streamed reply, tool calls with their declared kinds, a
    permission request answered once, an `execute` request refused at the
-   agent, and the stop reason.
+   agent, and the stop reason. A shell command that runs with no request
+   first sets `shellWithoutRequest` on the profile.
 6. **Cancel.** `session/cancel` during a running turn ends it as cancelled
    and leaves the process usable for the next prompt.
 7. **Confinement.** Below Full access the agent runs under the deny-default

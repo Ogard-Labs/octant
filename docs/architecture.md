@@ -1121,9 +1121,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   shows the Project terminal and Project actions, the developer surfaces Work
   has today; no thread's authority reads it.
 
-Allowed; not built yet: an ACP agent whose shell runs in-process with no protocol request reporting
-`unsupported` at Guarded and Reviewed and running only at Full access, in
-Work as in Code. Octant Shield answers a Work thread's approvals at Auto on
+An ACP agent whose shell runs in-process with no protocol request reports
+`unsupported` at Guarded and Reviewed and runs only at Full access, in Work as
+in Code (built: the profile's `shellWithoutRequest`; no shipped profile sets
+it). Octant Shield answers a Work thread's approvals at Auto on
 every runtime that routes them to Octant, as it answers a Code thread's:
 the Octant Harness, Claude Code, Codex, OpenCode, ACP agents, and Pi, judged
 against the Project folder and counted against the Work thread's spend; see
@@ -9039,7 +9040,7 @@ access` agree); a thread's own change is journaled as
   Work at the shared level is not a capability row: it changes the session a
   driver acquires, not what the driver declares. Each provider runs a Work
   session as it runs a Code session at the same level (built; the Octant
-  Shield and in-process-shell parts are allowed, not built yet):
+  Shield part is allowed, not built yet):
 
   - **Claude Code** starts the Work session with its shell tool; Guarded asks
     per command, Reviewed uses its automatic mode or Octant Shield, Full access runs

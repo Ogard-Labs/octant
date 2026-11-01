@@ -189,6 +189,13 @@ export interface AcpProviderProfile {
    */
   readonly refuses?: (mode: AcpSessionMode, policy: ProviderExecutionPolicy) => string | undefined;
   /**
+   * The agent runs its shell in-process and sends no `session/request_permission`
+   * or `terminal/*` request first, so no command reaches Octant to ask about.
+   * Guarded and Reviewed then cannot hold in Work or Code and are refused as
+   * `unsupported`; Full access runs, and Chat and Plan have no shell.
+   */
+  readonly shellWithoutRequest?: true;
+  /**
    * The sentence a Project root earns a refusal with, before a session process
    * starts, when it holds files the agent loads by itself and that start tools
    * (MCP servers, hooks, extensions). Used where the entry cannot be denied

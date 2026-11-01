@@ -193,7 +193,8 @@ Work and Code run under the same guardrail levels with the same capabilities; th
 - Work's Developer tools switch is set per Project by a person; no agent, routine or import sets it.
 - Built: every driver starts a Work session with its shell and Git at the thread's level, Work launches get Code's confinement at the same level, Work threads reach Full access, and each Work turn records shell and Git at its level.
 - Built: the Developer tools switch, set from a window on this host and journaled with who and when; it shows a Work Project's terminal and actions.
-- Not built yet: an in-process ACP shell reporting unsupported below Full access.
+- Built: an ACP agent whose shell runs in-process without a protocol request is refused as unsupported below Full access; no shipped profile has such a shell.
+- Not built yet: Octant Shield answering Work approvals at Reviewed.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes](../architecture.md#modes-chat-work-and-code) and [Overview and principles](../architecture.md#overview-and-principles).
 
@@ -1382,8 +1383,9 @@ A Work thread launches exactly as a Code thread at the same level would, shell i
 - Each provider runs a Work session as it runs a Code session: prompts to the person at Guarded, a reviewer at Reviewed, no prompts at Full access.
 - Octant Harness gains the shell port a Code harness thread has, under the same harness authority.
 - An ACP agent whose shell runs in-process, with no protocol request, cannot be asked per command and reports unsupported at Guarded and Reviewed.
+- Built: the in-process ACP shell refusal, set per agent profile.
 
-Status: Designed, not built. Since: —. Detail: [Architecture: Security and authority, Sandbox](../architecture.md#security-and-authority).
+Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Sandbox](../architecture.md#security-and-authority).
 
 ### Provider capability matrix
 
