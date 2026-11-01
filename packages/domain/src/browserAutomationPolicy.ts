@@ -275,6 +275,25 @@ export function originAllowed(target: string, allowedOrigins: ReadonlyArray<stri
   });
 }
 
+/**
+ * Whether the agent may read and act inside a frame at `frameUrl`. On a
+ * Private page a frame is part of the page the approval covered, whatever its
+ * origin: the person saw it in the page, a screenshot already shows it, and its
+ * site holds no sign-in older than the page. On a Project or Personal page a
+ * frame on another origin may be signed in to that site's account, so it is
+ * read only when the context's allowlist admits its origin, as a page there
+ * would need its own site approval. A blank or `srcdoc` frame has its parent's
+ * origin; anything but http and https is not read.
+ */
+export function browserFrameAdmitted(
+  frameUrl: string,
+  context: { readonly allowedOrigins: ReadonlyArray<string>; readonly signedIn: boolean },
+): boolean {
+  if (frameUrl === "about:blank" || frameUrl === "about:srcdoc") return true;
+  if (httpOrigin(frameUrl) === undefined) return false;
+  return !context.signedIn || originAllowed(frameUrl, context.allowedOrigins);
+}
+
 function bareHost(host: string): string {
   return host.startsWith("www.") ? host.slice("www.".length) : host;
 }
