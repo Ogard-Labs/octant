@@ -28,7 +28,10 @@ import {
   type AcpProbeOptions,
   type AcpProcessOptions,
 } from "./acpProcess";
-import type { ProcessConfinementPort } from "../process/seatbeltProfile";
+import {
+  SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
+  type ProcessConfinementPort,
+} from "../process/seatbeltProfile";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
@@ -1994,7 +1997,10 @@ describe("System Keychain read for fx", () => {
     async (executionPolicy) => {
       const lines = (await fxProfileText(fx, executionPolicy)).trimEnd().split("\n");
       const allow = `(allow file-read* (literal "${systemKeychain}"))`;
-      expect(lines.at(-1)).toBe(allow);
+      // Only the server control-socket denial, which names no Keychain, follows it.
+      const guard = SEATBELT_DENY_SERVER_CONTROL_SOCKETS.length;
+      expect(lines.slice(-guard)).toEqual(SEATBELT_DENY_SERVER_CONTROL_SOCKETS);
+      expect(lines.at(-1 - guard)).toBe(allow);
       expect(lines).toContain('(deny file-read* (subpath "/Library/Keychains"))');
       expect(
         lines.filter((line) => line.includes("Keychains/") && line.startsWith("(allow")),
