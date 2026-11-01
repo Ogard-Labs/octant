@@ -719,6 +719,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // The model that judges is a choice about where work is sent, so it
+          // is made at a window on this host, never by a paired device.
+          if (
+            command !== undefined &&
+            callerKind === "remote-device" &&
+            command.kind === "update-code-settings" &&
+            command.shieldModel !== undefined
+          ) {
+            return failureResponse(
+              { category: "unauthorized", message: AUTOMATIC_MODEL_LOCAL_ONLY },
+              403,
+              origin,
+            );
+          }
           if (
             command !== undefined &&
             (command.kind === "create-code-thread" ||
@@ -2983,6 +2997,8 @@ class CodeRouteRejected extends Error {
   }
 }
 
+const AUTOMATIC_MODEL_LOCAL_ONLY =
+  "The model for automatic calls is chosen in the Octant window on this host.";
 const FULL_ACCESS_LOCAL_ONLY = "Full access is chosen in the Octant window on this host.";
 
 function raisesToFullAccess(command: CodeCommand): boolean {

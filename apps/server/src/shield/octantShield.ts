@@ -40,6 +40,12 @@ export type ShieldModelOutcome =
 /** One configured model the Judge asks, by one prompt and one reply, with no tools. */
 export interface ShieldModelPort {
   readonly model: ShieldModelChoice;
+  /**
+   * Why the account the person chose cannot be asked right now (off, not
+   * ready, at its limit). The Judge then sends the decision to the person; it
+   * never asks another account.
+   */
+  readonly unavailable?: string | undefined;
   readonly complete: (input: {
     readonly instructions: string;
     readonly prompt: string;
@@ -241,6 +247,12 @@ export class OctantShield {
     if (model === undefined) {
       return decide("ask", "fail-closed", "No Shield model is reachable, so the person decides.", {
         rule: "no-model",
+      });
+    }
+    if (model.unavailable !== undefined) {
+      return decide("ask", "fail-closed", `${model.unavailable} The person decides this call.`, {
+        rule: "model-account-unavailable",
+        model: model.model,
       });
     }
     const admission = this.#options.spend?.admit({

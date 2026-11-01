@@ -587,12 +587,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "auto reviewer octant shield provider review approvals approve automatic judge",
         },
         {
-          id: settingId("code-shield-model"),
-          label: "Shield model",
-          scope: "app",
-          keywords: "octant shield model reviewer judge local endpoint approvals",
-        },
-        {
           id: settingId("code-editor-executable"),
           label: "External editor",
           scope: "app",
@@ -619,6 +613,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       keywords:
         "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
       settings: [
+        {
+          id: settingId("automatic-model-judge"),
+          label: "Octant Shield's Judge",
+          scope: "host",
+          keywords:
+            "automatic model calls octant shield judge reviewer approvals account api key provider smallest model local endpoint background",
+        },
+        {
+          id: settingId("automatic-model-memory"),
+          label: "Memory distilling",
+          scope: "host",
+          keywords:
+            "automatic model calls memory distilling writes memory account api key provider smallest model background",
+        },
         {
           id: settingId("opencode-managed-update"),
           label: "OpenCode update",
@@ -1076,12 +1084,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Search past threads",
           scope: "host",
           keywords: "search past threads earlier other projects what did we do tool",
-        },
-        {
-          id: settingId("person-memory-model"),
-          label: "Model that writes memory",
-          scope: "host",
-          keywords: "memory model smallest provider usage distill",
         },
         {
           id: settingId("person-memory-exclude"),

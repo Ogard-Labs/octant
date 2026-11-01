@@ -250,6 +250,45 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("refuses a paired device choosing the model for automatic calls, and lets a local window", async () => {
+    const execute = vi.fn(async () => ({ kind: "settings-updated" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
+    const body = JSON.stringify({
+      kind: "update-code-settings",
+      expectedVersion: 1,
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      shieldModel: {
+        providerInstanceId: "00000000-0000-4000-8000-0000000000a1",
+        modelId: "small",
+      },
+    });
+    const send = () =>
+      request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+    const remote = send();
+    bindPrincipalRouteContext(remote, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000941" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    expect((await route(remote))?.status).toBe(403);
+    expect(execute).not.toHaveBeenCalled();
+    expect((await route(send()))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("refuses a paired device turning on Claude artifacts for a thread, and lets it choose Canvas", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
