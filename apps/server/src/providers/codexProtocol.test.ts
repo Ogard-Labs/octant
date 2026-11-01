@@ -483,7 +483,7 @@ describe("Codex stable 0.144.4 protocol", () => {
     });
   });
 
-  it("decodes web search lifecycle items and keeps only the query", () => {
+  it("decodes web search lifecycle items and keeps the query and the results the Watcher reads", () => {
     expect(
       decodeCodexServerMessage({
         method: "item/completed",
@@ -506,7 +506,12 @@ describe("Codex stable 0.144.4 protocol", () => {
       params: {
         threadId: "thread-1",
         turnId: "turn-1",
-        item: { type: "webSearch", id: "exec-1", query: "Stavanger weather tomorrow" },
+        item: {
+          type: "webSearch",
+          id: "exec-1",
+          query: "Stavanger weather tomorrow",
+          results: [{ title: "Forecast", url: "https://example.invalid" }],
+        },
         completedAtMs: 30,
       },
     });
