@@ -151,6 +151,32 @@ describe("taintAppManagedToolResults", () => {
       expect((await unguarded.execute(call)).outsideContent).toBeUndefined();
     });
 
+    it("flags a shell command that printed a secret-holding environment variable", async () => {
+      const record = recorded();
+      const wrapped = taintAppManagedToolResults({
+        tools: tools(async () => ({ result: { output: "HOME=/Users/a\nGITHUB_TOKEN=ghp_x\n" } })),
+        threadId,
+        recordExternalContentIngestion: record,
+        uuid: () => correlationId,
+        resultTaintsThread: () => false,
+      });
+
+      const listed = await wrapped.execute({
+        name: "bash",
+        inputJson: JSON.stringify({ command: "env" }),
+      });
+      const read = await wrapped.execute({
+        name: "read",
+        inputJson: JSON.stringify({ path: ".env" }),
+      });
+
+      expect(listed.outsideContent).toEqual({ labels: ["secret-env-print"] });
+      expect(read.outsideContent).toBeUndefined();
+      expect(record.mock.calls.map(([call]) => provenanceOf(call).sourceLabel)).toEqual([
+        "shield-watcher-secret-env-print",
+      ]);
+    });
+
     it("flags a refused attempt on a protected path and still returns the refusal", async () => {
       const record = recorded();
       const refusal = { result: { error: "protected-file" }, isError: true } as const;

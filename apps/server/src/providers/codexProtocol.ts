@@ -330,6 +330,12 @@ const ThreadItem = Schema.Union(
     type: Schema.Literal("webSearch"),
     id: Schema.String,
     query: Schema.String,
+    /**
+     * What a standalone search returned (codex-cli 0.164.0
+     * `WebSearchItem.results`), as opaque JSON. A search the model's provider
+     * runs itself reports none.
+     */
+    results: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
   }),
   /**
    * One of Codex's own subagent calls (codex-cli 0.164.0 `ThreadItem`):
