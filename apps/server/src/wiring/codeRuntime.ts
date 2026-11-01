@@ -226,6 +226,7 @@ import {
   serverCodeCheckoutRoot,
   serverProjectOf,
 } from "../serverProjects/serverProjectThreads";
+import { serverTerminalLogin } from "../serverProjects/serverTerminal";
 
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
@@ -645,6 +646,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
+        serverTerminalLogin: (thread) => {
+          const project = serverProjectOf(serverProjectStore, thread);
+          if (project === undefined) return undefined;
+          const address = serverProjectStore.addressOf(String(project.id));
+          return address.kind === "address"
+            ? serverTerminalLogin(serverConnection, address.server, project.folder)
+            : undefined;
+        },
         serverCodeTurn: (input) =>
           serverProjectOf(serverProjectStore, input.thread) === undefined
             ? undefined

@@ -94,6 +94,8 @@ import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
 import { ReviewFindingServiceError } from "./reviewFindingService";
 
+import type { ServerTerminalLogin } from "../serverProjects/serverTerminal";
+
 type Awaitable<T> = T | Promise<T>;
 
 /**
@@ -103,12 +105,20 @@ type Awaitable<T> = T | Promise<T>;
 const REMOTE_FOLDER_UNAVAILABLE =
   "This thread's checkout is a folder on a remote machine, which Octant no longer supports.";
 
-/** The operations a server Project's thread runs: its turns, whose tools act on the server. */
+/**
+ * The operations a server Project's thread runs: its turns, whose tools act
+ * on the server, and its terminals, which are logins there.
+ */
 const SERVER_THREAD_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
   "start-provider-turn",
   "answer-provider-input",
   "answer-provider-approval",
   "cancel-provider-turn",
+  "start-terminal",
+  "attach-terminal",
+  "write-terminal",
+  "resize-terminal",
+  "stop-terminal",
 ]);
 const SERVER_OPERATION_UNAVAILABLE =
   "This is not available for a Project on a server yet. Ask the thread to do it there, or use a terminal on the server.";
@@ -964,6 +974,8 @@ export interface CodeOperationServiceOptions {
    * on its folder. Absent, every `remote-root` thread is refused.
    */
   readonly holdsServerThread?: (thread: CodeThread) => boolean;
+  /** The login a server thread's terminal opens on its server, or undefined when it has none now. */
+  readonly serverTerminalLogin?: (thread: CodeThread) => ServerTerminalLogin | undefined;
   /**
    * Runs after the command has passed thread, checkout, lifecycle, and Project
    * scope checks, but before operation approval or any side effect. Runtime
@@ -2505,6 +2517,22 @@ export class CodeOperationService {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
     switch (command.kind) {
       case "start-terminal": {
+        // A server thread's terminal is a login on its server, in its folder,
+        // with nothing of this host's: no credentials, no Browser grant, no
+        // other folder. Plan starts no terminal there either.
+        let serverLogin: ServerTerminalLogin | undefined;
+        if (checkout.kind === "remote-root") {
+          serverLogin = this.#options.serverTerminalLogin?.(thread);
+          if (
+            serverLogin === undefined ||
+            command.browserGrant === "on" ||
+            command.credentialRefs.length > 0 ||
+            command.folder !== undefined ||
+            thread.executionPolicy === "plan"
+          ) {
+            return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
+          }
+        }
         const allowed = new Set(command.credentialRefs);
         const credentialReferences = root.credentialReferences.filter((credential) =>
           allowed.has(credential.environmentName),
@@ -2599,6 +2627,7 @@ export class CodeOperationService {
           ...(browserGrant?.kind === "granted" && browserGrant.launcher !== undefined
             ? { launcher: browserGrant.launcher }
             : {}),
+          ...(serverLogin === undefined ? {} : { server: serverLogin }),
           executionPolicy: thread.executionPolicy,
         });
         owner.starting = starting;

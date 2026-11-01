@@ -2429,17 +2429,15 @@ describe("CodeOperationService", () => {
       fixture.service.admitsTurn(ids.window, { id: ids.thread, checkoutId: ids.checkout }),
     ).resolves.toBe(true);
 
-    const terminal = await fixture.service.execute(ids.window, {
-      kind: "start-terminal",
+    const git = await fixture.service.execute(ids.window, {
+      kind: "observe-git",
       operationId: decodeCodeOperationId("49494949-4949-4494-8494-494949494949"),
       threadId: ids.thread,
       checkoutId: ids.checkout,
-      terminalId: ids.terminal,
-      columns: 120,
-      rows: 40,
-      credentialRefs: [],
+      gitOperationId: "4b4b4b4b-4b4b-44b4-84b4-4b4b4b4b4b4b" as never,
+      maxDiffBytes: 1024,
     });
-    expect(terminal).toMatchObject({
+    expect(git).toMatchObject({
       kind: "operation-failed",
       failure: { category: "unavailable" },
     });

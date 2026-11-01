@@ -545,6 +545,8 @@ export interface CodeOperationRuntimeOptions {
    */
   /** Whether a thread runs in a server Project, on the checkout that Project derives. */
   readonly holdsServerThread?: (thread: CodeThread) => boolean;
+  /** The login a server thread's terminal opens on its server. */
+  readonly serverTerminalLogin?: CodeOperationServiceOptions["serverTerminalLogin"];
   readonly serverCodeTurn?: (input: {
     readonly thread: CodeThread;
     readonly windowId: WindowId;
@@ -1078,6 +1080,9 @@ export function createCodeOperationRuntime(
     ...(options.holdsServerThread === undefined
       ? {}
       : { holdsServerThread: options.holdsServerThread }),
+    ...(options.serverTerminalLogin === undefined
+      ? {}
+      : { serverTerminalLogin: options.serverTerminalLogin }),
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),

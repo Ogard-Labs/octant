@@ -1,4 +1,5 @@
 import type { TerminalLaunchInput, TerminalProcessHandle } from "./terminalProcessPort";
+import { startServerTerminal, type ServerTerminalLogin } from "../serverProjects/serverTerminal";
 
 export const MAX_TERMINAL_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 export const MAX_TERMINAL_OUTPUT_CHUNK_BYTES = 64 * 1024;
@@ -56,6 +57,11 @@ export interface TerminalLaunchRequest {
   readonly executionPolicy?: TerminalLaunchInput["executionPolicy"];
   /** The Project's other folders, bound like `cwd`; see {@link TerminalLaunchInput}. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /**
+   * A server Project's terminal: a login on its server instead of a shell
+   * here. `shell` and `cwd` are then the server's, never opened on this host.
+   */
+  readonly server?: ServerTerminalLogin;
 }
 
 export interface RestoredTerminalRecord {
@@ -224,23 +230,29 @@ export class TerminalService {
           : `${request.launcher.directory}:${environment.PATH}`;
     }
 
-    const process = this.#options.port.start({
-      shell: request.shell,
-      cwd: request.cwd,
-      stateScope: request.stateScope,
-      environment,
-      columns: request.columns,
-      rows: request.rows,
-      ...(request.launcher === undefined
-        ? {}
-        : { additionalReadRoots: request.launcher.readRoots }),
-      ...(request.executionPolicy === undefined
-        ? {}
-        : { executionPolicy: request.executionPolicy }),
-      ...(request.extraFolders === undefined || request.extraFolders.length === 0
-        ? {}
-        : { extraFolders: request.extraFolders }),
-    });
+    if (request.server !== undefined && request.credentialReferences.length > 0) {
+      throw new Error("A terminal on a server carries no credentials from this host.");
+    }
+    const process =
+      request.server !== undefined
+        ? startServerTerminal(request.server, { columns: request.columns, rows: request.rows })
+        : this.#options.port.start({
+            shell: request.shell,
+            cwd: request.cwd,
+            stateScope: request.stateScope,
+            environment,
+            columns: request.columns,
+            rows: request.rows,
+            ...(request.launcher === undefined
+              ? {}
+              : { additionalReadRoots: request.launcher.readRoots }),
+            ...(request.executionPolicy === undefined
+              ? {}
+              : { executionPolicy: request.executionPolicy }),
+            ...(request.extraFolders === undefined || request.extraFolders.length === 0
+              ? {}
+              : { extraFolders: request.extraFolders }),
+          });
     const record: TerminalRecord = {
       terminalId: request.terminalId,
       transcript: new TranscriptBuffer(),
