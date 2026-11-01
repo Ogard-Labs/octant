@@ -468,6 +468,40 @@ describe("AutomationDispatchService", () => {
     second.connection.close();
   });
 
+  it("leaves a Chat run's provider capacity to the ordinary Chat turn path", async () => {
+    const session = openSession();
+    const definition = chatDefinition();
+    const run = claimQueuedRun(session, definition);
+    const admit = vi.fn(() => ({ kind: "waiting" as const, message: "full" }));
+    const launch = vi.fn(async () => ({
+      kind: "accepted" as const,
+      runtimeReceipt: "chat-turn:test",
+      acceptedAt: "2026-08-10T13:00:30.000Z" as UtcTimestamp,
+    }));
+
+    await new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: createCodePort().port,
+      work: unavailableAutomationWorkDispatchPort(),
+      chat: {
+        createThread: async (input) => ({
+          kind: "created",
+          threadId: input.threadId as never,
+          createdAt: "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+        }),
+        startOrRecoverFirstTurn: launch,
+      },
+      capacity: { admit },
+      resolveFacts: () => matchingFacts(definition),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    }).dispatchNow(definition.id, run.id);
+
+    expect(admit).not.toHaveBeenCalled();
+    expect(launch).toHaveBeenCalledTimes(1);
+    session.connection.close();
+  });
+
   it("runs a due routine with no window open, acting as the host for Code and Work", async () => {
     // The dispatcher is given no window or window registry at all: a routine's
     // thread and first turn are the host's, so nothing about which windows are

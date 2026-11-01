@@ -200,12 +200,17 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     run = this.#projection.getRun(runId);
     if (run === undefined || run.runtimeLaunchClaim === undefined) return;
 
-    const capacity = this.#capacity.admit({
-      reservationId: String(run.firstTurnRequestId),
-      providerInstanceId: String(run.definitionSnapshot.executionProfile.providerInstanceId),
-      modelId: String(run.definitionSnapshot.executionProfile.modelId),
-      subjectThreadId: String(run.dispatchIntent!.threadId),
-    });
+    // The ordinary Chat turn path admits its own provider capacity, so a Chat
+    // run reserving here too would take a second slot for one turn.
+    const capacity =
+      run.definitionSnapshot.mode === "chat"
+        ? ({ kind: "admitted", release: () => undefined } as const)
+        : this.#capacity.admit({
+            reservationId: String(run.firstTurnRequestId),
+            providerInstanceId: String(run.definitionSnapshot.executionProfile.providerInstanceId),
+            modelId: String(run.definitionSnapshot.executionProfile.modelId),
+            subjectThreadId: String(run.dispatchIntent!.threadId),
+          });
     if (capacity.kind === "waiting") {
       // Leave the expired/absent claim path free for a later recovery offer.
       return;
