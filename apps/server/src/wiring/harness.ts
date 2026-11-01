@@ -69,6 +69,13 @@ import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
+import { createShieldServerRouteHandler } from "../shield/shieldServerRoutes";
+import {
+  personSshAgentSocket,
+  readRunbookFile,
+  ShieldServerStore,
+} from "../shield/shieldServerStore";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 
 export type HarnessDependencies = Pick<ServerStart, "persistence"> &
   Pick<
@@ -161,6 +168,24 @@ export function wireHarness(deps: HarnessDependencies) {
     workTurnProjection,
   } = deps;
 
+  // Octant Shield's server registry: SSH to these servers is judged by their
+  // profiles, and every remote command a harness shell runs is recorded.
+  const shieldServerStore = new ShieldServerStore({
+    journal: persistence.journal,
+    personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    readRunbook: readRunbookFile,
+  });
+  shieldServerStore.load();
+  const sshAgentSocket = () => personSshAgentSocket(process.env.SSH_AUTH_SOCK);
+  const shieldServerRoutes = createShieldServerRouteHandler({
+    windowAuthorityStore,
+    store: shieldServerStore,
+    sshAgentAvailable: () => sshAgentSocket() !== undefined,
+  });
+
   const researchRouter = new ResearchRouter({
     searxngClient: {
       search: async (input) => {
@@ -237,6 +262,7 @@ export function wireHarness(deps: HarnessDependencies) {
           createNativeHarnessShell({
             process: harnessProcessPort,
             scriptDirectory: harnessScriptDirectory,
+            sshAgentSocket,
             egress: {
               scope: {
                 threadId: decodeEgressAggregateId(scope.threadId),
@@ -427,6 +453,7 @@ export function wireHarness(deps: HarnessDependencies) {
     authorizeThread: authorizeFollowUpThread,
   });
   const nativeHarnessObserver = new NativeHarnessTurnObserver({
+    serverContext: () => shieldServerStore.context(),
     sessions: nativeHarnessSessions,
     router: nativeHarnessRouter,
     isHarnessProvider: (providerInstanceId) => {
@@ -579,10 +606,12 @@ export function wireHarness(deps: HarnessDependencies) {
           usage,
         },
       ),
+    servers: () => shieldServerStore.servers(),
     scratchRoot: harnessWorkDirectory,
   });
   shieldHolder.port = hostShield;
   const nativeHarnessComposition = createNativeHarnessComposition({
+    recordRemoteCommand: (input) => shieldServerStore.recordRemoteCommand(input),
     goals: goalService,
     questions: nativeHarnessQuestions,
     approvals: nativeHarnessApprovals,
@@ -642,14 +671,17 @@ export function wireHarness(deps: HarnessDependencies) {
     shell: createNativeHarnessShell({
       process: harnessProcessPort,
       scriptDirectory: harnessScriptDirectory,
+      sshAgentSocket,
     }),
     offlineShell: createNativeHarnessShell({
       process: harnessOfflineProcessPort,
       scriptDirectory: harnessScriptDirectory,
+      sshAgentSocket,
     }),
     fullAccessShell: createNativeHarnessShell({
       process: harnessFullAccessProcessPort,
       scriptDirectory: harnessScriptDirectory,
+      sshAgentSocket,
     }),
     ...(harnessProxiedShell === undefined
       ? {}
@@ -714,6 +746,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessComposition,
     nativeHarnessEgressRoutes,
     nativeHarnessRoutingRoutes,
+    shieldServerRoutes,
     nativeHarnessHooks,
     nativeHarnessSessionRoutes,
     onHarnessPausedByPerson,

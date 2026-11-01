@@ -215,6 +215,13 @@ import {
   ThreadEgressLaunchSummarizedPayload,
 } from "@octant/contracts";
 import {
+  SHIELD_REMOTE_COMMAND_EVENT_NAMES,
+  SHIELD_SERVERS_EVENT_NAMES,
+  ShieldRemoteCommandRanPayload,
+  ShieldServerRemovedPayload,
+  ShieldServerSetPayload,
+} from "@octant/contracts/shield-servers";
+import {
   RUNTIME_NETWORK_EVENT_NAMES,
   RuntimeNetworkDecisionsRecordedPayload,
   RuntimeNetworkLaunchStartedPayload,
@@ -522,6 +529,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       ThreadEgressDecisionsRecordedPayload,
     )
     .register(CODE_DEBUG_EVENT_NAMES.egressLaunchSummarized, 1, ThreadEgressLaunchSummarizedPayload)
+    .register(SHIELD_SERVERS_EVENT_NAMES.serverSet, 1, ShieldServerSetPayload)
+    .register(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, 1, ShieldServerRemovedPayload)
+    .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.placesSet, 1, SafeNetworksPlacesSetPayload)
     .register(

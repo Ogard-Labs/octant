@@ -969,7 +969,9 @@ describe("native harness composition", () => {
     const setup = (input: {
       readonly verdict?: "allow" | "ask" | "deny";
       readonly remembered?: boolean;
+      readonly remoteRecord?: "recorded" | "not-remote" | "unavailable";
     }) => {
+      const recorded = vi.fn((_record: unknown) => input.remoteRecord ?? ("not-remote" as const));
       const ran: string[] = [];
       const asked = vi.fn(async (_ask: unknown) => "approved" as const);
       const reviewed = vi.fn();
@@ -995,9 +997,10 @@ describe("native harness composition", () => {
         shell: {
           run: async (call) => {
             ran.push(call.command);
-            return { status: "ran", exitCode: 0, output: "", truncated: false };
+            return { status: "ran", exitCode: 0, output: "up 3 days", truncated: false };
           },
         },
+        recordRemoteCommand: recorded,
         approvals: {
           ask: asked,
           recordReviewed: reviewed,
@@ -1021,7 +1024,7 @@ describe("native harness composition", () => {
           inputJson: JSON.stringify({ command }),
           signal: new AbortController().signal,
         });
-      return { ran, asked, reviewed, shown, review, bash };
+      return { ran, asked, reviewed, shown, review, bash, recorded };
     };
 
     it("runs a call Shield allows without asking the person, and journals Shield's answer", async () => {
@@ -1149,6 +1152,26 @@ describe("native harness composition", () => {
       await harness.bash("ls -la");
       expect(harness.review).not.toHaveBeenCalled();
       expect(harness.asked).toHaveBeenCalledOnce();
+    });
+
+    it("records a remote command with its exit status under the thread", async () => {
+      const harness = setup({ verdict: "allow", remoteRecord: "recorded" });
+      const result = await harness.bash("ssh web1 uptime");
+      expect(harness.recorded).toHaveBeenCalledWith({
+        threadId: String(autoThread.id),
+        command: "ssh web1 uptime",
+        status: "ran",
+        exitCode: 0,
+      });
+      expect(JSON.stringify(result)).toContain("up 3 days");
+    });
+
+    it("withholds a remote command's output when its record cannot be kept", async () => {
+      const harness = setup({ verdict: "allow", remoteRecord: "unavailable" });
+      const result = await harness.bash("ssh web1 uptime");
+      expect(harness.ran).toEqual(["ssh web1 uptime"]);
+      expect(JSON.stringify(result)).not.toContain("up 3 days");
+      expect(result).toMatchObject({ isError: true, result: { error: "shell-unavailable" } });
     });
   });
 });

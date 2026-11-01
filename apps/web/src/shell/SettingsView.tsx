@@ -102,6 +102,8 @@ import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-cl
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
+import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
+import { ShieldServersSettings } from "../settings/ShieldServersSettings";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
 import { PhoneNotificationSettings } from "../host/PhoneNotificationSettings";
@@ -231,6 +233,8 @@ export interface SettingsViewProps {
   /** Settings › Access › Safe networks; absent where the host has no such route. */
   readonly safeNetworksClient?: SafeNetworksClient;
   readonly secretStoresClient?: SecretStoresClient;
+  /** Settings › Access › Servers; absent off this computer. */
+  readonly shieldServersClient?: ShieldServersClient;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -297,7 +301,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   host: "The host process: its status, startup, notifications, and maintenance.",
   permissions:
     "The files no agent may touch, and what you have already allowed: websites, extension tools, and public links.",
-  access: "The network places agents may reach below Full access.",
+  access: "The network places and your own servers agents may reach below Full access.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
   "secret-stores":
     "Keep API keys in a password manager you already use. Octant keeps a reference and fetches the key when it is used.",
@@ -1260,6 +1264,10 @@ function ActiveSectionContent({
             client={props.safeNetworksClient}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             {...(focusedSetting === undefined ? {} : { focusedSetting })}
+          />
+          <ShieldServersSettings
+            client={props.shieldServersClient}
+            focusedSetting={focusedSetting}
           />
         </div>
       );

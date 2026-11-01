@@ -17,6 +17,7 @@ import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-cl
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
+import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
@@ -83,6 +84,7 @@ export interface ShellSettingsSurfaceProps {
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
   readonly safeNetworksClient?: SafeNetworksClient;
   readonly secretStoresClient?: SecretStoresClient;
+  readonly shieldServersClient?: ShieldServersClient;
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   readonly replicaSyncStatusClient?: ReplicaSyncStatusClient;
   readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
@@ -178,6 +180,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.secretStoresClient === undefined
               ? {}
               : { secretStoresClient: props.secretStoresClient })}
+            {...(props.shieldServersClient === undefined
+              ? {}
+              : { shieldServersClient: props.shieldServersClient })}
             {...(props.replicaMembershipClient === undefined
               ? {}
               : { replicaMembershipClient: props.replicaMembershipClient })}

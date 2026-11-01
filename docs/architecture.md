@@ -10666,8 +10666,9 @@ the Watcher's tags.
 Octant Shield is Octant's own automatic approval reviewer (maintainer
 decision, 2026-10-31). Its Judge is built for every runtime below, subagents
 included, with the picker and the Settings and Project choices (build order
-steps 1 to 3), and its Watcher for the results Octant hands a model (step 4);
-safe networks and the server registry are designed, not built. It answers the
+steps 1 to 3), its Watcher for the results Octant hands a model (step 4),
+safe networks for provider runtimes (step 5), and the server registry with
+its SSH rules (step 6), with the gaps each part names below. It answers the
 approval prompts
 that would otherwise go to the person, for every runtime that routes
 approvals through Octant: Octant Harness, Claude Code (`canUseTool`), Codex
@@ -10771,6 +10772,68 @@ which keep thread and Project rules, and taint suspending places.
   remote output passes through the Watcher.
 - A per-server notes file (runbook) the person points to is given to the
   agent as context, never as authority.
+
+**Servers as built.** The registry is Settings › Access › Servers, one
+account list (no Project override yet): a server is its alias, user, profile,
+the deploy commands the person described (Operate and Admin run them exactly
+as written), and an optional absolute runbook path. Each change is journaled
+whole, journal first, as `shield-servers.server-set@1` or
+`shield-servers.server-removed@1` on the `shield-servers` aggregate, and
+startup replays them; only a person at a local window changes them (`GET`/`POST
+/api/shield/servers`). An alias is unique without regard to case, as ssh
+matches `Host` patterns, and a runbook inside a key or credential folder is
+refused. The rules are pure policy in `packages/domain/src/shieldServerPolicy.ts`,
+checked against the real-world command set in
+`packages/domain/src/shieldServerFixtures.ts` on every test run, and the Judge
+applies them to every command that starts with `ssh`:
+
+- Only a call that reads as one plain `ssh [options] [user@]host [command]`
+  can pass; a command that also runs, redirects, or expands anything locally,
+  or runs `ssh` anywhere but first (after a separator, in a substitution),
+  goes to the person, since a word check cannot tell which server it
+  reaches. The word `ssh` inside a message or a search pattern is not a call.
+- An option that names a key file (`-i`, `IdentityFile`) is refused; one that
+  can open a tunnel or run a local program (`-L`, `-R`, `-D`, `-A`, `-J`,
+  `-F`, `ProxyCommand`, and any `-o` key outside a short list of connection
+  timings) goes to the person, as do a login session with no command and a
+  user other than the registered one.
+- The remote command meets the malicious-call rules except raising privilege
+  (`sudo` on the person's own server is what a profile grants), then is split
+  into its simple commands, including those inside a substitution, and each is
+  placed: a lock-out or destructive part makes the whole command go to the
+  person at every profile, then a read of a secret path goes to the person,
+  then a tainted thread may only read, then anything no profile names, or
+  text the remote shell would expand, glob, or redirect, goes to the model,
+  and last the server's profile allows its tiers and sends the rest to the
+  person. A program named by a path outside the system's `bin` folders is
+  unknown whatever its name; `sed` counts only as an in-place edit (Admin);
+  `ip` reads only with `show` or `list`; a package option that sets
+  configuration, `pm2 start`, and a `certbot` hook make a command unknown;
+  any state change to SSH or network units, a power target, a recursive
+  change on a system folder, removing an SSH or boot package, and `kill -1`
+  are lock-out actions.
+
+Every `ssh` command an Octant Harness shell runs, at every level, is journaled
+under its thread as `shield-remote-commands.ran@1` with the host (left out
+when the command names it only at run time, as `ssh "$HOST"`), the
+registered server when it is one, the command (credential-shaped text
+redacted, cut to 2 KB), and how it ended with its exit code; output is not kept
+there. A command whose record cannot be journaled returns no output. Its
+output reaches the model as every harness command's does, through the
+Watcher. Each harness shell gets the person's SSH agent socket as
+`SSH_AUTH_SOCK` when the host process has one that is a live socket, and
+nothing that names a key. Work and Code turns on the Octant Harness carry the
+servers and their runbooks (the first 8 KB of each, read when the turn starts)
+as a notes block that says it grants nothing.
+
+Not built yet: a confined command reaching a server. Below Full access the
+harness sandbox keeps the private home (the SSH config with it) unreadable and
+opens only the egress proxy, so `ssh` connects at Full access only, where
+Shield records and does not judge. Also not built: the credential broker for
+SSH, exit status for commands a provider runtime runs itself (Shield's journaled
+decision is its record there), runbook context for provider runtimes, `scp`
+and `rsync` rules (they go to the model as before), naming a host apart at
+Guarded, and a Project override of the registry.
 
 **Model and privacy.** By default Shield uses the thread's own provider
 account with that provider's smallest model, so no new party sees the work.

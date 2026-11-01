@@ -841,3 +841,91 @@
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
 }
+
+/* Settings > Servers: one row per registered server over hairlines, and the
+   add form as a stacked column. */
+.shield-servers {
+  display: grid;
+  gap: var(--oct-space-4);
+}
+
+.shield-servers__profiles {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0 0 var(--oct-space-3);
+  padding: 0;
+  list-style: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.shield-servers__profiles strong {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.shield-servers__note,
+.shield-servers__empty {
+  margin: 0 0 var(--oct-space-3);
+  max-width: 560px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.shield-servers__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shield-servers__server {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-2) 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.shield-servers__list > :first-child {
+  border-top: 0;
+}
+
+.shield-servers__name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.shield-servers__login,
+.shield-servers__runbook {
+  min-width: 0;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.shield-servers__profile,
+.shield-servers__deploys {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.shield-servers__row-actions {
+  display: flex;
+  gap: var(--oct-space-2);
+  margin-left: auto;
+}
+
+.shield-servers__form {
+  display: grid;
+  gap: var(--oct-space-3);
+  max-width: 560px;
+}
+
+.shield-servers__actions {
+  display: flex;
+  gap: var(--oct-space-2);
+}

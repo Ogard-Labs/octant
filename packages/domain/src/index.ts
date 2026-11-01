@@ -18,6 +18,7 @@ export * from "./codePolicy";
 export * from "./guardrailPolicy";
 export * from "./secretGuardPolicy";
 export * from "./shieldJudgePolicy";
+export * from "./shieldServerPolicy";
 export * from "./threadBoardPolicy";
 export * from "./turnDecisionPolicy";
 export * from "./keybindings";

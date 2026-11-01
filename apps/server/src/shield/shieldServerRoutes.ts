@@ -1,0 +1,137 @@
+import {
+  decodeShieldServersCommand,
+  type ShieldServersCommand,
+  type ShieldServersCommandResult,
+  type ShieldServersRefusalReason,
+  type ShieldServersView,
+} from "@octant/contracts/shield-servers";
+import { authenticateRoutePrincipal } from "../principalRouteContext";
+import { isLoopbackHostname } from "../shellRoutes";
+import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import type {
+  ShieldServerPrincipal,
+  ShieldServerStore,
+  ShieldServersChange,
+} from "./shieldServerStore";
+
+const ROUTE = "/api/shield/servers";
+const METHODS = "GET, POST, OPTIONS";
+const HEADERS = "content-type, x-octant-window-capability";
+
+export interface ShieldServerRouteDependencies {
+  readonly windowAuthorityStore: WindowAuthorityStore;
+  readonly store: Pick<ShieldServerStore, "servers" | "register" | "change" | "remove">;
+  /** Whether the person's SSH agent socket is there for SSH sessions to use. */
+  readonly sshAgentAvailable: () => boolean;
+  readonly now?: () => number;
+}
+
+function corsHeaders(origin: string | null): Record<string, string> {
+  return {
+    "access-control-allow-origin": origin ?? "",
+    "access-control-allow-methods": METHODS,
+    "access-control-allow-headers": HEADERS,
+  };
+}
+
+function json(data: unknown, status: number, origin: string | null): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json", ...corsHeaders(origin) },
+  });
+}
+
+function failure(message: string, status: number, origin: string | null): Response {
+  return json({ error: message }, status, origin);
+}
+
+/**
+ * Settings › Servers: the servers a person registered with Octant Shield.
+ * The principal comes from the authenticated request; only a person at a
+ * local window changes the registry.
+ */
+export function createShieldServerRouteHandler(dependencies: ShieldServerRouteDependencies) {
+  const now = dependencies.now ?? Date.now;
+  return async (request: Request): Promise<Response | undefined> => {
+    const url = new URL(request.url);
+    if (url.pathname !== ROUTE) return undefined;
+    const origin = request.headers.get("origin");
+    if (!isLoopbackHostname(url.hostname)) {
+      return failure("Server requests must use loopback.", 400, null);
+    }
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    }
+    if (request.method !== "GET" && request.method !== "POST") {
+      return failure("Method not allowed.", 405, origin);
+    }
+    let body: unknown;
+    if (request.method === "POST") {
+      try {
+        body = await request.json();
+      } catch {
+        return failure("Server body must be valid JSON.", 400, origin);
+      }
+    }
+    let principal: ShieldServerPrincipal;
+    try {
+      const context = authenticateRoutePrincipal({
+        request,
+        store: dependencies.windowAuthorityStore,
+        now: now(),
+        ...(body === undefined ? {} : { body }),
+      });
+      principal = context.principal.kind === "remote-device" ? "remote-device" : "local-window";
+    } catch (error) {
+      if (error instanceof WindowAuthorityError) {
+        return failure("Server request is unauthorized.", 401, origin);
+      }
+      return failure("Server request is invalid.", 400, origin);
+    }
+
+    if (request.method === "GET") return json({ view: view(dependencies) }, 200, origin);
+    let command: ShieldServersCommand;
+    try {
+      command = decodeShieldServersCommand(body);
+    } catch {
+      return failure("Server command is invalid.", 400, origin);
+    }
+    const change: ShieldServersChange =
+      command.kind === "register-server"
+        ? dependencies.store.register({ server: command.server, principal })
+        : command.kind === "change-server"
+          ? dependencies.store.change({
+              serverId: String(command.serverId),
+              server: command.server,
+              principal,
+            })
+          : dependencies.store.remove({ serverId: String(command.serverId), principal });
+    const result: ShieldServersCommandResult =
+      change.kind === "changed"
+        ? { kind: "shield-servers-updated", view: view(dependencies) }
+        : refused(change.reason);
+    return json(result, result.kind === "shield-servers-updated" ? 200 : 409, origin);
+  };
+}
+
+function view(dependencies: ShieldServerRouteDependencies): ShieldServersView {
+  return {
+    servers: dependencies.store.servers(),
+    sshAgent: dependencies.sshAgentAvailable() ? "available" : "missing",
+  };
+}
+
+const MESSAGES: Readonly<Record<ShieldServersRefusalReason, string>> = {
+  "needs-local-window": "Servers can be changed only at this computer.",
+  "duplicate-alias": "A server with that alias is already registered.",
+  "invalid-runbook-path":
+    "That runbook is in a folder that holds keys or credentials, so Octant will not read it.",
+  "invalid-deploy-command": "Write each deploy command on one line.",
+  "server-not-found": "That server is not registered.",
+  "too-many-servers": "No more servers can be registered.",
+  unavailable: "The change could not be recorded, so nothing changed.",
+};
+
+function refused(reason: ShieldServersRefusalReason): ShieldServersCommandResult {
+  return { kind: "shield-servers-refused", reason, message: MESSAGES[reason] };
+}

@@ -17,6 +17,7 @@ import {
   type TurnUsage,
 } from "@octant/contracts";
 import { shieldReviewsPrompts, workThreadAccessOf } from "@octant/domain/guardrail-policy";
+import type { ShieldServerRule } from "@octant/domain/shield-server-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { SpendCeilingService } from "../spendCeilingService";
 import { OctantShield, type ShieldModelPort, type ShieldReviewPort } from "./octantShield";
@@ -76,6 +77,8 @@ export interface HostShieldDependencies {
     readonly model: ShieldModelChoice;
     readonly usage: TurnUsage | undefined;
   }) => void;
+  /** The servers the person registered, judged by their profiles. */
+  readonly servers?: () => ReadonlyArray<ShieldServerRule>;
   /** A folder outside every Project, where Shield's one-shot sessions start. */
   readonly scratchRoot: string;
   readonly clock?: () => string;
@@ -205,6 +208,7 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
           : (deps.workPersonMessages?.(work.id, SHIELD_PERSON_MESSAGE_COUNT) ?? []);
       },
       projectCommands: projectCommandsIn,
+      ...(deps.servers === undefined ? {} : { servers: deps.servers }),
     },
     ...(deps.spendCeiling === undefined && deps.recordUsage === undefined
       ? {}

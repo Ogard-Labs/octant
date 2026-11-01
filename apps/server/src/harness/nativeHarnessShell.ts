@@ -30,6 +30,12 @@ export interface NativeHarnessShellOptions {
    * launch that cannot start never runs its command.
    */
   readonly egress?: NativeHarnessShellEgress;
+  /**
+   * The person's SSH agent socket, read when each command runs. `ssh` signs
+   * in through it, so no command needs a key file; the sandbox's private-home
+   * read denial keeps the key files themselves out of reach.
+   */
+  readonly sshAgentSocket?: () => string | undefined;
 }
 
 export interface NativeHarnessShellEgress {
@@ -106,7 +112,7 @@ async function runScript(
         script,
         cwd: input.cwd,
         ...(input.extraRoots === undefined ? {} : { extraRoots: input.extraRoots }),
-        environment: { NO_COLOR: "1", TERM: "dumb" },
+        environment: commandEnvironment(options.sshAgentSocket?.()),
         timeoutMs: input.timeoutMs,
         ...(egressProxy === undefined ? {} : { egressProxy }),
       },
@@ -131,6 +137,14 @@ async function runScript(
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+function commandEnvironment(sshAgentSocket: string | undefined): Readonly<Record<string, string>> {
+  return {
+    NO_COLOR: "1",
+    TERM: "dumb",
+    ...(sshAgentSocket === undefined ? {} : { SSH_AUTH_SOCK: sshAgentSocket }),
+  };
 }
 
 function decodeOutput(result: RepositoryTestProcessResult): string {

@@ -84,6 +84,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     | "followUpSuggestionRoutes"
     | "nativeHarnessEgressRoutes"
     | "nativeHarnessRoutingRoutes"
+    | "shieldServerRoutes"
     | "nativeHarnessSessionRoutes"
     | "sideTaskRoutes"
   > &
@@ -182,6 +183,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     terminalSessionRoutes,
     nativeHarnessEgressRoutes,
     nativeHarnessRoutingRoutes,
+    shieldServerRoutes,
     nativeHarnessSessionRoutes,
     navigatorAssistantRoutes,
     pendingRequestRoutes,
@@ -255,6 +257,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await agentRunRoutes(request)) ??
     (await agentRunSettingsRoutes(request)) ??
     (await nativeHarnessRoutingRoutes(request)) ??
+    (await shieldServerRoutes(request)) ??
     (await nativeHarnessSessionRoutes(request)) ??
     (await nativeHarnessEgressRoutes(request)) ??
     (await safeNetworkRoutes(request)) ??

@@ -88,6 +88,24 @@ describe("Octant Shield on the host", () => {
     expect(port.complete).not.toHaveBeenCalled();
   });
 
+  it("allows a status read on a registered server by its profile, and asks for any other host", async () => {
+    const { port } = fakeModel({ status: "answered", text: "{}" });
+    const shield = shieldWith(port, {
+      servers: () => [{ alias: "web1", user: "deploy", profile: "read-only", deployCommands: [] }],
+    });
+    await expect(
+      shield.review({
+        threadId: "t",
+        call: bash("ssh web1 systemctl status nginx"),
+        boundRoot: root,
+      }),
+    ).resolves.toMatchObject({ verdict: "allow", stage: "fast-allow", rule: "registered-server" });
+    await expect(
+      shield.review({ threadId: "t", call: bash("ssh db9 uptime"), boundRoot: root }),
+    ).resolves.toMatchObject({ verdict: "ask", rule: "unregistered-server" });
+    expect(port.complete).not.toHaveBeenCalled();
+  });
+
   it("allows an edit in a Project's extra folder by rule, and asks the model without it", async () => {
     const { port } = fakeModel({
       status: "answered",

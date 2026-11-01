@@ -19,6 +19,37 @@ afterEach(async () => {
     rmSync(directory, { recursive: true, force: true });
 });
 
+describe("native harness shell environment", () => {
+  it("hands each command the person's SSH agent socket and nothing that names a key", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-harness-agent-"));
+    directories.push(directory);
+    const environments: Array<Readonly<Record<string, string>>> = [];
+    let socket: string | undefined = "/private/tmp/com.example.agent/Listeners";
+    const shell = createNativeHarnessShell({
+      process: {
+        executeShellScript: async (input) => {
+          environments.push(input.environment);
+          return {
+            termination: "exited",
+            exitCode: 0,
+            stdout: new Uint8Array(),
+            stderr: new Uint8Array(),
+          } as never;
+        },
+      },
+      scriptDirectory: directory,
+      sshAgentSocket: () => socket,
+    });
+    await shell.run({ command: "ssh web1 uptime", cwd: directory, timeoutMs: 1_000 });
+    socket = undefined;
+    await shell.run({ command: "ssh web1 uptime", cwd: directory, timeoutMs: 1_000 });
+    expect(environments).toEqual([
+      { NO_COLOR: "1", TERM: "dumb", SSH_AUTH_SOCK: "/private/tmp/com.example.agent/Listeners" },
+      { NO_COLOR: "1", TERM: "dumb" },
+    ]);
+  });
+});
+
 // These run the real `sandbox-exec`: the shell entry point only matters if a
 // command actually starts under the profile a harness turn gets.
 describe.skipIf(process.platform !== "darwin")("native harness shell under Seatbelt", () => {
