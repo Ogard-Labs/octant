@@ -20,6 +20,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from "node:p
 import { fileURLToPath } from "node:url";
 import {
   CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+  EXTENSION_BRIDGE_PRELOAD_FILENAME,
   CODE_APPROVAL_PRELOAD_FILENAME,
   DESKTOP_PRELOAD_FILENAME,
   TERMINAL_LAUNCHER_DIRECTORY_NAME,
@@ -188,6 +189,7 @@ export const REQUIRED_STAGED_PACKAGED_FILES = [
   `apps/desktop/dist/${DESKTOP_PRELOAD_FILENAME}`,
   `apps/desktop/dist/${CODE_APPROVAL_PRELOAD_FILENAME}`,
   `apps/desktop/dist/${CANVAS_PROTOTYPE_PRELOAD_FILENAME}`,
+  `apps/desktop/dist/${EXTENSION_BRIDGE_PRELOAD_FILENAME}`,
   "apps/desktop/node_modules/effect/package.json",
   "apps/desktop/resources/icon.icns",
   "apps/desktop/resources/icon.png",
@@ -884,9 +886,12 @@ export function validateBundledInternalRuntime(entries: ReadonlyArray<PackagedPa
 }
 
 const SANDBOXED_PRELOAD_PATHS = new Set(
-  [DESKTOP_PRELOAD_FILENAME, CODE_APPROVAL_PRELOAD_FILENAME, CANVAS_PROTOTYPE_PRELOAD_FILENAME].map(
-    (filename) => `apps/desktop/dist/${filename}`,
-  ),
+  [
+    DESKTOP_PRELOAD_FILENAME,
+    CODE_APPROVAL_PRELOAD_FILENAME,
+    CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+    EXTENSION_BRIDGE_PRELOAD_FILENAME,
+  ].map((filename) => `apps/desktop/dist/${filename}`),
 );
 const PRELOAD_REQUIRE = /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g;
 

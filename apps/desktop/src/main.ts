@@ -123,6 +123,8 @@ import {
   type ExtensionPopupView,
 } from "./browserExtensionPopupHost";
 import { fitPopupBounds, validateExtensionPopupRequest } from "./browserExtensionPopupRequest";
+import { createExtensionBridge } from "./browserExtensionBridge";
+import { createExtensionTabsService } from "./browserExtensionTabs";
 import { openCodeExternalEditorFromServer } from "./codeExternalEditor";
 import {
   detectOpenInApplications,
@@ -152,6 +154,7 @@ import {
   resolveDesktopCredentialBackend,
   type DesktopCredentialBackend,
 } from "./desktopCredentialStore";
+import { browserProfilePartition } from "@octant/domain";
 import { keyringAdvice } from "@octant/domain/keyring-advice";
 import {
   HostIdentitySigningFailure,
@@ -227,6 +230,7 @@ import {
   CODE_FILE_HELPER_FILENAME,
   CODE_APPROVAL_PRELOAD_FILENAME,
   DESKTOP_PRELOAD_FILENAME,
+  EXTENSION_BRIDGE_PRELOAD_FILENAME,
   KEYCHAIN_HELPER_FILENAME,
   resolveDesktopNativeHelperPath,
   resolveManagedToolsDirectory,
@@ -1287,6 +1291,7 @@ let computerUseService: ComputerUseDesktopService | undefined;
 let managedToolService: ManagedToolService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
 let browserExtensionPopupHost: ReturnType<typeof createExtensionPopupHost> | undefined;
+let browserExtensionBridge: ReturnType<typeof createExtensionBridge> | undefined;
 let canvasPrototypeSurface: CanvasPrototypeSurface | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
@@ -1760,6 +1765,7 @@ function popupViewOf(view: WebContentsView): ExtensionPopupView {
     native: view,
     setBounds: (bounds) => view.setBounds(bounds),
     webContents: {
+      id: view.webContents.id,
       loadURL: (url) => view.webContents.loadURL(url),
       close: () => view.webContents.close(),
       isDestroyed: () => view.webContents.isDestroyed(),
@@ -1841,9 +1847,23 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       partitionsDirectory: browserProfilesDirectory(),
       sessionFor: (partition) => session.fromPartition(partition),
       closeProfilePages: (profile) => surfaceHost.closeProfileContexts(profile),
+      onExtensionSession: (profile) => browserExtensionBridge?.attachProfile(profile),
+    });
+    const extensionPreloadPath = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      EXTENSION_BRIDGE_PRELOAD_FILENAME,
+    );
+    browserExtensionBridge = createExtensionBridge({
+      preloadPath: extensionPreloadPath,
+      tabsChannel: IPC_CHANNELS.browserExtensionTabs,
+      actionChannel: IPC_CHANNELS.browserExtensionActionClicked,
+      sessionFor: (profile) => session.fromPartition(browserProfilePartition(profile, "")),
+      store: profileStore,
+      tabs: createExtensionTabsService(surfaceHost),
     });
     browserExtensionPopupHost ??= createExtensionPopupHost({
       store: profileStore,
+      preloadPath: extensionPreloadPath,
       createView: ({ partition, webPreferences }) =>
         popupViewOf(new WebContentsView({ webPreferences: { partition, ...webPreferences } })),
     });
@@ -3493,14 +3513,39 @@ function installIpcHandlers(): void {
     const bounds = fitPopupBounds(request.anchor, request.size, context.window.getContentBounds());
     validateBrowserSurfaceBounds(bounds, context.window);
     if (browserExtensionPopupHost === undefined) return { opened: false };
-    return await browserExtensionPopupHost.open({
+    const profile = decodeStoredBrowserProfile(request.profile);
+    browserExtensionBridge?.useWindow(profile, context.windowId);
+    const shown = await browserExtensionPopupHost.open({
       windowId: context.windowId,
       window: popupWindowOf(context.window),
-      profile: decodeStoredBrowserProfile(request.profile),
+      profile,
       extensionId: request.extensionId,
       kind: request.kind,
       bounds,
     });
+    if (shown.opened || request.kind !== "popup" || browserExtensionBridge === undefined) {
+      return shown;
+    }
+    // No popup page: the click is the extension's own `action.onClicked`.
+    return {
+      opened: await browserExtensionBridge.clickAction(
+        profile,
+        context.windowId,
+        request.extensionId,
+      ),
+    };
+  });
+  ipcMain.handle(IPC_CHANNELS.browserExtensionTabs, async (event, request: unknown) => {
+    const popup =
+      event.senderFrame === event.sender.mainFrame
+        ? browserExtensionPopupHost?.contextOf(event.sender.id)
+        : undefined;
+    return (
+      (await browserExtensionBridge?.answerPopup(popup, event.senderFrame?.url ?? "", request)) ?? {
+        ok: false,
+        error: "Octant extensions are unavailable.",
+      }
+    );
   });
   ipcMain.handle(IPC_CHANNELS.browserExtensionPopupClose, (event) => {
     const context = ownedTopLevelWindowContext(event);

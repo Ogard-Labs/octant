@@ -19,6 +19,7 @@ import {
   RUNTIME_NETWORK_EVENT_NAMES,
   type RuntimeNetworkLaunch,
   type RuntimeNetworkRuntime,
+  type SafeNetworkPlace,
   type SafeNetworkRefusalView,
 } from "@octant/contracts/safe-networks";
 import {
@@ -57,7 +58,8 @@ import type { SafeNetworkStore } from "./safeNetworkStore";
  *
  * Inference and the runtime's own tools share the process, so a runtime's
  * bytes taint no thread here: its tool results are marked where the runtime
- * reports them, as before.
+ * reports them, as before. A launch that names its thread loses the places
+ * while that thread is marked.
  */
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -154,6 +156,16 @@ export interface ProviderRuntimeNetworkOptions {
   /** The Project that owns a runtime's folder, or `undefined` for a folder no Project holds. */
   readonly resolveProject: (root: string) => string | undefined;
   readonly reviewer?: RuntimeNetworkReviewer;
+  /**
+   * Whether the thread a launch names (directly, or by the provider session a
+   * running turn holds) has taken in outside content. Places are suspended
+   * for it while it has, as they are for a harness command; a launch no
+   * thread holds keeps them. A read that throws counts as marked.
+   */
+  readonly threadTainted?: (launch: {
+    readonly threadId?: string | undefined;
+    readonly sessionId?: string | undefined;
+  }) => boolean;
   /** Whether this host routes runtimes through the proxy: macOS and Linux. */
   readonly enforced: boolean;
   /**
@@ -351,6 +363,22 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
       return { status: "appended" };
     };
     const reviewer = input.autoReview === true ? this.#options.reviewer : undefined;
+    const namesThread = input.threadId !== undefined || input.sessionId !== undefined;
+    const placesNow = (): ReadonlyArray<SafeNetworkPlace> => {
+      if (namesThread && this.#options.threadTainted !== undefined) {
+        let marked: boolean;
+        try {
+          marked = this.#options.threadTainted({
+            threadId: input.threadId,
+            sessionId: input.sessionId,
+          });
+        } catch {
+          marked = true;
+        }
+        if (marked) return [];
+      }
+      return this.#options.safeNetworks.placesFor(projectId);
+    };
     const started = await startToolEgressProxy({
       launch: proxyLaunch,
       taint: () => ({ threadTainted: false, parentTainted: false }),
@@ -372,7 +400,7 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
             destination,
             providerDomains,
             launchLoopbackPorts: loopbackPorts,
-            places: this.#options.safeNetworks.placesFor(projectId),
+            places: placesNow(),
             projectRules: runtimeRules(),
             reviewerAllowed,
             now: this.#options.clock(),
@@ -382,7 +410,7 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
             address,
             port,
             by,
-            places: this.#options.safeNetworks.placesFor(projectId),
+            places: placesNow(),
             launchLoopbackPorts: loopbackPorts,
           }),
         ...(reviewer === undefined

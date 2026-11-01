@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
   CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+  EXTENSION_BRIDGE_PRELOAD_FILENAME,
   CODE_APPROVAL_PRELOAD_FILENAME,
   DESKTOP_PRELOAD_FILENAME,
 } from "../apps/desktop/src/runtimePaths";
@@ -208,6 +209,7 @@ describe("desktop packaging boundary", () => {
       "apps/desktop/dist/preload.cjs",
       "apps/desktop/dist/codeOperationApprovalViewPreload.cjs",
       "apps/desktop/dist/canvasPrototypePreload.cjs",
+      "apps/desktop/dist/extensionBridgePreload.cjs",
       "apps/desktop/node_modules/effect/package.json",
       "apps/desktop/resources/icon.icns",
       "apps/desktop/resources/icon.png",
@@ -919,6 +921,7 @@ describe("desktop packaging boundary", () => {
       DESKTOP_PRELOAD_FILENAME,
       CODE_APPROVAL_PRELOAD_FILENAME,
       CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+      EXTENSION_BRIDGE_PRELOAD_FILENAME,
     ]) {
       expect(() =>
         validateSandboxedPreloads([

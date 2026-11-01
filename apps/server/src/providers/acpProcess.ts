@@ -353,11 +353,12 @@ function prepareHostAuthentication(
 function releasedByNativeSetup(
   profile: AcpProviderProfile,
   setup: ProviderNativeSetup | undefined,
+  launch: { readonly executionPolicy: ProviderExecutionPolicy; readonly mode?: AcpSessionMode },
 ): { readonly guards: ReadonlySet<string>; readonly rootEntries: ReadonlySet<string> } {
   const released =
     setup === undefined || profile.process.nativeSetup === undefined
       ? undefined
-      : profile.process.nativeSetup(setup);
+      : profile.process.nativeSetup(setup, launch);
   return {
     guards: new Set(released?.releasedGuards ?? []),
     rootEntries: new Set(released?.releasedRootEntries ?? []),
@@ -368,10 +369,11 @@ function hostExtensionDenyPaths(
   profile: AcpProviderProfile,
   hostDirectory: string | undefined,
   root: string,
+  launch: { readonly executionPolicy: ProviderExecutionPolicy; readonly mode: AcpSessionMode },
   nativeSetup?: ProviderNativeSetup,
 ): ReadonlyArray<string> {
   const hostEntries = profile.process.hostDeniedEntries ?? [];
-  const released = releasedByNativeSetup(profile, nativeSetup).rootEntries;
+  const released = releasedByNativeSetup(profile, nativeSetup, launch).rootEntries;
   const rootEntries = (profile.process.forbiddenRootEntries ?? []).filter(
     (entry) => !released.has(entry),
   );
@@ -435,6 +437,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             profile,
             hostAuthentication.writePaths[0] ?? hostAuthentication.readPaths[0],
             root,
+            { executionPolicy: input.executionPolicy, mode: input.mode },
             input.nativeSetup,
           ),
         ];
@@ -961,11 +964,15 @@ export function sanitizeAcpEnvironment(
   input: {
     readonly managedHome: string;
     readonly executionPolicy?: ProviderExecutionPolicy;
+    readonly mode?: AcpSessionMode;
     readonly apiKey?: string;
     readonly nativeSetup?: ProviderNativeSetup;
   },
 ): NodeJS.ProcessEnv {
-  const released = releasedByNativeSetup(profile, input.nativeSetup).guards;
+  const released = releasedByNativeSetup(profile, input.nativeSetup, {
+    executionPolicy: input.executionPolicy ?? "approval-gated",
+    ...(input.mode === undefined ? {} : { mode: input.mode }),
+  }).guards;
   const guards = Object.fromEntries(
     Object.entries(profile.process.guards).filter(([name]) => !released.has(name)),
   );
@@ -1202,6 +1209,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
         const environment = sanitizeAcpEnvironment(profile, inheritedEnvironment, {
           managedHome: input.managedHome,
           executionPolicy: input.executionPolicy,
+          mode: input.mode,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         });

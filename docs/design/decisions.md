@@ -224,6 +224,7 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Built: the Watcher, deterministic detectors with no model, over every app-managed tool result and plugin MCP result before the model reads it; each label is journaled as an outside-content source that marks the thread, reaches the Judge as a kind, tags the Code tool row (quietly at Full access) and marks the Code board card; where an adapter sees what a runtime's own web search or fetch returned (an ACP agent's content items), the Watcher reads that text too, and Chat and Work tool rows carry the same tag as Code's.
 - Built: the server registry in Settings › Access › Servers (alias, user, Read-only, Operate or Admin profile, described deploys, runbook path), journaled and replayed, local window only; the Judge's SSH rules (a plain ssh call to a registered server as its user passes within its profile, an unregistered host, a key path, a tunnelling option, a lock-out or destructive remote command, or a remote secret read goes to the person or is refused) checked on a real-world command set; every Octant Harness `ssh` command journaled with host and exit status at every level; the person's SSH agent socket handed to harness shells; runbooks given to harness turns as notes that grant nothing.
 - Built: the secret guard's list handed to the Watcher and the Judge, and a journaled tag for a secret-then-network command at Full access.
+- Built: the Judge's fast allow for egress to a safe network, for a call that names its destinations (never a shell command), only while Network limits are on and only on an untainted thread.
 - Not built yet: the shared levels in Work; a confined command reaching a registered server (ssh connects at Full access only), the credential broker for SSH, exit status and runbook context for provider runtimes' own commands, `scp` and `rsync` rules, and a Project override of the registry; the Watcher cannot read a runtime's own web result where the runtime does not expose it (Codex, OpenCode); the false-allow rate of a real model is unmeasured.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
@@ -238,8 +239,8 @@ The person names trusted places (hosts, domains, address ranges, private-network
 - With limits on, below Full access every wrapped provider runtime runs on its own egress proxy and reaches only its provider's endpoints, its Project's egress rules and these places; Claude's command sandbox sends its network to the same proxy. Full access stays open network, and so does every runtime while limits are off.
 - A refused host is refused with the host named and listed under Recently refused, where the person can trust it.
 - No place or range may reach a link-local address, and a name nothing lists is refused before any lookup.
-- Built on macOS and Linux for provider runtimes, Claude's own process (Plan, its probes and its in-process web fetch) included, and for Octant Harness commands, behind the Network limits switch (off by default). A Linux capsule reaches its listener through a Unix socket and its tool bridges through the forwarder's loopback relay; OpenCode keeps open network on Linux because the host connects into its server. Taint suspends places for a harness command as it suspends standing rules.
-- With limits on, Octant Shield reviews an unlisted host where it is the thread's reviewer at Auto: for Claude's own process and sandbox, and for harness commands, whose allowance is one call rule. Anything else goes to the person.
+- Built on macOS and Linux for provider runtimes, Claude's own process (Plan, its probes and its in-process web fetch) included, and for Octant Harness commands, behind the Network limits switch (off by default). A Linux capsule reaches its listener through a Unix socket and its tool bridges through the forwarder's loopback relay; OpenCode keeps open network on Linux because the host connects into its server. Taint suspends places for a harness command as it suspends standing rules, and for a runtime launch that names its thread (Claude's own process and sandbox) while that thread is marked; a launch no thread holds keeps them.
+- With limits on, Octant Shield reviews an unlisted host where it is the thread's reviewer at Auto: for Claude's own process and sandbox, and for harness commands, whose allowance is one call rule. Anything else goes to the person. The Judge also allows by rule a call whose every named destination is a trusted place, on an untainted thread.
 - Outside Plan Claude's own process is not wrapped, so only its proxy variables route it. No real runtime turn has run on its proxy yet.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Provider runtime network](../architecture.md#provider-runtime-network) and [Octant Shield](../architecture.md#octant-shield).
@@ -273,10 +274,10 @@ The key providers run inside Octant as they run on their own, with their native 
 - A Project's own settings, hooks, MCP servers and plugins load only in a Project the person trusted for that provider, at every level.
 - A thread may turn a key provider's own setup on or off for itself (Account default, On, Off), only from a window on the host and journaled; Off beats Full access, and On never grants a Project's code, which still needs the Project's trust (built for all four key providers).
 - Claude Code loads its own subagents (each shown as a child run, every call through the parent's gate), web search and fetch (asking below Full access, marking the thread), home skills, settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers and plugins; its account's MCP servers start only with a trusted Project's.
-- Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run only at Full access, because their approvals never reach Octant, each shown as a child run, with their web searches marking the thread.
+- Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run at every level, each shown as a child run, with their approvals and app-tool calls answered through the parent's approval path and their web searches marking the thread.
 - OpenCode loads its own skills, the MCP servers in the person's own configuration, and the permission rules they wrote (over the level, under Plan's denials and the outside-directory refusal; a catch-all rule is ignored), follows each session its `task` tool delegates to as a child run with its requests answered through the parent, and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; Octant Shield answers its approvals at Auto like every other runtime's.
 - OpenCode reports file changes and compacts its own session on request only from the 2.x release whose server was read for them (2.2.0); an older 2.x release reports no file changes and compaction `unavailable`, 1.x reports compaction `unavailable` and reports no file changes (not built yet), and a change no edit grant names still fails the turn. A compaction request is held open until the run that carried it ends, so the closing idle is never read as a completed turn. Rationale: the narrower choice trusts only a release that was read, since routes and events differ between 2.x releases and the claim adds no authority.
-- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; it stays on the ACP bridge, because its `vibe-app-server` is an unversioned surface that ships with its own client; reading usage, compaction, review and questions from `vibe-acp`'s own extensions is not built yet.
+- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; its own subagents run only at Full access in Work and Code, shown as child runs, because a subagent's permission request names nothing Octant could show; it stays on the ACP bridge, because its `vibe-app-server` is an unversioned surface that ships with its own client; reading usage, compaction, review and questions from `vibe-acp`'s own extensions is not built yet.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
 
@@ -701,7 +702,8 @@ A Code thread may push its own branch and open, update and stack pull requests f
 - Each action journals the actor, repository, number and head SHA, and Octant stores no forge token.
 - Built: push, amend with force-with-lease, plain force-push on approval, open (ready, draft, stacked), edit, labels of existing labels only, comments and review replies (approved for each post at every level), close and reopen, and an agent's merge on request or on a stored Project or routine choice.
 - The review pane carries the person's own label, comment, review-reply, approve, request-changes, close and reopen controls; the labels and review threads they name are read through a desktop-window-only query, and a label the repository lacks is never offered. A review is recorded on the head the person read and refused when it moved; no agent, routine or paired device reviews.
-- At Guarded and Reviewed a Code agent's shell can still reach forge credentials, and a change made that way is journaled only as a shell command (known gap).
+- Built: every push, merge and pull-request change Octant reads in a shell command is journaled under the thread (`shield-forge-changes.observed@1`) with who ran it and what happened; at Full access an Octant Harness command that merges, force-pushes plainly, forces or deletes a branch other than the thread's own, or pushes to another thread's branch is refused before it runs, and a provider runtime's command, seen only as it starts, is recorded with the hard line it crossed. A target behind an expansion is recorded as unreadable.
+- At Guarded and Reviewed a Code agent's shell can still reach forge credentials, and a change made that way is journaled as a forge change where Octant sees it, but none of the pull-request rules applies to it (known gap).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -1120,7 +1122,7 @@ Every harness tool call is authorized under the thread's current authority befor
 - The offered tools follow the mode. A call is judged by the narrower of the thread's stored posture and the running turn's posture, so a turn narrowed to Plan refuses writes and commands.
 - A direct-endpoint request goes only to the configured base URL and follows no redirect. Web fetches refuse private destinations and carry no credential.
 - Only harness results that bring in outside content taint the thread. On a tainted thread, shell, edit, write, check and web-fetch need a single-use confirmation, and remembered approvals stop covering them.
-- A tainted thread's search query is refused when it looks like it carries data, before any request leaves; at Full access in Code the refusal does not apply.
+- A tainted thread's search query is refused when it looks like it carries data, before any request leaves; it is a guard the person lowers with the outside-content gate, so at Full access in Work and Code the refusal does not apply.
 - At Full access in Code a tainted thread records the taint and asks no confirmation.
 - Every tool result is hard-capped with a truncation marker and paging, and nothing variable enters the stable request prefix. _Here only._
 
@@ -1564,9 +1566,9 @@ Child runs receive equal-or-narrower authority than the parent, clamped server-s
 - Code children require a verified isolated worktree receipt, and a managed child's Canvas tools are bound to the workspace and Project the host resolved, never a path the model names.
 - A provider transport that cannot carry app-managed tools fails the start with a typed reason rather than dropping the tool.
 - A source turn may send at most three thread messages, and a target turn started by that tool is never offered the tool. _Here only._
-- Native subagents of the key providers are journaled and use the parent's approval path; a provider whose children would bypass it gets them only at Full access (built for Claude Code, for Codex at Full access only, and for OpenCode, whose delegated sessions are followed as child runs; not built yet for the others, whose adapters keep native subagents off).
+- Native subagents of the key providers are journaled and use the parent's approval path; a provider whose children would bypass it gets them only at Full access (built for Claude Code, for Codex, whose subagents' requests are answered through the parent's session, for OpenCode, whose delegated sessions are followed as child runs, and for Mistral Vibe at Full access only, because its subagents' requests name nothing Octant could show).
 
-Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Subagents](../architecture.md#security-and-authority).
+Status: Built. Since: —. Detail: [Architecture: Security and authority, Subagents](../architecture.md#security-and-authority).
 
 ### Canvas design images
 
@@ -2223,7 +2225,7 @@ Browser pages may keep sign-in in a Project or Personal profile. Private remains
 - On a profile page the agent needs a site approval for each origin and profile, for reading too. Credential fields stay protected.
 - Routines, subagents, paired devices and terminal grants are refused on profile pages.
 - An extension is installed and enabled only by a person at a local window. Install never enables, and no agent, plugin or skill can install or enable.
-- Profiles, their stores, site approvals, refusals, sign out, and extension install, per-profile enablement, and popups are built. Two pieces of the popup design are declared and not built: `chrome.tabs` support for popups and the `chrome.action.onClicked` event.
+- Profiles, their stores, site approvals, refusals, sign out, extension install, per-profile enablement, and popups are built. A popup, an options page, and an extension's background worker get `chrome.tabs` (query, get, create, update, sendMessage) for the profile's own pages in the window only, and an extension with no popup page gets `chrome.action.onClicked`. An extension opens a page only to an origin the page already admits, and sees tab addresses only with the `tabs` permission.
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Profiles](browser-profiles.md#profiles) and [The agent on a signed-in page](browser-profiles.md#the-agent-on-a-signed-in-page).
 
@@ -2242,7 +2244,7 @@ Status: Built. Since: —. Detail: [Terminal Browser grant: Current behavior](te
 On a tainted thread the harness refuses a web search query that looks like it carries data, before any request leaves.
 
 - Refused patterns include long text, URLs, email addresses, long hex runs, escaped bytes, base64 and high-entropy tokens.
-- At Full access in Code the query is not refused; the mark is only recorded.
+- It is a guard, not a privacy rule: the person lowers it with the outside-content gate by choosing Full access for a thread or a Project's new threads, so at Full access in Work and Code the query is not refused and the mark is only recorded.
 
 Status: Built. Since: —. Detail: [Search queries on a tainted thread](search-query-taint.md#refused-patterns).
 

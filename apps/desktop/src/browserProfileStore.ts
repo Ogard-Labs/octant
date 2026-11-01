@@ -43,6 +43,11 @@ export interface BrowserProfileStoreOptions {
   readonly sessionFor: (partition: string) => BrowserProfileSessionPort;
   /** Closes every page of a profile before its storage is touched. */
   readonly closeProfilePages: (profile: StoredBrowserProfile) => Promise<void>;
+  /**
+   * Called once per profile, the first time an extension is loaded into its
+   * session, so the app can attach what extension pages and workers there need.
+   */
+  readonly onExtensionSession?: (profile: StoredBrowserProfile) => void;
 }
 
 export interface StoredBrowserProfileSize {
@@ -79,6 +84,31 @@ export interface BrowserProfileStore {
     extensionId: string,
     kind: "popup" | "options",
   ) => string | undefined;
+  /**
+   * Who a loaded extension is, from the address its pages and worker run at.
+   * Absent when no extension of that address is loaded in the profile, so a
+   * caller that is not an enabled extension of this profile learns nothing.
+   */
+  readonly extensionOfElectronId: (
+    profile: StoredBrowserProfile,
+    electronId: string,
+  ) => LoadedExtensionIdentity | undefined;
+  /**
+   * Where a toolbar click on an extension with no popup page goes: the worker
+   * scope that receives `chrome.action.onClicked`. Absent when the extension has
+   * a popup page (the popup is what the click opens) or declares no action.
+   */
+  readonly extensionActionScope: (
+    profile: StoredBrowserProfile,
+    extensionId: string,
+  ) => string | undefined;
+}
+
+export interface LoadedExtensionIdentity {
+  /** Octant's id for the extension. */
+  readonly extensionId: string;
+  /** Whether its manifest asks for the `tabs` permission, which shows tab addresses and titles. */
+  readonly seesTabAddresses: boolean;
 }
 
 interface LoadedExtension {
@@ -104,6 +134,7 @@ export function createBrowserProfileStore(
   // the later change would find nothing loaded and the revoked extension would
   // be recorded as running when the load ended.
   const queues = new Map<string, Promise<void>>();
+  const attached = new Set<string>();
   const syncOne = async (
     profile: StoredBrowserProfile,
     wanted: ReadonlyArray<EnabledExtensionFolder>,
@@ -111,6 +142,10 @@ export function createBrowserProfileStore(
     const partition = browserProfilePartition(profile, "");
     const host = options.sessionFor(partition).extensions;
     if (host === undefined) return;
+    if (!attached.has(partition)) {
+      attached.add(partition);
+      options.onExtensionSession?.(profile);
+    }
     const here = loaded.get(partition) ?? new Map<string, LoadedExtension>();
     loaded.set(partition, here);
     for (const [id, extension] of here) {
@@ -152,6 +187,25 @@ export function createBrowserProfileStore(
       if (extension === undefined) return undefined;
       const page = manifestPage(extension.path, kind);
       return page === undefined ? undefined : `chrome-extension://${extension.electronId}/${page}`;
+    },
+    extensionOfElectronId(profile, electronId) {
+      for (const [extensionId, extension] of loaded.get(browserProfilePartition(profile, "")) ??
+        []) {
+        if (extension.electronId !== electronId) continue;
+        return {
+          extensionId,
+          seesTabAddresses: manifestPermissions(extension.path).includes("tabs"),
+        };
+      }
+      return undefined;
+    },
+    extensionActionScope(profile, extensionId) {
+      const extension = loaded.get(browserProfilePartition(profile, ""))?.get(extensionId);
+      if (extension === undefined) return undefined;
+      const manifest = readManifest(extension.path);
+      if (typeof manifest?.action !== "object" || manifest.action === null) return undefined;
+      if (manifestPage(extension.path, "popup") !== undefined) return undefined;
+      return `chrome-extension://${extension.electronId}/`;
     },
     async list() {
       let folders: string[];
@@ -203,16 +257,28 @@ export function createBrowserProfileStore(
   });
 }
 
-/** The popup or options page the extension's manifest names, as a path inside its folder. */
-function manifestPage(folder: string, kind: "popup" | "options"): string | undefined {
-  let manifest: unknown;
+function readManifest(folder: string): Record<string, unknown> | undefined {
   try {
-    manifest = JSON.parse(readFileSync(join(folder, "manifest.json"), "utf8"));
+    const manifest: unknown = JSON.parse(readFileSync(join(folder, "manifest.json"), "utf8"));
+    return typeof manifest === "object" && manifest !== null && !Array.isArray(manifest)
+      ? (manifest as Record<string, unknown>)
+      : undefined;
   } catch {
     return undefined;
   }
-  if (typeof manifest !== "object" || manifest === null) return undefined;
-  const record = manifest as Record<string, unknown>;
+}
+
+function manifestPermissions(folder: string): ReadonlyArray<string> {
+  const permissions = readManifest(folder)?.permissions;
+  return Array.isArray(permissions)
+    ? permissions.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+/** The popup or options page the extension's manifest names, as a path inside its folder. */
+function manifestPage(folder: string, kind: "popup" | "options"): string | undefined {
+  const record = readManifest(folder);
+  if (record === undefined) return undefined;
   const action =
     typeof record.action === "object" ? (record.action as Record<string, unknown>) : {};
   const ui =

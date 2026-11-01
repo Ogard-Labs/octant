@@ -26,6 +26,8 @@ interface AcpToolState {
   outsideContentReported?: true;
   /** The source the read was reported under, so its result is handed to the Watcher under it. */
   outsideContentSource?: "web-search" | "web-fetch";
+  /** The subagent this call started, once the agent named its session. */
+  childAgentId?: string;
 }
 
 export interface AcpEventContext {
@@ -41,6 +43,8 @@ export interface AcpEventContext {
   readonly tools: Map<string, AcpToolState>;
   readonly requestIds: Map<string | number, string>;
   readonly makeRequestId: () => string;
+  /** The profile's `childRunMetaKey`: where a call names the subagent it started. */
+  readonly childRunMetaKey?: string;
 }
 
 export type AcpMappedNotification =
@@ -185,6 +189,7 @@ function mapTool(
     return [
       event(context, { kind: "tool-start", toolCallId: created.toolCallId, toolName: title }),
       ...outsideContentRead(context, created, update),
+      ...childRun(context, created, update),
     ];
   }
   if (state === undefined)
@@ -210,6 +215,7 @@ function mapTool(
         toolCallId: state.toolCallId,
         summary: "Tool completed.",
       }),
+      ...childRun(context, state, update, "completed"),
     ];
   }
   if (status === "failed") {
@@ -221,6 +227,7 @@ function mapTool(
         toolCallId: state.toolCallId,
         message: toolFailureReason(update) ?? "Tool failed.",
       }),
+      ...childRun(context, state, update, "failed"),
     ];
   }
   return [
@@ -229,6 +236,47 @@ function mapTool(
       kind: "tool-progress",
       toolCallId: state.toolCallId,
       message: normalized(update.title, SUMMARY_MAX_CHARACTERS) ?? "Tool is running.",
+    }),
+    ...childRun(context, state, update),
+  ];
+}
+
+/**
+ * A call that started one of the agent's own subagents, shown as a child run
+ * once the agent names the child's session under the profile's
+ * `childRunMetaKey`: running when first named, then finished or failed with
+ * the call. The task is the first line of what the agent sent the child;
+ * nothing the child said is read.
+ */
+function childRun(
+  context: AcpEventContext,
+  state: AcpToolState,
+  update: Readonly<Record<string, unknown>>,
+  ended?: "completed" | "failed",
+): ReadonlyArray<AcpMappedNotification> {
+  if (context.childRunMetaKey === undefined) return [];
+  const meta = record(update._meta);
+  const reported = string(meta?.[context.childRunMetaKey])?.trim();
+  const named =
+    reported !== undefined && reported.length > 0 && reported.length <= 255 ? reported : undefined;
+  const firstSeen = state.childAgentId === undefined && named !== undefined;
+  if (firstSeen) state.childAgentId = named;
+  const childAgentId = state.childAgentId;
+  if (childAgentId === undefined || (!firstSeen && ended === undefined)) return [];
+  const task = normalized(string(meta?.task)?.split("\n")[0], 200);
+  const status = ended ?? "running";
+  return [
+    event(context, {
+      kind: "child-agent-activity",
+      childAgentId,
+      ...(task === undefined ? {} : { task }),
+      status,
+      summary:
+        status === "running"
+          ? `${context.displayName} is running a subagent.`
+          : status === "completed"
+            ? "The subagent finished."
+            : "The subagent stopped before it finished.",
     }),
   ];
 }

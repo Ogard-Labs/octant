@@ -2065,6 +2065,9 @@ describe("Mistral Vibe running as itself", () => {
     "VIBE_DEFAULT_AGENT",
     "VIBE_AGENT_PATHS",
     "VIBE_INSTALLED_AGENTS",
+    // Below Full access a subagent's request reaches Octant naming none of
+    // what it asks, so Vibe's own subagents stay off there.
+    "VIBE_ENABLE_SUBAGENTS",
   ];
 
   it("keeps every guard for a session without the person's setup and releases only its own for one with it", () => {
@@ -2098,6 +2101,30 @@ describe("Mistral Vibe running as itself", () => {
     expect(readOnly.VIBE_MCP_SERVERS).toBe("[]");
     expect(readOnly.VIBE_ENABLE_EXPERIMENTAL_HOOKS).toBe("false");
     expect(readOnly.VIBE_TOOL_PATHS).toBe("[]");
+  });
+
+  it("lets Vibe start its own subagents only at Full access in Work or Code, once the person allows them", () => {
+    expect(sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x" }).VIBE_ENABLE_SUBAGENTS).toBe(
+      "false",
+    );
+    for (const [executionPolicy, mode, nativeSetup, released] of [
+      ["full-access", "code", everything, true],
+      ["full-access", "work", everything, true],
+      ["full-access", "chat", everything, false],
+      ["full-access", "code", { ...everything, subagents: false }, false],
+      ["approval-gated", "code", everything, false],
+      ["auto-accept-edits", "code", everything, false],
+      ["plan", "code", everything, false],
+    ] as const) {
+      const environment = sanitizeAcpEnvironment(
+        vibe,
+        {},
+        { managedHome: "/x", executionPolicy, mode, nativeSetup },
+      );
+      expect(environment.VIBE_ENABLE_SUBAGENTS, `${executionPolicy} ${mode}`).toBe(
+        released ? undefined : "false",
+      );
+    }
   });
 
   it("reads a trusted Project's own .vibe entries again only for a session that loads its code", async () => {

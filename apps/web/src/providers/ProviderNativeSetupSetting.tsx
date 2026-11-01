@@ -57,6 +57,9 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
           in its home folder. Octant still shows each subagent and marks each web read. Full access
           turns this on by itself. Plan stays read-only, and Chat never gets a folder or a shell. A
           Project’s own hooks, MCP servers, and plugins load only in a Project you trust for {name}.
+          {props.instance.driverKind === "mistral-vibe" ? (
+            <> Mistral Vibe’s own subagents run only at Full access.</>
+          ) : null}
           {unsupported.length === 0 ? null : (
             <>
               {" "}

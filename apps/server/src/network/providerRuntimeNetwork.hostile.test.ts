@@ -89,6 +89,10 @@ interface HostOptions {
   readonly directory?: string;
   readonly socketDirectory?: string;
   readonly openRuntimes?: ReadonlySet<RuntimeNetworkRuntime>;
+  readonly threadTainted?: (launch: {
+    readonly threadId?: string | undefined;
+    readonly sessionId?: string | undefined;
+  }) => boolean;
 }
 
 function runtimeHost(options: HostOptions = {}) {
@@ -131,6 +135,7 @@ function runtimeHost(options: HostOptions = {}) {
     ...(options.reviewer === undefined ? {} : { reviewer: options.reviewer }),
     ...(options.socketDirectory === undefined ? {} : { socketDirectory: options.socketDirectory }),
     ...(options.openRuntimes === undefined ? {} : { openRuntimes: options.openRuntimes }),
+    ...(options.threadTainted === undefined ? {} : { threadTainted: options.threadTainted }),
     // An address resolves to itself, as the system lookup answers it.
     resolveAll: async (host) =>
       isIP(host) !== 0
@@ -445,6 +450,70 @@ describe("provider runtime network", () => {
     const back = await openTunnel(proxyOf(launch.endpoint), "git.corp.example:443", authorization);
     expect(back.status).toBe(200);
     back.socket.end();
+  });
+
+  it("suspends places for a launch whose thread took in outside content, and keeps them for one no thread holds", async () => {
+    const origin = await tcpFixture();
+    let marked = false;
+    const host = runtimeHost({
+      routes: new Map([["93.184.216.10", origin.port]]),
+      threadTainted: ({ sessionId }) => {
+        if (sessionId === "broken") throw new Error("unreadable");
+        return sessionId === "session-1" && marked;
+      },
+    });
+    host.store.set({
+      scope: { kind: "account" },
+      places: [{ kind: "domain", domain: "corp.example" }],
+      principal: "local-window",
+    });
+    const launch = await started(
+      host.network.start({
+        runtime: "claude",
+        root: "/projects/app",
+        executionPolicy: "approval-gated",
+        sessionId: "session-1",
+      }),
+    );
+    const authorization = basicAuthorization(tokenOf(launch.environment));
+    const before = await openTunnel(
+      proxyOf(launch.endpoint),
+      "git.corp.example:443",
+      authorization,
+    );
+    expect(before.status).toBe(200);
+    before.socket.end();
+
+    marked = true;
+    const after = await openTunnel(proxyOf(launch.endpoint), "git.corp.example:443", authorization);
+    expect(after.status).toBe(403);
+
+    const probe = await started(
+      host.network.start({ runtime: "claude", root: "/projects/app", executionPolicy: "plan" }),
+    );
+    const probeTunnel = await openTunnel(
+      proxyOf(probe.endpoint),
+      "git.corp.example:443",
+      basicAuthorization(tokenOf(probe.environment)),
+    );
+    expect(probeTunnel.status).toBe(200);
+    probeTunnel.socket.end();
+
+    // A mark that cannot be read counts as marked.
+    const unreadable = await started(
+      host.network.start({
+        runtime: "claude",
+        root: "/projects/app",
+        executionPolicy: "approval-gated",
+        sessionId: "broken",
+      }),
+    );
+    const refused = await openTunnel(
+      proxyOf(unreadable.endpoint),
+      "git.corp.example:443",
+      basicAuthorization(tokenOf(unreadable.environment)),
+    );
+    expect(refused.status).toBe(403);
   });
 
   it("reaches a loopback service only at a trusted this-mac port, never a private answer for an untrusted name, and never link-local", async () => {

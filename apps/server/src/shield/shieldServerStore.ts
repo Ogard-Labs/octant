@@ -3,7 +3,12 @@ import { isAbsolute } from "node:path";
 import {
   AggregateId,
   AggregateVersion,
+  MAX_SHIELD_FORGE_CHANGE_BRANCHES,
   MAX_SHIELD_TAGGED_COMMAND_LENGTH,
+  SHIELD_FORGE_CHANGE_EVENT_NAMES,
+  SHIELD_FORGE_CHANGES_AGGREGATE,
+  type ShieldForgeChangeOutcome,
+  type ShieldForgeHardLine,
   SHIELD_TAG_EVENT_NAMES,
   SHIELD_TAGS_AGGREGATE,
   type ShieldTag,
@@ -32,6 +37,10 @@ import {
   type ShieldServersRefusalReason,
 } from "@octant/contracts/shield-servers";
 import {
+  type ForgeShellChange,
+  forgeShellChangeSummary,
+} from "@octant/domain/forge-shell-change-policy";
+import {
   MAX_SHIELD_RUNBOOK_CONTEXT_LENGTH,
   parseFileCopyInvocation,
   parseSshInvocation,
@@ -45,7 +54,8 @@ import { redactSecretShaped } from "../providers/providerApprovalCall";
 /**
  * The servers a person registered with Octant Shield, journaled and rebuilt
  * from the journal at startup, the record of every `ssh` command a thread
- * ran, and the tags Shield puts on commands it does not judge. Canonical: docs/architecture.md § Octant Shield (servers over
+ * ran, the tags Shield puts on commands it does not judge, and the pushes and
+ * pull-request changes a thread's shell commands made. Canonical: docs/architecture.md § Octant Shield (servers over
  * SSH).
  *
  * Every change is one `shield-servers.server-set@1` (the whole record) or
@@ -132,6 +142,7 @@ export class ShieldServerStore {
       SHIELD_SERVERS_AGGREGATE,
       SHIELD_REMOTE_COMMANDS_AGGREGATE,
       SHIELD_TAGS_AGGREGATE,
+      SHIELD_FORGE_CHANGES_AGGREGATE,
     ]) {
       for (const { aggregateId, aggregateVersion } of this.#options.journal.aggregateVersions(
         aggregateType,
@@ -388,6 +399,60 @@ export class ShieldServerStore {
       SHIELD_TAGS_AGGREGATE,
       String(threadId),
       SHIELD_TAG_EVENT_NAMES.recorded,
+      payload,
+      this.#hostActor,
+    )
+      ? "recorded"
+      : "unavailable";
+  }
+
+  /**
+   * Journals a push or pull-request change a thread's shell command made,
+   * with who ran it, what Octant did, and the command redacted and cut.
+   * A command that makes none is not recorded; `unavailable` means the
+   * record could not be kept.
+   */
+  recordForgeChange(input: {
+    readonly threadId: string;
+    readonly via: "octant-harness" | "provider-runtime";
+    readonly changes: ReadonlyArray<ForgeShellChange>;
+    readonly outcome: ShieldForgeChangeOutcome;
+    readonly hardLine?: ShieldForgeHardLine | undefined;
+    readonly command: string;
+    readonly exitCode?: number | undefined;
+  }): "recorded" | "no-change" | "unavailable" {
+    const summary = forgeShellChangeSummary(input.changes);
+    if (summary.kinds.length === 0) return "no-change";
+    let threadId: AggregateId;
+    try {
+      threadId = decodeAggregateId(input.threadId);
+    } catch {
+      return "unavailable";
+    }
+    const redacted = redactSecretShaped(input.command.trim());
+    const branches = summary.branches
+      .map((branch) => branch.trim())
+      .filter((branch) => branch.length > 0 && branch.length <= 255)
+      .slice(0, MAX_SHIELD_FORGE_CHANGE_BRANCHES);
+    const payload = {
+      threadId,
+      via: input.via,
+      changes: summary.kinds,
+      ...(branches.length === 0 ? {} : { branches }),
+      unreadable: summary.unreadable,
+      outcome: input.outcome,
+      ...(input.hardLine === undefined ? {} : { hardLine: input.hardLine }),
+      command:
+        redacted.length > MAX_SHIELD_TAGGED_COMMAND_LENGTH
+          ? `${redacted.slice(0, MAX_SHIELD_TAGGED_COMMAND_LENGTH - 1)}…`
+          : redacted,
+      ...(input.exitCode === undefined ? {} : { exitCode: input.exitCode }),
+      recordedAt: this.#options.clock(),
+    };
+    return this.#append(
+      SHIELD_FORGE_CHANGES_AGGREGATE,
+      String(threadId),
+      SHIELD_FORGE_CHANGE_EVENT_NAMES.observed,
       payload,
       this.#hostActor,
     )

@@ -16,6 +16,13 @@ import {
   type WorkThread,
 } from "@octant/contracts";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
+import {
+  type ForgeShellChange,
+  type ForgeShellHardLine,
+  forgeShellChanges,
+  forgeShellHardLine,
+  forgeShellHardLineMessage,
+} from "@octant/domain/forge-shell-change-policy";
 import { shieldCallFromHarness } from "@octant/domain/shield-judge-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { nativeHarnessResultTaintsThread } from "@octant/domain/untrusted-content-policy";
@@ -112,6 +119,29 @@ export interface NativeHarnessCompositionOptions {
     readonly status: NativeHarnessShellRun["status"];
     readonly exitCode?: number | undefined;
   }) => "recorded" | "not-remote" | "unavailable";
+  /**
+   * Pushes and pull-request changes a command makes. Every one the shell
+   * runs is journaled under the thread; at Full access, where nothing else
+   * reviews a command, one that crosses a hard line (a merge or a plain
+   * force-push the person did not ask for, a push to another thread's
+   * branch) is refused before it runs and journaled as refused. `record`
+   * answering `unavailable` withholds the output, as an unmarked result is.
+   */
+  readonly forgeChanges?: {
+    /** The thread's own delivery branch and the branches other threads of its repository work on. */
+    readonly branches: (threadId: string) => {
+      readonly ownBranch?: string | undefined;
+      readonly otherThreadBranches: ReadonlyArray<string>;
+    };
+    readonly record: (input: {
+      readonly threadId: string;
+      readonly changes: ReadonlyArray<ForgeShellChange>;
+      readonly outcome: "refused" | "ran";
+      readonly hardLine?: ForgeShellHardLine | undefined;
+      readonly command: string;
+      readonly exitCode?: number | undefined;
+    }) => "recorded" | "no-change" | "unavailable";
+  };
   /**
    * The secret guard's list in force: whether a path the agent wrote is one it
    * protects. With it the Watcher flags a call that names a protected path,
@@ -695,6 +725,79 @@ export function createNativeHarnessComposition(
     };
   };
   /**
+   * The shell with each push and pull-request change journaled, and at Full
+   * access the ones that cross a hard line refused before they run.
+   */
+  const guardingForgeChanges = (
+    threadId: string,
+    shell: NativeHarnessShellPort | undefined,
+    atFullAccess: () => boolean,
+  ): NativeHarnessShellPort | undefined => {
+    const forge = options.forgeChanges;
+    if (shell === undefined || forge === undefined) return shell;
+    const withheld = { status: "unavailable", output: "", truncated: false } as const;
+    return {
+      run: async (input) => {
+        const changes = forgeShellChanges(input.command);
+        if (changes.length === 0) return shell.run(input);
+        let hardLine: ForgeShellHardLine | undefined;
+        try {
+          hardLine = atFullAccess()
+            ? forgeShellHardLine(changes, forge.branches(threadId))
+            : undefined;
+        } catch {
+          // Branches that cannot be read leave the push and merge lines,
+          // which need none, and lose only the other-thread line.
+          hardLine = forgeShellHardLine(changes, { otherThreadBranches: [] });
+        }
+        if (hardLine !== undefined) {
+          try {
+            forge.record({
+              threadId,
+              changes,
+              outcome: "refused",
+              hardLine,
+              command: input.command,
+            });
+          } catch {
+            // The refusal stands whether or not its record could be kept.
+          }
+          return {
+            ...withheld,
+            refusal: {
+              reason: `forge-${hardLine}`,
+              message: forgeShellHardLineMessage(hardLine),
+            },
+          };
+        }
+        const recordRan = (exitCode: number | undefined): ReturnType<typeof forge.record> => {
+          try {
+            return forge.record({
+              threadId,
+              changes,
+              outcome: "ran",
+              command: input.command,
+              ...(exitCode === undefined ? {} : { exitCode }),
+            });
+          } catch {
+            return "unavailable";
+          }
+        };
+        let run: NativeHarnessShellRun;
+        try {
+          run = await shell.run(input);
+        } catch (error) {
+          // The command may have pushed before the shell failed.
+          recordRan(undefined);
+          throw error;
+        }
+        // A shell that never started the command made no change to record.
+        if (run.status === "unavailable") return run;
+        return recordRan(run.exitCode) === "unavailable" ? withheld : run;
+      },
+    };
+  };
+  /**
    * Without the egress rules every command runs on `shell`; the ones a Full
    * access posture runs are still tagged, since Shield judges none of them.
    */
@@ -722,17 +825,21 @@ export function createNativeHarnessComposition(
     scope: HarnessEgressScope,
     windowId: string,
   ): NativeHarnessShellPort | undefined =>
-    recordingRemoteCommands(
+    guardingForgeChanges(
       scope.threadId,
-      options.proxiedShell === undefined
-        ? taggingAtFullAccess(scope.threadId, options.shell, () =>
-            codeEgress(scope.threadId, windowId),
-          )
-        : postureShell(
-            { threadId: scope.threadId, readerThreadIds: [scope.threadId] },
-            options.proxiedShell(scope),
-            () => codeEgress(scope.threadId, windowId),
-          ),
+      recordingRemoteCommands(
+        scope.threadId,
+        options.proxiedShell === undefined
+          ? taggingAtFullAccess(scope.threadId, options.shell, () =>
+              codeEgress(scope.threadId, windowId),
+            )
+          : postureShell(
+              { threadId: scope.threadId, readerThreadIds: [scope.threadId] },
+              options.proxiedShell(scope),
+              () => codeEgress(scope.threadId, windowId),
+            ),
+      ),
+      () => options.readCodeExecutionPolicy?.(scope.threadId, windowId) === "full-access",
     );
   const workEgress = (threadId: string) => {
     const executionPolicy = options.readWorkExecutionPolicy?.(threadId);
@@ -743,15 +850,19 @@ export function createNativeHarnessComposition(
   // Work and Code share the shell at the thread's level, so a Work thread's
   // commands run on the shell a Code thread at that level gets.
   const workShell = (scope: HarnessEgressScope): NativeHarnessShellPort | undefined =>
-    recordingRemoteCommands(
+    guardingForgeChanges(
       scope.threadId,
-      options.proxiedShell === undefined
-        ? taggingAtFullAccess(scope.threadId, options.shell, () => workEgress(scope.threadId))
-        : postureShell(
-            { threadId: scope.threadId, readerThreadIds: [scope.threadId] },
-            options.proxiedShell(scope),
-            () => workEgress(scope.threadId),
-          ),
+      recordingRemoteCommands(
+        scope.threadId,
+        options.proxiedShell === undefined
+          ? taggingAtFullAccess(scope.threadId, options.shell, () => workEgress(scope.threadId))
+          : postureShell(
+              { threadId: scope.threadId, readerThreadIds: [scope.threadId] },
+              options.proxiedShell(scope),
+              () => workEgress(scope.threadId),
+            ),
+      ),
+      () => options.readWorkExecutionPolicy?.(scope.threadId) === "full-access",
     );
   const delegateFor = (scope: {
     readonly parentThreadId: string;
@@ -1020,26 +1131,30 @@ export function createNativeHarnessComposition(
         });
       const commandsProxied =
         authority.network && options.proxiedShell !== undefined && projectId !== undefined;
-      // A child's remote commands and Shield's tags are recorded under the
-      // parent thread the person reviews.
-      const shell = recordingRemoteCommands(
+      // A child's remote commands, forge changes, and Shield's tags are
+      // recorded under the parent thread the person reviews.
+      const shell = guardingForgeChanges(
         parentThreadId,
-        !authority.network
-          ? options.offlineShell
-          : options.proxiedShell === undefined
-            ? options.shell
-            : projectId === undefined
-              ? unavailableShell
-              : postureShell(
-                  // A child's own reads count beside its parent's.
-                  { threadId: parentThreadId, readerThreadIds: [parentThreadId, runId] },
-                  options.proxiedShell({
-                    threadId: runId,
-                    projectId: String(projectId),
-                    parentThreadId,
-                  }),
-                  childEgress,
-                ),
+        recordingRemoteCommands(
+          parentThreadId,
+          !authority.network
+            ? options.offlineShell
+            : options.proxiedShell === undefined
+              ? options.shell
+              : projectId === undefined
+                ? unavailableShell
+                : postureShell(
+                    // A child's own reads count beside its parent's.
+                    { threadId: parentThreadId, readerThreadIds: [parentThreadId, runId] },
+                    options.proxiedShell({
+                      threadId: runId,
+                      projectId: String(projectId),
+                      parentThreadId,
+                    }),
+                    childEgress,
+                  ),
+        ),
+        () => authority.executionPolicy === "full-access",
       );
       const { approveCommand, ...interactions } = options.childInteractions?.(run) ?? {};
       const askApproval = interactions.approvals;

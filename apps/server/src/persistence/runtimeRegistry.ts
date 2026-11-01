@@ -219,6 +219,8 @@ import {
   ThreadEgressLaunchSummarizedPayload,
   SHIELD_TAG_EVENT_NAMES,
   ShieldTagRecordedPayload,
+  SHIELD_FORGE_CHANGE_EVENT_NAMES,
+  ShieldForgeChangeObservedPayload,
 } from "@octant/contracts";
 import {
   SHIELD_REMOTE_COMMAND_EVENT_NAMES,
@@ -559,6 +561,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(SERVER_PROJECTS_EVENT_NAMES.renamed, 1, ServerProjectRenamedPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES.removed, 1, ServerProjectRemovedPayload)
     .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
+    .register(SHIELD_FORGE_CHANGE_EVENT_NAMES.observed, 1, ShieldForgeChangeObservedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.placesSet, 1, SafeNetworksPlacesSetPayload)
     .register(

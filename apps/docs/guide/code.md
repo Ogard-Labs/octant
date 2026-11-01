@@ -129,8 +129,14 @@ in the composer changes it in one click, for new and existing threads alike:
   [Protected files](../advanced/privacy-and-security.md#protected-files),
   such as SSH private keys and cloud credentials, are guarded by Octant's own
   tools and redaction only, and a shell command can read them. Nothing asks,
-  pushing, merging and publishing included; the agent does those because you
-  asked in the thread, and every action is recorded. Outside content the
+  pushing and publishing included; the agent does those because you asked
+  in the thread, and every action is recorded. Every push and pull-request
+  change Octant sees in a command is recorded on the thread. Three things
+  stay yours even here: Octant's own agent cannot merge, force-push plainly,
+  or push to another thread's branch from its shell. Octant refuses the
+  command and the agent uses Octant's merge or push tool, which asks you.
+  Another provider's agent reports a command only as it starts, so Octant
+  records it and marks one of those three, but cannot stop it. Outside content the
   agent read is tagged on the tool row and the thread card, never blocked.
   The first time this computer or a Project picks Full access, Octant shows
   that warning once.

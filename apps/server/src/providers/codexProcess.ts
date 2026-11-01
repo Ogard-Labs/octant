@@ -70,9 +70,8 @@ export type CodexLaunchAuthority =
       readonly mode: "chat" | "work" | "code";
       readonly executionPolicy: ProviderExecutionPolicy;
       /**
-       * The person let Codex run its own subagents, and the thread runs at
-       * Full access, the only posture where a child, whose approvals never
-       * reach Octant, has nothing to wait for.
+       * The person let Codex run its own subagents. Their requests reach the
+       * parent's approval path on their own thread ids, at every level.
        */
       readonly ownSubagents?: true;
     };
@@ -294,9 +293,9 @@ export function isAtLeastRelease(
 }
 
 /**
- * Octant keeps provider-native subagents off: a Codex child runs on its own
- * thread, which the driver neither shows nor answers approvals for, so a child
- * waiting on one would hang the turn out of sight. The overrides ride on the
+ * Codex's own subagents stay off unless the person let Codex run them: a
+ * child is Codex's own delegation, not Octant's, so it waits for that choice
+ * like the rest of the person's own setup. The overrides ride on the
  * command line so the user's `CODEX_HOME` and `config.toml` stay untouched and
  * every thread this process starts or resumes inherits them.
  *
@@ -319,9 +318,9 @@ export function codexAppServerArgs(
   version: string,
   options: { readonly ownSubagents?: true } = {},
 ): readonly string[] {
-  // A lease for a Full access thread whose person let Codex run its own
-  // subagents leaves Codex's own defaults for them, as in Codex itself. Its
-  // memories stay off either way.
+  // A lease for a thread whose person let Codex run its own subagents leaves
+  // Codex's own defaults for them, as in Codex itself. Its memories stay off
+  // either way.
   if (options.ownSubagents === true) {
     return ["app-server", "--listen", "stdio://", "-c", "features.memories=false"];
   }

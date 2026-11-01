@@ -13,6 +13,7 @@ import {
   workThreadAccessOf,
   type ThreadToolSteps,
 } from "@octant/domain";
+import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
   MAX_PROVIDER_CONTEXT_BLOCKS,
@@ -105,6 +106,12 @@ export interface WorkTurnRuntimePort {
      * the turn.
      */
     readonly outsideContentMarks?: RuntimeOutsideContentMarking;
+    /**
+     * Journals each push or pull-request change the runtime's own shell starts,
+     * flagging a hard line at Full access; the runtime reports a command only
+     * as it starts, so this records and never stops one.
+     */
+    readonly forgeChanges?: RuntimeForgeChangeObserver;
     /** Told of every runtime event, for Octant Shield's record of remote commands. */
     readonly observeRemoteCommand?: (event: ProviderRuntimeEvent) => void;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
@@ -426,6 +433,15 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   return yield* Effect.fail<ProviderFailure>({
                     category: "provider-failed",
                     message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+                  });
+                }
+                if (event.kind === "tool-start" && event.argument !== undefined) {
+                  input.forgeChanges?.observe({
+                    threadId: String(input.command.threadId),
+                    command: event.argument,
+                    fullAccess:
+                      workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS).executionPolicy ===
+                      "full-access",
                   });
                 }
                 if (handledEvents > MAX_EVENTS) return;

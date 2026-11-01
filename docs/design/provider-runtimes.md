@@ -27,9 +27,11 @@ With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 `project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,
 `WebSearch`, `WebFetch`, and `Skill` tools, with every hook off by flag in Chat
 and Plan and `strictMcpConfig: false` only in a trusted Project. Codex starts
-with no `skills.config` rules, no per-name `mcp_servers` switch-off, and
-plugins and apps on in Chat, and at Full access with an app-server that has
-no subagent switches.
+with no `skills.config` rules, no per-name `mcp_servers` switch-off,
+plugins and apps on in Chat, and an app-server that has no subagent
+switches, at every level; a subagent's requests come back on its own thread
+id and are answered through the parent's session. Mistral Vibe keeps
+`VIBE_ENABLE_SUBAGENTS="false"` except at Full access in Work and Code.
 
 Plan's read-only rule, Chat's withheld filesystem and shell, and the
 provider's memory, telemetry, and self-update channels stay off at every

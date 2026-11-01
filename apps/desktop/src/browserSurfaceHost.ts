@@ -202,6 +202,12 @@ interface OwnedSurface {
    * action is authorized.
    */
   userGrantedOrigins: string[];
+  /**
+   * Page loads an extension asked for that are still under way. A redirect during
+   * one must not grant its destination as the person's own browsing would: the
+   * extension is not the person, whoever last touched the surface.
+   */
+  extensionLoads: number;
   actionTail: Promise<void>;
   control: BrowserSurfaceState["control"];
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
@@ -493,6 +499,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         nextTabOrdinal: 2,
         lastBounds: undefined,
         userGrantedOrigins: [],
+        extensionLoads: 0,
         actionTail: Promise.resolve(),
         control: "idle",
         shellWindow: undefined,
@@ -786,6 +793,83 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         return state;
       });
     },
+    /**
+     * The pages of one stored profile in one window, for an extension in that
+     * profile. A Private page has no profile key a stored profile shares, so it
+     * is never listed, and a page of another window or profile is not either.
+     */
+    profileTabs: (
+      profile: BrowserContextPolicy["profile"],
+      windowId: string,
+    ): ReadonlyArray<ProfileTab> => profileTabsOf(profile, windowId),
+    /**
+     * Open a page in the window's shown context of a profile, for an extension.
+     * Only an origin that context already admits is reachable: an extension is
+     * not the person browsing, so it can neither widen what the agent may act
+     * on nor grant itself an origin.
+     */
+    openProfileTab: async (
+      profile: BrowserContextPolicy["profile"],
+      windowId: string,
+      url: string | undefined,
+    ): Promise<ProfileTabResult> => {
+      const shown = shownSurface(profile, windowId);
+      if (shown === undefined) return { status: "no-page" };
+      const [contextId, owned] = shown;
+      if (url !== undefined && !extensionMayReach(owned, url)) return { status: "origin-refused" };
+      return queueSurfaceAction(owned, async (): Promise<ProfileTabResult> => {
+        if (owned.tabs.length >= owned.policy.maxConcurrentTabs) return { status: "tab-limit" };
+        const tabId = `${contextId}:${owned.nextTabOrdinal}`;
+        owned.nextTabOrdinal += 1;
+        const opened = openTabView(contextId, owned, tabId);
+        showTab(owned, opened);
+        owned.extensionLoads += 1;
+        try {
+          await opened.view.webContents.loadURL(url ?? "about:blank");
+        } catch {
+          // A page that fails to load is still a page the person can see.
+        } finally {
+          owned.extensionLoads -= 1;
+        }
+        publish(contextId, owned);
+        const tab = profileTabsOf(profile, windowId).find((entry) => entry.tabId === tabId);
+        return tab === undefined ? { status: "no-page" } : { status: "tab", tab };
+      });
+    },
+    /** Navigate or select one profile page by its numeric id, under the same rule as opening. */
+    updateProfileTab: async (
+      profile: BrowserContextPolicy["profile"],
+      windowId: string,
+      id: number,
+      change: { readonly url?: string; readonly active?: boolean },
+    ): Promise<ProfileTabResult> => {
+      for (const [contextId, owned] of surfaces) {
+        if (owned.owner.windowId !== windowId) continue;
+        if (browserProfileKey(owned.policy.profile) !== browserProfileKey(profile)) continue;
+        const tab = owned.tabs.find((entry) => entry.view.webContents.id === id);
+        if (tab === undefined) continue;
+        if (change.url !== undefined && !extensionMayReach(owned, change.url)) {
+          return { status: "origin-refused" };
+        }
+        return queueSurfaceAction(owned, async (): Promise<ProfileTabResult> => {
+          if (change.active === true) showTab(owned, tab);
+          if (change.url !== undefined) {
+            owned.extensionLoads += 1;
+            try {
+              await tab.view.webContents.loadURL(change.url);
+            } catch {
+              // The address is the person's to see failing in the page.
+            } finally {
+              owned.extensionLoads -= 1;
+            }
+          }
+          publish(contextId, owned);
+          const updated = profileTabsOf(profile, windowId).find((entry) => entry.id === id);
+          return updated === undefined ? { status: "no-page" } : { status: "tab", tab: updated };
+        });
+      }
+      return { status: "no-page" };
+    },
     state: (contextId: BrowserContextId | string): BrowserSurfaceState =>
       readState(contextId, surface(contextId)),
     closeContext,
@@ -821,6 +905,47 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       );
     },
   });
+
+  /** The context of a profile that is on screen in a window; the page a popup acts on. */
+  function shownSurface(
+    profile: BrowserContextPolicy["profile"],
+    windowId: string,
+  ): [string, OwnedSurface] | undefined {
+    const key = browserProfileKey(profile);
+    for (const [contextId, owned] of surfaces) {
+      if (owned.owner.windowId !== windowId) continue;
+      if (browserProfileKey(owned.policy.profile) !== key) continue;
+      if (owned.shellWindow === undefined || owned.shellWindow.isDestroyed()) continue;
+      return [contextId, owned];
+    }
+    return undefined;
+  }
+
+  function profileTabsOf(
+    profile: BrowserContextPolicy["profile"],
+    windowId: string,
+  ): ReadonlyArray<ProfileTab> {
+    const key = browserProfileKey(profile);
+    const tabs: ProfileTab[] = [];
+    for (const [contextId, owned] of surfaces) {
+      if (owned.owner.windowId !== windowId) continue;
+      if (browserProfileKey(owned.policy.profile) !== key) continue;
+      const shown = owned.shellWindow !== undefined && !owned.shellWindow.isDestroyed();
+      for (const tab of owned.tabs) {
+        const id = tab.view.webContents.id;
+        if (id === undefined) continue;
+        tabs.push({
+          id,
+          contextId,
+          tabId: tab.tabId,
+          url: tab.view.webContents.getURL(),
+          title: tab.view.webContents.getTitle(),
+          active: shown && tab.tabId === owned.activeTabId,
+        });
+      }
+    }
+    return tabs;
+  }
 
   async function closeContext(contextId: BrowserContextId | string): Promise<void> {
     const owned = surfaces.get(contextId);
@@ -868,6 +993,30 @@ function activeTab(owned: OwnedSurface): OwnedTab {
   return tab;
 }
 
+/** A page of a stored profile as an extension in that profile sees it. */
+export interface ProfileTab {
+  /** The page's Electron id, which is also the id the extension uses. */
+  readonly id: number;
+  readonly contextId: string;
+  readonly tabId: string;
+  readonly url: string;
+  readonly title: string;
+  readonly active: boolean;
+}
+
+export type ProfileTabResult =
+  | { readonly status: "tab"; readonly tab: ProfileTab }
+  | { readonly status: "no-page" | "origin-refused" | "tab-limit" };
+
+/** An extension reaches only an address the context already admits, or a blank page. */
+function extensionMayReach(owned: OwnedSurface, target: string): boolean {
+  if (target === "about:blank") return true;
+  return (
+    originAllowed(target, owned.policy.allowedOrigins) ||
+    originAllowed(target, owned.userGrantedOrigins)
+  );
+}
+
 /**
  * May this navigation proceed, and does it grant its origin?
  *
@@ -883,7 +1032,7 @@ function admitNavigation(owned: OwnedSurface, target: string): boolean {
   // Only while the person is demonstrably driving. "idle" is nobody's action:
   // a surface nobody has touched must not grant itself an origin because a
   // page redirected on load.
-  if (owned.control !== "user") return false;
+  if (owned.control !== "user" || owned.extensionLoads > 0) return false;
   const origin = originOf(target);
   if (origin === undefined) return false;
   if (owned.userGrantedOrigins.length >= MAX_USER_GRANTED_ORIGINS) {

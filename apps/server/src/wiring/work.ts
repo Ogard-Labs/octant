@@ -160,6 +160,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
   Pick<
     HarnessWiring,
+    | "runtimeForgeChanges"
     | "followUpCreation"
     | "restartContinuation"
     | "nativeHarnessComposition"
@@ -231,6 +232,7 @@ export function wireWork(deps: WorkDependencies) {
     routeCodeService,
     runningWorkTurns,
     runtimeOutsideContentMarks,
+    runtimeForgeChanges,
     sideTaskFirstMessage,
     routineProposalService,
     sideTasks,
@@ -331,6 +333,7 @@ export function wireWork(deps: WorkDependencies) {
       },
       runningAccess: runningWorkTurns,
       outsideContentMarks: runtimeOutsideContentMarks,
+      forgeChanges: runtimeForgeChanges,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
       contextHarness,
