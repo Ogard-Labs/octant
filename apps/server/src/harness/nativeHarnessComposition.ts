@@ -464,7 +464,8 @@ export function createNativeHarnessComposition(
     /**
      * Commands run with no sandbox, on a server: a remembered approval for
      * commands was given for ones inside this host's sandbox, so each one
-     * asks again.
+     * asks again. The bound root is then the server's, so Shield reads
+     * nothing at that path on this host.
      */
     readonly everyCommandAsks?: boolean;
   }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering" | "callEnded"> => ({
@@ -525,6 +526,7 @@ export function createNativeHarnessComposition(
                 }),
                 boundRoot: scope.boundRoot,
                 ...(scope.extraRoots === undefined ? {} : { extraRoots: scope.extraRoots }),
+                ...(scope.everyCommandAsks === true ? { rootOnServer: true } : {}),
                 signal: input.signal,
               });
               if (decision !== undefined) {

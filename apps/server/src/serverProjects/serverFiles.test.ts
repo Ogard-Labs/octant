@@ -119,6 +119,12 @@ describe.skipIf(!canRunThrowawaySshd)("the harness's file tools on a server fold
     const included = await tools.grep({ pattern: "greeting", include: "*.md" });
     expect(included.kind === "matches" && included.matches).toEqual([]);
     expect(await tools.grep({ pattern: "(" })).toMatchObject({ reason: "pattern-invalid" });
+    // One file the server cannot read leaves the other matches standing.
+    writeFileSync(join(root, "locked.txt"), "hello locked\n", { mode: 0o000 });
+    const withLocked = await tools.grep({ pattern: "hel+o" });
+    expect(withLocked.kind === "matches" && withLocked.matches.map((match) => match.path)).toEqual([
+      "src/main.ts",
+    ]);
     const keys = await tools.grep({ pattern: "PRIVATE" });
     expect(keys.kind === "matches" && keys.matches).toEqual([]);
   });

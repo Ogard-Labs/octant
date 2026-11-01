@@ -108,6 +108,12 @@ export interface ShieldReviewRequest {
   readonly boundRoot: string;
   /** The Project's extra folders, judged as the bound root is. */
   readonly extraRoots?: ReadonlyArray<string> | undefined;
+  /**
+   * The bound root is a folder on a server, not on this host, so nothing is
+   * read from this host's disk at that path: a local folder of the same name
+   * would otherwise vouch for commands that run on the server.
+   */
+  readonly rootOnServer?: boolean | undefined;
   /** A subagent's own taint, which counts beside its parent's. */
   readonly alsoTainted?: boolean | undefined;
   /** What the Watcher found in what a subagent read, beside its parent's. */
@@ -212,7 +218,8 @@ export class OctantShield {
       boundRoot: request.boundRoot,
       ...(request.extraRoots === undefined ? {} : { extraRoots: request.extraRoots }),
       tainted,
-      projectCommands: facts.projectCommands(request.boundRoot),
+      projectCommands:
+        request.rootOnServer === true ? [] : facts.projectCommands(request.boundRoot),
       servers: facts.servers?.(request.threadId) ?? [],
       ...(facts.protectedSecretPath === undefined
         ? {}

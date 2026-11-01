@@ -99,6 +99,20 @@ describe("Octant Shield on the host", () => {
     expect(port.complete).not.toHaveBeenCalled();
   });
 
+  it("reads no Project command from this host's disk for a folder on a server", async () => {
+    const { port } = fakeModel({ status: "answered", text: '{"verdict":"ask","reason":"unsure"}' });
+    const projectCommands = vi.fn(() => ["bun run test"]);
+    const shield = shieldWith(port, { projectCommands });
+    const decision = await shield.review({
+      threadId: "t",
+      call: bash("bun run test"),
+      boundRoot: root,
+      rootOnServer: true,
+    });
+    expect(projectCommands).not.toHaveBeenCalled();
+    expect(decision?.rule).not.toBe("project-command");
+  });
+
   it("allows a status read on a registered server by its profile, and asks for any other host", async () => {
     const { port } = fakeModel({ status: "answered", text: "{}" });
     const shield = shieldWith(port, {

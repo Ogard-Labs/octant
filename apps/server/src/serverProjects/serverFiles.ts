@@ -100,15 +100,21 @@ else
   find "$r" \\( -name .git -o -name node_modules \\) -prune -o -type f -print0
 fi`;
 
+/**
+ * The pattern is tried on nothing first, so status 2 means the pattern is
+ * wrong; the search itself also exits 2 when one file cannot be read, which
+ * leaves the other matches standing.
+ */
 const GREP_SCRIPT = `${RESOLVE_INSIDE}
 printf '\\0'
+grep -E -e "$3" /dev/null
+[ "$?" -le 1 ] || exit 2
 if [ -n "$4" ]; then
   grep -rHnIE --null --exclude-dir=.git --exclude-dir=node_modules --include="$4" -e "$3" -- "$r"
 else
   grep -rHnIE --null --exclude-dir=.git --exclude-dir=node_modules -e "$3" -- "$r"
 fi
-s=$?
-[ "$s" -le 1 ] || exit 2`;
+exit 0`;
 
 export interface ServerFileSystemOptions {
   readonly connection: Pick<ServerConnection, "run">;
