@@ -1,6 +1,7 @@
 import type { ShieldWatcherLabel } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  callPrintsSecretEnvironment,
   callReadsProtectedSecret,
   MAX_WATCHED_TEXT_LENGTH,
   watchedTextOf,
@@ -233,5 +234,46 @@ describe("Octant Shield's Watcher", () => {
       true,
     );
     expect(callReadsProtectedSecret({ command: "aws s3 ls --profile work" }, guarded)).toBe(false);
+  });
+
+  it.each([
+    "echo $GITHUB_TOKEN",
+    'printf "%s" "${OPENAI_API_KEY}"',
+    "cd src && echo $AWS_SECRET_ACCESS_KEY | base64",
+    "printenv NPM_TOKEN",
+    "/usr/bin/printenv DB_PASSWORD",
+    "sudo printenv STRIPE_SECRET_KEY",
+  ])("flags a command that prints a secret-holding variable: %s", (command) => {
+    expect(callPrintsSecretEnvironment({ command }, "")).toBe(true);
+  });
+
+  it.each([
+    "echo $HOME $PATH",
+    "echo '$GITHUB_TOKEN'",
+    'curl -H "Authorization: Bearer $GITHUB_TOKEN" https://api.example.com',
+    "echo $SSH_AUTH_SOCK $GIT_ASKPASS $AWS_ACCESS_KEY_ID $GOOGLE_CREDENTIALS_FILE",
+    "env NODE_ENV=test bun run test",
+    "env DB_PASSWORD",
+    "printenv HOME",
+  ])("leaves a command that prints no secret-holding variable alone: %s", (command) => {
+    expect(callPrintsSecretEnvironment({ command }, "")).toBe(false);
+  });
+
+  it("flags a listing of the environment whose output shows a secret-holding variable", () => {
+    const output = "HOME=/Users/a\nGITHUB_TOKEN=ghp_example\nPATH=/usr/bin\n";
+    expect(callPrintsSecretEnvironment({ command: "env" }, output)).toBe(true);
+    expect(callPrintsSecretEnvironment({ command: "export -p" }, 'declare -x API_KEY="x"')).toBe(
+      true,
+    );
+    expect(callPrintsSecretEnvironment({ command: "env" }, "HOME=/Users/a\nAPI_KEY=\n")).toBe(
+      false,
+    );
+  });
+
+  it("reads only a shell command's printing, never another tool's result", () => {
+    expect(callPrintsSecretEnvironment({ path: "README.md" }, "GITHUB_TOKEN=ghp_example")).toBe(
+      false,
+    );
+    expect(callPrintsSecretEnvironment({}, "")).toBe(false);
   });
 });

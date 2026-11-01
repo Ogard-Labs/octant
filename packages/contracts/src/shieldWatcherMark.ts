@@ -13,6 +13,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * - `exfiltration-request`: asks for secrets to be sent somewhere.
  * - `fake-authority`: claims to speak for the system, an administrator, or the person.
  * - `secret-path-read`: the call read a path the secret guard protects.
+ * - `secret-env-print`: a shell call printed an environment variable whose
+ *   name says it holds a secret.
  */
 export const ShieldWatcherLabel = Schema.Literal(
   "agent-instructions",
@@ -21,6 +23,7 @@ export const ShieldWatcherLabel = Schema.Literal(
   "exfiltration-request",
   "fake-authority",
   "secret-path-read",
+  "secret-env-print",
 );
 export type ShieldWatcherLabel = typeof ShieldWatcherLabel.Type;
 

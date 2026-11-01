@@ -9,6 +9,7 @@ import type {
 import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
 import { summarizeStepArgument, unwrapShellInvocation } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
+import { watchedTextOf } from "@octant/domain/shield-watcher-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
@@ -611,7 +612,24 @@ function mapLifecycle(
       }
       state.lifecycle = "terminal";
       const query = item.query.trim();
+      // The model already has the results; reading them now still labels the
+      // thread for every later call the Judge reviews.
+      const found =
+        item.results === undefined || item.results === null
+          ? ""
+          : watchedTextOf(item.results).slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
       return [
+        ...(found.trim() === ""
+          ? []
+          : [
+              event(context, {
+                kind: "outside-content-result",
+                toolCallId: state.toolCallId,
+                toolName: "webSearch",
+                source: "web-search",
+                text: found,
+              }),
+            ]),
         event(context, {
           kind: "tool-success",
           toolCallId: state.toolCallId,
