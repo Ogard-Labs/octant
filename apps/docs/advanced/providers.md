@@ -105,8 +105,8 @@ the page never infers them from what a picker can mention.
   thread, **By the runtime** when **Compact session** asks the runtime to
   summarize the session it keeps, **Needs a newer version** when this install
   is too old for the request, **Not available** when the runtime keeps its own
-  history and Octant has no compaction request for it (OpenCode, Pi and the
-  ACP agents), so Octant cannot compact it, or **Not confirmed** while the
+  history and Octant has no compaction request for it (Pi and the ACP
+  agents), so Octant cannot compact it, or **Not confirmed** while the
   runtime is not ready to say.
 
 | Runtime                                               | Transport for Octant tools                                     |
@@ -217,19 +217,19 @@ get a feature in full first. Every other provider is listed here with what is
 weaker. Where a provider cannot do something, Octant turns that feature off for
 it instead of imitating it.
 
-| Feature                           | Claude Code | Codex                       | OpenCode             | Pi            | ACP agents            | Ollama                                   | Model endpoints                          |
-| --------------------------------- | ----------- | --------------------------- | -------------------- | ------------- | --------------------- | ---------------------------------------- | ---------------------------------------- |
-| Reopen the thread's own session   | Yes         | Yes                         | Yes                  | Yes           | Most                  | Replayed                                 | Replayed                                 |
-| Approval prompts from the runtime | Yes         | Yes                         | Yes                  | Yes           | Yes                   | No                                       | No                                       |
-| Questions from the agent          | Yes         | No                          | Yes (not on 2.x)     | No            | Most                  | No                                       | No                                       |
-| Reasoning shown                   | Yes         | Yes                         | Yes                  | Yes           | If the agent sends it | If the model sends it                    | If the endpoint sends it                 |
-| Token usage counted               | Yes         | Yes                         | Yes                  | Yes           | No                    | After a reply                            | After a reply                            |
-| File changes and diffs            | Yes         | Yes                         | Diffs only           | No            | No                    | No                                       | No                                       |
-| Attachments sent natively         | No          | Image models                | Non-text models      | No            | No                    | Vision models                            | No                                       |
-| Octant tools (Browser, Computer)  | Yes         | Yes                         | macOS, some releases | After a check | macOS, some agents    | Verified models                          | Verified models                          |
-| Change model inside a thread      | Yes         | Yes                         | No                   | No            | No                    | Yes                                      | Yes                                      |
-| Compact session                   | Yes         | Yes, Codex 0.162.1 or newer | No                   | No            | No                    | Octant does it; Code uses Octant Harness | Octant does it; Code uses Octant Harness |
-| Auto-review of approvals in Code  | Yes         | Yes                         | No                   | No            | Mistral Vibe          | No                                       | No                                       |
+| Feature                           | Claude Code | Codex                       | OpenCode                   | Pi            | ACP agents            | Ollama                                   | Model endpoints                          |
+| --------------------------------- | ----------- | --------------------------- | -------------------------- | ------------- | --------------------- | ---------------------------------------- | ---------------------------------------- |
+| Reopen the thread's own session   | Yes         | Yes                         | Yes                        | Yes           | Most                  | Replayed                                 | Replayed                                 |
+| Approval prompts from the runtime | Yes         | Yes                         | Yes                        | Yes           | Yes                   | No                                       | No                                       |
+| Questions from the agent          | Yes         | No                          | Yes (not on 2.x)           | No            | Most                  | No                                       | No                                       |
+| Reasoning shown                   | Yes         | Yes                         | Yes                        | Yes           | If the agent sends it | If the model sends it                    | If the endpoint sends it                 |
+| Token usage counted               | Yes         | Yes                         | Yes                        | Yes           | No                    | After a reply                            | After a reply                            |
+| File changes and diffs            | Yes         | Yes                         | 2.2.0 or newer, else diffs | No            | No                    | No                                       | No                                       |
+| Attachments sent natively         | No          | Image models                | Non-text models            | No            | No                    | Vision models                            | No                                       |
+| Octant tools (Browser, Computer)  | Yes         | Yes                         | macOS, some releases       | After a check | macOS, some agents    | Verified models                          | Verified models                          |
+| Change model inside a thread      | Yes         | Yes                         | Yes                        | No            | No                    | Yes                                      | Yes                                      |
+| Compact session                   | Yes         | Yes, Codex 0.162.1 or newer | Yes, 2.2.0 or newer        | No            | No                    | Octant does it; Code uses Octant Harness | Octant does it; Code uses Octant Harness |
+| Auto-review of approvals in Code  | Yes         | Yes                         | No                         | No            | Mistral Vibe          | No                                       | No                                       |
 
 - **Replayed** means the provider keeps no session of its own, so Octant sends
   the thread's history again, fitted to the model's context window. Changing

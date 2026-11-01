@@ -220,6 +220,8 @@ export function ServerAccessSettings(props: {
   readonly servers: ShieldServersClient | undefined;
   readonly projects: Pick<ServerProjectsClient, "read" | "command"> | undefined;
   readonly focusedSetting?: string | undefined;
+  /** Project names by id, for the registry's Project picker. */
+  readonly projectNames: ReadonlyMap<string, string>;
 }) {
   const { servers } = props;
   const [registryRevision, setRegistryRevision] = useState(0);
@@ -228,7 +230,7 @@ export function ServerAccessSettings(props: {
       servers === undefined
         ? undefined
         : {
-            read: (signal) => servers.read(signal),
+            read: (projectId, signal) => servers.read(projectId, signal),
             command: async (command, signal) => {
               const result = await servers.command(command, signal);
               if (result.kind === "shield-servers-updated") setRegistryRevision((n) => n + 1);
@@ -239,7 +241,11 @@ export function ServerAccessSettings(props: {
   );
   return (
     <>
-      <ShieldServersSettings client={watched} focusedSetting={props.focusedSetting} />
+      <ShieldServersSettings
+        client={watched}
+        focusedSetting={props.focusedSetting}
+        projectNames={props.projectNames}
+      />
       <ServerProjectsSettings
         client={props.projects}
         registryRevision={registryRevision}

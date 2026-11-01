@@ -7,6 +7,8 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
+import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -465,10 +467,20 @@ function mapToolUse(
     return checklistEvents(context, content.input);
   }
   if (!resolved.created || !resolved.state.emitsActivity) return [{ kind: "ignored" }];
+  // A shell command crosses only when it reaches a server, so the command
+  // can be journaled with its host as Octant Shield's record of it; any other
+  // command stays inside the runtime.
+  const shellCommand =
+    content.toolName === "Bash" ? jsonString(content.input, "command") : undefined;
+  const remoteArgument =
+    shellCommand !== undefined && remoteHostsNamedBy(shellCommand).length > 0
+      ? summarizeStepArgument(shellCommand)
+      : undefined;
   const start = event(context, {
     kind: "tool-start",
     toolCallId: resolved.state.toolCallId,
     toolName: resolved.state.toolName,
+    ...(remoteArgument === undefined ? {} : { argument: remoteArgument }),
   });
   if (content.toolName === CLAUDE_SUBAGENT_TOOL) {
     // The runtime's own subagent: shown as a child run of this thread from

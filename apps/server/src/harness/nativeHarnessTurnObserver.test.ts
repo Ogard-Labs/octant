@@ -14,7 +14,7 @@ function observer(
   isHarness = true,
   session?: { status: string; detail?: string },
   goal?: Record<string, unknown>,
-  serverContext?: () => string | undefined,
+  serverContext?: (projectId: string | undefined) => string | undefined,
 ) {
   const recorded: { turns: unknown[]; interventions: unknown[]; settled: number; started: number } =
     {
@@ -141,6 +141,22 @@ describe("native harness turn observer", () => {
       throw new Error("journal closed");
     }).subject.contextFor(scope);
     expect(unreadable[0]?.kind).toBe("instructions");
+  });
+
+  it("gives a provider runtime's own Work and Code turns the same server notes, and a harness turn none twice", () => {
+    const asked: Array<string | undefined> = [];
+    const notes = (projectId: string | undefined) => {
+      asked.push(projectId);
+      return "The person registered these servers for SSH.";
+    };
+    const runtime = observer(false, undefined, undefined, notes).subject;
+    expect(
+      runtime.runtimeServerNotes({ ...scope, mode: "code", projectId: "p1" as never }),
+    ).toEqual([{ kind: "project-memory", text: "The person registered these servers for SSH." }]);
+    expect(runtime.runtimeServerNotes({ ...scope, mode: "chat" })).toEqual([]);
+    expect(asked).toEqual(["p1"]);
+    const harness = observer(true, undefined, undefined, notes).subject;
+    expect(harness.runtimeServerNotes({ ...scope, mode: "work" })).toEqual([]);
   });
 
   it("hands a pending advisor redirect to exactly the next turn", async () => {

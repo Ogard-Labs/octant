@@ -118,7 +118,13 @@ describe("ServerProjectsSettings", () => {
       command: vi.fn(),
     };
     const user = userEvent.setup();
-    render(<ServerAccessSettings projects={projects as never} servers={servers as never} />);
+    render(
+      <ServerAccessSettings
+        projectNames={new Map()}
+        projects={projects as never}
+        servers={servers as never}
+      />,
+    );
     expect(await screen.findByText("Register a server above first.")).toBeVisible();
 
     const add = await screen.findByRole("form", { name: "Add a server" });

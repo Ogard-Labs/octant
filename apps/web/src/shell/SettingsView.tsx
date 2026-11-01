@@ -1270,6 +1270,7 @@ function ActiveSectionContent({
           />
           <ServerAccessSettings
             focusedSetting={focusedSetting}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             projects={props.serverProjectsClient}
             servers={props.shieldServersClient}
           />

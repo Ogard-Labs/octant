@@ -929,3 +929,17 @@
   display: flex;
   gap: var(--oct-space-2);
 }
+
+.shield-servers__heading {
+  margin: var(--oct-space-4) 0 var(--oct-space-1);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.shield-servers__choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-3) 0;
+}
