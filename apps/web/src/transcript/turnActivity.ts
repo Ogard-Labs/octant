@@ -1,4 +1,4 @@
-import type { ShieldDecision, ToolOutsideContentMark } from "@octant/contracts/shield";
+import type { ReviewDecision, ToolOutsideContentMark } from "@octant/contracts/shield";
 import type { HarnessRetryNotice, ThreadPublishedPage, ThreadToolStep } from "@octant/contracts";
 
 /**
@@ -32,12 +32,12 @@ export type TurnActivityRow =
       readonly summary: string;
     }
   | {
-      /** An approval Octant Shield answered, in its own name. */
+      /** An approval a reviewer answered, in the reviewer's own name: Octant Shield or the provider. */
       readonly kind: "review";
       readonly id: string;
       /** The call it answered, as the approval named it. */
       readonly summary: string;
-      readonly decision: ShieldDecision;
+      readonly decision: ReviewDecision;
     };
 
 export interface TurnActivity {

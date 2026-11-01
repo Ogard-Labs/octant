@@ -226,4 +226,12 @@ describe("Octant Shield's Watcher", () => {
     expect(callReadsProtectedSecret({ path: "src/a.ts" }, guarded)).toBe(false);
     expect(callReadsProtectedSecret({ path: "~/.ssh/id_ed25519" }, undefined)).toBe(false);
   });
+
+  it("flags a shell command that names a protected path", () => {
+    const guarded = (path: string) => path === "~/.aws/credentials";
+    expect(callReadsProtectedSecret({ command: "cat ~/.aws/credentials | head" }, guarded)).toBe(
+      true,
+    );
+    expect(callReadsProtectedSecret({ command: "aws s3 ls --profile work" }, guarded)).toBe(false);
+  });
 });

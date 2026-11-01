@@ -48,9 +48,6 @@ export function revalidateAutomationAuthority(input: {
   if (String(input.definition.hostId) !== input.facts.hostId) {
     return blocked("host-mismatch", "Automation definition host identity no longer matches.");
   }
-  if (snapshot.mode !== "work" && snapshot.mode !== "code") {
-    return blocked("unsupported-mode", "Automation mode is unsupported for dispatch.");
-  }
   if (
     snapshot.executionProfile.executionPolicy === "full-access" ||
     snapshot.authorityProfile.requested.executionPolicy === "full-access" ||

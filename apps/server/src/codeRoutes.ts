@@ -82,7 +82,7 @@ import {
   decodeCodePlannerView,
   decodeCodeRepositoryTestListing,
   decodeCodeRepositoryTestStatus,
-  decodeCodeRelativePath,
+  decodeCodeProjectFilePath,
   decodeCodeThreadFollowUpUpdated,
   decodeCodeThreadFollowUpView,
   decodeCodeThreadId,
@@ -221,7 +221,7 @@ export interface CodeContentRead {
 export interface CodeFileSaveInput {
   readonly threadId: CodeThreadId;
   readonly checkoutId: typeof CodeCheckoutId.Type;
-  readonly relativePath: ReturnType<typeof decodeCodeRelativePath>;
+  readonly relativePath: ReturnType<typeof decodeCodeProjectFilePath>;
   readonly expectedIdentity: FileIdentity;
   readonly expectedDigest: string;
   readonly text: string;
@@ -2469,7 +2469,7 @@ function decodeFileListingQuery(url: URL): Omit<CodeFileListingInput, "signal"> 
     return {
       threadId: decodeCodeThreadId(threadId),
       checkoutId: decodeCheckoutId(checkoutId),
-      ...(directory === null ? {} : { directory: decodeCodeRelativePath(directory) }),
+      ...(directory === null ? {} : { directory: decodeCodeProjectFilePath(directory) }),
     };
   } catch {
     throw new CodeRouteRejected("Code file listing query is invalid.", 400);
@@ -2563,7 +2563,7 @@ function decodeFileOpenQuery(url: URL): Omit<CodeFileOpenInput, "signal"> {
     return {
       threadId: decodeCodeThreadId(threadId),
       checkoutId: decodeCheckoutId(checkoutId),
-      relativePath: decodeCodeRelativePath(path),
+      relativePath: decodeCodeProjectFilePath(path),
     };
   } catch {
     throw new CodeRouteRejected("Code file open query is invalid.", 400);
@@ -2596,7 +2596,7 @@ function decodeFileSaveHeaders(headers: Headers): Omit<CodeFileSaveInput, "text"
     return {
       threadId: decodeCodeThreadId(requiredHeader(headers, "x-octant-code-thread-id")),
       checkoutId: decodeCheckoutId(requiredHeader(headers, "x-octant-code-checkout-id")),
-      relativePath: decodeCodeRelativePath(relativePath),
+      relativePath: decodeCodeProjectFilePath(relativePath),
       expectedIdentity: {
         device: boundedIdentity(requiredHeader(headers, "x-octant-code-file-device")),
         inode: boundedIdentity(requiredHeader(headers, "x-octant-code-file-inode")),

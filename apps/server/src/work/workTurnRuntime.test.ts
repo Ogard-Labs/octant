@@ -411,7 +411,7 @@ describe("WorkTurnRuntime", () => {
         modelId: "gpt-5",
       }),
     });
-    const run = (record: RecordExternalContentIngestion) => {
+    const run = (record: RecordExternalContentIngestion, access?: "full-access") => {
       const steps: unknown[] = [];
       const driver: ProviderDriver = {
         kind: "openai-compatible",
@@ -438,6 +438,7 @@ describe("WorkTurnRuntime", () => {
         modelOptionValues: {},
         outsideContentMarks: new RuntimeOutsideContentMarks(record),
         onToolSteps: (next) => steps.push(next),
+        ...(access === undefined ? {} : { access }),
       });
       return { outcome, steps };
     };
@@ -464,6 +465,23 @@ describe("WorkTurnRuntime", () => {
           toolCallId: "call-2",
           state: "completed",
           outsideContent: { labels: ["agent-instructions"] },
+        },
+      ],
+    });
+    // At Full access the same finding is a quiet tag: recorded, never asked about.
+    const quiet = run(
+      () => ({
+        kind: "recorded",
+        taint: { externalContentIngested: true, ingestedSources: ["runtime-web-fetch"] },
+      }),
+      "full-access",
+    );
+    await quiet.outcome;
+    expect(quiet.steps.at(-1)).toMatchObject({
+      steps: [
+        {
+          toolCallId: "call-2",
+          outsideContent: { labels: ["agent-instructions"], recordedOnly: true },
         },
       ],
     });
@@ -785,94 +803,112 @@ describe("WorkTurnRuntime", () => {
     ]);
   });
 
-  it("shows Octant Shield's answer to an approval among the turn's tool steps", async () => {
-    const updates: unknown[] = [];
-    const decision = {
-      reviewer: "octant-shield",
-      verdict: "allow",
-      stage: "fast-allow",
-      rule: "read-only-git",
-      reason: "A read-only Git command.",
-      latencyMs: 1,
-      decidedAt: "2026-10-31T10:00:00.000Z",
-    } as never;
-    let reviewed: ((review: never) => void) | undefined;
-    const driver: ProviderDriver = {
-      kind: "openai-compatible",
-      probe: () => Effect.die("unused"),
-      acquire: (input) => {
-        reviewed = input.workRequest?.onApprovalReviewed as never;
-        return Effect.succeed({
-          subscribe: Effect.succeed(
-            Stream.make({
-              instanceId: ids.provider,
-              sequence: 1,
-              correlationId: decodeCorrelationId(String(ids.project)),
-              occurredAt: decodeTimestamp("2026-10-31T10:00:01.000Z"),
-              kind: "completed" as const,
-              sessionId: ids.session as never,
-            }),
-          ),
-          start: () => Effect.void,
-          send: () =>
-            Effect.sync(() =>
-              reviewed?.({
-                requestId: "approval-1",
-                toolName: "Bash",
-                summary: "git status",
-                decision,
-              } as never),
+  it.each(["the runtime's session", "the turn's own tools"] as const)(
+    "shows Octant Shield's answer to an approval asked through %s among the turn's tool steps",
+    async (askedThrough) => {
+      const updates: unknown[] = [];
+      const runtime = new WorkTurnRuntime();
+      const decision = {
+        reviewer: "octant-shield",
+        verdict: "allow",
+        stage: "fast-allow",
+        rule: "read-only-git",
+        reason: "A read-only Git command.",
+        latencyMs: 1,
+        decidedAt: "2026-10-31T10:00:00.000Z",
+      } as never;
+      let reviewed: ((review: never) => void) | undefined;
+      const driver: ProviderDriver = {
+        kind: "openai-compatible",
+        probe: () => Effect.die("unused"),
+        acquire: (input) => {
+          reviewed = input.workRequest?.onApprovalReviewed as never;
+          return Effect.succeed({
+            subscribe: Effect.succeed(
+              Stream.make({
+                instanceId: ids.provider,
+                sequence: 1,
+                correlationId: decodeCorrelationId(String(ids.project)),
+                occurredAt: decodeTimestamp("2026-10-31T10:00:01.000Z"),
+                kind: "completed" as const,
+                sessionId: ids.session as never,
+              }),
             ),
-          resume: () => Effect.void,
-          interrupt: () => Effect.void,
-          stop: () => Effect.void,
-          answerApproval: () => Effect.void,
-          answerUserInput: () => Effect.void,
-          answerTool: () => Effect.void,
-        } as never);
-      },
-    };
-    const command = decodeStartWorkThreadTurnCommand({
-      kind: "start-work-thread-turn",
-      requestId: ids.request,
-      threadId: ids.thread,
-      turnId: ids.turn,
-      prompt: "Check the repository",
-      authority: decodeWorkTurnAuthority({
-        hostId: "local",
-        projectId: ids.project,
-        bindingRevisionId: ids.binding,
-        workingDirectory: ".",
-        confinementPosture: "project-root-confined",
-        providerInstanceId: ids.provider,
-        modelId: "gpt-5",
-      }),
-    });
+            start: () => Effect.void,
+            send: () =>
+              Effect.sync(() => {
+                const review = {
+                  requestId: "approval-1",
+                  toolName: "Bash",
+                  summary: "git status",
+                  decision,
+                };
+                if (askedThrough === "the turn's own tools") {
+                  runtime.recordShieldReview({ ...review, threadId: String(ids.thread) });
+                } else {
+                  reviewed?.(review as never);
+                }
+              }),
+            resume: () => Effect.void,
+            interrupt: () => Effect.void,
+            stop: () => Effect.void,
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          } as never);
+        },
+      };
+      const command = decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Check the repository",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      });
 
-    await new WorkTurnRuntime().run({
-      command,
-      providerSessionId: ids.session as never,
-      projectRoot: "/tmp/work-project",
-      driver,
-      signal: new AbortController().signal,
-      onToolSteps: (steps) => updates.push(steps),
-    });
+      await runtime.run({
+        command,
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver,
+        signal: new AbortController().signal,
+        onToolSteps: (steps) => updates.push(steps),
+      });
 
-    expect(updates).toEqual([
-      {
-        truncated: false,
-        steps: [
-          {
-            toolCallId: "shield:approval-1",
-            toolName: "Bash",
-            state: "completed",
-            summary: "git status",
-            shield: decision,
-          },
-        ],
-      },
-    ]);
-  });
+      expect(updates).toEqual([
+        {
+          truncated: false,
+          steps: [
+            {
+              toolCallId: "shield:approval-1",
+              toolName: "Bash",
+              state: "completed",
+              summary: "git status",
+              shield: decision,
+            },
+          ],
+        },
+      ]);
+      // Once the turn is over there is no row to add a decision to.
+      runtime.recordShieldReview({
+        threadId: String(ids.thread),
+        requestId: "approval-2",
+        toolName: "Bash",
+        summary: "git log",
+        decision,
+      });
+      expect(updates).toHaveLength(1);
+    },
+  );
 
   it.each([false, true])(
     "persists the resumed identity before sending and refuses input when persistence fails (%s)",

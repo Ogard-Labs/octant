@@ -292,9 +292,11 @@ export function startOctantServer(
       providerRuntimeNetwork,
       safeNetworkRoutes,
     } = yield* wireIntegrations({
+      codeActiveTurns,
       externalContentIngestionStore,
       options,
       persistence,
+      shieldHolder,
       windowAuthorityStore,
       workThreadProjection,
     });
@@ -724,9 +726,22 @@ export function startOctantServer(
       threadMentionService: (): ThreadMentionService => threadMentionService,
       threadOutsideContentMarks,
     });
-    // Octant Shield's decisions show on the Code transcript beside the tool
-    // rows; the runtime that owns the transcript is built after Shield.
-    hostShield.showDecisionsWith((input) => codeOperationRuntime?.recordShieldReview?.(input));
+    // Octant Shield's decisions show on the transcript beside the tool rows:
+    // a Code thread's operation, or a Work thread's running turn, which takes
+    // a decision only when it carries the call it was for. The runtimes that
+    // own the transcripts are built after Shield.
+    hostShield.showDecisionsWith((input) => {
+      codeOperationRuntime?.recordShieldReview?.(input);
+      if (input.requestId !== undefined) {
+        workTurnService.recordShieldReview({
+          threadId: input.threadId,
+          requestId: input.requestId,
+          toolName: input.toolName ?? "Approval",
+          summary: input.summary,
+          decision: input.decision,
+        });
+      }
+    });
     workShieldHolder.port = hostShield;
     const {
       codeCheckoutOpenRoutes,
@@ -992,6 +1007,7 @@ export function startOctantServer(
       windowAuthorityStore,
       windowCanOpenThread,
       workArtifactProjection,
+      workThreadProjection,
       workThreadService,
       workTurnProjection,
     });

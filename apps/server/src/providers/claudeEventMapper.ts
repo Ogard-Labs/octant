@@ -71,6 +71,7 @@ const DECODED_MESSAGE_KINDS = new Set([
   "authentication",
   "status",
   "compaction",
+  "review-denied",
   "ignored",
 ]);
 
@@ -1202,6 +1203,21 @@ export function mapClaudeMessage(
         );
       }
       return withoutIgnored(results);
+    }
+    case "review-denied": {
+      // The call's own row is the one this turn already opened for it; a
+      // refusal for a call this turn never started names no row.
+      const state = context.toolStates.get(message.toolUseId);
+      const reason = message.reason === undefined ? undefined : normalized(message.reason, 280);
+      return [
+        event(context, {
+          kind: "review-verdict",
+          verdict: "deny",
+          ...(state === undefined ? {} : { toolCallId: state.toolCallId }),
+          ...(state === undefined ? {} : { argument: state.toolName }),
+          ...(reason === undefined ? {} : { reason }),
+        }),
+      ];
     }
     case "tool-summary":
       return [{ kind: "ignored" }];

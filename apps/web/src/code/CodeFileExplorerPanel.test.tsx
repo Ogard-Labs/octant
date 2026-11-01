@@ -1,5 +1,5 @@
 import type { CodeCheckoutId, CodeFileListingResult, CodeThreadId } from "@octant/contracts";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CodeFileExplorerPanel } from "./CodeFileExplorerPanel";
@@ -315,5 +315,69 @@ describe("CodeFileExplorerPanel", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "This Code thread is not bound to a checkout",
     );
+  });
+});
+
+describe("CodeFileExplorerPanel extra folders", () => {
+  it("lists each extra folder below the checkout and opens its files by that folder's path", async () => {
+    const user = userEvent.setup();
+    const onOpenFile = vi.fn();
+    const file = (path: string) => ({
+      kind: "file",
+      fileId,
+      path,
+      byteLength: 4,
+      availability: { status: "available" },
+    });
+    const list = vi.fn(async (request: { readonly directory?: string }) =>
+      request.directory === "/Users/me/notes"
+        ? listing([file("plan.md")])
+        : listing([file("a.ts")]),
+    );
+    render(
+      <CodeFileExplorerPanel
+        checkoutId={checkoutId}
+        client={{ list, watch: vi.fn(async function* () {}) } as never}
+        extraFolders={["/Users/me/notes"]}
+        onOpenFile={onOpenFile}
+        threadId={threadId}
+      />,
+    );
+
+    const folder = await screen.findByRole("region", { name: "notes (extra folder)" });
+    await user.click(await within(folder).findByRole("treeitem", { name: /plan\.md/ }));
+
+    expect(list.mock.calls.map(([request]) => request.directory)).toContain("/Users/me/notes");
+    expect(onOpenFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/Users/me/notes/plan.md" }),
+    );
+    expect(await screen.findByRole("treeitem", { name: /a\.ts/ })).toBeVisible();
+  });
+
+  it("shows an extra folder whose name the file-path schema refuses as unavailable and keeps the checkout's tree", async () => {
+    const list = vi.fn(async () =>
+      listing([
+        {
+          kind: "file",
+          fileId,
+          path: "a.ts",
+          byteLength: 4,
+          availability: { status: "available" },
+        },
+      ]),
+    );
+    render(
+      <CodeFileExplorerPanel
+        checkoutId={checkoutId}
+        client={{ list, watch: vi.fn(async function* () {}) } as never}
+        extraFolders={["/Users/me/odd\\name"]}
+        onOpenFile={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByText(/cannot list this folder/)).toBeVisible();
+    expect(await screen.findByRole("treeitem", { name: /a\.ts/ })).toBeVisible();
+    expect(list).toHaveBeenCalledTimes(1);
   });
 });

@@ -47,8 +47,12 @@ export interface TaintAppManagedToolResultsInput {
  * row. It never withholds a result for what it found and never allows
  * anything.
  *
- * Host-side refusals stay unrecorded: they are Octant answers, not untrusted
- * content. Recording failure withholds the result rather than handing it to
+ * Host-side refusals stay unrecorded as outside content: they are Octant
+ * answers, not untrusted content. One exception is flagged: a refused call
+ * that named a protected secret path is journaled as the Watcher's
+ * `secret-path-read`, because the attempt is what the person should see, and
+ * the refusal goes back unchanged whether or not the flag could be kept.
+ * Recording failure withholds the result rather than handing it to
  * the model without a taint event. Structured tool JSON is kept as-is; the
  * journal never stores the body.
  */
@@ -60,13 +64,44 @@ export function taintAppManagedToolResults(
     ...(input.tools.close === undefined ? {} : { close: input.tools.close }),
     execute: async (call) => {
       const outcome = await input.tools.execute(call);
-      if (outcome.isError === true) return outcome;
+      if (outcome.isError === true) return flagRefusedSecretRead(input, call, outcome);
       const labels = watchToolResult(call, outcome.result, input.protectedSecretPath);
       const outside = input.resultTaintsThread?.(call, outcome.result) !== false;
       if (!outside && labels.length === 0) return outcome;
       return taintSuccessfulResult(input, call.name, outcome, { outside, labels });
     },
   };
+}
+
+function flagRefusedSecretRead(
+  input: TaintAppManagedToolResultsInput,
+  call: { readonly inputJson: string },
+  outcome: Awaited<ReturnType<AppManagedToolSet["execute"]>>,
+): Awaited<ReturnType<AppManagedToolSet["execute"]>> {
+  if (!callNamesProtectedSecret(call, input.protectedSecretPath)) return outcome;
+  const labels: ReadonlyArray<ShieldWatcherLabel> = ["secret-path-read"];
+  const recorded = recordShieldWatcherLabels({
+    record: input.recordExternalContentIngestion,
+    threadId: input.threadId,
+    uuid: input.uuid,
+    labels,
+    digest: createHash("sha256").update(call.inputJson).digest("hex"),
+  });
+  return recorded ? { ...outcome, outsideContent: { labels } } : outcome;
+}
+
+function callNamesProtectedSecret(
+  call: { readonly inputJson: string },
+  protectedSecretPath: ((path: string) => boolean) | undefined,
+): boolean {
+  if (protectedSecretPath === undefined) return false;
+  let args: unknown;
+  try {
+    args = JSON.parse(call.inputJson);
+  } catch {
+    return false;
+  }
+  return callReadsProtectedSecret(args, protectedSecretPath);
 }
 
 /** What the Watcher finds in one tool result, and in the paths its call named. */
@@ -76,14 +111,7 @@ export function watchToolResult(
   protectedSecretPath: ((path: string) => boolean) | undefined,
 ): ReadonlyArray<ShieldWatcherLabel> {
   const labels = watchOutsideContent(watchedTextOf(result));
-  if (protectedSecretPath === undefined) return labels;
-  let args: unknown;
-  try {
-    args = JSON.parse(call.inputJson);
-  } catch {
-    return labels;
-  }
-  return callReadsProtectedSecret(args, protectedSecretPath)
+  return callNamesProtectedSecret(call, protectedSecretPath)
     ? [...labels, "secret-path-read"]
     : labels;
 }

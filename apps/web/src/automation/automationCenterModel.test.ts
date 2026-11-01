@@ -14,6 +14,7 @@ import {
   AUTOMATION_UI_TEST_DUE,
   AUTOMATION_UI_TEST_IDS,
   AUTOMATION_UI_TEST_NOW,
+  automationChatDraftFixture,
   automationDefinitionFixture,
   automationRunFixture,
 } from "./automationTestFixtures";
@@ -140,6 +141,41 @@ describe("automationRunThreadTarget", () => {
 });
 
 describe("buildAutomationDraft", () => {
+  it("keeps the level choice in the draft: the Project's, or a named level, one at most", () => {
+    const named = buildAutomationDraft({ ...validFormInput(), runLevel: "auto" });
+    expect(named).toMatchObject({ kind: "valid", draft: { runLevel: "auto" } });
+    const project = buildAutomationDraft({ ...validFormInput(), runLevel: "project" });
+    expect(project.kind === "valid" && project.draft).toMatchObject({ projectLevel: "opted-in" });
+    expect(project.kind === "valid" && project.draft.runLevel).toBeUndefined();
+  });
+
+  it("builds a Chat routine from Chat's authority and drops any level", () => {
+    const chat = automationChatDraftFixture();
+    const input: AutomationDraftFormInput = {
+      ...validFormInput(),
+      mode: "chat",
+      project: {
+        projectId: chat.projectId,
+        name: "Briefings",
+        mode: "chat",
+        projectVersion: chat.projectVersion,
+        binding: chat.binding,
+      },
+      executionProfile: chat.executionProfile,
+      authorityProfile: chat.authorityProfile,
+      runLevel: "full-access",
+    };
+    const built = buildAutomationDraft(input);
+    expect(built.kind).toBe("valid");
+    expect(built.kind === "valid" && built.draft.runLevel).toBeUndefined();
+    expect(built.kind === "valid" && built.draft.projectLevel).toBeUndefined();
+
+    // A profile that grants the folder would widen what Chat holds.
+    expect(
+      buildAutomationDraft({ ...input, authorityProfile: definition.authorityProfile }).kind,
+    ).toBe("invalid");
+  });
+
   it("builds a strict contract-valid draft with a freshly confirmed delivery target", () => {
     const result = buildAutomationDraft(validFormInput());
     expect(result.kind).toBe("valid");

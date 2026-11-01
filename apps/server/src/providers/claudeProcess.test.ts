@@ -507,6 +507,51 @@ describe("Claude runtime confinement", () => {
     expect(launch.networkEgress).toBe("allow");
   });
 
+  it("runs a Plan launch on its own egress listener and hands every posture the proxy variables when the host routes Claude", async () => {
+    const target = fixture();
+    const network = {
+      endpoint: { kind: "loopback", port: 47004 },
+      environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47004" },
+    } as const;
+    const reporter = join(target.root, "report-proxy.sh");
+    writeFileSync(reporter, "#!/bin/sh\nprintf 'proxy=%s\\n' \"$HTTPS_PROXY\"\n");
+    chmodSync(reporter, 0o755);
+    const outputs: string[] = [];
+    for (const executionPolicy of ["plan", "approval-gated"] as const) {
+      const confinement = recordingConfinement();
+      const child = makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy,
+        network,
+      })({
+        command: reporter,
+        args: [],
+        cwd: target.root,
+        env: target.environment,
+        signal: new AbortController().signal,
+      });
+      let output = "";
+      child.stdout.on("data", (chunk: Buffer | string) => {
+        output += chunk.toString();
+      });
+      await waitForExit(child);
+      outputs.push(output);
+      if (executionPolicy === "plan") {
+        expect(confinement.prepared[0]?.networkEgress).toEqual({
+          kind: "proxied",
+          endpoint: network.endpoint,
+        });
+      } else {
+        // Outside Plan Claude's own sandbox holds its commands, so the process is not wrapped.
+        expect(confinement.prepared).toEqual([]);
+      }
+    }
+    expect(outputs).toEqual([
+      `proxy=${network.environment.HTTPS_PROXY}\n`,
+      `proxy=${network.environment.HTTPS_PROXY}\n`,
+    ]);
+  });
+
   it("gives a Plan turn a temporary directory only that launch can name, and removes it after the runtime exits", async () => {
     const target = fixture();
     const ambient = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-ambient-")));

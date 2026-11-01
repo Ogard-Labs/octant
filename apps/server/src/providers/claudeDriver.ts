@@ -535,6 +535,8 @@ const availableCapabilities: ProviderCapabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   harnessAutoReview: "supported",
+  // Claude's reviewer reports a refusal and nothing for a call it approved.
+  reviewVerdicts: { allow: "unsupported", deny: "supported" },
   modelSwitch: "supported",
   nativeSetup: {
     subagents: "supported",
@@ -1101,10 +1103,18 @@ function probeSdk(
     const environment = yield* environmentFactory(options.authentication, environmentOptions);
     // Acquired before the query, so it is released after the query closes.
     const probeRoot = yield* privateProbeRoot;
+    // A probe is a Plan launch of its own, on a listener of its own.
+    const network = yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+      runtime: "claude",
+      root: probeRoot,
+      executionPolicy: "plan",
+      environment: environment.environment,
+    });
     const query = yield* options.sdk.openQuery({
       binaryPath: options.binaryPath,
       projectRoot: probeRoot,
       authEnvironment: environment.environment,
+      ...(network === undefined ? {} : { network }),
       model: PROBE_MODEL,
       executionPolicy: "plan",
       tools: CLAUDE_PLAN_TOOLS,
@@ -1296,10 +1306,17 @@ function makeClaudeContextFacts(
           options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory },
         );
         const probeRoot = yield* privateProbeRoot;
+        const network = yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+          runtime: "claude",
+          root: probeRoot,
+          executionPolicy: "plan",
+          environment: environment.environment,
+        });
         const query = yield* options.sdk.openQuery({
           binaryPath: options.binaryPath,
           projectRoot: probeRoot,
           authEnvironment: environment.environment,
+          ...(network === undefined ? {} : { network }),
           model: PROBE_MODEL,
           executionPolicy: "plan",
           tools: CLAUDE_PLAN_TOOLS,
@@ -1348,7 +1365,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         : undefined,
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], workRequest }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -1371,6 +1388,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         extraFolders,
         mode,
         factories,
+        workRequest === undefined ? undefined : String(workRequest.threadId),
       );
     },
   };
@@ -1383,6 +1401,8 @@ function makeConnection(
   extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
+  /** The Work thread this connection serves, which names it to the network reviewer. */
+  workThreadId?: string,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -1843,6 +1863,25 @@ function makeConnection(
           signal,
         );
         const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
+        // Claude's own process: its inference and in-process web fetch. It
+        // runs at Auto under the same reviewer as its command sandbox.
+        const ownNetwork = await runSetupEffect(
+          acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+            runtime: "claude",
+            root: projectRoot,
+            executionPolicy: input.executionPolicy,
+            environment: environment.environment,
+            autoReview: input.autoApprove === true,
+            // Only Plan runs the process in Octant's own capsule; outside it
+            // the process reads the proxy variables on the host's loopback.
+            ...(CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy)
+              ? {}
+              : { listener: "loopback" as const }),
+            sessionId: String(input.sessionId),
+            ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
+          }).pipe(Effect.provideService(Scope.Scope, scope)),
+          signal,
+        );
         const runtimeVersion = await runSetupEffect(
           options.process.probeVersion(options.binaryPath),
           signal,
@@ -1857,7 +1896,13 @@ function makeConnection(
             options.process.probeSubscription(
               options.binaryPath,
               environment.environment,
-              confined ? { projectRoot, executionPolicy: input.executionPolicy } : undefined,
+              confined
+                ? {
+                    projectRoot,
+                    executionPolicy: input.executionPolicy,
+                    ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
+                  }
+                : undefined,
             ),
             signal,
           );
@@ -1915,18 +1960,24 @@ function makeConnection(
                 root: projectRoot,
                 executionPolicy: input.executionPolicy,
                 autoReview: input.autoApprove === true,
-                // The sandbox points its commands at a bare port and sends no
-                // proxy credentials.
+                sessionId: String(input.sessionId),
+                ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
+                // The sandbox points its commands at a bare port on the
+                // host's loopback and sends no proxy credentials.
                 authentication: "none",
+                listener: "loopback",
               }).pipe(Effect.provideService(Scope.Scope, scope)),
               signal,
             )
           : undefined;
+        if (sandboxNetwork !== undefined && sandboxNetwork.endpoint.kind !== "loopback") {
+          throw failure("incompatible", "Claude's sandbox needs its egress proxy on loopback.");
+        }
         const sandbox = claudeSandboxSettings(
           input.executionPolicy,
           projectRoot,
           extraFolders,
-          sandboxNetwork?.endpoint.port,
+          sandboxNetwork?.endpoint.kind === "loopback" ? sandboxNetwork.endpoint.port : undefined,
         );
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
@@ -2299,6 +2350,7 @@ function makeConnection(
                   : environment.environment,
                 nativeSetup,
               ),
+              ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,

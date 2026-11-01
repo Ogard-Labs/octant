@@ -2129,9 +2129,18 @@ rules below:
 **Routines (Automation Center).** A routine is a host-owned, Project-bound
 definition that starts an ordinary Work or Code thread with a fixed task prompt
 on a trigger: once, every N minutes (15 minutes to 30 days), or weekly at a
-local time in an IANA time zone. Chat routines are allowed, since a Chat
-thread has no file, shell, or Git authority for a routine to widen, but not
-built yet: today a routine targets a Work or Code Project. Each occurrence creates
+local time in an IANA time zone. A routine targets a Chat, Work, or Code
+Project. A **Chat routine** keeps Chat's authority, since a Chat thread has no
+file, shell, or Git authority for a routine to widen: its definition binds an
+active Chat Project (the receipt names the Project and its version, with no
+folder or binding revision), its authority snapshot grants no filesystem,
+shell, Git, or subagents, and the contract refuses a Chat definition that
+does. It has no level to pick and no follow-up (`same-thread`) target, and no
+thread's agent proposes one, because a Chat thread has no Environment to
+propose from. Each run creates a Chat thread in the Project through
+`create-chat-thread`, puts it on the routine's provider and model, and sends
+the task as one `send-chat-turn` under a submission identity derived from the
+occurrence, so a retry after a crash finds the turn it already sent. Each occurrence creates
 at most one new thread (target policy `new-thread`) and runs its first turn
 through the ordinary thread and turn services; a routine cannot do anything the
 thread it creates could not do. The one exception is a follow-up (target
@@ -2161,16 +2170,29 @@ the thread it came from.
   own, else Settings › Code › Access), and a Work run's turn is not narrowed
   below its thread's level, which a routine thread takes from Settings ›
   Work. Only a local window sets the opt-in: a paired device is refused at the
-  route, and a routine an agent proposes never has it. A Code
+  route, and a routine an agent proposes never has it. A person may instead
+  **pick a level on the routine itself** (`runLevel` on the definition, one of
+  Ask first, Accept edits, Auto, or Full access; at most one of this and the
+  Project opt-in, journaled and copied into each run's snapshot the same way).
+  It is the highest level a run may use, never a grant: a Code run's thread is
+  created at the lower of the pick and the level the Project's new threads
+  start at, and a Work run's turn takes the pick as its ceiling, so it is
+  clamped to the thread's own level (`clampWorkAccess`). A pick can therefore
+  lower a run below its Project's level and never raise it above what the
+  person allowed there. Only a local window sets it, a paired device is
+  refused at the route, a routine an agent proposes never has it, and a Chat
+  routine cannot carry it. _Rationale:_ the maintainer asked for a level "never
+  above what the person allowed"; the narrower reading, the Project's level
+  as the ceiling, keeps Full access a choice made where the Project's level is
+  set.
+  A Code
   routine may also be created with **Merge the pull requests it opens**
   (`agentMerge: "allowed"` on the definition, journaled with every revision and
   copied into each run's snapshot); only a local window sets it, a paired device
   is refused at the route, and a routine an agent proposes never has it. It
   lets the run's agent merge the pull request its own thread opened under the
   merge rules in [Git and pull requests](#modes-chat-work-and-code), with the
-  head and required checks enforced, while the live routine is enabled. Allowed;
-  not built yet: a level picked on the routine itself rather than taken from
-  its Project. A routine never runs at a level lower than the one
+  head and required checks enforced, while the live routine is enabled. A routine never runs at a level lower than the one
   its creator chose. Work runs bind the Project's confined root like an
   interactive Work thread. A Code first turn runs with
   the `agent` initiator, so approvals wait for a person.
@@ -2685,7 +2707,15 @@ Git start in the main folder. Built.
   folder as it does the main one, and the ACP client file and terminal tools
   accept an absolute path or working directory inside an extra folder and
   bind every Project folder for the command they launch; a path outside all
-  of them is refused.
+  of them is refused. The editor and the Files explorer open, read and save
+  a file in an extra folder under the same checkout authority and the same
+  confinement as the checkout's own: the request names the file by absolute
+  path, the root authority places it in one of the Project's current extra
+  folders after resolving the checkout, and the folder is then the file's
+  root. The explorer lists each extra folder as its own tree beneath the
+  checkout's, labelled with the folder's last component. An extra folder has
+  no file watch, so its tree relists on Refresh, and a save there is
+  journaled like any other save of the thread.
 - **Terminals and Project actions.** A Project terminal starts in the main
   folder unless the person picks an extra folder, and a saved action runs
   under the folder they pick (the action's own directory is relative to it).
@@ -2694,7 +2724,12 @@ Git start in the main folder. Built.
   binds all of the Project's folders that exist like the main folder, so the
   shell can move between them; the pick only chooses where it starts. The
   header's action buttons and the start screen's quick tools offer the pick
-  once a Project has an extra folder.
+  once a Project has an extra folder. A Code thread's terminal binds every
+  Project folder that exists as a Project terminal does, and its start command
+  may name an extra folder to start in, compared as the exact path the Project
+  lists; the host refuses any other, and a folder missing on disk is left out
+  of the binding. The Terminal tab does not offer that pick yet: a thread
+  terminal started from it still opens in the thread's working directory.
 - **Work files.** A path relative to the main folder is always the main
   folder's; a file in an extra folder is named by its absolute path, and the
   host honours an absolute path only inside one of the Project's current
@@ -2706,8 +2741,17 @@ Git start in the main folder. Built.
   the item limit and naming each by its last component, so it carries no
   host path. A turn's record of the files that changed while it ran watches
   every folder the same way, so a file written in an extra folder lists as
-  Work's own. Artifacts the host itself creates, revises or exports still
-  take a name with no path and live in the main folder.
+  Work's own. An artifact the host creates for a Work thread takes a name with
+  no path and is placed in the folder that thread works in: its working
+  directory, which is always inside the main folder, read from the thread by
+  the host and never from the request, and refused for a thread of another
+  Project. Without a thread it goes to the main folder. The artifact's record
+  keeps that folder, so revising, renaming, converting and exporting it act on
+  the same folder.
+  _Rationale:_ a thread's working directory is a path relative to the main
+  folder by contract, so no thread works in an extra folder, and an artifact
+  never lands in one. Letting a request name an extra folder would widen what
+  a create request may reach beyond what it reaches today.
 - **`@file` picker and Code search.** A mention is the main folder's relative
   path or the absolute path of a file inside one of the Project's current
   extra folders; the host reads an absolute path only there and reports any
@@ -2715,12 +2759,11 @@ Git start in the main folder. Built.
   main folder under the same confinement and root identity checks, and the
   Code picker offers those files by absolute path. Code search walks the
   checkout and then each extra folder under the shared budgets, and a match
-  there carries its folder. The editor opens files of the checkout only, so
-  such a match is listed but not opened from the search dialog.
-- **Not yet.** Artifacts the host itself creates, revises or exports in Work
-  still live in the main folder, and the Code editor and explorer do not open
-  files of an extra folder. An agent reaches them through its runtime's own
-  tools.
+  there carries its folder; choosing it opens the file in the editor by the
+  folder's path joined to the match's.
+- **Not yet.** The Terminal tab has no control to start a thread terminal in
+  an extra folder, and an extra folder has no live file watch in the
+  explorer.
 
 ## Agent task display
 
@@ -2886,9 +2929,12 @@ flowchart LR
   thread's [guardrail level](#security-and-authority): on at Guarded and
   Reviewed, and off at Full access, where the mark is recorded and shown
   but never prompts or blocks;
-  a person turns it down for one thread or Project by setting that scope's
-  level (allowed; not built yet: Full access is the only level where it is off,
-  and a Project or thread cannot turn it down below that). The mark
+  a person turns it down for one thread by setting its level, or for a
+  Project's new threads by setting the Project's level, in Work and Code
+  alike, and back up the same way (`outsideContentRecordedOnly`). No
+  switch turns it down at a level below Full access: the gate is what keeps
+  a marked thread's irreversible calls asking there, so turning it down
+  means choosing Full access for that scope. The mark
   itself is recorded at every level, because the journal records what came
   in. One gate enforces it today:
   `resolveThreadElevation` in `packages/domain/src/toolCallPolicy.ts` asks
@@ -6780,9 +6826,17 @@ where it was or narrows it:
   since narrowed to a posture that clamps it to `proxied` runs its commands
   unasked, so on a tainted parent they reach no host. A tainted proposal shows on the card and cannot
   be granted there; the command confirmation is where it is granted.
-  [Octant Shield](#octant-shield), the reviewer that may answer a per-call
-  `network-access` prompt, is not built.
   Each fails closed.
+- _The reviewer path._ With Network limits on, a command's `no-rule` or
+  `expired` refusal on an untainted thread goes to
+  [Octant Shield](#octant-shield) while the command runs, before the
+  refusal is answered (`ToolEgressRules` `reviewNetwork`), when Shield is the
+  thread's reviewer at Auto. Shield judges a `network-access` call naming the
+  host and port; an allow becomes one `call` rule for that launch, journaled
+  as `thread.egress-rule-granted@1` with the reviewer as principal, and the
+  proxy decides again; the decision shows on the thread's transcript. The
+  proxy waits at most 20 seconds. Anything else stays refused and goes on to
+  learn mode as before.
 
 **Failure modes.** Each fails closed:
 
@@ -6881,12 +6935,12 @@ proofs that suite already holds:
 
 ### Provider runtime network
 
-**Status: built on macOS, behind the Network limits switch, off by default (maintainer request, 2026-10-31).** The decision is
+**Status: built on macOS and Linux, behind the Network limits switch, off by default (maintainer request, 2026-10-31; Linux, Claude's own process, and the composed reviewer 2026-11-01).** The decision is
 `decideProviderRuntimeEgress` in `packages/domain/src/safeNetworkPolicy.ts`,
 the places and records are in `packages/contracts/src/safeNetworks.ts`, and
 the host side is `apps/server/src/network/` (`providerRuntimeNetwork.ts`,
 `safeNetworkStore.ts`, `safeNetworkRoutes.ts`), composed in
-`wiring/runtimeNetwork.ts`. Linux keeps open network for runtimes (below).
+`wiring/runtimeNetwork.ts`. On Linux OpenCode keeps open network (below).
 
 **Network limits ship off.** No real provider turn has run through the proxy
 yet, and a runtime that ignores the proxy settings would lose all its
@@ -6909,20 +6963,26 @@ that for the runtime process too. Full access stays open network.
 
 **Where it applies.** Every wrapped runtime below Full access, Plan and Chat
 included: OpenCode, ACP agents, Pi, and the Codex app-server, each launch
-(and each probe) on a listener of its own. Claude's own process is unwrapped
-outside Plan, so at Ask first, Accept edits and Auto its command sandbox
-carries the network instead: the Agent SDK's `sandbox.network.httpProxyPort`
-points the sandbox's commands at the session's listener in place of the
-sandbox's own proxy. Octant sends that one network setting and refuses a
-sandbox with any other (`hasValidSandbox`). The SDK has no setting that
-carries proxy credentials, so that listener takes no launch token
-(`authentication: "none"`); only processes that can reach the port use it,
-and a confined launch's OS rules reach only its own port. Still open: Claude's
-own process (its in-process web fetch and, in Plan, the runtime itself, whose
-launch is composed synchronously inside the SDK's spawn hook) and SOCKS
-traffic from the Claude sandbox, which its own filter keeps. Each runtime's
-module reaches this through `acquireProviderRuntimeNetwork`, and
-`providerProcessConfinement.test.ts` refuses a wrapped module that does not.
+(and each probe) on a listener of its own. Claude's own process gets a
+listener of its own too (runtime `claude`), started with the session before
+the SDK's spawn hook runs, so the hook only reads it: every launch, its
+catalog and plan-usage probes included, carries the listener's proxy
+variables, and its inference and in-process web fetch go there. In Plan,
+where Octant wraps the process, its OS rules reach that listener and nothing
+else. Outside Plan the process is not wrapped (macOS refuses a sandbox inside
+the one Claude's commands run in), so the variables are what route it: a
+client in it that ignored them would keep open network there. At Ask first,
+Accept edits and Auto its command sandbox carries the commands' network as
+well: the Agent SDK's `sandbox.network.httpProxyPort` points the sandbox's
+commands at a second listener in place of the sandbox's own proxy. Octant
+sends that one network setting and refuses a sandbox with any other
+(`hasValidSandbox`). The SDK has no setting that carries proxy credentials,
+so that listener takes no launch token (`authentication: "none"`); only
+processes that can reach the port use it, and a confined launch's OS rules
+reach only its own port. Still open: SOCKS traffic from the Claude sandbox,
+which its own filter keeps. Each runtime's module reaches this through
+`acquireProviderRuntimeNetwork`, and `providerProcessConfinement.test.ts`
+refuses a wrapped module that does not.
 
 **Enforcement point.** The host proxy harness commands use
 (`nativeHarnessEgressProxy.ts`), with a provider-runtime decider in place of
@@ -6967,15 +7027,27 @@ innermost active Work or Code Project whose bound folder holds it), and a
 folder no Project holds gets the account default and no Project rules.
 
 **Unlisted hosts at Auto and Ask first.** At Auto, where the launch knows it
-runs at Auto (Claude's sandbox today), an unlisted host goes to the reviewer
-hook (`RuntimeNetworkReviewer`) before its refusal is answered; the proxy
-decides again once the reviewer answers or 20 seconds pass. An `allow` is
-journaled first (`runtime-network.reviewer-allowed@1`) and holds for that
-launch alone; it is never a place or a rule. No reviewer is composed yet, so
-at Auto as at Ask first the refusal stands and goes to the person: the
-host appears under Recently refused in Settings › Access › Safe networks,
-where one click trusts it for the Project or every Project, and the runtime's
-next attempt passes. The connection is refused at once rather than held.
+runs at Auto (Claude's own process and its sandbox today), an unlisted host
+goes to the reviewer hook (`RuntimeNetworkReviewer`) before its refusal is
+answered; the proxy decides again once the reviewer answers or 20 seconds
+pass. The reviewer composed there is [Octant Shield](#octant-shield)
+(`shield/shieldNetworkReview.ts`): the launch names its thread directly (a
+Work request's session) or by its provider session, which a running Code
+turn holds, and Shield judges a `network-access` call naming only the host,
+the port, and the runtime. Shield answers only on a thread whose reviewer it
+is, never on a tainted thread, and its decision shows on the thread's
+transcript. An `allow` is journaled first (`runtime-network.reviewer-allowed@1`)
+and holds for that launch alone; it is never a place or a rule. Every other
+answer, a launch whose thread no running turn holds (a probe, a child run),
+and Ask first leave the refusal standing for the person: the host appears
+under Recently refused in Settings › Access › Safe networks, where one click
+trusts it for the Project or every Project, and the runtime's next attempt
+passes. The connection is refused at once rather than held. _Rationale:_ the
+person chose who reviews at Auto; where they kept the provider's own
+reviewer, that reviewer never sees the proxy's question, so Shield does not
+answer it in their place and spend on a call nobody chose. OpenCode, ACP
+agents, Pi, and Codex do not tell their launch the thread's level, so their
+unlisted hosts go to the person at every level.
 
 **Audit journal.** On the launch's own `runtime-network` aggregate:
 `runtime-network.launch-started@1` (the launch's id, runtime, ACP profile,
@@ -6987,19 +7059,33 @@ whose start cannot be journaled never starts the runtime, which reports that
 its network guard could not start. Recently refused is rebuilt at startup
 from the launch starts and summaries.
 
-**Linux.** The capsule's private network namespace would also cut the host
-loopback that tool bridges and OpenCode's own server use, so Linux runtimes
-keep `allow` until the forwarder carries those connections too. The Safe
-networks page says so when its host does not route runtimes.
+**Linux.** A runtime's Bubblewrap capsule keeps its private network
+namespace, and its listener is a Unix socket in a fresh private folder under
+the data folder's `runtime-network`, which the capsule's forwarder relays its
+fixed loopback port to, as harness commands do. The namespace also hides the
+host's loopback, so the forwarder listens on each port the launch serves
+Octant's tools on (`loopbackRelayPorts`) and carries every connection there
+to the same host port through the proxy as a `CONNECT 127.0.0.1:<port>` with
+the launch's token, so the proxy decides and records it as any other request.
+A process Octant does not run in a capsule of its own (Claude's sandbox, and
+Claude's own process outside Plan) gets a loopback listener, as on macOS.
+OpenCode keeps open network on Linux: it is a server the host connects into,
+and the namespace would cut that connection. _Rationale:_ relaying the host's
+connections in needs a host-side listener for each launch beside the
+forwarder's inbound socket; until it exists, OpenCode keeps the network it
+had rather than failing every launch.
 
 **Not proven live.** No real runtime turn has run on its proxy: a runtime's
 own HTTP client honouring the proxy variables with credentials, Codex's
-streaming transport among them, and Claude's sandbox using the outside proxy
-port, are unverified against real providers. A client that ignores the
-variables fails closed. The real check is a Codex-shaped launch under
-Seatbelt in `providerRuntimeNetwork.hostile.test.ts`: `curl` reaches a trusted
-loopback server through the proxy, is refused an untrusted one with 403, and
-fails going around the proxy.
+streaming transport among them, Claude's own process and its sandbox using
+their listeners, and a Shield model answering a network review, are
+unverified against real providers. A client that ignores the variables fails
+closed where Octant wraps it. The real checks are in
+`providerRuntimeNetwork.hostile.test.ts`: a Codex-shaped launch under
+Seatbelt, where `curl` reaches a trusted loopback server through the proxy,
+is refused an untrusted one with 403, and fails going around the proxy; and
+the same under real Bubblewrap on Linux, where `curl` also reaches the
+launch's tool bridge through the loopback relay.
 
 ## Extensions and skills
 
@@ -7993,9 +8079,11 @@ mechanisms are:
     soft there: Octant's own file tools (the Octant Harness's, the ACP
     client's host-side file operations, and Claude Code's through Octant's
     tool gate) still refuse a protected path with the same plain message,
-    [Octant Shield](#octant-shield)'s Judge and Watcher are to flag a read of a
-    protected path and a secret-then-network sequence as journaled tags and
-    never block (allowed; not built yet), and secret redaction stays on. Below Full access the list is
+    [Octant Shield](#octant-shield)'s Watcher flags a call that names a
+    protected path and the Octant Harness's secret-then-network commands are
+    tagged, both journaled and never blocking (the
+    [secret guard](#secret-guard) states the rules), and secret redaction
+    stays on. Below Full access the list is
     an OS rule on every confined launch.
   - **Outside content is recorded only** at Full access: a quiet tag on the
     tool row, a small mark on the thread card, and the taint in the journal
@@ -8081,12 +8169,24 @@ mechanisms are:
   inside the same confined launch as Guarded, and the host withdraws it on a
   thread marked by outside content as it does the others'.
   - **The provider is the recorded approver.** A verdict the provider reports
-    is journaled with the provider as approver ("approved by the provider's
+    is journaled with the provider as approver ("Approved by the provider's
     review") and shown in the transcript like a person's approval, with the
-    call it covered. Allowed; not built yet: today the journal records the
-    thread's `autoApprove` setting and the tool activity, not a per-call
-    verdict, and Codex's reviewer answers inside the runtime without sending
-    each request to the host.
+    call it covered. Built for Code: Codex reports each finished review
+    (`item/autoApprovalReview/completed`), approved or denied, with the
+    reviewed item, a risk grade, and its reason, so both verdicts are
+    journaled; a review that timed out, was aborted, or is still running said
+    nothing about the call and journals nothing. Claude Code reports only a
+    refusal (a `permission_denied` notice whose reason is `classifier`) and
+    nothing for a call its automatic mode approved, so only denials are
+    journaled and an approval stays unrecorded; the capability report says so
+    (`reviewVerdicts`: Codex `allow` and `deny` supported, Claude Code `deny`
+    only). An ACP agent's own reviewer (Mistral Vibe's `auto-approve`) reports
+    no per-call verdict over ACP, so its calls show as tool activity and the
+    report reads `Not reported`. A provider's verdict is journaled as the
+    provider's and is never presented as Shield's or the person's, and the
+    host never infers an approval from a call that ran. Rationale: a verdict
+    the host made up would claim a review that did not happen, and the
+    product stance is honest capability reports over a uniform-looking row.
   - **Hard lines apply after the provider says yes.** A provider's approval
     never stands in for the person's request to merge or force-push, never
     reaches another thread's branch, and never writes in Plan; the host
@@ -9026,6 +9126,8 @@ access` agree); a thread's own change is journaled as
   | `nativeArtifacts.code`    | as Work                                                                                       | `absent`                                                                                     | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                 | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `citations`               | `unsupported`                                                                                 | `unsupported`                                                                                | `unsupported`                                                                                            | `unsupported`                                                                                     | `unsupported`                                                                            | `unsupported`                                                    | `unsupported`                                                                     | `unsupported`                                                    | `unsupported`                         |
   | `harnessAutoReview`       | `supported`                                                                                   | `supported`                                                                                  | `unsupported`                                                                                            | `unsupported`                                                                                     | `varies`: `supported` on Mistral Vibe, whose auto-approve mode is its reviewer in Code   | `unsupported`                                                    | `unsupported`                                                                     | `unsupported`                                                    | `unsupported`                         |
+  | `reviewVerdicts.allow`    | `unsupported`; an approval is not reported                                                    | `supported`                                                                                  | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                 | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
+  | `reviewVerdicts.deny`     | `supported`                                                                                   | `supported`                                                                                  | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                 | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `nativeSetup.subagents`   | `supported`; shown as a child run, each call through the parent's gate                        | `supported`; only at Full access, shown as child runs                                        | `supported`; its `task` children shown as child runs, their requests through the parent's approval path  | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `unsupported`: its agent profiles are modes | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `nativeSetup.webTools`    | `supported`; asks below Full access and marks the thread                                      | `supported`; never switched off, each search marks the thread                                | `supported`; never switched off outside Plan, each call marks                                            | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, its fetch never switched off   | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `nativeSetup.skills`      | `supported`; a Project's skills only in a trusted Project                                     | `supported`; no Project skill switched off by path                                           | `supported`; `.claude` and `.agents` skills, the `skill` permission asked                                | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                 | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
@@ -10597,7 +10699,8 @@ Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
 no prompts": a shell command there can read a protected file. Built, except
-the Watcher's protected-path tags.
+short-lived cloud credentials from the broker and the Watcher flagging a
+printed secret-holding environment variable.
 
 - **One list, every runtime.** The list is
   `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
@@ -10697,17 +10800,33 @@ the Watcher's protected-path tags.
   approval requests are left as asked, so redaction never changes what an
   agent does. A key split across two streamed chunks is not caught, and the
   model still sees what a tool returned to it.
-- **Shield links in.** The Judge, built for every runtime that routes approvals through Octant, sends a
-  command that reaches a secret file to the person (`secret-path`) and refuses
-  one that reads secrets and sends something off the computer
-  (`reads-secrets-then-egress`); see [Octant Shield](#octant-shield). The
-  Watcher has a hook to flag a read of a protected path once the list is
-  handed to it. Allowed; not built yet: the Watcher flagging an attempt to
-  read a protected path or print a secret-holding environment variable, and
-  the Judge reading the person's protected list rather than its own
-  secret-path patterns. At Full access these are journaled tags and never
-  block, because nothing else stands between a shell command and the file
-  there.
+- **Shield links in.** The Judge, built for every runtime that routes
+  approvals through Octant, sends a command or call that reaches a secret file to the person (`secret-path`) and refuses a command that reads
+  secrets and sends something off the computer (`reads-secrets-then-egress`);
+  see [Octant Shield](#octant-shield). It reads the list in force, the
+  person's additions included (`isProtectedSecretPath`), beside its own
+  secret-path patterns. The Watcher flags every call of Octant's own tools
+  that names a protected path, in a path field or as a word of a shell
+  command, refused or not, as the `secret-path-read` label. At Full access,
+  where Shield judges nothing, an Octant Harness command that sends something
+  off the computer after the thread reached for a secret, or while naming
+  one, is journaled as a `shield-tags.recorded@1` tag
+  (`reads-secrets-then-egress`) under the thread. These never block, because
+  nothing else stands between a shell command and the file there. Allowed;
+  not built yet: the Watcher flagging a printed secret-holding environment
+  variable.
+  - _Rationale._ The Judge keeps its own patterns beside the list rather than
+    replacing them: they also cover files the list leaves out (`.env`,
+    `.gnupg`, a stray `.pem`), and a built-in group the person removes takes
+    away the OS rule, not Shield's habit of asking, which only ever sends a
+    call to the person. The flag reads a command's text only, so a path the
+    command builds at run time, or a relative path in a tool's arguments, is
+    not seen; it is a record for the person, never what stands between a
+    command and a file. A refused attempt is flagged too, because what the
+    agent reached for is what the person needs to see. A tag that cannot be
+    journaled withholds the command's output, as an unrecorded `ssh` command
+    does; the command itself has already run. A provider runtime's own
+    commands at Full access reach no Octant shell and are not tagged.
 - **Measured friction** (macOS 27, below Full access, fake files in a
   throwaway home): a planted `~/.ssh/id_test` is refused while
   `~/.ssh/config`, `known_hosts`, and public keys read; `ssh-add -l` lists a
@@ -10731,7 +10850,7 @@ Octant Shield is Octant's own automatic approval reviewer (maintainer
 decision, 2026-10-31). Its Judge is built for every runtime below, subagents
 included, with the picker and the Settings and Project choices (build order
 steps 1 to 3), its Watcher for the results Octant hands a model (step 4),
-safe networks for provider runtimes (step 5), and the server registry with
+safe networks for provider runtimes and harness commands (step 5), and the server registry with
 its SSH rules (step 6), with the gaps each part names below. It answers the
 approval prompts
 that would otherwise go to the person, for every runtime that routes
@@ -10808,7 +10927,8 @@ count beside its parent's.
 (account default, Project override): hosts, domains, address ranges, and
 private-network tags. Egress to a trusted place passes by rule; anything else
 goes to the Judge at Reviewed and to the person at Guarded. Each decision is
-journaled per host. Built for provider runtimes on macOS, behind the Network limits switch, which
+journaled per host. Built for provider runtimes on macOS and Linux and for
+Octant Harness commands, behind the Network limits switch, which
 ships off ([provider runtime network](#provider-runtime-network)): a `host` place
 matches that name, a `domain` the name and every name under it, a range is
 CIDR, and the tags are `this-mac` (loopback), `local-network` (the private
@@ -10819,10 +10939,20 @@ link-local address is refused. Each list is journaled whole, journal first, as
 fixed id, or the Project's), and `safe-networks.project-override-cleared@1`
 returns a Project to the default, and `safe-networks.limits-set@1` records the
 Network limits switch; startup replays them. Only a person at a
-local window changes them (`GET`/`POST /api/access/safe-networks`). The
-reviewer hook is in place and no reviewer is composed, so today every unlisted
-host goes to the person. Not built yet: safe networks for harness commands,
-which keep thread and Project rules, and taint suspending places.
+local window changes them (`GET`/`POST /api/access/safe-networks`). A harness
+command's proxy falls back to the places of its thread's Project after the
+thread's and Project's rules refuse, and a private answer passes for it only
+through a place, as for a runtime. Taint suspends places for a command as it
+suspends standing rules, so a marked thread's command reaches only the hosts
+a person confirmed for it; a runtime taints no thread, so its places stay.
+Bytes a command receives from a place taint its thread as any other
+command's do. With limits on, an unlisted host goes to Shield where Shield
+reviews the thread at Auto, for a runtime that says it runs at Auto (Claude's
+own process and its sandbox) and for every harness command, whose
+`network-access` prompt it answers per call; anything Shield does not allow
+goes to the person. _Rationale:_ places apply to commands only while limits
+are on, like everything else here, so turning the switch off returns every
+command to exactly its thread and Project rules.
 
 **Servers over SSH,** in Work and Code alike:
 
@@ -10971,8 +11101,9 @@ decision as an `approval-reviewed` row beside the tool rows. A Work thread
 at Auto is reviewed the same way, judged against its Project folder, with
 its own turn prompts as the person's messages and its model calls counted
 against its spend ceilings as a Work thread. On the Octant Harness its
-decisions are journaled with its harness approvals and its transcript does
-not yet show them as rows (allowed; not built yet). Claude Code, Codex,
+decisions are journaled with its harness approvals, and the running turn
+shows each as a review row among its tool steps, keyed by the call it was
+for. Claude Code, Codex,
 OpenCode, ACP agents, and Pi on a Work thread take the path they take on a
 Code thread: the approval reaches Shield before it becomes a request, an
 allow or deny goes back to the runtime for that one call and nobody is
@@ -11055,8 +11186,14 @@ marked but not read. The Chat and Work tool rows carry the same "Outside
 content" tag as Code's: the turn's tool steps hold the Watcher's labels for a
 runtime web tool and for an app-managed tool's result, and a later progress or
 result message keeps them. The Judge still never sees the text, only the labels.
-The secret guard's protected-files list is not yet handed to the Watcher or the
-Judge, so `secret-path-read` is not raised until that list exists on this branch.
+The secret guard's list in force is handed to the Watcher and the Judge (see
+[Secret guard](#secret-guard)), so `secret-path-read` is raised for every call
+of Octant's own tools that names a protected path, and a refused call's row
+carries the tag too. A Work tool row's tag is quiet at Full access, as Code's
+is. A client built before a tool step carried Shield's decision reads a Work
+turn with a review row as an ordinary completed step: clients decode a host's
+answer ignoring fields they do not know (`decodeHostAnswer`), and a contract
+test decodes such a turn with the older step shape.
 
 **Build order.** (1) Octant Harness; (2) every runtime through the approval
 path; (3) the picker and Settings; (4) the Watcher; (5) safe networks; (6)
@@ -11147,7 +11284,7 @@ request and editing its title, body, or draft state, a person's
 merge of one pull request from a local window, a person's approval or request
 for changes there, an agent's merge on a Project setting or routine, and the
 Merge when ready and Auto-fix switches the person turns on there are built;
-the rest, Chat routines,
+the rest
 are allowed and not built yet. Linked external secret stores are built for the
 1Password CLI, under [linked secret stores](#linked-secret-stores): a pointer
 in the credential broker, the value fetched at use and never kept.

@@ -1,4 +1,6 @@
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { decodeHostAnswer } from "./hostAnswer";
 import {
   WORK_TURN_CAPABILITIES,
   WORK_TURN_EVENT_NAMES,
@@ -13,6 +15,7 @@ import {
   decodeWorkTurnState,
   decodeWorkTurnUpdated,
   decodeStartWorkThreadTurnCommand,
+  WorkTurnStreamFrame,
 } from "./workTurns";
 
 const ids = {
@@ -359,5 +362,60 @@ describe("work turn contracts", () => {
     ]) {
       expect(() => decodeWorkThreadTranscriptWindowRequest(invalid)).toThrow();
     }
+  });
+});
+
+describe("a Work turn's Shield rows on an older client", () => {
+  const strict = { parseOptions: { onExcessProperty: "error" as const } };
+  // A client built before tool steps carried Shield's decision or the
+  // Watcher's mark: its step has only these fields, and refuses any other.
+  const OlderToolStep = Schema.Struct({
+    toolCallId: Schema.String,
+    toolName: Schema.String,
+    state: Schema.Literal("started", "running", "completed", "failed"),
+    summary: Schema.optional(Schema.String),
+  }).annotations(strict);
+  const OlderTurnToolsFrame = Schema.Struct({
+    kind: Schema.Literal("turn-tools"),
+    sequence: Schema.Int,
+    threadId: Schema.String,
+    requestId: Schema.String,
+    toolSteps: Schema.Array(OlderToolStep),
+    toolStepsTruncated: Schema.Boolean,
+  }).annotations(strict);
+
+  it("keeps the row and drops the decision it cannot show instead of refusing the turn", () => {
+    const frame = Schema.encodeSync(WorkTurnStreamFrame)(
+      decodeHostAnswer(WorkTurnStreamFrame)({
+        kind: "turn-tools",
+        sequence: 3,
+        threadId: ids.thread,
+        requestId: ids.request,
+        toolSteps: [
+          {
+            toolCallId: "shield:call-1",
+            toolName: "bash",
+            state: "completed",
+            summary: "git status",
+            shield: {
+              reviewer: "octant-shield",
+              verdict: "allow",
+              stage: "fast-allow",
+              rule: "read-only-git",
+              reason: "A read-only Git command.",
+              latencyMs: 1,
+              decidedAt: now,
+            },
+            outsideContent: { labels: ["secret-path-read"], recordedOnly: true },
+          },
+        ],
+        toolStepsTruncated: false,
+      }),
+    );
+
+    expect(() => Schema.decodeUnknownSync(OlderTurnToolsFrame)(frame)).toThrow();
+    expect(decodeHostAnswer(OlderTurnToolsFrame)(frame).toolSteps).toEqual([
+      { toolCallId: "shield:call-1", toolName: "bash", state: "completed", summary: "git status" },
+    ]);
   });
 });

@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { AppReleaseRing } from "./appUpdates";
 import { AppleProjectPath } from "./appleToolchain";
 import { ChatThreadId } from "./chat";
-import { CodeRelativePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
+import { CodeProjectFilePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
 import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
 import { StoredBrowserProfile } from "./browserProfiles";
@@ -806,7 +806,7 @@ const CodeOverviewWorkspaceTab = Schema.Struct({
 const CodeFileWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-file"),
   ...CodeWorkspaceTabFields,
-  relativePath: CodeRelativePath,
+  relativePath: CodeProjectFilePath,
 }).annotations(strict);
 
 const codeThreadSurface = <K extends string>(kind: K) =>

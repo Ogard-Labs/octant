@@ -95,7 +95,12 @@ in the composer changes it in one click, for new and existing threads alike:
   first: the provider's own (Claude's auto mode, Codex's approval reviewer),
   or Octant Shield, Octant's own reviewer, on every other runtime and wherever
   you choose it. Choose in Settings › Code › Access › Auto reviewer, or per
-  Project on its overview; Settings › Code › Access › Shield model picks the
+  Project on its overview. When the provider's own reviewer answers, the
+  turn shows "Approved by the provider's review" or "Denied by the provider's
+  review" beside the call. Codex reports both; Claude Code reports only its
+  refusals, so a call it approved shows no line; Mistral Vibe reports none.
+  Settings › Providers & Models lists which verdicts each one reports. Settings › Code ›
+  Access › Shield model picks the
   model Shield asks (by default each thread's own provider with its smallest
   model, or any configured endpoint, a local one included). Shield allows
   reads and edits in the folder, your Project's test and build commands, and
