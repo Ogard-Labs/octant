@@ -358,7 +358,9 @@ export function safeNetworkPlaceAllows(
   }
   const raw = destination.host.toLowerCase();
   if (raw === "localhost" || raw === "localhost.") {
-    return safeNetworkHoldsAddress(places, "127.0.0.1", port) ? { host: "127.0.0.1", port } : undefined;
+    return safeNetworkHoldsAddress(places, "127.0.0.1", port)
+      ? { host: "127.0.0.1", port }
+      : undefined;
   }
   if (parseNetworkAddress(raw) !== undefined) {
     const host = raw.startsWith("[") ? raw.slice(1, -1) : raw;

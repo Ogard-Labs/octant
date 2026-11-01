@@ -328,9 +328,9 @@ already running keep the network they began with. While it is off, runtimes
 have open network and the safe networks lists are saved but not applied. You
 can edit the lists either way, and the page says whether limits are on.
 
-With limits on, on a Mac, below Full access, each provider runtime Octant
-starts (Codex, OpenCode, Pi, and ACP agents such as Mistral Vibe) gets a
-network guard of its own. The runtime can reach:
+With limits on, on a Mac or on Linux, below Full access, each provider
+runtime Octant starts (Claude, Codex, OpenCode, Pi, and ACP agents such as
+Mistral Vibe) gets a network guard of its own. The runtime can reach:
 
 - its provider's own endpoints, for sign-in and the model;
 - the hosts your Project's network rules allow;
@@ -338,9 +338,14 @@ network guard of its own. The runtime can reach:
 
 Anything else is refused, and the refusal names the host, for example
 `octant-egress-refused: no-rule registry.npmjs.org:443`. That includes the
-runtime's own web fetch. Claude's commands at Ask first, Accept edits, and
-Auto go through the same guard, because Octant points Claude's own command
-sandbox at it. Full access stays open network.
+runtime's own web fetch, Claude's included. Claude's commands at Ask first,
+Accept edits, and Auto go through the same guard, because Octant points
+Claude's own command sandbox at it. Full access stays open network.
+
+Octant Harness commands also reach the places you trust, on top of their
+thread's and Project's network rules, while limits are on. Once a thread has
+read outside content, its commands stop using those places, as they stop
+using standing rules, until you confirm hosts for a command.
 
 **Safe networks** lists the places you trust, once for every Project and,
 if you want, a different list for one Project. A place is one of:
@@ -358,17 +363,20 @@ someone at this computer can change the lists, and every change is recorded.
 **Recently refused** shows the hosts a Project's runtimes were turned away
 from. Choose **Trust** to add one to the list you are editing; the runtime's
 next attempt goes through. Octant does not hold the request open while you
-decide. At Auto, Octant Shield will be able to let a single host through for
-one runtime; until it is available, Auto treats an unlisted host as Ask first
-does.
+decide. At Auto, when Octant Shield is the thread's reviewer, Shield is asked
+first about a host nothing lists, for Claude and for Octant Harness commands.
+If Shield allows it, the host is let through for that one runtime launch or
+command, and the decision shows in the thread; otherwise the refusal stands.
+Shield is never asked once a thread has read outside content.
 
 What this does not cover yet:
 
-- On Linux, runtimes keep open network.
-- Claude's own process keeps open network, including in Plan and for its
-  built-in web fetch; only its commands go through the guard.
-- Octant Harness commands keep their own per-thread network rules (Network
-  access in a Code thread's Agents tab) and do not read safe networks yet.
+- On Linux, OpenCode keeps open network.
+- Outside Plan, Claude's own process is pointed at its guard but not locked to
+  it, so a part of Claude that ignored the proxy settings would still have
+  open network. In Plan it is locked to the guard.
+- Codex, OpenCode, Pi, and ACP agents do not tell Octant when they run at
+  Auto, so their unlisted hosts always go to you.
 - No live turn with a real provider has run through the guard yet, which is
   why limits ship off. With limits on, a runtime whose network client ignores
   the proxy settings cannot reach anything; turn the switch off to get its

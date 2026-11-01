@@ -629,7 +629,9 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
         // On Linux a proxied capsule reaches the bridge through the forwarder's
         // loopback relay; with no proxy there is nothing to carry it.
         const linuxBridgeRelay =
-          input.toolBridge !== undefined && platform === "linux" && typeof networkEgress === "object"
+          input.toolBridge !== undefined &&
+          platform === "linux" &&
+          typeof networkEgress === "object"
             ? loopbackPortOf(input.toolBridge)
             : [];
         if (

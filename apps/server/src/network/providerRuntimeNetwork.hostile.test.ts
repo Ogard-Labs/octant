@@ -980,16 +980,16 @@ describe.runIf(process.platform === "linux" && existsSync("/usr/bin/bwrap"))(
           allowFileReadStar: true,
         });
         const output = await new Promise<string>((resolve) => {
-            execFile(
-              launch.command,
-              [...launch.args],
-              {
-                cwd: root,
-                env: { PATH: "/usr/bin:/bin", HOME: work, ...network.environment },
-                timeout: 30_000,
-              },
-              (_error, stdout, stderr) => resolve(`${stdout}${stderr}`),
-            );
+          execFile(
+            launch.command,
+            [...launch.args],
+            {
+              cwd: root,
+              env: { PATH: "/usr/bin:/bin", HOME: work, ...network.environment },
+              timeout: 30_000,
+            },
+            (_error, stdout, stderr) => resolve(`${stdout}${stderr}`),
+          );
         });
         expect(output).toContain("TRUSTED-ORIGIN trusted-exit=0");
         expect(output).toContain("other-status=403");
@@ -1004,9 +1004,21 @@ describe.runIf(process.platform === "linux" && existsSync("/usr/bin/bwrap"))(
           .find((event) => event.eventName === RUNTIME_NETWORK_EVENT_NAMES.launchSummarized);
         expect(summary?.payload).toMatchObject({
           entries: expect.arrayContaining([
-            expect.objectContaining({ host: "127.0.0.1", port: portOf(trusted), decision: "allowed" }),
-            expect.objectContaining({ host: "127.0.0.1", port: portOf(bridge), decision: "allowed" }),
-            expect.objectContaining({ host: "127.0.0.1", port: portOf(other), decision: "refused" }),
+            expect.objectContaining({
+              host: "127.0.0.1",
+              port: portOf(trusted),
+              decision: "allowed",
+            }),
+            expect.objectContaining({
+              host: "127.0.0.1",
+              port: portOf(bridge),
+              decision: "allowed",
+            }),
+            expect.objectContaining({
+              host: "127.0.0.1",
+              port: portOf(other),
+              decision: "refused",
+            }),
           ]),
         });
       } finally {

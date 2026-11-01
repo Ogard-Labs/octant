@@ -237,7 +237,9 @@ The person names trusted places (hosts, domains, address ranges, private-network
 - With limits on, below Full access every wrapped provider runtime runs on its own egress proxy and reaches only its provider's endpoints, its Project's egress rules and these places; Claude's command sandbox sends its network to the same proxy. Full access stays open network, and so does every runtime while limits are off.
 - A refused host is refused with the host named and listed under Recently refused, where the person can trust it.
 - No place or range may reach a link-local address, and a name nothing lists is refused before any lookup.
-- Built on macOS for provider runtimes, behind the Network limits switch (off by default). Not built yet: Linux runtimes (they keep open network), Claude's own process (Plan and its in-process web fetch), a composed reviewer (the hook is in place, so Auto goes to the person), safe networks for harness commands, and taint suspending places. No real runtime turn has run on its proxy yet.
+- Built on macOS and Linux for provider runtimes, Claude's own process (Plan, its probes and its in-process web fetch) included, and for Octant Harness commands, behind the Network limits switch (off by default). A Linux capsule reaches its listener through a Unix socket and its tool bridges through the forwarder's loopback relay; OpenCode keeps open network on Linux because the host connects into its server. Taint suspends places for a harness command as it suspends standing rules.
+- With limits on, Octant Shield reviews an unlisted host where it is the thread's reviewer at Auto: for Claude's own process and sandbox, and for harness commands, whose allowance is one call rule. Anything else goes to the person.
+- Outside Plan Claude's own process is not wrapped, so only its proxy variables route it. No real runtime turn has run on its proxy yet.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Provider runtime network](../architecture.md#provider-runtime-network) and [Octant Shield](../architecture.md#octant-shield).
 
@@ -1151,7 +1153,7 @@ A harness command on an approval-gated or auto-accept-edits Code thread reaches 
 - Rules arise only from answering a network-access approval, never from a model call, tool result or repository configuration. Project rules need a person at a local window.
 - Taint suspends standing rules, and bytes a proxied command receives from outside taint the thread. Learn mode turns refusals into proposals that grant nothing.
 - Provider runtimes that run their own tools in-process run on a proxy of their own, decided by provider endpoints, Project rules and safe networks rather than thread rules.
-- The reviewer path for per-call network prompts is not built yet.
+- With Network limits on, Octant Shield answers a command's per-call network prompt on an untainted thread it reviews at Auto; its allow is one call rule for that launch, granted by the reviewer.
 
 Status: Built. Since: 2026-10-13. Detail: [Architecture: Harness tool egress rules](../architecture.md#harness-tool-egress-rules).
 
@@ -1368,7 +1370,7 @@ A provider runtime launch is wrapped when the process carries exactly one thread
 - One key provider's runtime is wrapped in Plan but keeps its own sandbox outside Plan; closing that gap is not an open goal.
 - A runtime used only for a readiness probe is unwrapped and starts no turn.
 - At Full access Octant wraps no provider runtime, so only the operating system's own protections remain; Plan's read-only enforcement is the same at every level.
-- A runtime that makes its own API call resolves provider-endpoints-only below Full access. On macOS, with Network limits on (they ship off), the runtime then runs on its own egress proxy, reaching its provider's endpoints, its Project's rules and the person's safe networks; on Linux the OS profile still materializes it as plain network allow.
+- A runtime that makes its own API call resolves provider-endpoints-only below Full access. On macOS and Linux, with Network limits on (they ship off), the runtime then runs on its own egress proxy, reaching its provider's endpoints, its Project's rules and the person's safe networks; OpenCode on Linux still materializes it as plain network allow.
 - A new module may not launch a provider process without the shared confinement builder unless the matrix names it.
 - Runtimes get no reusable cloud credential the person did not configure for that account; shared-config and default-chain cloud sign-in is refused.
 
