@@ -156,6 +156,9 @@ wins.
 - Never import another product's source, assets, schemas, copy, identifiers, or
   distinctive implementation structure. Third-party code enters only as an
   approved dependency with a compatible license and explicit architectural fit.
+- Do not name other agent workspaces or apps in code, comments, docs, tests,
+  commits, branch names, or pull-request and issue text. Name an AI provider or
+  an integration only where the product really uses it.
 - Dependencies point inward: apps may consume packages; contracts and domain
   do not import apps. Provider-specific payloads stop at adapters.
 - Authority checks occur on the server before side effects, never only in React.
