@@ -6,6 +6,7 @@ import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHar
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
+import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import { createRuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
@@ -14,6 +15,7 @@ import {
   type CodeThread,
   decodeCodeThreadId,
   decodeNativeHarnessTurnId,
+  decodeWorkThreadId,
   LOCAL_HOST_ID,
   type OctantMode,
   type ProviderInstanceId,
@@ -95,6 +97,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "agentRunPersistence"
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
+    | "personMemory"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -183,6 +186,7 @@ export function wireHarness(deps: HarnessDependencies) {
     workThreadProjection,
     workTurnProjection,
     options,
+    personMemory,
   } = deps;
   // The keys Octant keeps for servers that sign in with one, in the broker.
   const serverSshKeys =
@@ -681,6 +685,39 @@ export function wireHarness(deps: HarnessDependencies) {
     scratchRoot: harnessWorkDirectory,
   });
   shieldHolder.port = hostShield;
+  const personMemorySweep = createPersonMemorySweep({
+    persistence,
+    store: personMemory,
+    workThreads: {
+      list: () =>
+        workThreadProjection.list().map((thread) => ({
+          id: String(thread.id),
+          title: thread.title,
+          projectId: String(thread.projectId),
+          providerInstanceId: thread.providerInstanceId,
+          modelId: thread.modelId,
+          completedAt: thread.completedAt,
+        })),
+    },
+    // What the person wrote: each turn's prompt, leaving out the turns the
+    // host accepted to deliver a subagent's result.
+    workPersonMessages: (threadId, limit) =>
+      workTurnProjection
+        .listForThread(decodeWorkThreadId(threadId))
+        .filter((turn) => turn.delivery === undefined)
+        .map((turn) => turn.prompt)
+        .slice(-limit),
+    codePersonMessages: (threadId, limit) =>
+      codeBoardEventStore
+        .personPromptsForThread(decodeCodeThreadId(threadId), limit)
+        .flatMap((prompt) => {
+          const text = codeEvidence.read(prompt);
+          return text === undefined ? [] : [text];
+        }),
+    resolveDriver: resolveConfiguredDriver,
+    scratchRoot: harnessWorkDirectory,
+    protectedSecretPath: (path) => isProtectedSecretPath(path),
+  });
   // A provider runtime's own shell reports a command only as it starts, so
   // its pushes and pull-request changes are recorded, never stopped.
   const runtimeForgeChanges = createRuntimeForgeChangeObserver({
@@ -838,6 +875,7 @@ export function wireHarness(deps: HarnessDependencies) {
   // what later areas add.
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   return {
+    personMemorySweep,
     runtimeForgeChanges,
     followUpCreation,
     restartContinuation,

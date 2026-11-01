@@ -28,6 +28,7 @@ describe("octantSettingsRegistry", () => {
       "linear",
       "permissions",
       "access",
+      "memory",
       "secret-stores",
       "data",
       "sync",
