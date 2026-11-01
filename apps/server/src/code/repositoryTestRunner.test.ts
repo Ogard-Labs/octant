@@ -110,6 +110,34 @@ describe("RepositoryTestRunner", () => {
     });
   });
 
+  it("makes a run whose output was cut off before it arrived inconclusive, even when it exited zero", async () => {
+    const runner = new RepositoryTestRunner({
+      realpath: async (path) => path,
+      execute: async () => ({
+        termination: "exited",
+        exitCode: 0,
+        stdout: new TextEncoder().encode("ok\n"),
+        stderr: new Uint8Array(),
+        parserFailed: false,
+        cleanupUncertain: false,
+        outputTruncated: true,
+      }),
+      readArtifact: async () => undefined,
+      now: () => "2026-07-21T12:00:00.000Z",
+      newId: () => "20000000-0000-4000-8000-000000000001",
+    });
+    const run = await runner.run({
+      definition: { ...definition, artifactPaths: [] } as never,
+      threadId: "30000000-0000-4000-8000-000000000001" as never,
+      checkoutId: "40000000-0000-4000-8000-000000000001" as never,
+      checkoutRevision: "a".repeat(40),
+      executionPolicy: "approval-gated",
+      checkoutRoot: "/private/repository",
+      environment: {},
+    });
+    expect(run).toMatchObject({ verdict: "inconclusive", concerns: ["output-truncated"] });
+  });
+
   it("distinguishes an unavailable artifact read from a missing artifact", async () => {
     const runner = new RepositoryTestRunner({
       realpath: async (path) => path,

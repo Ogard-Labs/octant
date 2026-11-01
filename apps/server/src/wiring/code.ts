@@ -86,7 +86,13 @@ import type { FoundationsWiring } from "./foundations";
 
 import type { HarnessStateWiring } from "./harnessState";
 import { createServerGitHistory } from "../serverProjects/serverGit";
-import { serverProjectOf, withServerCodeCheckouts } from "../serverProjects/serverProjectThreads";
+import {
+  serverProjectOf,
+  serverThreadOf,
+  withServerCodeCheckouts,
+} from "../serverProjects/serverProjectThreads";
+import { ServerCodeFiles } from "../serverProjects/serverCodeFiles";
+import { discoverServerTests } from "../serverProjects/serverTests";
 import {
   listServerWorktreeRefs,
   withServerWorktreeCreation,
@@ -806,6 +812,31 @@ export function wireCode(deps: CodeDependencies) {
           },
           files: codeFiles,
           tests: codeTestDiscovery,
+          serverCheckout: (thread) => {
+            // The thread's folder there: the Project's own, or its own worktree.
+            const place = serverThreadOf(serverProjectStore, thread);
+            if (place === undefined) return undefined;
+            const projectId = String(place.project.id);
+            if (serverProjectStore.addressOf(projectId).kind !== "address") return undefined;
+            const files = new ServerCodeFiles({
+              connection: serverConnection,
+              // Read each call, so a server removed mid-request refuses the next one.
+              server: () => {
+                const address = serverProjectStore.addressOf(projectId);
+                return address.kind === "address" ? address.server : undefined;
+              },
+              root: place.folder,
+              content: codeContent,
+              clock: () => new Date().toISOString(),
+            });
+            return {
+              list: (request) => files.list(request),
+              open: (input) => files.open(input),
+              read: (input) => files.read(input),
+              save: (input) => files.save(input),
+              discoverTests: (input) => discoverServerTests(files, input.checkoutId),
+            };
+          },
           watcher: codeFileWatch,
           searcher: codeFileSearch,
           content: codeContent,

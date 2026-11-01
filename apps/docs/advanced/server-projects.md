@@ -72,8 +72,14 @@ Choose one to start a thread there.
   **Create pull request** on the checkout bar. Octant opens it with this
   computer's GitHub sign-in, on the GitHub repository of the remote on the
   server.
+- **Files and Tests.** The Files panel lists the folder on the server, and
+  files open and save there. Choose **Refresh** to see changes made on the
+  server, since the folder is not watched. The Tests panel runs the tests
+  your `package.json` or `.octant/tests.json` defines, on the server, under
+  the thread's access level. A save is refused when the file changed on the
+  server after you opened it.
 - **Not available there yet:** connectors and plugins, Browser and Computer,
-  subagents, forks, checkpoints and rewind, and the Files and Tests panels.
+  subagents, forks, checkpoints and rewind, and searching across the folder.
   Ask the agent to do it on the server, or use a terminal.
 - **Tested on a throwaway local server only.** Octant's tests ran this against
   an `sshd` started on this computer for the test, never a real server.

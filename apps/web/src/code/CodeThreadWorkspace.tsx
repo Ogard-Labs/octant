@@ -542,9 +542,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The path travels as ordinary prompt text; the host still decides what the
   // turn may read, so naming a file here reaches nothing on its own.
   const pathMentions = useCodePathMentions({
-    ...(props.fileListingClient === undefined || serverCheckout
-      ? {}
-      : { client: props.fileListingClient }),
+    ...(props.fileListingClient === undefined ? {} : { client: props.fileListingClient }),
     threadId: props.threadId,
     checkoutId: view?.checkout.id,
     draft,

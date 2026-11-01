@@ -21,6 +21,8 @@ export interface RepositoryTestProcessResult {
   readonly stderr: Uint8Array;
   readonly parserFailed: boolean;
   readonly cleanupUncertain: boolean;
+  /** The process's output was cut off before it reached the runner, as a server's connection bounds it. */
+  readonly outputTruncated?: boolean;
 }
 
 export interface RepositoryTestRunnerOptions {
@@ -255,7 +257,9 @@ function concernsFor(
   artifacts: ReadonlyArray<CodeRepositoryTestArtifact>,
 ): Array<CodeRepositoryTestRun["concerns"][number]> {
   const concerns: Array<CodeRepositoryTestRun["concerns"][number]> = [];
-  if (output.stdout.truncated || output.stderr.truncated) concerns.push("output-truncated");
+  if (output.stdout.truncated || output.stderr.truncated || result.outputTruncated === true) {
+    concerns.push("output-truncated");
+  }
   if (artifacts.some(({ status }) => status === "truncated")) concerns.push("artifact-truncated");
   if (artifacts.some(({ status }) => status === "missing")) concerns.push("missing-artifact");
   if (artifacts.some(({ status }) => status === "unavailable")) {
