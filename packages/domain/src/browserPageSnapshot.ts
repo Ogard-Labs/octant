@@ -233,9 +233,10 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       if (condition.state === "detached") return element === null;
       if (condition.state === "visible") return element !== null && shown(element);
       if (condition.state === "hidden") return element === null || !shown(element);
+      // `:disabled` covers what a control inherits, such as a disabled fieldset.
       const disabled =
         element !== null &&
-        (element.hasAttribute("disabled") || element.getAttribute("aria-disabled") === "true");
+        (element.matches(":disabled") || element.getAttribute("aria-disabled") === "true");
       return element !== null && (condition.state === "disabled" ? disabled : !disabled);
     });
     return { mode: "check", met };
@@ -299,11 +300,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
   };
   const statesOf = (element: Element): string[] => {
     const states: string[] = [];
-    if (
-      element.hasAttribute("disabled") ||
-      element.getAttribute("aria-disabled") === "true" ||
-      (element instanceof HTMLFieldSetElement && element.disabled)
-    ) {
+    if (element.matches(":disabled") || element.getAttribute("aria-disabled") === "true") {
       states.push("disabled");
     }
     if (

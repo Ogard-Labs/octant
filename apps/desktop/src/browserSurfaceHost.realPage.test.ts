@@ -45,6 +45,7 @@ const pages: Record<string, string> = {
   "/slow": `<!doctype html><title>Slow</title>
     <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
     <button id="later" onclick="setTimeout(() => { document.title = 'Settled'; }, 150)">Later</button>
+    <button id="late" onclick="setTimeout(() => alert('late news'), 800)">Late</button>
     <button id="ask" onclick="const ok = confirm('Delete everything?'); alert(ok ? 'deleted' : 'kept'); document.title = ok ? 'Deleted' : 'Kept'">Ask</button>
     <p>Width <span id="width"></span></p>
     <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
@@ -402,6 +403,24 @@ describe.skipIf(chrome === undefined)(
       const tabs = await host.act(contextId, { kind: "tab-open", target: `${origin}/greets` });
       expect(tabs.dialogs).toEqual([{ type: "alert", message: "Welcome", answer: "accepted" }]);
       expect(tabs.tabs?.[1]).toMatchObject({ title: "Greeted", active: true });
+      await page.close();
+    });
+
+    it("reports a dialog answered during an action that then failed with the next answer", async () => {
+      const { host, contextId, page } = await surface("/slow");
+      await host.act(contextId, { kind: "click", target: "#late" });
+      await expect(
+        host.act(contextId, {
+          kind: "wait",
+          waitFor: {
+            conditions: [{ kind: "text", text: "Never there", present: true }],
+            match: "all",
+            timeoutMs: 2_000,
+          },
+        }),
+      ).rejects.toThrow(/timed out/);
+      const next = await host.act(contextId, { kind: "extract-text" });
+      expect(next.dialogs).toEqual([{ type: "alert", message: "late news", answer: "accepted" }]);
       await page.close();
     });
   },
