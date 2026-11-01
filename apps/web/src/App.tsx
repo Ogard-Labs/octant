@@ -517,6 +517,7 @@ export interface AppProps {
   readonly zenClient?: ZenClient;
 }
 
+const NO_PROJECT_EXTRA_FOLDERS: ReadonlyArray<string> = [];
 const NO_PROJECT_ACTIONS: ReadonlyArray<ProjectAction> = [];
 const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
@@ -3372,6 +3373,25 @@ function LaunchedShell(
       ),
     [workProviderGroups],
   );
+  const chatProviderChoices = useMemo<ReadonlyArray<CodeThreadProviderChoice>>(
+    () =>
+      chatProviderGroups.flatMap((group) =>
+        group.sections.flatMap((section) =>
+          section.models.flatMap((picker) =>
+            picker.unavailableReason === undefined
+              ? [
+                  {
+                    instanceId: group.instance.id,
+                    modelId: picker.model.id,
+                    label: `${group.instance.displayName} — ${picker.model.displayName}`,
+                  },
+                ]
+              : [],
+          ),
+        ),
+      ),
+    [chatProviderGroups],
+  );
   const workProviderChoice = resolveWorkDraftChoice({
     choices: workProviderChoices,
     settingsStatus: workSettings.status,
@@ -3441,6 +3461,10 @@ function LaunchedShell(
     )
     .join("\0");
   const automationCatalogProviderKey = [
+    "chat",
+    ...chatProviderChoices.map(
+      (choice) => `${String(choice.instanceId)}:${String(choice.modelId)}`,
+    ),
     "work",
     ...workProviderChoices.map(
       (choice) => `${String(choice.instanceId)}:${String(choice.modelId)}`,
@@ -3474,6 +3498,10 @@ function LaunchedShell(
         projects: automationCatalogProjects,
         profiles: automationCatalogProfiles,
         providerChoicesByMode: {
+          chat: chatProviderChoices.map((choice) => ({
+            providerInstanceId: String(choice.instanceId),
+            modelId: String(choice.modelId),
+          })),
           work: workProviderChoices.map((choice) => ({
             providerInstanceId: String(choice.instanceId),
             modelId: String(choice.modelId),
@@ -6578,6 +6606,12 @@ function LaunchedShell(
     actionsProject?.type === "code" || actionsProject?.type === "work"
       ? (actionsProject.actions ?? NO_PROJECT_ACTIONS)
       : NO_PROJECT_ACTIONS;
+  // Only a Code Project's extra folders are listed by the Files tool; a Work
+  // Project's own Files listing already walks them.
+  const activeProjectExtraFolders =
+    actionsProject?.type === "code"
+      ? (actionsProject.extraFolders ?? []).map((folder) => folder.canonicalRoot)
+      : NO_PROJECT_EXTRA_FOLDERS;
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -7035,6 +7069,9 @@ function LaunchedShell(
                     activeMode={activeMode}
                     {...(activeProjectId === undefined ? {} : { activeProjectId })}
                     {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
+                    {...(activeProjectExtraFolders.length === 0
+                      ? {}
+                      : { projectExtraFolders: activeProjectExtraFolders })}
                     bottomPanelHeight={bottomPanelHeight}
                     bottomPanelOpen={bottomPanelOpen}
                     bottomPanelPresentation={bottomPanelPresentation}

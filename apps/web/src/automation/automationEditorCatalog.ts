@@ -49,6 +49,7 @@ export interface BuildAutomationEditorCatalogInput {
   readonly projects: ReadonlyArray<ProjectSummary>;
   readonly profiles: ReadonlyArray<AgentProfile>;
   readonly providerChoicesByMode: {
+    readonly chat?: ReadonlyArray<AutomationProviderChoice>;
     readonly work: ReadonlyArray<AutomationProviderChoice>;
     readonly code: ReadonlyArray<AutomationProviderChoice>;
   };
@@ -81,7 +82,7 @@ export function buildAutomationEditorCatalog(
     const projects: AutomationProjectOption[] = [];
     for (const project of input.projects) {
       if (project.lifecycle !== "active") continue;
-      if (project.type !== "work" && project.type !== "code") continue;
+      if (project.type !== "chat" && project.type !== "work" && project.type !== "code") continue;
       try {
         const option = projectOptionFromSummary(
           input.hostId,
@@ -107,6 +108,17 @@ export function buildAutomationEditorCatalog(
         if (authority !== undefined && !seenAuthority.has(String(authority.receipt.profileId))) {
           seenAuthority.add(String(authority.receipt.profileId));
           authorityProfiles.push(authority);
+        }
+
+        // A Chat routine keeps Chat's authority, which no Work or Code profile
+        // authority describes, so a Chat-compatible profile offers its own.
+        if (profile.compatibleModes.includes("chat")) {
+          const chatAuthority = authorityOptionFromProfile(profile, "chat");
+          const key = `${String(profile.id)}:chat`;
+          if (chatAuthority !== undefined && !seenAuthority.has(key)) {
+            seenAuthority.add(key);
+            authorityProfiles.push(chatAuthority);
+          }
         }
 
         for (const project of projects) {
@@ -139,10 +151,25 @@ export function buildAutomationEditorCatalog(
 
 function projectOptionFromSummary(
   hostId: string,
-  project: Extract<ProjectSummary, { type: "work" | "code" }>,
+  project: Extract<ProjectSummary, { type: "chat" | "work" | "code" }>,
   codeBootstrap: CodeBootstrap | null | undefined,
   preparedCodeCheckouts: ReadonlyArray<PreparedCodeCheckoutFact> | undefined,
 ): AutomationProjectOption | undefined {
+  // A Chat Project holds no folder, so there is no binding revision to name.
+  if (project.type === "chat") {
+    return {
+      projectId: project.id,
+      name: project.name,
+      mode: "chat",
+      projectVersion: project.version,
+      binding: {
+        kind: "chat",
+        hostId: hostId as never,
+        projectId: project.id,
+        projectVersion: project.version,
+      },
+    };
+  }
   const bindingRevisionId = project.bindingRevisionId;
   if (bindingRevisionId === undefined || String(bindingRevisionId).trim() === "") {
     return undefined;
@@ -306,9 +333,10 @@ function executionOptionFromProfile(
 
 function authorityOptionFromProfile(
   profile: AgentProfile,
+  forMode?: "chat",
 ): AutomationAuthorityProfileOption | undefined {
   const includesWork = profile.compatibleModes.includes("work");
-  const authority = authorityFromProfile(profile, includesWork ? "work" : "code");
+  const authority = authorityFromProfile(profile, forMode ?? (includesWork ? "work" : "code"));
   if (authority.executionPolicy === "full-access") return undefined;
   const digest = automationAuthorityDigest(authority);
   const receipt: AutomationAuthorityProfileReceipt = {
@@ -322,9 +350,10 @@ function authorityOptionFromProfile(
 }
 
 function authorityFromProfile(profile: AgentProfile, mode: AutomationMode): AgentRunAuthority {
-  // Approval-gated only. Work never carries shell/Git; Code may.
+  // Approval-gated only. Work never carries shell/Git; Code may. Chat has no
+  // folder, shell, or Git at all.
   return {
-    filesystem: true,
+    filesystem: mode !== "chat",
     shell: mode === "code",
     git: mode === "code",
     network: false,
@@ -340,7 +369,7 @@ function resolveProviderChoice(
   profile: AgentProfile,
   mode: AutomationMode,
 ): AutomationProviderChoice | undefined {
-  const choices = input.providerChoicesByMode[mode];
+  const choices = input.providerChoicesByMode[mode] ?? [];
   const constrained = profile.modelConstraints.map(String);
   for (const choice of choices) {
     if (constrained.length === 0 || constrained.includes(String(choice.modelId))) {

@@ -16,7 +16,7 @@ export const capabilityLabels: ReadonlyArray<
   readonly [
     Exclude<
       keyof ProviderObservedState["capabilities"],
-      "sessionCompaction" | "nativeArtifacts" | "nativeSetup"
+      "sessionCompaction" | "nativeArtifacts" | "nativeSetup" | "reviewVerdicts"
     >,
     string,
   ]
@@ -36,6 +36,24 @@ export const capabilityLabels: ReadonlyArray<
   ["taskProgress", "Task progress"],
   ["nativeChildAgents", "Native child agents"],
 ];
+/**
+ * What a runtime's own reviewer reports per call at Reviewed, in plain words,
+ * or nothing for a runtime with no reviewer of its own. A verdict the runtime
+ * does not send is said to be missing, never filled in.
+ */
+export function reviewVerdictsLabel(
+  capabilities: ProviderObservedState["capabilities"],
+): string | undefined {
+  if (capabilities.harnessAutoReview !== "supported") return undefined;
+  const reported = capabilities.reviewVerdicts;
+  const allow = reported?.allow === "supported";
+  const deny = reported?.deny === "supported";
+  if (allow && deny) return "Approvals and denials";
+  if (deny) return "Denials only";
+  if (allow) return "Approvals only";
+  return "Not reported";
+}
+
 export const probeTimestampFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",

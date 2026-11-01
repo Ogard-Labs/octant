@@ -6,6 +6,7 @@ import {
   decideProviderRuntimeEgress,
   runtimeEgressPrivateAddressAllowed,
   safeNetworkHoldsAddress,
+  safeNetworkPlaceAllows,
   type RuntimeEgressRequest,
 } from "./safeNetworkPolicy";
 
@@ -257,5 +258,37 @@ describe("provider runtime egress", () => {
         launchLoopbackPorts: [],
       }),
     ).toBe(false);
+  });
+});
+
+describe("safe networks for harness commands", () => {
+  const places: ReadonlyArray<SafeNetworkPlace> = [
+    { kind: "domain", domain: "corp.example" },
+    { kind: "host", host: "registry.example", port: 8443 },
+    { kind: "private-network", tag: "local-network" },
+  ];
+
+  it("lets a trusted name or a trusted address through at its port, in canonical form", () => {
+    expect(safeNetworkPlaceAllows({ host: "Git.Corp.Example.", port: 22 }, places)).toEqual({
+      host: "git.corp.example",
+      port: 22,
+    });
+    expect(safeNetworkPlaceAllows({ host: "registry.example", port: 8443 }, places)).toEqual({
+      host: "registry.example",
+      port: 8443,
+    });
+    expect(safeNetworkPlaceAllows({ host: "192.168.1.20", port: 80 }, places)).toEqual({
+      host: "192.168.1.20",
+      port: 80,
+    });
+  });
+
+  it("refuses what no place names, a place's other ports, link-local, and a bad port", () => {
+    expect(safeNetworkPlaceAllows({ host: "registry.example", port: 443 }, places)).toBeUndefined();
+    expect(safeNetworkPlaceAllows({ host: "evil.example", port: 443 }, places)).toBeUndefined();
+    expect(safeNetworkPlaceAllows({ host: "169.254.169.254", port: 80 }, places)).toBeUndefined();
+    expect(safeNetworkPlaceAllows({ host: "localhost", port: 3000 }, places)).toBeUndefined();
+    expect(safeNetworkPlaceAllows({ host: "corp.example", port: 0 }, places)).toBeUndefined();
+    expect(safeNetworkPlaceAllows({ host: "corp.example", port: 22 }, [])).toBeUndefined();
   });
 });

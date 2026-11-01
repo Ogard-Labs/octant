@@ -4,6 +4,7 @@ import {
 } from "../agentRun/agentResultDeliveryBatch";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { chooseThreadTerminalFolder } from "./codeTerminalFolder";
 import { randomUUID } from "node:crypto";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
@@ -134,6 +135,8 @@ export interface CodeOperationAuthorityPort {
     | Readonly<{
         checkoutRoot: string;
         workingDirectory?: string;
+        /** The Project's extra folders, by absolute path. */
+        extraFolders?: ReadonlyArray<string>;
         shell: string;
         credentialReferences: readonly {
           readonly environmentName: string;
@@ -2519,6 +2522,19 @@ export class CodeOperationService {
             );
           }
         }
+        const folder = chooseThreadTerminalFolder({
+          workingDirectory,
+          extraFolders: root.extraFolders ?? [],
+          picked: command.folder,
+        });
+        if (folder.kind === "refused") {
+          this.#options.terminalBrowserGrants?.abandon(command.terminalId);
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "That folder is not one of this Project's folders.",
+          );
+        }
         const owner: TerminalOwner = {
           windowId: String(windowId),
           threadId: thread.id,
@@ -2528,7 +2544,8 @@ export class CodeOperationService {
         const starting = this.#options.terminals.launch({
           terminalId: command.terminalId,
           shell: root.shell,
-          cwd: workingDirectory,
+          cwd: folder.cwd,
+          ...(folder.extraFolders.length === 0 ? {} : { extraFolders: folder.extraFolders }),
           // The repository this checkout belongs to, not the path it sits at.
           stateScope: String(checkout.repositoryId),
           columns: command.columns,

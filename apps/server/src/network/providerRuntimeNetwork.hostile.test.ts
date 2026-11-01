@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { isIP, connect as netConnect, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ import { Schema } from "effect";
 import { decodeWindowId, ToolEgressRuleId, type AggregateId } from "@octant/contracts";
 import {
   RUNTIME_NETWORK_AGGREGATE,
+  type RuntimeNetworkRuntime,
   RUNTIME_NETWORK_EVENT_NAMES,
   SAFE_NETWORKS_AGGREGATE,
   SAFE_NETWORKS_EVENT_NAMES,
@@ -30,6 +31,7 @@ import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
+import type { EgressProxyEndpoint } from "../process/threadEgressPolicy";
 import { prepareCodexLaunch } from "../providers/codexProcess";
 import { resolveRuntimeProject } from "../wiring/runtimeNetwork";
 import {
@@ -85,6 +87,8 @@ interface HostOptions {
   readonly routes?: ReadonlyMap<string, number>;
   readonly resolve?: (host: string) => ReadonlyArray<string>;
   readonly directory?: string;
+  readonly socketDirectory?: string;
+  readonly openRuntimes?: ReadonlySet<RuntimeNetworkRuntime>;
 }
 
 function runtimeHost(options: HostOptions = {}) {
@@ -125,6 +129,8 @@ function runtimeHost(options: HostOptions = {}) {
           : undefined,
     enforced: options.enforced ?? true,
     ...(options.reviewer === undefined ? {} : { reviewer: options.reviewer }),
+    ...(options.socketDirectory === undefined ? {} : { socketDirectory: options.socketDirectory }),
+    ...(options.openRuntimes === undefined ? {} : { openRuntimes: options.openRuntimes }),
     // An address resolves to itself, as the system lookup answers it.
     resolveAll: async (host) =>
       isIP(host) !== 0
@@ -164,7 +170,8 @@ function tokenOf(environment: Readonly<Record<string, string>>): string {
   return url.password;
 }
 
-function proxyOf(endpoint: { readonly port: number }) {
+function proxyOf(endpoint: EgressProxyEndpoint) {
+  if (endpoint.kind !== "loopback") throw new Error("Expected a loopback listener.");
   return {
     endpoint: { kind: "loopback" as const, host: "127.0.0.1" as const, port: endpoint.port },
   };
@@ -311,6 +318,38 @@ describe("provider runtime network", () => {
       }),
     ).toEqual({ status: "open" });
     expect(host.events(RUNTIME_NETWORK_AGGREGATE)).toEqual([]);
+  });
+
+  it("gives a Linux capsule launch a socket of its own, a loopback launch a port, and leaves an open runtime alone", async () => {
+    // A Unix socket path has a short limit, and macOS's own temporary folder is long.
+    const sockets = mkdtempSync("/tmp/octant-runtime-sockets-");
+    directories.push(sockets);
+    const host = runtimeHost({ socketDirectory: sockets, openRuntimes: new Set(["opencode"]) });
+    const capsule = await started(
+      host.network.start({ runtime: "codex", root: "/projects/app", executionPolicy: "plan" }),
+    );
+    expect(capsule.endpoint).toMatchObject({ kind: "unix-socket" });
+    expect(capsule.endpoint.kind === "unix-socket" && capsule.endpoint.path).toMatch(
+      new RegExp(`^${sockets}/egress-[^/]+/proxy\\.sock$`),
+    );
+    // The capsule's forwarder listens on its fixed port; the variables name it.
+    expect(new URL(capsule.environment.HTTPS_PROXY ?? "").port).toBe("3128");
+    const loopback = await started(
+      host.network.start({
+        runtime: "claude",
+        root: "/projects/app",
+        executionPolicy: "approval-gated",
+        listener: "loopback",
+      }),
+    );
+    expect(loopback.endpoint).toMatchObject({ kind: "loopback", port: expect.any(Number) });
+    expect(
+      await host.network.start({
+        runtime: "opencode",
+        root: "/projects/app",
+        executionPolicy: "approval-gated",
+      }),
+    ).toEqual({ status: "open" });
   });
 
   it("lets a host the Project's egress rules allow through, and only for that Project's runtimes", async () => {
@@ -876,3 +915,115 @@ describe.skipIf(process.platform !== "darwin")("a wrapped runtime under Seatbelt
     }
   });
 });
+
+// Real Bubblewrap around a runtime launch: the capsule's private network has
+// only loopback, so its forwarder is the one way out. `curl` stands in for
+// the runtime. Every server listens on this machine's loopback.
+describe.runIf(process.platform === "linux" && existsSync("/usr/bin/bwrap"))(
+  "a wrapped runtime under Bubblewrap",
+  () => {
+    it("reaches a trusted server and its own tool bridge through its proxy, is refused the rest, and cannot go around it", async () => {
+      const answer = (body: string) =>
+        createHttpServer((_request, response) => {
+          response.writeHead(200, { "content-type": "text/plain" });
+          response.end(body);
+        });
+      const trusted = answer("TRUSTED-ORIGIN");
+      const other = answer("OTHER-ORIGIN");
+      const bridge = answer("TOOL-BRIDGE");
+      for (const server of [trusted, other, bridge]) {
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+      }
+      const portOf = (server: HttpServer) => {
+        const address = server.address();
+        return typeof address === "object" && address !== null ? address.port : 0;
+      };
+      const planted = mkdtempSync("/tmp/octant-runtime-capsule-");
+      directories.push(planted);
+      try {
+        const root = join(planted, "project");
+        const work = join(planted, "work");
+        const sockets = join(planted, "sockets");
+        mkdirSync(root);
+        mkdirSync(work, { mode: 0o700 });
+        mkdirSync(sockets, { mode: 0o700 });
+        const host = runtimeHost({ socketDirectory: sockets });
+        host.store.set({
+          scope: { kind: "account" },
+          places: [{ kind: "private-network", tag: "this-mac", port: portOf(trusted) }],
+          principal: "local-window",
+        });
+        const network = await started(
+          host.network.start({
+            runtime: "pi",
+            root,
+            executionPolicy: "approval-gated",
+            loopbackPorts: [portOf(bridge)],
+          }),
+        );
+        expect(network.endpoint.kind).toBe("unix-socket");
+        const curl = "curl -s -m 5";
+        const script = [
+          `${curl} http://127.0.0.1:${String(portOf(trusted))}/; echo " trusted-exit=$?"`,
+          `${curl} -o /dev/null -w 'other-status=%{http_code}' http://127.0.0.1:${String(portOf(other))}/; echo " other-exit=$?"`,
+          `${curl} --noproxy '*' http://127.0.0.1:${String(portOf(bridge))}/; echo " bridge-exit=$?"`,
+          `${curl} --noproxy '*' http://127.0.0.1:${String(portOf(trusted))}/; echo " direct-exit=$?"`,
+          `${curl} -o /dev/null -w 'name-status=%{http_connect}' https://unlisted.example/; echo " name-exit=$?"`,
+        ].join("; ");
+        const launch = makeProcessConfinementLive({ platform: "linux" }).prepare({
+          executable: "/bin/sh",
+          args: ["-c", script],
+          boundRoot: root,
+          temporaryDirectory: work,
+          networkEgress: { kind: "proxied", endpoint: network.endpoint },
+          loopbackRelayPorts: [portOf(bridge)],
+          allowFileReadStar: true,
+        });
+        const output = await new Promise<string>((resolve) => {
+          execFile(
+            launch.command,
+            [...launch.args],
+            {
+              cwd: root,
+              env: { PATH: "/usr/bin:/bin", HOME: work, ...network.environment },
+              timeout: 30_000,
+            },
+            (_error, stdout, stderr) => resolve(`${stdout}${stderr}`),
+          );
+        });
+        expect(output).toContain("TRUSTED-ORIGIN trusted-exit=0");
+        expect(output).toContain("other-status=403");
+        expect(output).not.toContain("OTHER-ORIGIN");
+        expect(output).toContain("TOOL-BRIDGE bridge-exit=0");
+        expect(output).not.toMatch(/TRUSTED-ORIGIN direct-exit/);
+        expect(output).toMatch(/direct-exit=[1-9]/);
+        expect(output).toContain("name-status=403");
+        await network.release();
+        const summary = host
+          .events(RUNTIME_NETWORK_AGGREGATE)
+          .find((event) => event.eventName === RUNTIME_NETWORK_EVENT_NAMES.launchSummarized);
+        expect(summary?.payload).toMatchObject({
+          entries: expect.arrayContaining([
+            expect.objectContaining({
+              host: "127.0.0.1",
+              port: portOf(trusted),
+              decision: "allowed",
+            }),
+            expect.objectContaining({
+              host: "127.0.0.1",
+              port: portOf(bridge),
+              decision: "allowed",
+            }),
+            expect.objectContaining({
+              host: "127.0.0.1",
+              port: portOf(other),
+              decision: "refused",
+            }),
+          ]),
+        });
+      } finally {
+        for (const server of [trusted, other, bridge]) server.close();
+      }
+    });
+  },
+);

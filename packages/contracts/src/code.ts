@@ -942,7 +942,7 @@ export const CodeFileReference = Schema.Struct({
   id: CodeFileId,
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
-  relativePath: Schema.optional(CodeRelativePath),
+  relativePath: Schema.optional(CodeProjectFilePath),
   contentId: Schema.optional(CodeEvidenceContentId),
   digest: CodeDigest,
   byteLength: Schema.Int.pipe(Schema.nonNegative()),

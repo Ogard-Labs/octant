@@ -207,12 +207,15 @@ the proposal said. A Work routine saved before Work threads had the shell
 does not run until you edit it in Automation Center and save it with a
 profile that includes the shell and Git; its run history says why.
 
-To let a routine run at the mode its Project's new threads start in instead
-of asking first, open it in Automation Center and turn on **Run at this
-Project's mode**. If that mode is Full access, the routine's runs change files
-and run commands with nobody asked. Only a window on this computer can turn
-it on, and the change is recorded with the routine; a routine an agent
-proposed never has it until you turn it on. A Code routine also has **Merge the
+To let a routine run in a mode other than asking first, open it in Automation
+Center and choose **Mode for each run**: **The Project's mode** uses the mode
+its Project's new threads start in, or pick **Accept edits**, **Auto**, or
+**Full access** as the highest mode a run may use. A run never uses a higher
+mode than its Project's new threads start in, so a pick can lower a run but
+not raise it. Full access means no sandbox and no prompts, so those runs
+change files and run commands with nobody asked. Only a window on this
+computer can set it, and the change is recorded with the routine; a routine
+an agent proposed never has it until you set it. A Code routine also has **Merge the
 pull requests it opens**: when it is on, the run's agent may merge the pull
 request its own thread opened without asking, once the head it saw is still
 current and the repository's required checks have passed. It is off by default

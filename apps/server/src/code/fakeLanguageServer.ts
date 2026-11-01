@@ -43,6 +43,8 @@ function handle(message: Record<string, unknown>): void {
   }
   log({
     event: "received",
+    // Which server process got it, so a test can tell two servers apart.
+    pid: process.pid,
     method,
     params: method === "textDocument/didOpen" ? undefined : params,
   });

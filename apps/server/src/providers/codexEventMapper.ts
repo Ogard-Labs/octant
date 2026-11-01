@@ -846,6 +846,15 @@ function mapNotification(
     case "item/started":
     case "item/completed":
       return mapLifecycle(context, message);
+    case "item/autoApprovalReview/started":
+      return matchesCorrelation(context, message.params.threadId, message.params.turnId)
+        ? [{ kind: "ignored" }]
+        : correlationFailure();
+    case "item/autoApprovalReview/completed":
+      if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
+        return correlationFailure();
+      }
+      return reviewVerdictEvents(context, message.params);
     case "item/agentMessage/delta": {
       if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
         return correlationFailure();
@@ -969,6 +978,69 @@ function mapNotification(
     case "account/rateLimits/updated":
       return rateLimitWindowEvents(context, message.params.rateLimits);
   }
+}
+
+/**
+ * Codex's own reviewer answered one approval. Only a finished review that
+ * approved or denied is a verdict; one that timed out, was aborted, or is
+ * still running said nothing about the call, so nothing is journaled for it.
+ * The call is named by the reviewed item when Codex gave one, and described
+ * by the same reduced line a tool start carries, never the raw action.
+ */
+function reviewVerdictEvents(
+  context: CodexEventContext,
+  params: Extract<
+    CodexServerMessage,
+    { readonly kind: "notification"; readonly method: "item/autoApprovalReview/completed" }
+  >["params"],
+): ReadonlyArray<CodexMappedMessage> {
+  const verdict =
+    params.review.status === "approved"
+      ? "allow"
+      : params.review.status === "denied"
+        ? "deny"
+        : undefined;
+  if (verdict === undefined) return [{ kind: "ignored" }];
+  const action = params.action;
+  const first = action?.files?.[0];
+  const argument =
+    action === undefined
+      ? undefined
+      : action.type === "command"
+        ? action.command == null
+          ? undefined
+          : summarizeStepArgument(action.command)
+        : action.type === "execve"
+          ? action.program == null
+            ? undefined
+            : summarizeStepArgument(action.program)
+          : action.type === "applyPatch"
+            ? first === undefined
+              ? undefined
+              : confinedRelativePath(context, first)
+            : action.type === "networkAccess"
+              ? action.host == null
+                ? undefined
+                : summarizeStepArgument(action.host)
+              : undefined;
+  const riskLevel = ["low", "medium", "high", "critical"].find(
+    (level) => level === params.review.riskLevel,
+  ) as "low" | "medium" | "high" | "critical" | undefined;
+  const reason = params.review.rationale?.trim();
+  // Only a call this turn already started has a row to point at. A review
+  // that lands first must not create the tool's state ahead of its start.
+  const reviewed =
+    params.targetItemId == null ? undefined : context.toolStates.get(params.targetItemId);
+  return [
+    event(context, {
+      kind: "review-verdict",
+      verdict,
+      ...(reviewed === undefined ? {} : { toolCallId: reviewed.toolCallId }),
+      ...(argument === undefined ? {} : { argument }),
+      ...(riskLevel === undefined ? {} : { riskLevel }),
+      ...(reason === undefined || reason.length === 0 ? {} : { reason: truncate(reason, 280) }),
+    }),
+  ];
 }
 
 /**

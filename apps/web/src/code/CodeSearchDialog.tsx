@@ -6,6 +6,7 @@ import type {
   CodeSearchScope,
   CodeThreadId,
 } from "@octant/contracts";
+import { decodeCodeProjectFilePath } from "@octant/contracts";
 import { CornerDownLeft, FileText, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { matchKeybinding, resolveKeybindings, type OctantKeybindings } from "@octant/domain";
@@ -194,11 +195,20 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
   }
 
   function open(match: CodeSearchMatch | undefined): void {
-    // The editor opens files of the checkout; a match in an extra folder is
-    // listed so it can be found, and stays in the list when chosen.
-    if (match === undefined || match.folder !== undefined) return;
+    if (match === undefined) return;
+    // A match in an extra folder opens by that folder's path joined to its own,
+    // the way the editor names a file outside the checkout. A spelling the
+    // file-path schema refuses stays listed and does not open.
+    let path = match.path;
+    if (match.folder !== undefined) {
+      try {
+        path = decodeCodeProjectFilePath(`${match.folder}/${match.path}`);
+      } catch {
+        return;
+      }
+    }
     setScope(undefined);
-    props.onOpenFile(match.path);
+    props.onOpenFile(path);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {

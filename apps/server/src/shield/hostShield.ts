@@ -11,7 +11,6 @@ import {
   type ProviderExecutionPolicy,
   type ProviderInstanceId,
   type ProviderModelId,
-  type ShieldDecision,
   type ShieldModelChoice,
   type ShieldWatcherLabel,
   type TurnUsage,
@@ -20,7 +19,12 @@ import { shieldReviewsPrompts, workThreadAccessOf } from "@octant/domain/guardra
 import type { ShieldServerRule } from "@octant/domain/shield-server-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { SpendCeilingService } from "../spendCeilingService";
-import { OctantShield, type ShieldModelPort, type ShieldReviewPort } from "./octantShield";
+import {
+  OctantShield,
+  type ShieldModelPort,
+  type ShieldReviewPort,
+  type ShieldTranscriptRecord,
+} from "./octantShield";
 import { createShieldModelPort, projectCommandsIn, resolveShieldModel } from "./shieldModel";
 
 /** How many of the person's own messages the Judge reads. */
@@ -79,6 +83,11 @@ export interface HostShieldDependencies {
   }) => void;
   /** The servers the person registered, judged by their profiles. */
   readonly servers?: () => ReadonlyArray<ShieldServerRule>;
+  /**
+   * The secret guard's list in force, the person's changes included, so the
+   * Judge asks about a file the person added as it asks about a built-in one.
+   */
+  readonly protectedSecretPath?: (path: string) => boolean;
   /** A folder outside every Project, where Shield's one-shot sessions start. */
   readonly scratchRoot: string;
   readonly clock?: () => string;
@@ -89,13 +98,7 @@ export interface HostShield extends ShieldReviewPort {
   /** Whether Shield can run for a thread on this provider instance at all. */
   readonly availableFor: (providerInstanceId: ProviderInstanceId) => boolean;
   /** Where decisions show on a thread's transcript; set once the Code runtime exists. */
-  readonly showDecisionsWith: (
-    record: (input: {
-      readonly threadId: string;
-      readonly summary: string;
-      readonly decision: ShieldDecision;
-    }) => void,
-  ) => void;
+  readonly showDecisionsWith: (record: (input: ShieldTranscriptRecord) => void) => void;
 }
 
 /**
@@ -105,13 +108,7 @@ export interface HostShield extends ShieldReviewPort {
  * reviewer keeps answering where it exists and was not overruled.
  */
 export function createHostShield(deps: HostShieldDependencies): HostShield {
-  let showDecision:
-    | ((input: {
-        readonly threadId: string;
-        readonly summary: string;
-        readonly decision: ShieldDecision;
-      }) => void)
-    | undefined;
+  let showDecision: ((input: ShieldTranscriptRecord) => void) | undefined;
   const readThread = (threadId: string): CodeThread | undefined => {
     try {
       return deps.readCodeThread(decodeCodeThreadId(threadId));
@@ -209,6 +206,9 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
       },
       projectCommands: projectCommandsIn,
       ...(deps.servers === undefined ? {} : { servers: deps.servers }),
+      ...(deps.protectedSecretPath === undefined
+        ? {}
+        : { protectedSecretPath: deps.protectedSecretPath }),
     },
     ...(deps.spendCeiling === undefined && deps.recordUsage === undefined
       ? {}

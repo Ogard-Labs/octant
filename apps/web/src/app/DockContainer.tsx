@@ -101,6 +101,7 @@ export interface DockContainerProps {
   readonly activeMode: OctantMode;
   readonly activeProjectId?: ProjectId;
   readonly appleProjectPath?: string;
+  readonly projectExtraFolders?: ReadonlyArray<string>;
   readonly bottomPanelHeight: number;
   readonly bottomPanelOpen: boolean;
   readonly bottomPanelPresentation: ReturnType<
@@ -191,6 +192,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     activeMode,
     activeProjectId,
     appleProjectPath,
+    projectExtraFolders,
     bottomPanelHeight,
     bottomPanelOpen,
     bottomPanelPresentation,
@@ -324,6 +326,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           : {})}
         nativeHarnessClient={nativeHarnessClient}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
+        {...(projectExtraFolders === undefined ? {} : { projectExtraFolders })}
         appleToolchainClient={appleToolchainClient}
         androidToolchainClient={androidToolchainClient}
         {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}

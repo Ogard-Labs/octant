@@ -143,7 +143,11 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
-import { decodeAgentRunAdmittedContext, type ProviderContextBlock } from "@octant/contracts";
+import {
+  decodeAgentRunAdmittedContext,
+  MAX_SHIELD_REASON_LENGTH,
+  type ProviderContextBlock,
+} from "@octant/contracts";
 import type {
   AgentRunParentContextSelection,
   AgentRunParentContextUnavailableReason,
@@ -876,7 +880,12 @@ export function createCodeOperationRuntime(
       return context === undefined ? undefined : approvalContextDigest(context);
     },
     resolveCheckoutRoot: async (windowId, thread, checkout) => {
-      const root = await options.resolveCheckoutRoot(windowId, thread, checkout);
+      const resolved = await options.resolveCheckoutRoot(windowId, thread, checkout);
+      const folders = extraFoldersOf(thread.projectId);
+      const root =
+        resolved === undefined || folders.length === 0
+          ? resolved
+          : { ...resolved, extraFolders: folders };
       roots.set(String(thread.id), root);
       return root;
     },
@@ -2116,6 +2125,19 @@ export function threadWithActiveTurnPosture(
     thread: thread.executionPolicy,
   });
   return executionPolicy === thread.executionPolicy ? thread : { ...thread, executionPolicy };
+}
+
+/** The Code thread whose running turn holds this provider session, if any. */
+export function threadOfActiveSession(
+  activeTurns: ReadonlyMap<string, Pick<ActiveTurn, "thread" | "sessionId" | "requestedSessionId">>,
+  sessionId: string,
+): string | undefined {
+  for (const active of activeTurns.values()) {
+    if (active.sessionId === sessionId || active.requestedSessionId === sessionId) {
+      return String(active.thread.id);
+    }
+  }
+  return undefined;
 }
 
 interface ActiveTurn {
@@ -4503,6 +4525,26 @@ function normalizedOperationEvent(
       summary:
         boundProviderSummary(event.text ?? "Provider approval requested.") ??
         "Provider approval requested.",
+    };
+  }
+  // The provider's own reviewer answered a call itself. It is journaled under
+  // the provider's name beside the tool rows, and nobody was asked.
+  if (event.category === "review" && event.verdict !== undefined) {
+    return {
+      kind: "approval-reviewed",
+      summary: boundProviderSummary(event.text ?? "Tool call") ?? "Tool call",
+      decision: {
+        reviewer: "provider",
+        verdict: event.verdict,
+        ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
+        ...(event.riskLevel === undefined ? {} : { riskLevel: event.riskLevel }),
+        // Sanitizing can lengthen the text (a path becomes a placeholder), and
+        // the journal refuses a reason past its bound.
+        ...(event.reason === undefined
+          ? {}
+          : { reason: Array.from(event.reason).slice(0, MAX_SHIELD_REASON_LENGTH).join("") }),
+        decidedAt: event.occurredAt,
+      },
     };
   }
   if (event.category === "question" && event.requestId !== undefined) {

@@ -204,6 +204,20 @@ export function workAccessOfPermissionMode(mode: PermissionMode): WorkAccess | u
   }
 }
 
+/** The Code mode picker choice a Work access stands for. */
+export function permissionModeOfWorkAccess(access: WorkAccess): PermissionMode {
+  switch (access) {
+    case "auto":
+      return "auto";
+    case "ask-first":
+      return "ask-first";
+    case "auto-accept-edits":
+      return "accept-edits";
+    case "full-access":
+      return "full-access";
+  }
+}
+
 /**
  * What a Work turn records about the level it ran at: shell and Git follow
  * the level as they do in Code, and a Full access turn runs with no OS
@@ -405,19 +419,21 @@ export function defaultPermissionModeFor(input: {
 }
 
 /**
- * Whether outside content is recorded only: Code at Full access, where the
- * mark tags the tool row and the thread card and never asks or blocks. Work
- * is not on the shared levels, so its mark gates as before.
+ * Whether outside content is recorded only: Work or Code at Full access, where
+ * the mark tags the tool row and the thread card and never asks or blocks.
+ * It follows the level the thread runs at, so a person turns the gate down
+ * for one thread, or for a Project's new threads, by setting that scope's
+ * level, and back up the same way. Chat never reaches Full access.
  */
 export function outsideContentRecordedOnly(input: {
   readonly mode: ToolActionAuthority["mode"];
   readonly executionPolicy: ThreadAccess["executionPolicy"];
 }): boolean {
-  if (input.mode !== "code") return false;
+  if (input.mode === "chat") return false;
   const guardrail = resolveGuardrail({
     access: { executionPolicy: input.executionPolicy },
     capabilities: { providerReview: true, providerSandbox: false },
-    mode: "code",
+    mode: input.mode,
   });
   return guardrail.status === "supported" && guardrail.outsideContent === "recorded";
 }

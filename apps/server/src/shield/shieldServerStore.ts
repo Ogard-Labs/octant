@@ -3,6 +3,10 @@ import { isAbsolute } from "node:path";
 import {
   AggregateId,
   AggregateVersion,
+  MAX_SHIELD_TAGGED_COMMAND_LENGTH,
+  SHIELD_TAG_EVENT_NAMES,
+  SHIELD_TAGS_AGGREGATE,
+  type ShieldTag,
   CorrelationId,
   EventActor,
   EventId,
@@ -37,8 +41,8 @@ import { redactSecretShaped } from "../providers/providerApprovalCall";
 
 /**
  * The servers a person registered with Octant Shield, journaled and rebuilt
- * from the journal at startup, and the record of every `ssh` command a
- * thread ran. Canonical: docs/architecture.md § Octant Shield (servers over
+ * from the journal at startup, the record of every `ssh` command a thread
+ * ran, and the tags Shield puts on commands it does not judge. Canonical: docs/architecture.md § Octant Shield (servers over
  * SSH).
  *
  * Every change is one `shield-servers.server-set@1` (the whole record) or
@@ -116,7 +120,11 @@ export class ShieldServerStore {
       }
       if (batch.length < REPLAY_BATCH) break;
     }
-    for (const aggregateType of [SHIELD_SERVERS_AGGREGATE, SHIELD_REMOTE_COMMANDS_AGGREGATE]) {
+    for (const aggregateType of [
+      SHIELD_SERVERS_AGGREGATE,
+      SHIELD_REMOTE_COMMANDS_AGGREGATE,
+      SHIELD_TAGS_AGGREGATE,
+    ]) {
       for (const { aggregateId, aggregateVersion } of this.#options.journal.aggregateVersions(
         aggregateType,
       )) {
@@ -204,6 +212,43 @@ export class ShieldServerStore {
       SHIELD_REMOTE_COMMANDS_AGGREGATE,
       String(threadId),
       SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran,
+      payload,
+      this.#hostActor,
+    )
+      ? "recorded"
+      : "unavailable";
+  }
+
+  /**
+   * Journals a tag Shield put on a command it did not judge (Full access),
+   * under the thread, with the command redacted and cut. The tag changes
+   * nothing about the command; `unavailable` means it could not be kept.
+   */
+  recordTag(input: {
+    readonly threadId: string;
+    readonly tag: ShieldTag;
+    readonly command: string;
+  }): "recorded" | "unavailable" {
+    let threadId: AggregateId;
+    try {
+      threadId = decodeAggregateId(input.threadId);
+    } catch {
+      return "unavailable";
+    }
+    const redacted = redactSecretShaped(input.command.trim());
+    const payload = {
+      threadId,
+      tag: input.tag,
+      command:
+        redacted.length > MAX_SHIELD_TAGGED_COMMAND_LENGTH
+          ? `${redacted.slice(0, MAX_SHIELD_TAGGED_COMMAND_LENGTH - 1)}…`
+          : redacted,
+      recordedAt: this.#options.clock(),
+    };
+    return this.#append(
+      SHIELD_TAGS_AGGREGATE,
+      String(threadId),
+      SHIELD_TAG_EVENT_NAMES.recorded,
       payload,
       this.#hostActor,
     )

@@ -92,6 +92,81 @@ describe("WorkMutationService", () => {
     expect(reply.outcome.version.sequence).toBe(1);
   });
 
+  it("creates an artifact in the folder the host names, and in the root when none is named", async () => {
+    const filesystem = workFilesystemFixture();
+    const { service } = createService(filesystem);
+    const request = (displayName: string) =>
+      ({
+        kind: "create-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        format: "markdown",
+        displayName,
+        content: "# Hello",
+      }) satisfies WorkMutationRequest;
+
+    const placed = await service.mutate(request("brief.md"), {
+      ...fullContext,
+      directory: "research/brief",
+    });
+    const rooted = await service.mutate(request("root.md"), fullContext);
+
+    expect(placed.outcome.kind).toBe("created");
+    expect(filesystem.readBytes("/work/research/brief/brief.md")).toBeDefined();
+    expect(rooted.outcome.kind).toBe("created");
+    expect(filesystem.readBytes("/work/root.md")).toBeDefined();
+  });
+
+  it("keeps revising, renaming and exporting an artifact in the folder it was created in", async () => {
+    const filesystem = workFilesystemFixture();
+    const { service } = createService(filesystem);
+    const created = await service.mutate(
+      {
+        kind: "create-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        format: "markdown",
+        displayName: "brief.md",
+        content: "# Hello",
+      } satisfies WorkMutationRequest,
+      { ...fullContext, directory: "research/brief" },
+    );
+    if (created.outcome.kind !== "created") throw new Error("create failed");
+    const artifactId = created.outcome.artifact.artifactId;
+
+    const revised = await service.mutate(
+      {
+        kind: "revise-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        artifactId,
+        content: "# Updated",
+        expectedArtifactVersion: 1,
+      } satisfies WorkMutationRequest,
+      fullContext,
+    );
+    expect(revised.outcome.kind).toBe("revised");
+    expect(
+      new TextDecoder().decode(filesystem.readBytes("/work/research/brief/brief.md")),
+    ).toContain("Updated");
+    expect(filesystem.readBytes("/work/brief.md")).toBeUndefined();
+
+    const renamed = await service.mutate(
+      {
+        kind: "rename-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        artifactId,
+        displayName: "final.md",
+        expectedArtifactVersion: 2,
+      } satisfies WorkMutationRequest,
+      fullContext,
+    );
+    expect(renamed.outcome.kind).toBe("revised");
+    expect(filesystem.readBytes("/work/research/brief/final.md")).toBeDefined();
+    expect(filesystem.readBytes("/work/final.md")).toBeUndefined();
+  });
+
   it("uses production-registered format adapters for document creation", async () => {
     const { service } = createService();
     const reply = await service.mutate(

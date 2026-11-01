@@ -50,6 +50,8 @@ export interface ThreadUtilityDockContentProps {
   readonly onReviewAgentChanges?: (request: AgentResultReviewRequest) => void;
   readonly nativeHarnessClient?: NativeHarnessClient;
   readonly appleProjectPath?: string;
+  /** The active Code Project's extra folders, by absolute path, for the Files tool. */
+  readonly projectExtraFolders?: ReadonlyArray<string>;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly androidToolchainClient?: AndroidToolchainClient;
   readonly browserAutomationClient?: BrowserAutomationClient;

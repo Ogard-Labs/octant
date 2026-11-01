@@ -154,6 +154,95 @@ describe("native harness tool egress proxy", () => {
     expect(asked).toEqual(["pypi.org", "evil.example"]);
   });
 
+  it("lets a harness command reach a trusted place its rules do not name, until its thread is tainted", async () => {
+    const origin = await tcpFixture();
+    let tainted = false;
+    const harness = await startEgressHarness({
+      places: () => [
+        { kind: "domain", domain: "corp.example" },
+        { kind: "private-network", tag: "local-network" },
+      ],
+      taint: () => ({ threadTainted: tainted, parentTainted: false }),
+      resolve: async (host) =>
+        host === "git.corp.example"
+          ? ["10.0.0.7"]
+          : host === "rule.example"
+            ? ["192.168.1.9"]
+            : ["93.184.216.10"],
+      rules: [threadRule("rule.example", 443)],
+      routes: new Map([
+        ["10.0.0.7", origin.port],
+        ["192.168.1.9", origin.port],
+      ]),
+    });
+    const placed = await openTunnel(harness.proxy, "git.corp.example:443", harness.authorization);
+    expect(placed.status).toBe(200);
+    expect(await roundTrip(placed.socket, "ping", 4)).toBe("ping");
+    // A thread rule never reaches a private answer; the trusted range does.
+    const ruled = await openTunnel(harness.proxy, "rule.example:443", harness.authorization);
+    expect(ruled.status).toBe(200);
+    ruled.socket.end();
+    const unlisted = await openTunnel(harness.proxy, "evil.example:443", harness.authorization);
+    expect(unlisted.answer).toContain("octant-egress-refused: no-rule evil.example:443");
+
+    tainted = true;
+    harness.proxy.recheck();
+    await waitFor(() => placed.socket.destroyed || placed.socket.readableEnded);
+    const afterTaint = await openTunnel(
+      harness.proxy,
+      "git.corp.example:443",
+      harness.authorization,
+    );
+    expect(afterTaint.status).toBe(403);
+    expect(afterTaint.answer).toContain("octant-egress-refused: no-rule git.corp.example:443");
+  });
+
+  it("keeps a trusted name's private answer when a thread rule names the same host", async () => {
+    const origin = await tcpFixture();
+    const harness = await startEgressHarness({
+      places: () => [{ kind: "host", host: "nas.example", port: 443 }],
+      resolve: async () => ["10.0.0.7"],
+      rules: [threadRule("nas.example", 443)],
+      routes: new Map([["10.0.0.7", origin.port]]),
+    });
+    const tunnel = await openTunnel(harness.proxy, "nas.example:443", harness.authorization);
+    expect(tunnel.status).toBe(200);
+    tunnel.socket.end();
+  });
+
+  it("refuses a private answer for a host a thread rule names when no place holds it", async () => {
+    const harness = await startEgressHarness({
+      places: () => [{ kind: "host", host: "other.example" }],
+      resolve: async () => ["10.0.0.7"],
+      rules: [threadRule("rule.example", 443)],
+    });
+    const refused = await openTunnel(harness.proxy, "rule.example:443", harness.authorization);
+    expect(refused.status).toBe(403);
+    expect(refused.answer).toContain("octant-egress-refused: private-destination");
+    expect(harness.dialed).toEqual([]);
+  });
+
+  it("asks the reviewer hook about a harness command's unlisted host and passes only what a rule then allows", async () => {
+    const origin = await tcpFixture();
+    const asked: string[] = [];
+    const rules: ReturnType<typeof threadRule>[] = [];
+    const harness = await startEgressHarness({
+      rulesRead: () => rules,
+      escalate: async (destination) => {
+        asked.push(destination.host);
+        if (destination.host === "pypi.org") rules.push(threadRule("pypi.org", 443));
+      },
+      routes: new Map([["93.184.216.10", origin.port]]),
+    });
+    const passed = await openTunnel(harness.proxy, "pypi.org:443", harness.authorization);
+    expect(passed.status).toBe(200);
+    passed.socket.end();
+    const refused = await openTunnel(harness.proxy, "evil.example:443", harness.authorization);
+    expect(refused.status).toBe(403);
+    expect(refused.answer).toContain("octant-egress-refused: no-rule evil.example:443");
+    expect(asked).toEqual(["pypi.org", "evil.example"]);
+  });
+
   it("serves a client that cannot send the launch token only when the launch asked for no token", async () => {
     const origin = await tcpFixture();
     const decision = {
