@@ -113,6 +113,39 @@ describe("Work mutation routes", () => {
     expect(JSON.stringify(body)).not.toMatch(/\/work|file:|\\\\/i);
   });
 
+  it("places an artifact made for a thread in that thread's working directory and refuses a thread of another Project", async () => {
+    const mutate = vi.fn(async (request: WorkMutationRequest, _context: unknown) => ({
+      requestId: request.requestId,
+      outcome: { kind: "interrupted" as const },
+    }));
+    const route = createRoute({
+      service: { mutate } as never,
+      readThread: (id) =>
+        String(id) === threadId
+          ? { projectId, workingDirectory: "research/brief" }
+          : String(id) === otherThreadId
+            ? { projectId: "00000000-0000-4000-8000-0000000008ff" as never }
+            : undefined,
+    });
+    const send = (id: string) =>
+      route(
+        new Request("http://127.0.0.1/api/work/mutations", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": capability,
+          },
+          body: JSON.stringify({ ...validCreateRequest(), threadId: id }),
+        }),
+      );
+
+    await send(threadId);
+    expect(mutate.mock.lastCall?.[1]).toMatchObject({ directory: "research/brief" });
+
+    expect((await send(otherThreadId))?.status).toBe(404);
+    expect((await send("00000000-0000-4000-8000-0000000008ee"))?.status).toBe(404);
+  });
+
   it("refuses a destructive delete until confirmation is recorded", async () => {
     const route = createRoute();
     const created = await route(
@@ -233,16 +266,22 @@ describe("Work mutation routes", () => {
   });
 });
 
+const threadId = "00000000-0000-4000-8000-0000000008a1";
+const otherThreadId = "00000000-0000-4000-8000-0000000008a2";
+
 function createRoute(
   options: {
     readonly accessible?: boolean;
     readonly projectType?: "work" | "code";
+    readonly service?: Parameters<typeof createWorkMutationRouteHandler>[0]["service"];
+    readonly readThread?: Parameters<typeof createWorkMutationRouteHandler>[0]["readThread"];
   } = {},
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   return createWorkMutationRouteHandler({
-    service: createService(),
+    service: options.service ?? createService(),
+    ...(options.readThread === undefined ? {} : { readThread: options.readThread }),
     persistence: {
       readProject: vi.fn((id) => {
         if (String(id) !== String(projectId)) return undefined;

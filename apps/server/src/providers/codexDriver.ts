@@ -478,6 +478,7 @@ const capabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   harnessAutoReview: "supported",
+  reviewVerdicts: { allow: "supported", deny: "supported" },
   modelSwitch: "supported",
   // One app-server process serves every thread, so killing it ends them all.
   forceStop: "unsupported",

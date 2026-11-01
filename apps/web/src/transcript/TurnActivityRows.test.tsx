@@ -83,6 +83,39 @@ describe("Octant Shield decisions among the tool rows", () => {
   });
 });
 
+describe("The provider's own reviewer among the tool rows", () => {
+  const providerReview = (verdict: "allow" | "deny") => ({
+    kind: "review" as const,
+    id: `provider-${verdict}`,
+    summary: "git status",
+    decision: {
+      reviewer: "provider" as const,
+      verdict,
+      riskLevel: "low" as const,
+      reason: "Reads the working tree.",
+      decidedAt: "2026-10-31T00:00:00.000Z" as never,
+    },
+  });
+
+  it("shows the provider as the approver, with the call it covered, never as Shield", () => {
+    render(
+      <TurnActivityRows
+        activity={{ reasoning: "", rows: [providerReview("allow"), providerReview("deny")] }}
+        running
+      />,
+    );
+    const notes = screen.getAllByRole("note");
+    expect(notes[0]).toHaveTextContent("Approved by the provider's review");
+    expect(notes[0]).toHaveTextContent("git status");
+    expect(notes[0]).toHaveTextContent("low risk");
+    expect(notes[0]).toHaveAccessibleName(
+      "Approved by the provider's review: git status. Reads the working tree.",
+    );
+    expect(notes[1]).toHaveTextContent("Denied by the provider's review");
+    expect(notes.every((note) => !/Shield/.test(note.textContent ?? ""))).toBe(true);
+  });
+});
+
 describe("TurnActivityRows", () => {
   it("reveals reasoning-only history with one disclosure instead of nested Thinking rows", async () => {
     render(

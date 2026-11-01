@@ -1520,6 +1520,28 @@ export function decodeMessage(
     };
   }
 
+  // Only the automatic-mode reviewer's refusal is a verdict. A denial for any
+  // other reason keeps being an unsupported message, as it was.
+  if (
+    message.type === "system" &&
+    message.subtype === "permission_denied" &&
+    message.decision_reason_type === "classifier"
+  ) {
+    if (
+      typeof message.session_id !== "string" ||
+      typeof message.tool_use_id !== "string" ||
+      typeof message.tool_name !== "string" ||
+      (message.decision_reason !== undefined && typeof message.decision_reason !== "string")
+    )
+      throw protocol("Claude returned an unsupported runtime message.");
+    return {
+      kind: "review-denied",
+      sessionId: message.session_id,
+      toolUseId: message.tool_use_id,
+      toolName: message.tool_name,
+      ...(message.decision_reason === undefined ? {} : { reason: message.decision_reason }),
+    };
+  }
   if (isHarmlessInformational(message)) return { kind: "ignored" };
   // A system subtype this decoder does not know says so in a sentence of its
   // own. The subtype itself is runtime-supplied text and stays out of a

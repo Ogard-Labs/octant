@@ -2754,6 +2754,8 @@ describe("native harness tool egress grants and learn mode", () => {
       readonly failTaint?: () => boolean;
       /** When this host starts; a restart later than the first start. */
       readonly at?: number;
+      readonly places?: ConstructorParameters<typeof ToolEgressRules>[0]["places"];
+      readonly reviewNetwork?: ConstructorParameters<typeof ToolEgressRules>[0]["reviewNetwork"];
     } = {},
   ) {
     const base = options.base ?? taintJournal();
@@ -2786,6 +2788,8 @@ describe("native harness tool egress grants and learn mode", () => {
       uuid: randomUUID,
       clock: () => new Date(at).toISOString(),
       elapsedMs: () => elapsed,
+      ...(options.places === undefined ? {} : { places: options.places }),
+      ...(options.reviewNetwork === undefined ? {} : { reviewNetwork: options.reviewNetwork }),
     });
     return {
       ...base,
@@ -2872,6 +2876,82 @@ describe("native harness tool egress grants and learn mode", () => {
       principal: person,
       grants: [{ host: name, port: 443, scope: eightHours }],
     });
+
+  describe("the reviewer and safe networks", () => {
+    it("turns a reviewer's allowance into a call rule for that launch alone", async () => {
+      const asked: string[] = [];
+      const host = egressHost({
+        reviewNetwork: async (request) => {
+          asked.push(`${request.threadId} ${request.host}:${String(request.port)}`);
+          return request.host === "registry.example.com";
+        },
+      });
+      const origin = await tcpFixture();
+      const launch = await startLaunch(host, { origin: origin.port });
+      expect(await ask(launch, "registry.example.com:443")).toBe("connected");
+      expect(await ask(launch, "evil.example:443")).toBe(
+        "octant-egress-refused: no-rule evil.example:443",
+      );
+      expect(asked).toEqual([
+        `${String(egressThread)} registry.example.com:443`,
+        `${String(egressThread)} evil.example:443`,
+      ]);
+      const granted = host
+        .events(TOOL_EGRESS_THREAD_AGGREGATE)
+        .filter((event) => event.eventName === TOOL_EGRESS_EVENT_NAMES.threadRuleGranted)
+        .map((event) => event.payload);
+      expect(granted).toEqual([
+        expect.objectContaining({
+          host: "registry.example.com",
+          scope: { kind: "call", launchId: expect.any(String) },
+          principal: { kind: "reviewer" },
+        }),
+      ]);
+      await launch.finish();
+      // The next command asks again: the allowance was for one launch.
+      const next = await startLaunch(host, { origin: origin.port });
+      asked.length = 0;
+      expect(await ask(next, "registry.example.com:443")).toBe("connected");
+      expect(asked).toEqual([`${String(egressThread)} registry.example.com:443`]);
+    });
+
+    it("never asks the reviewer for a tainted thread", async () => {
+      const asked: string[] = [];
+      const host = egressHost({
+        reviewNetwork: async (request) => {
+          asked.push(request.host);
+          return true;
+        },
+      });
+      host.taint(String(egressThread));
+      const launch = await startLaunch(host);
+      expect(await ask(launch, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+      expect(asked).toEqual([]);
+    });
+
+    it("lets a command reach a trusted place of its Project, and not once the thread is tainted", async () => {
+      const projects: string[] = [];
+      const host = egressHost({
+        places: (projectId) => {
+          projects.push(projectId);
+          return [{ kind: "domain", domain: "example.com" }];
+        },
+      });
+      const origin = await tcpFixture();
+      const launch = await startLaunch(host, { origin: origin.port });
+      expect(await ask(launch, "registry.example.com:443")).toBe("connected");
+      expect(projects).toContain(String(egressProject));
+      expect(await ask(launch, "registry.example.org:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.org:443",
+      );
+      host.taint(String(egressThread));
+      expect(await ask(launch, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+    });
+  });
 
   describe("learn mode", () => {
     it("refuses and proposes a host however often it is asked, and never connects to it", async () => {

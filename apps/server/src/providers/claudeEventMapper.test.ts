@@ -878,6 +878,35 @@ describe("mapClaudeMessage", () => {
     expect(JSON.stringify(results)).not.toContain("private-tool-output");
   });
 
+  it("journals the automatic-mode reviewer's refusal against the call's row", () => {
+    const ctx = context();
+    mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: { kind: "tool-use", toolUseId: "tool-use-1", toolName: "Bash", input: {} },
+      },
+    });
+    const results = mapped(ctx, {
+      kind: "review-denied",
+      sessionId: claudeSessionId,
+      toolUseId: "tool-use-1",
+      toolName: "Bash",
+      reason: "Deletes files outside the task.",
+    });
+    expect(results.some((item) => item.kind === "failure")).toBe(false);
+    expect(eventValues(results)).toEqual([
+      expect.objectContaining({
+        kind: "review-verdict",
+        verdict: "deny",
+        toolCallId: expect.any(String),
+        reason: "Deletes files outside the task.",
+      }),
+    ]);
+  });
+
   it("correlates a managed heartbeat with its active parent tool", () => {
     const ctx = context();
     const toolName = "mcp__octant__octant_browser";

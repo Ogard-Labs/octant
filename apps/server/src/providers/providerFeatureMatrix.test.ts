@@ -216,11 +216,18 @@ const perModeRows = perModeCapabilities.flatMap((capability) =>
  * are checked against the drivers' tests instead.
  */
 const nativeSetupRows = PROVIDER_NATIVE_SETUP_FEATURES.map((feature) => `nativeSetup.${feature}`);
-const nestedCapabilities: ReadonlyArray<string> = [...perModeCapabilities, "nativeSetup"];
+/** The runtime reviewer's per-call verdicts, one row per verdict, checked in the drivers' tests. */
+const reviewVerdictRows = ["reviewVerdicts.allow", "reviewVerdicts.deny"];
+const nestedCapabilities: ReadonlyArray<string> = [
+  ...perModeCapabilities,
+  "nativeSetup",
+  "reviewVerdicts",
+];
 const expectedRowKeys = [
   ...Object.keys(ProviderCapabilities.fields).filter((key) => !nestedCapabilities.includes(key)),
   ...perModeRows,
   ...nativeSetupRows,
+  ...reviewVerdictRows,
 ];
 
 describe("provider capability matrix", () => {

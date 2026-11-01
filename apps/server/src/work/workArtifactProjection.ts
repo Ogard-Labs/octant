@@ -58,7 +58,7 @@ export class WorkArtifactProjection {
           format: artifact.format,
           artifactRef: artifact.artifactRef,
           displayName: artifact.displayName,
-          relativePath: relativePathFor(artifact.displayName),
+          relativePath: relativePathFor(artifact.displayName, artifact.directory),
           sequence: frame.outcome.version.sequence,
           currentSourceVersion: frame.outcome.version.sourceVersion,
           deleted: false,
@@ -75,7 +75,7 @@ export class WorkArtifactProjection {
           format: artifact.format,
           artifactRef: artifact.artifactRef,
           displayName: artifact.displayName,
-          relativePath: relativePathFor(artifact.displayName),
+          relativePath: relativePathFor(artifact.displayName, artifact.directory),
           sequence: frame.outcome.version.sequence,
           currentSourceVersion: frame.outcome.version.sourceVersion,
           deleted: false,
@@ -109,7 +109,12 @@ export class WorkArtifactProjection {
             format: produced.format,
             artifactRef: previewTarget.opaqueRef,
             displayName: previewTarget.displayName,
-            relativePath: relativePathFor(previewTarget.displayName),
+            relativePath: relativePathFor(
+              previewTarget.displayName,
+              previous.relativePath.includes("/")
+                ? previous.relativePath.slice(0, previous.relativePath.lastIndexOf("/"))
+                : undefined,
+            ),
             sequence: produced.sequence,
             currentSourceVersion: produced.sourceVersion,
             lastMutation: "exported",
@@ -172,8 +177,10 @@ export class WorkArtifactProjection {
   }
 }
 
-function relativePathFor(displayName: string): string {
-  return canonicalizeWorkRelativePath(displayName);
+function relativePathFor(displayName: string, directory?: string): string {
+  return canonicalizeWorkRelativePath(
+    directory === undefined ? displayName : `${directory}/${displayName}`,
+  );
 }
 
 /**
