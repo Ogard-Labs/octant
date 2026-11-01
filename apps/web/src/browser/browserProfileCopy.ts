@@ -1,6 +1,11 @@
 import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 
+/** The files an upload approval names; see the Browser approval contract. */
+interface BrowserUploadRequest {
+  readonly files: ReadonlyArray<{ readonly name: string; readonly sizeBytes: number }>;
+}
+
 /** The words a person sees for a profile choice. */
 export const BROWSER_PROFILE_LABELS: Readonly<Record<BrowserProfileChoice, string>> = {
   private: "Private",
@@ -25,7 +30,14 @@ export function profileChoiceOf(profile: StoredBrowserProfile | undefined): Brow
 export function browserApprovalSummary(approval: {
   readonly origin: string;
   readonly profile?: StoredBrowserProfile | undefined;
+  readonly upload?: BrowserUploadRequest | undefined;
 }): string {
+  if (approval.upload !== undefined) {
+    const named = approval.upload.files
+      .map((file) => `${file.name} (${formatProfileSize(file.sizeBytes)})`)
+      .join(", ");
+    return `Let the agent upload ${named} to ${approval.origin}?`;
+  }
   if (approval.profile === undefined) return `Allow Browser to open ${approval.origin}?`;
   return `Let the agent use ${approval.origin} in the ${BROWSER_PROFILE_LABELS[approval.profile.kind]} profile?`;
 }
@@ -33,7 +45,11 @@ export function browserApprovalSummary(approval: {
 export function browserApprovalDetail(approval: {
   readonly profile?: StoredBrowserProfile | undefined;
   readonly extensionCount?: number | undefined;
+  readonly upload?: BrowserUploadRequest | undefined;
 }): string {
+  if (approval.upload !== undefined) {
+    return "The files leave this computer for that site. This answer covers these files once";
+  }
   if (approval.profile === undefined) return "Shell and file access stay unchanged";
   const extensions =
     approval.extensionCount === undefined || approval.extensionCount < 1

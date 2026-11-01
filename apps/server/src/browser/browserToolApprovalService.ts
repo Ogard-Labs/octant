@@ -95,6 +95,8 @@ export class BrowserToolApprovalService {
     readonly origin: string;
     /** The Project or Personal profile the page lives in, when it is in one. */
     readonly profile?: StoredBrowserProfile;
+    /** Files the agent asks to upload to this origin; see the contract. */
+    readonly upload?: ReadonlyArray<{ readonly name: string; readonly sizeBytes: number }>;
     readonly signal?: AbortSignal;
   }): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
@@ -111,6 +113,16 @@ export class BrowserToolApprovalService {
       origin: input.origin,
       ...(input.profile === undefined ? {} : { profile: input.profile }),
       ...(extensionCount > 0 ? { extensionCount } : {}),
+      ...(input.upload === undefined
+        ? {}
+        : {
+            upload: {
+              files: input.upload.map((file) => ({
+                name: file.name.slice(0, 256),
+                sizeBytes: file.sizeBytes,
+              })),
+            },
+          }),
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     return new Promise((resolve) => {
@@ -163,7 +175,13 @@ export class BrowserToolApprovalService {
       return false;
     }
     pending.resolve(decision.decision);
-    if (decision.decision === "approved" && decision.remember === true) {
+    // An upload's answer covers those files once; it never becomes a
+    // remembered grant for the origin.
+    if (
+      decision.decision === "approved" &&
+      decision.remember === true &&
+      pending.view.upload === undefined
+    ) {
       // The answering window journals the grant: for a routine it is the
       // person who saw the prompt, not the host scope that raised it.
       this.#options.rememberOrigin?.(pending.view.origin, windowId, pending.view.profile);

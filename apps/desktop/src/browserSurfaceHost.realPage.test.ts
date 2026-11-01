@@ -1,4 +1,7 @@
 import { existsSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { chromium, type Browser, type CDPSession, type Page } from "playwright-core";
@@ -27,6 +30,20 @@ const pages: Record<string, string> = {
     <label for="user">Email</label><input id="user" value="ada@example.com">
     <label for="pass">Password</label><input id="pass" type="password" value="hunter2">
     <button>Continue</button>`,
+  "/controls": `<!doctype html><title>Controls</title>
+    <nav id="menu" onmouseenter="document.getElementById('item').hidden = false">Menu
+      <a id="item" href="/form" hidden>Open settings</a></nav>
+    <label for="size">Size</label>
+    <select id="size" onchange="document.title = 'Size ' + this.value">
+      <option value="s">Small</option><option value="l">Large</option>
+    </select>
+    <div id="card" style="width:60px;height:30px" onpointerdown="window.dragging = true">Card</div>
+    <div id="done" style="width:60px;height:30px;margin-top:40px" onpointerup="if (window.dragging) document.title = 'Dropped card'">Done</div>
+    <form onsubmit="event.preventDefault(); document.title = 'Submitted'"><input id="keys" aria-label="Keys" onkeydown="if (event.ctrlKey) document.title = 'Chord ' + event.key"></form>
+    <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">`,
+  "/html-drag": `<!doctype html><title>Drag</title>
+    <div id="card" draggable="true" style="width:60px;height:30px" ondragstart="event.dataTransfer.setData('text', 'card')">Card</div>
+    <div id="done" style="width:60px;height:30px;margin-top:40px" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>`,
   "/form": `<!doctype html><title>Form</title>
     <label>Name <input id="name"></label>
     <button id="save" onclick="document.title = 'Saved ' + document.getElementById('name').value">Save</button>
@@ -132,9 +149,19 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
   return { view, page };
 }
 
-async function surface(path: string) {
-  const { view, page } = await pageView();
-  const host = createBrowserSurfaceHost({ createView: () => view });
+async function surface(path: string, views = 1) {
+  const pool = await Promise.all(Array.from({ length: views }, () => pageView()));
+  const page = pool[0]?.page;
+  if (page === undefined) throw new Error("No page.");
+  let next = 0;
+  const host = createBrowserSurfaceHost({
+    createView: () => {
+      const created = pool[next]?.view;
+      next += 1;
+      if (created === undefined) throw new Error("No page left for another tab.");
+      return created;
+    },
+  });
   const contextId = crypto.randomUUID();
   await host.createContext({
     contextId,
@@ -229,6 +256,73 @@ describe.skipIf(chrome === undefined)(
       expect(pictured.extractedText).toBeUndefined();
       const preview = await host.peek(contextId);
       expect(preview.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+      await page.close();
+    });
+
+    it("hovers, chooses an option, drags, presses chords and Enter, and uploads a file", async () => {
+      const { host, contextId, page } = await surface("/controls");
+      await host.act(contextId, { kind: "hover", target: "#menu" });
+      expect(await page.isVisible("#item")).toBe(true);
+      expect(
+        (await host.act(contextId, { kind: "select", target: "#size", value: "Large" })).title,
+      ).toBe("Size l");
+      await expect(
+        host.act(contextId, { kind: "select", target: "#size", value: "Huge" }),
+      ).rejects.toThrow(/no option/);
+      expect(
+        (await host.act(contextId, { kind: "drag", target: "#card", destination: "#done" })).title,
+      ).toBe("Dropped card");
+      await host.act(contextId, { kind: "click", target: "#keys" });
+      expect((await host.act(contextId, { kind: "press", value: "Control+B" })).title).toBe(
+        "Chord b",
+      );
+      expect((await host.act(contextId, { kind: "press", value: "Enter" })).title).toBe(
+        "Submitted",
+      );
+      const folder = await mkdtemp(join(tmpdir(), "octant-upload-"));
+      try {
+        await writeFile(join(folder, "notes.txt"), "hello");
+        const sent = await host.act(contextId, {
+          kind: "upload",
+          target: "#file",
+          files: [join(folder, "notes.txt")],
+        });
+        expect(sent.title).toBe("Attached notes.txt 5");
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+      await page.close();
+    });
+
+    it("opens, lists, switches, and closes the agent's tabs inside the allowed origin", async () => {
+      const { host, contextId, page } = await surface("/form", 3);
+      const opened = await host.act(contextId, { kind: "tab-open", target: `${origin}/login` });
+      expect(opened.tabs).toEqual([
+        { tabId: "t1", url: `${origin}/form`, title: "Form", active: false },
+        { tabId: "t2", url: `${origin}/login`, title: "Sign in", active: true },
+      ]);
+      expect((await host.act(contextId, { kind: "tab-select", tabId: "t1" })).title).toBe("Form");
+      const closed = await host.act(contextId, { kind: "tab-close", tabId: "t2" });
+      expect(closed.tabs).toEqual([
+        { tabId: "t1", url: `${origin}/form`, title: "Form", active: true },
+      ]);
+      await expect(host.act(contextId, { kind: "tab-close", tabId: "t1" })).rejects.toThrow(
+        /only tab/,
+      );
+      await expect(
+        host.act(contextId, { kind: "tab-open", target: "https://example.com/" }),
+      ).rejects.toThrow(/allowlist/);
+      await page.close();
+    });
+
+    it("drags so a page listening for HTML drag and drop sees the drop too", async () => {
+      const { host, contextId, page } = await surface("/html-drag");
+      const dragged = await host.act(contextId, {
+        kind: "drag",
+        target: "#card",
+        destination: "#done",
+      });
+      expect(dragged.title).toBe("Dropped card");
       await page.close();
     });
   },

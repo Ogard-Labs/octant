@@ -37,6 +37,12 @@ export interface NativeHarnessShellOptions {
    */
   readonly sshAgentSocket?: () => string | undefined;
   /**
+   * The cloud command line's short-lived credentials, asked for as each
+   * command runs (`AWS_ACCESS_KEY_ID` and its kin), or none. They replace the
+   * credential files the secret guard keeps out of reach.
+   */
+  readonly cloudCliEnvironment?: () => Promise<Readonly<Record<string, string>>>;
+  /**
    * Opens a command's way to the registered servers it names, in its own
    * script folder, for a command on `proxied` network. Undefined when the
    * command names none; the access closes when the command ends.
@@ -131,7 +137,10 @@ async function runScript(
         script,
         cwd: input.cwd,
         ...(input.extraRoots === undefined ? {} : { extraRoots: input.extraRoots }),
-        environment: commandEnvironment(options.sshAgentSocket?.()),
+        environment: {
+          ...(await options.cloudCliEnvironment?.().catch(() => ({}))),
+          ...commandEnvironment(options.sshAgentSocket?.()),
+        },
         timeoutMs: input.timeoutMs,
         ...(egressProxy === undefined ? {} : { egressProxy }),
         ...(servers === undefined

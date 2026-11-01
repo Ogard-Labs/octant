@@ -652,6 +652,53 @@ describe("BrowserSurfaceHost", () => {
     ).rejects.toThrow("allowed origins");
   });
 
+  it("lists a tab the person took to an unapproved site without its address or title", async () => {
+    const views = [view(), view()];
+    let opened = 0;
+    const host = createBrowserSurfaceHost({ createView: () => views[opened++] ?? view() });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    await host.tabCommand(contextId, { windowId: "window-a", threadId }, { kind: "open" });
+    vi.mocked(views[1]!.webContents.getURL).mockReturnValue("https://mail.example.org/inbox");
+    vi.mocked(views[1]!.webContents.getTitle).mockReturnValue("Inbox (3)");
+    await host.tabCommand(
+      contextId,
+      { windowId: "window-a", threadId },
+      { kind: "select", tabId: `${contextId}:1` },
+    );
+
+    const listed = await host.act(contextId, { kind: "tab-list" });
+
+    expect(listed.tabs).toEqual([
+      { tabId: "t1", url: "https://example.com/", title: "Example", active: true },
+      { tabId: "t2", active: false },
+    ]);
+    await expect(host.act(contextId, { kind: "tab-select", tabId: "t2" })).rejects.toThrow(
+      /outside this context's allowed origins/,
+    );
+    // With the person's tab in front, the agent can still list and move.
+    await host.tabCommand(
+      contextId,
+      { windowId: "window-a", threadId },
+      { kind: "select", tabId: `${contextId}:2` },
+    );
+    expect((await host.act(contextId, { kind: "tab-list" })).tabs).toHaveLength(2);
+    expect(
+      (await host.act(contextId, { kind: "tab-select", tabId: "t1" })).tabs?.[0],
+    ).toMatchObject({
+      active: true,
+    });
+  });
+
   it("opens a second page in the same session and shows one tab at a time", async () => {
     const views = [view(), view(), view()];
     let opened = 0;

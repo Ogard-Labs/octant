@@ -1,4 +1,5 @@
 import { browserToolImage } from "../browser/browserToolImage";
+import { admitBrowserUpload, browserUploadSummary } from "../browser/browserUploadFiles";
 import {
   browserToolAction,
   browserToolResult,
@@ -478,11 +479,25 @@ export interface CodeAppManagedToolsOptions {
       readonly windowId: WindowId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
+      readonly uploadFiles?: ReadonlyArray<string>;
+      readonly releaseUpload?: () => Promise<void>;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => Promise<BrowserAutomationSnapshot>;
+  };
+  /**
+   * Asks the person, in the thread, to let the agent upload named files to a
+   * page, and names the thread's checkout, the only folder an upload sends
+   * from. Absent, an upload is refused.
+   */
+  readonly browserUpload?: {
+    readonly root: string;
+    readonly request: (
+      summary: string,
+      signal?: AbortSignal,
+    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   };
   readonly apple?: CodeAppleToolPort;
   readonly android?: CodeAndroidToolPort;
@@ -1154,8 +1169,39 @@ async function browserTool(
   if (signal?.aborted) return failure("tool-interrupted");
   const request = browserToolAction(input, context);
   if (request === undefined) return failure("invalid-browser-input");
+  let uploadFiles: ReadonlyArray<string> | undefined;
+  let releaseUpload: (() => Promise<void>) | undefined;
+  if (input.operation === "upload") {
+    const upload = options.browserUpload;
+    const admitted = await admitBrowserUpload({
+      workspaceRoot: upload?.root,
+      files: input.files,
+      ask: (files) =>
+        upload === undefined
+          ? Promise.resolve("denied")
+          : upload.request(browserUploadSummary(origin, files), signal),
+    });
+    if (admitted.status === "refused") return failure(admitted.reason);
+    uploadFiles = admitted.paths;
+    releaseUpload = admitted.release;
+  }
+  if (releaseUpload !== undefined) {
+    const changed = browserAuthorityFailure(options);
+    if (changed !== undefined || signal?.aborted === true) {
+      await releaseUpload();
+      return failure(changed ?? "tool-interrupted");
+    }
+  }
+  // The service keeps the copies until the page closes; see Work's tool.
+  const release = releaseUpload;
   const acted = await guardedBrowserEffect(options, threadId, signal, () =>
-    options.browser!.act({ windowId: options.windowId, request, capturedBy: "agent" }),
+    options.browser!.act({
+      windowId: options.windowId,
+      request,
+      capturedBy: "agent",
+      ...(uploadFiles === undefined ? {} : { uploadFiles }),
+      ...(release === undefined ? {} : { releaseUpload: release }),
+    }),
   );
   if (acted.kind === "failure") return failure(acted.reason);
   if (

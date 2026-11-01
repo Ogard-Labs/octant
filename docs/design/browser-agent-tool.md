@@ -10,8 +10,8 @@ approval covers
 and [Browser captures](browser-captures.md) owns which screenshots a thread
 keeps.
 
-Status: the page snapshot, element refs, and short results are built. More
-actions, batched steps, richer waits, dialogs and viewport size, the sign-in
+Status: the page snapshot, element refs, short results, and the actions below
+(hover, select, drag, key chords, upload, tabs) are built. Batched steps, richer waits, dialogs and viewport size, the sign-in
 handoff, and fuller diagnostics are allowed; not built yet.
 
 ## One tool for every provider
@@ -104,10 +104,74 @@ handoff, and fuller diagnostics are allowed; not built yet.
 
 ## Actions
 
-Allowed; not built yet. `hover`, `select`, `drag`, key chords, `upload`, and
-tabs (list, open, switch, close). Upload sends files only from the thread's
-workspace, refuses symlinks, and asks the person each time. Downloads stay
-blocked.
+- `hover` moves the pointer over an element, for menus that open on hover.
+- `select` chooses one option of a list by its value or its label. A list with
+  no such option refuses at once instead of waiting.
+- `drag` presses on one element and releases on another (`toRef` or
+  `toSelector`); both ends are checked like a ref when they came from one. The
+  desktop Browser moves the pointer in steps, which pages that follow pointer
+  events and pages that use the HTML drag events both see as a drop.
+- `press` takes a named key, a letter, a digit, or F1 to F12, alone or with
+  `Control`, `Alt`, `Shift`, and `Meta` (each at most once): `Control+A`,
+  `Shift+ArrowDown`. A letter reaches the page as a keyboard sends it: lower
+  case unless Shift is held. A focused credential field still refuses every
+  key.
+- Tabs: `tab-list` names the context's tabs `t1`, `t2`, and so on, with the one
+  in front; `tab-open` opens a tab, at most the context's tab limit, optionally
+  at a URL, which must pass the same origin admission as a navigation;
+  `tab-switch` brings one to the front, and `tab-close` closes one but never the
+  last. Every other operation acts on the tab in front. A tab action drops the
+  snapshot's refs. On the desktop Browser the person sees the tab the agent
+  brings forward. A page's own popup is still refused or closed. A tab that
+  lands outside the allowed origins, by a redirect too, is left for a blank
+  page and the action is refused.
+- On the desktop Browser the person's own tabs share the context. A tab the
+  person took to a site no approval covers is listed without its address or
+  title; the agent cannot switch to it, read it, or act on it, and with it in
+  front the agent can still list tabs and switch to another. On the headless
+  Browser, a tab that followed a redirect off the allowed origins after its own
+  action is sent to a blank page before it is listed.
+- A paired device may hover and list tabs. It may not choose an option, drag,
+  upload, or open, switch, or close a tab, as it may not navigate or type
+  ([Architecture: remote access](../architecture.md#security-and-authority)).
+
+### Upload
+
+A file leaves this computer through a page only from the thread's workspace and
+only after the person approves it.
+
+- `upload` puts files into one file field. `files` names them relative to the
+  thread's workspace: the Work thread's Project folder, or the Code thread's
+  checkout. An absolute path, a path that climbs out, and a path that is not a
+  plain file are refused before anyone is asked.
+- A symbolic link is refused, at the file and anywhere between the workspace
+  and the file: the file's canonical path must be the path named.
+- At most 5 files, each at most 25 MB.
+- The host copies each checked file into a private temporary folder before it
+  asks, reading it through a descriptor that does not follow a link and that
+  must still be the file it checked, and the page receives the copies. A file
+  swapped for a link while the person reads the question is therefore never
+  what is sent. A page reads an attached file when its form is sent, often in
+  a later action, so the copies stay until the page's browsing context closes
+  (at most 8 uploads' worth per context, the oldest deleted first), and are
+  deleted then, or at once if the upload never reached the page.
+- The person is asked every time, naming each file with its size and the site:
+  "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
+  covers those files to that site once. It is never remembered, so the card has
+  no "Always allow", and it is asked at every access level, Full access
+  included, as the first Browser action on a site is. Work asks in the thread's
+  Browser approval card; Code asks in the thread's tool approval.
+- Only the agent tool can upload: it resolves the files and holds the answer,
+  and the server's Browser service refuses an upload that did not come with
+  them, so no route or paired device can hand a runtime a path. A CLI in a
+  thread terminal cannot upload.
+- Downloads stay blocked; this adds no download.
+- Rationale: an upload is the one Browser action that reads a file off this
+  computer and sends it to a site, so it keeps the narrowest reach the request
+  allowed. The workspace is the folder the thread's own file tools already
+  treat as its root; a Work Project's extra folders are left out until a person
+  asks for them. Asking every time follows the Browser's first-action ask,
+  which a separate maintainer decision keeps at every access level.
 
 ## Steps
 
