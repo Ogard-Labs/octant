@@ -289,6 +289,23 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      // Letting an agent merge without asking each time is the person's
+      // standing permission, so only a window on this host sets it, and a paired
+      // device cannot widen it on their behalf.
+      if (
+        command.kind === "change-code-project-agent-merge" &&
+        principal !== undefined &&
+        principal.kind !== "local-window"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "Whether agents may merge is set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
       return response(await dependencies.service.executeProject(windowId, command), 200, origin);
     } catch (error) {
       if (error instanceof ProjectServiceError) return failureResponse(error.failure, origin);

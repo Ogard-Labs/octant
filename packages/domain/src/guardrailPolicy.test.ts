@@ -3,6 +3,7 @@ import {
   AUTO_UNSUPPORTED_REASON,
   defaultPermissionModeFor,
   guardrailLevelOf,
+  outsideContentRecordedOnly,
   permissionModeOf,
   clampWorkAccess,
   chosenAutoReviewer,
@@ -289,5 +290,23 @@ describe("who reviews at Auto", () => {
         capabilities: { ...claudeOrCodex, shield: shieldRuns },
       }),
     ).toBe(false);
+  });
+});
+
+describe("outside content at each level", () => {
+  it("is recorded only for a Work or Code thread at Full access, and gates everywhere else", () => {
+    for (const mode of ["work", "code"] as const) {
+      expect(outsideContentRecordedOnly({ mode, executionPolicy: "full-access" })).toBe(true);
+      for (const executionPolicy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
+        expect([
+          mode,
+          executionPolicy,
+          outsideContentRecordedOnly({ mode, executionPolicy }),
+        ]).toEqual([mode, executionPolicy, false]);
+      }
+    }
+    expect(outsideContentRecordedOnly({ mode: "chat", executionPolicy: "full-access" })).toBe(
+      false,
+    );
   });
 });

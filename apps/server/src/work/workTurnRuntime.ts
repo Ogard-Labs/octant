@@ -6,6 +6,7 @@ import type {
 import {
   observeTurnMetrics,
   markThreadToolStepOutsideContent,
+  outsideContentRecordedOnly,
   recordThreadShieldReview,
   recordThreadToolStep,
   startTurnMetrics,
@@ -137,9 +138,14 @@ export interface WorkTurnRuntimePort {
     /** The wall clock the turn is timed against. */
     readonly clock?: () => string;
   }): Promise<WorkTurnRuntimeOutcome>;
+  /** Shows an Octant Shield decision on the thread's running turn, if one runs. */
+  recordShieldReview?(review: WorkShieldReview & { readonly threadId: string }): void;
 }
 
 type WorkTurnRunInput = Parameters<WorkTurnRuntimePort["run"]>[0];
+
+/** One Octant Shield decision for a running Work turn's tool steps. */
+type WorkShieldReview = Parameters<typeof recordThreadShieldReview>[1];
 
 /** What a turn tells its meter as the provider's events arrive. */
 interface WorkTurnMeter {
@@ -161,9 +167,21 @@ export interface WorkTurnRuntimeOptions {
  */
 export class WorkTurnRuntime implements WorkTurnRuntimePort {
   readonly #timeoutMs: number;
+  /** Each running turn's review rows, by thread: one Work thread runs one turn at a time. */
+  readonly #shieldReviews = new Map<string, (review: WorkShieldReview) => void>();
 
   constructor(options: WorkTurnRuntimeOptions = {}) {
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+  }
+
+  /**
+   * Shows Octant Shield's decision on an approval the running turn's tools
+   * asked for out of band (the Octant Harness's own approvals) as a review
+   * row among the turn's tool steps. A thread with no running turn has no
+   * row to add it to; the approval journal that asked still holds it.
+   */
+  recordShieldReview(review: WorkShieldReview & { readonly threadId: string }): void {
+    this.#shieldReviews.get(review.threadId)?.(review);
   }
 
   async run(input: WorkTurnRunInput): Promise<WorkTurnRuntimeOutcome> {
@@ -241,6 +259,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     meter: WorkTurnMeter,
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
     const cleanupTimeoutMs = Math.max(1, Math.min(this.#timeoutMs, 1_000));
+    const shieldReviews = this.#shieldReviews;
     return Effect.gen(function* () {
       yield* Effect.addFinalizer(() =>
         Effect.promise(async () => {
@@ -258,6 +277,24 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         });
       }
       let toolSteps: ThreadToolSteps | undefined;
+      const recordedOnly = outsideContentRecordedOnly({
+        mode: "work",
+        executionPolicy: workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS).executionPolicy,
+      });
+      // Octant Shield's answer to an approval shows on the transcript beside
+      // the turn's tool rows, whether the runtime asked through its session
+      // or the turn's own tools asked out of band.
+      const showShieldReview = (review: WorkShieldReview) => {
+        toolSteps = recordThreadShieldReview(toolSteps, review);
+        input.onToolSteps?.(toolSteps);
+      };
+      const threadKey = String(input.command.threadId);
+      shieldReviews.set(threadKey, showShieldReview);
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (shieldReviews.get(threadKey) === showShieldReview) shieldReviews.delete(threadKey);
+        }),
+      );
       const connection = yield* input.driver.acquire({
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,
@@ -268,12 +305,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           threadId: input.command.threadId,
           sessionId: input.providerSessionId,
           signal: input.signal,
-          // Octant Shield's answer to an approval shows on the transcript
-          // beside the turn's tool rows.
-          onApprovalReviewed: (review) => {
-            toolSteps = recordThreadShieldReview(toolSteps, review);
-            input.onToolSteps?.(toolSteps);
-          },
+          onApprovalReviewed: showShieldReview,
         },
       });
       yield* Effect.addFinalizer(() =>
@@ -365,7 +397,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   const next = markThreadToolStepOutsideContent(toolSteps, {
                     toolCallId,
                     toolName,
-                    mark: { labels },
+                    // At Full access the mark is recorded only: a quiet tag.
+                    mark: recordedOnly ? { labels, recordedOnly: true } : { labels },
                   });
                   if (next === undefined || next === toolSteps) return;
                   toolSteps = next;
@@ -487,7 +520,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     }),
                   );
                   if (executionSignal.aborted) return;
-                  if (execution.isError !== true && execution.outsideContent !== undefined) {
+                  // A refused call carries a mark only when it reached for a
+                  // protected secret, which its row then shows.
+                  if (execution.outsideContent !== undefined) {
                     markToolRow(event.requestId, event.toolName, execution.outsideContent.labels);
                   }
                   yield* connection

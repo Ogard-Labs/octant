@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyProtectedFilesChoice,
   configureSecretGuardLocations,
+  isProtectedSecretPath,
   secretGuardEntries,
   secretGuardLinuxPaths,
   secretGuardRefusal,
@@ -133,6 +134,18 @@ describe("secret guard refusals for host file tools", () => {
     expect(
       secretGuardSearchRefusal(join(elsewhere, "aws"), { platform: "darwin", homeDirectory: home }),
     ).toContain("Cloud command-line credentials");
+  });
+
+  it("answers Shield for a home-relative path, a path the person added, and none for a relative one", () => {
+    const home = fakeHome();
+    const options = { platform: "darwin" as const, homeDirectory: home };
+    expect(isProtectedSecretPath("~/.aws/credentials", options)).toBe(true);
+    expect(isProtectedSecretPath("$HOME/.ssh/github_ed25519", options)).toBe(true);
+    expect(isProtectedSecretPath("~/.aws/config", options)).toBe(false);
+    expect(isProtectedSecretPath(".aws/credentials", options)).toBe(false);
+    expect(isProtectedSecretPath(join(home, "project/readme.md"), options)).toBe(false);
+    applyProtectedFilesChoice({ added: ["~/project/readme.md"], removed: [] });
+    expect(isProtectedSecretPath(join(home, "project/readme.md"), options)).toBe(true);
   });
 
   it("refuses a search above a protected file and allows one beside it", () => {

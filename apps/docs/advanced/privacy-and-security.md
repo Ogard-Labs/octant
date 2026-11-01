@@ -255,6 +255,15 @@ keeps working:
 When an agent asks for a protected file, the refusal says which group refused
 it and which channel to use. You see that message in the tool row.
 
+Octant Shield watches for this too. Any call of Octant's own tools that names
+a protected file, refused or not, gets an "Outside content" tag on its tool
+row saying it reached for a protected secret file, and the thread is marked.
+When Shield answers approvals at **Auto**, it sends a command that touches a file on your list to you,
+the files you added included, and refuses one that also sends something off
+the computer. At **Full access** Shield decides nothing, so instead it records
+an Octant Harness command that sends something off the computer after the
+thread reached for a secret. None of this stops a command at Full access.
+
 Change the list in **Settings › Permissions › Protected files**. Add a file or
 folder of your own, absolute or starting with `~/`. Removing a built-in group
 asks you to confirm first, and Octant records the change. **Protect again**

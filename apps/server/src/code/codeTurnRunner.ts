@@ -639,7 +639,9 @@ export class CodeTurnRunner {
                       text: answer.isError
                         ? appManagedActionFailureText(execution.result)
                         : "App-managed action completed.",
-                      ...(answer.isError || execution.outsideContent === undefined
+                      // A refused call carries a mark only when it reached
+                      // for a protected secret, which its row then shows.
+                      ...(execution.outsideContent === undefined
                         ? {}
                         : {
                             outsideContent: {

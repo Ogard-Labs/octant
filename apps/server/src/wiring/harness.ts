@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
+import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
+import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import {
   AggregateId,
@@ -641,6 +643,7 @@ export function wireHarness(deps: HarnessDependencies) {
         },
       ),
     servers: (threadId) => shieldServerStore.serversFor(threadProjectId(threadId)),
+    protectedSecretPath: (path) => isProtectedSecretPath(path),
     scratchRoot: harnessWorkDirectory,
   });
   shieldHolder.port = hostShield;
@@ -650,6 +653,18 @@ export function wireHarness(deps: HarnessDependencies) {
         ...input,
         projectId: threadProjectId(input.threadId),
       }),
+    protectedSecretPath: (path) => isProtectedSecretPath(path),
+    tagSecretEgress: ({ threadId, readerThreadIds, command, workingDirectory }) =>
+      readsSecretsThenEgress({
+        command,
+        workingDirectory,
+        protectedSecretPath: (path) => isProtectedSecretPath(path),
+        threadReadSecret: readerThreadIds.some((reader) =>
+          readShieldWatcherLabels(persistence.connection, reader).includes("secret-path-read"),
+        ),
+      })
+        ? shieldServerStore.recordTag({ threadId, tag: "reads-secrets-then-egress", command })
+        : "not-tagged",
     goals: goalService,
     questions: nativeHarnessQuestions,
     approvals: nativeHarnessApprovals,

@@ -28,6 +28,7 @@ import {
   CodeProjectNewThreadWorkspaceChanged,
   CodeProjectPermissionModeChanged,
   CodeProjectAutoReviewerChanged,
+  CodeProjectAgentMergeChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
   CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
   CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
@@ -213,6 +214,8 @@ import {
   ThreadEgressDecisionsRecordedPayload,
   ThreadEgressLaunchStartedPayload,
   ThreadEgressLaunchSummarizedPayload,
+  SHIELD_TAG_EVENT_NAMES,
+  ShieldTagRecordedPayload,
 } from "@octant/contracts";
 import {
   SHIELD_REMOTE_COMMAND_EVENT_NAMES,
@@ -411,6 +414,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
+    .register("project.code-agent-merge-changed@1", 1, CodeProjectAgentMergeChanged)
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
     .register(CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED, 1, CodeProjectPullRequestActionRecorded)
     .register(
@@ -540,6 +544,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       ShieldProjectServersClearedPayload,
     )
     .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
+    .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.placesSet, 1, SafeNetworksPlacesSetPayload)
     .register(

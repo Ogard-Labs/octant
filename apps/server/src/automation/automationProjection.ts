@@ -208,6 +208,20 @@ export class AutomationProjection implements Projection {
     return this.#runs.get(runId);
   }
 
+  /**
+   * The newest run that started this thread, if any. A run no longer in the
+   * capped history is not found, which callers treat as no routine behind the
+   * thread.
+   */
+  runForThread(threadId: string): AutomationRun | undefined {
+    let found: AutomationRun | undefined;
+    for (const run of this.#runs.values()) {
+      if (run.threadId === undefined || String(run.threadId) !== threadId) continue;
+      if (found === undefined || run.createdAt > found.createdAt) found = run;
+    }
+    return found;
+  }
+
   /** True when a claim or skip receipt already consumed the occurrence. */
   isOccurrenceConsumed(
     automationId: AutomationId,

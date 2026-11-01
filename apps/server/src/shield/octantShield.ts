@@ -89,6 +89,8 @@ export interface ShieldThreadFacts {
   readonly projectCommands: (boundRoot: string) => ReadonlyArray<string>;
   /** The servers the person registered; SSH to any other host goes to the person. */
   readonly servers?: (threadId: string) => ReadonlyArray<ShieldServerRule>;
+  /** The secret guard's list in force: whether a path is one it protects. */
+  readonly protectedSecretPath?: (path: string) => boolean;
 }
 
 export interface OctantShieldOptions {
@@ -113,6 +115,19 @@ export interface ShieldReviewRequest {
   readonly signal?: AbortSignal | undefined;
 }
 
+/** One decision for a thread's transcript. */
+export interface ShieldTranscriptRecord {
+  readonly threadId: string;
+  readonly summary: string;
+  readonly decision: ShieldDecision;
+  /**
+   * The call the approval was for and its tool, which key a Work turn's
+   * review row; a Code transcript appends the decision as its own row.
+   */
+  readonly requestId?: string | undefined;
+  readonly toolName?: string | undefined;
+}
+
 /**
  * How an approval path reaches Shield: `review` answers undefined when Shield
  * is not the thread's reviewer, and `recordOnTranscript` shows a decision on
@@ -120,11 +135,7 @@ export interface ShieldReviewRequest {
  */
 export interface ShieldReviewPort {
   readonly review: (request: ShieldReviewRequest) => Promise<ShieldDecision | undefined>;
-  readonly recordOnTranscript?: (input: {
-    readonly threadId: string;
-    readonly summary: string;
-    readonly decision: ShieldDecision;
-  }) => void;
+  readonly recordOnTranscript?: (input: ShieldTranscriptRecord) => void;
 }
 
 /**
@@ -203,6 +214,9 @@ export class OctantShield {
       tainted,
       projectCommands: facts.projectCommands(request.boundRoot),
       servers: facts.servers?.(request.threadId) ?? [],
+      ...(facts.protectedSecretPath === undefined
+        ? {}
+        : { protectedSecretPath: facts.protectedSecretPath }),
       level: reviewing.level,
       personMessages: facts.personMessages(request.threadId),
       watcherLabels,
