@@ -129,6 +129,8 @@ interface OwnedContext {
   contentHash: string | undefined;
   /** When a preview last asked the runtime for a picture of the page. */
   peekedAt: number | undefined;
+  /** The agent handed the page to the person and waits for them to sign in. */
+  waitingForPerson: "sign-in" | undefined;
   readonly evidence: ToolEvidence[];
   failure: BrowserAutomationFailure | undefined;
   creation?: Promise<void>;
@@ -298,6 +300,7 @@ export class BrowserAutomationService {
       refs: undefined,
       contentHash: undefined,
       peekedAt: undefined,
+      waitingForPerson: undefined,
       evidence: [],
       failure: undefined,
     };
@@ -1247,6 +1250,20 @@ export class BrowserAutomationService {
       : { category: "policy-denied", reason: decision.reason, message: decision.message };
   }
 
+  /**
+   * Mark the thread's page as handed to the person to sign in, until the
+   * returned release. Windows that show the thread see it and bring the Browser
+   * forward; the agent tool holds every other agent action on the page meanwhile.
+   */
+  holdForPerson(windowId: WindowId, threadId: BrowserThreadId): () => void {
+    const owned = this.#current(windowId, threadId);
+    if (owned === undefined) return () => undefined;
+    owned.waitingForPerson = "sign-in";
+    return () => {
+      owned.waitingForPerson = undefined;
+    };
+  }
+
   /** The profile a live context keeps its site data in, if the host knows the context. */
   profileOf(contextId: BrowserContextId): BrowserContextPolicy["profile"] {
     return this.#contexts.get(contextId)?.record.policy.profile;
@@ -1542,6 +1559,7 @@ function snapshot(owned: OwnedContext): BrowserAutomationSnapshot {
     ...(owned.observation === undefined ? {} : { observation: owned.observation }),
     evidence: [...owned.evidence],
     ...(owned.failure === undefined ? {} : { failure: owned.failure }),
+    ...(owned.waitingForPerson === undefined ? {} : { waitingForPerson: owned.waitingForPerson }),
   };
 }
 
@@ -1582,6 +1600,9 @@ function threadSnapshotFromSnapshots(
     contexts,
     evidence: [...primary.evidence],
     ...(primary.failure === undefined ? {} : { failure: primary.failure }),
+    ...(primary.waitingForPerson === undefined
+      ? {}
+      : { waitingForPerson: primary.waitingForPerson }),
   };
 }
 

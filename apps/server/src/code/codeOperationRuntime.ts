@@ -464,6 +464,8 @@ export interface CodeOperationRuntimeOptions {
    * live so a grant forgotten in Settings stops satisfying it at once.
    */
   readonly isBrowserOriginRemembered?: (origin: string) => boolean;
+  /** The Browser approvals a sign-in handoff asks through; see the Code tools. */
+  readonly browserSignIn?: CodeAppManagedToolsOptions["browserSignIn"];
   /** The app-managed Apple capability, when this host has an Apple toolchain. */
   readonly appleToolchain?: CodeAppManagedToolsOptions["apple"];
   /** The app-managed Android emulator capability. */
@@ -3935,6 +3937,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             forget: (contextId) =>
               this.#approvedBrowserContexts.delete(this.#browserApprovalKey(active, contextId)),
           },
+          ...(this.#options.browserSignIn === undefined
+            ? {}
+            : { browserSignIn: this.#options.browserSignIn }),
           ...(this.#options.recordExternalContentIngestion === undefined
             ? {}
             : { recordExternalContentIngestion: this.#options.recordExternalContentIngestion }),

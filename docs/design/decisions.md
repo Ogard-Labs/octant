@@ -2228,10 +2228,11 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - An upload sends files only from the thread's workspace (the Work Project folder or the Code checkout): relative paths, no symbolic link anywhere on the path, at most 5 files of 25 MB, and the person is asked every time at every access level. The answer is never remembered, and a terminal grant cannot upload.
 - `steps` runs up to 10 operations in one call, each admitted by the server on its own, stopping at the first failure. A batch cannot nest, upload, stop, or open a signed-in page.
 - Waits take text, an address, a load state, or an element's state, all or any, with a hard limit of 30 seconds. Actions wait for the page to settle (load, then 250 ms unchanged, at most 2 seconds). A page's dialogs are answered by a fixed rule (alert and leave-page accepted, confirm and prompt dismissed) and reported. `resize` sets the agent's own page to 320-3840 by 320-2160 and restores it.
+- `sign-in` hands the page to the person: a card with Continue and Cancel, the Browser brought forward, every other agent Browser call held, and a fresh snapshot on Continue. It is never remembered and is refused on routine, subagent, terminal-grant and paired-device turns.
 - No password saving, no agent-written script in the page, and downloads stay blocked.
-- Not built yet: the sign-in handoff and fuller diagnostics.
+- Not built yet: fuller diagnostics.
 
-Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), and [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport).
+Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), and [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in).
 
 ### Browser profiles and extensions
 

@@ -31,7 +31,11 @@ export function browserApprovalSummary(approval: {
   readonly origin: string;
   readonly profile?: StoredBrowserProfile | undefined;
   readonly upload?: BrowserUploadRequest | undefined;
+  readonly signIn?: { readonly reason?: string | undefined } | undefined;
 }): string {
+  if (approval.signIn !== undefined) {
+    return `The agent asks you to sign in on ${approval.origin}`;
+  }
   if (approval.upload !== undefined) {
     const named = approval.upload.files
       .map((file) => `${file.name} (${formatProfileSize(file.sizeBytes)})`)
@@ -46,7 +50,12 @@ export function browserApprovalDetail(approval: {
   readonly profile?: StoredBrowserProfile | undefined;
   readonly extensionCount?: number | undefined;
   readonly upload?: BrowserUploadRequest | undefined;
+  readonly signIn?: { readonly reason?: string | undefined } | undefined;
 }): string {
+  if (approval.signIn !== undefined) {
+    const reason = approval.signIn.reason === undefined ? "" : `“${approval.signIn.reason}” `;
+    return `${reason}Sign in on the Browser page yourself, then press Continue. The agent waits and never sees what you type`;
+  }
   if (approval.upload !== undefined) {
     return "The files leave this computer for that site. This answer covers these files once";
   }

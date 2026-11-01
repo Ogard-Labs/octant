@@ -24,6 +24,33 @@ function client(listed: ReadonlyArray<BrowserToolApproval>, settled = true) {
 }
 
 describe("TerminalBrowserApprovalPrompt", () => {
+  it("shows the Code agent's sign-in request as its own question, with Continue and no remembering", async () => {
+    const browser = client([
+      {
+        ...approval(),
+        signIn: { reason: "The dashboard needs your account." },
+      } as BrowserToolApproval,
+    ]);
+    render(
+      <TerminalBrowserApprovalPrompt
+        client={browser}
+        threadId={threadId}
+        threadTitle="Fix the login page"
+      />,
+    );
+
+    const card = await screen.findByRole("group", { name: "Browser sign-in" });
+    expect(card).toHaveTextContent("The agent asks you to sign in on https://example.com");
+    expect(screen.queryByRole("button", { name: "Always allow" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() =>
+      expect(browser.decideApproval).toHaveBeenCalledWith({
+        approvalId: "22222222-2222-4222-8222-222222222222",
+        decision: "approved",
+      }),
+    );
+  });
+
   it("names the thread and the site, and says the terminal asked rather than the thread's agent", async () => {
     const browser = client([approval()]);
     render(

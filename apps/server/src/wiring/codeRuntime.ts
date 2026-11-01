@@ -783,8 +783,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           act: (input) => browserAutomationService.act(input),
           releaseThread: (windowId, threadId) =>
             browserAutomationService.releaseThread(windowId, threadId),
+          holdForPerson: (windowId, threadId) =>
+            browserAutomationService.holdForPerson(windowId, threadId),
         },
         isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
+        browserSignIn: {
+          // A routine's or subagent's turn has nobody to sign in, and a paired
+          // device cannot see the page.
+          refusal: (windowId) =>
+            browserToolApprovalService.isUnattendedScope(windowId)
+              ? "sign-in-needs-a-person"
+              : browserToolApprovalService.isPairedDevice(windowId)
+                ? "sign-in-needs-this-computer"
+                : undefined,
+          request: (input) => browserToolApprovalService.request(input),
+        },
         // The agent's Apple capability resolves its execution context through
         // exactly the resolver the workbench route uses, so a tool call and a
         // click are the same request to the same policy.

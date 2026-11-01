@@ -5,6 +5,7 @@ import {
   browserToolResult,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
+  handBrowserToPerson,
   runBrowserToolSteps,
   type BrowserToolAnswer,
   type BrowserToolInput,
@@ -489,6 +490,24 @@ export interface CodeAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => Promise<BrowserAutomationSnapshot>;
+    /** Marks the page as the person's to sign in on; see the service. */
+    readonly holdForPerson?: (windowId: WindowId, threadId: BrowserThreadId) => () => void;
+  };
+  /**
+   * Asks the person to sign in on the thread's page, through the same Browser
+   * approval the Work thread uses, and says who may not be asked. Absent, a
+   * sign-in is refused.
+   */
+  readonly browserSignIn?: {
+    readonly refusal: (windowId: WindowId) => string | undefined;
+    readonly request: (input: {
+      readonly windowId: WindowId;
+      readonly threadId: string;
+      readonly authority: ToolActionAuthority;
+      readonly origin: string;
+      readonly signIn: { readonly reason?: string };
+      readonly signal?: AbortSignal;
+    }) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   };
   /**
    * Asks the person, in the thread, to let the agent upload named files to a
@@ -1115,6 +1134,15 @@ async function browserTool(
   const postureFailure = browserAuthorityFailure(options);
   if (postureFailure !== undefined) return failure(postureFailure);
   let snapshot = options.browser.inspectThread(options.windowId, threadId);
+  // While the person signs in, the page is theirs; see Work's tool.
+  if (snapshot.waitingForPerson !== undefined) return failure("browser-waiting-for-person");
+  if (input.operation === "sign-in") {
+    const refusal =
+      options.browserSignIn === undefined
+        ? "sign-in-unavailable"
+        : options.browserSignIn.refusal(options.windowId);
+    if (refusal !== undefined) return failure(refusal);
+  }
   const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
   if (existing === undefined && snapshot.context !== undefined) {
     options.browserApproval?.forget(String(snapshot.context.contextId));
@@ -1173,6 +1201,24 @@ async function browserTool(
   const context = snapshot.context;
   if (context === undefined || context.state !== "active") return browserToolResult(snapshot);
   if (signal?.aborted) return failure("tool-interrupted");
+  if (input.operation === "sign-in") {
+    const signIn = options.browserSignIn;
+    const browser = options.browser;
+    if (signIn === undefined || browser === undefined) return failure("sign-in-unavailable");
+    return handBrowserToPerson({
+      hold: () => browser.holdForPerson?.(options.windowId, threadId) ?? (() => undefined),
+      ask: () =>
+        signIn.request({
+          windowId: options.windowId,
+          threadId: String(threadId),
+          authority,
+          origin,
+          signIn: input.reason === undefined ? {} : { reason: input.reason },
+          ...(signal === undefined ? {} : { signal }),
+        }),
+      snapshotAfter: () => browserTool(options, { operation: "snapshot" }, signal),
+    });
+  }
   const request = browserToolAction(input, context);
   if (request === undefined) return failure("invalid-browser-input");
   let uploadFiles: ReadonlyArray<string> | undefined;

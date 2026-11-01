@@ -12,8 +12,8 @@ keeps.
 
 Status: the page snapshot, element refs, short results, the actions below
 (hover, select, drag, key chords, upload, tabs), batched steps, waits, settling,
-dialogs, and viewport size are built. The sign-in handoff and fuller
-diagnostics are allowed; not built yet.
+dialogs, viewport size, and the sign-in handoff are built. Fuller diagnostics
+are allowed; not built yet.
 
 ## One tool for every provider
 
@@ -237,10 +237,32 @@ only after the person approves it.
 
 ## Asking the person to sign in
 
-Allowed; not built yet. The agent asks the person to sign in: a card in the
-thread, the Browser brought forward, the agent's actions held, and a fresh
-snapshot after the person presses Continue. Refused on routine, subagent, and
-paired-device turns.
+- `sign-in` (with an optional `reason`, at most 300 characters) hands the open
+  page to the person when it needs an account. It needs a page open already.
+- The person sees a card in the thread: "The agent asks you to sign in on
+  example.com", the reason, and **Continue** and **Cancel**. Work shows it with
+  the thread's Browser approvals and Code with the Browser requests in its
+  thread; both are the same host approval, never remembered, and it waits up to
+  10 minutes, the longest a Browser approval waits.
+- The page is marked as waiting for the person. Every window showing the thread
+  brings its Browser forward once, through the thread's activity preview, and
+  the agent tool holds every other agent Browser call on the page until the
+  card is answered (`browser-waiting-for-person`); `stop` still works.
+- The person signs in by typing into the page themselves. Octant saves no
+  password and fills none, and the agent never sees what they typed: a
+  credential field never shows a value.
+- On **Continue** the agent gets a fresh snapshot of whatever page the person
+  left. **Cancel**, the card expiring, or the turn stopping ends the hand-off with
+  `browser-sign-in-denied`, `-expired`, or `-cancelled`, and the page is the
+  agent's again.
+- Refused before anyone is asked on a routine's or a subagent's turn and for a
+  CLI in a thread terminal (`sign-in-needs-a-person`), and on a paired device's
+  turn (`sign-in-needs-this-computer`): nobody there can sign in, or the person
+  there cannot see the page.
+- Rationale: the hand-off fits the rule that a person's sign-ins are never read
+  by an agent. The page keeps its profile; a Private page's sign-in lasts as
+  long as the page, and a Project or Personal page keeps it for the next page
+  in that profile ([Browser profiles](browser-profiles.md#profiles)).
 
 ## Diagnostics
 

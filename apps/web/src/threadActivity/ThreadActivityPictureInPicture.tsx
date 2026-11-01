@@ -76,6 +76,21 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
       : `${String(props.threadId)}:${String(browserSnapshot.context.contextId)}`;
   const browserPreviewHidden =
     browserPreviewKey !== undefined && hiddenBrowserPreviews.has(browserPreviewKey);
+  // The agent handed the page to the person to sign in: bring the Browser
+  // forward once for that hand-off, wherever the person is in the thread.
+  const waitingForPerson = browserSnapshot?.waitingForPerson;
+  const broughtForward = useRef<string | undefined>(undefined);
+  const showBrowser = props.onShowBrowser;
+  useEffect(() => {
+    if (waitingForPerson === undefined) {
+      broughtForward.current = undefined;
+      return;
+    }
+    const handOff = browserPreviewKey ?? String(props.threadId);
+    if (broughtForward.current === handOff) return;
+    broughtForward.current = handOff;
+    showBrowser?.();
+  }, [browserPreviewKey, props.threadId, showBrowser, waitingForPerson]);
   // A picture is asked for only while one could be seen.
   const wantsPicture = props.browserVisible !== true && !browserPreviewHidden;
   const hasPolledActivity =
@@ -534,6 +549,7 @@ function browserPictureSignature(snapshot: BrowserAutomationSnapshot | undefined
     snapshot.observation?.viewport?.width,
     snapshot.observation?.viewport?.height,
     snapshot.observation?.screenshotDataUrl,
+    snapshot.waitingForPerson,
   ]);
 }
 

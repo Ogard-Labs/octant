@@ -35,7 +35,7 @@ export type BrowserToolInclude = ReadonlyArray<"text" | "screenshot" | "snapshot
 /** One operation of a `steps` call: anything but a batch, an upload, stop, or help. */
 export type BrowserToolStep = Exclude<
   BrowserToolInput,
-  { readonly operation: "steps" | "upload" | "stop" }
+  { readonly operation: "steps" | "upload" | "stop" | "sign-in" }
 >;
 
 /** How many operations one `steps` call may carry. */
@@ -74,6 +74,7 @@ export type BrowserToolInput = {
   | { readonly operation: "tab-open"; readonly url?: string }
   | { readonly operation: "tab-switch" | "tab-close"; readonly tabId: string }
   | { readonly operation: "steps"; readonly steps: ReadonlyArray<BrowserToolStep> }
+  | { readonly operation: "sign-in"; readonly reason?: string }
 );
 
 /**
@@ -114,7 +115,8 @@ export function parseBrowserToolInput(
       one === undefined ||
       one.operation === "steps" ||
       one.operation === "upload" ||
-      one.operation === "stop"
+      one.operation === "stop" ||
+      one.operation === "sign-in"
     )
       return undefined;
     parsedSteps.push(one);
@@ -253,6 +255,14 @@ function parseBrowserToolRecord(
     return { ...common, operation, ...named, files: files as ReadonlyArray<string> };
   }
   if (operation === "tab-list" && only()) return { ...common, operation };
+  if (operation === "sign-in" && only("reason")) {
+    if (record.reason !== undefined && !text("reason", 300)) return undefined;
+    return {
+      ...common,
+      operation,
+      ...(typeof record.reason === "string" ? { reason: record.reason } : {}),
+    };
+  }
   if (operation === "tab-open" && only("url")) {
     if (record.url !== undefined && !text("url", 4096)) return undefined;
     return {
@@ -494,8 +504,34 @@ export function browserToolAction(
       return { ...base, kind: "tab-close", tabId: input.tabId };
     case "stop":
     case "steps":
+    case "sign-in":
       return undefined;
   }
+}
+
+/**
+ * Hand the page to the person to sign in, and wait. The page is marked as the
+ * person's while they do, so every window showing the thread brings its
+ * Browser forward and every other agent action on it is held. On Continue the
+ * agent gets a fresh snapshot of whatever page the person left; it never sees
+ * what they typed, because a credential field never shows a value.
+ */
+export async function handBrowserToPerson(input: {
+  readonly hold: () => () => void;
+  readonly ask: () => Promise<"approved" | "denied" | "cancelled" | "expired">;
+  readonly snapshotAfter: () => Promise<BrowserToolAnswer>;
+}): Promise<BrowserToolAnswer> {
+  const release = input.hold();
+  let outcome: "approved" | "denied" | "cancelled" | "expired";
+  try {
+    outcome = await input.ask();
+  } finally {
+    release();
+  }
+  if (outcome !== "approved") {
+    return { result: { error: `browser-sign-in-${outcome}` }, isError: true };
+  }
+  return input.snapshotAfter();
 }
 
 /** What one operation answered, as an executor returns it. */

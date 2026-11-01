@@ -11,6 +11,7 @@ import {
 } from "@octant/contracts";
 
 const DEFAULT_TTL_MS = 5 * 60_000;
+const MAX_TTL_MS = 10 * 60_000;
 const MAX_PENDING_APPROVALS = 32;
 
 interface BrowserToolApprovalServiceOptions {
@@ -68,6 +69,7 @@ interface PendingApproval {
   readonly authority: ToolActionAuthority;
   readonly resolve: (decision: "approved" | "denied" | "cancelled" | "expired") => void;
   readonly timer: ReturnType<typeof setTimeout>;
+  readonly ttlMs: number;
   readonly signal?: AbortSignal;
   readonly onAbort?: () => void;
 }
@@ -85,7 +87,7 @@ export class BrowserToolApprovalService {
 
   constructor(options: BrowserToolApprovalServiceOptions) {
     this.#options = options;
-    this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, 10 * 60_000));
+    this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, MAX_TTL_MS));
   }
 
   request(input: {
@@ -97,6 +99,8 @@ export class BrowserToolApprovalService {
     readonly profile?: StoredBrowserProfile;
     /** Files the agent asks to upload to this origin; see the contract. */
     readonly upload?: ReadonlyArray<{ readonly name: string; readonly sizeBytes: number }>;
+    /** The agent asks the person to sign in here; see the contract. */
+    readonly signIn?: { readonly reason?: string };
     readonly signal?: AbortSignal;
   }): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
@@ -123,6 +127,14 @@ export class BrowserToolApprovalService {
               })),
             },
           }),
+      ...(input.signIn === undefined
+        ? {}
+        : {
+            signIn:
+              input.signIn.reason === undefined || input.signIn.reason.trim() === ""
+                ? {}
+                : { reason: input.signIn.reason.trim().slice(0, 300) },
+          }),
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     return new Promise((resolve) => {
@@ -137,7 +149,10 @@ export class BrowserToolApprovalService {
         }
         resolve(decision);
       };
-      const timer = setTimeout(() => settle("expired"), this.#ttlMs);
+      // Signing in can take a second factor and a password manager; it gets
+      // the longest wait the service allows.
+      const ttlMs = input.signIn === undefined ? this.#ttlMs : MAX_TTL_MS;
+      const timer = setTimeout(() => settle("expired"), ttlMs);
       timer.unref?.();
       const onAbort = input.signal === undefined ? undefined : () => settle("cancelled");
       const pending: PendingApproval = {
@@ -147,6 +162,7 @@ export class BrowserToolApprovalService {
         authority: input.authority,
         resolve: settle,
         timer,
+        ttlMs,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(onAbort === undefined ? {} : { onAbort }),
       };
@@ -180,7 +196,8 @@ export class BrowserToolApprovalService {
     if (
       decision.decision === "approved" &&
       decision.remember === true &&
-      pending.view.upload === undefined
+      pending.view.upload === undefined &&
+      pending.view.signIn === undefined
     ) {
       // The answering window journals the grant: for a routine it is the
       // person who saw the prompt, not the host scope that raised it.
@@ -227,6 +244,11 @@ export class BrowserToolApprovalService {
     return this.#options.isOriginRemembered?.(origin, profile) === true;
   }
 
+  /** Whether a scope is a paired device rather than a window of this computer. */
+  isPairedDevice(windowId: WindowId): boolean {
+    return this.#isPairedDevice(windowId);
+  }
+
   /** Whether a scope is the host acting alone, with no person to answer a prompt. */
   isUnattendedScope(windowId: WindowId): boolean {
     return this.#options.isHostScope?.(windowId) === true;
@@ -245,7 +267,7 @@ export class BrowserToolApprovalService {
   #expire(): void {
     const now = this.#options.now();
     for (const pending of this.#pending.values()) {
-      if (Date.parse(String(pending.view.requestedAt)) + this.#ttlMs <= now) {
+      if (Date.parse(String(pending.view.requestedAt)) + pending.ttlMs <= now) {
         pending.resolve("expired");
       }
     }

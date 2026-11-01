@@ -2217,10 +2217,15 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 size="sm"
                 type="button"
               >
-                {pendingBrowserApproval.upload === undefined ? "Approve once" : "Upload once"}
+                {pendingBrowserApproval.signIn !== undefined
+                  ? "Continue"
+                  : pendingBrowserApproval.upload === undefined
+                    ? "Approve once"
+                    : "Upload once"}
               </OctantButton>
-              {/* An upload's answer covers those files once and is never remembered. */}
-              {pendingBrowserApproval.upload === undefined ? (
+              {/* An upload's or a sign-in's answer is never remembered. */}
+              {pendingBrowserApproval.upload === undefined &&
+              pendingBrowserApproval.signIn === undefined ? (
                 <OctantButton
                   disabled={browserApprovalBusy}
                   onClick={() => void decideBrowserApproval("approved", true)}
@@ -2238,7 +2243,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 type="button"
                 variant="ghost"
               >
-                Deny
+                {pendingBrowserApproval.signIn === undefined ? "Deny" : "Cancel"}
               </OctantButton>
             </>
           }
@@ -2246,9 +2251,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           detail={browserApprovalDetail(pendingBrowserApproval)}
           error={browserApprovalMessage}
           label={
-            pendingBrowserApproval.upload === undefined
-              ? "Browser origin approval"
-              : "Browser upload approval"
+            pendingBrowserApproval.signIn !== undefined
+              ? "Browser sign-in"
+              : pendingBrowserApproval.upload === undefined
+                ? "Browser origin approval"
+                : "Browser upload approval"
           }
           summary={browserApprovalSummary(pendingBrowserApproval)}
         />

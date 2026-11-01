@@ -8,6 +8,7 @@ import { announceShellSettingsWritten } from "../shell/shellSettingsNotification
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { OctantButton } from "../ui/base/OctantButton";
+import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 
 /**
  * A CLI waiting on this answer has no turn the window can see, so the window
@@ -92,7 +93,9 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
       );
       if (!settled) {
         setEnded(
-          `The terminal's request to open ${pending.origin} had already ended, so nothing was let through.`,
+          pending.signIn !== undefined
+            ? `The agent's sign-in request for ${pending.origin} had already ended.`
+            : `The terminal's request to open ${pending.origin} had already ended, so nothing was let through.`,
         );
       } else if (decision === "approved" && remember === true) {
         announceShellSettingsWritten();
@@ -103,6 +106,41 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
       setBusy(false);
     }
   };
+
+  // The thread's own agent asks the person to sign in through the same list;
+  // that question is the agent's, not a terminal's, and is never remembered.
+  if (pending.signIn !== undefined) {
+    return (
+      <OctantApprovalCard
+        actions={
+          <>
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decide("approved")}
+              size="sm"
+              type="button"
+            >
+              Continue
+            </OctantButton>
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decide("denied")}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Cancel
+            </OctantButton>
+          </>
+        }
+        {...(props.className === undefined ? {} : { className: props.className })}
+        detail={browserApprovalDetail(pending)}
+        error={message}
+        label="Browser sign-in"
+        summary={browserApprovalSummary(pending)}
+      />
+    );
+  }
 
   return (
     <OctantApprovalCard

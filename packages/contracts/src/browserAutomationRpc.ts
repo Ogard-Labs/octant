@@ -77,6 +77,16 @@ export const BrowserToolApproval = Schema.Struct({
       ).pipe(Schema.minItems(1), Schema.maxItems(5)),
     }).annotations(strict),
   ),
+  /**
+   * Set when the agent asks the person to sign in on the page rather than to
+   * open it: the agent waits, the person signs in themselves, and Continue
+   * hands the page back. Never remembered.
+   */
+  signIn: Schema.optional(
+    Schema.Struct({
+      reason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300))),
+    }).annotations(strict),
+  ),
   requestedAt: UtcTimestamp,
 }).annotations({ ...strict, ...personDecides });
 export type BrowserToolApproval = typeof BrowserToolApproval.Type;
@@ -164,6 +174,11 @@ export const BrowserAutomationSnapshot = Schema.Struct({
   ),
   evidence: Schema.Array(ToolEvidence),
   failure: Schema.optional(BrowserAutomationFailure),
+  /**
+   * The agent handed the page to the person and waits: for now only to sign
+   * in. A window showing the thread brings its Browser forward.
+   */
+  waitingForPerson: Schema.optional(Schema.Literal("sign-in")),
 }).annotations(strict);
 export type BrowserAutomationSnapshot = typeof BrowserAutomationSnapshot.Type;
 
