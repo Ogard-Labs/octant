@@ -1236,8 +1236,9 @@ refused, and a call that cannot reach the server fails with nothing run on
 this host instead. Built: the catalog, the connection, and the folder check
 at binding (Settings › Access › Servers); Code threads there, which run only
 on the Octant Harness, with file tools, commands, and Git on the server under
-the same levels, approvals, and journal as a local Project; and thread
-terminals that are logins on the server. Octant has no sandbox on the server,
+the same levels, approvals, and journal as a local Project; thread
+terminals that are logins on the server; and the Git tab, whose Git runs on
+the server. Octant has no sandbox on the server,
 so below Full access a remembered approval does not cover a command there. An agent in a local Project still
 reaches a remote machine with `ssh` through its shell (above), and Octant on
 another computer is a hub-and-spoke member

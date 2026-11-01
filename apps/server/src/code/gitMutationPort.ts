@@ -114,15 +114,25 @@ export class GitMutationPort {
   readonly #commandTimeoutMs: number;
   readonly #confinement: ReturnType<typeof createGitSeatbeltConfinement>;
   readonly #commitIdentity: CommitIdentityResolver | undefined;
+  readonly #onServer: boolean;
 
   constructor(
     dependencies: GitMutationDependencies = liveDependencies,
     options: {
       readonly commandTimeoutMs?: number;
       readonly commitIdentity?: CommitIdentityResolver;
+      /**
+       * The checkout is a server Project's folder and `dependencies` reach the
+       * server: Git runs there as it is, with no launch prepared or path read
+       * on this host. Octant confines nothing there, so Plan, whose read-only
+       * rule is a confinement here, runs nothing. Canonical:
+       * docs/design/server-projects.md § Panels.
+       */
+      readonly onServer?: boolean;
     } & GitSeatbeltPortOptions = {},
   ) {
     this.#dependencies = dependencies;
+    this.#onServer = options.onServer === true;
     this.#commandTimeoutMs = options.commandTimeoutMs ?? 15_000;
     this.#commitIdentity = options.commitIdentity;
     // A shared port serves every thread. Plan confinement is applied per
@@ -959,6 +969,15 @@ export class GitMutationPort {
     return this.#confined(parentSignal, async (signal) => {
       const executable = await this.#fileToolExecutable(tool);
       if (executable === undefined) return { exitCode: 1, stdout: "", stderr: "" };
+      if (this.#onServer) {
+        if (executionPolicy === "plan") return PLAN_ON_SERVER;
+        return await this.#dependencies.execFile(
+          executable,
+          args,
+          createGitCommandEnvironment(process.env),
+          signal,
+        );
+      }
       const binaryDirectory = dirname(executable);
       const extraRules = gitLinkedWorktreeMetadataRules(checkoutRoot, {
         writable: executionPolicy !== "plan",
@@ -1010,6 +1029,15 @@ export class GitMutationPort {
       if (checkoutRoot === undefined || !isAbsolute(checkoutRoot)) {
         return { exitCode: 1, stdout: "", stderr: "" };
       }
+      if (this.#onServer) {
+        if (executionPolicy === "plan") return PLAN_ON_SERVER;
+        return await this.#dependencies.execFile(
+          "git",
+          args,
+          { ...createGitCommandEnvironment(process.env), ...environment },
+          signal,
+        );
+      }
       const launch = prepareGitSeatbeltLaunch({
         confinement:
           executionPolicy === "plan"
@@ -1037,6 +1065,12 @@ export class GitMutationPort {
     });
   }
 }
+
+const PLAN_ON_SERVER: CommandResult = {
+  exitCode: 1,
+  stdout: "",
+  stderr: "Plan is read-only, and Octant cannot hold Git to that on a server, so nothing ran.",
+};
 
 function planGitMutationConfinement(confinement: ProcessConfinementPort): ProcessConfinementPort {
   return {
