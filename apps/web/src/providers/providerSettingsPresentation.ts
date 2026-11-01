@@ -65,7 +65,9 @@ export function ownReviewerLabel(
   capabilities: ProviderObservedState["capabilities"],
 ): string | undefined {
   if (!isAcpAgentKind(driverKind)) return undefined;
-  if (capabilities.harnessAutoReview === "supported") return undefined;
+  // Only a reviewer the agent reported absent is "none": a failed connection
+  // check reads unavailable for every capability and says nothing about this one.
+  if (capabilities.harnessAutoReview !== "unsupported") return undefined;
   return "None. Octant Shield reviews at Auto.";
 }
 

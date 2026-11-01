@@ -375,4 +375,8 @@ describe("ownReviewerLabel", () => {
     expect(ownReviewerLabel("mistral-vibe", report("supported"))).toBeUndefined();
     expect(ownReviewerLabel("claude", report("unsupported"))).toBeUndefined();
   });
+
+  it("does not call a reviewer missing when the connection check could not say", () => {
+    expect(ownReviewerLabel("mistral-vibe", report("unavailable"))).toBeUndefined();
+  });
 });
