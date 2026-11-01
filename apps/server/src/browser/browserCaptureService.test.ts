@@ -304,7 +304,10 @@ describe("BrowserCaptureService steps", () => {
     service.recordStep(
       step({
         element: { role: "button", name: "Save" },
-        changed: "Address changed to https://example.com/a.",
+        change: {
+          before: { url: "https://example.com/", title: "Home", contentHash: "1" },
+          after: { url: "https://example.com/a?token=abc&page=2", title: "A", contentHash: "2" },
+        },
       }),
     );
     const [row, ...rest] = stepRows(connection);

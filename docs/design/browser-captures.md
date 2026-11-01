@@ -151,17 +151,20 @@ request, and only by choosing to.
   caller that names no one (the rule that decides who takes a capture).
 - **What a step holds.** The operation (`navigate`, `click`, `type`, and so on);
   for an action that named its element by ref, the element's role and
-  accessible name; the page's origin and path; the one-line `changed` result or,
-  for an action that failed, the failure category; the capture it kept, when it
+  accessible name; the page's origin and path; a result built from fixed categories
+  ("Address changed to <origin and path>", "Title changed", "Page content
+  changed", "Nothing changed") or, for an action that failed, the failure
+  category; the capture it kept, when it
   was a screenshot that was kept; the recording time; and, for a page in a
   Project or Personal profile, that profile.
 - **What a step never holds.** Text the agent typed, the value of any field,
   a selector, the page's text, a picture, a query string or fragment of the
   address, or anything from a failure message. The record has no field for
-  them, and the request itself is never handed to the recorder. Any address the
-  `changed` line quotes passes through the same redaction a diagnostic's
-  address does: no user or password, no fragment, and every query value whose
-  name suggests a secret replaced.
+  them, and the request itself is never handed to the recorder. The result is
+  never copied from the page's `changed` line: a page can echo what was typed
+  into its title or text (search results do), so the record compares the
+  before and after page states and says only which of address, title, and
+  content changed.
 - **Same keeping as captures.** One `browser-step` aggregate per thread
   (aggregate id = thread id) with one `browser.step-recorded@1` event per step,
   actor the agent (provider instance and thread). The newest 50 aggregate
@@ -196,7 +199,9 @@ request, and only by choosing to.
   pull request body, offers "Include Browser proof", off by default. Choosing
   it reads the proof, says how many steps it will add, and on Create adds a
   "Browser check" section to the body after the person's text: the numbered
-  steps, and for each capture the name of its screenshot file. The proof is
+  steps, and for each capture the name of its screenshot file. The files are
+  named by position, so if the captures changed after the person saved them,
+  Create stops and asks for another save first. The proof is
   read again at Create, so the section reflects the steps as they stand then.
   If it cannot be read, nothing is created and the form says why. The form is
   the only place pull-request text is written by a person; the agent's own
