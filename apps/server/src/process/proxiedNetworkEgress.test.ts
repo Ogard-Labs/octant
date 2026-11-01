@@ -103,6 +103,82 @@ describe("Linux egress forwarder", () => {
   });
 });
 
+describe("Linux egress forwarder server relay", () => {
+  it("carries a command's connection on a server port to the host relay's socket and nowhere else", async () => {
+    // A Unix socket path has a short limit, and macOS's own temporary folder is long.
+    const directory = realpathSync(mkdtempSync("/tmp/octant-server-relay-"));
+    directories.push(directory);
+    const script = join(directory, "forwarder.cjs");
+    writeFileSync(script, LINUX_EGRESS_FORWARDER_SOURCE);
+    const proxySocket = join(directory, "proxy.sock");
+    const relaySocket = join(directory, "relay.sock");
+    const proxySaw: string[] = [];
+    const proxy = createServer((connection) => {
+      connection.on("data", (chunk: Buffer) => proxySaw.push(chunk.toString()));
+    });
+    // The host relay to one server's address.
+    const relay = createServer((connection) => {
+      connection.on("data", (chunk: Buffer) => connection.end(`server saw ${chunk.toString()}`));
+    });
+    servers.push(proxy, relay);
+    await new Promise<void>((done) => proxy.listen(proxySocket, () => done()));
+    await new Promise<void>((done) => relay.listen(relaySocket, () => done()));
+    const serverPort = await freePort();
+    const forwarderPort = await freePort();
+    const client = [
+      "const net = require('node:net');",
+      `const socket = net.connect({ host: '127.0.0.1', port: ${serverPort} });`,
+      "let answer = '';",
+      "socket.on('data', (chunk) => (answer += chunk));",
+      "socket.on('close', () => process.stdout.write(answer));",
+      "socket.write('SSH-2.0-test');",
+    ].join("\n");
+    const output = await new Promise<string>((done) => {
+      const child = spawn(process.execPath, [
+        script,
+        proxySocket,
+        String(forwarderPort),
+        "--server-relay",
+        String(serverPort),
+        relaySocket,
+        process.execPath,
+        "-e",
+        client,
+      ]);
+      let stdout = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      child.on("close", () => done(stdout));
+    });
+
+    expect(output).toBe("server saw SSH-2.0-test");
+    // The bytes went to the relay alone, never through the egress proxy.
+    expect(proxySaw).toEqual([]);
+  });
+
+  it("refuses a server relay that names no absolute socket before the command runs", async () => {
+    const directory = realpathSync(mkdtempSync("/tmp/octant-server-relay-"));
+    directories.push(directory);
+    const script = join(directory, "forwarder.cjs");
+    writeFileSync(script, LINUX_EGRESS_FORWARDER_SOURCE);
+    const marker = join(directory, "ran");
+    const code = await new Promise<number | null>((done) => {
+      const child = spawn(process.execPath, [
+        script,
+        join(directory, "proxy.sock"),
+        "3128",
+        "--server-relay",
+        "2201",
+        "relay.sock",
+        "/usr/bin/touch",
+        marker,
+      ]);
+      child.on("close", (exit) => done(exit));
+    });
+    expect(code).toBe(125);
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
 describe("Linux egress forwarder loopback relay", () => {
   it("carries a tool bridge connection through the launch's proxy, and only to the launch's own port", async () => {
     // A Unix socket path has a short limit, and macOS's own temporary folder is long.

@@ -1356,6 +1356,66 @@ describe("Linux Bubblewrap confinement", () => {
     }
   });
 
+  it("hands the forwarder a server relay for each registered server, and only for a proxied launch", () => {
+    const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const sockets = join(root, "egress-relay");
+    mkdirSync(sockets, { mode: 0o700 });
+    const socket = join(sockets, "proxy.sock");
+    const runtime = join(root, "node");
+    const relaySocket = join(root, "ssh-sockets", "relay-0");
+    const proxied = {
+      kind: "proxied",
+      endpoint: { kind: "unix-socket", path: socket },
+    } as const;
+
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/sh",
+        args: ["script.sh"],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: proxied,
+        serverRelays: [{ port: 2201, socketPath: relaySocket }],
+      },
+      { bwrapPath, forwarderRuntime: runtime },
+    );
+
+    expect(launch.args.slice(launch.args.indexOf("--") + 1)).toEqual([
+      runtime,
+      "--no-warnings",
+      join(sockets, "forwarder.cjs"),
+      socket,
+      String(LINUX_EGRESS_FORWARDER_PORT),
+      "--server-relay",
+      "2201",
+      relaySocket,
+      "/bin/sh",
+      "script.sh",
+    ]);
+    for (const input of [
+      { networkEgress: "allow", serverRelays: [{ port: 2201, socketPath: relaySocket }] },
+      { networkEgress: proxied, serverRelays: [{ port: 2201, socketPath: "relay-0" }] },
+      {
+        networkEgress: proxied,
+        serverRelays: [{ port: LINUX_EGRESS_FORWARDER_PORT, socketPath: relaySocket }],
+      },
+      {
+        networkEgress: proxied,
+        serverRelays: [
+          { port: 2201, socketPath: relaySocket },
+          { port: 2201, socketPath: relaySocket },
+        ],
+      },
+    ] as const) {
+      expect(() =>
+        buildBubblewrapLaunch(
+          { executable: "/bin/true", args: [], boundRoot, temporaryDirectory, ...input },
+          { bwrapPath, forwarderRuntime: runtime },
+        ),
+      ).toThrow(ProcessConfinementError);
+    }
+  });
+
   it("refuses a proxied launch without its socket", () => {
     const { boundRoot, temporaryDirectory, bwrapPath } = fixture();
     for (const input of [
