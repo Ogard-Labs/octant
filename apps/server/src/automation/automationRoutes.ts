@@ -208,7 +208,7 @@ async function handleList(
     return failureResponse("Automation list request is invalid.", 400, origin);
   }
   const mode = url.searchParams.get("mode") ?? "all";
-  if (mode !== "all" && mode !== "work" && mode !== "code") {
+  if (mode !== "all" && mode !== "chat" && mode !== "work" && mode !== "code") {
     return failureResponse("Automation list mode is invalid.", 400, origin);
   }
   let projectId: ProjectId | undefined;

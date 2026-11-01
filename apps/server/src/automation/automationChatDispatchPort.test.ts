@@ -83,8 +83,10 @@ function chatService(options: { readonly existing?: boolean; readonly model?: st
         modelId: options.model ?? "approved-model",
       }
     : undefined;
+  const sent: Array<unknown> = [];
   const execute = vi.fn(async (command: unknown) => {
     const { kind } = command as { kind: string };
+    if (kind === "send-chat-turn") sent.push(command);
     if (kind === "create-chat-thread") {
       thread = {
         id: threadId,
@@ -109,7 +111,7 @@ function chatService(options: { readonly existing?: boolean; readonly model?: st
   const service = {
     read: (id: ChatThreadId) => {
       if (thread === undefined || id !== thread.id) throw new Error("Chat thread is missing.");
-      return { thread } as never;
+      return { thread, turns: sent } as never;
     },
     execute,
   } satisfies AutomationChatService;
@@ -174,6 +176,33 @@ describe("createAutomationChatDispatchPort", () => {
       expectedVersion: 2,
     });
     expect(sent[2]?.submissionId).toBe(sent[3]?.submissionId);
+  });
+
+  it("leaves a model the person chose after the first send alone on a retry", async () => {
+    const { service, execute } = chatService();
+    const port = createAutomationChatDispatchPort({ chat: service, clock: () => now });
+    const run = chatRun();
+    await port.createThread({ run, threadId, title: "Morning" });
+    const input = {
+      run,
+      threadId,
+      firstTurnRequestId: run.firstTurnRequestId,
+      promptDigest: "unused" as never,
+    };
+    await port.startOrRecoverFirstTurn(input);
+    await execute({
+      kind: "change-chat-provider",
+      threadId,
+      providerInstanceId: "someone-elses",
+      modelId: "their-model",
+    });
+    execute.mockClear();
+
+    await port.startOrRecoverFirstTurn(input);
+
+    expect(execute.mock.calls.map(([command]) => (command as { kind: string }).kind)).toEqual([
+      "send-chat-turn",
+    ]);
   });
 
   it("fails the launch with the Chat service's reason, and waits when it is busy", async () => {

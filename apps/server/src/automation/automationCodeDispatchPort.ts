@@ -217,10 +217,14 @@ async function startOrRecover(
     // A follow-up goes into a thread a person may since have widened; its
     // turn asks first all the same unless the person opted the routine into
     // the Project's level, and the host only ever narrows a turn.
-    ...(followUp &&
-    input.run.definitionSnapshot.projectLevel !== "opted-in" &&
-    input.run.definitionSnapshot.runLevel === undefined
-      ? { executionPolicy: "approval-gated" as const }
+    ...(followUp && input.run.definitionSnapshot.projectLevel !== "opted-in"
+      ? {
+          executionPolicy:
+            input.run.definitionSnapshot.runLevel === undefined
+              ? ("approval-gated" as const)
+              : threadAccessOf(permissionModeOfWorkAccess(input.run.definitionSnapshot.runLevel))
+                  .executionPolicy,
+        }
       : {}),
   };
   try {

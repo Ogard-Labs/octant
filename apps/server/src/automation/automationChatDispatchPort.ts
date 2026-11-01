@@ -25,6 +25,7 @@ export interface AutomationChatService {
       readonly providerInstanceId: ProviderInstanceId;
       readonly modelId: ProviderModelId;
     };
+    readonly turns: ReadonlyArray<unknown>;
   };
   readonly execute: (command: unknown) => Promise<{ readonly kind: string }>;
 }
@@ -112,9 +113,12 @@ async function startOrRecover(
       };
     }
     const { providerInstanceId, modelId } = snapshot.executionProfile;
+    // Only a thread with no turn yet is put on the routine's model, so a
+    // retry never undoes a model the person chose after the first send.
     if (
-      String(thread.providerInstanceId) !== String(providerInstanceId) ||
-      String(thread.modelId) !== String(modelId)
+      thread.turns.length === 0 &&
+      (String(thread.providerInstanceId) !== String(providerInstanceId) ||
+        String(thread.modelId) !== String(modelId))
     ) {
       await options.chat.execute({
         kind: "change-chat-provider",
@@ -161,12 +165,17 @@ async function startOrRecover(
   }
 }
 
+type ChatThreadFacts = ReturnType<AutomationChatService["read"]>["thread"] & {
+  readonly turns: ReadonlyArray<unknown>;
+};
+
 function readThread(
   chat: AutomationChatService,
   threadId: ChatThreadId,
-): ReturnType<AutomationChatService["read"]>["thread"] | undefined {
+): ChatThreadFacts | undefined {
   try {
-    return chat.read(threadId).thread;
+    const view = chat.read(threadId);
+    return { ...view.thread, turns: view.turns };
   } catch {
     return undefined;
   }
