@@ -650,6 +650,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       "tab-close": { tabId: "t2" },
       steps: { steps: [{ operation: "snapshot" }] },
       resize: { width: 390, height: 844 },
+      "sign-in": { reason: "The dashboard needs your account." },
       "read-page": {},
       click: { selector: "#go" },
       type: { selector: "#name", text: "octant" },
