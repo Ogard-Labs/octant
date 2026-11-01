@@ -277,6 +277,11 @@ function readPush(args: ReadonlyArray<string>, expands: boolean): ForgeShellChan
       force = "plain";
       spec = spec.slice(1);
     }
+    // A lone `:` pushes every branch that exists on both sides, not a deletion.
+    if (spec === ":") {
+      allBranches = true;
+      continue;
+    }
     const colon = spec.indexOf(":");
     if (colon === -1) {
       if (spec === "HEAD") continue;

@@ -109,6 +109,10 @@ describe("hard lines on a shell command nothing else reviews", () => {
     expect(lineOf("git push origin feature/theirs")).toBe("other-thread-branch");
     expect(lineOf("git push origin HEAD:refs/heads/feature/theirs")).toBe("other-thread-branch");
     expect(lineOf("git push --all origin")).toBe("other-thread-branch");
+    expect(lineOf("git push origin :")).toBe("other-thread-branch");
+    expect(forgeShellChanges("git push origin :")).toMatchObject([
+      { kind: "push", allBranches: true, deletes: false },
+    ]);
     expect(
       forgeShellHardLine(forgeShellChanges("git push --all origin"), {
         ownBranch: "feature/mine",
