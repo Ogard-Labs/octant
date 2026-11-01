@@ -9,9 +9,9 @@ person's registered servers, reached over SSH. Architecture owns the boundary
 **Delivery state.** Built: the server Project catalog, its journal and replay,
 the SSH connection, and the folder check at binding (`/api/server-projects`);
 Code threads there on the Octant Harness, with file tools, commands, and Git
-on the server at every level; thread terminals there; and the Code sidebar,
-composer, and thread view that open them. Not built yet: the items under
-[Not built yet](#not-built-yet).
+on the server at every level; thread terminals there; the Git tab, whose Git
+runs on the server; and the Code sidebar, composer, and thread view that open
+them. Not built yet: the items under [Not built yet](#not-built-yet).
 
 ## Outcome
 
@@ -93,6 +93,7 @@ hands are on the server.
   Project, server, and folder under labels of their own, so it can never name a
   retired checkout, and every host-side Git, file, test, checkpoint, and
   worktree path keeps refusing it as it refuses every `remote-root` checkout.
+  The Git tab reaches it only through Git on the server ([Panels](#panels)).
 - **Octant Harness only.** A thread there runs on the Octant Harness, whose
   inference stays on this host and whose hands are on the server. Every other
   runtime is refused before it launches, naming why: its own tools act on this
@@ -137,16 +138,48 @@ hands are on the server.
 - **Checkpoints.** A turn on a server takes no checkpoint, so rewind and
   restore are not offered there; Git on the server is the way back.
 
+### Panels
+
+- **Git tab.** A server thread's Git tab is the Git tab of any Code thread:
+  status, diff, stage, unstage, discard, commit, and push. This host's own Git service runs it, and every command that
+  service runs goes to the server as `git` in the folder, through the same
+  connection rules; nothing is read from or written to this host's disk. The
+  thread's checkout bar opens it with **Git**. The approvals, refusals, and
+  push rules are the ones a local Git tab has.
+- **Git's setup on the server is the server's.** Git there reads the server's
+  own system and global config, so the person's identity, signing, and
+  credential helper on the server apply; only this host's switches that stop
+  prompts and lock contention are passed. When the server has no identity,
+  the commit falls back to the person's profile here, as a local commit does.
+  _Rationale:_ locally the global config is hidden because the sandbox hides
+  it; the server has no sandbox, and the person's own `git` there would read
+  it, so hiding it would be stricter than the server itself.
+- **Plan changes nothing.** At Plan every Git change from the tab is refused
+  on a server. _Rationale:_ locally Plan's read-only rule is a confinement
+  around Git; Octant has none on the server, so refusing is the only way to
+  keep Plan read-only there.
+- **Fail closed.** A Git command that cannot reach the server runs nothing and
+  the tab says Git is unavailable; a server removed from the registry refuses
+  the next command. One login per command makes the tab slower than a local
+  one; that is the connection rule's known cost.
+- **One queue per Project.** Git changes on one server Project run one after
+  another, as they do on one local checkout. A change the tab stops waiting
+  for may still finish on the server; the next look at the tab shows it.
+- Run review and merge (mergeability needs a scratch object store on this
+  host), checkpoints, and a drafted commit message stay refused for a server
+  thread. _Rationale:_ the draft's model session is opened with the checkout
+  as its folder, which would name a server path as a folder of this host.
+
 ## Not built yet
 
 - Work Projects on a server, and extra folders in a server Project.
-- Host-side Git panels, the file browser, tests, managed worktrees, and pull
-  request delivery for a server Project.
+- The file browser, tests, managed worktrees, and pull request delivery for a
+  server Project, and the dock's Review tool there; the Git tab is built.
 - The Project terminal (the thread-less one) for a server Project; thread
   terminals are built.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
-- Real servers are untested: the connection, folder check, file tools, commands
-  and terminals were exercised against a throwaway local `sshd` only. Linux
+- Real servers are untested: the connection, folder check, file tools,
+  commands, terminals and the Git tab were exercised against a throwaway local `sshd` only. Linux
   hosts are likewise untested; the connection uses only `ssh` options both
   platforms share.

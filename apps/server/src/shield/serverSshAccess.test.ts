@@ -54,8 +54,15 @@ describe("the host-owned agent socket", () => {
 });
 
 // A throwaway sshd and ssh-agent on loopback, owned by this test: no real
-// host and no key of the person's is ever involved.
-const canRun = process.platform === "darwin" && existsSync("/usr/sbin/sshd");
+// host and no key of the person's is ever involved. On Linux the command runs
+// in Bubblewrap, so the test needs it there.
+const linux = process.platform === "linux";
+const canRun =
+  existsSync("/usr/sbin/sshd") &&
+  (process.platform === "darwin" || (linux && existsSync("/usr/bin/bwrap")));
+const sftpServer = ["/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server"].find((path) =>
+  existsSync(path),
+);
 
 describe.skipIf(!canRun)("a confined command reaching a registered server", () => {
   const started: ChildProcess[] = [];
@@ -89,7 +96,7 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
         "UsePAM no",
         "StrictModes no",
         `PidFile ${join(root, "sshd.pid")}`,
-        "Subsystem sftp /usr/libexec/sftp-server",
+        `Subsystem sftp ${sftpServer ?? "internal-sftp"}`,
       ].join("\n"),
     );
     started.push(
@@ -138,6 +145,10 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
       temporaryDirectory: work,
       harnessShellScriptDirectory: scripts,
     });
+    // A Linux launch reaches its proxy through a socket in a folder of its
+    // own, where the capsule's forwarder is written. Nothing listens there:
+    // only the server relays carry bytes.
+    const egressFolder = realpathSync(mkdtempSync(join(socketRoot, "egress-")));
     const shell = createNativeHarnessShell({
       process: port,
       scriptDirectory: scripts,
@@ -149,7 +160,12 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
           status: "listening",
           launch: {
             // No egress proxy listens here: only the server relays carry bytes.
-            proxy: { endpoint: { kind: "loopback", port: 9 }, token: "token" },
+            proxy: {
+              endpoint: linux
+                ? { kind: "unix-socket", path: join(egressFolder, "proxy.sock") }
+                : { kind: "loopback", port: 9 },
+              token: "token",
+            },
             finish: async () => ({ status: "summarized", summary: {} as never }),
           } as never,
         }),
@@ -159,6 +175,7 @@ describe.skipIf(!canRun)("a confined command reaching a registered server", () =
           personAgentSocket: () => agentSocket,
           resolve: (alias) => resolveWithPersonConfig(alias, personConfig),
           socketParent: socketRoot,
+          ...(linux ? { relays: "unix-socket" as const } : {}),
         }),
     });
     return { shell, checkout };

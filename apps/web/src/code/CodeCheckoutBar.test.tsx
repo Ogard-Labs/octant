@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CodeCheckoutBar } from "./CodeCheckoutBar";
@@ -97,5 +97,17 @@ describe("CodeCheckoutBar", () => {
     );
     expect(screen.getByLabelText("Checkout")).toHaveTextContent("devbox:/home/build/service");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("opens Git on the server from a server Project's bar", () => {
+    const openGit = vi.fn();
+    render(
+      <CodeCheckoutProvider observation={facts()}>
+        <CodeCheckoutBar onOpenServerGit={openGit} serverLocation="devbox:/home/build/service" />
+      </CodeCheckoutProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Git" }));
+    expect(openGit).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Create pull request" })).not.toBeInTheDocument();
   });
 });
