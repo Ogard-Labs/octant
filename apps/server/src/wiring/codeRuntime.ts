@@ -1066,6 +1066,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             head: `${owner}:${thread.deliveryTarget.branchIntent}`,
           };
         },
+        standingMergeAllowance: (thread) => {
+          const project = persistence.readProject(thread.projectId);
+          return project?.type === "code" && project.agentMerge === "enabled" ? ["project"] : [];
+        },
         reviewFiles: {
           resolve: (input) => {
             const reference = persistence.readCodeFileReference(input.fileId);

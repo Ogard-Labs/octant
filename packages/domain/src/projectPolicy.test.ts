@@ -30,6 +30,7 @@ import {
   changeCodeProjectPermissionMode,
   changeCodeProjectAutoReviewer,
   changeCodeProjectDesktopRecipe,
+  changeCodeProjectAgentMerge,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectBrandKit,
   changeProjectColor,
@@ -252,6 +253,22 @@ describe("Project creation and lifecycle", () => {
         "enabled",
         updatedAt,
       ),
+    ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("lets a Code Project allow agents to merge, which starts off for every Project", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const allowed = changeCodeProjectAgentMerge(project, "enabled", updatedAt);
+    expect(allowed).toMatchObject({ type: "code", agentMerge: "enabled", version: 2 });
+    expect(changeCodeProjectAgentMerge(allowed, "disabled", updatedAt)).toMatchObject({
+      agentMerge: "disabled",
+      version: 3,
+    });
+    expect(() => changeCodeProjectAgentMerge(project, "disabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() =>
+      changeCodeProjectAgentMerge(makeProject(ids.work, "0/1", { type: "work" }), "enabled", updatedAt),
     ).toThrow(ProjectPolicyRejected);
   });
 

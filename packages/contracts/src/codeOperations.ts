@@ -244,6 +244,22 @@ const GitAuthorization = Schema.Union(
   ),
   Schema.Struct({ kind: Schema.Literal("full-access") }).annotations(strict),
 );
+/**
+ * What allowed a merge. Besides the approval for one act, the person may have
+ * stored a standing choice: the Project's "agents may merge" setting, or a
+ * routine created with merging allowed. The command only names the choice it
+ * relies on; the host checks it again and refuses a claim the stored choice
+ * does not back.
+ */
+export const CodeMergeStandingSource = Schema.Literal("project", "routine");
+export type CodeMergeStandingSource = typeof CodeMergeStandingSource.Type;
+const MergeAuthorization = Schema.Union(
+  GitAuthorization,
+  Schema.Struct({
+    kind: Schema.Literal("standing"),
+    allowedBy: CodeMergeStandingSource,
+  }).annotations(strict),
+);
 const GitPushConfirmation = Schema.Struct({
   remote: GitRemoteName,
   refspec: boundedNonEmptyText(1_024).pipe(
@@ -747,7 +763,7 @@ const MergePullRequest = Schema.Struct({
   ...OperationScope,
   method: Schema.Literal("merge", "squash", "rebase"),
   headSha: GitObjectId,
-  authorization: GitAuthorization,
+  authorization: MergeAuthorization,
 }).annotations(strict);
 const ObservePullRequest = Schema.Struct({
   kind: Schema.Literal("observe-pull-request"),

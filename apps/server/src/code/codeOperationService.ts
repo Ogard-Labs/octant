@@ -47,6 +47,7 @@ import {
   type ProviderContextBlock,
   type UtcTimestamp,
   type WindowId,
+  type CodeMergeStandingSource,
 } from "@octant/contracts";
 import type { FramedExternalContent } from "../context/externalContentFraming";
 import {
@@ -986,6 +987,13 @@ export interface CodeOperationServiceOptions {
     | { readonly status: "unavailable" }
   >;
   readonly pullRequests: CodeOperationPullRequestPort;
+  /**
+   * The standing merge permissions the person has stored for this thread right
+   * now: its Project's "agents may merge" setting, and the routine that
+   * started it. Absent reads none, so a merge then needs an approval for the
+   * act.
+   */
+  readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
   readonly reviewFindings: CodeOperationReviewFindingPort;
   readonly turns: CodeOperationTurnPort;
   readonly evidence: CodeOperationEvidencePort;
@@ -2368,6 +2376,14 @@ export class CodeOperationService {
       initiator: vouchedInitiator,
     });
     if (policy.decision === "deny") return "unauthorized";
+    // A merge on a standing permission skips the per-act prompt only while the
+    // host's own stored choice still backs the claim; the command's word is not
+    // enough.
+    if (command.kind === "merge-pull-request" && command.authorization.kind === "standing") {
+      return this.#standingMergeBacked(command.authorization.allowedBy, thread)
+        ? "allow"
+        : "unauthorized";
+    }
     if (
       policy.decision === "prompt" &&
       this.#isApprovedTerminalContinuation(windowId, command, thread, checkout)
@@ -2404,6 +2420,10 @@ export class CodeOperationService {
         return "unauthorized";
     }
     return "allow";
+  }
+
+  #standingMergeBacked(source: CodeMergeStandingSource, thread: CodeThread): boolean {
+    return this.#options.standingMergeAllowance?.(thread).includes(source) === true;
   }
 
   #isApprovedTerminalContinuation(
@@ -3721,14 +3741,26 @@ export class CodeOperationService {
     command: Extract<CodeOperationCommand, { readonly kind: "merge-pull-request" }>,
     checkoutRoot: string,
   ): Promise<CodeOperationResult> {
-    // A merge cannot be taken back. It happens on the person's say for this
-    // act: the approval names the head they saw and the method.
-    if (command.authorization.kind !== "approved") {
+    // A merge cannot be taken back. It happens on the person's say: an approval
+    // for this act, which names the head they saw and the method, or a stored
+    // choice the host checks again here.
+    const standing = command.authorization.kind === "standing";
+    if (command.authorization.kind !== "approved" && !standing) {
       return this.#failed(
         command.operationId,
         "unauthorized",
-        "Merging needs the person's approval for this act, at every access level.",
+        "Merging needs the person's approval for this act, or a stored choice that allows it.",
       );
+    }
+    if (command.authorization.kind === "standing") {
+      const thread = this.#options.authority.readThread(command.threadId);
+      if (thread === undefined || !this.#standingMergeBacked(command.authorization.allowedBy, thread)) {
+        return this.#failed(
+          command.operationId,
+          "unauthorized",
+          "No stored choice allows this merge any longer.",
+        );
+      }
     }
     if ((await this.#hasGitHubRemote(checkoutRoot)) === false)
       return this.#pullRequestUnavailable(command.operationId, "no-remote");
@@ -3746,7 +3778,7 @@ export class CodeOperationService {
     if (summary.headSha !== command.headSha)
       return this.#pullRequestUnavailable(command.operationId, "sha-mismatch");
     const decision = decideRemotePullRequestMerge({
-      caller: "agent-on-request",
+      caller: standing ? "agent-on-standing-permission" : "agent-on-request",
       confirmed: true,
       requiredChecks: await actions.requiredChecks(located.target, signal),
     });
