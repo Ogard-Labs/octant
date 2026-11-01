@@ -125,6 +125,16 @@ function run(service: SecretStoresService, windowId: WindowId, command: SecretSt
       return service.clearProviderKeyReference(windowId, command.instanceId);
     case "read-provider-key-reference":
       return service.readProviderKeyReference(command.instanceId);
+    case "point-aws-cli-key":
+      return service.pointAwsCliKey(windowId, {
+        store: command.store,
+        accessKeyIdReference: command.accessKeyIdReference,
+        secretAccessKeyReference: command.secretAccessKeyReference,
+      });
+    case "clear-aws-cli-key":
+      return service.clearAwsCliKey(windowId);
+    case "read-aws-cli-key":
+      return service.readAwsCliKey();
   }
 }
 

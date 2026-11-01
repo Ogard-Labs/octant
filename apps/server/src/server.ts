@@ -514,6 +514,7 @@ export function startOctantServer(
       goalService,
       nativeHarnessLeadFallback,
       nativeHarnessTranscripts,
+      options,
       persistence,
       providerDataDirectory,
       runningWorkTurnAccess,

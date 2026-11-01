@@ -262,6 +262,9 @@ keeps working:
 - **API keys and tokens** go through Octant's credential broker. Link the key
   in Octant, and the runtime receives it in its environment. For a cluster,
   point `KUBECONFIG` at a file you keep outside the protected list.
+- **The AWS command line** in Octant's own shell gets a session that lasts one
+  hour once you point its key pair at items in a linked password manager
+  ([Use API keys from a secret store](../guide/secret-stores.md)).
 
 When an agent asks for a protected file, the refusal says which group refused
 it and which channel to use. You see that message in the tool row.

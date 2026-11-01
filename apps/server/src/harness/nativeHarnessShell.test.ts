@@ -48,6 +48,47 @@ describe("native harness shell environment", () => {
       { NO_COLOR: "1", TERM: "dumb" },
     ]);
   });
+
+  it("hands each command the cloud command line's session, and runs it without one when none comes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-harness-cloud-"));
+    directories.push(directory);
+    const environments: Array<Readonly<Record<string, string>>> = [];
+    let session: () => Promise<Readonly<Record<string, string>>> = async () => ({
+      AWS_ACCESS_KEY_ID: "ASIAFIXTURE00SESSION",
+      AWS_SECRET_ACCESS_KEY: "session-secret",
+      AWS_SESSION_TOKEN: "session-token",
+    });
+    const shell = createNativeHarnessShell({
+      process: {
+        executeShellScript: async (input) => {
+          environments.push(input.environment);
+          return {
+            termination: "exited",
+            exitCode: 0,
+            stdout: new Uint8Array(),
+            stderr: new Uint8Array(),
+          } as never;
+        },
+      },
+      scriptDirectory: directory,
+      cloudCliEnvironment: () => session(),
+    });
+    await shell.run({ command: "aws s3 ls", cwd: directory, timeoutMs: 1_000 });
+    session = async () => {
+      throw new Error("broker down");
+    };
+    await shell.run({ command: "aws s3 ls", cwd: directory, timeoutMs: 1_000 });
+    expect(environments).toEqual([
+      {
+        AWS_ACCESS_KEY_ID: "ASIAFIXTURE00SESSION",
+        AWS_SECRET_ACCESS_KEY: "session-secret",
+        AWS_SESSION_TOKEN: "session-token",
+        NO_COLOR: "1",
+        TERM: "dumb",
+      },
+      { NO_COLOR: "1", TERM: "dumb" },
+    ]);
+  });
 });
 
 // These run the real `sandbox-exec`: the shell entry point only matters if a
