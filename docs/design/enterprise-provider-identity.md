@@ -703,7 +703,7 @@ depends only on 1–3.
    product's first-party client id is refused under the originality rule.
 2. **Sign-in flow.** The desktop signs in with the authorization code flow and
    PKCE on a loopback redirect only. Device code is a per-instance opt-in for a
-   host without the desktop app, in a later slice (slice 2), never the default:
+   host without the desktop app (built in slice 2, from `octant provider sign-in`), never the default:
    many tenants block it by policy, and it is the easier flow to phish.
 3. **Continuous access evaluation.** Octant does not request it, keeping
    ordinary hour-long tokens and no claims challenges. Rejected for slice 1:

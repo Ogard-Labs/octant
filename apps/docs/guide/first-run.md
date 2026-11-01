@@ -137,23 +137,21 @@ new-task composer in that Project. Nothing is sent until you send it.
 The thread starts in the mode you chose in the Mode step, or the one its
 Project chose.
 
-Planned: first run asks once which mode new threads start in. The list is Auto
-(Recommended), Ask first, Accept edits, Plan, and Full access. In Auto a
-reviewer answers approval prompts for you: your provider's own reviewer where
-it has one (Claude Code, Codex), otherwise Octant Shield, Octant's own
-reviewer. Shield runs on your provider's smallest model by default, never
-allows risky actions such as deleting data or reaching new hosts on its own,
-and sends anything it is unsure of to you. Auto is pre-selected for every
-provider. Where no reviewer can run, the thread starts in Ask first and the
-list says why. Choose the reviewer in Settings › Access. Your pick is the default for new threads.
-Change it in Settings › Access, per Project, or on any thread from the
-composer in one click. Full access is never the default. Full access means
-no sandbox and no prompts: agents can change any file and run any command
-without asking, with no sandbox. Protected files, such as SSH and cloud keys,
-are guarded by Octant's own tools and redaction only, and a shell command can
-read them. The first time this computer or a Project picks
-it, Octant shows that warning once. At Full access, outside content an agent
-read is only marked on the tool row and the thread card; nothing asks.
+Auto, Ask first, Accept edits, Plan, and Full access are the same modes you
+meet everywhere else; your pick is the default for new Code threads. New Work
+threads take their level from Settings › Work, and Work Projects have no
+access override. Change it in
+Settings › Access, per Project, or on any thread from the composer in one
+click. Where a provider has no reviewer of its own, Octant Shield, Octant's
+own reviewer, can answer approval prompts. Shield runs on your provider's
+smallest model by default, never allows risky actions such as deleting data
+or reaching new hosts on its own, and sends anything it is unsure of to you.
+Full access is never the default. It means no sandbox and no prompts: agents
+can change any file and run any command without asking. Protected files, such
+as SSH and cloud keys, are guarded by Octant's own tools and redaction only,
+and a shell command can read them. The first time this computer or a Project
+picks it, Octant shows that warning once. At Full access, outside content an
+agent read is only marked on the tool row and the thread card; nothing asks.
 
 Destinations that this host cannot back — Navigator without a model, a Work
 board that is not wired, GitHub pull requests without a working GitHub

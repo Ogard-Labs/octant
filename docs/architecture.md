@@ -1085,7 +1085,7 @@ show and which tools a thread starts with, never in what a thread may do:
 
 Each provider driver starts a session acquired in Work mode exactly as it
 starts a Code session at the same level, and a Work turn journals `shell` and
-`git` as the level it ran at (`guarded`, `provider-review`, or `full-access`;
+`git` as the level it ran at (`guarded`, `provider-review` for Reviewed, or `full-access`;
 `denied` on a turn accepted before the shared rule was built), with
 `confinement` `unconfined` at Full access. Built per runtime:
 
@@ -1121,9 +1121,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   shows the Project terminal and Project actions, the developer surfaces Work
   has today; no thread's authority reads it.
 
-Allowed; not built yet: an ACP agent whose shell runs in-process with no protocol request reporting
-`unsupported` at Guarded and Reviewed and running only at Full access, in
-Work as in Code. Octant Shield answers a Work thread's approvals at Auto on
+An ACP agent whose shell runs in-process with no protocol request reports
+`unsupported` at Guarded and Reviewed and runs only at Full access, in Work as
+in Code (built: the profile's `shellWithoutRequest`; no shipped profile sets
+it). Octant Shield answers a Work thread's approvals at Auto on
 every runtime that routes them to Octant, as it answers a Code thread's:
 the Octant Harness, Claude Code, Codex, OpenCode, ACP agents, and Pi, judged
 against the Project folder and counted against the Work thread's spend; see
@@ -2848,7 +2849,8 @@ flowchart LR
   Reviewed, and off at Full access, where the mark is recorded and shown
   but never prompts or blocks;
   a person turns it down for one thread or Project by setting that scope's
-  level (allowed; not built yet: today it is on at every posture). The mark
+  level (allowed; not built yet: Full access is the only level where it is off,
+  and a Project or thread cannot turn it down below that). The mark
   itself is recorded at every level, because the journal records what came
   in. One gate enforces it today:
   `resolveThreadElevation` in `packages/domain/src/toolCallPolicy.ts` asks
@@ -2856,7 +2858,7 @@ flowchart LR
   for each closed-catalog entry marked `irreversibleUnderTaint`
   (MCP tools, computer-use, the harness's `web-fetch`, `bash`, `edit`,
   `write`, and `goal-check`); Plan refuses all of these but `web-fetch`
-  before that check. At Full access in Code the taint is recorded only (see
+  before that check. At Full access in Work and Code the taint is recorded only (see
   [modes](#modes-chat-work-and-code)). A contract test refuses a catalog entry in a
   destructive, credential, outside-Project, or privilege-expansion class
   without that flag. A Code Git action a person takes from a window is that
@@ -3451,9 +3453,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 
   | Provider     | Today                                                                                                                                                                                              | Rule                                                                                                                                                                                                                 | Built                                                                                                                                                                                                                                                                                                                                                                   |
   | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | Claude Code  | With the setup off: own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Code only; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers start only with a trusted Project's, because `strictMcpConfig` governs both                                         |
-  | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                                    | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                               | Reviewed with its own reviewer, in Code only; with the setup on, Project skills on and the person's tool servers on in Chat; its own subagents only at Full access, because their approvals never reach Octant                                                                                                                                                          |
-  | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                                                 | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | Reviewed with its auto-approve mode, in Code only; with the setup on, its skills, Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents. Not built yet: promotion off the ACP bridge                                                                                        |
+  | Claude Code  | With the setup off: own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers start only with a trusted Project's, because `strictMcpConfig` governs both                                     |
+  | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                                    | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                               | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on and the person's tool servers on in Chat; its own subagents only at Full access, because their approvals never reach Octant                                                                                                                                                      |
+  | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                                                 | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills, Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents. Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                                    |
   | OpenCode     | Shell and delegation follow the level in Work as in Code; Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`, never `always`                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                                 | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card. Not built yet: Reviewed through Octant Shield |
 
   Every other provider keeps the deny rules for Project code and skills under
@@ -6162,8 +6164,8 @@ the model at another size.
   release's acceptance runs this checklist, and a release does not claim
   Harness parity while any item is open.
   1. **Offered tools.** Always offered: `todo-write`, `context-remaining`,
-     and `second-opinion` in every mode; `read`, `grep`, `glob`, `edit`, and
-     `write` in Work and Code; `bash` and `goal-check` in Code only;
+     and `second-opinion` in every mode; `read`, `grep`, `glob`, `edit`,
+     `write`, `bash`, and `goal-check` in Work and Code;
      `journal-lookup` in every mode when the host supplies the journal (and,
      in Code, the turn's secret list). Offered
      when the host supplies the port: `delegate`, `ask-user`, and `goal`
@@ -7969,20 +7971,22 @@ mechanisms are:
     Where no reviewer can run for a thread (for example, no reachable Shield
     model), that thread falls back to Ask first and the picker says why.
     There is no separate switch below Full access. The answer becomes the
-    default for every new thread, Work and
-    Code; Settings › Access changes it, a Project may override it, and any
-    thread can switch mode at any time from the composer in one click
-    (maintainer decision, 2026-10-31; allowed; not built yet: today new Code
-    threads start approval-gated unless Full access is remembered).
+    default for every new Code thread; Settings › Code › Access changes it, a
+    Code Project may override it, and any thread can switch mode at any time
+    from the composer in one click (maintainer decision, 2026-10-31). Built
+    for Code; a new Work thread takes its mode from Settings › Work, and the
+    first-run answer and a Work Project override do not reach Work (allowed;
+    not built yet).
   - **Plan is an overlay,** not a level: a mode of a thread at any level,
     always read-only.
   - **Lowering is journaled and shown.** Each change records who lowered it,
     when, from which level, and at which scope. The thread header shows the
-    level in force and the scope it came from.
-  - **Older recorded levels replay as Full access.** A journaled "Trusted"
-    or "Off" level, from the earlier design that kept a sandboxed no-prompt
-    level and a separate switch, replays as Full access; nothing recorded is
-    dropped.
+    level in force and the scope it came from (allowed; not built yet: today
+    the composer's mode picker shows the level, and the journal does not
+    record the scope a change was lowered from).
+  - **Older recorded levels replay as Full access.** A level journaled by
+    the earlier design, which kept a sandboxed no-prompt level and a
+    separate switch, replays as Full access; nothing recorded is dropped.
   - **Subagents start at their parent's level** and go lower only when the
     person says so; a child run never exceeds its parent. A routine runs at
     the level the person picked when creating it, Full access included, and
@@ -7995,21 +7999,19 @@ mechanisms are:
   Today's postures map onto the levels. Approval-gated is Guarded, and
   auto-accept-edits is Guarded with project file writes waived (Accept
   edits). A Code thread's `autoApprove` flag on a provider reporting
-  `harnessAutoReview` is Reviewed (below). Built today: Guarded, Accept
-  edits, Reviewed for Claude Code and Codex in Code, and Full access in
-  Code, set per thread and remembered per Project. Today's Full access
-  already runs Claude Code at `bypassPermissions` and Codex at
-  `danger-full-access` with approval policy `never`, with no Octant
-  wrapping for any provider runtime.
-  It still asks for some classes (the
-  Octant Harness exception below, a tainted thread's confirmations, a
-  review reply posted under the person's name, a publish to an outside
-  service); those prompts are today's build, not the rule.
-  Allowed; not built yet: the single
-  level setting with its global and Project defaults, the first-run
-  question, the header indicator, the one-time warning,
-  Reviewed in Work, and Full access
-  without a sandbox or prompts for every runtime.
+  `harnessAutoReview` is Reviewed (below). Built: Guarded, Accept edits,
+  Reviewed (the provider's own reviewer, or Octant Shield), and Full access
+  in Code and Work, with the first-run question, a global default, a Code
+  Project override, and the one-time warning. Full access runs Claude Code
+  at `bypassPermissions` and Codex at `danger-full-access` with approval
+  policy `never`, with no Octant wrapping for any provider runtime. A
+  review reply posted under the person's name still asks at every level, and
+  so does a publish of a Project file to an outside service (allowed; not
+  built yet: no prompt for it at Full access).
+  Allowed; not built yet: the header indicator that shows the level in
+  force and the scope it came from, the journaled record of who lowered a
+  level and from where, a Work Project override, and an ACP agent's own
+  reviewer.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
@@ -8050,8 +8052,8 @@ mechanisms are:
   [Extensions and skills](#extensions-and-skills). Work and Code threads
   start in the mode the person picked at first run (Auto
   pre-selected, else Ask first where no reviewer can run), changeable
-  per thread from the composer, per Project, or in Settings › Access (allowed; not built yet: today Code starts approval-gated and only
-  a per-Project remembered Full access exists, and Work has neither);
+  per thread from the composer, per Code Project, or in Settings › Code ›
+  Access (built for Code; allowed; not built yet: a Work Project override);
   Plan mode is read-only; auto-accept-edits waives only project file writes;
   today a Work thread takes its level from Settings › Work when it is created
   (Auto, Ask first, the default, Accept edits, or Full access) and changes it
@@ -8112,7 +8114,7 @@ mechanisms are:
   Delegation is clamped off by taint and by capability (`harnessAutoReviewEffective`).
   Full access means what it means in the providers' own apps: no sandbox and
   no prompts (maintainer decision, 2026-10-31, which folded the earlier
-  sandboxed Trusted level and the separate Off switch into it). OpenCode, Pi
+  sandboxed no-prompt level and the separate switch into it). OpenCode, Pi
   and the Octant harness launch outside Octant's OS sandbox with the network
   open, and Octant answers every approval allow; an ACP agent also launches
   unconfined, keeping only the static denials of host credential files and
@@ -8123,8 +8125,8 @@ mechanisms are:
   publishes because the person asked in the thread, and the journal records
   the call. Outside content is recorded only: the thread keeps its taint for
   the tool row tag, the thread card mark, the journal and export, and it
-  never prompts or blocks, the tainted web-search refusal included. Work is
-  not on the shared levels, so its taint gates as before. A journal that
+  never prompts or blocks, the tainted web-search refusal included, in Work
+  as in Code. A journal that
   carries the retired `sandboxOff` thread stamp or `fullAccessSandboxOff`
   Settings switch decodes and drops it, so both old forms of Full access
   replay as Full access. The first time this machine (its Settings default
@@ -9008,8 +9010,11 @@ access` agree); a thread's own change is journaled as
   - **Pi** reports no user questions, file changes, diffs, or task progress,
     and offers Octant's tools only after its probe attests the tool bridge on
     the one release that bridge was read against.
-  - **Mistral Vibe** is first-class but still runs through the ACP bridge, so
-    every ACP gap below applies to it until it is promoted (not built yet).
+  - **Mistral Vibe** is first-class and runs through the ACP bridge, so every
+    ACP gap below applies to it. Its `vibe-app-server` is not adopted
+    ([why](design/provider-runtimes.md#mistral-vibe-surface)); reading usage,
+    compaction, review, and questions from `vibe-acp`'s own ACP extensions is
+    allowed, not built yet.
   - **ACP agents** do not report usage, so a spend ceiling leaves their turns
     out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
@@ -9039,12 +9044,12 @@ access` agree); a thread's own change is journaled as
 
   Work at the shared level is not a capability row: it changes the session a
   driver acquires, not what the driver declares. Each provider runs a Work
-  session as it runs a Code session at the same level (built; the Octant
-  Shield and in-process-shell parts are allowed, not built yet):
+  session as it runs a Code session at the same level (built, with Octant
+  Shield answering a Work thread's approvals at Auto on every runtime):
 
   - **Claude Code** starts the Work session with its shell tool; Guarded asks
-    per command, Reviewed uses its automatic mode or Octant Shield, Full access runs
-    commands without asking.
+    per command, Reviewed uses its automatic mode or Octant Shield, Full access
+    runs commands without asking.
   - **Codex** starts and resumes the Work thread with `features.shell_tool`
     and `features.unified_exec` on and its own approval policy for the level;
     Reviewed uses its own approval review or Octant Shield.
@@ -9054,8 +9059,8 @@ access` agree); a thread's own change is journaled as
   - **Pi** starts with its shell tool; Reviewed uses Octant Shield there too.
   - **ACP agents**, Mistral Vibe included, get their `execute` requests sent
     to the person at Guarded instead of refused; Reviewed uses the
-    agent's own auto-approve mode where it has one (Mistral Vibe: allowed, not
-    built yet) and Octant Shield otherwise. An agent whose shell runs in-process without a protocol
+    agent's own auto-approve mode where it has one (Mistral Vibe) and Octant Shield
+    otherwise. An agent whose shell runs in-process without a protocol
     request cannot be asked per command, so at Guarded and Reviewed it
     reports `unsupported` with that reason, in Work and Code alike; at
     Full access it runs.
@@ -10536,7 +10541,7 @@ Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
 no prompts": a shell command there can read a protected file. Built, except
-the Watcher's tags.
+the Watcher's protected-path tags.
 
 - **One list, every runtime.** The list is
   `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
@@ -10636,15 +10641,17 @@ the Watcher's tags.
   approval requests are left as asked, so redaction never changes what an
   agent does. A key split across two streamed chunks is not caught, and the
   model still sees what a tool returned to it.
-- **Shield links in.** The Judge, built for the Octant Harness, sends a
+- **Shield links in.** The Judge, built for every runtime that routes approvals through Octant, sends a
   command that reaches a secret file to the person (`secret-path`) and refuses
   one that reads secrets and sends something off the computer
-  (`reads-secrets-then-egress`); see [Octant Shield](#octant-shield). Allowed;
-  not built yet: the Watcher flagging an attempt to read a protected path or
-  print a secret-holding environment variable, and the Judge reading the
-  person's protected list rather than its own secret-path patterns. At Full
-  access these are journaled tags and never block, because nothing else
-  stands between a shell command and the file there.
+  (`reads-secrets-then-egress`); see [Octant Shield](#octant-shield). The
+  Watcher has a hook to flag a read of a protected path once the list is
+  handed to it. Allowed; not built yet: the Watcher flagging an attempt to
+  read a protected path or print a secret-holding environment variable, and
+  the Judge reading the person's protected list rather than its own
+  secret-path patterns. At Full access these are journaled tags and never
+  block, because nothing else stands between a shell command and the file
+  there.
 - **Measured friction** (macOS 27, below Full access, fake files in a
   throwaway home): a planted `~/.ssh/id_test` is refused while
   `~/.ssh/config`, `known_hosts`, and public keys read; `ssh-add -l` lists a
@@ -10697,8 +10704,9 @@ the picker says why.
    below belong here.
 2. **Fast allow rules,** with no model call: reads and edits inside the bound
    root or one of the Project's extra folders, the Project's own test or build
-   command, read-only Git, egress to a
-   safe network, and SSH to a registered server within its profile.
+   command, read-only Git, and SSH to a registered server within its
+   profile. Egress to a safe network is allowed; not built yet in the
+   Judge.
 3. **Model judgment** for everything else. The Judge sees only the person's
    own messages in this thread, the pending call (tool, arguments, working
    directory), the bound root, the level, the thread's taint state, and the
@@ -10724,14 +10732,21 @@ classes; those go to the person, as taint already withdraws the provider's
 own reviewer. After 3 denials in a row, or 20 in one thread, Shield pauses
 and the next call goes to the person.
 
-**Watcher.** The Watcher reads outside content as it enters the thread: tool
-results, fetched pages, files from outside the root, MCP results, and remote
-command output. It labels injection-shaped content: instructions aimed at the
+**Watcher.** The Watcher reads outside content as it enters the thread, with
+deterministic detectors and no model call. Built for every successful result
+of an app-managed tool and of a plugin MCP server, and of what an adapter sees
+a runtime's own web search or fetch return (an ACP agent's content items);
+allowed; not built yet: a runtime's own web result where it does not expose
+it (Codex, OpenCode), and remote command output. It labels injection-shaped content: instructions aimed at the
 agent, hidden or encoded text, requests to exfiltrate, and fake authority. It
 can only raise: it marks the thread tainted, puts a visible marker on that
 tool row, and tells the Judge "tainted". It never allows anything. It runs at
 every level; at Full access it only records and marks: a quiet tag on the
-tool row and a small mark on the thread card, never a prompt or a block.
+tool row and a small mark on the thread card, never a prompt or a block. Each
+label is journaled as an outside-content source, so it names the finding in
+the person's review of the mark and is forgotten when the person clears it;
+the Judge is told the label kinds, never the text, and a subagent's labels
+count beside its parent's.
 
 **Safe networks.** The person names trusted places in Settings › Access
 (account default, Project override): hosts, domains, address ranges, and
@@ -10988,9 +11003,9 @@ authorizes a later call nobody reviewed. An OpenCode v2 permission's
 `resources` are read as the paths, command, or address it targets. Claude Code and Codex keep their own reviewer at Auto
 by default; once the person chooses Shield for the account or the Project,
 the thread starts without the provider's reviewer, so its prompts reach
-Octant and Shield answers them. Mistral Vibe's own auto-approve mode is not
-built, so Shield reviews it, as it reviews OpenCode, every other ACP agent,
-and Pi.
+Octant and Shield answers them. Mistral Vibe's own auto-approve mode is
+built, so Shield is its alternative reviewer; Shield is the only reviewer for
+OpenCode, every other ACP agent, and Pi.
 
 The choices are built for Code: Settings › Code › Access has **Auto
 reviewer** (Provider's own / Octant Shield, stored as `CodeSettings.autoReviewer`)

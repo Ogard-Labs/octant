@@ -30,6 +30,50 @@ it("keeps browser authentication reserved for non-CLI profiles", () => {
   ).toBe(true);
 });
 
+it("passes conformance at Full access for an agent whose shell runs without asking", async () => {
+  // Such an agent is refused below Full access before any process starts, so
+  // its conformance runs where it can run: Full access, no prompts.
+  const profile: AcpProviderProfile = { ...acpProviderProfiles.kilo, shellWithoutRequest: true };
+  const fixture = createFixture(profile);
+  const evidence = await runProviderConformance({
+    driver: fixture.driver,
+    probeInput: { instanceId },
+    acquireInput: { instanceId, projectRoot, mode: "work" },
+    sessionStart: { sessionId, modelId, executionPolicy: "full-access" },
+    turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
+    resume: {
+      sessionId,
+      resumeCursor: { driverKind: profile.kind, value: "agent-session-2" },
+      executionPolicy: "full-access",
+    },
+    staleResume: {
+      sessionId,
+      resumeCursor: { driverKind: profile.kind, value: "stale" },
+      executionPolicy: "full-access",
+    },
+    unknownApproval: { sessionId, requestId: "unknown", approved: false },
+    unknownUserInput: { sessionId, requestId: "unknown", answer: "none" },
+    expectedEventKinds: [
+      "text-delta",
+      "reasoning-delta",
+      "tool-start",
+      "tool-success",
+      "task-progress",
+      "task-list",
+      "approval-request",
+      ...(profile.userQuestions === "supported" ? (["user-input-request"] as const) : []),
+      "interrupted",
+    ],
+    expectedFailureCategories: {
+      staleResume: "stale-resume",
+      unknownApproval: "protocol",
+      unknownUserInput: profile.userQuestions === "supported" ? "protocol" : "unsupported",
+    },
+    isReleased: () => fixture.active() === 0 && fixture.released() >= 3,
+  });
+  expect(evidence).toMatchObject({ capabilityHonest: true, resumed: true, released: true });
+});
+
 describe.each(Object.values(acpProviderProfiles))(
   "ACP provider conformance ($displayName)",
   (profile) => {
