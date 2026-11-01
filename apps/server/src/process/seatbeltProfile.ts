@@ -204,6 +204,14 @@ export interface ProcessConfinementPrepareInput {
    * uses it. macOS refuses it: there the profile opens the host port itself.
    */
   readonly loopbackRelayPorts?: ReadonlyArray<number>;
+  /**
+   * Linux `proxied` only: loopback ports inside the capsule the forwarder
+   * also listens on, each carried byte for byte to its host Unix socket, a
+   * relay to one registered server's address. The socket's folder must be a
+   * read root. A harness command's `ssh` uses it. macOS refuses it: there the
+   * profile opens the host relay's port itself.
+   */
+  readonly serverRelays?: ReadonlyArray<Readonly<{ port: number; socketPath: string }>>;
 }
 
 export interface ProcessConfinementPort {
@@ -984,6 +992,12 @@ function prepareSeatbeltLaunch(
 ): ConfinedProcessLaunch {
   const sandboxPath = options.sandboxPath ?? DEFAULT_SANDBOX_PATH;
   requireSandboxExec({ platform: "darwin", sandboxPath });
+  if (input.serverRelays !== undefined && input.serverRelays.length > 0) {
+    throw new ProcessConfinementError(
+      "incompatible",
+      "Seatbelt launches have no server relay; the profile opens the host relay's port.",
+    );
+  }
   if (input.inboundRelay !== undefined) {
     throw new ProcessConfinementError(
       "incompatible",
