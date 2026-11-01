@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { CodeCheckoutId, CodeFileId, CodeRelativePath, CodeThreadId } from "./code";
+import { CodeCheckoutId, CodeFileId, CodeProjectFilePath, CodeThreadId } from "./code";
 import { ProjectId } from "./projects";
 import type { ProviderToolDefinition } from "./providers";
 
@@ -65,7 +65,7 @@ export const CodeLanguageDiagnosticSeverity = Schema.Literal(
 export type CodeLanguageDiagnosticSeverity = typeof CodeLanguageDiagnosticSeverity.Type;
 
 export const CodeLanguageDiagnostic = Schema.Struct({
-  path: CodeRelativePath,
+  path: CodeProjectFilePath,
   range: CodeLanguageRange,
   severity: CodeLanguageDiagnosticSeverity,
   message: Schema.String.pipe(Schema.maxLength(MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH)),
@@ -86,7 +86,7 @@ export type CodeLanguageDiagnostic = typeof CodeLanguageDiagnostic.Type;
 export const CodeLanguageDefinitionTarget = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("checkout-location"),
-    path: CodeRelativePath,
+    path: CodeProjectFilePath,
     range: CodeLanguageRange,
   }).annotations(strict),
   Schema.Struct({
@@ -174,7 +174,7 @@ export const CodeLanguageDocumentRequest = Schema.Union(
     kind: Schema.Literal("open"),
     threadId: CodeThreadId,
     checkoutId: CodeCheckoutId,
-    path: CodeRelativePath,
+    path: CodeProjectFilePath,
     text: documentText,
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("change"), ...scope, text: documentText }).annotations(
@@ -212,13 +212,13 @@ export const CODE_DEFINITION_TOOL_NAME = "octant_code_definition";
 
 const OneBased = Schema.Int.pipe(Schema.between(1, MAX_POSITION));
 
-export const CodeDiagnosticsToolArguments = Schema.Struct({ path: CodeRelativePath }).annotations(
-  strict,
-);
+export const CodeDiagnosticsToolArguments = Schema.Struct({
+  path: CodeProjectFilePath,
+}).annotations(strict);
 export type CodeDiagnosticsToolArguments = typeof CodeDiagnosticsToolArguments.Type;
 
 export const CodeDefinitionToolArguments = Schema.Struct({
-  path: CodeRelativePath,
+  path: CodeProjectFilePath,
   line: OneBased,
   column: OneBased,
 }).annotations(strict);
@@ -287,7 +287,7 @@ export type CodeLanguageApprovalScope = typeof CodeLanguageApprovalScope.Type;
 export const CodeLanguageApprovalRequest = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
-  path: CodeRelativePath,
+  path: CodeProjectFilePath,
   scope: CodeLanguageApprovalScope,
 }).annotations(strict);
 export type CodeLanguageApprovalRequest = typeof CodeLanguageApprovalRequest.Type;

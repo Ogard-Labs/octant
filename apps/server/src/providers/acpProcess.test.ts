@@ -8,11 +8,15 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
+import type {
+  ProviderExecutionPolicy,
+  ProviderFailure,
+  ProviderNativeSetup,
+} from "@octant/contracts";
 import { Effect, Either } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -802,31 +806,9 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
         environment: { PATH: "/usr/bin" },
       }),
     );
-    const deniedPaths = [
-      ...(profile.process.forbiddenRootEntries ?? []).map((entry) =>
-        join(target.canonicalRoot, entry),
-      ),
-      ...(hostAuthentication?.kind === "directory"
-        ? (profile.process.hostDeniedEntries ?? []).map((entry) =>
-            join(target.canonicalRoot, "host-auth", entry),
-          )
-        : []),
-    ];
-    if (deniedPaths.length === 0) {
-      expect(fullAccess).toMatchObject({ command: target.binaryPath, args });
-    } else {
-      // The static extension denials outlive Full access: a workspace
-      // instruction, project config, skill root, project MCP server, or the
-      // runtime's own folder-trust list stays denied even when the rest of
-      // the sandbox is opened.
-      expect(fullAccess.command).toBe(target.sandboxPath);
-      const fullAccessProfile = fullAccess.args[1]!;
-      expect(fullAccessProfile).toContain("(allow default)");
-      for (const path of deniedPaths) {
-        expect(fullAccessProfile).toContain(`(deny file-read* (subpath "${path}"))`);
-        expect(fullAccessProfile).toContain(`(deny file-write* (subpath "${path}"))`);
-      }
-    }
+    // Full access is no sandbox: the credential-file and extension denials
+    // that apply below Full access do not wrap the launch.
+    expect(fullAccess).toMatchObject({ command: target.binaryPath, args });
     for (const file of profile.process.managedFiles({
       managedHome,
       executionPolicy: "full-access",
@@ -1112,14 +1094,7 @@ describe.each(directoryHostProfiles)("ACP host-profile contract ($displayName)",
     const launch = prepared.result.right;
     const hostEnv =
       directoryHostAuthentication(profile).environment?.(prepared.hostAuthenticationPath) ?? {};
-    const deniesHostExtensions =
-      (profile.process.hostDeniedEntries?.length ?? 0) > 0 ||
-      (profile.process.forbiddenRootEntries?.length ?? 0) > 0 ||
-      (profile.process.hostAuthentication?.kind === "directory" &&
-        (profile.process.hostAuthentication.forbiddenEntries?.length ?? 0) > 0);
-    expect(launch.command).toBe(
-      deniesHostExtensions ? prepared.target.sandboxPath : prepared.target.binaryPath,
-    );
+    expect(launch.command).toBe(prepared.target.binaryPath);
     expect(launch.environment).toMatchObject(hostEnv);
     expect(launch.environment.HOME).not.toBe(prepared.hostHome);
     expect(launch.environment.HOME).not.toBe(homedir());
@@ -1192,7 +1167,7 @@ describe("Grok Build consumed configuration", () => {
     expect(existsSync(join(managedHome, "config.toml"))).toBe(false);
   });
 
-  it.each(["approval-gated", "full-access"] as const)(
+  it.each(["approval-gated"] as const)(
     "hides the person's folder-trust list so no Project is trusted (%s)",
     async (executionPolicy) => {
       const target = fixture(grok);
@@ -1334,105 +1309,44 @@ describe("Kimi Code host-profile extension surfaces", () => {
     );
   });
 
-  it("still denies reused MCP, skills, plugins, and hooks under Full access", async () => {
-    const target = fixture(kimi);
-    const managedHome = join(target.canonicalRoot, "managed-kimi");
-    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
-    directories.push(hostHome);
-    const hostAuthenticationPath = join(hostHome, ".kimi-code");
-    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
-    mkdirSync(join(hostAuthenticationPath, "plugins"), { recursive: true });
-    mkdirSync(join(hostAuthenticationPath, "hooks"), { recursive: true });
-    writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
-    writeFileSync(join(hostAuthenticationPath, "AGENTS.md"), "hostile\n");
-    const canonicalHostPath = realpathSync(hostAuthenticationPath);
-    mkdirSync(join(target.canonicalRoot, ".kimi-code"));
-    mkdirSync(join(target.canonicalRoot, ".agents"));
-    const launch = await Effect.runPromise(
-      makeAcpConfinementLive({
-        platform: "darwin",
-        sandboxPath: target.sandboxPath,
-        temporaryDirectory: join(target.canonicalRoot, "tmp"),
-        hostAuthenticationPath: canonicalHostPath,
-      }).prepare({
-        profile: kimi,
-        binaryPath: target.binaryPath,
-        root: target.canonicalRoot,
-        managedHome,
-        mode: "code",
-        executionPolicy: "full-access",
-        environment: sanitizeAcpEnvironment(
-          kimi,
-          { PATH: "/usr/bin", HOME: "/Users/octant-test" },
-          { managedHome, executionPolicy: "full-access" },
-        ),
-      }),
-    );
+  it.each([
+    { platform: "darwin", sandboxName: "sandbox" },
+    { platform: "linux", sandboxName: "bwrap" },
+  ] as const)(
+    "launches Full access unwrapped on $platform even where the profile has extension paths to deny",
+    async ({ platform }) => {
+      const target = fixture(kimi);
+      const managedHome = join(target.canonicalRoot, "managed-kimi");
+      const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+      directories.push(hostHome);
+      const hostAuthenticationPath = join(hostHome, ".kimi-code");
+      mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
+      writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
+      const canonicalHostPath = realpathSync(hostAuthenticationPath);
+      const launch = await Effect.runPromise(
+        makeAcpConfinementLive({
+          platform,
+          sandboxPath: platform === "darwin" ? target.sandboxPath : target.bwrapPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath: canonicalHostPath,
+        }).prepare({
+          profile: kimi,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy: "full-access",
+          environment: {},
+        }),
+      );
+      expect(launch.command).toBe(target.binaryPath);
+      expect(launch.args).not.toContain("--bind");
+      expect(launch.args).not.toContain("-p");
+      expect(launch.environment.KIMI_CODE_HOME).toBe(canonicalHostPath);
+    },
+  );
 
-    expect(launch.command).toBe(target.sandboxPath);
-    expect(launch.environment.KIMI_CODE_HOME).toBe(canonicalHostPath);
-    const profileText = seatbeltProfile(launch);
-    expect(profileText).toContain("(allow default)");
-    expect(profileText).not.toContain("(deny default)");
-    for (const entry of ["mcp.json", "skills", "plugins", "hooks", "AGENTS.md"]) {
-      const denied = join(canonicalHostPath, entry);
-      expect(profileText).toContain(`(deny file-read* (subpath "${denied}"))`);
-      expect(profileText).toContain(`(deny file-write* (subpath "${denied}"))`);
-    }
-    expect(profileText).toContain(
-      `(deny file-read* (subpath "${join(target.canonicalRoot, ".kimi-code")}"))`,
-    );
-    expect(profileText).toContain(
-      `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
-    );
-  });
-
-  it("binds the host root on Linux Full access and overlays the denied extension paths", async () => {
-    const target = fixture(kimi);
-    const managedHome = join(target.canonicalRoot, "managed-kimi");
-    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
-    directories.push(hostHome);
-    const hostAuthenticationPath = join(hostHome, ".kimi-code");
-    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
-    writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
-    const canonicalHostPath = realpathSync(hostAuthenticationPath);
-    const launch = await Effect.runPromise(
-      makeAcpConfinementLive({
-        platform: "linux",
-        sandboxPath: target.bwrapPath,
-        temporaryDirectory: join(target.canonicalRoot, "tmp"),
-        hostAuthenticationPath: canonicalHostPath,
-      }).prepare({
-        profile: kimi,
-        binaryPath: target.binaryPath,
-        root: target.canonicalRoot,
-        managedHome,
-        mode: "code",
-        executionPolicy: "full-access",
-        environment: {},
-      }),
-    );
-    expect(launch.command).toBe(target.bwrapPath);
-    expect(launch.args.slice(0, 9)).toEqual([
-      "--die-with-parent",
-      "--bind",
-      "/",
-      "/",
-      "--dev-bind",
-      "/dev",
-      "/dev",
-      "--proc",
-      "/proc",
-    ]);
-    expect(launch.args).toContainEqual("--tmpfs");
-    expect(launch.args).toContain(join(canonicalHostPath, "skills"));
-    expect(launch.args).toContain(join(canonicalHostPath, "mcp.json"));
-    // A denied entry the Project does not have is not created in it.
-    expect(launch.args).not.toContain(join(target.canonicalRoot, ".agents"));
-    expect(existsSync(join(target.canonicalRoot, ".agents"))).toBe(false);
-  });
-
-  it("refuses Linux Full access through a setuid Bubblewrap before launching, while approval-gated still starts", async () => {
+  it("starts Linux Full access unwrapped on a setuid Bubblewrap, while approval-gated still starts", async () => {
     const target = fixture(kimi);
     const managedHome = join(target.canonicalRoot, "managed-kimi");
     const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
@@ -1454,63 +1368,15 @@ describe("Kimi Code host-profile extension surfaces", () => {
       mode: "code",
       environment: {},
     } as const;
-    const refusal = await failureOf(
+    const fullAccess = await Effect.runPromise(
       confinement.prepare({ ...request, executionPolicy: "full-access" }),
     );
-    expect(refusal.category).toBe("incompatible");
-    expect(refusal.message).toContain(`${target.bwrapPath} is setuid`);
-    expect(refusal.message).toContain("choose a narrower permission than Full access");
+    expect(fullAccess.command).toBe(target.binaryPath);
     const gated = await Effect.runPromise(
       confinement.prepare({ ...request, executionPolicy: "approval-gated" }),
     );
     expect(gated.command).toBe(target.bwrapPath);
     expect(gated.args).toContain("--unshare-all");
-  });
-
-  it("uses native sandbox-exec so a Full access child cannot read planted MCP config", async () => {
-    if (process.platform !== "darwin") return;
-    const target = fixture(kimi);
-    const managedHome = join(target.canonicalRoot, "managed-kimi");
-    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
-    directories.push(hostHome);
-    const hostAuthenticationPath = join(hostHome, ".kimi-code");
-    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
-    writeFileSync(join(hostAuthenticationPath, "mcp.json"), "hostile-mcp\n");
-    writeFileSync(join(hostAuthenticationPath, "config.toml"), "telemetry = false\n");
-    const canonicalHostPath = realpathSync(hostAuthenticationPath);
-    const launch = await Effect.runPromise(
-      makeAcpConfinementLive({
-        platform: "darwin",
-        sandboxPath: "/usr/bin/sandbox-exec",
-        temporaryDirectory: join(target.canonicalRoot, "tmp"),
-        hostAuthenticationPath: canonicalHostPath,
-      }).prepare({
-        profile: kimi,
-        binaryPath: target.binaryPath,
-        root: target.canonicalRoot,
-        managedHome,
-        mode: "code",
-        executionPolicy: "full-access",
-        environment: {},
-      }),
-    );
-    const profile = launch.args[1];
-    expect(typeof profile).toBe("string");
-    if (typeof profile !== "string") return;
-    const denied = spawnSync(
-      "/usr/bin/sandbox-exec",
-      ["-p", profile, "--", "/bin/cat", join(canonicalHostPath, "mcp.json")],
-      { encoding: "utf8" },
-    );
-    const allowed = spawnSync(
-      "/usr/bin/sandbox-exec",
-      ["-p", profile, "--", "/bin/cat", join(canonicalHostPath, "config.toml")],
-      { encoding: "utf8" },
-    );
-    expect(denied.status).not.toBe(0);
-    expect(denied.stdout).not.toContain("hostile-mcp");
-    expect(allowed.status).toBe(0);
-    expect(allowed.stdout).toContain("telemetry = false");
   });
 });
 
@@ -2093,5 +1959,184 @@ describe("Kimi Code provider-owned profile", () => {
     const spawned = spawnRecord(target.root);
     expect(spawned?.cwd).toBe(root);
     expect(spawned?.args.at(-1)).toBe("acp");
+  });
+});
+
+describe("System Keychain read for fx", () => {
+  const systemKeychain = "/Library/Keychains/System.keychain";
+
+  async function fxProfileText(
+    profile: AcpProviderProfile,
+    executionPolicy: ProviderExecutionPolicy,
+  ) {
+    const target = fixture(profile);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: "code",
+        executionPolicy,
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    return seatbeltProfile(launch);
+  }
+
+  it.each(["approval-gated", "auto-accept-edits"] as const)(
+    "lets fx at %s read the System Keychain file after every built-in denial, and write no Keychain",
+    async (executionPolicy) => {
+      const lines = (await fxProfileText(fx, executionPolicy)).trimEnd().split("\n");
+      const allow = `(allow file-read* (literal "${systemKeychain}"))`;
+      expect(lines.at(-1)).toBe(allow);
+      expect(lines).toContain('(deny file-read* (subpath "/Library/Keychains"))');
+      expect(
+        lines.filter((line) => line.includes("Keychains/") && line.startsWith("(allow")),
+      ).toEqual([allow]);
+      expect(
+        lines.some((line) => line.startsWith("(allow file-write") && line.includes("Keychains")),
+      ).toBe(false);
+    },
+  );
+
+  it.each(profiles.filter((profile) => profile.kind !== "fx"))(
+    "gives $displayName no System Keychain read",
+    async (profile) => {
+      if (profile.refuses?.("code", "approval-gated") !== undefined) return;
+      expect(await fxProfileText(profile, "approval-gated")).not.toContain("System.keychain");
+    },
+  );
+
+  it("lets a process under the fx profile read the System Keychain file and nothing else of the Keychains", async () => {
+    if (process.platform !== "darwin" || !existsSync(systemKeychain)) return;
+    const target = fixture(fx);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: "/usr/bin/sandbox-exec",
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile: fx,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    const profile = seatbeltProfile(launch);
+    const run = (...command: ReadonlyArray<string>) =>
+      spawnSync("/usr/bin/sandbox-exec", ["-p", profile, "--", ...command], {
+        encoding: "utf8",
+      }).status;
+    expect(run("/usr/bin/head", "-c", "4", systemKeychain)).toBe(0);
+    expect(run("/bin/ls", "/Library/Keychains")).not.toBe(0);
+    expect(run("/usr/bin/head", "-c", "1", "/var/db/SystemKey")).not.toBe(0);
+    expect(run("/bin/ls", join(realpathSync(homedir()), "Library/Keychains"))).not.toBe(0);
+    expect(run("/bin/sh", "-c", `: >> ${systemKeychain}`)).not.toBe(0);
+  });
+});
+
+describe("Mistral Vibe running as itself", () => {
+  const everything = {
+    subagents: true,
+    webTools: true,
+    skills: true,
+    toolServers: true,
+    hooks: true,
+    projectCode: true,
+  } as const;
+  const kept = [
+    "VIBE_ENABLE_TELEMETRY",
+    "VIBE_ENABLE_UPDATE_CHECKS",
+    "VIBE_ENABLE_NOTIFICATIONS",
+    "VIBE_VOICE_MODE_ENABLED",
+    "VIBE_NARRATOR_ENABLED",
+    "VIBE_TEST_DISABLE_KEYRING",
+    "VIBE_ENABLED_AGENTS",
+    "VIBE_DEFAULT_AGENT",
+    "VIBE_AGENT_PATHS",
+    "VIBE_INSTALLED_AGENTS",
+  ];
+
+  it("keeps every guard for a session without the person's setup and releases only its own for one with it", () => {
+    const locked = sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x" });
+    expect(locked).toMatchObject(vibe.process.guards);
+
+    const own = sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x", nativeSetup: everything });
+    for (const name of [
+      "VIBE_INCLUDE_PROJECT_CONTEXT",
+      "VIBE_SKILL_PATHS",
+      "VIBE_DISABLED_SKILLS",
+      "VIBE_MCP_SERVERS",
+      "VIBE_ENABLE_CONNECTORS",
+      "VIBE_ENABLE_EXPERIMENTAL_HOOKS",
+      "VIBE_TOOL_PATHS",
+    ]) {
+      expect(own, name).not.toHaveProperty(name);
+    }
+    for (const name of kept) expect(own[name], name).toBe(vibe.process.guards[name]);
+
+    // Plan and Chat: skills only, so hooks, tool servers, and Project tools stay off.
+    const readOnly = sanitizeAcpEnvironment(
+      vibe,
+      {},
+      {
+        managedHome: "/x",
+        nativeSetup: { ...everything, toolServers: false, hooks: false, projectCode: false },
+      },
+    );
+    expect(readOnly).not.toHaveProperty("VIBE_SKILL_PATHS");
+    expect(readOnly.VIBE_MCP_SERVERS).toBe("[]");
+    expect(readOnly.VIBE_ENABLE_EXPERIMENTAL_HOOKS).toBe("false");
+    expect(readOnly.VIBE_TOOL_PATHS).toBe("[]");
+  });
+
+  it("reads a trusted Project's own .vibe entries again only for a session that loads its code", async () => {
+    const target = fixture(vibe);
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+    });
+    const launch = (nativeSetup?: ProviderNativeSetup) =>
+      Effect.runPromise(
+        confinement.prepare({
+          profile: vibe,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: { PATH: "/usr/bin" },
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+    const projectConfig = join(target.canonicalRoot, ".vibe/config.toml");
+    const denies = (args: ReadonlyArray<string>) =>
+      args.some((arg) => arg.includes(`(deny file-read* (subpath "${projectConfig}"))`));
+    expect(denies((await launch()).args)).toBe(true);
+    expect(denies((await launch({ ...everything, projectCode: false })).args)).toBe(true);
+    expect(denies((await launch(everything)).args)).toBe(false);
+  });
+
+  it("answers Reviewed's prompts with Vibe's own auto-approve mode in Code only", () => {
+    expect(vibe.ownReviewer).toBe(true);
+    expect(vibe.sessionMode("code", "approval-gated", true)).toBe("auto-approve");
+    expect(vibe.sessionMode("code", "approval-gated", false)).toBe("ask");
+    expect(vibe.sessionMode("work", "approval-gated", true)).toBe("ask");
+    expect(vibe.sessionMode("chat", "approval-gated", true)).toBe("ask");
+    expect(vibe.sessionMode("code", "plan", true)).toBe("plan");
+    expect(kimi.ownReviewer).toBeUndefined();
   });
 });

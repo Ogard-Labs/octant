@@ -52,6 +52,11 @@ export interface RepositoryTestRunInput {
   readonly checkoutRevision: string;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly checkoutRoot: string;
+  /**
+   * The Project's extra folders. A definition whose working directory is
+   * absolute runs in the extra folder holding it, as that folder's own root.
+   */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly environment: Readonly<Record<string, string | undefined>>;
 }
 
@@ -67,10 +72,12 @@ export class RepositoryTestRunner {
     const startedAt = this.#options.now();
     const environment = selectedEnvironment(definition.environmentRefs, input.environment);
     let result: RepositoryTestProcessResult;
+    const placed = placeWorkingDirectory(definition.cwd, input);
     try {
+      if (placed === undefined) throw new Error("Repository test working directory is unplaced.");
       const cwd = await privateWorkingDirectory(
-        input.checkoutRoot,
-        definition.cwd,
+        placed.root,
+        placed.cwd,
         this.#options.realpath ?? nodeRealpath,
       );
       result = await this.#options.execute(
@@ -87,7 +94,7 @@ export class RepositoryTestRunner {
     );
     const artifacts = await retainedArtifacts(
       definition.artifactPaths,
-      input.checkoutRoot,
+      placed?.root ?? input.checkoutRoot,
       this.#options.readArtifact,
     );
     const concerns = concernsFor(result, output, artifacts);
@@ -109,6 +116,20 @@ export class RepositoryTestRunner {
       concerns,
     });
   }
+}
+
+/** The root a run's paths are relative to, and its working directory inside it. */
+function placeWorkingDirectory(
+  cwd: string,
+  input: Pick<RepositoryTestRunInput, "checkoutRoot" | "extraFolders">,
+): { readonly root: string; readonly cwd: string } | undefined {
+  if (!cwd.startsWith("/")) return { root: input.checkoutRoot, cwd };
+  for (const folder of input.extraFolders ?? []) {
+    const base = folder.replace(/\/+$/, "");
+    if (cwd === base) return { root: folder, cwd: "." };
+    if (cwd.startsWith(`${base}/`)) return { root: folder, cwd: cwd.slice(base.length + 1) };
+  }
+  return undefined;
 }
 
 function selectedEnvironment(

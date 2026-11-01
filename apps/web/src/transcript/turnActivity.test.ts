@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ThreadToolStep } from "@octant/contracts";
 import {
   alwaysVisibleActivityRows,
   settledTurnActivitySummary,
@@ -74,5 +75,33 @@ describe("turn activity", () => {
       { id: "read-1" },
     ]);
     expect(activity?.rows[1]).not.toHaveProperty("outsideContent");
+  });
+
+  it("shows a Work step Octant Shield answered as a review row, not a tool call", () => {
+    const decision = {
+      reviewer: "octant-shield",
+      verdict: "deny",
+      stage: "deny-rule",
+      reason: "Reads a secret file.",
+      latencyMs: 2,
+      decidedAt: "2026-10-31T10:00:00.000Z",
+    } as unknown as NonNullable<ThreadToolStep["shield"]>;
+    const activity = toolStepsActivity(
+      [
+        { toolCallId: "a", toolName: "Bash", state: "completed" },
+        {
+          toolCallId: "shield:approval-1",
+          toolName: "Bash",
+          state: "completed",
+          summary: "cat .env",
+          shield: decision,
+        },
+      ],
+      undefined,
+    );
+    expect(activity?.rows).toEqual([
+      { kind: "tool", id: "a", toolName: "Bash", state: "completed" },
+      { kind: "review", id: "shield:approval-1", summary: "cat .env", decision },
+    ]);
   });
 });

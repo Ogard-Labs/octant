@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "./code";
+import { CodeCheckoutId, CodeProjectFilePath, CodeThreadId } from "./code";
 import {
   ExtensionComponentId,
   ExtensionContentDigest,
@@ -108,11 +108,11 @@ export type CodeDebugConfigurationName = typeof CodeDebugConfigurationName.Type;
 export const CodeDebugConfiguration = Schema.Struct({
   name: CodeDebugConfigurationName,
   adapter: ExtensionComponentQualifiedId,
-  program: CodeRelativePath,
+  program: CodeProjectFilePath,
   args: Schema.Array(boundedBytes(MAX_CODE_DEBUG_ARGUMENT_BYTES)).pipe(
     Schema.maxItems(MAX_CODE_DEBUG_ARGUMENTS),
   ),
-  cwd: Schema.optional(CodeRelativePath),
+  cwd: Schema.optional(CodeProjectFilePath),
   env: Schema.Array(CodeDebugEnvironmentEntry).pipe(
     Schema.maxItems(MAX_CODE_DEBUG_ENVIRONMENT_ENTRIES),
     Schema.filter((entries) => new Set(entries.map((entry) => entry.key)).size === entries.length),
@@ -364,7 +364,7 @@ const threadScope = { threadId: CodeThreadId, checkoutId: CodeCheckoutId };
 export const CodeDebugConfigurationsRequest = Schema.Struct({
   ...threadScope,
   /** The editor's current file, which a launch file's current-file variables name. */
-  currentFile: Schema.optional(CodeRelativePath),
+  currentFile: Schema.optional(CodeProjectFilePath),
 }).annotations(strict);
 export type CodeDebugConfigurationsRequest = typeof CodeDebugConfigurationsRequest.Type;
 
@@ -454,7 +454,7 @@ export type CodeDebugBreakpoint = typeof CodeDebugBreakpoint.Type;
 
 /** One file's breakpoints, the window's state for the thread. */
 export const CodeDebugFileBreakpoints = Schema.Struct({
-  path: CodeRelativePath,
+  path: CodeProjectFilePath,
   breakpoints: Schema.Array(CodeDebugBreakpoint).pipe(
     Schema.maxItems(MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE),
   ),
@@ -609,7 +609,7 @@ export type CodeDebugOutputEntry = typeof CodeDebugOutputEntry.Type;
 export const CodeDebugSourceLocation = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("checkout"),
-    path: CodeRelativePath,
+    path: CodeProjectFilePath,
     line: DebugLine,
     column: DebugLine,
   }).annotations(strict),

@@ -275,6 +275,40 @@ describe("TerminalProcessPort", () => {
     );
   });
 
+  it("lets the shell read and write an extra folder of the Project as it does its start folder", () => {
+    const pty = fakePty();
+    const spawn = vi.fn(() => pty);
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const extra = join(fake.root, "project-notes");
+    mkdirSync(extra, { recursive: true });
+    const port = new TerminalProcessPort({
+      spawn,
+      killProcessGroup: vi.fn(),
+      confinement: fake.confinement,
+      temporaryDirectory: fake.temporaryDirectory,
+      shellStateDirectory: join(fake.root, "terminal-shell"),
+      seatbeltHomeDirectory: fake.root,
+      networkEgress: "allow",
+      platform: "darwin",
+    });
+
+    port.start({
+      shell: "/bin/zsh",
+      cwd: "/private/repo",
+      stateScope: "repo_test",
+      environment: { PATH: "/usr/bin" },
+      columns: 80,
+      rows: 24,
+      extraFolders: [extra],
+    });
+
+    const resolved = realpathSync(extra);
+    const profile = launchedProfile(spawn);
+    expect(profile).toContain(`(allow file-read* (subpath "${resolved}"))`);
+    expect(profile).toContain(`(allow file-write* (subpath "${resolved}"))`);
+  });
+
   it("refuses to start a Plan mode terminal rather than spawning a writable shell", () => {
     const spawn = vi.fn(() => fakePty());
     const fake = createFakeSandboxConfinement();

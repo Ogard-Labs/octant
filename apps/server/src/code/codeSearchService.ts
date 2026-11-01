@@ -42,6 +42,11 @@ export interface CodeSearchRequest {
   readonly checkoutId: CodeCheckoutId;
   /** Canonical host path of the checkout this thread is bound to. */
   readonly rootPath: string;
+  /**
+   * The Project's extra folders, searched after the checkout under the same
+   * confinement and the same budgets. A folder missing on disk is skipped.
+   */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly scope: CodeSearchScope;
   readonly query: string;
   readonly signal?: AbortSignal | undefined;
@@ -132,6 +137,15 @@ export class CodeSearchService {
       ...(request.signal === undefined ? {} : { signal: request.signal }),
     };
     await this.#walk(state, root.canonical, root.stat, "", 0);
+    for (const folder of request.extraFolders ?? []) {
+      if (this.#exhausted(state)) break;
+      const extra = await this.#extraRoot(folder);
+      if (extra === undefined || state.visited.has(extra.canonical)) continue;
+      state.canonicalRoot = extra.canonical;
+      state.folder = folder;
+      state.visited.add(extra.canonical);
+      await this.#walk(state, extra.canonical, extra.stat, "", 0);
+    }
 
     try {
       return {
@@ -149,6 +163,21 @@ export class CodeSearchService {
       };
     } catch {
       return failed("unavailable", "Code search result could not be encoded.");
+    }
+  }
+
+  async #extraRoot(
+    folder: string,
+  ): Promise<{ readonly canonical: string; readonly stat: CodeDirectoryStat } | undefined> {
+    try {
+      if (!isAbsolutePosixPath(folder)) return undefined;
+      const canonical = await this.#directory.realpath(folder);
+      const stat = await this.#directory.stat(canonical);
+      if (!stat.isDirectory) return undefined;
+      if (classifyPathContainment(canonical, canonical) === "escapes-root") return undefined;
+      return { canonical, stat };
+    } catch {
+      return undefined;
     }
   }
 
@@ -223,11 +252,16 @@ export class CodeSearchService {
       const fileId = deriveCodeFileId(
         String(state.threadId),
         String(state.checkoutId),
-        childRelative,
+        state.folder === undefined ? childRelative : `${state.folder}\0${childRelative}`,
       );
       if (state.scope === "path") {
         if (childRelative.toLowerCase().includes(state.needle)) {
-          state.matches.push({ scope: "path", fileId, path: relativePath });
+          state.matches.push({
+            scope: "path",
+            fileId,
+            path: relativePath,
+            ...(state.folder === undefined ? {} : { folder: state.folder }),
+          });
         }
         continue;
       }
@@ -291,6 +325,7 @@ export class CodeSearchService {
         scope: "content",
         fileId,
         path,
+        ...(state.folder === undefined ? {} : { folder: state.folder }),
         line: index + 1,
         column: column + 1,
         preview: preview(line),
@@ -310,7 +345,10 @@ export class CodeSearchService {
 }
 
 interface SearchState {
-  readonly canonicalRoot: string;
+  /** The folder being walked: the checkout first, then each extra folder. */
+  canonicalRoot: string;
+  /** Absent while walking the checkout; the extra folder's path after. */
+  folder?: string;
   readonly needle: string;
   readonly scope: CodeSearchScope;
   readonly matches: CodeSearchMatch[];

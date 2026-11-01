@@ -276,6 +276,7 @@ describe("Code persistence restart", () => {
       { projection_name: "thread-checkpoint", reason: "unsupported-event-version" },
       { projection_name: "thread-external-content-taint", reason: "unsupported-event-version" },
       { projection_name: "thread-message-queue", reason: "unsupported-event-version" },
+      { projection_name: "thread-native-setup", reason: "unsupported-event-version" },
       { projection_name: "thread-retention", reason: "unsupported-event-version" },
       { projection_name: "usage", reason: "unsupported-event-version" },
       { projection_name: "usage-resume", reason: "unsupported-event-version" },

@@ -120,8 +120,10 @@ in the composer changes it in one click, for new and existing threads alike:
   short list of reading tools, refuses every write they try outside a
   scratch folder of its own, and gives them no network.
 - **Full access**: no sandbox and no prompts, as in the providers' own apps.
-  Agents can change any file and run any command without asking, so they can
-  read your whole home folder, including SSH and cloud keys. Nothing asks,
+  Agents can change any file and run any command without asking.
+  [Protected files](../advanced/privacy-and-security.md#protected-files),
+  such as SSH private keys and cloud credentials, are guarded by Octant's own
+  tools and redaction only, and a shell command can read them. Nothing asks,
   pushing, merging and publishing included; the agent does those because you
   asked in the thread, and every action is recorded. Outside content the
   agent read is tagged on the tool row and the thread card, never blocked.
@@ -151,6 +153,13 @@ The phone app opens a Code thread on its newest 20 turns and says so when
 earlier ones exist; it has no Load earlier, so read those on the desktop.
 `octant agent` shows a Code thread's newest 50 turns, and its footer then
 counts them as **newest 50 turns**.
+
+On the phone, a Code thread's pull-request panel has **Merge…** and **Merge when
+ready…** for an open pull request. Each re-reads the pull request from GitHub,
+shows the short head it read, and waits for your **Confirm**. A merge goes
+ahead only if that head is still current and the required checks have passed;
+**Merge when ready** hands the merge to GitHub once they do. Labels, comments,
+replies, close, and reopen stay on the desktop.
 
 In `octant agent`, Stop reports an interruption only when the host confirms it.
 If the turn finishes before Stop arrives, it reports that nothing is running;
@@ -302,7 +311,7 @@ Code can create managed git worktrees for isolated feature branches. New managed
 Code exposes repository-valid engineering surfaces:
 
 - Thread conversations, including the tool steps and thinking a turn recorded — a reopened thread replays a bounded number of them and says when it kept only the earliest
-- Terminal (confined to the Project root). A thread's own terminal keeps running when you close its tab and reattaches when you open it again; an extra terminal you opened alongside it belongs to that tab, so closing the tab stops its shell rather than leaving a process nothing can reach.
+- Terminal (confined to the Project root). A thread's own terminal keeps running when you close its tab and reattaches when you open it again; an extra terminal you opened alongside it belongs to that tab, so closing the tab stops its shell rather than leaving a process nothing can reach. The agent can use the thread's terminal too, for dev servers and other long-running commands: in Plan it cannot, at Full access it runs commands there without asking, and in every other mode it asks you before each command it types, showing the command.
 - A thread list you can shape: rename a thread in place (double-click or F2), pin the ones you keep coming back to so they stay at the top, and see which threads moved while you were elsewhere
 - A thread card on hover or keyboard focus: Project, branch, provider, fork origin, recency, and the thread's exact linked pull requests read from the cached snapshot (hovering never asks GitHub). Click a pull request to open it in Review; Cmd-click, the trailing GitHub control, or the row menu's **Open on GitHub** entry opens it in your browser
 - Quick open by file name (`Cmd+P`) and search across file contents (`Cmd+Shift+F`), both confined to the repository bound to the thread and both bounded — Octant says when it stopped before searching everything rather than reporting a partial answer as complete

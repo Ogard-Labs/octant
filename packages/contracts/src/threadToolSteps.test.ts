@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeThreadToolStep, decodeThreadToolStepList } from "./threadToolSteps";
+import { decodeThreadToolStep, decodeThreadToolStepList } from "./threadToolStepList";
 import { MAX_THREAD_TOOL_STEPS_PER_TURN } from "./threadToolSteps";
 
 const step = { toolCallId: "call-1", toolName: "Read", state: "completed" } as const;
@@ -25,6 +25,24 @@ describe("the thread tool step contract", () => {
           toolCallId: `call-${String(index)}`,
         })),
       ),
+    ).toThrow();
+  });
+});
+
+describe("a tool step Octant Shield answered", () => {
+  it("keeps Shield's decision on the step and refuses one with an unknown reviewer", () => {
+    const decision = {
+      reviewer: "octant-shield",
+      verdict: "allow",
+      stage: "fast-allow",
+      rule: "read-only-git",
+      reason: "A read-only Git command.",
+      latencyMs: 1,
+      decidedAt: "2026-10-31T10:00:00.000Z",
+    } as const;
+    expect(decodeThreadToolStep({ ...step, shield: decision }).shield).toEqual(decision);
+    expect(() =>
+      decodeThreadToolStep({ ...step, shield: { ...decision, reviewer: "provider" } }),
     ).toThrow();
   });
 });

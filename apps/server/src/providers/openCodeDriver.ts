@@ -1,3 +1,9 @@
+import { OpenCodeChildSessions } from "./openCodeChildSessions";
+import {
+  openCodeOwnRulesAllow,
+  readOpenCodeOwnSetup,
+  type OpenCodeOwnSetup,
+} from "./openCodeOwnSetup";
 import { OpenCodeMessageParts } from "./openCodeMessageParts";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -5,6 +11,7 @@ import {
   type CorrelationId,
   type PermissionPersistence,
   type ProviderExecutionPolicy,
+  type ProviderNativeSetup,
   type ProviderFailure,
   type ProviderCapabilities,
   type ProviderInstanceId,
@@ -27,7 +34,12 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
-import type { PermissionRuleset, PermissionV2Ruleset, Provider } from "@opencode-ai/sdk/v2/types";
+import type {
+  PermissionRuleset,
+  PermissionV2Rule,
+  PermissionV2Ruleset,
+  Provider,
+} from "@opencode-ai/sdk/v2/types";
 import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
 import { mapOpenCodeEvent, openCodeApprovalCall, type OpenCodeEvent } from "./openCodeEventMapper";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
@@ -98,6 +110,8 @@ export interface OpenCodeDriverOptions {
     projectRoot: string,
   ) => OpenCodeClientPort;
   readonly permissionPersistence?: () => PermissionPersistence;
+  /** The person's own OpenCode rules and MCP servers; read from their configuration by default. */
+  readonly readOwnSetup?: () => OpenCodeOwnSetup;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
@@ -114,7 +128,16 @@ interface SessionState {
   modelId: string;
   sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /** The person's own OpenCode setup this session carries; absent keeps it off. */
+  readonly nativeSetup: ProviderNativeSetup | undefined;
+  /** The person's own permission rules this session applies, empty when none. */
+  readonly own: OwnPermissions;
   readonly approvals: Set<string>;
+  /**
+   * The delegated session each pending approval or question came from, when it
+   * was not this session's own; the reply goes back to that session.
+   */
+  readonly requestSources: Map<string, string>;
   /** Each pending approval's call, for an automatic reviewer; never published. */
   readonly approvalCalls: Map<string, ProviderApprovalCall>;
   /** Files each pending 2.x edit request would let change if the user approves it. */
@@ -127,6 +150,15 @@ interface SessionState {
    * withdraws another's.
    */
   readonly unreportedEditGrants: string[];
+  /**
+   * Files a 2.x approval answered `always` admits for good, shared by every
+   * session of this Project root while the host runs: OpenCode saves the
+   * grant in its own store and makes later matching edits without asking, so
+   * each such change is admitted without spending anything.
+   */
+  readonly rememberedEdits: Set<string>;
+  /** 2.x requests Octant itself answered, whose grants it already admitted. */
+  readonly answeredRequests: Set<string>;
   readonly questions: Map<
     string,
     {
@@ -143,6 +175,32 @@ interface SessionState {
   compactionReported: boolean;
   managedTools: ManagedToolsLease | undefined;
   readonly stopMemory: { current: ProviderOutputStopReason | undefined };
+}
+
+/**
+ * The person's own OpenCode permission rules, and whether their tool servers
+ * are on, as a session applies them over the level's rules.
+ */
+export interface OwnPermissions {
+  readonly rules: ReadonlyArray<PermissionV2Rule>;
+  readonly toolServers: boolean;
+}
+
+const NO_OWN_PERMISSIONS: OwnPermissions = { rules: [], toolServers: false };
+
+/** What a session with the setup on carries of the person's configuration. */
+interface ResolvedOwnSetup extends OpenCodeOwnSetup {
+  readonly toolServers: boolean;
+}
+
+function ownPermissions(setup: ResolvedOwnSetup | undefined): OwnPermissions {
+  return setup === undefined
+    ? NO_OWN_PERMISSIONS
+    : { rules: setup.rules, toolServers: setup.toolServers };
+}
+
+function ownSetupKey(setup: ResolvedOwnSetup | undefined): string {
+  return JSON.stringify(setup ?? null);
 }
 
 interface OpenCodeUsageTotals {
@@ -190,6 +248,22 @@ const capabilities = {
   forceStop: "unsupported",
   ...unsupportedChatCapabilities,
   appManagedTools: "unsupported",
+  nativeSetup: {
+    // Its `task` children run as sessions of their own; the driver follows
+    // each as a child run, sends its permission requests through the
+    // parent's approval path, and marks the thread for its web reads.
+    subagents: "supported",
+    // OpenCode's own web fetch and search were never switched off outside
+    // Plan; each call marks the thread.
+    webTools: "supported",
+    skills: "supported",
+    // The MCP servers in the person's own OpenCode configuration load into
+    // the launch's private one, and their tools follow the level. Plugins and
+    // a Project's own configuration stay out of the launch.
+    toolServers: "supported",
+    hooks: "unsupported",
+    projectCode: "unsupported",
+  },
 } as const;
 
 function openCodeInputModalities(model: Provider["models"][string]): ProviderInputModality[] {
@@ -1022,6 +1096,16 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const resumeToolCatalogs = new Map<string, ReadonlyArray<ProviderToolDefinition>>();
+  // What OpenCode remembers from an `always` answer outlives the session and
+  // connection that gave it, so the admission is kept per Project root.
+  const rememberedEditGrants = new Map<string, Set<string>>();
+  const rememberedEditsFor = (projectRoot: string): Set<string> => {
+    const existing = rememberedEditGrants.get(projectRoot);
+    if (existing !== undefined) return existing;
+    const created = new Set<string>();
+    rememberedEditGrants.set(projectRoot, created);
+    return created;
+  };
   return {
     kind: "opencode",
     conversationOwnership: "provider",
@@ -1180,6 +1264,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               clock,
               makeCorrelation,
               resumeToolCatalogs,
+              rememberedEditsFor(projectRoot),
             );
           }),
   };
@@ -1274,10 +1359,26 @@ function makeConnection(
   clock: () => string,
   makeCorrelation: () => string,
   resumeToolCatalogs: Map<string, ReadonlyArray<ProviderToolDefinition>>,
+  rememberedEdits: Set<string>,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessionsBySource = new Map<string, SessionState>();
+    /**
+     * The person's own rules, and their tool servers where those are on,
+     * read from their OpenCode configuration when a session starts. Nothing
+     * loads unless the setup is on for the session.
+     */
+    const ownSetupFor = (setup: ProviderNativeSetup | undefined): ResolvedOwnSetup | undefined => {
+      if (setup === undefined) return undefined;
+      const own = (options.readOwnSetup ?? readOpenCodeOwnSetup)();
+      return {
+        rules: own.rules,
+        mcp: setup.toolServers ? own.mcp : {},
+        toolServers: setup.toolServers,
+      };
+    };
+    const childSessions = new OpenCodeChildSessions();
     const sourceBySession = new Map<ProviderSessionId, string>();
     const pendingBySource = new Map<string, OpenCodeEvent[]>();
     let subscriptionAbort = new AbortController();
@@ -1290,6 +1391,8 @@ function makeConnection(
     let runtimeScope: Scope.CloseableScope | undefined;
     let processMonitor: { readonly exited: Promise<void>; readonly cancel: () => void } | undefined;
     let runtimePolicy: ProviderExecutionPolicy | undefined;
+    let runtimeOwnSkills = false;
+    let runtimeOwnSetupKey = ownSetupKey(undefined);
     let runtimeKind: "legacy" | "beta" | undefined;
     let runtimeIsolated = false;
     let runtimeLoopbackPorts: ReadonlyArray<number> = [];
@@ -1340,6 +1443,8 @@ function makeConnection(
     };
     const retireState = (state: SessionState): void => {
       state.terminal = true;
+      if (state.sourceId !== undefined) childSessions.forget(state.sourceId);
+      state.requestSources.clear();
       cancelPendingTools(state);
       state.approvals.clear();
       state.pendingEditGrants.clear();
@@ -1348,16 +1453,21 @@ function makeConnection(
       deactivate(state);
       void releaseManagedTools(state).catch(() => undefined);
     };
-    const betaEnforcement = (state: SessionState) =>
+    const betaEnforcement = (state: SessionState, replySource?: string) =>
       runtimeKind !== "beta"
         ? undefined
         : {
             mode,
             projectRoot,
             extraFolders,
+            remembersInOpenCode: opencodeRemembersApproval(
+              state,
+              runtimeKind,
+              options.permissionPersistence?.() ?? "current-session",
+            ),
             reply: (requestId: string, reply: "once" | "reject") => {
               const active = client;
-              const source = state.sourceId;
+              const source = replySource ?? state.sourceId;
               if (active === undefined || source === undefined) {
                 if (state.terminal) return;
                 offer(
@@ -1385,6 +1495,64 @@ function makeConnection(
               });
             },
           };
+    /**
+     * An event of a session OpenCode delegated to. Its activity is reported as
+     * a child run of the owning session; its permission and question requests
+     * are handled as that session's own, so the person answers them through the
+     * same path and the same level decides them; a web read marks the thread.
+     */
+    const handleChildRoute = (
+      child: Extract<ReturnType<OpenCodeChildSessions["route"]>, { kind: "child" }>,
+    ): void => {
+      const state = sessionsBySource.get(child.rootSource);
+      if (state === undefined || state.terminal) return;
+      if (child.activity !== undefined) {
+        offer({
+          kind: "child-agent-activity",
+          instanceId: options.instanceId,
+          sessionId: state.sessionId,
+          sequence: state.nextSequence++,
+          correlationId: state.correlationId,
+          occurredAt: clock() as UtcTimestamp,
+          ...child.activity,
+        });
+      }
+      const forwarded = child.forward;
+      if (forwarded === undefined) return;
+      if (String(forwarded.type) === "session.next.tool.called") {
+        const reads = mapOpenCodeEvent(
+          {
+            instanceId: options.instanceId,
+            sessionId: state.sessionId,
+            sequenceStart: state.nextSequence,
+            correlationId: state.correlationId,
+            occurredAt: clock() as UtcTimestamp,
+          },
+          forwarded,
+        ).filter((event) => event.kind === "outside-content-read");
+        for (const read of reads) {
+          offer({ ...read, sequence: state.nextSequence++ });
+        }
+        return;
+      }
+      const requestId = textProperty(forwarded.properties, "id");
+      if (
+        requestId !== "" &&
+        String(forwarded.type).endsWith(".asked") &&
+        state.requestSources.size < 256
+      ) {
+        state.requestSources.set(requestId, child.childSource);
+      }
+      mapAndOffer(
+        state,
+        forwarded,
+        options.instanceId,
+        clock,
+        offer,
+        retireState,
+        betaEnforcement(state, child.childSource),
+      );
+    };
     /**
      * The OpenCode process went away under a running turn without anyone
      * asking it to stop: it died, or the host is shutting it down. What the
@@ -1424,6 +1592,8 @@ function makeConnection(
       processMonitor = undefined;
       client = undefined;
       runtimePolicy = undefined;
+      runtimeOwnSkills = false;
+      runtimeOwnSetupKey = ownSetupKey(undefined);
       runtimeIsolated = false;
       runtimeLoopbackPorts = [];
       subscriptionReady = undefined;
@@ -1432,11 +1602,19 @@ function makeConnection(
       executionPolicy: ProviderExecutionPolicy,
       loopbackPorts: ReadonlyArray<number>,
       managedToolServerName: string | undefined,
+      ownSkills: boolean,
+      ownSetup: ResolvedOwnSetup | undefined,
     ): Effect.Effect<OpenCodeClientPort, ProviderFailure> =>
       Effect.tryPromise({
         try: async () => {
           if (client !== undefined && runtimePolicy !== undefined) {
-            if (runtimePolicy !== executionPolicy) {
+            // The person's own skills ride on the process's environment and
+            // private configuration, which cannot change once it runs.
+            if (
+              runtimePolicy !== executionPolicy ||
+              runtimeOwnSkills !== ownSkills ||
+              runtimeOwnSetupKey !== ownSetupKey(ownSetup)
+            ) {
               throw fail(
                 "unauthorized",
                 "OpenCode process authority cannot be widened on an active connection.",
@@ -1460,11 +1638,17 @@ function makeConnection(
                   ...(extraFolders.length === 0 ? {} : { extraFolders }),
                   mode,
                   executionPolicy,
+                  ...(ownSkills ? { ownSkills: true as const } : {}),
+                  ...(ownSetup === undefined || !ownSetup.toolServers
+                    ? {}
+                    : { ownToolServers: ownSetup.mcp }),
                   betaPermissions: betaSessionPermissionRules(
                     executionPolicy,
                     mode,
                     managedToolServerName,
                     extraFolders,
+                    ownSkills,
+                    ownPermissions(ownSetup),
                   ),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
                   onProcessStarted: (process) =>
@@ -1484,6 +1668,8 @@ function makeConnection(
             runtimeScope = scope;
             processMonitor = monitor;
             runtimePolicy = executionPolicy;
+            runtimeOwnSkills = ownSkills;
+            runtimeOwnSetupKey = ownSetupKey(ownSetup);
             runtimeKind = started.runtime ?? "legacy";
             runtimeIsolated = started.isolatedConfiguration === true;
             runtimeLoopbackPorts = loopbackPorts;
@@ -1572,6 +1758,13 @@ function makeConnection(
                 for await (const event of events) {
                   const sourceId = sourceSessionId(event);
                   if (sourceId === undefined) continue;
+                  const child = childSessions.route(event, sourceId, (source) =>
+                    sessionsBySource.has(source),
+                  );
+                  if (child.kind === "child") {
+                    handleChildRoute(child);
+                    continue;
+                  }
                   const state = sessionsBySource.get(sourceId);
                   if (state === undefined) {
                     const pending = pendingBySource.get(sourceId) ?? [];
@@ -1747,12 +1940,16 @@ function makeConnection(
             return Effect.fail(fail("protocol", "A provider session is already active."));
           }
           sessionSetupInFlight = true;
+          const ownSetup = ownSetupFor(input.nativeSetup);
           const state = newSessionState(
             input.sessionId,
             input.modelId,
             input.executionPolicy,
             makeCorrelation,
             input.tools ?? [],
+            input.nativeSetup,
+            rememberedEdits,
+            ownPermissions(ownSetup),
           );
           return prepareManagedTools(state, input.tools ?? []).pipe(
             Effect.flatMap(() =>
@@ -1760,6 +1957,8 @@ function makeConnection(
                 input.executionPolicy,
                 state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
                 state.managedTools?.serverName,
+                state.nativeSetup?.skills === true,
+                ownSetup,
               ),
             ),
             Effect.flatMap((runtimeClient) => {
@@ -1792,6 +1991,8 @@ function makeConnection(
                         mode,
                         state.managedTools?.serverName,
                         extraFolders,
+                        state.nativeSetup?.skills === true,
+                        state.own,
                       ),
                       model: splitModelId(input.modelId),
                     }),
@@ -1891,12 +2092,16 @@ function makeConnection(
               if (priorState !== undefined && inheritedTools !== undefined) {
                 priorState.managedTools = undefined;
               }
+              const ownSetup = ownSetupFor(input.nativeSetup);
               const state = newSessionState(
                 input.sessionId,
                 "unknown/unknown",
                 input.executionPolicy,
                 makeCorrelation,
                 tools,
+                input.nativeSetup,
+                rememberedEdits,
+                ownPermissions(ownSetup),
               );
               if (inheritedTools !== undefined) {
                 inheritedTools.owner.state = state;
@@ -1914,6 +2119,8 @@ function makeConnection(
                     input.executionPolicy,
                     state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
                     state.managedTools?.serverName,
+                    state.nativeSetup?.skills === true,
+                    ownSetup,
                   ),
                 ),
                 Effect.flatMap((runtimeClient) => {
@@ -2051,6 +2258,8 @@ function makeConnection(
                             mode,
                             managedTools?.serverName,
                             extraFolders,
+                            state.nativeSetup?.skills === true,
+                            state.own,
                           ),
                         }),
                       );
@@ -2120,35 +2329,47 @@ function makeConnection(
                       const grant = input.approved
                         ? (state.pendingEditGrants.get(input.requestId) ?? [])
                         : [];
+                      // On 2.x `always` saves a project grant in OpenCode's own
+                      // data directory, shared with the person's OpenCode use,
+                      // outside Octant's revocation; OpenCode then makes later
+                      // matching edits without asking and settles other
+                      // pending requests it covers. It is answered only where
+                      // the person let OpenCode run as itself, and its files
+                      // stay admitted for this Project root from then on.
+                      const always =
+                        input.approved &&
+                        input.scope !== "once" &&
+                        opencodeRemembersApproval(
+                          state,
+                          runtimeKind,
+                          options.permissionPersistence?.() ?? "current-session",
+                        );
+                      state.answeredRequests.add(input.requestId);
                       state.unreportedEditGrants.push(...grant);
+                      const newlyRemembered =
+                        runtimeKind === "beta" && always
+                          ? grant.filter((file) => !state.rememberedEdits.has(file))
+                          : [];
+                      for (const file of newlyRemembered) state.rememberedEdits.add(file);
                       return request(() =>
                         activeClient.replyPermission(
-                          source,
+                          state.requestSources.get(input.requestId) ?? source,
                           input.requestId,
-                          // On 2.x `always` saves a project grant in OpenCode's
-                          // own data directory, shared with the person's OpenCode
-                          // use, outside Octant's revocation, and it also settles
-                          // other pending requests it covers. Octant keeps its
-                          // own remembered approvals, so 2.x is only answered once.
-                          input.approved
-                            ? input.scope !== "once" &&
-                              runtimeKind !== "beta" &&
-                              (options.permissionPersistence?.() ?? "current-session") ===
-                                "project-default"
-                              ? "always"
-                              : "once"
-                            : "reject",
+                          input.approved ? (always ? "always" : "once") : "reject",
                         ),
                       ).pipe(
                         Effect.tapError(() =>
                           Effect.sync(() => {
                             for (const file of grant) spendEditGrant(state, file);
+                            for (const file of newlyRemembered) state.rememberedEdits.delete(file);
+                            state.answeredRequests.delete(input.requestId);
                           }),
                         ),
                         Effect.tap(() =>
                           Effect.sync(() => {
                             state.pendingEditGrants.delete(input.requestId);
                             state.approvals.delete(input.requestId);
+                            state.requestSources.delete(input.requestId);
                           }),
                         ),
                       );
@@ -2189,7 +2410,11 @@ function makeConnection(
                           (_, index) => answers.get(index + 1) ?? "",
                         );
                         const reply = request(() =>
-                          activeClient.replyQuestion(source, question.providerRequestId, ordered),
+                          activeClient.replyQuestion(
+                            state.requestSources.get(question.providerRequestId) ?? source,
+                            question.providerRequestId,
+                            ordered,
+                          ),
                         ).pipe(
                           Effect.tap(() =>
                             Effect.sync(() => {
@@ -2235,6 +2460,9 @@ function newSessionState(
   executionPolicy: ProviderExecutionPolicy,
   makeCorrelation: () => string,
   tools: ReadonlyArray<ProviderToolDefinition>,
+  nativeSetup: ProviderNativeSetup | undefined,
+  rememberedEdits: Set<string>,
+  own: OwnPermissions,
 ): SessionState {
   return {
     sessionId,
@@ -2247,10 +2475,15 @@ function newSessionState(
     modelId,
     sourceId: undefined,
     executionPolicy,
+    nativeSetup,
+    own,
     approvals: new Set(),
+    requestSources: new Map(),
     approvalCalls: new Map(),
     pendingEditGrants: new Map(),
     unreportedEditGrants: [],
+    rememberedEdits,
+    answeredRequests: new Set(),
     questions: new Map(),
     questionAnswers: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
@@ -2321,9 +2554,20 @@ function failClosedBetaEvent(
   // An edit the posture allows, or one the user already approved, may be
   // reported. Any other file change ran without a grant, so the turn fails.
   if (edit === "allow") return event;
-  if (spendEditGrant(state, resolve(projectRoot, event.path)) || spendEditGrant(state, "*")) {
+  const file = resolve(projectRoot, event.path);
+  // An edit the person's own rules allow for this file ran without asking,
+  // as in OpenCode itself. Plan never takes it: its denial is Octant's.
+  if (
+    state.executionPolicy !== "plan" &&
+    openCodeOwnRulesAllow(state.own.rules, "edit", [event.path, file])
+  ) {
     return event;
   }
+  if (spendEditGrant(state, file) || spendEditGrant(state, "*")) {
+    return event;
+  }
+  // A grant OpenCode remembers from an `always` answer is never spent.
+  if (state.rememberedEdits.has(file) || state.rememberedEdits.has("*")) return event;
   return {
     kind: "failed",
     instanceId: event.instanceId,
@@ -2349,6 +2593,8 @@ function mapAndOffer(
     readonly mode: "chat" | "work" | "code";
     readonly projectRoot: string;
     readonly extraFolders: ReadonlyArray<string>;
+    /** An approval here is answered `always`, a grant kept in OpenCode's own store. */
+    readonly remembersInOpenCode: boolean;
     readonly reply: (requestId: string, reply: "once" | "reject") => void;
   },
 ): void {
@@ -2365,6 +2611,16 @@ function mapAndOffer(
   // answer to it is refused as not pending instead of failing at the server.
   if (beta !== undefined && event.type === "permission.v2.replied") {
     const settled = textProperty(event.properties, "requestID");
+    // A request OpenCode settled by itself, because an earlier `always`
+    // covers it, lets its edit run as surely as one the person approved, so
+    // its files are admitted (for good when the reply is `always`) before
+    // the change is reported. A request Octant answered was admitted then.
+    const reply = textProperty(event.properties, "reply");
+    const grant = state.pendingEditGrants.get(settled);
+    if (grant !== undefined && !state.answeredRequests.has(settled)) {
+      if (reply === "always") for (const file of grant) state.rememberedEdits.add(file);
+      else if (reply === "once") state.unreportedEditGrants.push(...grant);
+    }
     state.approvals.delete(settled);
     state.pendingEditGrants.delete(settled);
     return;
@@ -2381,6 +2637,11 @@ function mapAndOffer(
               beta.mode,
               state.managedTools?.serverName,
               beta.extraFolders,
+              state.nativeSetup?.skills === true,
+              // OpenCode asked, so its own evaluation of the person's rules,
+              // which name resources Octant does not see, ended in `ask`; the
+              // level decides what Octant does with it.
+              { rules: [], toolServers: state.own.toolServers },
             ),
             action,
           );
@@ -2527,6 +2788,13 @@ function mapAndOffer(
           ? openCodeApprovalCall(normalized.action, event.properties)
           : undefined;
       if (call !== undefined) state.approvalCalls.set(normalized.requestId, call);
+      // The person is told where the grant lives before they approve it.
+      if (beta?.remembersInOpenCode === true) {
+        normalized = {
+          ...normalized,
+          description: `${normalized.description} ${OPENCODE_REMEMBERED_APPROVAL_NOTE}`,
+        };
+      }
     }
     if (normalized.kind === "user-input-request") {
       const providerRequestId = normalized.requestId;
@@ -2550,11 +2818,35 @@ function mapAndOffer(
   }
 }
 
+/** What a 2.x approval says when approving it saves a grant in OpenCode's own store. */
+export const OPENCODE_REMEMBERED_APPROVAL_NOTE =
+  "Approving saves the grant in OpenCode's own settings for this repository; clear it there to undo it.";
+
+/**
+ * Whether an approval is answered `always`, which OpenCode remembers itself.
+ * On 1.x that grant lives with the session, and Octant answers `always` when
+ * the person remembers approvals for the Project. On 2.x it is saved in
+ * OpenCode's data directory, shared with the person's own OpenCode use and
+ * outside Octant's revocation, so it is answered `always` only once the
+ * person let OpenCode run as itself, and the approval says where the grant
+ * goes.
+ */
+function opencodeRemembersApproval(
+  state: Pick<SessionState, "nativeSetup">,
+  runtimeKind: "legacy" | "beta" | undefined,
+  persistence: PermissionPersistence,
+): boolean {
+  if (persistence !== "project-default") return false;
+  return runtimeKind !== "beta" || state.nativeSetup !== undefined;
+}
+
 export function permissionRules(
   policy: ProviderExecutionPolicy,
   _mode: "chat" | "work" | "code",
   managedToolServerName?: string,
   extraFolders: ReadonlyArray<string> = [],
+  ownSkills = false,
+  own: OwnPermissions = NO_OWN_PERMISSIONS,
 ): PermissionRuleset {
   let rules: PermissionRuleset;
   if (policy === "full-access") {
@@ -2585,6 +2877,20 @@ export function permissionRules(
       { permission: "todowrite", pattern: "*", action: "deny" },
     ];
   }
+  // The person's own rules apply over the level's allows and asks and under
+  // its denies, so Plan's denials and the outside-directory refusal stand.
+  rules = insertBeforeFirstDeny(
+    rules,
+    own.rules
+      // Plan keeps asking before it reaches outside; its web tools are the level's.
+      .filter((rule) => policy !== "plan" || !/^web(?:fetch|search)$/u.test(rule.action))
+      .map((rule) => ({
+        permission: rule.action,
+        pattern: rule.resource,
+        action: rule.effect,
+      })),
+    (rule) => rule.action === "deny",
+  );
   // Work and Code share one capability set at the thread's level, so a Work
   // session's bash and task follow the posture above exactly as Code's do.
   // A Project's extra folder is no outside directory: reaching it is allowed,
@@ -2593,10 +2899,11 @@ export function permissionRules(
   for (const pattern of extraFolderPatterns(extraFolders)) {
     rules.push({ permission: "external_directory", pattern, action: "allow" });
   }
-  rules.push(
-    { permission: "*_*", pattern: "*", action: "deny" },
-    { permission: "skill", pattern: "*", action: "deny" },
-  );
+  // The person's tool servers are namespaced tools, which the level decides.
+  if (!own.toolServers) rules.push({ permission: "*_*", pattern: "*", action: "deny" });
+  // The person's own skills load once they let OpenCode run as itself; a
+  // skill is text, and OpenCode asks for it under the posture's own rule.
+  if (!ownSkills) rules.push({ permission: "skill", pattern: "*", action: "deny" });
   if (managedToolServerName === undefined) return rules;
   // OpenCode prefixes MCP tools as `<server>_<tool>`. Deny every other
   // namespaced tool in this session; only this session's bridge is allowed.
@@ -2633,6 +2940,7 @@ export function betaAgentPermissionRules(
   policy: ProviderExecutionPolicy,
   _mode: "chat" | "work" | "code",
   extraFolders: ReadonlyArray<string> = [],
+  ownRules: ReadonlyArray<PermissionV2Rule> = [],
 ): PermissionV2Ruleset {
   const denyExternal: PermissionV2Ruleset = [
     { action: "external_directory", resource: "*", effect: "deny" },
@@ -2659,11 +2967,26 @@ export function betaAgentPermissionRules(
       { action: "websearch", resource: "*", effect: "deny" },
     ];
   }
+  rules = insertBeforeFirstDeny(rules, ownRules, (rule) => rule.effect === "deny");
   // Work follows the posture as Code does; only Plan denies the shell.
   for (const resource of extraFolderPatterns(extraFolders)) {
     rules.push({ action: "external_directory", resource, effect: "allow" });
   }
   return rules;
+}
+
+/**
+ * Puts the person's rules ahead of the posture's first deny, so they override
+ * the level's allows and asks while every deny the posture holds still wins.
+ */
+function insertBeforeFirstDeny<T>(
+  posture: ReadonlyArray<T>,
+  own: ReadonlyArray<T>,
+  isDeny: (rule: T) => boolean,
+): T[] {
+  if (own.length === 0) return [...posture];
+  const at = posture.findIndex(isDeny);
+  return at === -1 ? [...posture, ...own] : [...posture.slice(0, at), ...own, ...posture.slice(at)];
 }
 
 /** The folder itself and everything beneath it, in OpenCode's wildcard form. */
@@ -2682,11 +3005,13 @@ export function betaSessionPermissionRules(
   mode: "chat" | "work" | "code",
   managedToolServerName?: string,
   extraFolders: ReadonlyArray<string> = [],
+  ownSkills = false,
+  own: OwnPermissions = NO_OWN_PERMISSIONS,
 ): PermissionV2Ruleset {
   const rules: PermissionV2Ruleset = [
-    ...betaAgentPermissionRules(policy, mode, extraFolders),
-    { action: "*_*", resource: "*", effect: "deny" },
-    { action: "skill", resource: "*", effect: "deny" },
+    ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules),
+    ...(own.toolServers ? [] : [{ action: "*_*", resource: "*", effect: "deny" } as const]),
+    ...(ownSkills ? [] : [{ action: "skill", resource: "*", effect: "deny" } as const]),
     // 2.0.22's question tool asks for this permission and then publishes a
     // form, which Octant does not map; its default agent allows it.
     { action: "question", resource: "*", effect: "deny" },

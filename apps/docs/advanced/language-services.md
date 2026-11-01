@@ -50,6 +50,8 @@ The bundled server is confined when the host starts it:
 - It starts only when you open a file it reads, and stops after ten minutes
   unused, or when the thread is archived or completed.
 
+A file in one of the Project's extra folders gets the same server, confined to that folder in the same way. Any other path outside the Project's folders is refused.
+
 It never runs anything the repository names. A `tsconfig` plugin list, an
 editor settings folder, or a repository's list of servers is data the server
 reads, never a program it starts.

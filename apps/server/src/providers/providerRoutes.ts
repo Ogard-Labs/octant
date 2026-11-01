@@ -5,6 +5,9 @@ import {
   decodeProviderRegistryCommand,
   decodeProviderRegistryCommandResult,
   decodeProviderRegistrySnapshot,
+  decodeThreadNativeSetupRequest,
+  type ThreadNativeSetupChoice,
+  type ThreadNativeSetupRequest,
   type OctantMode,
   type ProviderExecutionPolicy,
   type ProviderFailure,
@@ -26,6 +29,11 @@ export interface ProviderRouteDependencies {
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
   readonly packagedProviderSmokeControl?: boolean;
+  /** A thread's own choice about its key provider's native setup. */
+  readonly threadNativeSetup?: {
+    get(threadId: string): ThreadNativeSetupChoice;
+    set(request: Extract<ThreadNativeSetupRequest, { kind: "set" }>): "recorded" | "refused";
+  };
 }
 
 export function createProviderRouteHandler(dependencies: ProviderRouteDependencies) {
@@ -40,7 +48,10 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
     const isProbe = probeMatch !== null;
     const smokeMatch = /^\/api\/providers\/([^/]+)\/packaged-smoke-turn$/.exec(url.pathname);
     const isSmokeTurn = smokeMatch !== null && dependencies.packagedProviderSmokeControl === true;
-    if (!isBootstrap && !isCommands && !isProbe && !isSmokeTurn) return undefined;
+    const isThreadNativeSetup = url.pathname === "/api/providers/thread-native-setup";
+    if (!isBootstrap && !isCommands && !isProbe && !isSmokeTurn && !isThreadNativeSetup) {
+      return undefined;
+    }
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
       return response(
@@ -76,7 +87,7 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
     }
 
     let body: unknown = {};
-    if (isCommands || isProbe || isSmokeTurn) {
+    if (isCommands || isProbe || isSmokeTurn || isThreadNativeSetup) {
       const read = await readJson(request, bodyLimit, isProbe);
       if (read.kind === "too-large") {
         return response(
@@ -129,6 +140,60 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
       if (isBootstrap) {
         return response(
           decodeProviderRegistrySnapshot(await dependencies.service.bootstrap(windowId)),
+          200,
+          origin,
+        );
+      }
+      if (isThreadNativeSetup) {
+        const store = dependencies.threadNativeSetup;
+        if (store === undefined) {
+          return response(
+            { category: "unsupported", message: "Thread native setup is unavailable." },
+            503,
+            origin,
+          );
+        }
+        let threadRequest: ThreadNativeSetupRequest;
+        try {
+          threadRequest = decodeThreadNativeSetupRequest(body);
+        } catch {
+          return response(
+            {
+              category: "invalid-configuration",
+              message: "Thread native setup request is invalid.",
+            },
+            400,
+            origin,
+          );
+        }
+        if (threadRequest.kind === "set") {
+          // Loading a provider's own code and tool servers is the person's
+          // decision at a window on this host, as it is for the account.
+          const setter = readPrincipalRouteContext(request)?.principal;
+          if (setter !== undefined && setter.kind !== "local-window") {
+            return response(
+              {
+                category: "unauthorized",
+                message: "This step requires the Octant window on this host.",
+              },
+              401,
+              origin,
+            );
+          }
+          if (store.set(threadRequest) === "refused") {
+            return response(
+              {
+                category: "unsupported",
+                message:
+                  "Only a Claude Code, Codex, OpenCode, or Mistral Vibe thread can change this.",
+              },
+              400,
+              origin,
+            );
+          }
+        }
+        return response(
+          { threadId: threadRequest.threadId, choice: store.get(threadRequest.threadId) },
           200,
           origin,
         );

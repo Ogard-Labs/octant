@@ -13,7 +13,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
+import type {
+  ProviderExecutionPolicy,
+  ProviderFailure,
+  ProviderNativeSetup,
+} from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 import type { AcpProviderProfile, AcpSessionMode } from "./acpProfiles";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
@@ -22,12 +26,10 @@ import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
-  requireSandboxExec,
+  seatbeltAllowLiteralReadRule,
   seatbeltDenyRule,
-  wrapCommandInSandboxExec,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
-import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
@@ -42,6 +44,9 @@ import {
 } from "../network/providerRuntimeNetwork";
 
 export type { AcpSessionMode } from "./acpProfiles";
+
+/** See {@link AcpProviderProfile} `process.readsSystemKeychain`. */
+const SYSTEM_KEYCHAIN_PATH = "/Library/Keychains/System.keychain";
 
 export interface AcpLaunchSpec {
   readonly command: string;
@@ -71,6 +76,8 @@ export interface AcpConfinementInput {
    * runtimes through the proxy.
    */
   readonly network?: ProviderRuntimeProxiedNetwork;
+  /** The person's own setup this session carries; absent keeps every deny. */
+  readonly nativeSetup?: ProviderNativeSetup;
 }
 
 export interface AcpConfinementPort {
@@ -105,6 +112,8 @@ export interface AcpProcessStartInput {
   readonly apiKey?: string;
   /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
   readonly loopbackPorts?: ReadonlyArray<number>;
+  /** The person's own setup this session carries, applied through the profile's `nativeSetup`. */
+  readonly nativeSetup?: ProviderNativeSetup;
   readonly clientCapabilities?: AcpClientCapabilities;
   readonly onProcessStarted?: ProviderProcessStartedListener;
 }
@@ -340,13 +349,32 @@ function prepareHostAuthentication(
   });
 }
 
+/** What a session with the person's own setup releases of the profile's guards and denies. */
+function releasedByNativeSetup(
+  profile: AcpProviderProfile,
+  setup: ProviderNativeSetup | undefined,
+): { readonly guards: ReadonlySet<string>; readonly rootEntries: ReadonlySet<string> } {
+  const released =
+    setup === undefined || profile.process.nativeSetup === undefined
+      ? undefined
+      : profile.process.nativeSetup(setup);
+  return {
+    guards: new Set(released?.releasedGuards ?? []),
+    rootEntries: new Set(released?.releasedRootEntries ?? []),
+  };
+}
+
 function hostExtensionDenyPaths(
   profile: AcpProviderProfile,
   hostDirectory: string | undefined,
   root: string,
+  nativeSetup?: ProviderNativeSetup,
 ): ReadonlyArray<string> {
   const hostEntries = profile.process.hostDeniedEntries ?? [];
-  const rootEntries = profile.process.forbiddenRootEntries ?? [];
+  const released = releasedByNativeSetup(profile, nativeSetup).rootEntries;
+  const rootEntries = (profile.process.forbiddenRootEntries ?? []).filter(
+    (entry) => !released.has(entry),
+  );
   return [
     ...(hostDirectory === undefined ? [] : hostEntries.map((entry) => join(hostDirectory, entry))),
     ...rootEntries.map((entry) => join(root, entry)),
@@ -407,67 +435,16 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             profile,
             hostAuthentication.writePaths[0] ?? hostAuthentication.readPaths[0],
             root,
+            input.nativeSetup,
           ),
         ];
-        // Full access is unrestricted except for the static MCP/skills/hooks
-        // denials. Darwin uses allow-default plus trailing denies. Linux binds
-        // the host root and overlays the same paths.
+        // Full access runs the agent as its own app does: no sandbox, no
+        // credential-file or extension denials. Octant's own file tools still
+        // refuse protected paths, and secrets are redacted from what it records.
         if (input.executionPolicy === "full-access") {
-          if (denyPaths.length === 0) {
-            return {
-              command: input.binaryPath,
-              args,
-              cwd: root,
-              environment: { ...input.environment, ...hostAuthentication.environment },
-            };
-          }
-          const launch = yield* Effect.try({
-            try: () => {
-              if (platform === "darwin") {
-                requireSandboxExec({ platform, sandboxPath });
-                return wrapCommandInSandboxExec({
-                  sandboxPath,
-                  executable: input.binaryPath,
-                  args,
-                  profile: [
-                    "(version 1)",
-                    "(allow default)",
-                    ...denyPaths.flatMap((path) => [
-                      seatbeltDenyRule("file-read*", path),
-                      seatbeltDenyRule("file-write*", path),
-                    ]),
-                  ].join("\n"),
-                });
-              }
-              if (platform === "linux") {
-                return buildLinuxAllowDefaultDenyLaunch(
-                  {
-                    executable: input.binaryPath,
-                    args,
-                    cwd: root,
-                    denyPaths,
-                  },
-                  { bwrapPath: sandboxPath },
-                );
-              }
-              throw new ProcessConfinementError(
-                "incompatible",
-                `${name} Full access extension denials require macOS or Linux.`,
-              );
-            },
-            catch: (error) =>
-              failure(
-                error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
-                  ? "invalid-configuration"
-                  : "incompatible",
-                error instanceof ProcessConfinementError
-                  ? error.message
-                  : `${name} Full access extension denials could not be prepared.`,
-              ),
-          });
           return {
-            command: launch.command,
-            args: launch.args,
+            command: input.binaryPath,
+            args,
             cwd: root,
             environment: { ...input.environment, ...hostAuthentication.environment },
           };
@@ -516,6 +493,12 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 seatbeltDenyRule("file-read*", path),
                 seatbeltDenyRule("file-write*", path),
               ])
+            : []),
+          // Caller rules follow the Keychain and built-in secret-file denials,
+          // so neither overrides this one literal read; a path the person
+          // protects in Settings still does. Nothing grants a write there.
+          ...(platform === "darwin" && profile.process.readsSystemKeychain === true
+            ? [seatbeltAllowLiteralReadRule(SYSTEM_KEYCHAIN_PATH)]
             : []),
         ];
         const launch = yield* Effect.try({
@@ -970,8 +953,13 @@ export function sanitizeAcpEnvironment(
     readonly managedHome: string;
     readonly executionPolicy?: ProviderExecutionPolicy;
     readonly apiKey?: string;
+    readonly nativeSetup?: ProviderNativeSetup;
   },
 ): NodeJS.ProcessEnv {
+  const released = releasedByNativeSetup(profile, input.nativeSetup).guards;
+  const guards = Object.fromEntries(
+    Object.entries(profile.process.guards).filter(([name]) => !released.has(name)),
+  );
   const passthrough = new Set(profile.process.passthroughVariables);
   const environment = Object.fromEntries(
     Object.entries(inherited).filter(
@@ -985,7 +973,7 @@ export function sanitizeAcpEnvironment(
       executionPolicy: input.executionPolicy ?? "approval-gated",
       ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
     }),
-    ...profile.process.guards,
+    ...guards,
   };
 }
 
@@ -1206,6 +1194,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           managedHome: input.managedHome,
           executionPolicy: input.executionPolicy,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+          ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         });
         const network =
           input.executionPolicy === "full-access"
@@ -1230,6 +1219,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
           ...(network === undefined ? {} : { network }),
+          ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         });
         const managed = yield* Effect.acquireRelease(
           acquireConnection(

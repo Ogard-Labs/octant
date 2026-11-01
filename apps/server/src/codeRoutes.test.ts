@@ -492,12 +492,15 @@ describe("Code routes", () => {
       diagnostics,
     );
 
-    // A caller cannot name the window, open by a host path, or read by path.
+    // A caller cannot name the window, open by a traversing host path, or read by
+    // path. An absolute path passes the schema and the host places it in one of
+    // the Project's extra folders or refuses it (see the language service tests).
     expect((await route(post("/api/code/language/documents", { ...open, windowId })))?.status).toBe(
       400,
     );
     expect(
-      (await route(post("/api/code/language/documents", { ...open, path: "/etc/passwd" })))?.status,
+      (await route(post("/api/code/language/documents", { ...open, path: "/etc/../passwd" })))
+        ?.status,
     ).toBe(400);
     expect(
       (await route(post("/api/code/language/read", { ...diagnostics, path: "src/file.ts" })))
@@ -565,7 +568,7 @@ describe("Code routes", () => {
     for (const body of [
       { ...approval, windowId },
       { ...approval, component: "any" },
-      { ...approval, path: "/etc/passwd" },
+      { ...approval, path: "/etc/../passwd" },
       { ...approval, scope: "host" },
     ]) {
       expect((await route(post(body)))?.status).toBe(400);
@@ -2203,6 +2206,36 @@ describe("Code project pull-request detail routes", () => {
     );
   });
 
+  it("serves the labels and review threads the controls name to the local user only", async () => {
+    const context = {
+      status: "read" as const,
+      labels: ["bug"],
+      repositoryLabels: ["bug", "p1"],
+      reviewThreads: [],
+    };
+    const readProjectPullRequestActionContext = vi.fn(async () => context);
+    const route = routeFixture({ readProjectPullRequestActionContext });
+    const local = await route(
+      request("/api/code/project-pull-requests/action-context", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(detailQuery),
+      }),
+    );
+    const remote = await route(
+      remoteDeviceRequest("/api/code/project-pull-requests/action-context", detailQuery),
+    );
+    expect(await local!.json()).toEqual(context);
+    expect(remote?.status).toBe(403);
+    expect(readProjectPullRequestActionContext).toHaveBeenCalledTimes(1);
+    expect(readProjectPullRequestActionContext).toHaveBeenCalledWith(
+      windowId,
+      detailQuery,
+      expect.any(AbortSignal),
+      "local-window",
+    );
+  });
+
   it("rejects an invalid pull-request action before the service", async () => {
     const actOnProjectPullRequest = vi.fn();
     const route = routeFixture({ actOnProjectPullRequest });
@@ -2226,7 +2259,7 @@ describe("Code project pull-request detail routes", () => {
     expect(actOnProjectPullRequest).not.toHaveBeenCalled();
   });
 
-  it("turns Merge when ready and Auto-fix on only for the local user, never for a paired device", async () => {
+  it("lets a paired device turn Merge when ready on but never Auto-fix", async () => {
     const view = {
       version: 1 as const,
       target: detailQuery,
@@ -2280,14 +2313,24 @@ describe("Code project pull-request detail routes", () => {
         }),
         scopeId: remoteDeviceId as never,
       });
-      expect((await route(remoteRequest))?.status).toBe(403);
+      expect((await route(remoteRequest))?.status).toBe(
+        path.endsWith("/merge-when-ready") ? 200 : 403,
+      );
     }
-    expect(setProjectPullRequestMergeWhenReady).toHaveBeenCalledTimes(1);
-    expect(setProjectPullRequestMergeWhenReady).toHaveBeenCalledWith(
+    expect(setProjectPullRequestMergeWhenReady).toHaveBeenCalledTimes(2);
+    expect(setProjectPullRequestMergeWhenReady).toHaveBeenNthCalledWith(
+      1,
       windowId,
       bodies["/api/code/project-pull-requests/merge-when-ready"],
       expect.any(AbortSignal),
-      "user",
+      "local-window",
+    );
+    expect(setProjectPullRequestMergeWhenReady).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      bodies["/api/code/project-pull-requests/merge-when-ready"],
+      expect.any(AbortSignal),
+      "remote-device",
     );
     expect(setProjectPullRequestAutoFix).toHaveBeenCalledTimes(1);
   });

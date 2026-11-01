@@ -7,6 +7,7 @@ import {
   type WorkThreadId,
   type WindowId,
 } from "@octant/contracts";
+import { projectExtraFolderRoots } from "@octant/domain";
 import type { PersistenceService } from "./persistence/persistenceService";
 import type { ProjectService } from "./projectService";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -118,6 +119,7 @@ export function createWorkFileListingRouteHandler(dependencies: WorkFileListingR
         threadId,
         projectId,
         rootPath: project.binding.canonicalRoot,
+        extraFolders: projectExtraFolderRoots(project),
         ...(directory === undefined ? {} : { directory }),
         signal: request.signal,
       });

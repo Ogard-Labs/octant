@@ -105,6 +105,7 @@ async function runScript(
       {
         script,
         cwd: input.cwd,
+        ...(input.extraRoots === undefined ? {} : { extraRoots: input.extraRoots }),
         environment: { NO_COLOR: "1", TERM: "dumb" },
         timeoutMs: input.timeoutMs,
         ...(egressProxy === undefined ? {} : { egressProxy }),

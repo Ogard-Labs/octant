@@ -605,6 +605,13 @@ classes.
 
 ### Authority
 
+- **Extra folders.** A file in one of the Project's extra folders is named by
+  its absolute path. After the checkout resolves as for any file, the root
+  authority places the path in a current extra folder or refuses it, so the
+  rest of this section holds for the folder as for a checkout: the same
+  containment, launch decision and posture rules, one server per component
+  and folder, a debug session rooted in the folder its program runs in. The
+  folder has no file watch.
 - **Code only.** The component kind is `mode-prohibited` in Chat and Work. Work
   has no developer environment, and Chat has no folder.
 - **Every read is checked when it runs.** The thread is an active Code thread.

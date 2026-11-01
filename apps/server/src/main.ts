@@ -37,6 +37,8 @@ import {
 } from "./startupFailureReason";
 import { runStartupArtifactInspection } from "./startupArtifactInspection";
 import { watchDesktopParent } from "./desktopParentWatch";
+import { configureSecretGuardLocations } from "./process/secretGuard";
+import { redactHostSecrets, redactHostSecretsInValue } from "./process/secretRedaction";
 
 // Validate launch config before loading server modules that transitively
 // import native dependencies (node-pty). This makes the packaged-runtime
@@ -56,7 +58,7 @@ let owner: HostRuntimeOwner | undefined;
 let ownerPaths: HostRuntimePaths | undefined;
 let diagnostics: (() => HostRuntimeDiagnostics) | undefined;
 let ownerBackup: ((label?: string) => HostRuntimeBackupOutcome) | undefined;
-let serviceLogs: BoundedHostLogStore | undefined;
+let serviceLogs: Pick<BoundedHostLogStore, "append" | "read"> | undefined;
 let failedStartup = false;
 
 try {
@@ -79,7 +81,25 @@ try {
   });
   ownerPaths = paths;
   await prepareHostRuntimePaths(paths);
-  const hostLogs = new BoundedHostLogStore({ path: paths.serviceLogPath });
+  // The secret guard keeps the bridge and control secrets out of every
+  // runtime's reach; it learns where they live before anything launches.
+  configureSecretGuardLocations({
+    dataDirectory: paths.dataDirectory,
+    runtimeDirectory: paths.runtimeDirectory,
+  });
+  const serviceLogStore = new BoundedHostLogStore({ path: paths.serviceLogPath });
+  // Every service log line passes the secret redaction on its way to disk.
+  const hostLogs = {
+    read: serviceLogStore.read.bind(serviceLogStore),
+    append: (entry: Parameters<BoundedHostLogStore["append"]>[0]) =>
+      serviceLogStore.append({
+        ...entry,
+        message: redactHostSecrets(entry.message),
+        ...(entry.details === undefined
+          ? {}
+          : { details: redactHostSecretsInValue(entry.details) }),
+      }),
+  };
   serviceLogs = hostLogs;
   process.env.OCTANT_DATA_DIR = paths.dataDirectory;
   const instanceId = launchConfig.instanceId ?? randomUUID();

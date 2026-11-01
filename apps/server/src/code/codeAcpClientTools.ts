@@ -17,6 +17,7 @@ import {
 } from "@octant/provider-sdk";
 import type { CodeThread, WindowId } from "@octant/contracts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { secretGuardRefusal } from "../process/secretGuard";
 import {
   isAbsolutePosixPath,
   joinCodePath,
@@ -118,6 +119,7 @@ export interface CodeAcpTerminalConfinement {
     readonly executable: string;
     readonly args: ReadonlyArray<string>;
     readonly boundRoot: string;
+    readonly extraBoundRoots?: ReadonlyArray<string>;
     readonly temporaryDirectory: string;
   }) => { readonly command: string; readonly args: ReadonlyArray<string> };
 }
@@ -126,7 +128,14 @@ export interface CodeAcpClientToolsOptions {
   readonly windowId: WindowId;
   readonly thread: CodeThread;
   readonly readExecutionPolicy: () => CodeThread["executionPolicy"];
+  /**
+   * The secret guard's refusal for a path, or undefined; defaults to this
+   * host's protected list. Checked at every posture, Full access included.
+   */
+  readonly protectedFileRefusal?: (path: string) => string | undefined;
   readonly checkoutRoot: string;
+  /** The Project's extra folders: they accept the same paths and cwd as the checkout. */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly uuid: () => string;
   readonly pathPort: CodeTestSourcePort;
   readonly terminalConfinement: CodeAcpTerminalConfinement;
@@ -255,11 +264,42 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       : [readDefinition, writeDefinition, ...terminalDefinitions];
   const terminals = new Map<string, TerminalRecord>();
 
-  const resolveFile = async (path: string) => {
+  // The checkout first, then each extra folder that still exists: a folder
+  // missing on disk is left out rather than failing the call.
+  const folderRoots = async (): Promise<ReadonlyArray<string>> => {
+    const roots: string[] = [];
+    for (const candidate of [options.checkoutRoot, ...(options.extraFolders ?? [])]) {
+      const real = await options.pathPort.realpath(candidate).catch(() => undefined);
+      if (real !== undefined) roots.push(real);
+    }
+    return roots;
+  };
+  const extraBoundRoots = (roots: ReadonlyArray<string>, bound: string) => {
+    const extras = roots.filter((root) => root !== bound);
+    return extras.length === 0 ? {} : { extraBoundRoots: extras };
+  };
+  const containingFolder = async (path: string) => {
     if (!isAbsolutePosixPath(path)) return undefined;
-    const root = await options.pathPort.realpath(options.checkoutRoot).catch(() => undefined);
-    if (root === undefined) return undefined;
-    return resolveContainedPath(options.pathPort, root, path);
+    const roots = await folderRoots();
+    for (const root of roots) {
+      const resolved = await resolveContainedPath(options.pathPort, root, path);
+      if (resolved !== undefined) return { root, roots, resolved };
+    }
+    return undefined;
+  };
+  const resolveFile = async (path: string) => (await containingFolder(path))?.resolved;
+
+  const protectedFileRefusal =
+    options.protectedFileRefusal ?? ((path: string) => secretGuardRefusal(path));
+  /** The refusal names the rule and the channel, never a bare unreadable file. */
+  const protectedResult = (...paths: ReadonlyArray<string>) => {
+    for (const path of paths) {
+      const message = protectedFileRefusal(path);
+      if (message !== undefined) {
+        return { result: { error: "protected-file", message }, isError: true as const };
+      }
+    }
+    return undefined;
   };
 
   const read = async (input: AcpClientReadTextFileInput) => {
@@ -270,6 +310,8 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       return errorResult("invalid-input");
     const resolved = await resolveFile(input.path);
     if (resolved === undefined) return errorResult("path-outside-checkout");
+    const guarded = protectedResult(input.path, resolved.canonical);
+    if (guarded !== undefined) return guarded;
     if (!resolved.stat.isFile || resolved.stat.size > MAX_FILE_BYTES)
       return errorResult(
         resolved.stat.size > MAX_FILE_BYTES ? "file-oversized" : "file-unreadable",
@@ -318,12 +360,13 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
     const lastSegment = input.path.slice(input.path.lastIndexOf("/") + 1);
     if (lastSegment === "" || lastSegment === "." || lastSegment === "..")
       return errorResult("path-outside-checkout");
-    const root = await options.pathPort.realpath(options.checkoutRoot).catch(() => undefined);
-    if (root === undefined) return errorResult("path-outside-checkout");
-    const parent = await resolveContainedPath(options.pathPort, root, parentCodePath(input.path));
-    if (parent === undefined || !parent.stat.isDirectory)
+    const folder = await containingFolder(parentCodePath(input.path));
+    if (folder === undefined || !folder.resolved.stat.isDirectory)
       return errorResult("path-outside-checkout");
+    const { root, roots, resolved: parent } = folder;
     const target = joinCodePath(parent.canonical, basename(input.path));
+    const guarded = protectedResult(input.path, target);
+    if (guarded !== undefined) return guarded;
     const current = await resolveContainedPath(options.pathPort, root, target);
     if (current !== undefined && !current.stat.isFile) return errorResult("path-not-a-file");
     const mode =
@@ -343,6 +386,7 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
           executable,
           args,
           boundRoot: root,
+          ...extraBoundRoots(roots, root),
           temporaryDirectory: baseTmpDir,
         });
         const child = spawn(launch.command, [...launch.args], {
@@ -406,12 +450,10 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       if (terminals.size >= MAX_TERMINALS) return errorResult("terminal-limit");
       if (input.cwd !== undefined && !isAbsolutePosixPath(input.cwd))
         return errorResult("cwd-outside-checkout");
-      const cwd = input.cwd ?? options.checkoutRoot;
-      const root = await options.pathPort.realpath(options.checkoutRoot).catch(() => undefined);
-      if (root === undefined) return errorResult("cwd-outside-checkout");
-      const resolved = await resolveContainedPath(options.pathPort, root, cwd);
-      if (resolved === undefined || !resolved.stat.isDirectory)
+      const folder = await containingFolder(input.cwd ?? options.checkoutRoot);
+      if (folder === undefined || !folder.resolved.stat.isDirectory)
         return errorResult("cwd-outside-checkout");
+      const { root, roots, resolved } = folder;
       const env = { ...options.terminalConfinement.environment };
       if (input.env !== undefined) {
         if (input.env.length > MAX_ENVIRONMENT_ENTRIES) return errorResult("invalid-environment");
@@ -442,6 +484,7 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
           executable,
           args: usesShell ? ["-c", input.command] : input.args,
           boundRoot: root,
+          ...extraBoundRoots(roots, root),
           temporaryDirectory: options.terminalConfinement.environment.TMPDIR ?? "/tmp",
         });
         child = spawn(launch.command, [...launch.args], {

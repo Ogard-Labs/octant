@@ -1,4 +1,5 @@
 import { readdir } from "node:fs/promises";
+import { basename } from "node:path";
 import {
   decodeWorkProjectStatus,
   type WorkProjectStatus,
@@ -106,11 +107,33 @@ const MAX_FOLDER_ITEMS = 64;
  * The top level of a Work folder as overview items: names and whether each is
  * a folder. Hidden entries are skipped, the same names the listing tool hides,
  * and nothing is read beyond the directory entries themselves.
+ *
+ * A Project's extra folders list after the main folder, each entry labeled
+ * with its folder's name and sharing the 64 items evenly, so a folder with many
+ * entries cannot push the others off the page. The overview never carries a
+ * host path, so a folder is named by its last component. A folder that cannot
+ * be read is left out.
  */
 export async function listWorkFolderTopLevel(
   canonicalRoot: string,
+  extraFolders: ReadonlyArray<string> = [],
 ): Promise<ReadonlyArray<WorkOverviewItem>> {
-  const entries = await readdir(canonicalRoot, { withFileTypes: true });
+  const share = Math.max(1, Math.floor(MAX_FOLDER_ITEMS / (1 + extraFolders.length)));
+  const main = await topLevelItems(canonicalRoot, share, undefined);
+  const extras = await Promise.all(
+    extraFolders.map((folder, index) =>
+      topLevelItems(folder, share, { name: basename(folder), index }).catch(() => []),
+    ),
+  );
+  return [...main, ...extras.flat()];
+}
+
+async function topLevelItems(
+  folder: string,
+  limit: number,
+  owner: { readonly name: string; readonly index: number } | undefined,
+): Promise<ReadonlyArray<WorkOverviewItem>> {
+  const entries = await readdir(folder, { withFileTypes: true });
   return entries
     .filter((entry) => !entry.name.startsWith(".") && (entry.isFile() || entry.isDirectory()))
     .sort((left, right) =>
@@ -120,10 +143,19 @@ export async function listWorkFolderTopLevel(
           ? -1
           : 1,
     )
-    .slice(0, MAX_FOLDER_ITEMS)
-    .map((entry) => ({
-      id: `folder:${entry.name}`.slice(0, 128),
-      label: entry.name.slice(0, 512),
-      detail: entry.isDirectory() ? "Folder" : "File",
-    }));
+    .slice(0, limit)
+    .map((entry) => {
+      const kind = entry.isDirectory() ? "Folder" : "File";
+      return owner === undefined
+        ? {
+            id: `folder:${entry.name}`.slice(0, 128),
+            label: entry.name.slice(0, 512),
+            detail: kind,
+          }
+        : {
+            id: `folder:${owner.index + 1}:${entry.name}`.slice(0, 128),
+            label: `${owner.name}/${entry.name}`.slice(0, 512),
+            detail: `${kind} in ${owner.name}`.slice(0, 256),
+          };
+    });
 }

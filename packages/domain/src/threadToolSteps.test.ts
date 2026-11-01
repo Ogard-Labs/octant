@@ -2,6 +2,7 @@ import type { ProviderRuntimeEvent } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
   markThreadToolStepOutsideContent,
+  recordThreadShieldReview,
   recordThreadToolStep,
   type ThreadToolSteps,
 } from "./threadToolSteps";
@@ -160,5 +161,43 @@ describe("the Watcher's tag on a tool step", () => {
         outsideContent: { labels: [] },
       },
     ]);
+  });
+});
+
+describe("Octant Shield's decisions among a turn's tool steps", () => {
+  const decision = {
+    reviewer: "octant-shield",
+    verdict: "allow",
+    stage: "fast-allow",
+    rule: "read-only-git",
+    reason: "A read-only Git command.",
+    latencyMs: 1,
+    decidedAt: "2026-10-31T10:00:00.000Z",
+  } as unknown as Parameters<typeof recordThreadShieldReview>[1]["decision"];
+  const review = { requestId: "approval-1", toolName: "Bash", summary: "git status", decision };
+
+  it("shows a decision as a completed step of its own beside the tool's", () => {
+    const tool = fold([event({ kind: "tool-start", toolCallId: "a", toolName: "Bash" })]);
+    const steps = recordThreadShieldReview(tool, review);
+    expect(steps.steps.map((step) => step.toolCallId)).toEqual(["a", "shield:approval-1"]);
+    expect(steps.steps[1]).toMatchObject({ state: "completed", shield: decision });
+  });
+
+  it("replaces the step when the same request is reviewed again and drops a decision past the limit", () => {
+    const once = recordThreadShieldReview(undefined, review);
+    const twice = recordThreadShieldReview(once, { ...review, summary: "git log" });
+    expect(twice.steps).toHaveLength(1);
+    expect(twice.steps[0]?.summary).toBe("git log");
+
+    let full: ThreadToolSteps | undefined;
+    for (let index = 0; index < 64; index += 1) {
+      full = recordThreadToolStep(
+        full,
+        event({ kind: "tool-start", toolCallId: `t${index}`, toolName: "Read" }),
+      );
+    }
+    const over = recordThreadShieldReview(full, review);
+    expect(over.steps).toHaveLength(64);
+    expect(over.truncated).toBe(true);
   });
 });

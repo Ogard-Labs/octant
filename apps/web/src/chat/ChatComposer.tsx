@@ -47,6 +47,7 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { ComposerModelPicker, isComposerReasoningOption } from "../providers/ComposerModelPicker";
+import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 import {
@@ -110,6 +111,11 @@ export interface ChatComposerProps {
   readonly caretIndex?: number;
   /** Identity of the thread whose caret should be restored, typically its id. */
   readonly caretRestoreKey?: string;
+  /** The thread and provider account a key provider's own-setup choice applies to. */
+  readonly nativeSetupThread?: {
+    readonly threadId: string;
+    readonly providerInstanceId: ProviderInstanceId;
+  };
   readonly onCaretIndexChange?: (caretIndex: number) => void;
   readonly isSending: boolean;
   readonly model: ChatComposerSelection;
@@ -842,6 +848,13 @@ export function ChatComposer(props: ChatComposerProps) {
               />
             </label>
           </>
+        )}
+        {props.nativeSetupThread === undefined ? null : (
+          <ThreadNativeSetupControl
+            disabled={settingsLocked}
+            providerInstanceId={props.nativeSetupThread.providerInstanceId}
+            threadId={props.nativeSetupThread.threadId}
+          />
         )}
         {hasModelOptionControls ? (
           <div className="chat-composer__model-options">

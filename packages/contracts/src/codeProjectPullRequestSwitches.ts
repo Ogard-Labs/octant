@@ -43,6 +43,11 @@ export const CodeProjectPullRequestMergeWhenReadyCommand = Schema.Union(
     target: CodeProjectPullRequestSwitchTarget,
     headSha: boundedNonEmptyText(64),
     method: Schema.optional(CodeProjectPullRequestMergeMethod),
+    /**
+     * The person's confirmation of the head they saw. A paired phone or web
+     * client must send it; a local window's own click stands in for it there.
+     */
+    confirmed: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("disable"),
@@ -231,6 +236,8 @@ export const CodeProjectPullRequestMergeWhenReadyRecorded = Schema.Struct({
       kind: Schema.Literal("enabled"),
       method: CodeProjectPullRequestMergeMethod,
       headSha: boundedNonEmptyText(64),
+      /** Set when a paired phone or web client turned it on; absent for the local window. */
+      caller: Schema.optional(Schema.Literal("remote-device")),
     }).annotations(strict),
     Schema.Struct({ kind: Schema.Literal("disabled") }).annotations(strict),
     Schema.Struct({ kind: Schema.Literal("merged") }).annotations(strict),

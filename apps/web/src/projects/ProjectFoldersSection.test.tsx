@@ -83,12 +83,12 @@ describe("Project folders", () => {
     expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("Main repository");
   });
 
-  it("says extra folders share the main folder's access while commands and Git stay in the main folder", () => {
+  it("says extra folders share the main folder's access while checkouts and Git stay in the main folder", () => {
     render(<ProjectFoldersSection onAdd={vi.fn()} onRemove={vi.fn()} project={project()} />);
 
     expect(
       screen.getByText(
-        "Extra folders get the same access as the main folder. Commands, checkouts and Git stay in the main folder.",
+        "Extra folders get the same access as the main folder. Checkouts and Git stay in the main folder; a terminal or a saved action can start in any of them.",
       ),
     ).toBeVisible();
   });

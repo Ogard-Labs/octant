@@ -2,6 +2,7 @@ import {
   MAX_THREAD_TOOL_STEP_SUMMARY_BYTES,
   MAX_THREAD_TOOL_STEPS_PER_TURN,
   type ProviderRuntimeEvent,
+  type ShieldDecision,
   type ToolOutsideContentMark,
   type ThreadToolStep,
   type ThreadToolStepList,
@@ -155,6 +156,42 @@ export function markThreadToolStepOutsideContent(
           outsideContent,
         }
       : { ...previous, outsideContent };
+  const nextSteps = steps.slice();
+  if (index === -1) nextSteps.push(next);
+  else nextSteps[index] = next;
+  return { steps: nextSteps, truncated: current?.truncated === true };
+}
+
+/**
+ * Adds Octant Shield's decision on one approval to a turn's tool steps, as a
+ * completed step of its own keyed by the approval's request id. A repeated
+ * review of the same request replaces its step. Past the step limit the
+ * decision is dropped and the list is marked truncated; the approval journal
+ * still holds it.
+ */
+export function recordThreadShieldReview(
+  current: ThreadToolSteps | undefined,
+  review: {
+    readonly requestId: string;
+    readonly toolName: string;
+    readonly summary: string;
+    readonly decision: ShieldDecision;
+  },
+): ThreadToolSteps {
+  const steps = current?.steps ?? [];
+  const toolCallId = boundedIdentifier(`shield:${review.requestId}`);
+  const summary = boundedSummary(review.summary);
+  const next: ThreadToolStep = {
+    toolCallId,
+    toolName: boundedIdentifier(review.toolName) || "Approval",
+    state: "completed",
+    ...(summary === undefined ? {} : { summary }),
+    shield: review.decision,
+  };
+  const index = steps.findIndex((step) => step.toolCallId === toolCallId);
+  if (index === -1 && steps.length >= MAX_THREAD_TOOL_STEPS_PER_TURN) {
+    return current?.truncated === true ? current : { steps, truncated: true };
+  }
   const nextSteps = steps.slice();
   if (index === -1) nextSteps.push(next);
   else nextSteps[index] = next;

@@ -1,6 +1,6 @@
 import { decodeProjectId, type UtcTimestamp } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { WorkProjectStatusReader } from "./workProjectStatusReader";
+import { listWorkFolderTopLevel, WorkProjectStatusReader } from "./workProjectStatusReader";
 
 const projectId = decodeProjectId("72000000-0000-4000-8000-000000000002");
 const today = "2026-07-26";
@@ -72,5 +72,30 @@ describe("WorkProjectStatusReader dueReminder", () => {
     const reader = readerWith({ throws: true });
     await expect(reader.dueReminder(projectId, "/tmp/acme")).resolves.toBeUndefined();
     await expect(reader.hasDueItems(projectId, "/tmp/acme")).resolves.toBe(false);
+  });
+});
+
+describe("listWorkFolderTopLevel with extra folders", () => {
+  it("lists each extra folder after the main folder, named by its last component", async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const base = await mkdtemp(join(tmpdir(), "octant-overview-"));
+    try {
+      const main = join(base, "main");
+      const extra = join(base, "notes");
+      await mkdir(join(main, "drafts"), { recursive: true });
+      await mkdir(extra);
+      await writeFile(join(extra, "ideas.md"), "x");
+      await writeFile(join(extra, ".hidden"), "x");
+
+      const items = await listWorkFolderTopLevel(main, [extra, join(base, "missing")]);
+
+      expect(items.map((item) => item.label)).toEqual(["drafts", "notes/ideas.md"]);
+      expect(items[1]).toMatchObject({ detail: "File in notes" });
+      expect(JSON.stringify(items)).not.toContain(base);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
   });
 });

@@ -10,7 +10,15 @@ const INLINE_ACTIONS = 3;
 
 export interface ProjectActionButtonsProps {
   readonly actions: ReadonlyArray<ProjectAction>;
-  readonly onRun: (action: ProjectAction) => void;
+  /** The Project's main folder and its extra folders; a choice is offered only with an extra one. */
+  readonly mainFolder?: string;
+  readonly extraFolders?: ReadonlyArray<string>;
+  /** `folder` is the extra folder the person chose; absent runs in the main folder. */
+  readonly onRun: (action: ProjectAction, folder?: string) => void;
+}
+
+function folderName(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
 /**
@@ -28,6 +36,12 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
   useEffect(() => {
     setHost(document.querySelector("[data-octant-project-actions]"));
   }, []);
+  const extras = props.extraFolders ?? [];
+  const [chosen, setChosen] = useState<string>("");
+  // A removed folder falls back to the main one rather than staying chosen.
+  const folder = extras.includes(chosen) ? chosen : "";
+  const run = (action: ProjectAction) =>
+    folder === "" ? props.onRun(action) : props.onRun(action, folder);
   if (host === null || props.actions.length === 0) return null;
   const inline = props.actions.slice(0, INLINE_ACTIONS);
   const rest = props.actions.slice(INLINE_ACTIONS);
@@ -40,7 +54,7 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
       {inline.map((action) => (
         <OctantButton
           key={String(action.id)}
-          onClick={() => props.onRun(action)}
+          onClick={() => run(action)}
           size="sm"
           title={action.command}
           type="button"
@@ -55,13 +69,26 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
           items={rest.map((action) => ({ label: action.name, value: String(action.id) }))}
           onValueChange={(value) => {
             const selected = rest.find((action) => String(action.id) === value);
-            if (selected !== undefined) props.onRun(selected);
+            if (selected !== undefined) run(selected);
           }}
           selectionMode="action"
           trigger={<span>More</span>}
           triggerClassName="project-action-buttons__more"
           triggerLabel="More Project actions"
           value=""
+        />
+      )}
+      {extras.length === 0 ? null : (
+        <OctantMenu
+          items={[
+            { label: `${folderName(props.mainFolder ?? "")} (main)`, value: "" },
+            ...extras.map((path) => ({ label: folderName(path), value: path })),
+          ]}
+          onValueChange={setChosen}
+          trigger={<span>Run in: {folder === "" ? "main folder" : folderName(folder)}</span>}
+          triggerClassName="project-action-buttons__more"
+          triggerLabel="Folder to run actions in"
+          value={folder}
         />
       )}
     </div>,

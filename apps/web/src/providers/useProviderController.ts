@@ -29,6 +29,7 @@ import {
   type ProviderFailure,
   type ProviderModel,
   type ProviderInstanceId,
+  type ThreadNativeSetupChoice,
   type ProviderModelId,
   type ProviderAuthenticationAttempt,
   type ProviderObservedState,
@@ -2171,6 +2172,29 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  const threadNativeSetup = useMemo(
+    () =>
+      client?.threadNativeSetup === undefined
+        ? undefined
+        : {
+            read: async (threadId: string) =>
+              (await client.threadNativeSetup?.({ kind: "get", threadId }))?.choice ?? "inherit",
+            change: async (
+              threadId: string,
+              providerInstanceId: ProviderInstanceId,
+              choice: ThreadNativeSetupChoice,
+            ) =>
+              (
+                await client.threadNativeSetup?.({
+                  kind: "set",
+                  threadId,
+                  providerInstanceId,
+                  choice,
+                })
+              )?.choice ?? "inherit",
+          },
+    [client],
+  );
   const setDataTags = useCallback(
     (instanceId: ProviderInstanceId, dataTags: ProviderDataTags) =>
       execute((current) => {
@@ -2607,6 +2631,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     setEnabled,
     setClaudeArtifactDelivery,
     setProviderNativeSetup,
+    threadNativeSetup,
     setDataTags,
     setModelDataTags,
     setModelContextWindow,

@@ -89,6 +89,23 @@ export async function pinFileMentionRoot(
   };
 }
 
+/**
+ * Pin each of a Project's extra folders like its main root. A folder that is
+ * missing, a symlink, or not a directory is left out, as it is from a
+ * runtime's profile, rather than failing the main folder's mentions.
+ */
+export async function pinFileMentionExtraRoots(
+  folders: ReadonlyArray<string>,
+  directory: CodeDirectoryPort = liveCodeDirectoryPort,
+): Promise<
+  ReadonlyArray<{ readonly rootPath: string; readonly rootIdentity: FileMentionRootIdentity }>
+> {
+  const pinned = await Promise.all(folders.map((folder) => pinFileMentionRoot(folder, directory)));
+  return pinned.flatMap((entry) =>
+    entry.kind === "ok" ? [{ rootPath: entry.rootPath, rootIdentity: entry.rootIdentity }] : [],
+  );
+}
+
 export function createFileMentionIo(
   directory: CodeDirectoryPort = liveCodeDirectoryPort,
   files: CodeTestSourcePort = liveCodeTestSourcePort,

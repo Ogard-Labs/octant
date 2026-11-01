@@ -116,4 +116,27 @@ describe("a session's native setup read from the journal", () => {
     expect(nativeSetupOption(undefined)).toEqual({});
     expect(nativeSetupOption(setup)).toEqual({ nativeSetup: setup });
   });
+
+  it("follows the thread's own choice over the account's switch", () => {
+    const threadId = "70000000-0000-4000-8000-000000000105";
+    const input = {
+      providerInstanceId: codex().id,
+      projectId,
+      threadId,
+      mode: "code" as const,
+      executionPolicy: "full-access" as const,
+    };
+    const withChoice = (choice: "on" | "off" | undefined) => ({
+      ...sources(codex({ nativeSetup: true }), codeProject()),
+      readThreadNativeSetup: (id: string) => (id === threadId ? choice : undefined),
+    });
+    expect(sessionNativeSetup(withChoice("off"), input)).toBeUndefined();
+    expect(sessionNativeSetup(withChoice(undefined), input)?.skills).toBe(true);
+    expect(
+      sessionNativeSetup(
+        { ...sources(codex(), codeProject()), readThreadNativeSetup: () => "on" },
+        { ...input, executionPolicy: "approval-gated" },
+      )?.skills,
+    ).toBe(true);
+  });
 });

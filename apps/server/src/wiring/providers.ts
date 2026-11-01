@@ -108,6 +108,7 @@ import { makeOpenCodeProcessLive, type OpenCodeProcessPort } from "../providers/
 import { makeOhMyPiProcessLive, type OhMyPiProcessPort } from "../providers/ohMyPiProcess";
 import { makePiProcessLive, type PiProcessPort } from "../providers/piProcess";
 import { createProviderRouteHandler } from "../providers/providerRoutes";
+import { ThreadNativeSetupStore } from "../providers/threadNativeSetupStore";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
@@ -126,6 +127,7 @@ import { ProviderUsageReadingStore } from "../providers/providerUsageReadingStor
 import { HeldTurnContextFile, heldTurnContext } from "../providers/heldTurnContext";
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
+import { redactProviderRuntimeSecrets } from "../providers/secretRedactingDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { GeneratedImageStore } from "../image/generatedImageStore";
@@ -190,6 +192,7 @@ import {
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
   isImageProfileDriverKind,
+  isKeyProviderDriverKind,
 } from "@octant/domain";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart, ServerStartupFailed } from "./serverShape";
@@ -386,9 +389,12 @@ export function makeConfiguredProviderDriver(
   if (localUsageHistory !== undefined) {
     driver = { ...driver, localUsageHistory };
   }
+  // Redaction comes first, so every consumer of the stream, the usage tap
+  // included, reads the redacted events.
+  const redacted = redactProviderRuntimeSecrets(driver);
   return options.onRuntimeEvent === undefined
-    ? driver
-    : attachProviderRuntimeUsageLimits(driver, { record: options.onRuntimeEvent });
+    ? redacted
+    : attachProviderRuntimeUsageLimits(redacted, { record: options.onRuntimeEvent });
 }
 
 /**
@@ -1429,7 +1435,24 @@ export function wireProviders(deps: ProvidersDependencies) {
         .then((refresh) => reviewedModelManifest.accept(refresh))
         .catch(() => undefined);
     }
+    const threadNativeSetupStore = new ThreadNativeSetupStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
     const providerRoutes = createProviderRouteHandler({
+      threadNativeSetup: {
+        get: (threadId) => threadNativeSetupStore.get(threadId),
+        set: (request) => {
+          const instance = persistence.readProviderInstance(request.providerInstanceId);
+          if (instance === undefined || !isKeyProviderDriverKind(instance.driverKind)) {
+            return "refused";
+          }
+          return threadNativeSetupStore.set(request.threadId, request.choice);
+        },
+      },
       service: providerService,
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,

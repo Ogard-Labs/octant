@@ -5914,6 +5914,7 @@ export class ChatService {
               ...nativeSetupOption(
                 sessionNativeSetup(this.#persistence, {
                   providerInstanceId,
+                  threadId: String(input.thread.id),
                   mode: "chat",
                   executionPolicy: "approval-gated",
                 }),
