@@ -247,7 +247,7 @@ describe("planCodeThreadCreate", () => {
     });
   });
 
-  it("binds a server Project's remote root without a branch and refuses a managed worktree there", () => {
+  it("binds a server Project's remote root without a branch, or asks for its worktree on the server", () => {
     const remote = {
       kind: "checkout-prepared",
       bindingRevisionId: ids.binding,
@@ -265,8 +265,8 @@ describe("planCodeThreadCreate", () => {
       command: { kind: "create-code-thread", thread: { checkoutId: ids.checkout } },
     });
     expect(plan("managed-worktree", remote)).toMatchObject({
-      kind: "rejected",
-      message: expect.stringContaining("Choose Current checkout"),
+      kind: "command",
+      command: { kind: "create-managed-code-thread", bindingRevisionId: ids.binding },
     });
   });
 });

@@ -547,6 +547,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      serverConnection,
       serverProjectStore,
       codeBoardEventStore,
       codeEvidence,
