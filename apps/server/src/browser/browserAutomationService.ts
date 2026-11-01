@@ -1,6 +1,8 @@
 import type {
   BrowserActionRequest,
   BrowserAutomationFailure,
+  BrowserDownloadRefusalReason,
+  BrowserDownloadReport,
   BrowserAutomationSnapshot,
   BrowserCaptureOutcome,
   BrowserContextId,
@@ -20,6 +22,7 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import {
+  MAX_BROWSER_HELD_DOWNLOADS,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_BROWSER_THREAD_CONTEXTS,
   MAX_PROJECT_AGENT_PAGES,
@@ -43,6 +46,8 @@ import type {
 } from "../context/externalContentIngestionStore";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
+import type { BrowserDownloadRecorder } from "./browserDownloadJournal";
+import { saveBrowserDownload, type BrowserDownloadFacts } from "./browserDownloadSave";
 import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
@@ -91,6 +96,13 @@ export interface BrowserAutomationServiceOptions {
    * a signed-in page.
    */
   readonly isUnattendedScope?: (windowId: WindowId) => boolean;
+  /**
+   * Whether the person's "Let agents download files" switch is on. Absent, off:
+   * no download is ever held.
+   */
+  readonly agentDownloadsEnabled?: () => boolean;
+  /** Where a saved, refused, or denied download is journaled. */
+  readonly downloads?: BrowserDownloadRecorder;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly now: () => number;
@@ -170,6 +182,12 @@ interface OwnedContext {
   readonly evidence: ToolEvidence[];
   failure: BrowserAutomationFailure | undefined;
   creation?: Promise<void>;
+  /**
+   * The downloads the runtime holds for the agent, as an action reported them.
+   * The server saves only one of these, by the id the runtime gave, and holds
+   * the same bound the runtime does (the oldest goes first).
+   */
+  readonly heldDownloads: Map<string, BrowserDownloadFacts>;
 }
 
 const hostPolicy: BrowserContextPolicy = {
@@ -247,6 +265,8 @@ export class BrowserAutomationService {
     | undefined;
   readonly #captures: BrowserAutomationServiceOptions["captures"];
   readonly #isUnattendedScope: (windowId: WindowId) => boolean;
+  readonly #agentDownloadsEnabled: () => boolean;
+  readonly #downloads: BrowserDownloadRecorder | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #now: () => number;
@@ -266,6 +286,8 @@ export class BrowserAutomationService {
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#captures = options.captures;
     this.#isUnattendedScope = options.isUnattendedScope ?? (() => false);
+    this.#agentDownloadsEnabled = options.agentDownloadsEnabled ?? (() => false);
+    this.#downloads = options.downloads;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#now = options.now;
@@ -391,6 +413,7 @@ export class BrowserAutomationService {
       keptUntil: undefined,
       evidence: [],
       failure: undefined,
+      heldDownloads: new Map(),
     };
     this.#contexts.set(contextId, owned);
     owned.creation = (async () => {
@@ -499,6 +522,11 @@ export class BrowserAutomationService {
      * this; the person's pane does not.
      */
     readonly refuseStaleRevision?: boolean;
+    /**
+     * Set by the agent tool when this turn may have downloads held for it. The
+     * runtime holds them only if the person's switch is also on.
+     */
+    readonly holdDownloads?: boolean;
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
     const foreign =
@@ -588,6 +616,7 @@ export class BrowserAutomationService {
       readonly capturedBy?: BrowserCaptureTaker;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly refuseStaleRevision?: boolean;
+      readonly holdDownloads?: boolean;
     },
   ): Promise<BrowserAutomationSnapshot> {
     if (owned.abort.signal.aborted || owned.record.state !== "active") {
@@ -751,6 +780,12 @@ export class BrowserAutomationService {
           ...(input.request.kind === "upload" && input.uploadFiles !== undefined
             ? { files: input.uploadFiles }
             : {}),
+          // Only an agent action, only while the person's switch is on.
+          ...(input.holdDownloads === true &&
+          input.capturedBy === "agent" &&
+          this.#agentDownloadsEnabled()
+            ? { downloads: "hold" as const }
+            : {}),
         },
         owned.abort.signal,
       );
@@ -798,6 +833,9 @@ export class BrowserAutomationService {
         ...(observed.dialogs === undefined || observed.dialogs.length === 0
           ? {}
           : { dialogs: observed.dialogs.slice(0, 8) }),
+        ...(observed.downloads === undefined || observed.downloads.length === 0
+          ? {}
+          : { downloads: this.#noteDownloads(owned, observed.downloads) }),
         // Only the observe-diagnostics action collects these, and it reports
         // them as absent rather than empty when the runtime did not supply
         // them: an empty array would claim the page logged nothing, which is a
@@ -1118,6 +1156,163 @@ export class BrowserAutomationService {
     } catch {
       return { status: "not-kept", reason: "unavailable" };
     }
+  }
+
+  /**
+   * Remember the downloads the runtime now holds, so the agent can ask to save
+   * one by the id it was given, and journal the ones it stopped. The report is
+   * returned as it goes into the answer.
+   */
+  #noteDownloads(
+    owned: OwnedContext,
+    reports: ReadonlyArray<BrowserDownloadReport>,
+  ): ReadonlyArray<BrowserDownloadReport> {
+    const kept = reports.slice(0, 16);
+    for (const report of kept) {
+      if (report.state === "held") {
+        owned.heldDownloads.set(report.downloadId, {
+          name: report.name,
+          sizeBytes: report.sizeBytes,
+          mediaType: report.mediaType,
+        });
+        while (owned.heldDownloads.size > MAX_BROWSER_HELD_DOWNLOADS) {
+          const oldest = owned.heldDownloads.keys().next().value;
+          if (oldest === undefined) break;
+          owned.heldDownloads.delete(oldest);
+        }
+      } else {
+        this.#journalRefusedDownload(owned, {
+          name: report.name,
+          reason: report.reason === "too-large" ? "too-large" : "unavailable",
+        });
+      }
+    }
+    return kept;
+  }
+
+  #journalRefusedDownload(
+    owned: OwnedContext,
+    file: {
+      readonly name: string;
+      readonly sizeBytes?: number | undefined;
+      readonly mediaType?: string | undefined;
+      readonly reason: BrowserDownloadRefusalReason;
+    },
+  ): void {
+    try {
+      this.#downloads?.refused(this.#downloadContext(owned), file);
+    } catch {
+      // A record that cannot be written must not fail the page the agent is reading.
+    }
+  }
+
+  #downloadContext(owned: OwnedContext) {
+    return {
+      threadId: owned.threadId,
+      origin:
+        owned.observation?.url === undefined
+          ? owned.record.policy.allowedOrigins.join(", ")
+          : (originOfUrl(owned.observation.url) ?? owned.record.policy.allowedOrigins.join(", ")),
+      providerInstanceId: owned.record.authority.providerInstanceId,
+      correlationId: owned.action.correlationId,
+    };
+  }
+
+  /**
+   * Save a download the thread's Browser holds into `workspaceRoot`'s
+   * `downloads/` folder, after `ask` returns approved. Only the agent tool calls
+   * this, with the root of the thread's own workspace; the held file is named by
+   * an id the runtime issued, and no caller can name a host path. The held file
+   * is deleted whatever the answer, and the outcome is journaled without bytes.
+   */
+  async saveDownload(input: {
+    readonly windowId: WindowId;
+    readonly threadId: BrowserThreadId;
+    readonly downloadId: string;
+    readonly workspaceRoot: string | undefined;
+    readonly ask: (
+      facts: BrowserDownloadFacts,
+      origin: string,
+    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+  }): Promise<
+    | {
+        readonly status: "saved";
+        readonly path: string;
+        readonly sizeBytes: number;
+        readonly mediaType: string;
+      }
+    | { readonly status: "refused"; readonly error: string }
+  > {
+    const owned = this.#current(input.windowId, input.threadId);
+    const held = owned?.heldDownloads.get(input.downloadId);
+    if (
+      owned === undefined ||
+      owned.record.state !== "active" ||
+      held === undefined ||
+      this.#runtime.claimDownload === undefined
+    ) {
+      return { status: "refused", error: "download-not-found" };
+    }
+    const contextId = owned.record.contextId;
+    const downloadId = input.downloadId;
+    const claim = this.#runtime.claimDownload.bind(this.#runtime);
+    const context = this.#downloadContext(owned);
+    const outcome = await saveBrowserDownload({
+      workspaceRoot: input.workspaceRoot,
+      name: held.name,
+      claim: () => claim(contextId, downloadId),
+      ask: async (facts) => {
+        const answer = await input.ask(facts, context.origin);
+        // A question can wait minutes: the page and the thread's authority
+        // must still be there when it is answered.
+        if (
+          answer === "approved" &&
+          (owned.record.state !== "active" ||
+            owned.abort.signal.aborted ||
+            !this.#authorityIsActive(owned))
+        ) {
+          return "cancelled";
+        }
+        return answer;
+      },
+    });
+    // Saved, refused, or denied: the held copy is not needed again. A refusal
+    // for something the agent could fix (no such id) keeps nothing to delete.
+    if (!(outcome.status === "refused" && outcome.error === "download-not-found")) {
+      owned.heldDownloads.delete(downloadId);
+      await this.#runtime.discardDownload?.(contextId, downloadId).catch(() => undefined);
+    }
+    try {
+      if (outcome.status === "saved") {
+        this.#downloads?.saved(context, {
+          path: outcome.path,
+          sizeBytes: outcome.sizeBytes,
+          mediaType: outcome.mediaType,
+          sha256: outcome.sha256,
+        });
+      } else if (outcome.reason !== undefined) {
+        this.#downloads?.refused(context, {
+          name: outcome.facts?.name ?? held.name,
+          sizeBytes: outcome.facts?.sizeBytes ?? held.sizeBytes,
+          mediaType:
+            outcome.facts?.mediaType === ""
+              ? undefined
+              : (outcome.facts?.mediaType ?? held.mediaType),
+          reason: outcome.reason,
+        });
+      }
+    } catch {
+      // The file is already saved or already refused; a record that cannot be
+      // written is reported by the host, not by failing the agent's call.
+    }
+    return outcome.status === "saved"
+      ? {
+          status: "saved",
+          path: outcome.path,
+          sizeBytes: outcome.sizeBytes,
+          mediaType: outcome.mediaType,
+        }
+      : { status: "refused", error: outcome.error };
   }
 
   async cancel(input: {
@@ -2111,4 +2306,13 @@ function defaultSchedule(delayMs: number, callback: () => void): () => void {
   const timer = setTimeout(callback, delayMs);
   timer.unref?.();
   return () => clearTimeout(timer);
+}
+
+function originOfUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
 }

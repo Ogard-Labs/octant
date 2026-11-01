@@ -1,7 +1,9 @@
 import { browserToolImage } from "../browser/browserToolImage";
 import { admitBrowserUpload, browserUploadSummary } from "../browser/browserUploadFiles";
+import { browserDownloadQuestion } from "@octant/domain";
 import {
   browserToolAction,
+  browserDownloadSavedResult,
   browserToolResult,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
@@ -497,7 +499,27 @@ export interface CodeAppManagedToolsOptions {
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
+      readonly holdDownloads?: boolean;
     }) => Promise<BrowserAutomationSnapshot>;
+    /** Saves a download the thread's Browser holds; see the service. */
+    readonly saveDownload?: (input: {
+      readonly windowId: WindowId;
+      readonly threadId: BrowserThreadId;
+      readonly downloadId: string;
+      readonly workspaceRoot: string | undefined;
+      readonly ask: (
+        facts: { readonly name: string; readonly sizeBytes: number; readonly mediaType: string },
+        origin: string,
+      ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+    }) => Promise<
+      | {
+          readonly status: "saved";
+          readonly path: string;
+          readonly sizeBytes: number;
+          readonly mediaType: string;
+        }
+      | { readonly status: "refused"; readonly error: string }
+    >;
     readonly releaseThread: (
       windowId: WindowId,
       threadId: BrowserThreadId,
@@ -535,6 +557,20 @@ export interface CodeAppManagedToolsOptions {
    */
   readonly browserUpload?: {
     readonly root: string;
+    readonly request: (
+      summary: string,
+      signal?: AbortSignal,
+    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+  };
+  /**
+   * Asks the person, in the thread, to let the agent save a download into the
+   * thread's checkout (its `downloads/` folder), and says who may not be asked:
+   * a paired device is not at the computer the file would land on. Absent, a
+   * download is neither held nor saved.
+   */
+  readonly browserDownload?: {
+    readonly root: string;
+    readonly refusal?: (windowId: WindowId) => string | undefined;
     readonly request: (
       summary: string,
       signal?: AbortSignal,
@@ -1285,6 +1321,24 @@ async function browserToolOne(
       snapshotAfter: () => browserToolOne(options, { operation: "snapshot" }, signal),
     });
   }
+  if (input.operation === "download-save") {
+    const download = options.browserDownload;
+    const browser = options.browser;
+    if (download === undefined || browser.saveDownload === undefined) {
+      return failure("download-unavailable");
+    }
+    const refusal = download.refusal?.(options.windowId);
+    if (refusal !== undefined) return failure(refusal);
+    const saved = await browser.saveDownload({
+      windowId: options.windowId,
+      threadId,
+      downloadId: input.downloadId,
+      workspaceRoot: download.root,
+      ask: (facts, pageOrigin) =>
+        download.request(browserDownloadQuestion(pageOrigin, facts), signal),
+    });
+    return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
+  }
   const request = browserToolAction(input, context);
   if (request === undefined) return failure("invalid-browser-input");
   let uploadFiles: ReadonlyArray<string> | undefined;
@@ -1325,6 +1379,11 @@ async function browserToolOne(
       request,
       capturedBy: "agent",
       refuseStaleRevision: true,
+      // Held only where the question about saving one can be answered.
+      ...(options.browserDownload === undefined ||
+      options.browserDownload.refusal?.(options.windowId) !== undefined
+        ? {}
+        : { holdDownloads: true }),
       ...(uploadFiles === undefined ? {} : { uploadFiles }),
       ...(release === undefined ? {} : { releaseUpload: release }),
     }),

@@ -1613,6 +1613,18 @@ describe("SettingsView", () => {
     expect(screen.getByRole("button", { name: "Stop host" })).toBeEnabled();
   });
 
+  it("offers the agent-downloads switch, off by default, beside the other Browser settings", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    expect(screen.getByRole("heading", { name: "Browser downloads" })).toBeInTheDocument();
+    const control = screen.getByRole("switch", { name: "Let agents download files" });
+    expect(control).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText(/Downloads you start yourself stay blocked/)).toBeVisible();
+    await userEvent.setup().click(control);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ agentBrowserDownloads: true });
+  });
+
   it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {
     const projectId = "44000000-0000-4000-8000-0000000000a1";
     const extensionClient = {

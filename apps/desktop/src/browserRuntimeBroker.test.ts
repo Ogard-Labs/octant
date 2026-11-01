@@ -23,6 +23,10 @@ function host() {
     createContext: vi.fn(async () => undefined),
     inspectTarget: vi.fn(async () => ({ sensitive: false })),
     onContextGone: vi.fn(() => () => undefined),
+    claimDownload: vi.fn(
+      (): string | undefined => "/tmp/octant-browser-downloads/desktop/d-1/file",
+    ),
+    discardDownload: vi.fn(async () => undefined),
   };
 }
 
@@ -78,6 +82,75 @@ describe("BrowserRuntimeBroker", () => {
       );
       expect(invalid.status).toBe(400);
       expect(surface.act).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("passes the hold flag through only as the fixed value, and claims or discards by id", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      const held = await broker.fetchForTest(
+        request(broker.url, broker.token, {
+          contextId,
+          request: { kind: "click", target: "#get", downloads: "hold" },
+        }),
+      );
+      expect(held.status).toBe(200);
+      expect(surface.act).toHaveBeenCalledWith(contextId, {
+        kind: "click",
+        target: "#get",
+        downloads: "hold",
+      });
+      const other = await broker.fetchForTest(
+        request(broker.url, broker.token, {
+          contextId,
+          request: { kind: "click", target: "#get", downloads: "allow" },
+        }),
+      );
+      expect(other.status).toBe(400);
+
+      const claimed = await broker.fetchForTest(
+        request(
+          broker.url,
+          broker.token,
+          { contextId, downloadId: "d1" },
+          "v1/contexts/download-claim",
+        ),
+      );
+      expect(await claimed.json()).toEqual({
+        path: "/tmp/octant-browser-downloads/desktop/d-1/file",
+      });
+      surface.claimDownload.mockReturnValueOnce(undefined);
+      const missing = await broker.fetchForTest(
+        request(
+          broker.url,
+          broker.token,
+          { contextId, downloadId: "d2" },
+          "v1/contexts/download-claim",
+        ),
+      );
+      expect(await missing.json()).toEqual({ path: null });
+      const discarded = await broker.fetchForTest(
+        request(
+          broker.url,
+          broker.token,
+          { contextId, downloadId: "d1" },
+          "v1/contexts/download-discard",
+        ),
+      );
+      expect(discarded.status).toBe(200);
+      expect(surface.discardDownload).toHaveBeenCalledWith(contextId, "d1");
+      const bad = await broker.fetchForTest(
+        request(
+          broker.url,
+          broker.token,
+          { contextId, downloadId: "../../etc/passwd" },
+          "v1/contexts/download-claim",
+        ),
+      );
+      expect(bad.status).toBe(400);
     } finally {
       await broker.close();
     }

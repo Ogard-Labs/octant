@@ -741,6 +741,16 @@ export const ShellSettings = Schema.Struct({
     Schema.Array(RememberedBrowserProfileSite).pipe(Schema.maxItems(1_024)),
     { default: () => [] },
   ),
+  /**
+   * "Let agents download files": whether a page the agent drives in its
+   * Browser may start a download that the host holds for the agent to ask to
+   * save. Off, every download is blocked as before. It is a host switch the
+   * person sets from a local window; shell settings are written only through
+   * the shell route, which a paired device, a routine, a subagent, a plugin,
+   * and a terminal CLI cannot reach. A store persisted before this shipped
+   * decodes to off.
+   */
+  agentBrowserDownloads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations(strict);
 export type ShellSettings = typeof ShellSettings.Type;
 

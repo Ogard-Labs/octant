@@ -196,6 +196,9 @@ import {
   BROWSER_CAPTURE_KEPT,
   BROWSER_STEP_RECORDED,
   BrowserCaptureKept,
+  BROWSER_DOWNLOAD_EVENT_NAMES,
+  BrowserDownloadRefused,
+  BrowserDownloadSaved,
   BROWSER_FLOW_EVENT_NAMES,
   BrowserFlowDeleted,
   BrowserFlowSaved,
@@ -678,6 +681,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(IMAGE_JOB_QUEUED, 1, ImageJobQueued)
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
+    .register(BROWSER_DOWNLOAD_EVENT_NAMES.saved, 1, BrowserDownloadSaved)
+    .register(BROWSER_DOWNLOAD_EVENT_NAMES.refused, 1, BrowserDownloadRefused)
     .register(BROWSER_FLOW_EVENT_NAMES.saved, 1, BrowserFlowSaved)
     .register(BROWSER_FLOW_EVENT_NAMES.deleted, 1, BrowserFlowDeleted)
     .register(BROWSER_STEP_RECORDED, 1, BrowserStep)

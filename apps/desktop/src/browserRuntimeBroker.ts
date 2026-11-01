@@ -33,6 +33,8 @@ const ROUTES = new Set([
   "/v1/contexts/person-input",
   "/v1/contexts/act",
   "/v1/contexts/peek",
+  "/v1/contexts/download-claim",
+  "/v1/contexts/download-discard",
   "/v1/contexts/close",
   "/v1/contexts/close-all",
   "/v1/profiles/list",
@@ -236,6 +238,20 @@ async function handleBrokerRequest(
           : await host.act(body.contextId, body.request, signal),
       );
     }
+    if (
+      url.pathname === "/v1/contexts/download-claim" ||
+      url.pathname === "/v1/contexts/download-discard"
+    ) {
+      if (!isUuid(body.contextId) || typeof body.downloadId !== "string") {
+        return failure("invalid-request", 400);
+      }
+      if (!/^d[1-9][0-9]{0,5}$/.test(body.downloadId)) return failure("invalid-request", 400);
+      if (url.pathname === "/v1/contexts/download-discard") {
+        await host.discardDownload(body.contextId, body.downloadId);
+        return Response.json({ ok: true });
+      }
+      return Response.json({ path: host.claimDownload(body.contextId, body.downloadId) ?? null });
+    }
     if (url.pathname === "/v1/contexts/close") {
       if (!isUuid(body.contextId)) return failure("invalid-request", 400);
       await host.closeContext(body.contextId);
@@ -390,6 +406,7 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "colorScheme",
     "diagnosticsSince",
     "diagnosticsWarnings",
+    "downloads",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   if (!(BrowserActionKind.literals as ReadonlyArray<unknown>).includes(value.kind)) return false;
@@ -412,6 +429,7 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
         value.files.every(
           (file) => typeof file === "string" && file.length <= 4096 && file.startsWith("/"),
         ))) &&
+    (value.downloads === undefined || value.downloads === "hold") &&
     (value.waitFor === undefined || isWaitFor(value.waitFor)) &&
     (value.diagnosticsSince === undefined ||
       (Number.isSafeInteger(value.diagnosticsSince) && (value.diagnosticsSince as number) >= 0)) &&

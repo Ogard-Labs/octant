@@ -2414,12 +2414,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               >
                 {pendingBrowserApproval.signIn !== undefined
                   ? "Continue"
-                  : pendingBrowserApproval.upload === undefined
-                    ? "Approve once"
-                    : "Upload once"}
+                  : pendingBrowserApproval.download !== undefined
+                    ? "Save once"
+                    : pendingBrowserApproval.upload === undefined
+                      ? "Approve once"
+                      : "Upload once"}
               </OctantButton>
-              {/* An upload's or a sign-in's answer is never remembered. */}
+              {/* An upload's, a download's, or a sign-in's answer is never remembered. */}
               {pendingBrowserApproval.upload === undefined &&
+              pendingBrowserApproval.download === undefined &&
               pendingBrowserApproval.signIn === undefined ? (
                 <OctantButton
                   disabled={browserApprovalBusy}
@@ -2448,9 +2451,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           label={
             pendingBrowserApproval.signIn !== undefined
               ? "Browser sign-in"
-              : pendingBrowserApproval.upload === undefined
-                ? "Browser origin approval"
-                : "Browser upload approval"
+              : pendingBrowserApproval.download !== undefined
+                ? "Browser download approval"
+                : pendingBrowserApproval.upload === undefined
+                  ? "Browser origin approval"
+                  : "Browser upload approval"
           }
           summary={browserApprovalSummary(pendingBrowserApproval)}
         />

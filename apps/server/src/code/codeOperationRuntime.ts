@@ -476,6 +476,8 @@ export interface CodeOperationRuntimeOptions {
   readonly isBrowserOriginRemembered?: (origin: string) => boolean;
   /** The Browser approvals a sign-in handoff asks through; see the Code tools. */
   readonly browserSignIn?: CodeAppManagedToolsOptions["browserSignIn"];
+  /** Who may not be asked to save a download: a paired device. */
+  readonly browserDownloadRefusal?: (windowId: WindowId) => string | undefined;
   /** The app-managed Apple capability, when this host has an Apple toolchain. */
   readonly appleToolchain?: CodeAppManagedToolsOptions["apple"];
   /** The app-managed Android emulator capability. */
@@ -4086,6 +4088,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           // a site does.
           browserUpload: {
             root: active.checkoutRoot,
+            request: (summary, signal) => {
+              const bounded = boundProviderSummary(summary);
+              return bounded === undefined
+                ? Promise.resolve("cancelled" as const)
+                : this.#askToolApproval(active, bounded, undefined, signal);
+            },
+          },
+          // A saved download lands in this thread's checkout only, and the
+          // person is asked every time, as for an upload.
+          browserDownload: {
+            root: active.checkoutRoot,
+            ...(this.#options.browserDownloadRefusal === undefined
+              ? {}
+              : { refusal: this.#options.browserDownloadRefusal }),
             request: (summary, signal) => {
               const bounded = boundProviderSummary(summary);
               return bounded === undefined

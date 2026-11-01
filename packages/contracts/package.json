@@ -55,6 +55,7 @@
     "./browser-automation": "./src/browserAutomation.ts",
     "./browser-automation-rpc": "./src/browserAutomationRpc.ts",
     "./browser-capture": "./src/browserCapture.ts",
+    "./browser-download": "./src/browserDownload.ts",
     "./browser-flows": "./src/browserFlows.ts",
     "./browser-profiles": "./src/browserProfiles.ts",
     "./browser-extensions": "./src/browserExtensions.ts",

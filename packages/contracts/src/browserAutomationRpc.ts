@@ -63,6 +63,18 @@ export const BrowserToolApproval = Schema.Struct({
    */
   extensionCount: Schema.optional(Schema.Int.pipe(Schema.between(1, 64))),
   /**
+   * Set when the agent asks to save a download a page started into the
+   * thread's workspace: the file, by name, size and sniffed type. Such an
+   * approval covers that file once and is never remembered.
+   */
+  download: Schema.optional(
+    Schema.Struct({
+      name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+      sizeBytes: Schema.Int.pipe(Schema.nonNegative()),
+      mediaType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+    }).annotations(strict),
+  ),
+  /**
    * Set when the agent asks to upload files to the page rather than to open
    * it: the files, by name and size, that would leave this computer. Such an
    * approval covers those files once and is never remembered.
