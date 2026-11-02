@@ -406,7 +406,10 @@ export class SkillDiscoveryService {
               ? "Claude Code skills"
               : sourceRef === "provider:codex"
                 ? "Codex skills"
-                : (skillsRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? "Skill folder"),
+                : (skillsRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? "")
+                    .trim()
+                    .slice(0, 256)
+                    .trim() || "Skill folder",
           status,
           skillCount,
           watching: false,
