@@ -675,6 +675,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      browserModelBindings,
       personMemoryAccess,
       serverConnection,
       serverProjectStore,
@@ -1000,6 +1001,7 @@ export function startOctantServer(
     const { agentMessageRoutes, browserAutomationRoutes, contextRoutes, windowCanOpenThread } =
       wireContext({
         agentMessageProjection,
+        browserModelBindings,
         browserAuthority,
         browserAutomationService,
         browserCaptures,

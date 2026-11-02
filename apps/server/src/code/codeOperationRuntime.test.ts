@@ -1591,6 +1591,118 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("wires task-profile approval and revocation through the actual Code runtime adapter", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      rootId: "90000000-0000-4000-8000-000000000009",
+      worktreeId: checkoutId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const page = decodeBrowserAutomationSnapshot({
+      status: "running",
+      threadId,
+      evidence: [],
+      context: {
+        contextId: "90000000-0000-4000-8000-000000000011",
+        threadId,
+        actionId: "90000000-0000-4000-8000-000000000012",
+        correlationId: "90000000-0000-4000-8000-000000000013",
+        authority,
+        policy: {
+          profileMode: "isolated",
+          profile: { kind: "personal" },
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 600000,
+        },
+        state: "active",
+        createdAt: now,
+      },
+    });
+    const request = vi.fn(async () => "approved" as const);
+    const rememberBinding = vi.fn();
+    const forgetBinding = vi.fn();
+    const create = vi.fn(async () => page);
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      browserProfiles: {
+        approvals: { request, isRemembered: () => false },
+        readBinding: () => undefined,
+        rememberBinding,
+        forgetBinding,
+      },
+      browserAutomation: {
+        resolveAuthority: () => authority,
+        inspectThread: () => ({ status: "ready", threadId: threadId as never, evidence: [] }),
+        create,
+        act: vi.fn(async () => page),
+        releaseThread: vi.fn(async () => page),
+      },
+    });
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        executionPolicy: "full-access",
+        browserTaskProfile: "personal",
+      }),
+    );
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(991),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "task-profile",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"navigate","url":"https://example.com"}',
+          }),
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(provider.answerTool).toHaveBeenCalledWith(
+          expect.objectContaining({ requestId: "task-profile", isError: false }),
+        ),
+      );
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({ profile: { kind: "personal" }, origin: "https://example.com" }),
+      );
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          policy: expect.objectContaining({ profile: { kind: "personal" } }),
+        }),
+      );
+      expect(rememberBinding).toHaveBeenCalledWith(
+        String(page.context!.contextId),
+        expect.objectContaining({ modelId: String(thread().modelId), authority }),
+      );
+      await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(992),
+        threadId,
+        checkoutId,
+      });
+      expect(forgetBinding).toHaveBeenCalledWith(String(page.context!.contextId));
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each(["approved", "denied", "cancelled"] as const)(
     "honors %s browser approval without changing thread access",
     async (decision) => {
@@ -7195,6 +7307,7 @@ function selectThreadConversation(
 function runtimeFixture(options: {
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
+  browserProfiles?: Parameters<typeof createCodeOperationRuntime>[0]["browserProfiles"];
   appleToolchain?: Parameters<typeof createCodeOperationRuntime>[0]["appleToolchain"];
   computerUseTools?: Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"];
   threadDesktopDestination?: Parameters<
@@ -7574,6 +7687,7 @@ function runtimeFixture(options: {
                 supportsAcpClientCapabilities: () => options.supportsAcpClientCapabilities ?? false,
               }),
         }),
+    ...(options.browserProfiles === undefined ? {} : { browserProfiles: options.browserProfiles }),
     ...(options.appleToolchain === undefined ? {} : { appleToolchain: options.appleToolchain }),
     ...(options.planner === undefined ? {} : { planner: options.planner }),
     ...(options.supportsModelSwitch === undefined

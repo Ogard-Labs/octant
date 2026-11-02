@@ -1,4 +1,10 @@
 import {
+  BrowserTaskProfileState,
+  BrowserTaskProfileSelection,
+  decodeBrowserTaskProfileReadCommand,
+  decodeBrowserTaskProfileSelectCommand,
+  type BrowserTaskProfileReadCommand,
+  type BrowserTaskProfileSelectCommand,
   decodeBrowserActionCommand,
   decodeBrowserContextCancelCommand,
   decodeBrowserContextCreateCommand,
@@ -59,6 +65,14 @@ export interface BrowserAutomationClientOptions {
 }
 
 export interface BrowserAutomationClient {
+  readTaskProfile?(
+    input: BrowserTaskProfileReadCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserTaskProfileState>;
+  selectTaskProfile?(
+    input: BrowserTaskProfileSelectCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserTaskProfileSelection>;
   resolve(input: BrowserThreadScopeRequest, signal?: AbortSignal): Promise<BrowserThreadScope>;
   create(
     input: BrowserContextCreateCommand,
@@ -148,6 +162,22 @@ export function createBrowserAutomationClient(
   options: BrowserAutomationClientOptions,
 ): BrowserAutomationClient {
   return {
+    readTaskProfile: (input, signal) =>
+      post(
+        options,
+        "/api/browser/task-profile/current",
+        decodeBrowserTaskProfileReadCommand(input),
+        decodeHostAnswer(BrowserTaskProfileState),
+        signal,
+      ),
+    selectTaskProfile: (input, signal) =>
+      post(
+        options,
+        "/api/browser/task-profile",
+        decodeBrowserTaskProfileSelectCommand(input),
+        decodeHostAnswer(BrowserTaskProfileSelection),
+        signal,
+      ),
     resolve: (input, signal) =>
       post(
         options,

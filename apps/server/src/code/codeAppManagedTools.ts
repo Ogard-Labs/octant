@@ -1,3 +1,9 @@
+import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
+import { sameToolActionAuthority, type StoredBrowserProfile } from "@octant/contracts";
+import type {
+  BrowserAppManagedToolsOptions,
+  BrowserModelBinding,
+} from "../browser/browserAppManagedTools";
 import { browserToolImage } from "../browser/browserToolImage";
 import { admitBrowserUpload, browserUploadSummary } from "../browser/browserUploadFiles";
 import { browserDownloadQuestion } from "@octant/domain";
@@ -381,6 +387,12 @@ export interface CodeAppManagedToolsOptions {
   readonly thread: CodeThread;
   readonly readThread: (windowId: WindowId, threadId: CodeThread["id"]) => CodeThread | undefined;
   readonly uuid: () => string;
+  readonly browserProfiles?: {
+    readonly approvals: NonNullable<BrowserAppManagedToolsOptions["approvals"]>;
+    readonly readBinding: (contextId: string) => BrowserModelBinding | undefined;
+    readonly rememberBinding: (contextId: string, binding: BrowserModelBinding) => void;
+    readonly forgetBinding: (contextId: string) => void;
+  };
   readonly browserApproval?: {
     readonly isApproved: (contextId: string) => boolean;
     readonly request: (
@@ -484,6 +496,7 @@ export interface CodeAppManagedToolsOptions {
       readonly threadId: BrowserThreadId;
       readonly action: ToolActionRequest;
       readonly policy: {
+        readonly profile?: StoredBrowserProfile;
         readonly profileMode: "isolated";
         readonly allowedOrigins: readonly string[];
         readonly credentialFieldProtection: true;
@@ -546,6 +559,7 @@ export interface CodeAppManagedToolsOptions {
       readonly threadId: string;
       readonly authority: ToolActionAuthority;
       readonly origin: string;
+      readonly profile?: StoredBrowserProfile;
       readonly signIn: { readonly reason?: string };
       readonly signal?: AbortSignal;
     }) => Promise<"approved" | "denied" | "cancelled" | "expired">;
@@ -654,7 +668,7 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
         return browserTool(
           options,
-          parseBrowserToolInput(inputJson, { allowProfile: false }),
+          parseBrowserToolInput(inputJson, { allowProfile: true }),
           signal,
         );
       }
@@ -1227,7 +1241,10 @@ async function browserToolOne(
   if (authority === undefined) return failure("browser-authority-unavailable");
   if (input.operation === "stop") {
     const context = options.browser.inspectThread(options.windowId, threadId).context;
-    if (context !== undefined) options.browserApproval?.forget(String(context.contextId));
+    if (context !== undefined) {
+      options.browserApproval?.forget(String(context.contextId));
+      options.browserProfiles?.forgetBinding(String(context.contextId));
+    }
     const released = await options.browser.releaseThread(options.windowId, threadId);
     return browserToolResult(released);
   }
@@ -1259,12 +1276,95 @@ async function browserToolOne(
     return failure(
       input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
     );
+  const profiles = options.browserProfiles;
+  const defaultChoice = options.readThread(options.windowId, options.thread.id)?.browserTaskProfile;
+  const choice =
+    input.operation === "navigate"
+      ? (input.profile ??
+        options.readThread(options.windowId, options.thread.id)?.browserTaskProfile)
+      : undefined;
+  const requested: StoredBrowserProfile | undefined =
+    choice === "personal"
+      ? { kind: "personal" }
+      : choice === "project" && authority.projectId !== undefined
+        ? { kind: "project", projectId: authority.projectId }
+        : undefined;
+  if (choice === "project" && requested === undefined) return failure("profile-unavailable");
+  if (
+    existing !== undefined &&
+    input.operation === "navigate" &&
+    input.profile !== undefined &&
+    browserProfileKey(existing.policy.profile) !== browserProfileKey(requested)
+  )
+    return failure("browser-profile-differs-stop-first");
+  const profile =
+    existing === undefined ? requested : storedBrowserProfile(existing.policy.profile);
+  if (
+    profile !== undefined &&
+    (profiles === undefined || profiles.approvals.isUnattendedScope?.(options.windowId) === true)
+  )
+    return failure("profile-needs-a-person");
+  if (
+    profile !== undefined &&
+    defaultChoice !== undefined &&
+    defaultChoice !== "private" &&
+    (input.operation !== "navigate" || input.profile === undefined) &&
+    profiles?.approvals.isPairedDevice?.(options.windowId) === true
+  )
+    return failure("profile-not-local");
+  const binding =
+    existing === undefined ? undefined : profiles?.readBinding(String(existing.contextId));
+  const boundIdentity =
+    binding !== undefined &&
+    binding.modelId === String(options.thread.modelId) &&
+    sameToolActionAuthority(binding.authority, authority);
+  const usesProfileBinding = profile !== undefined || binding !== undefined;
+  if (usesProfileBinding) {
+    if (profiles === undefined) return failure("browser-approval-required");
+    const approved = boundIdentity && binding?.approval !== "pending";
+    const remembered =
+      (existing === undefined || (boundIdentity && binding?.approval === "pending")) &&
+      profiles.approvals.isRemembered?.(origin, profile) === true;
+    // Full access still authorizes a new Private page. It never grants a stored
+    // profile or lets a different model inherit a person-switched page.
+    const privatePending =
+      profile === undefined &&
+      boundIdentity &&
+      binding?.approval === "pending" &&
+      currentAuthorityFailure(options) === undefined;
+    if (!approved && !remembered && !privatePending) {
+      const outcome = await profiles.approvals.request({
+        windowId: options.windowId,
+        threadId: String(threadId),
+        authority,
+        origin,
+        ...(profile === undefined ? {} : { profile }),
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
+    }
+    const changed = browserAuthorityFailure(options);
+    const freshAuthority = options.browser.resolveAuthority(threadId, "code");
+    if (
+      signal?.aborted ||
+      changed !== undefined ||
+      freshAuthority === undefined ||
+      !sameToolActionAuthority(authority, freshAuthority)
+    )
+      return failure(changed ?? (signal?.aborted ? "tool-interrupted" : "browser-authority-stale"));
+    if (existing !== undefined)
+      profiles.rememberBinding(String(existing.contextId), {
+        modelId: String(options.thread.modelId),
+        authority,
+      });
+  }
   const requiresApproval = currentAuthorityFailure(options) !== undefined;
   const remembered =
     existing === undefined &&
     options.browserApproval?.isOriginRemembered !== undefined &&
     options.browserApproval.isOriginRemembered(origin);
   if (
+    !usesProfileBinding &&
     requiresApproval &&
     (existing === undefined ||
       options.browserApproval?.isApproved(String(existing.contextId)) !== true) &&
@@ -1286,6 +1386,7 @@ async function browserToolOne(
         threadId,
         action,
         policy: {
+          ...(profile === undefined ? {} : { profile }),
           profileMode: "isolated",
           allowedOrigins: [origin],
           credentialFieldProtection: true,
@@ -1296,6 +1397,12 @@ async function browserToolOne(
     );
     if (created.kind === "failure") return failure(created.reason);
     snapshot = created.snapshot;
+    if (snapshot.context?.state === "active" && usesProfileBinding && !signal?.aborted) {
+      profiles?.rememberBinding(String(snapshot.context.contextId), {
+        modelId: String(options.thread.modelId),
+        authority,
+      });
+    }
     if (requiresApproval && snapshot.context?.state === "active") {
       options.browserApproval?.remember(String(snapshot.context.contextId));
     }
@@ -1315,6 +1422,7 @@ async function browserToolOne(
           threadId: String(threadId),
           authority,
           origin,
+          ...(profile === undefined ? {} : { profile }),
           signIn: input.reason === undefined ? {} : { reason: input.reason },
           ...(signal === undefined ? {} : { signal }),
         }),

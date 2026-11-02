@@ -4,6 +4,7 @@ import {
 } from "@octant/client-runtime/browser-automation-client";
 import type {
   BrowserAutomationSnapshot,
+  BrowserTaskProfileState,
   BrowserThreadScope,
   BrowserWorkspaceStatus,
 } from "@octant/contracts/browser-automation-rpc";
@@ -41,6 +42,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MiddleTruncatedText } from "../lib/MiddleTruncatedText";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ShellState } from "../shell/ShellState";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
@@ -138,6 +140,37 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       ? "private"
       : readRememberedProfileChoice(String(props.projectId)),
   );
+  const [taskProfile, setTaskProfile] = useState<BrowserTaskProfileState>();
+  const [pendingTaskProfile, setPendingTaskProfile] = useState<BrowserProfileChoice>();
+  const [selectingTaskProfile, setSelectingTaskProfile] = useState(false);
+  const taskProfileSupported =
+    props.tab.threadId !== undefined &&
+    props.client.readTaskProfile !== undefined &&
+    props.client.selectTaskProfile !== undefined;
+  const taskProfileApplies =
+    taskProfileSupported &&
+    !props.startFresh &&
+    (snapshot?.context === undefined || snapshot.context.contextId === taskProfile?.contextId);
+  useEffect(() => {
+    const read = props.client.readTaskProfile;
+    const threadId = props.tab.threadId;
+    const mode = props.tab.mode;
+    if (!taskProfileSupported || read === undefined || threadId === undefined) return;
+    const controller = new AbortController();
+    void read
+      .call(props.client, { threadId, mode }, controller.signal)
+      .then((selection) => {
+        if (!controller.signal.aborted) setTaskProfile(selection);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [
+    props.client,
+    props.tab.threadId,
+    props.tab.mode,
+    snapshot?.context?.contextId,
+    taskProfileSupported,
+  ]);
   const chosenByPerson = useRef(false);
   // The context a profile switch created for a tab that was bound to another one.
   const [replacementContextId, setReplacementContextId] = useState<BrowserContextId>();
@@ -405,9 +438,15 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   async function start(
     address: string = url,
     prepared?: LocalServerOpenTarget,
-    choice: BrowserProfileChoice = profileChoice,
+    choice: BrowserProfileChoice = taskProfileApplies
+      ? (taskProfile?.profile ?? "private")
+      : profileChoice,
   ): Promise<void> {
     if (startInFlight.current) return;
+    if (taskProfileSupported && !props.startFresh && taskProfile === undefined) {
+      setMessage("The task’s Browser profile is loading. Try again shortly.");
+      return;
+    }
     startInFlight.current = true;
     localFailure.current = false;
     setStarting(true);
@@ -676,7 +715,62 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
    * the same address opens again as a new browsing context in the chosen profile
    * and the old context closes; nothing it held carries over.
    */
+  async function selectTaskProfile(choice: BrowserProfileChoice): Promise<void> {
+    const select = props.client.selectTaskProfile;
+    const selection = taskProfile;
+    if (select === undefined || selection === undefined || selectingTaskProfile) return;
+    setSelectingTaskProfile(true);
+    try {
+      const address = committedAddress ?? validTargetUrl(url);
+      const result = await select.call(props.client, {
+        threadId: selection.threadId,
+        mode: selection.mode,
+        expectedVersion: selection.version,
+        profile: choice,
+        ...(selection.contextId === undefined ? {} : { expectedContextId: selection.contextId }),
+        ...(activeContext && address !== undefined ? { url: address } : {}),
+      });
+      setTaskProfile(result.selection);
+      update(result.browser);
+      if (result.browser.context?.state === "active") {
+        setOwnedContextId(result.browser.context.contextId);
+        if (props.tab.contextId !== undefined)
+          setReplacementContextId(result.browser.context.contextId);
+        props.onContextCreated?.(result.browser.context.contextId);
+      }
+      setMessage(
+        "Default Browser profile saved for this task. Agents still need permission to use a signed-in profile.",
+      );
+    } catch (error) {
+      localFailure.current = true;
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "The task’s Browser profile could not be changed. The original page was kept.",
+      );
+      // A version conflict must be retryable without replacing the held page.
+      try {
+        const refreshed = await props.client.readTaskProfile?.({
+          threadId: selection.threadId,
+          mode: selection.mode,
+        });
+        if (refreshed !== undefined) setTaskProfile(refreshed);
+      } catch {
+        /* Keep the last choice visible while the host is unavailable. */
+      }
+    } finally {
+      setSelectingTaskProfile(false);
+      setPendingTaskProfile(undefined);
+    }
+  }
+
   async function chooseProfile(choice: BrowserProfileChoice): Promise<void> {
+    if (taskProfileApplies) {
+      if (choice === taskProfile?.profile) return;
+      if (activeContext) setPendingTaskProfile(choice);
+      else await selectTaskProfile(choice);
+      return;
+    }
     chosenByPerson.current = true;
     if (profileKey !== undefined) writeRememberedProfileChoice(profileKey, choice);
     setProfileChoice(choice);
@@ -743,6 +837,19 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       aria-label="Browser automation"
       className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}`}
     >
+      {pendingTaskProfile === undefined ? null : (
+        <OctantConfirmDialog
+          title="Change this task’s default Browser profile?"
+          confirmLabel="Change profile"
+          pending={selectingTaskProfile}
+          onCancel={() => setPendingTaskProfile(undefined)}
+          onConfirm={() => void selectTaskProfile(pendingTaskProfile)}
+        >
+          The current address opens in a fresh page in the chosen profile. Unsaved form entries on
+          this page will be lost. Your task, conversation, and message draft stay open. The original
+          page stays open if the switch fails.
+        </OctantConfirmDialog>
+      )}
       <header className="browser-workspace__chrome">
         <div className="browser-workspace__history" aria-label="Browser history controls">
           <OctantButton
@@ -794,16 +901,21 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           </OctantButton>
         </div>
         <BrowserProfileControl
-          disabled={starting}
+          disabled={
+            starting || selectingTaskProfile || (taskProfileSupported && taskProfile === undefined)
+          }
+          {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
           onChange={(choice) => void chooseProfile(choice)}
           profile={
-            activeContext
-              ? profileChoiceOf(storedProfileOf(snapshot?.context?.policy.profile))
-              : profileChoice
+            taskProfileApplies
+              ? (taskProfile?.profile ?? "private")
+              : activeContext
+                ? profileChoiceOf(storedProfileOf(snapshot?.context?.policy.profile))
+                : profileChoice
           }
           projectProfileAvailable
           signedInPagesAvailable={nativeSupported}
-          {...(props.client.manageProfiles === undefined
+          {...(taskProfileApplies || props.client.manageProfiles === undefined
             ? {}
             : { onSignOut: () => signOutOfProfile() })}
         />

@@ -178,6 +178,16 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
         );
       }
       const command = decodeWorkThreadCommand(value);
+      if (command.kind === "change-work-thread-browser-profile") {
+        return failureResponse(
+          {
+            category: "unauthorized",
+            message: "Choose the default Browser profile through this task’s Browser control.",
+          },
+          403,
+          origin,
+        );
+      }
       if (
         command.kind === "change-work-thread-document-delivery" &&
         refusesThreadDocumentDelivery(request, command.documentDelivery)

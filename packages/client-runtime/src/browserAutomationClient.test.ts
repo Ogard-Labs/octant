@@ -17,6 +17,42 @@ const authority = {
 };
 
 describe("BrowserAutomationClient", () => {
+  it("strictly decodes task-profile transaction results and preserves host refusals", async () => {
+    const selection = { threadId, mode: "code", version: 2, profile: "personal" };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(selection))
+      .mockResolvedValueOnce(
+        Response.json({ selection, browser: { status: "ready", threadId, evidence: [] } }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ category: "stale", message: "Original page kept." }, { status: 409 }),
+      )
+      .mockResolvedValueOnce(Response.json({ ...selection, profile: "named-account" }));
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    await expect(
+      client.readTaskProfile!({ threadId: threadId as never, mode: "code" }),
+    ).resolves.toEqual(selection);
+    const input = {
+      threadId: threadId as never,
+      mode: "code" as const,
+      expectedVersion: 1 as never,
+      profile: "personal" as const,
+    };
+    await expect(client.selectTaskProfile!(input)).resolves.toMatchObject({ selection });
+    await expect(client.selectTaskProfile!(input)).rejects.toMatchObject({
+      category: "stale",
+      message: "Original page kept.",
+    });
+    await expect(
+      client.readTaskProfile!({ threadId: threadId as never, mode: "code" }),
+    ).rejects.toMatchObject({ category: "protocol" });
+  });
+
   it("takes a capture through its own route and reports a refusal as an unauthorized failure", async () => {
     const request = {
       actionId: "70000000-0000-4000-8000-000000000001",

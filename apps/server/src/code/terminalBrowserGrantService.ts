@@ -492,6 +492,7 @@ export class TerminalBrowserGrantService {
         return current === undefined ? undefined : String(current.modelId);
       },
       modelBindings,
+      resolveTaskProfile: () => this.#options.readThread(thread.id)?.browserTaskProfile,
       resolveAuthority: lent.resolveAuthority,
       executionPolicy: readPosture(),
       // A CLI in a terminal drives this thread's Private pages only; a signed-in

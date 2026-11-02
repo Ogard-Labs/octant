@@ -1357,6 +1357,135 @@ describe("BrowserWorkspace", () => {
       getHostCapabilities: vi.fn(async () => ({ liveBrowserSupported: true }) as any),
     } as any;
 
+    it("saves the task default without changing the Project page preference", async () => {
+      const browser = client();
+      browser.readTaskProfile = vi.fn(
+        async () => ({ threadId, mode: "work", version: 1, profile: "private" }) as any,
+      );
+      browser.selectTaskProfile = vi.fn(
+        async (input) =>
+          ({
+            selection: { ...input, version: 2 },
+            browser: { status: "ready", threadId, evidence: [] },
+          }) as any,
+      );
+      render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
+      const user = userEvent.setup();
+      const control = await screen.findByRole("button", {
+        name: "Default browser profile for this task: Private",
+      });
+      await waitFor(() => expect(control).toBeEnabled());
+      await user.click(control);
+      await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
+      await waitFor(() =>
+        expect(browser.selectTaskProfile).toHaveBeenCalledWith({
+          threadId,
+          mode: "work",
+          expectedVersion: 1,
+          profile: "personal",
+        }),
+      );
+      expect(browser.stop).not.toHaveBeenCalled();
+      expect(browser.create).not.toHaveBeenCalled();
+      expect(
+        globalThis.localStorage.getItem(`octant.browser.profile.${authority.projectId}`),
+      ).toBeNull();
+    });
+
+    it.each([false, true])(
+      "confirms a live shared page switch and preserves it on failure=%s",
+      async (fails) => {
+        const browser = client();
+        const current = { status: "running", threadId, context, evidence: [] } as any;
+        vi.mocked(browser.inspectThread).mockResolvedValue(current);
+        vi.mocked(browser.inspect).mockResolvedValue(current);
+        const selection = {
+          threadId,
+          mode: "work",
+          version: 1,
+          profile: "private",
+          contextId: context.contextId,
+        };
+        browser.readTaskProfile = vi.fn(
+          async () =>
+            ({
+              ...selection,
+              version: fails && vi.mocked(browser.selectTaskProfile!).mock.calls.length > 0 ? 2 : 1,
+            }) as any,
+        );
+        const replacement = {
+          ...current,
+          context: {
+            ...context,
+            contextId: "60000000-0000-4000-8000-000000000002",
+            policy: { ...context.policy, profile: { kind: "personal" } },
+          },
+        };
+        browser.selectTaskProfile = vi.fn(async () => {
+          if (fails)
+            throw new BrowserAutomationClientFailure("stale", "Task changed. Original page kept.");
+          vi.mocked(browser.inspect).mockResolvedValue(replacement);
+          browser.readTaskProfile = vi.fn(
+            async () =>
+              ({
+                ...selection,
+                profile: "personal",
+                version: 2,
+                contextId: replacement.context.contextId,
+              }) as any,
+          );
+          return {
+            selection: {
+              ...selection,
+              profile: "personal",
+              version: 2,
+              contextId: replacement.context.contextId,
+            },
+            browser: replacement,
+          } as any;
+        });
+        const created = vi.fn();
+        render(
+          <BrowserWorkspace
+            client={browser}
+            hostBridge={nativeBridge}
+            tab={tab}
+            onContextCreated={created}
+          />,
+        );
+        const user = userEvent.setup();
+        const control = await screen.findByRole("button", {
+          name: "Default browser profile for this task: Private",
+        });
+        await waitFor(() => expect(control).toBeEnabled());
+        await user.click(control);
+        await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
+        expect(
+          await screen.findByText(/Unsaved form entries on this page will be lost/),
+        ).toBeVisible();
+        expect(browser.selectTaskProfile).not.toHaveBeenCalled();
+        await user.click(screen.getByRole("button", { name: "Change profile" }));
+        await waitFor(() => expect(browser.selectTaskProfile).toHaveBeenCalledOnce());
+        expect(browser.stop).not.toHaveBeenCalled();
+        expect(browser.create).not.toHaveBeenCalled();
+        if (fails) {
+          expect(await screen.findByText("Task changed. Original page kept.")).toBeVisible();
+          expect(created).not.toHaveBeenCalled();
+          expect(
+            screen.getByRole("button", { name: "Default browser profile for this task: Private" }),
+          ).toBeVisible();
+          await user.click(
+            screen.getByRole("button", { name: "Default browser profile for this task: Private" }),
+          );
+          await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
+          await user.click(screen.getByRole("button", { name: "Change profile" }));
+          await waitFor(() => expect(browser.selectTaskProfile).toHaveBeenCalledTimes(2));
+          expect(vi.mocked(browser.selectTaskProfile!).mock.calls[1]?.[0].expectedVersion).toBe(2);
+        } else
+          await waitFor(() => expect(created).toHaveBeenCalledWith(replacement.context.contextId));
+      },
+    );
+
     it("opens a new page Private unless the person chose a profile", async () => {
       const browser = client();
       render(<BrowserWorkspace client={browser} tab={tab} />);
