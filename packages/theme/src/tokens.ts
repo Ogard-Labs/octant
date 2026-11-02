@@ -186,7 +186,7 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultDark: "#949494",
   },
   {
-    // Primary actions invert against the monochrome accent in each mode.
+    // Primary actions put this ink on the accent in each mode.
     id: "primary-foreground",
     displayName: "Primary foreground",
     category: "text",

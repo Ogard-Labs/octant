@@ -64,9 +64,9 @@ describe("ShellState", () => {
       />,
     );
 
-    // The default look is monochrome. A brass triangle on a screen that says
-    // something cannot be reached was the only colour on the page, and the
-    // glyph and the title already carry the meaning.
+    // Plain messages stay neutral in every style. A brass triangle on a screen that says
+    // something cannot be reached reads as an alarm, and the glyph and the title
+    // already carry the meaning.
     const media = screen.getByRole("alert").querySelector('[data-slot="empty-media"]');
     expect(media).not.toHaveClass("text-[var(--octant-warning-text)]");
     expect(media?.querySelector("svg")).toBeInTheDocument();

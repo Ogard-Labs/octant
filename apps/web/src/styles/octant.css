@@ -11,7 +11,7 @@
    light value comes first.
 
    Text and semantic colours carry separate light and dark values for
-   contrast. The default action accent is monochrome; the runtime bridge
+   contrast. The static action accent below is the Mono fallback; the runtime bridge
    applies the selected preset and any explicit colour overrides.
 
    Theme resolution: follows the OS by default, and [data-theme] on <html>
@@ -35,7 +35,7 @@
      translucent tint would shift as content passes beneath it */
   --oct-selection: light-dark(#ebebea, #2c2c2c);
 
-  /* Monochrome actions. The runtime theme owns optional tinted accents. */
+  /* Static Mono fallback for actions. The runtime theme owns the accent. */
   --oct-accent: light-dark(#141414, #f5f5f7);
   --oct-accent-fg: light-dark(#141414, #f5f5f7);
   --oct-accent-on: light-dark(#ffffff, #171717);

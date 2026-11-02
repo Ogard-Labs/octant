@@ -148,7 +148,7 @@ describe("built-in theme preset catalog", () => {
     ).toEqual(BUILT_IN_THEME_PRESET_IDS);
   });
 
-  it("colours every tinted preset's accent while the default stays monochrome", () => {
+  it("colours every tinted preset's accent and the default carries the blue accent", () => {
     const tinted = THEME_PRESETS.filter(
       (preset) => !["system", "light", "dark", "octant"].includes(preset.id),
     );
