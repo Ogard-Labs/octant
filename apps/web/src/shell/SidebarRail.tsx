@@ -154,6 +154,7 @@ export function SidebarRail(props: SidebarRailProps) {
               icon={rail.icon}
               key={tile.id}
               label={`${rail.label}, ${tile.count}`}
+              tile={tile.id}
               {...(tile.onSelect === undefined ? {} : { onSelect: tile.onSelect })}
             />
           );
@@ -227,6 +228,8 @@ function RailButton(props: {
   readonly badge?: number;
   readonly active?: boolean;
   readonly onSelect?: () => void;
+  /** Which count this is; the Colour style gives its icon the tile's hue. */
+  readonly tile?: SidebarTileId;
   readonly children?: ReactNode;
 }) {
   const Icon = props.icon;
@@ -236,6 +239,7 @@ function RailButton(props: {
         aria-current={props.active === true ? "page" : undefined}
         aria-label={props.label}
         className="sidebar-rail__button window-no-drag hover:no-underline"
+        data-tile={props.tile}
         disabled={props.onSelect === undefined}
         onClick={() => props.onSelect?.()}
         type="button"

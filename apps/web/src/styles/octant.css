@@ -206,12 +206,12 @@
      a 28px icon control share one centreline. The sidebar's header row is
      its part of that rail; below it the sidebar runs 30px rows down to a
      40px account row, and every leading icon in it sits on one 12px inset. */
-  --oct-title-rail-h: 38px;
+  --oct-title-rail-h: 44px;
   --oct-rail-tab-h: 30px;
   --oct-rail-button-h: 28px;
   /* The bottom edge of a rail head: the 4px step less the hairline, so a 30px
-     field between 4px above and this below still closes a 38px rail with its
-     1px border. A plain 4px made the Files head 39px. */
+     field between 4px above and this below, centred in the rail's minimum
+     height, keeps the head at the rail's height with its 1px border. */
   --oct-rail-pad-end: calc(var(--oct-space-1) - 1px);
   --oct-nav-head-h: 40px;
   --oct-nav-row-h: 32px;

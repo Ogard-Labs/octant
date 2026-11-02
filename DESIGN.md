@@ -1201,7 +1201,7 @@ grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
 `--oct-nav-inset` tokens in `octant.css`: the title band, the window
 controls, the right dock head, and the bottom panel toolbar share one title
-rail, on which a rail tab and a rail icon control sit on one centreline and
+rail (44px), on which a rail tab and a rail icon control sit on one centreline and
 the band's hairline meets the dock's; the sidebar's header row is its part of
 that rail (`--oct-title-rail-h`), so its controls share the window controls'
 centreline, and below it the sidebar runs navigation, Project, and
@@ -1221,11 +1221,15 @@ rail clamp or drawer. The workspace sidebar supports resizing.
 
 **Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
 rail stands in its own column in front of the open sidebar. It is exactly as
-wide as the title band is tall (38px), open or collapsed, so the frame's two
+wide as the title band is tall (44px), open or collapsed, so the frame's two
 arms match. In the desktop app the traffic lights sit in the title band above
 it, and the sidebar's head, or with the sidebar hidden the window chrome,
 keeps the rest of their width clear. Beside the sidebar it
-carries the places: the count tiles as icons with badges, the destination
+carries the places: the count tiles as icons with badges (under Colour the
+four icons take the tiles' hues, Inbox blue, Running amber, To review purple,
+and Done green, from the same palette roles; the hover and current fills and the
+count badge stay neutral, and under Mono and increased contrast the icons stay
+grey), the destination
 rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
 which and in what order, for the rail as for the sidebar), the Activity feed,
 Projects, More (the menu-only destinations and Customize sidebar), the usage
@@ -1588,12 +1592,17 @@ Board (the Activity feed in Chat, which has no board), To review opens the
 Review page, and Done today opens the Put away shelf (see [Workspace](docs/design/workspace.md#thread-visibility-and-completion)). With the tiles on,
 the Inbox and Board rows are left out because their tiles go to the same
 place. Settings › Sidebar › Count tiles turns them off and brings the rows
-back. Tiles are neutral faces under Mono; under Colour each takes a
-palette hue, as a solid face with primary-foreground text in the light theme
-and as a tint with a coloured count in the dark one. In the narrow drawer
-(under 681px) the four destinations are compact rows instead: icon, name, and
-the count at the trailing edge, with no fill and no hue in any style, so they
-sit quieter than the thread list under them. Each row keeps its name with its
+back. Tiles show only where the sidebar stands without a rail in a window wider
+than 960px, that is, when Settings › Sidebar › Icon rail is Never, or When
+hidden while the sidebar is open. They are neutral faces under Mono; under
+Colour each takes a palette hue, as a solid face with primary-foreground text in
+the light theme and as a tint with a coloured count in the dark one. At 960px and
+narrower, where no rail shows (the same breakpoint as the rail's own, one
+number), and in the phone drawer, the four destinations are compact rows
+instead: icon, name, and the count at the trailing edge, with no fill, so they
+sit quieter than the thread list under them. Under Colour the row's icon takes the
+same hue as the rail's icon, so the four places read in the same colours
+whichever layout shows them; the name and the count stay in the sidebar ink. Each row keeps its name with its
 count and its destination. The drawer itself paints the opaque sidebar surface
 in every material, since it overlays the page and a transparent drawer let the
 page's text show through it.

@@ -846,4 +846,40 @@ describe("the public-block visual language", () => {
     expect(limits).not.toContain("OctantCard");
     expect(limits).toContain('className="surface-row provider-limits__row"');
   });
+
+  describe("count hues in the rail and the narrow rows", () => {
+    const shell = readFileSync(join(webRoot, "styles", "shell.css"), "utf8");
+
+    it("gives the rail icons the tiles' hue variables, once, and only under Colour", () => {
+      for (const id of ["inbox", "running", "review", "done"]) {
+        // One definition per hue: the tile and the rail button share the rule.
+        const shared = new RegExp(
+          `\\.sidebar-tile\\[data-tile="${id}"\\],\\s*\\.sidebar-rail__button\\[data-tile="${id}"\\]\\s*\\{[^}]*var\\(--oct-colour-${id}`,
+        );
+        expect(shell).toMatch(shared);
+        expect(
+          shell.match(new RegExp(`--sidebar-tile-hue:\\s*var\\(--oct-colour-${id}`, "g")),
+        ).toHaveLength(1);
+      }
+      const hued = [
+        ...shell.matchAll(/([^{}]*\.sidebar-rail__button\[data-tile\][^{]*)\{([^}]*)\}/g),
+      ];
+      expect(hued).toHaveLength(1);
+      expect(hued[0]?.[1]).toContain(':root[data-octant-style="colour"]');
+      expect(hued[0]?.[2]).toMatch(/color:\s*var\(--sidebar-tile-hue\)/);
+      // Mono and increased contrast never set the style, so the rail icon keeps
+      // the muted ink from its base rule.
+      expect(shell).toMatch(/\.sidebar-rail__face \{[^}]*color:\s*var\(--oct-muted\)/);
+    });
+
+    it("draws the narrow rows without a media query of their own and without a fill", () => {
+      const rule = shell.match(
+        /:root\[data-octant-style\]\[data-octant-theme-mode\] \.sidebar-tiles--rows \.sidebar-tile__face \{([^}]*)\}/,
+      );
+      expect(rule?.[1]).toMatch(/background:\s*transparent/);
+      expect(rule?.[1]).toMatch(/box-shadow:\s*none/);
+      const at = shell.indexOf(".sidebar-tiles--rows {");
+      expect(shell.lastIndexOf("@media", at)).toBeLessThan(shell.lastIndexOf("}\n\n", at));
+    });
+  });
 });

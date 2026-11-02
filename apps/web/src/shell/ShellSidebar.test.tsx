@@ -585,6 +585,9 @@ describe("ShellSidebar", () => {
     const { rerender } = render(sidebar(defaultShellSettings()));
 
     const tiles = screen.getByRole("group", { name: "Thread counts" });
+    // A wide window whose rail is off keeps the tiles; rows are for narrow ones.
+    expect(tiles).not.toHaveClass("sidebar-tiles--rows");
+    expect(tiles.querySelector(".sidebar-tile__top")).not.toBeNull();
     for (const name of ["Inbox, 3", "Running, 2", "To review, 1", "Done today, 4"]) {
       expect(within(tiles).getByRole("button", { name })).toBeVisible();
     }
@@ -605,11 +608,14 @@ describe("ShellSidebar", () => {
     expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
   });
 
-  it("shows the four destinations as rows with their counts in the phone drawer", async () => {
+  it.each([
+    ["the phone drawer", 600],
+    ["a window at the rail's breakpoint", 960],
+  ])("shows the four destinations as rows with their counts in %s", async (_name, width) => {
     const user = userEvent.setup();
     const originalMatchMedia = window.matchMedia;
     window.matchMedia = vi.fn((query: string) => ({
-      matches: query === "(max-width: 680px)",
+      matches: Number(/max-width: (\d+)px/.exec(query)?.[1] ?? 0) >= width,
       media: query,
       onchange: null,
       addEventListener: vi.fn(),

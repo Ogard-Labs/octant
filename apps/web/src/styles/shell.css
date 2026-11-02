@@ -265,8 +265,8 @@ html[data-octant-native-host="true"]
    edge (the resize handle, the native drag strip, the glass/ground split)
    right by the rail's width; the sidebar column keeps its own width rules,
    including the Projects pane and the wide-context clamp. The rail is as wide
-   as the title band is tall: at 48px beside a 38px band the frame's two arms
-   visibly differed. */
+   as the title band is tall: a rail wider or narrower than the band made the
+   frame's two arms visibly differ. */
 .shell.shell-frame.shell--rail-beside {
   --octant-rail-offset: var(--oct-title-rail-h);
   grid-template-columns:
@@ -325,7 +325,7 @@ html[data-octant-native-host="true"]
   padding: var(--oct-space-2) 0 var(--oct-space-3);
   overflow-x: hidden;
   overflow-y: auto;
-  /* The rail is 38px around 32px faces. A classic scrollbar took 10px of that
+  /* The rail is as wide as the title band around 32px faces. A classic scrollbar took 10px of that
      once the rail overflowed and clipped every face, so the rail scrolls
      without drawing one. */
   scrollbar-width: none;
@@ -926,16 +926,20 @@ html[data-octant-native-host="true"]
    are dark enough to carry primary-foreground text on a solid face, the
    look the style was approved in; in the dark theme they are light, so the
    face is a tint and the hue moves to the count and icon instead. */
-.sidebar-tile[data-tile="inbox"] {
+.sidebar-tile[data-tile="inbox"],
+.sidebar-rail__button[data-tile="inbox"] {
   --sidebar-tile-hue: var(--oct-colour-inbox, var(--octant-palette-blue, currentColor));
 }
-.sidebar-tile[data-tile="running"] {
+.sidebar-tile[data-tile="running"],
+.sidebar-rail__button[data-tile="running"] {
   --sidebar-tile-hue: var(--oct-colour-running, var(--octant-palette-orange, currentColor));
 }
-.sidebar-tile[data-tile="review"] {
+.sidebar-tile[data-tile="review"],
+.sidebar-rail__button[data-tile="review"] {
   --sidebar-tile-hue: var(--oct-colour-review, var(--octant-palette-purple, currentColor));
 }
-.sidebar-tile[data-tile="done"] {
+.sidebar-tile[data-tile="done"],
+.sidebar-rail__button[data-tile="done"] {
   --sidebar-tile-hue: var(--oct-colour-done, var(--octant-palette-green, currentColor));
 }
 
@@ -970,6 +974,76 @@ html[data-octant-native-host="true"]
   .sidebar-tile:hover
   .sidebar-tile__face {
   filter: brightness(1.06);
+}
+
+/* Rows, not tiles, in the drawer: icon, name, and the count at the trailing
+   edge, with no fill and no hue. The selectors outrank the colour tile paint
+   above, which would otherwise colour them. */
+.sidebar-tiles--rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+:root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__face {
+  min-height: var(--oct-rail-button-h);
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 var(--oct-space-3);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--oct-fg);
+}
+
+:root[data-octant-style][data-octant-theme-mode]
+  .sidebar-tiles--rows
+  .sidebar-tile:hover
+  .sidebar-tile__face {
+  background: var(--oct-fg-soft);
+  filter: none;
+}
+
+:root[data-octant-style][data-octant-theme-mode]
+  .sidebar-tiles--rows
+  .sidebar-tile[aria-current="page"]
+  .sidebar-tile__face {
+  background: transparent;
+  font-weight: var(--oct-weight-strong);
+}
+
+:root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__icon {
+  color: var(--oct-muted);
+}
+
+:root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__label {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+
+:root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__count {
+  margin-inline-start: auto;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+}
+
+/* Under Colour the rows' icons take the hue too, so the same four places read
+   in the same colours whether a rail or rows show them. The name and the count
+   stay in the sidebar ink. */
+:root[data-octant-style="colour"][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__icon {
+  color: var(--sidebar-tile-hue);
+}
+
+/* Colour style: the rail's four count icons take the tiles' hues, from the
+   same variables above. Only the glyph is coloured: the hover and current
+   fills stay the neutral ones, and the badge keeps the sidebar ink. Mono and
+   increased contrast never set the style, so the icons stay muted there. */
+:root[data-octant-style="colour"] .sidebar-rail__button[data-tile] .sidebar-rail__face {
+  color: var(--sidebar-tile-hue);
 }
 
 /* The thread filter opens under the header when the Search icon asks for
@@ -2054,61 +2128,6 @@ html[data-octant-native-host="true"]
        through the header and count tiles at 640px under the colour style and Glass. The
        drawer reads on the opaque sidebar colour in every material. */
     background: var(--octant-sidebar-opaque);
-  }
-
-  /* Rows, not tiles, in the drawer: icon, name, and the count at the trailing
-     edge, with no fill and no hue. The selectors outrank the colour tile paint
-     above, which would otherwise colour them. */
-  .sidebar-tiles--rows {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  :root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__face {
-    min-height: var(--oct-rail-button-h);
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-start;
-    padding: 0 var(--oct-space-3);
-    border-color: transparent;
-    background: transparent;
-    box-shadow: none;
-    color: var(--oct-fg);
-  }
-
-  :root[data-octant-style][data-octant-theme-mode]
-    .sidebar-tiles--rows
-    .sidebar-tile:hover
-    .sidebar-tile__face {
-    background: var(--oct-fg-soft);
-    filter: none;
-  }
-
-  :root[data-octant-style][data-octant-theme-mode]
-    .sidebar-tiles--rows
-    .sidebar-tile[aria-current="page"]
-    .sidebar-tile__face {
-    background: transparent;
-    font-weight: var(--oct-weight-strong);
-  }
-
-  :root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__icon {
-    color: var(--oct-muted);
-  }
-
-  :root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__label {
-    min-width: 0;
-    flex: 1 1 auto;
-    color: var(--oct-fg);
-    font-size: var(--oct-text-sm);
-  }
-
-  :root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__count {
-    margin-inline-start: auto;
-    color: var(--oct-muted);
-    font-size: var(--oct-text-detail);
-    font-weight: var(--oct-weight-medium);
   }
 
   .shell--projects-sidebar-open.shell-frame > .sidebar {

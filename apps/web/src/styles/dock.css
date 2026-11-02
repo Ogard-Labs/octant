@@ -524,7 +524,7 @@
 
 /* A rail holds one line: the title yields before the count and the layout
    control do, and the layout control keeps the rail's 28px button height so
-   the rail stays 38px instead of wrapping onto two lines. */
+   the rail keeps its height instead of wrapping onto two lines. */
 .right-utility-dock__tool :is(.code-diff-pane__toolbar, .code-delivery-pane__toolbar) > div {
   display: block;
   min-width: 0;
@@ -556,7 +556,7 @@
   grid-template-rows: var(--oct-title-rail-h) auto minmax(0, 1fr);
 }
 
-/* The notice is body copy about what the tool cannot do; a 38px rail holds
+/* The notice is body copy about what the tool cannot do; a title rail holds
    the title alone, so the notice reads under it at the body's inset. */
 .right-utility-dock__tool .side-chat__notice {
   margin: 0;

@@ -1833,6 +1833,7 @@ Status: Built. Since: —. Detail: [Architecture: Development loop](../architect
 Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02) and grey is a choice called Mono. Every surface uses the same words, face and hierarchy.
 
 - Colour is the default and applies to everyone: a blue accent, amber warning, red failure, green success, coloured count tiles, board marks and connector marks. Colour never stands alone: a state also has a shape or a word. The Mono style draws the grey look; plain empty, loading and informational messages stay neutral in both.
+- The four count destinations carry their hues wherever they show: icons in the rail, tiles when a wide window has no rail, and plain rows (icon in the hue, no fill) at 960px and narrower, the rail's own breakpoint. The title band and the rail are both 44px.
 - Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the page title is bold.
 - Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style.
 - Counts and token figures use English separators whatever the system locale; dates and times follow the locale.
