@@ -709,7 +709,10 @@ type GitMutationOutcome =
         | "invalid-refspec"
         | "unconfirmed-target"
         | "ignored-path-collision"
-        | "identity-missing";
+        | "identity-missing"
+        | "stale-state"
+        | "unlisted-path"
+        | "untracked-path";
     }
   | { readonly status: "unavailable" }
   | { readonly status: "failed"; readonly detail?: string };

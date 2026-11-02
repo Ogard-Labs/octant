@@ -214,6 +214,7 @@ describe("Code execution lifecycle", () => {
     ).toMatchObject({ kind: "git-mutation-state", mutation: "discard", state: "completed" });
     expect(readFileSync(join(checkoutRoot, "README.md"), "utf8")).toBe("initial\n");
     expect(readFileSync(join(checkoutRoot, "keep.txt"), "utf8")).toBe("untracked work stays\n");
+    rmSync(join(checkoutRoot, "keep.txt"));
 
     writeFileSync(join(checkoutRoot, "README.md"), "delivered\n");
     const observed = await fixture.runtime.execute(windowId, observeCommand(12));

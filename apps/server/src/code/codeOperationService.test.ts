@@ -25,6 +25,7 @@ import {
   CodeOperationServiceError,
   CodeOperationSnapshotRequiredError,
   type CodeOperationServiceOptions,
+  type CodeOperationGitPort,
 } from "./codeOperationService";
 import { requireLinuxConfinement } from "../process/linuxConfinement";
 import { ReviewFindingServiceError } from "./reviewFindingService";
@@ -1503,7 +1504,7 @@ describe("CodeOperationService", () => {
         status: "applied" as const,
         undo: { worktree: "e".repeat(40), index: "f".repeat(40) },
       }));
-      const discard = vi.fn(async () => ({ status: "applied" as const }));
+      const discard = vi.fn<CodeOperationGitPort["discard"]>(async () => ({ status: "applied" }));
       const validate = vi.fn(async () => true);
       const checkpoint = vi.fn(async () => ({ status: "unavailable" as const }));
       const start = vi.fn(async () => ({ state: "running" as const }));
@@ -1574,6 +1575,20 @@ describe("CodeOperationService", () => {
       });
       return { service, restoreCheckpoint, checkpoint, start, cancel, append, discard, validate };
     }
+
+    it.each(["stale-state", "unlisted-path", "untracked-path"] as const)(
+      "returns the tracked discard refusal %s instead of failing to decode its result",
+      async (reason) => {
+        const { service, discard } = restoreFixture([]);
+        discard.mockResolvedValueOnce({ status: "rejected", reason });
+        await expect(service.execute(ids.window, discardCommand)).resolves.toMatchObject({
+          kind: "git-mutation-state",
+          mutation: "discard",
+          state: "rejected",
+          reason,
+        });
+      },
+    );
 
     it.each(["running", "waiting"] as const)(
       "refuses discard while another thread is %s and names it",
