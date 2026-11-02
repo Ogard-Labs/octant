@@ -332,6 +332,32 @@ function listedSecretPath(
   return protectedSecretPath(asked);
 }
 
+/** Forge hard lines apply before either local or SSH commands reach a model or fast allow. */
+function judgeForgeCommand(command: string): ShieldRuleOutcome | undefined {
+  for (const change of forgeShellChanges(command)) {
+    if (change.kind === "merge") {
+      return decided(
+        "ask",
+        "hard-line",
+        "merges-pull-request",
+        "A pull request is merged only when the person asks.",
+      );
+    }
+    if (
+      change.kind === "push" &&
+      (change.force !== "none" || change.deletes || change.allBranches)
+    ) {
+      return decided(
+        "ask",
+        "hard-line",
+        "rewrites-shared-history",
+        "Force-pushing or rewriting a branch happens only when the person asks.",
+      );
+    }
+  }
+  return undefined;
+}
+
 /**
  * Applies the rule stages in order. `needs-model` means no rule decided and
  * the model judges; a rule that decided is final.
@@ -369,29 +395,8 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
         return decided(entry.verdict, entry.stage, entry.rule, entry.reason);
       }
     }
-    // Use the same command reading as the execution boundary: global flags,
-    // wrappers and GraphQL merges must not fall through to a model allow.
-    for (const change of forgeShellChanges(command)) {
-      if (change.kind === "merge") {
-        return decided(
-          "ask",
-          "hard-line",
-          "merges-pull-request",
-          "A pull request is merged only when the person asks.",
-        );
-      }
-      if (
-        change.kind === "push" &&
-        (change.force !== "none" || change.deletes || change.allBranches)
-      ) {
-        return decided(
-          "ask",
-          "hard-line",
-          "rewrites-shared-history",
-          "Force-pushing or rewriting a branch happens only when the person asks.",
-        );
-      }
-    }
+    const forge = judgeForgeCommand(command);
+    if (forge !== undefined) return forge;
     // A copy to or from a registered server is judged by its profile, after
     // the hard lines above.
     const copy = ssh.kind === "not-ssh" ? parseFileCopyInvocation(command) : undefined;
@@ -615,6 +620,8 @@ function judgeSshCall(
       return decided(entry.verdict, entry.stage, entry.rule, entry.reason);
     }
   }
+  const forge = judgeForgeCommand(remote);
+  if (forge !== undefined) return forge;
   const { tier, words } = classifyRemoteCommand(remote, server.deployCommands);
   if (tier === "lockout") {
     return decided(
