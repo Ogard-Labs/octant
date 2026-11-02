@@ -1,3 +1,4 @@
+import { connectorPackageName, featuredConnectors } from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import {
@@ -272,6 +273,32 @@ describe("the library's lead row and groups", () => {
     }
   });
 
+  it("keeps the featured set fixed when one is connected, showing its state and keeping it under Installed", () => {
+    const featuredCount = featuredConnectors().length;
+    const connected = pkg(
+      "ext-gh",
+      { trusted: true, pluginDesired: true },
+      { addedInSettings: true, slug: connectorPackageName("github") },
+      ["mcp"],
+      "effective",
+    );
+    const shown = filterLibrary(buildLibrary({ snapshot: snapshot(connected) }), all);
+    const lead = featuredItems(shown, all);
+    expect(lead).toHaveLength(featuredCount);
+    expect(lead.map((item) => item.connectorId)[0]).toBe("github");
+    expect(lead[0]).toMatchObject({ state: "on", stateLabel: "On" });
+    const groups = groupLibrary(shown, all);
+    expect(groups[0]?.title).toBe("Installed");
+    expect(groups[0]?.items.map((item) => item.connectorId)).toEqual(["github"]);
+    // Narrowing to not-installed shows only the featured ones that are not connected.
+    const available = { ...all, state: "available" } as const;
+    const left = featuredItems(
+      filterLibrary(buildLibrary({ snapshot: snapshot(connected) }), available),
+      available,
+    );
+    expect(left).toHaveLength(featuredCount - 1);
+  });
+
   it("makes a search one flat list of results", () => {
     const filter = { ...all, query: "linear" };
     const groups = groupLibrary(
@@ -279,5 +306,45 @@ describe("the library's lead row and groups", () => {
       filter,
     );
     expect(groups.map((group) => group.title)).toEqual(["Results"]);
+  });
+});
+
+describe("a skill's card line", () => {
+  const skillRecord = (name: string, description?: string, instructions?: string) => ({
+    skill: { qualifiedId: `agents-skills-directory:${name}:sha256:x` },
+    source: { kind: "agents-skills-directory" },
+    displayName: name,
+    ...(description === undefined ? {} : { description }),
+    ...(instructions === undefined ? {} : { instructions }),
+    reviewed: true,
+    desiredEnabled: true,
+    effectiveState: { kind: "effective" },
+  });
+
+  it("uses the skill's own description and leaves the line out when the host gives none", () => {
+    const items = buildLibrary({
+      snapshot: {
+        sequence: 1,
+        snapshotAt: "2026-11-02T00:00:00.000Z",
+        collisions: [],
+        packages: [],
+        skills: [
+          skillRecord("with-text", "Reviews diffs."),
+          skillRecord(
+            "found",
+            undefined,
+            '---\nname: found\ndescription: "Plans a release."\n---\nBody',
+          ),
+          skillRecord("bare", undefined, "---\nname: bare\n---\nBody"),
+        ],
+      } as never as ExtensionSnapshot,
+      connectors: [],
+    });
+    expect(items.find((item) => item.name === "with-text")?.summary).toBe("Reviews diffs.");
+    expect(items.find((item) => item.name === "found")?.summary).toBe("Plans a release.");
+    const bare = items.find((item) => item.name === "bare");
+    expect(bare).toBeDefined();
+    expect(bare && "summary" in bare).toBe(false);
+    expect(JSON.stringify(items)).not.toContain("written skill");
   });
 });

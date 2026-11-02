@@ -8242,7 +8242,12 @@ credentials, hooks, other apps and Apple tooling high; a connector is medium
 and says which host receives requests), stays on every card as three dots and
 is stated in full in the detail. The page leads with a small hand-picked
 Featured row of connectors from the bundled list (`featuredConnectors`), so it
-shows with no network and with Marketplace fetches off, then groups what is
+shows with no network and with Marketplace fetches off. The set is fixed: a
+connected connector stays in the row and shows its state on its card (it also
+stays under Installed), so the row never has a hole; narrowing to not installed
+shows only the featured ones that are not connected. The row lays out in 1, 2,
+3 columns so six cards never leave a ragged last row. A skill's card line is the
+skill's own description and is left out when the host gives none. The page then groups what is
 installed first, then what is not by the catalog's own categories, Marketplace
 results and tools found on this computer; a search is one flat list.
 

@@ -448,7 +448,9 @@ function LibraryCard(props: LibraryCardProps) {
           {item.category ?? item.source}
           {item.provider === "Every provider" ? "" : ` · ${item.provider}`}
         </span>
-        <span className="library__card-summary">{item.summary}</span>
+        {item.summary === undefined ? null : (
+          <span className="library__card-summary">{item.summary}</span>
+        )}
       </span>
       <span className="library__card-foot">
         {action !== undefined ? (
@@ -652,7 +654,9 @@ function LibraryDetail(props: LibraryDetailProps) {
           <X aria-hidden="true" size={16} strokeWidth={1.5} />
         </OctantButton>
       </header>
-      <p className="library-detail__summary">{item.summary}</p>
+      {item.summary === undefined ? null : (
+        <p className="library-detail__summary">{item.summary}</p>
+      )}
       <StepLadder steps={item.steps} />
       {item.stateNote === undefined ? null : (
         <p className="library__note" role="status">
