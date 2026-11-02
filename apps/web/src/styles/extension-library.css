@@ -440,3 +440,9 @@
     padding: var(--oct-space-4);
   }
 }
+
+.extensions-settings__switch {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--oct-space-3);
+}

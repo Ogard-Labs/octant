@@ -46,6 +46,8 @@ import {
   WorkProjectPermissionModeChanged,
   GUARDRAIL_LEVEL_LOWERED,
   GuardrailLevelLowered,
+  PROVIDER_TOOLING_APPLIED,
+  ProviderToolingAppliedRecordSchema,
   CodeProjectActionsChanged,
   ProjectExtraFolderAdded,
   ProjectExtraFolderRemoved,
@@ -439,6 +441,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.code-agent-merge-changed@1", 1, CodeProjectAgentMergeChanged)
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
     .register(GUARDRAIL_LEVEL_LOWERED, 1, GuardrailLevelLowered)
+    .register(PROVIDER_TOOLING_APPLIED, 1, ProviderToolingAppliedRecordSchema)
     .register(CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED, 1, CodeProjectPullRequestActionRecorded)
     .register(
       CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,

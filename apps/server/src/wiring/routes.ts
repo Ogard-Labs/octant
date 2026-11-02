@@ -63,6 +63,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     ProvidersWiring,
     | "discoveryRoutes"
     | "extensionRoutes"
+    | "providerToolingRoutes"
     | "localUsageHistoryRoutes"
     | "providerOAuthRoutes"
     | "providerRoutes"
@@ -165,6 +166,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     diagnosticsExportRoutes,
     discoveryRoutes,
     extensionRoutes,
+    providerToolingRoutes,
     fileMentionRoutes,
     fleetActivityRoutes,
     folderBrowseRoutes,
@@ -330,6 +332,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await computerUseRoutes(request)) ??
     (await validationEvidenceRoutes(request)) ??
     (await extensionRoutes(request)) ??
+    (await providerToolingRoutes(request)) ??
     (await browserAutomationRoutes(request)) ??
     (await shellRoutes(request)) ??
     (await shipRoutes(request)) ??

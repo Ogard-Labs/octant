@@ -106,6 +106,7 @@ import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-cl
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
+import type { ProviderToolingClient } from "@octant/client-runtime/provider-tooling-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import { ServerAccessSettings } from "../settings/ServerProjectsSettings";
@@ -155,6 +156,7 @@ import { SettingsSearchResults, searchResultLink } from "../settings/SettingsSea
 import { isApplePlatform, thisComputerName, useHostPlatform } from "../platform";
 import { useSettingsRoute } from "../settings/useSettingsRoute";
 import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
+import { ProviderToolingPanel } from "../extensions/ProviderToolingPanel";
 import type { ThemeController } from "../theme/useThemeController";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
@@ -243,6 +245,8 @@ export interface SettingsViewProps {
   readonly secretStoresClient?: SecretStoresClient;
   /** Settings › Access › Servers; absent off this computer. */
   readonly shieldServersClient?: ShieldServersClient;
+  /** Settings › Skills & Extensions › Claude and Codex; absent off this computer. */
+  readonly providerToolingClient?: ProviderToolingClient;
   /** Code Projects on a registered server; absent off this computer. */
   readonly serverProjectsClient?: ServerProjectsClient;
   /** Creating, joining, and revoking on this host; absent off it. */
@@ -1439,7 +1443,13 @@ function ActiveSectionContent({
     case "skills":
       // Marketplace fetches is this host's own switch, so it stays reachable
       // while the extension catalog is loading or unavailable.
-      return <SkillsSection focusedSetting={focusedSetting} props={props} />;
+      return (
+        <SkillsSection
+          focusedSetting={focusedSetting}
+          onApplyDeepLink={onApplyDeepLink}
+          props={props}
+        />
+      );
     default:
       return null;
   }
@@ -1983,7 +1993,11 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
  * of saved skill-folder changes tells the extension list to discover again once
  * the host holds the new folders, not while the save is still in flight.
  */
-function SkillsSection({ focusedSetting, props }: SectionProps) {
+function SkillsSection({
+  focusedSetting,
+  onApplyDeepLink,
+  props,
+}: SectionProps & { readonly onApplyDeepLink: (link: SettingsDeepLink) => void }) {
   const [skillFolderSaves, setSkillFolderSaves] = useState(0);
   return (
     <div className="settings-section-stack" id="settings-skills">
@@ -1993,6 +2007,34 @@ function SkillsSection({ focusedSetting, props }: SectionProps) {
           marketplaceFetchesEnabled={props.settings.marketplaceFetchesEnabled}
           skillFoldersKey={`${JSON.stringify(props.settings.skillFolders)}:${skillFolderSaves}`}
           showHeading={false}
+          {...(props.providerToolingClient === undefined || props.providerController === undefined
+            ? {}
+            : {
+                accountTools: (
+                  <ProviderToolingPanel
+                    accounts={props.providerController.instances.flatMap((instance) =>
+                      instance.driverKind === "claude" || instance.driverKind === "codex"
+                        ? [
+                            {
+                              id: String(instance.id),
+                              displayName: instance.displayName,
+                              driverKind: instance.driverKind,
+                              nativeSetup: instance.nativeSetup === true,
+                            },
+                          ]
+                        : [],
+                    )}
+                    client={props.providerToolingClient}
+                    localHost
+                    onOpenRunAsItself={(accountId) =>
+                      onApplyDeepLink({
+                        section: "providers",
+                        setting: `provider-${accountId}-native-setup`,
+                      })
+                    }
+                  />
+                ),
+              })}
           {...(props.pickLocalPluginFolder === undefined
             ? {}
             : { pickLocalPluginFolder: props.pickLocalPluginFolder })}

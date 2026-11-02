@@ -69,6 +69,8 @@ export interface LibraryViewProps {
   readonly disabled: boolean;
   readonly busyExtensionId?: string | undefined;
   readonly onOpen: (target: LibraryHandoff, item: LibraryItem) => void;
+  /** Opens the panel for adding tools to Claude Code and Codex; absent when it is unavailable here. */
+  readonly onOpenAccountTools?: () => void;
   readonly onTrust: (item: LibraryItem, trusted: boolean) => void;
   readonly onPluginDesired: (item: LibraryItem, desired: boolean) => void;
 }
@@ -167,6 +169,19 @@ export function LibraryView(props: LibraryViewProps) {
             ) : null}
           </div>
         </div>
+        {props.onOpenAccountTools === undefined ? null : (
+          <p className="library__note">
+            Want a tool inside Claude Code or Codex itself?{" "}
+            <OctantButton
+              onClick={props.onOpenAccountTools}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              Add it to an account
+            </OctantButton>
+          </p>
+        )}
         {!props.marketplaceFetchesEnabled ? (
           <p className="library__note" role="status">
             Marketplace fetches are off, so Marketplace search finds nothing new. Installed items

@@ -1,5 +1,5 @@
 import { BookOpen, ChevronDown, ChevronUp, Puzzle, Search, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
   DiscoveredAgentToolingListing,
@@ -384,7 +384,12 @@ export interface ExtensionsSettingsViewProps {
    */
   readonly marketplaceFetchesEnabled?: boolean;
   /** The view that opens first; the Library when omitted. */
-  readonly initialView?: "library" | "installed" | "marketplace" | "connectors";
+  readonly initialView?: "library" | "installed" | "marketplace" | "connectors" | "account-tools";
+  /**
+   * The panel for adding tools to Claude Code and Codex themselves. When given,
+   * it appears as the "Claude and Codex" view beside the others.
+   */
+  readonly accountTools?: ReactNode;
   /** Changes when the skill folders in Settings change, so discovery runs again. */
   readonly skillFoldersKey?: string;
   /**
@@ -418,11 +423,10 @@ const INSTALLED_SKILL_PREVIEW_LIMIT = 12;
 export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const scope = props.scope ?? DEFAULT_EXTENSION_SETTINGS_SCOPE;
   const marketplaceFetchesEnabled = props.marketplaceFetchesEnabled ?? true;
-  const [view, setView] = useState<"library" | "installed" | "marketplace" | "connectors">(
-    props.initialView ?? "library",
-  );
+  type ExtensionsView = "library" | "installed" | "marketplace" | "connectors" | "account-tools";
+  const [view, setView] = useState<ExtensionsView>(props.initialView ?? "library");
   const viewSwitch = (
-    <OctantToggleGroup<"library" | "installed" | "marketplace" | "connectors">
+    <OctantToggleGroup<ExtensionsView>
       aria-label="View"
       onValueChange={(value) => {
         const selected = value[0];
@@ -434,6 +438,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       <OctantToggleGroupItem value="installed">Installed</OctantToggleGroupItem>
       <OctantToggleGroupItem value="marketplace">Marketplace</OctantToggleGroupItem>
       <OctantToggleGroupItem value="connectors">Connectors</OctantToggleGroupItem>
+      {props.accountTools === undefined ? null : (
+        <OctantToggleGroupItem value="account-tools">Claude and Codex</OctantToggleGroupItem>
+      )}
     </OctantToggleGroup>
   );
   const [status, setStatus] = useState<LoadStatus>("loading");
@@ -1021,9 +1028,17 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           </p>
         </>
       )}
-      {view === "library" ? (
+      {view === "account-tools" && props.accountTools !== undefined ? (
+        <>
+          <div className="extensions-settings__switch">{viewSwitch}</div>
+          {props.accountTools}
+        </>
+      ) : view === "library" ? (
         <LibraryView
           actions={viewSwitch}
+          {...(props.accountTools === undefined
+            ? {}
+            : { onOpenAccountTools: () => setView("account-tools") })}
           busyExtensionId={libraryBusyId}
           disabled={installing || importingLocal}
           items={libraryItems}
