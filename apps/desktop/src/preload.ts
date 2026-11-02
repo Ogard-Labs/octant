@@ -1885,7 +1885,7 @@ function decodeSupportBundleSaveResult(value: unknown): SupportBundleSaveResult 
 
 function decodePickerReceiptResult(
   value: unknown,
-  picker: "local plugin folder" | "binary",
+  picker: "local plugin folder" | "skill folder" | "binary",
 ): PickerReceiptResult {
   if (!isRecord(value)) throw new TypeError(`Invalid ${picker} picker result.`);
   const keys = Object.keys(value).sort();
