@@ -694,7 +694,8 @@ Agent-to-agent messaging is a host-delivered channel, and seeing sibling threads
 - Message bodies never enter the journal; delivery marks the recipient as having read outside content, and delivery is at least once.
 - A source turn may make at most three thread-message sends, and a target turn started by that tool is never offered the tool. _Here only._
 - `octant_threads` lists, reads and waits only; a read marks the caller, and a turn may make 8 reads and 4 waits.
-- The acknowledgement event and its projection exist, but nothing acknowledges a delivered message and the sender has no read-back of what became of it (not built yet).
+- The current recipient can explicitly report receipt of its exact delivered message; the host rechecks both Code threads and their same-Project authority. Sender status reads only its own metadata through the existing tool, and the person sees bounded recent receipts in Agents. Acknowledgement means reported receipt, never understanding or action; delivery and turn completion do not auto-acknowledge.
+- Plan still omits the messaging tool, excluded profiles and cancelled turns refuse every action, and receipt retries are idempotent for the same durable ID. Retrying a send creates a new message. Queued-message expiry has no recorded deadline and remains unimplemented; no receipt infers Expired from age.
 
 Status: Built. Since: 2026-10-12. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 

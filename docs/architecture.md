@@ -2888,9 +2888,30 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   the host keeps only the bodies of waiting messages. A message an earlier
   host journaled as delivered without a turn carrying it stays as journaled
   and is never offered.
-- **Not built.** Nothing journals `agent.message-acknowledged@1`, and a sender
-  has no tool to read what became of a message. The Chat mention path is
-  unchanged.
+- **Acknowledgement and sender read-back.** The host-authored envelope names
+  its immutable messageId. The existing `octant_agent_message` tool accepts
+  explicit `acknowledge` and `status` actions for up to 20 durable IDs per call,
+  while legacy send input remains supported. An acknowledgement is the current
+  recipient reporting receipt: the host checks the exact delivered record,
+  current sender and recipient Code authority and same-Project relationship.
+  A sender cannot acknowledge its outgoing message or name another recipient;
+  the caller thread comes from the running turn. Duplicate acknowledgements
+  and replay retain one fact. Neither prompt acceptance nor turn completion
+  automatically acknowledges a message. Acknowledgement proves no understanding
+  or action. Sender status reads only that thread's own queued, delivered,
+  acknowledged or refused metadata, never a body, target title or peer lookup.
+  The authenticated existing facts route lists bounded recent receipts and
+  refusals only for sender threads the window may open. Its provider-delivered
+  count includes acknowledged messages; acknowledgement is a later receipt,
+  not an additive delivery total. The tool remains omitted and all its actions
+  refused in Plan, on excluded profiles and cancelled turns; managed children,
+  Chat and Work gain no messaging rights. Sending again, including retrying a
+  send, creates a new durable message; receipt retries use the existing ID.
+- **Expiry not implemented.** Queued messages currently have no recorded
+  lifetime and can wait indefinitely for a recipient turn. No timestamp is
+  inferred to be expiry and no receipt claims Expired. A new expiry policy
+  requires an explicit deadline/authorizer and journal-before-cleanup rule.
+  The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
   the tool (a turn in Plan, a profile without the tool, a call with no
   message; a cancelled turn is not a refusal), and at delivery, with these
