@@ -141,6 +141,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       : readRememberedProfileChoice(String(props.projectId)),
   );
   const [taskProfile, setTaskProfile] = useState<BrowserTaskProfileState>();
+  const [taskProfileRead, setTaskProfileRead] = useState<"pending" | "ready" | "error">("pending");
+  const [taskProfileRetry, setTaskProfileRetry] = useState(0);
   const [pendingTaskProfile, setPendingTaskProfile] = useState<BrowserProfileChoice>();
   const [selectingTaskProfile, setSelectingTaskProfile] = useState(false);
   const taskProfileSupported =
@@ -149,6 +151,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     props.client.selectTaskProfile !== undefined;
   const taskProfileApplies =
     taskProfileSupported &&
+    taskProfileRead === "ready" &&
     !props.startFresh &&
     (snapshot?.context === undefined || snapshot.context.contextId === taskProfile?.contextId);
   useEffect(() => {
@@ -160,9 +163,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     void read
       .call(props.client, { threadId, mode }, controller.signal)
       .then((selection) => {
-        if (!controller.signal.aborted) setTaskProfile(selection);
+        if (!controller.signal.aborted) {
+          setTaskProfile(selection);
+          setTaskProfileRead("ready");
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!controller.signal.aborted) setTaskProfileRead("error");
+      });
     return () => controller.abort();
   }, [
     props.client,
@@ -170,6 +178,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     props.tab.mode,
     snapshot?.context?.contextId,
     taskProfileSupported,
+    taskProfileRetry,
   ]);
   const chosenByPerson = useRef(false);
   // The context a profile switch created for a tab that was bound to another one.
@@ -441,10 +450,20 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     choice: BrowserProfileChoice = taskProfileApplies
       ? (taskProfile?.profile ?? "private")
       : profileChoice,
+    explicitPrivate = false,
   ): Promise<void> {
     if (startInFlight.current) return;
-    if (taskProfileSupported && !props.startFresh && taskProfile === undefined) {
-      setMessage("The task’s Browser profile is loading. Try again shortly.");
+    if (
+      taskProfileSupported &&
+      !props.startFresh &&
+      taskProfileRead !== "ready" &&
+      !(taskProfileRead === "error" && explicitPrivate && choice === "private")
+    ) {
+      setMessage(
+        taskProfileRead === "error"
+          ? "The task’s default could not be loaded. Retry, or explicitly open a Private page below."
+          : "The task’s Browser profile is loading. Try again shortly.",
+      );
       return;
     }
     startInFlight.current = true;
@@ -733,10 +752,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       setTaskProfile(result.selection);
       update(result.browser);
       if (result.browser.context?.state === "active") {
-        setOwnedContextId(result.browser.context.contextId);
+        if (props.startFresh) setOwnedContextId(result.browser.context.contextId);
         if (props.tab.contextId !== undefined)
           setReplacementContextId(result.browser.context.contextId);
-        props.onContextCreated?.(result.browser.context.contextId);
+        if (props.startFresh || props.tab.contextId !== undefined)
+          props.onContextCreated?.(result.browser.context.contextId);
       }
       setMessage(
         "Default Browser profile saved for this task. Agents still need permission to use a signed-in profile.",
@@ -902,7 +922,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         </div>
         <BrowserProfileControl
           disabled={
-            starting || selectingTaskProfile || (taskProfileSupported && taskProfile === undefined)
+            starting ||
+            selectingTaskProfile ||
+            (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready")
           }
           {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
           onChange={(choice) => void chooseProfile(choice)}
@@ -1089,6 +1111,33 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           )}
         </span>
       </header>
+      {taskProfileSupported && !props.startFresh && taskProfileRead === "error" ? (
+        <OctantAlert tone="warning">
+          The task’s default could not be loaded. Its saved choice has not changed.
+          <OctantButton
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              setTaskProfileRead("pending");
+              setTaskProfileRetry((value) => value + 1);
+            }}
+          >
+            Retry task default
+          </OctantButton>
+          {!activeContext ? (
+            <OctantButton
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={starting || url.trim() === ""}
+              onClick={() => void start(url, undefined, "private", true)}
+            >
+              Open Private page
+            </OctantButton>
+          ) : null}
+        </OctantAlert>
+      ) : null}
       {notice === undefined ? null : (
         <OctantAlert className="browser-workspace__message" tone="warning">
           {notice}
