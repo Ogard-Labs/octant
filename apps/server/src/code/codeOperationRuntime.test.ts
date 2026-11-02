@@ -57,6 +57,8 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+import { createCodeRouteHandler } from "../codeRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { codeTurnExecutionPolicyReader } from "./codeTurnExecutionPolicy";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -525,62 +527,94 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("refuses another thread's in-place restore while a writing turn is live and allows it once the turn is cancelled", async () => {
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const connection = providerConnection(queue);
-    const fixture = runtimeFixture({ provider: providerDriver(connection) });
-    const restoringThread = decodeCodeThread({
-      ...thread(),
-      id: decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1"),
-      title: "Restoring thread",
-    });
-    fixture.setOtherThread(restoringThread);
-    const restore = (id: number) =>
-      fixture.runtime.execute(windowId, {
-        kind: "restore-git-checkpoint",
-        operationId: operationId(id),
-        gitOperationId: operationId(id + 1) as never,
-        threadId: restoringThread.id,
-        checkoutId,
-        checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) } as never,
+  it.each(["restore", "discard"] as const)(
+    "refuses another thread's %s while a writing turn is live and allows it once the turn is cancelled",
+    async (action) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const fixture = runtimeFixture({ provider: providerDriver(connection) });
+      const restoringThread = decodeCodeThread({
+        ...thread(),
+        id: decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1"),
+        title: "Restoring thread",
+      });
+      fixture.setOtherThread(restoringThread);
+      const capability = "A".repeat(43);
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId, capability, now: 0 });
+      const route = createCodeRouteHandler({
+        service: { executeOperation: fixture.runtime.execute } as never,
+        windowAuthorityStore,
+        now: () => 1,
+      });
+      const restore = async (id: number, authenticated = true) => {
+        const command = {
+          operationId: operationId(id),
+          gitOperationId: operationId(id + 1),
+          threadId: restoringThread.id,
+          checkoutId,
+          ...(action === "restore"
+            ? {
+                kind: "restore-git-checkpoint",
+                checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) },
+              }
+            : {
+                kind: "discard-git-changes",
+                paths: ["file.txt"],
+                expectedStateToken: "f".repeat(64),
+              }),
+        };
+        const response = await route(
+          new Request("http://127.0.0.1/api/code/commands", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(authenticated ? { "x-octant-window-capability": capability } : {}),
+            },
+            body: JSON.stringify(command),
+          }),
+        );
+        expect(response?.status).toBe(authenticated ? 200 : 401);
+        return response?.json();
+      };
+      await restore(30, false);
+
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(31),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+      await expect(restore(32)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message: `Another thread is writing in this checkout: "Runtime". Wait for its turn to finish or stop it, then ${action}.`,
+        },
       });
 
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "start-provider-turn",
-        operationId: operationId(31),
+      await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(34),
         threadId,
         checkoutId,
-        sessionId,
-        prompt: fixture.prompt,
-      }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      });
 
-    await expect(restore(32)).resolves.toMatchObject({
-      kind: "operation-failed",
-      failure: {
-        category: "conflict",
-        message:
-          'Another thread is writing in this checkout: "Runtime". Wait for its turn to finish or stop it, then restore.',
-      },
-    });
-
-    await fixture.runtime.execute(windowId, {
-      kind: "cancel-provider-turn",
-      operationId: operationId(34),
-      threadId,
-      checkoutId,
-    });
-
-    const afterCancel = await restore(35);
-    // The fixture's checkout cannot be observed, so the restore reaches Git and
-    // finds it unavailable: the settled turn no longer holds it back.
-    expect(afterCancel).toMatchObject({
-      kind: "operation-failed",
-      failure: { category: "unavailable", message: "Git mutation is unavailable." },
-    });
-    fixture.close();
-  });
+      const afterCancel = await restore(35);
+      // The fixture's checkout cannot be observed, so the restore reaches Git and
+      // finds it unavailable: the settled turn no longer holds it back.
+      expect(afterCancel).toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "unavailable", message: "Git mutation is unavailable." },
+      });
+      fixture.close();
+    },
+  );
 
   describe("an in-place restore beside a turn that is still preparing to start", () => {
     const restoringThreadId = decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1");

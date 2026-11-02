@@ -1262,12 +1262,12 @@ export class CodeOperationService {
    */
   readonly #startingTurns = new Set<StartingTurn>();
   /**
-   * In-place restores past their check and still overwriting files. Git
+   * Restores and discards past their check and still overwriting files. Git
    * queues work per checkout id, and two Projects on one folder have two ids,
    * so a turn starting in the other Project would not wait for the overwrite;
    * nor would a recovered start, which captures no checkpoint.
    */
-  readonly #restoresInFlight = new Set<{
+  readonly #overwritesInFlight = new Set<{
     readonly checkoutRoot: string;
     readonly settled: Promise<unknown>;
   }>();
@@ -1555,7 +1555,7 @@ export class CodeOperationService {
               // Held first, so no restore starts after this; one already
               // overwriting the files finishes before the checkpoint is taken.
               const restoring =
-                startingTurn === undefined ? undefined : this.#restoreInFlight(root.checkoutRoot);
+                startingTurn === undefined ? undefined : this.#overwriteInFlight(root.checkoutRoot);
               if (restoring !== undefined) await restoring;
               let turnRefusal =
                 command.kind === "start-provider-turn"
@@ -1754,7 +1754,7 @@ export class CodeOperationService {
       };
       startingTurn = held;
       this.#startingTurns.add(held);
-      const restoring = this.#restoreInFlight(root.checkoutRoot);
+      const restoring = this.#overwriteInFlight(root.checkoutRoot);
       if (restoring !== undefined) await restoring;
       const recovered = await this.#providerTurn(
         command,
@@ -3053,21 +3053,36 @@ export class CodeOperationService {
         if (git === undefined)
           return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
         return this.#gitDraft(command, thread, root.checkoutRoot, git);
-      case "discard-git-changes":
+      case "discard-git-changes": {
         if (git === undefined)
           return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
+        if (
+          this.#options.turns.holdsTurn?.(String(thread.id)) === true ||
+          [...this.#startingTurns].some((turn) => String(turn.thread.id) === String(thread.id))
+        )
+          return this.#failed(
+            command.operationId,
+            "conflict",
+            "A turn is running in this thread. Wait for it to finish or stop it, then discard.",
+          );
+        const refusal = this.#checkoutOverwriteRefusal(thread, root.checkoutRoot, "discard");
+        if (refusal !== undefined) return this.#failed(command.operationId, ...refusal);
         return this.#gitMutation(
           command.operationId,
           command.gitOperationId,
           "discard",
-          await git.discard({
-            checkoutId: checkout.id,
-            checkoutRoot: root.checkoutRoot,
-            paths: command.paths,
-            expectedStateToken: command.expectedStateToken,
-            executionPolicy: thread.executionPolicy,
-          }),
+          await this.#overwriteCheckout(
+            root.checkoutRoot,
+            git.discard({
+              checkoutId: checkout.id,
+              checkoutRoot: root.checkoutRoot,
+              paths: command.paths,
+              expectedStateToken: command.expectedStateToken,
+              executionPolicy: thread.executionPolicy,
+            }),
+          ),
         );
+      }
       case "commit-git":
         if (git === undefined)
           return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
@@ -3124,7 +3139,7 @@ export class CodeOperationService {
         );
       }
       case "restore-git-checkpoint": {
-        const refusal = this.#inPlaceRestoreRefusal(thread, root.checkoutRoot);
+        const refusal = this.#checkoutOverwriteRefusal(thread, root.checkoutRoot);
         if (refusal !== undefined) return this.#failed(command.operationId, ...refusal);
         return this.#gitMutation(
           command.operationId,
@@ -3776,16 +3791,17 @@ export class CodeOperationService {
   }
 
   /**
-   * Why an in-place restore of this checkout root cannot start now, or
+   * Why an overwrite of this checkout root cannot start now, or
    * undefined when it may. Checked in the same step that registers the
-   * restore, with nothing awaited between them, so a turn either was refused
+   * overwrite, with nothing awaited between them, so a turn either was refused
    * here or waits for the overwrite.
    */
-  #inPlaceRestoreRefusal(
+  #checkoutOverwriteRefusal(
     thread: CodeThread,
     checkoutRoot: string,
+    action: "restore" | "discard" = "restore",
   ): readonly ["unavailable" | "conflict", string] | undefined {
-    if (this.#options.git.restoreCheckpoint === undefined)
+    if (action === "restore" && this.#options.git.restoreCheckpoint === undefined)
       return ["unavailable", "Restoring a checkpoint is unavailable."];
     const writer = this.#threadsWritingIn(checkoutRoot, thread.id)[0];
     if (writer !== undefined) {
@@ -3793,21 +3809,22 @@ export class CodeOperationService {
         "conflict",
         inPlaceRestoreRefusalText(
           String(writer.projectId) === String(thread.projectId) ? writer.title : undefined,
+          action,
         ),
       ];
     }
     // Git queues per checkout id, so two Projects on one folder would
     // otherwise overwrite it at the same time.
-    if (this.#restoreInFlight(checkoutRoot) !== undefined) {
+    if (this.#overwriteInFlight(checkoutRoot) !== undefined) {
       return [
         "conflict",
-        "Another restore is overwriting this checkout. Wait for it to finish, then restore.",
+        `Another operation is overwriting this checkout. Wait for it to finish, then ${action}.`,
       ];
     }
     return undefined;
   }
 
-  /** Overwrite the checkout with a checkpoint; callers check `#inPlaceRestoreRefusal` first. */
+  /** Overwrite the checkout with a checkpoint; callers check `#checkoutOverwriteRefusal` first. */
   async #restoreInPlace(
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
@@ -3816,18 +3833,25 @@ export class CodeOperationService {
   ): Promise<GitMutationOutcome & { readonly undo?: CodeCheckpoint }> {
     const restore = this.#options.git.restoreCheckpoint;
     if (restore === undefined) return { status: "unavailable" };
-    const restoring = restore({
-      checkoutId: checkout.id,
+    return this.#overwriteCheckout(
       checkoutRoot,
-      snapshot: checkpoint,
-      executionPolicy: thread.executionPolicy,
-    });
-    const inFlight = { checkoutRoot, settled: restoring };
-    this.#restoresInFlight.add(inFlight);
+      restore({
+        checkoutId: checkout.id,
+        checkoutRoot,
+        snapshot: checkpoint,
+        executionPolicy: thread.executionPolicy,
+      }),
+    );
+  }
+
+  /** Register without yielding after the conflict check, so new turns wait before capture. */
+  async #overwriteCheckout<T>(checkoutRoot: string, overwriting: Promise<T>): Promise<T> {
+    const inFlight = { checkoutRoot, settled: overwriting };
+    this.#overwritesInFlight.add(inFlight);
     try {
-      return await restoring;
+      return await overwriting;
     } finally {
-      this.#restoresInFlight.delete(inFlight);
+      this.#overwritesInFlight.delete(inFlight);
     }
   }
 
@@ -3967,7 +3991,7 @@ export class CodeOperationService {
         let restored: CodeOperationResult;
         if (journaled?.kind === "operation-result") restored = journaled.result;
         else {
-          const refusal = this.#inPlaceRestoreRefusal(thread, checkoutRoot);
+          const refusal = this.#checkoutOverwriteRefusal(thread, checkoutRoot);
           if (refusal !== undefined) return this.#failed(command.operationId, ...refusal);
           restored = this.#gitMutation(
             command.filesOperationId,
@@ -4010,9 +4034,9 @@ export class CodeOperationService {
     });
   }
 
-  /** Settles once every in-place restore of this checkout root has; none, nothing to wait on. */
-  #restoreInFlight(checkoutRoot: string): Promise<unknown> | undefined {
-    const restoring = [...this.#restoresInFlight]
+  /** Settles once every overwrite of this checkout root has; none, nothing to wait on. */
+  #overwriteInFlight(checkoutRoot: string): Promise<unknown> | undefined {
+    const restoring = [...this.#overwritesInFlight]
       .filter((restore) => restore.checkoutRoot === checkoutRoot)
       .map((restore) => restore.settled);
     return restoring.length === 0 ? undefined : Promise.allSettled(restoring);

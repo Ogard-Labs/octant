@@ -588,7 +588,7 @@ A fork is a managed-worktree creation the host resolves itself from a finished t
 - A checkpoint is journaled on its own aggregate (marked, forgotten, restored). Chat branches through the marked turn; Code creates a thread on its own worktree at the recorded revision with a fresh delivery branch. The origin is untouched. _Here only._
 - A Code checkpoint is refused when the host never caught a revision. Forgetting retires the marker and leaves it readable. _Here only._
 - An in-place Git restore keeps its own name, is never presented as the same gesture, and is refused as a conflict while another thread has a live writing turn on the same checkout root.
-- Discard also overwrites files and is not yet covered by that conflict check (not built yet). No route reaches the Git service's commit revert today; a route added for it must take the same check.
+- Discard takes the same live-writer conflict check and checkout-root serialization immediately before mutation, after approval, and also refuses during its own starting or live turn. Its state-token and tracked-path checks remain required. No route reaches the Git service's commit revert today; a route added for it must take the same check.
 
 Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
