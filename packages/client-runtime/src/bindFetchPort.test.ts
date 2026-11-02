@@ -2,6 +2,32 @@ import { describe, expect, it, vi } from "vitest";
 import { bindFetchPort } from "./bindFetchPort";
 
 describe("bindFetchPort", () => {
+  it("preserves captured callable properties while using the current realm binding and refusing redirects", async () => {
+    const original = globalThis.fetch;
+    const captured = Object.assign(vi.fn<typeof globalThis.fetch>(), { marker: "captured" });
+    globalThis.fetch = captured;
+    try {
+      const bound = bindFetchPort(captured);
+      expect(Reflect.get(bound, "marker")).toBe("captured");
+      const response = new Response("replacement");
+      const replacement = vi
+        .fn<typeof globalThis.fetch>()
+        .mockImplementation(function (this: unknown) {
+          expect(this).toBe(globalThis);
+          return Promise.resolve(response);
+        });
+      globalThis.fetch = replacement;
+      expect(await bound("http://127.0.0.1/example")).toBe(response);
+      expect(captured).not.toHaveBeenCalled();
+      expect(replacement).toHaveBeenCalledWith("http://127.0.0.1/example", { redirect: "error" });
+      const init = { redirect: "manual" as const };
+      await bound("http://127.0.0.1/example", init);
+      expect(replacement).toHaveBeenLastCalledWith("http://127.0.0.1/example", init);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it("re-reads globalThis.fetch on each call when the realm fetch was passed", async () => {
     const original = globalThis.fetch;
     const first = vi.fn().mockResolvedValue(new Response("first"));
