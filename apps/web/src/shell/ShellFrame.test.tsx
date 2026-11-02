@@ -316,7 +316,7 @@ describe("ShellFrame", () => {
     expect(shellStyles).toMatch(
       /@media \(max-width: 680px\)[\s\S]*\.shell\.shell-frame\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\);/,
     );
-    // The chrome row is the title rail (38px, `--oct-title-rail-h`), the
+    // The chrome row is the title rail (`--oct-title-rail-h`), the
     // same height the thread tab band takes, so the narrow drawer starts
     // where the rail ends instead of four pixels above it.
     expect(shellStyles).toMatch(

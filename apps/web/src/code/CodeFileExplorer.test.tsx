@@ -289,10 +289,9 @@ describe("CodeFileExplorer", () => {
     expect(head).toMatch(/border-bottom:\s*1px solid var\(--oct-border\)/);
   });
 
-  it("closes the docked head on the 38px rail: 4px, the 30px field, then 3px and the hairline", () => {
-    // Measured in a browser: 4px above, 3px below and a 1px hairline around the
-    // 30px field is 38px; a plain 4px below made the head 39px and its hairline
-    // missed the title band beside it.
+  it("keeps the docked head at the rail height: 4px, the 30px field, then 3px and the hairline, centred", () => {
+    // The head's minimum height is the rail's; the 30px field is centred in it,
+    // and the 3px below plus the hairline keep a plain 4px from overflowing it.
     expect(systemStylesheet).toMatch(/--oct-rail-pad-end:\s*calc\(var\(--oct-space-1\) - 1px\)/);
     expect(dockStylesheet).toMatch(
       /padding:\s*4px var\(--oct-space-3\) var\(--oct-rail-pad-end\);/,

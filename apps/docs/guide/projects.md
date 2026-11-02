@@ -91,6 +91,12 @@ the Board (the Activity feed in Chat), To review opens the Review page, and
 Done today opens the Put away shelf. Turn the tiles off in **Settings ›
 Sidebar › Count tiles** to get the plain Inbox and Board rows back.
 
+With the icon rail on (the default), the four counts sit in the rail as icons
+with a badge, in blue, amber, purple and green under the Colour style. In a
+window 960 pixels wide or narrower, and on a phone, the sidebar shows them as
+plain rows with the name and count instead of tiles. The tiles appear in a wide
+window when you turn the icon rail off.
+
 ## Review finished threads
 
 **To review** opens the Review page: every finished thread you have not opened

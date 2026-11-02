@@ -25,4 +25,31 @@ describe("SidebarRail", () => {
     await user.hover(screen.getByRole("button", { name: "octant" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("octant");
   });
+
+  it("marks only the four count icons with their hue role", () => {
+    render(
+      <SidebarRail
+        activeMode="code"
+        destinations={[]}
+        modes={["chat", "work", "code"]}
+        nativeHost={false}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projects={[]}
+        tiles={[
+          { id: "inbox", count: 3, onSelect: vi.fn() },
+          { id: "running", count: 1, onSelect: vi.fn() },
+          { id: "review", count: 2, onSelect: vi.fn() },
+          { id: "done", count: 4, onSelect: vi.fn() },
+        ]}
+      />,
+    );
+
+    const hued = screen
+      .getAllByRole("button")
+      .filter((button) => button.hasAttribute("data-tile"))
+      .map((button) => button.getAttribute("data-tile"));
+    expect(hued).toEqual(["inbox", "running", "review", "done"]);
+    expect(screen.getByRole("button", { name: "Settings" })).not.toHaveAttribute("data-tile");
+  });
 });

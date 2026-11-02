@@ -1,6 +1,6 @@
 import { CircleCheck, CirclePlay, Eye, Inbox, type LucideIcon } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { useSidebarDrawerViewport } from "./useShellPresentation";
+import { useNarrowViewport } from "./useShellPresentation";
 
 export type SidebarTileId = "inbox" | "running" | "review" | "done";
 
@@ -33,9 +33,12 @@ const TILE_ICONS: Readonly<Record<SidebarTileId, LucideIcon>> = {
  * than a bare number beside a label.
  */
 export function SidebarCountTiles(props: { readonly tiles: ReadonlyArray<SidebarTile> }) {
-  // In the phone drawer four saturated blocks outweighed the thread list under
-  // them, so the same destinations read as plain rows there.
-  const rows = useSidebarDrawerViewport();
+  // Wherever the icon rail does not show (a window 960px wide or narrower,
+  // and the phone drawer), four saturated blocks outweighed the thread list
+  // under them, so the same destinations read as plain rows. The tiles stay
+  // for a wide window whose person turned the rail off. The breakpoint is the
+  // rail's own, so the two never disagree about which layout shows.
+  const rows = useNarrowViewport();
   return (
     <div
       aria-label="Thread counts"
