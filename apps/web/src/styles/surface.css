@@ -186,13 +186,6 @@
   margin-inline-start: -6px;
 }
 
-/* A press shows in the fill. The icon button's shared press shrinks it and the
-   recipe's sinks it, and a control that moves under the pointer reads as web. */
-.surface-header .surface-header__back:active {
-  transform: none;
-  translate: none;
-}
-
 .surface-header__copy {
   display: flex;
   /* Actions wrap to their own row before the title shrinks to a word. */

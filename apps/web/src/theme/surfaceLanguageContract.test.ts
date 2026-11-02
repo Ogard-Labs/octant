@@ -70,16 +70,13 @@ describe("surface language", () => {
     expect(component).not.toContain(">Close<");
   });
 
-  it("gives destinations and Settings one page title, and a Back that does not move on press", () => {
+  it("gives destinations and Settings one page title", () => {
     const surface = read("styles/surface.css");
     const title = surface.match(/\.oct-page-title \{[^}]*\}/)?.[0] ?? "";
     expect(title).toContain("font-size: var(--oct-text-sm);");
     expect(title).toContain("font-weight: var(--oct-weight-strong);");
     expect(read("surface/SurfaceHeader.tsx")).toContain('className="oct-page-title"');
     expect(read("shell/SettingsView.tsx")).toContain('<h1 className="oct-page-title"');
-    const press = surface.match(/\.surface-header__back:active \{[^}]*\}/)?.[0] ?? "";
-    expect(press).toContain("transform: none;");
-    expect(press).toContain("translate: none;");
   });
 
   it("keeps sidebar and menu labels in sentence case", () => {
