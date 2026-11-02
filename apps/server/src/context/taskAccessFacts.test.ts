@@ -203,7 +203,8 @@ describe("host task access facts", () => {
     const f = fixture();
     f.setEnabled(false);
     f.setObserved(false);
-    f.setFacts({ ...f.getFacts(), default: undefined });
+    const { default: _default, ...withoutDefault } = f.getFacts();
+    f.setFacts(withoutDefault);
     expect(f.read()).toMatchObject({
       default: { status: "unknown" },
       runtime: { enabled: false, capabilities: [] },
@@ -243,7 +244,8 @@ describe("host task access facts", () => {
   });
   it("fails closed when current subject standing or effective posture is unavailable", () => {
     const f = fixture();
-    f.setFacts({ ...f.getFacts(), effective: undefined });
+    const { effective: _effective, ...withoutEffective } = f.getFacts();
+    f.setFacts(withoutEffective);
     expect(f.read()).toMatchObject({
       effectiveContext: "unknown",
       reviewer: { kind: "unknown" },

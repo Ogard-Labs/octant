@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { resolveGuardrail } from "@octant/domain/guardrail-policy";
+import { createTaskAccessFacts } from "./taskAccessFacts";
 import {
   decodeCodeThread,
   decodeContextSubjectRef,
@@ -59,12 +61,13 @@ function fixture() {
   const projection = new WorkThreadProjection();
   projection.apply({ kind: "thread-created", thread: work });
   const session = new CodeSessionAuthorityStore();
+  let codeRecord = code;
   let running: WorkAccess | undefined;
   let active = true;
   let allowed = true;
   let plan = false;
   const read = createTaskAccessSubjectReader({
-    code: () => code,
+    code: () => codeRecord,
     work: (id) => projection.read(id),
     project: (id) =>
       id === work.projectId
@@ -85,6 +88,10 @@ function fixture() {
   });
   return {
     read: (mode: "work" | "code") => read(subjectOf(mode), windowId),
+    reader: read,
+    completeCode: () => {
+      codeRecord = decodeCodeThread({ ...code, completedAt: now });
+    },
     projection,
     session,
     setRunning: (value: WorkAccess | undefined) => {
@@ -103,6 +110,32 @@ function fixture() {
 }
 
 describe("task access reads its owning live sources", () => {
+  it("reports actual Code completedAt as Done with no effective executable level", () => {
+    const f = fixture();
+    f.completeCode();
+    const snapshot = createTaskAccessFacts({
+      subject: f.reader,
+      instance: () => undefined,
+      observed: () => undefined,
+      reviewer: (_id, access) => ({
+        resolution: resolveGuardrail({
+          access,
+          capabilities: { providerReview: false, providerSandbox: false },
+        }),
+        modelUnavailable: false,
+      }),
+      clock: () => now,
+    })(subjectOf("code"), windowId);
+    expect(snapshot?.standing).toBe("completed");
+    expect(snapshot?.effectiveMode).toBeUndefined();
+    expect(snapshot?.limitations).toContainEqual(
+      expect.objectContaining({
+        kind: "unavailable",
+        message: expect.stringContaining("marked Done"),
+      }),
+    );
+  });
+
   it("reads a real Work projection and running routine/turn ceiling instead of stored Full access", () => {
     const f = fixture();
     f.setRunning("ask-first");

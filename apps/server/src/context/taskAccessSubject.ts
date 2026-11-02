@@ -51,11 +51,12 @@ export function createTaskAccessSubjectReader(deps: TaskAccessSubjectDependencie
       const settings = deps.codeSettings();
       return {
         selected: thread,
-        standing: thread.completionConfirmed
-          ? "completed"
-          : thread.lifecycle === "active"
-            ? "active"
-            : "inactive",
+        standing:
+          thread.completedAt !== undefined
+            ? "completed"
+            : thread.lifecycle === "active"
+              ? "active"
+              : "inactive",
         effective,
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
@@ -85,9 +86,10 @@ export function createTaskAccessSubjectReader(deps: TaskAccessSubjectDependencie
     if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
     const settings = deps.workSettings();
     const access = deps.runningWork(id) ?? thread.access;
+    const turnRefusal = deps.workStanding?.(thread);
     return {
       selected: workThreadAccessOf(thread.access),
-      turnRefusal: deps.workStanding?.(thread),
+      ...(turnRefusal === undefined ? {} : { turnRefusal }),
       standing: thread.completionConfirmed
         ? "completed"
         : thread.lifecycle === "active"

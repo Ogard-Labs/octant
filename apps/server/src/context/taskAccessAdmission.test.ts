@@ -189,11 +189,11 @@ describe("task access through existing subject authority", () => {
     const client = createContextClient({
       baseUrl: "http://127.0.0.1",
       windowCapability: capability,
-      fetch: async (input, init) => {
+      fetch: vi.fn<typeof globalThis.fetch>().mockImplementation(async (input, init) => {
         const answer = await f.dispatch(new Request(input, init));
         if (answer === undefined) throw new Error("Route unavailable");
         return answer;
-      },
+      }),
     });
     expect(await client.taskAccess?.(subject)).toMatchObject({
       selectedMode: "auto",
