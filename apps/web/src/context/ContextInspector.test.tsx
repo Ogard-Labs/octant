@@ -204,7 +204,7 @@ describe("ContextInspector", () => {
     expect(within(sentEntry).getByText(/Conservative estimate/)).toBeVisible();
     expect(screen.getByText("Retry").nextElementSibling).toHaveTextContent("Active until");
     expect(screen.getByText("Concurrency reset").nextElementSibling).toHaveTextContent(
-      "Jul 18, 2026",
+      "Jul 18, 2099",
     );
   });
 

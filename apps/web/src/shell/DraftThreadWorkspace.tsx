@@ -1486,7 +1486,7 @@ function CreateFromIssueControl(props: {
     <div className="create-from-issue-control">
       <div className="create-from-issue-control__bar">
         <OctantPopover
-          align="end"
+          align="start"
           className="create-from-issue-control__popup"
           onOpenChange={(open) => {
             if (open !== props.open) props.onToggle();

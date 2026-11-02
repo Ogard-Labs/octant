@@ -20,6 +20,8 @@ export interface ThreadPlanPanelProps {
    * Proposal stays the thread's planning workflow.
    */
   readonly artifactOnly?: boolean;
+  /** Set by the New plan sheet, which names itself and closes on Cancel. */
+  readonly onCancelProposal?: () => void;
 }
 
 /**
@@ -58,6 +60,8 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
   }
 
   const artifactOnly = props.artifactOnly === true;
+  // In the composer's New plan sheet the sheet names itself and owns Cancel.
+  const inSheet = props.onCancelProposal !== undefined;
   if (artifactOnly && (plan === null || plan.status === "withdrawn")) {
     return (
       <section aria-label="Plan" className="thread-plan">
@@ -74,7 +78,7 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
 
   return (
     <section aria-label="Plan" className="thread-plan">
-      {artifactOnly ? null : <h3 className="thread-plan__title">Plan</h3>}
+      {artifactOnly || inSheet ? null : <h3 className="thread-plan__title">Plan</h3>}
       {plan === null || plan.status === "withdrawn" ? null : (
         <>
           <PlanCard
@@ -120,8 +124,16 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
         <form
           className="thread-plan__compose"
           noValidate
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && event.metaKey) {
+              event.preventDefault();
+              event.currentTarget.requestSubmit();
+            }
+          }}
           onSubmit={(event) => {
             event.preventDefault();
+            // Cmd+Return submits past the disabled button, so the guard lives here.
+            if (controller.pending) return;
             const steps = parseSteps(stepText);
             if (title.trim() === "" || steps.length === 0) return;
             const submit = revising ? controller.revise : controller.propose;
@@ -133,39 +145,48 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
             });
           }}
         >
-          {plan === null ? (
-            <p className="thread-plan__empty" role="note">
-              <ListChecks aria-hidden="true" size={14} strokeWidth={1.8} />
-              <span>This thread has no plan yet.</span>
-            </p>
-          ) : null}
-          <OctantInput
-            aria-label="Plan title"
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="What is this plan for?"
-            value={title}
-          />
-          <OctantTextarea
-            aria-label="Plan steps"
-            onChange={(event) => setStepText(event.target.value)}
-            placeholder={"One step per line.\nAdd a reason after an em dash."}
-            rows={5}
-            value={stepText}
-          />
-          <OctantButton
-            disabled={
-              controller.pending || title.trim() === "" || parseSteps(stepText).length === 0
-            }
-            type="submit"
-            variant="default"
-          >
-            {revising ? "Save revision" : "Propose plan"}
-          </OctantButton>
-          {!revising ? null : (
-            <OctantButton onClick={() => setRevising(false)} type="button" variant="ghost">
-              Cancel
+          <label className="thread-plan__field">
+            <span>Title</span>
+            <OctantInput
+              aria-label="Plan title"
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="What is this plan for?"
+              value={title}
+            />
+          </label>
+          <label className="thread-plan__field">
+            <span>Steps</span>
+            <OctantTextarea
+              aria-label="Plan steps"
+              onChange={(event) => setStepText(event.target.value)}
+              placeholder={"One step per line.\nAdd a reason after an em dash."}
+              rows={5}
+              value={stepText}
+            />
+          </label>
+          <div className="thread-plan__actions">
+            {inSheet || revising ? (
+              <OctantButton
+                onClick={() => {
+                  if (revising) setRevising(false);
+                  else props.onCancelProposal?.();
+                }}
+                type="button"
+                variant="ghost"
+              >
+                Cancel
+              </OctantButton>
+            ) : null}
+            <OctantButton
+              disabled={
+                controller.pending || title.trim() === "" || parseSteps(stepText).length === 0
+              }
+              type="submit"
+              variant="default"
+            >
+              {revising ? "Save revision" : "Propose plan"}
             </OctantButton>
-          )}
+          </div>
         </form>
       )}
       {controller.commandMessage === undefined ? null : (
@@ -175,9 +196,6 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
           <span>{controller.commandMessage}</span>
         </p>
       )}
-      <p className="thread-plan__retention" role="note">
-        The host records this plan in its journal, so it survives a restart.
-      </p>
     </section>
   );
 }

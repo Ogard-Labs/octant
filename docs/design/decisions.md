@@ -304,7 +304,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundar
 
 ### Post-preview tracks are design-first
 
-Mobile maturity, a ciphertext-only hosted relay, language services and a debugger, enterprise identity, disposable desktops, outside provider drivers, the compliance package, and the hub-and-spoke topology are authorized post-preview work, each built only once its specification documents its boundaries.
+Mobile maturity, language services and a debugger, enterprise identity, disposable desktops, outside provider drivers, the compliance package, and the hub-and-spoke topology are authorized post-preview work, each built only once its specification documents its boundaries.
 
 - The authorization covers design and implementation; creating an account, spending money, submitting to a store, deploying a hosted service, or weakening an invariant each needs a separate maintainer action.
 - Remote SSH development environments are in scope; a Code or Work Project on a registered server is built ([Server Projects](server-projects.md)).
@@ -588,7 +588,7 @@ A fork is a managed-worktree creation the host resolves itself from a finished t
 - A checkpoint is journaled on its own aggregate (marked, forgotten, restored). Chat branches through the marked turn; Code creates a thread on its own worktree at the recorded revision with a fresh delivery branch. The origin is untouched. _Here only._
 - A Code checkpoint is refused when the host never caught a revision. Forgetting retires the marker and leaves it readable. _Here only._
 - An in-place Git restore keeps its own name, is never presented as the same gesture, and is refused as a conflict while another thread has a live writing turn on the same checkout root.
-- Discard and revert also overwrite files and are not yet covered by that conflict check (not built yet).
+- Discard also overwrites files and is not yet covered by that conflict check (not built yet). No route reaches the Git service's commit revert today; a route added for it must take the same check.
 
 Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -1450,7 +1450,7 @@ Four key providers are first-class, each promised full native capability; every 
 - A capability only some providers have still reaches the others through the published SDK and plugin seams; no seam is widened for one vendor.
 - Outside harness endpoint drivers are held to the bundled endpoints' declared ceiling and reach Octant's tools only for models the host itself verified.
 - A test pins the matrix against the drivers' static capability blocks and the catalog's per-mode columns.
-- The remaining gaps of the two key providers that are not yet fully native, and moving one of them off the ACP bridge, are not built yet.
+- The remaining gaps of the key providers that are not yet fully native are not built yet. Mistral Vibe stays on the ACP bridge ([Provider runtimes](provider-runtimes.md#mistral-vibe-surface)): reading its usage, compaction, review and question messages over ACP is allowed, and needs a probe against a signed-in install first.
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Provider capability matrix ("degraded on")](../architecture.md#security-and-authority).
 
@@ -2632,7 +2632,7 @@ A hosted relay would let an already-paired app reach its host when no other path
 - The relay is off by default behind a Settings switch, opens no connection when off, and a paired device can never enable it.
 - A relayed device keeps its device session's authority but can never pair; pairing never happens over a relay.
 - The relay is one stateless process with no database, and gives identical refusals for unknown and offline routes.
-- Only the contracts and policy slice is built; no transport, relay service or client calls them (not built yet).
+- Only the contracts and policy slice exists, and no transport, relay service or client calls them. Building the rest was canceled (maintainer decision, 2026-10-30) because hub and spokes covers remote reach; it reopens only on written evidence of a reachability gap and a maintainer's request.
 
 Status: Partly built. Since: 2026-10-26. Detail: [Hosted relay: shape](hosted-relay.md#shape-a-blind-pipe-for-the-existing-pinned-tls), [authority](hosted-relay.md#authority-over-a-relayed-stream) and [decisions](hosted-relay.md#maintainer-decisions).
 

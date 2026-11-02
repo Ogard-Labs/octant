@@ -1649,7 +1649,9 @@ hands its text to the command-style overlay, which searches every thread of
 the mode; the overlay also stays in the command palette. The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
 are a visible Status/Projects/Activity switch on the row the Project view
-picker uses, not an icon in the header. Status headings carry their count in
+picker uses, not an icon in the header. That row stands in the same place in
+all three, with the Project tree's own Projects heading under it, so pressing
+the switch moves nothing but the list. Status headings carry their count in
 meta ink after the label ("Needs input 2"), the same face as the feed's folded
 Earlier count. A row whose pull request's checks pass adds a 12px check in the
 success ink after the PR number.
@@ -2168,6 +2170,23 @@ on a still frame. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.
+
+A press darkens a control's fill and moves nothing: no sink, no scale, on any
+control. Words in the chrome do not select when the pointer drags across them,
+controls keep the arrow cursor, a disabled control keeps it too, and the hand
+is for a real link. Pictures and links do not lift off as drag ghosts. Reading
+matter opts back in, so a message, a diff, a value, and an error can still be
+copied. The keyboard focus edge shows only while a person is moving focus by
+keyboard (`data-octant-input`): a dialog handing focus back to its trigger paints
+no ring after a pointer press, and a focused field shows its caret and a brighter
+border.
+
+The right dock has one width whatever it shows, so a click inside it moves
+nothing: the launcher and every tool use the width the person last dragged it to.
+It never takes more than half the workspace, and its handle stops at the same
+half. A Browser or Terminal tab that needs more holds 640px while that tab stays
+open, including one restored after a restart, and does not save it. A width the
+person drags to stands until the next Browser or Terminal opens.
 
 Native Electron title-bar regions are a hard boundary. Interactive controls
 must carry `window-no-drag` and render above the native drag target. Test title-bar

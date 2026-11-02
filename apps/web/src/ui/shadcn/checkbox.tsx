@@ -18,7 +18,7 @@ export function Checkbox({ className, ...props }: ComponentProps<"input">) {
   return (
     <input
       className={cn(
-        "octant-checkbox size-4 shrink-0 cursor-pointer appearance-none rounded-[4px] border border-input bg-transparent outline-none transition-colors checked:border-primary checked:bg-primary disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive",
+        "octant-checkbox size-4 shrink-0 cursor-default appearance-none rounded-[4px] border border-input bg-transparent outline-none transition-colors checked:border-primary checked:bg-primary disabled:pointer-events-none disabled:cursor-default disabled:opacity-50 aria-invalid:border-destructive",
         className,
       )}
       data-slot="checkbox"

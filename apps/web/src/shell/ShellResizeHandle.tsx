@@ -6,6 +6,8 @@ export interface ShellResizeHandleProps {
   readonly edge: "leading" | "trailing" | "top" | "bottom";
   readonly maximum: number;
   readonly minimum: number;
+  /** Runs after a moved drag is abandoned and its starting value restored. */
+  readonly onCancel?: () => void;
   readonly onCommit: (value: number) => void;
   readonly onPreview: (value: number) => void;
   readonly value: number;
@@ -29,15 +31,15 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
     function handleWindowKeyDown(event: KeyboardEvent): void {
       if (event.key !== "Escape" || activePointer.current === undefined) return;
       event.preventDefault();
-      cancelActivePointer(activePointer, latestProps.current.onPreview);
+      cancelActivePointer(activePointer, latestProps.current);
     }
     function handleWindowBlur(): void {
-      cancelActivePointer(activePointer, latestProps.current.onPreview);
+      cancelActivePointer(activePointer, latestProps.current);
     }
     window.addEventListener("keydown", handleWindowKeyDown);
     window.addEventListener("blur", handleWindowBlur);
     return () => {
-      cancelActivePointer(activePointer, latestProps.current.onPreview);
+      cancelActivePointer(activePointer, latestProps.current);
       window.removeEventListener("keydown", handleWindowKeyDown);
       window.removeEventListener("blur", handleWindowBlur);
     };
@@ -60,7 +62,7 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
   }
 
   function cancelPointerResize(): void {
-    cancelActivePointer(activePointer, props.onPreview);
+    cancelActivePointer(activePointer, props);
   }
 
   function finishPointerResize(event: ReactPointerEvent<HTMLDivElement>): void {
@@ -135,12 +137,14 @@ function cancelActivePointer(
       }
     | undefined
   >,
-  onPreview: (value: number) => void,
+  handlers: Pick<ShellResizeHandleProps, "onCancel" | "onPreview">,
 ): void {
   const pointer = activePointer.current;
   if (pointer === undefined) return;
   activePointer.current = undefined;
-  if (pointer.moved) onPreview(pointer.startValue);
+  if (!pointer.moved) return;
+  handlers.onPreview(pointer.startValue);
+  handlers.onCancel?.();
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

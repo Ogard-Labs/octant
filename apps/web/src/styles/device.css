@@ -64,7 +64,7 @@
 }
 
 .device-toolbar__device--switch {
-  cursor: pointer;
+  cursor: default;
 }
 
 .device-toolbar__device--switch:hover,
@@ -121,7 +121,7 @@
   border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   background: transparent;
-  cursor: pointer;
+  cursor: default;
 }
 
 .device-toolbar__more:hover,

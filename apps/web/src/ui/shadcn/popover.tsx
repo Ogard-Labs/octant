@@ -24,7 +24,7 @@ export function PopoverTrigger({
   return (
     <PopoverPrimitive.Trigger
       className={cn(
-        "inline-flex cursor-pointer items-center justify-center rounded-lg outline-none",
+        "inline-flex cursor-default items-center justify-center rounded-lg outline-none",
         className,
       )}
       data-slot="popover-trigger"

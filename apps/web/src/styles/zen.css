@@ -570,7 +570,7 @@
 
 .zen-bar__button--deferred {
   opacity: var(--oct-disabled-opacity);
-  cursor: not-allowed;
+  cursor: default;
 }
 
 /* .visually-hidden is defined once, in octant.css. */
@@ -777,7 +777,7 @@ img.zen-appearance__thumb {
   display: grid;
   gap: var(--oct-space-1);
   padding: var(--oct-space-1);
-  cursor: pointer;
+  cursor: default;
 }
 
 /* The native control is still the one that opens the file picker and names
@@ -821,7 +821,7 @@ img.zen-appearance__thumb {
 }
 
 .zen-appearance__custom > summary {
-  cursor: pointer;
+  cursor: default;
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
 }

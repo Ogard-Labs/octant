@@ -116,7 +116,7 @@
   padding: var(--oct-space-2);
   white-space: normal;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
 }
 
 .board-card-pr:hover {

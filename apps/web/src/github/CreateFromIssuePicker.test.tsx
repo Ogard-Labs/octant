@@ -240,6 +240,7 @@ describe("Create from issue picker", () => {
     });
     render(<CreateFromIssuePicker client={client} onSelect={vi.fn()} />);
     await user.click(await screen.findByText("octant/octant"));
+    await user.click(await screen.findByRole("button", { name: "Change" }));
     await user.click(await screen.findByText("octant/atlas"));
     releaseFirst?.();
     expect(await screen.findByRole("button", { name: /#9 New repo issue/ })).toBeVisible();
@@ -251,6 +252,6 @@ describe("Create from issue picker", () => {
       authenticationSnapshot: async () => readySnapshot,
     } as unknown as GithubClient;
     expect(() => render(<CreateFromIssuePicker client={stub} onSelect={vi.fn()} />)).not.toThrow();
-    expect(screen.getByText("Choose a repository to list its issues.")).toBeVisible();
+    expect(screen.getByLabelText("Search GitHub repositories")).toBeVisible();
   });
 });

@@ -628,12 +628,11 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   function renderProjectGroup(
     label: string,
     projects: ReadonlyArray<ProjectSummary>,
-    options: { readonly allowAdd?: boolean; readonly tools?: React.ReactNode } = {},
+    options: { readonly allowAdd?: boolean } = {},
   ): React.ReactNode {
     return (
       <ProjectGroup
         key={label}
-        {...(options.tools === undefined ? {} : { tools: options.tools })}
         allProjects={props.projects}
         {...(props.activeProjectId === undefined ? {} : { activeProjectId: props.activeProjectId })}
         {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
@@ -730,28 +729,17 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         ) : null}
       </div>
     ) : undefined;
-  // In the Project tree the list's tools stand in the Projects heading, as one
-  // header row; on their own row above it they made two rows of controls
-  // before the first Project. The status and activity lists have no such
-  // heading, so they keep the row.
-  const toolsInHeading =
-    listTools !== undefined &&
-    !(nestThreads && activityView) &&
-    !showFilteredThreadsEmpty &&
-    (viewGrouping === "project" || props.projects.length === 0) &&
-    // The Projects heading hides when it has nothing to show and empty
-    // Projects are hidden (every match pinned, say); the tools keep their own
-    // row then, or the filter that hid them could not be undone.
-    !(ordinary.length === 0 && hideEmptyProjects);
-
   return (
     <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>
       <nav aria-label="Projects" className="project-nav window-no-drag">
         {/* Views sort and filter Projects; with none yet the row only said
             "All Projects" over a heading that said "Projects" again. The
             Projects/Activity switch shares the row so the list's two
-            questions, which Projects and which arrangement, sit together. */}
-        {listTools === undefined || toolsInHeading ? null : listTools}
+            questions, which Projects and which arrangement, sit together.
+            The row stands in the same place in every arrangement: when the
+            Project tree moved it into its heading, pressing the switch threw
+            the switch itself 62px left and 20px down from under the pointer. */}
+        {listTools}
         {projectViewEditor === undefined || projectViewState === undefined ? null : (
           <CodeProjectViewEditorDialog
             mode={projectViewEditor.mode}
@@ -813,7 +801,6 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                   renderProjectGroup("Pinned", pinned),
                   renderProjectGroup("Projects", ordinary, {
                     allowAdd: true,
-                    ...(toolsInHeading ? { tools: listTools } : {}),
                   }),
                 ]
               : groupedViewProjects.map((group) => renderProjectGroup(group.label, group.projects))}
@@ -952,7 +939,6 @@ function projectThreadListId(projectId: ProjectId): string {
 
 function ProjectGroup(props: {
   /** The list's view, filter, and arrangement controls, shown in this heading. */
-  readonly tools?: React.ReactNode;
   /** Every visible Project, across sections, for telling same-named ones apart. */
   readonly allProjects: ReadonlyArray<ProjectSummary>;
   readonly activeProjectId?: ProjectId;
@@ -1008,7 +994,6 @@ function ProjectGroup(props: {
     >
       <div className="project-section__header sidebar-section">
         <h2>{props.label}</h2>
-        {props.tools}
         {props.onAddProject === undefined &&
         (props.onSortChange === undefined || props.sort === undefined) ? null : (
           <div className="project-section__header-actions">

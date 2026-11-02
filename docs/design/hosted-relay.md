@@ -10,13 +10,13 @@ host-initiated network calls
 ([Overview and principles](../architecture.md#overview-and-principles)), and
 release scope ([Current Release Boundary](../architecture.md#current-release-boundary)).
 
-**Status: accepted 2026-10-26; slice 1 (contracts and policy) is built and in
-review, reached by no transport.** The maintainer unlocked
-this parked workstream as authorized post-preview work and accepted the
-decisions below on 2026-10-26. Nothing below is in force until its slice
-lands; until then the private-network-only rules in Architecture are the whole
-behavior. Opening hosted-relay scope in the architecture's Current Release Boundary is a separate change, and no
-implementation slice merges before it.
+**Status: canceled 2026-10-30; nothing below is in force.** Hub and spokes
+covers remote reach, so a maintainer canceled the rest of this work. Only slice
+1 (contracts and policy) exists, reached by no transport; it and this design
+stay as a record. The private-network-only rules in Architecture are the whole
+behavior. Reopening needs the written evidence described below and a
+maintainer's request, and opening hosted-relay scope in the architecture's
+Current Release Boundary is a separate change.
 
 ## No reachability gap has been demonstrated
 

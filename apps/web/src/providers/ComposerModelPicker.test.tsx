@@ -252,13 +252,13 @@ describe("ComposerModelPicker", () => {
       />,
     );
     const trigger = screen.getByRole("button", { name: "Provider and model" });
-    expect(trigger).toHaveTextContent("current-model");
+    expect(trigger).toHaveTextContent("Current Model");
     await user.click(trigger);
     await user.hover(screen.getByRole("option", { name: "Remote Claude" }));
     expect(screen.queryByRole("option", { name: "Model Three" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "Remote Claude" }));
     expect(screen.getByRole("option", { name: "Model Three" })).toBeVisible();
-    expect(trigger).toHaveTextContent("current-model");
+    expect(trigger).toHaveTextContent("Current Model");
     expect(onSelect).not.toHaveBeenCalled();
   });
 

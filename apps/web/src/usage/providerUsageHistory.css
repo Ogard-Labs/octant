@@ -234,7 +234,7 @@
   font-size: var(--oct-text-detail);
 }
 .provider-history__coverage summary {
-  cursor: pointer;
+  cursor: default;
   color: var(--oct-fg);
 }
 .provider-history__coverage ul {
@@ -299,7 +299,7 @@
   font-size: var(--oct-text-detail);
 }
 .provider-history__chart-data summary {
-  cursor: pointer;
+  cursor: default;
 }
 .provider-history__chart-table {
   max-height: 240px;

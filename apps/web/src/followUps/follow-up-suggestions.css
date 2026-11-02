@@ -134,7 +134,7 @@
 
 .composer-side-task__prompt summary {
   color: var(--octant-text-muted);
-  cursor: pointer;
+  cursor: default;
 }
 
 .composer-side-task__prompt p {

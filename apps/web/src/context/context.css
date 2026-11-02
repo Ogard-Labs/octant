@@ -571,7 +571,7 @@
   color: var(--octant-text-secondary);
   border: 1px solid var(--octant-border);
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-xs);
 }
 
@@ -581,7 +581,7 @@
 }
 
 .context-inspector button:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.48;
 }
 

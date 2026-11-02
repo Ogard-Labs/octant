@@ -201,7 +201,7 @@
   flex-wrap: wrap;
   gap: var(--oct-space-1) var(--oct-space-2);
   padding: var(--oct-space-2) var(--oct-space-3);
-  cursor: pointer;
+  cursor: default;
 }
 
 .imported-history__title {
@@ -567,7 +567,7 @@
   align-items: center;
   gap: var(--oct-space-1);
   padding: 0 var(--oct-space-2);
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-xs);
   text-align: left;
 }
@@ -661,7 +661,7 @@
   background: transparent;
   border: 1px solid var(--oct-border);
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-xs);
 }
 
