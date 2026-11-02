@@ -62,7 +62,7 @@
   disclose those limits and omit unavailable capture and push-enablement controls;
   integrity stays unknown. Vault locking is not evidence of native capture protection.
   Platform adapters and device acceptance are still required.
-- EAS `projectId`, signing, TestFlight, and Play internal uploads need Henrik-owned
+- EAS `projectId`, signing, TestFlight, and Play internal uploads need maintainer-owned
   credentials.
 - Live APNs/FCM delivery remains a Mobile C residual.
 - A compromised host can still send whatever the host policy allows to a paired

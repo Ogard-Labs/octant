@@ -554,7 +554,7 @@
     display: none;
   }
 
-  /* The 36px hero wrapped "Good evening, Henrik" onto two lines on a phone. */
+  /* The 36px hero wrapped "Good evening, Sam" onto two lines on a phone. */
   .welcome__heading > .oct-title--hero {
     font-size: var(--oct-text-2xl);
   }

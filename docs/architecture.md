@@ -6796,7 +6796,7 @@ composition (`nativeHarnessComposition.ts`) and launched by
 grants `call` rules (`nativeHarnessApprovals.ts`).** What is not yet verified or wired is listed under
 **Phase 4 settled** below. The design's approval replaces the "no local egress
 proxy in this release" decision in the
-[threat model](security/security-architecture-threat-model.md#approved-decisions-henrik-2026-08-12)
+[threat model](security/security-architecture-threat-model.md#approved-decisions-maintainers-2026-08-12)
 for native-harness tool processes only.
 
 **Outcome.** A command the harness runs for a thread reaches exactly the
@@ -12083,84 +12083,98 @@ nothing first-party.
 This section is the one statement of what the first release includes and
 defers, and it owns the architectural rules behind it.
 
-The first release is the Apple Silicon technical preview with the
-provider-neutral plugin/skill marketplace. It is signed with a Developer ID,
-notarized, and updates itself — those three are one deliverable, because an
-updater on an unsigned app is an unauthenticated code-delivery channel and
-macOS refuses the replacement anyway. On macOS, Squirrel.Mac refuses a
-replacement that does not satisfy the running app's designated requirement, so
-signing, notarization, and update ship as one deliverable. A local package
-built without maintainer signing credentials is unsigned.
+**Where the release stands (2026-11-02).** The first release is the Apple
+Silicon technical preview with the provider-neutral plugin/skill marketplace.
+Builds of `main` publish daily on the `preview` ring as the second app Octant
+Nightly, and on-demand builds publish on the `candidate` ring, as GitHub
+pre-releases named `v0.1.0-preview.<date>.<build>`; each carries a macOS zip
+and a linux-x64 AppImage. The stable ring (a `vMAJOR.MINOR.PATCH` tag, approved
+in the `stable` environment) has not been used, so Octant itself has not
+shipped. The first release counts as shipped when a maintainer approves the
+first stable version; daily builds stay previews. That first stable release is
+the Apple Silicon build, and Linux is not part of it.
 
-Cross-platform desktop (macOS, Linux, Windows) remains authorized: Linux
-desktop shell next, Windows Work/Code only after an explicitly approved Windows
-confinement design is documented. These tracks are authorized as post-preview
-work (maintainer decision, 2026-10-26) and are not part of the technical
-preview: mobile maturity (Android internal builds, redacted push, capture and
-voice, public store distribution), a ciphertext-only hosted relay, a full LSP /
+The release is signed with a Developer ID, notarized, and updates itself.
+Those three are one deliverable: an updater on an unsigned app is an
+unauthenticated code-delivery channel, and on macOS Squirrel.Mac refuses a
+replacement that does not satisfy the running app's designated requirement. A
+ring publishes a signed feed or publishes none. A local package built without
+signing credentials a maintainer holds is unsigned.
+
+Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
+desktop shell, then the Linux AppImage with its signed feed, then Windows, and
+Windows Work and Code only after an explicitly approved Windows confinement
+design is documented. The following are authorized as post-preview work
+(maintainer decision, 2026-10-26) and are not part of the technical preview:
+mobile maturity (Android internal builds, redacted push, capture and voice,
+public store distribution), a ciphertext-only hosted relay, a full LSP /
 extension host / debugger companion, enterprise directory OAuth and cloud-IAM
 provider identity, disposable Linux desktops for headless hosts, third-party
 provider-driver plugins, and the EU/GDPR compliance package (pending legal
 review). Public store distribution, the Windows sequence below, and the full
 LSP / extension host / debugger companion are release-scope choices the
-maintainer schedules, not safety rules; none of them protects an invariant by
-itself. Remote SSH development environments are in scope (maintainer
-decision, 2026-10-31, replacing the 2026-10-29 out-of-scope rule): a Code
-or Work Project bound to a folder on a registered server is built
-([Server Projects](design/server-projects.md)). An agent in a local Project
-reaches another machine with `ssh` through its shell with the person's own
-SSH agent and configuration ([Modes](#modes-chat-work-and-code)), and Octant
-on the person's other computers joins a hub. A
-hub-and-spoke topology on a person's own devices, where one Octant server
-(running without the desktop app and serving the web app over a private network
-such as Tailscale) enrolls the person's other computers and phones, introduces
-them to each other, fails over to a standby, and runs their wake and push
-services, is authorized the same way (maintainer decision, 2026-10-28) under
-[Hub and spokes](design/hub-and-spokes.md). Each is design-first: build it only
-once its owning specification documents its authority, privacy, and release
-boundaries. The authorization covers design and implementation; creating an
-account, spending money, submitting to a store, deploying a hosted service, or
-weakening any invariant each still needs a separate explicit maintainer action.
-Apple physical devices and App Store Connect upload, submission, and release
-are out of scope (maintainer decision, 2026-10-29): Octant drives the iOS
-Simulator only, and an agent that needs a device or the store uses its own
-provider tools.
+maintainers schedule, not safety rules; none of them protects an invariant by
+itself.
 
-Connectors (MCP servers added by hand, imported from other tools on this Mac,
-signed in to, or chosen from the bundled catalog) are in scope under the
-[connector rules](#extensions-and-skills): user-added packages through the
-published seams and the credential broker, never a hosted service. A Code
-thread's own Git and pull-request work (push, draft, ready, stacked, and
-force-with-lease on its own branch, a plain force-push the person asks for,
-title, body, labels, drafted replies a person sends, close or reopen with
-approval, and merge, auto-merge, or a stack merge the person allowed), a
-person's merge from any of their windows, phone, or web client, and
-host-local routines (Automation Center), Chat routines included, are in scope
-under the rules in [Modes](#modes-chat-work-and-code). Of the pull-request
-actions, a fast-forward push, opening a draft, ready, or stacked pull
-request and editing its title, body, or draft state, a person's
-merge of one pull request from a local window, a person's approval or request
-for changes there, an agent's merge on a Project setting or routine, and the
-Merge when ready and Auto-fix switches the person turns on there are built;
-the rest
-are allowed and not built yet. Linked external secret stores are built for the
-1Password CLI, under [linked secret stores](#linked-secret-stores): a pointer
-in the credential broker, the value fetched at use and never kept.
-The [guardrail levels](#security-and-authority) and the
-[key providers' native features](#providers) are in scope; of them only
-Guarded, Accept edits, Reviewed for Claude Code and Codex in Code, and
-Full access in Code are built; [Octant Shield](#octant-shield) is in scope,
-its Judge is built for every runtime that routes approvals through Octant, and
-its Watcher for the results Octant hands a model. A merge or force-push an agent starts on its own
-initiative, and cloud scheduling, are not in scope. A self-hosted wake service
-that runs in the Octant server on a person's hub and wakes their own spokes is
-in scope under [Hub and spokes](design/hub-and-spokes.md#wake-service); an
-Octant-operated hosted service, deploying anything, creating an account, or
-spending money still needs a separate explicit maintainer action. The public
-Canvas share service is in scope under
-[Canvas public links](design/canvas-public-links.md); its code lives in the
-`octant-webapp` repository. Existing scoped exceptions remain documented in
-this architecture.
+Also in scope, each design-first (build it only once its owning specification
+documents its authority, privacy, and release boundaries):
+
+- Remote SSH development environments (maintainer decision, 2026-10-31,
+  replacing the 2026-10-29 out-of-scope rule): a Code or Work Project bound to
+  a folder on a registered server is built ([Server Projects](design/server-projects.md)).
+  An agent in a local Project reaches another machine with `ssh` through its
+  shell with the person's own SSH agent and configuration
+  ([Modes](#modes-chat-work-and-code)).
+- A hub-and-spoke topology on a person's own devices (maintainer decision,
+  2026-10-28): one Octant server (running without the desktop app and serving
+  the web app over a private network such as Tailscale) enrolls the person's
+  other computers and phones, introduces them, fails over to a standby, and
+  runs their wake and push services, including a self-hosted wake service
+  ([Hub and spokes](design/hub-and-spokes.md#wake-service)). An
+  Octant-operated wake service is not in scope.
+- Connectors (MCP servers added by hand, imported from other tools on this Mac,
+  signed in to, or chosen from the bundled catalog): user-added packages
+  through the published seams and the credential broker, never a hosted
+  service ([connector rules](#extensions-and-skills)).
+- A Code thread's own Git and pull-request work (push, draft, ready, stacked,
+  and force-with-lease on its own branch, a plain force-push the person asks
+  for, title, body, labels, drafted replies a person sends, close or reopen
+  with approval, and merge, auto-merge, or a stack merge the person allowed), a
+  person's merge from any of their windows, phone, or web client, and
+  host-local routines (Automation Center, Chat routines included), under the
+  rules in [Modes](#modes-chat-work-and-code). Built: a fast-forward push;
+  opening a draft, ready, or stacked pull request and editing its title, body,
+  or draft state; a person's merge of one pull request from a local window; a
+  person's approval or request for changes there; an agent's merge on the
+  person's request in the turn, after the person approves that one merge; an
+  agent's merge on a Project setting or routine; and the Merge when ready and
+  Auto-fix switches the person turns on there. The rest of the allowed actions
+  are not built yet.
+- Linked external secret stores, built for the 1Password CLI
+  ([linked secret stores](#linked-secret-stores)): a pointer in the credential
+  broker, the value fetched at use and never kept.
+- The [guardrail levels](#security-and-authority) and the
+  [key providers' native features](#providers). Built in Code: Ask first,
+  Accept edits, Auto (with the key CLI providers' own reviewers), Plan and Full
+  access. Built in Work: Auto, Ask first, Accept edits and Full access.
+  [Octant Shield](#octant-shield) is in scope; its Judge is built for every
+  runtime that routes approvals through Octant, and its Watcher for the
+  results Octant hands a model.
+- The public Canvas share service, under
+  [Canvas public links](design/canvas-public-links.md); its code lives in the
+  `octant-webapp` repository.
+
+Out of scope: a merge or force-push an agent starts on its own initiative,
+cloud scheduling, an Octant-operated hosted service, Apple physical devices,
+and App Store Connect upload, submission and release (maintainer decision,
+2026-10-29: Octant drives the iOS Simulator only, and an agent that needs a
+device or the store uses its own provider tools).
+
+The authorization covers design and implementation. Creating an account,
+spending money, submitting to a store, deploying a hosted service,
+or weakening an invariant each still needs a separate explicit action
+by a maintainer. Existing scoped exceptions remain documented in this
+architecture.
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
@@ -12169,10 +12183,10 @@ AppImage with its signed feed, then Windows. Windows comes after the macOS
 technical preview has shipped and a Linux self-update from the signed feed
 has been seen on a real image; until both exist, no Windows packaging,
 installer, feed, packaging CI, or confinement work starts (maintainer
-decision, 2026-10-16). This is a release-scope choice the maintainer may
+decision, 2026-10-16). This is a release-scope choice a maintainer may
 change, not a safety rule. The reason is sequencing, not a technical
-dependency: the one maintainer is also the only acceptance tester, the
-macOS preview has waited on acceptance since September, and a third
+dependency: one person is today both the only maintainer and the only acceptance
+tester, the macOS preview has waited on acceptance since September, and a third
 platform's packaging and confinement questions would compete for the same
 sittings. The Linux self-update gate exists because the signed-feed update
 path is the shared trust root for every non-macOS platform and has never
@@ -12264,13 +12278,6 @@ Public links on and approves a publish, and a self-hosted service URL is a
 Settings choice. Deploying it, its DNS and TLS, and its operator contact are
 release steps of their own.
 
-The post-preview tracks listed above were previously held and were authorized
-by the maintainer on 2026-10-26. On 2026-10-28 the maintainer added the
-hub-and-spoke topology under the same terms
-([Hub and spokes](design/hub-and-spokes.md)), including a self-hosted wake
-service that runs in the Octant server on the person's own hub; an
-Octant-operated wake service is not in scope. None of them is part of the
-technical preview, whose ship boundary above is unchanged.
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a
 bundled first-party catalog, sign-in through the MCP authorization flow, and
@@ -12282,7 +12289,7 @@ user-added packages through the published seams and the credential broker.
 ```sh
 bun install --frozen-lockfile
 bun run dev        # Vite renderer + Electron with hot reload; server spawned from source
-bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint, typecheck, test, build
+bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions:check, fmt:check, lint, typecheck, test, build
 ```
 
 - Two stalls are logged once per occurrence so the next one is visible: a

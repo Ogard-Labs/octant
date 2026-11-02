@@ -12,7 +12,7 @@ Unfinished plugin extraction and other proposals are separate from these rules.
 
 ## Continuing after a restart
 
-Status: Done (2026-10-28). Approved by Henrik on 2026-10-28.
+Status: Done (2026-10-28). Approved by a maintainer on 2026-10-28.
 
 A conversation whose turn was cut off by a host restart shows a notice above
 its composer: "Octant restarted before this turn finished. Review any changes

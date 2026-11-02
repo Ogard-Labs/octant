@@ -1,6 +1,6 @@
 # Security Architecture and Threat Model
 
-**Status:** Approved by Henrik (2026-08-12). Implementation children may enter Ready.
+**Status:** Approved by a maintainer (2026-08-12). Implementation children may enter Ready.
 
 **Date:** 2026-08-11 (approved 2026-08-12)
 
@@ -321,7 +321,7 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   engine as if the user had never seen the content.
 - **Thread taint and irreversible approvals.** A thread that has ingested external content is marked
   `external-content-ingested` (a projection over provenance events) for the **thread lifetime**
-  (Henrik decision 2026-08-12: taint does not clear on session/turn boundaries). While marked,
+  (maintainer decision 2026-08-12: taint does not clear on session/turn boundaries). While marked,
   approval classes that are irreversible or authority-bearing — destructive or irreversible
   actions, credential/secret access, access outside the selected Project, and privilege expansion
   or sandbox changes (design section 8.4) — require a fresh explicit per-action confirmation.
@@ -343,11 +343,11 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   (`web-fetch`, `web-search`, a child's collected or delivered reply); local reads, searches, edits, and
   commands do not. On a tainted thread a harness "always" approval stops covering its class, and
   `web-fetch` itself needs the per-action confirmation because a GET can carry data out in its
-  URL (Henrik decision 2026-10-09; detail in `docs/architecture.md`, Native harness). A tainted
+  URL (maintainer decision 2026-10-09; detail in `docs/architecture.md`, Native harness). A tainted
   thread's `web-search` asks nobody, because it reaches only the search endpoint the person
   configured; instead the policy refuses a query that looks like it carries data — a URL, an email
   address, a long high-entropy token, a base64, hex, or percent-encoded run, or more than 200 characters — with a
-  named reason (`search-query-refused-under-taint: …`) before any request leaves (Henrik decision
+  named reason (`search-query-refused-under-taint: …`) before any request leaves (maintainer decision
   2026-10-10). Residual risk: a short plain-word query can still leak a few words, but only to the
   endpoint the person chose. Revisit if a default hosted third-party search provider ships.
   A provider runtime's own built-in web search or page fetch, or a tool its provider hosts, appends
@@ -356,14 +356,14 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   runtime may already hold the result by then, and it can act on it before Octant's next gated call;
   what the mark changes is that call and every later turn. A Code turn whose approvals the runtime's own
   reviewer answers is stopped at the mark so the next approval goes to a person, and a mark that cannot be
-  recorded stops the turn and refuses the thread's next turn until it is recorded (Henrik decision
+  recorded stops the turn and refuses the thread's next turn until it is recorded (maintainer decision
   2026-10-14: track it). Residual risks: the mark's gate does not cover a tool the runtime executes
   itself; an owed mark lives in the host process and a restart forgets it; an ACP agent's web search
   reported under the `search` kind with a path-like input, or with no `query`, leaves the thread
   unmarked. Which calls each runtime exposes is listed in `docs/architecture.md`, Persistence,
   Provider runtimes' own web tools.
 - **A person may clear the mark.** The mark keeps its thread lifetime, and a person at a local
-  window may clear it after reviewing what the thread read (Henrik decision 2026-10-12). The clear
+  window may clear it after reviewing what the thread read (maintainer decision 2026-10-12). The clear
   is journaled with who and when (`thread.external-content-cleared@1`: the thread, the window, the
   cleared source labels, and the ingestion count, never content). It names the aggregate version the
   person was shown, so an ingestion they have not seen refuses it, and it is refused while the
@@ -513,10 +513,10 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
 - **Per-thread network egress policy.** Today's profiles grant `(allow network*)` unconditionally.
   This design replaces that with a thread-resolved egress policy: `none` (default for Work
   document work and Plan mode), `provider-endpoints-only` (**default for Code approval-gated
-  threads** — Henrik decision 2026-08-12), or `unrestricted` (Code full-access only, or an
+  threads** — maintainer decision 2026-08-12), or `unrestricted` (Code full-access only, or an
   explicit network approval under section 8.4). The policy resolves in the tool-call policy engine
   and materializes in the Seatbelt profile at launch. V1 OS enforcement is two-level (`none` /
-  `allow`) with broker-level host allowlists (Henrik decision 2026-08-12); a local egress proxy is
+  `allow`) with broker-level host allowlists (maintainer decision 2026-08-12); a local egress proxy is
   deferred. Where Seatbelt cannot express a host allowlist, the finer host-level policy is
   enforced by the Octant-owned brokered tools (browser origin allowlist, research backends);
   this limitation is stated honestly rather than simulated. One consequence is an exception to
@@ -587,7 +587,7 @@ authority-relevant decision from the journal alone:
   Plan-to-execution) and `authority-transition-recorded` (Project attach, worktree bind, child
   clamp results).
 - Actor attribution: `EventActor` is extended with `remote-device` and agent-attribution kinds
-  (Henrik decision 2026-08-12 — prefer an explicit union over payload-only fields). Audit events
+  (maintainer decision 2026-08-12 — prefer an explicit union over payload-only fields). Audit events
   additionally record the acting principal (`local-window`, `remote-device` with device id) and, for
   agent-initiated petitions, the provider instance and thread identity, so a remote approval is
   never indistinguishable from a local one. Contract change in `packages/contracts/src/events.ts`
@@ -713,7 +713,7 @@ crosses a server authority or sandbox boundary without additional local compromi
 | Consolidated audit taxonomy with principal attribution               | Newly specified | `packages/contracts/src/events.ts` or audit payload schemas + owning services                  |
 | Escape suite fixtures and exit gate                                  | Newly specified | `apps/server/src/security/escapeSuite/` (new) + domain policy tests                            |
 
-## Approved Decisions (Henrik, 2026-08-12)
+## Approved Decisions (maintainers, 2026-08-12)
 
 1. **Egress policy default for Code approval-gated threads:** `provider-endpoints-only` (not
    prompt-per-first-egress). Work and Plan remain `none`; Full access / explicit network approval
