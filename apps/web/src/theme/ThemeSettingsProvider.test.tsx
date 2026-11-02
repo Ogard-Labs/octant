@@ -1,5 +1,6 @@
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { INCREASED_CONTRAST_TEXT, type EditorColorProjection } from "@octant/theme/editor-colors";
+import { MONO_STYLE_TOKENS } from "@octant/theme";
 import { act, render } from "@testing-library/react";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -241,6 +242,12 @@ describe("ThemeSettingsProvider", () => {
       );
       expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
       expect(root.style.getPropertyValue("--octant-text-primary")).toBe("");
+      // The system's request also selects the grey style and roles, not the
+      // blue accent and amber warning of the colour style.
+      expect(root.getAttribute("data-octant-style")).toBe("mono");
+      expect(root.style.getPropertyValue("--octant-accent")).toBe(
+        MONO_STYLE_TOKENS.light["accent"],
+      );
 
       systemMore = false;
       act(() => {
@@ -248,6 +255,10 @@ describe("ThemeSettingsProvider", () => {
       });
       expect(root.getAttribute("data-octant-increased-contrast")).toBe("false");
       expect(root.style.getPropertyValue("--octant-text-primary")).not.toBe("");
+      expect(root.getAttribute("data-octant-style")).toBe("colour");
+      expect(root.style.getPropertyValue("--octant-accent")).not.toBe(
+        MONO_STYLE_TOKENS.light["accent"],
+      );
       result.unmount();
     } finally {
       vi.unstubAllGlobals();
