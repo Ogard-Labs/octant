@@ -41,7 +41,7 @@ one grid. Search by name or by what it does, narrow by kind, state or
 provider, and open any card to see where it came from, what it can do and
 what it costs in authority (low, medium or high, from the capabilities it
 declares). The page leads with a **Featured** row of connectors picked for
-everyday work, then lists what you have installed, then what you do not by
+everyday work (a connector you have connected stays there and shows **On**), then lists what you have installed, then what you do not by
 category. A card that is not installed offers its next step: **Connect…** for a
 connector (**Add key…** when the service issues a key), **Review** for a plugin.
 An installed card shows its state only when that tells you something: needs

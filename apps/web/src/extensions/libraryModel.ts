@@ -46,7 +46,8 @@ export interface LibraryItem {
   readonly id: string;
   readonly kind: LibraryKind;
   readonly name: string;
-  readonly summary: string;
+  /** One line on what it is; absent when the host gives none, so a card shows nothing rather than filler. */
+  readonly summary?: string;
   /** Where it comes from, in the words the Installed view uses. */
   readonly source: string;
   /** The providers it is for, in words, or "Every provider". */
@@ -319,7 +320,31 @@ function packageItem(pkg: InstalledPackage, connectors: ReadonlyArray<ConnectorC
   return item;
 }
 
+/**
+ * A discovered skill reaches the client with its document text but no
+ * `description`; the host admits only one-line `key: value` frontmatter for
+ * it, so the description is that one line. Nothing is read from disk here.
+ */
+function skillDescription(skill: StandaloneSkill): string | undefined {
+  if (skill.description !== undefined) return skill.description;
+  const text = skill.instructions;
+  if (text === undefined || !text.startsWith("---\n")) return undefined;
+  const closing = text.indexOf("\n---", 4);
+  if (closing < 0) return undefined;
+  for (const line of text.slice(4, closing).split("\n")) {
+    const match = /^description\s*:\s*(\S.*)$/.exec(line);
+    if (match === null) continue;
+    const value = (match[1] ?? "")
+      .trim()
+      .replace(/^(["'])(.*)\1$/, "$2")
+      .trim();
+    return value === "" || /^[>|][+-]?$/.test(value) ? undefined : value;
+  }
+  return undefined;
+}
+
 function skillItem(skill: StandaloneSkill): LibraryItem {
+  const description = skillDescription(skill);
   const on = skill.desiredEnabled && skill.effectiveState.kind === "effective";
   const state: LibraryState = !skill.reviewed
     ? "needs-trust"
@@ -332,7 +357,7 @@ function skillItem(skill: StandaloneSkill): LibraryItem {
     id: `skill:${skill.skill.qualifiedId}`,
     kind: "skill",
     name: skill.displayName,
-    summary: skill.description ?? "A written skill the agent can follow.",
+    ...(description === undefined ? {} : { summary: description }),
     source: packageSource(skill.source),
     provider: EVERY_PROVIDER,
     providers: [EVERY_PROVIDER],
@@ -514,8 +539,8 @@ export function filterLibrary(
     .filter(
       (item) =>
         needle === "" ||
-        [item.name, item.summary, item.source, item.provider, item.category ?? ""].some((text) =>
-          text.toLocaleLowerCase().includes(needle),
+        [item.name, item.summary ?? "", item.source, item.provider, item.category ?? ""].some(
+          (text) => text.toLocaleLowerCase().includes(needle),
         ),
     )
     .map((item, index) => ({ item, index }))
@@ -554,9 +579,12 @@ export function isBrowsing(filter: LibraryFilter): boolean {
 }
 
 /**
- * The hand-picked connectors not yet connected, in the order they were picked.
- * They lead the page while a person is browsing everything or connectors, and
- * leave the groups below so nothing shows twice.
+ * The hand-picked connectors, in the order they were picked. The set is fixed:
+ * a connected one stays and shows its state on its card, so the row never has
+ * a hole. They lead the page while a person is browsing everything or
+ * connectors. An available one leaves the groups below so it shows once; a
+ * connected one also stays under Installed, where its state is acted on.
+ * Narrowing to not-installed shows only the featured ones that are not.
  */
 export function featuredItems(
   items: ReadonlyArray<LibraryItem>,
@@ -565,7 +593,13 @@ export function featuredItems(
   if (!isBrowsing(filter)) return [];
   if (filter.kind !== "all" && filter.kind !== "connector") return [];
   if (filter.state === "installed" || filter.state === "attention") return [];
-  return items.filter((item) => item.featured && item.state === "available");
+  return items
+    .filter((item) => item.featured)
+    .sort(
+      (a, b) =>
+        (FEATURED_RANK.get(a.connectorId ?? "") ?? Infinity) -
+        (FEATURED_RANK.get(b.connectorId ?? "") ?? Infinity),
+    );
 }
 
 export interface LibraryGroup {
@@ -597,7 +631,11 @@ export function groupLibrary(
   if (filter.query.trim() !== "") {
     return shown.length === 0 ? [] : [{ key: "results", title: "Results", items: shown }];
   }
-  const lead = new Set(featuredItems(shown, filter).map((item) => item.id));
+  const lead = new Set(
+    featuredItems(shown, filter)
+      .filter((item) => item.state === "available")
+      .map((item) => item.id),
+  );
   const rest = shown.filter((item) => !lead.has(item.id));
   const groups: LibraryGroup[] = [];
   const installed = rest.filter((item) => item.state !== "available");
