@@ -186,14 +186,14 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultDark: "#949494",
   },
   {
-    // Primary actions invert against the monochrome accent in each mode.
+    // Primary actions put this ink on the accent in each mode.
     id: "primary-foreground",
     displayName: "Primary foreground",
     category: "text",
     contrastTarget: "accent",
     contrastLevel: "normal-text",
     defaultLight: "#ffffff",
-    defaultDark: "#171717",
+    defaultDark: "#141414",
   },
   {
     id: "focus-ring",
@@ -214,17 +214,17 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultDark: "#2c2c2c",
   },
   {
-    // Primary action fill. The accent is monochrome: the primary button, the
-    // send control, and an active mark are the ink colour inverted, so the
-    // one hue on screen stays the keyboard focus ring. Links keep their
-    // underline, which is what separates them from body text.
+    // Primary action fill: the primary button, the send control, and an active
+    // mark. Blue is the default accent; the Mono style swaps in the ink colour
+    // inverted (MONO_STYLE_TOKENS). Links keep their underline, which is what
+    // separates them from body text.
     id: "accent",
     displayName: "Accent",
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#141414",
-    defaultDark: "#f5f5f7",
+    defaultLight: "#1f5fc7",
+    defaultDark: "#5b9cf5",
   },
   {
     id: "accent-foreground",
@@ -233,7 +233,7 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     contrastTarget: "accent",
     contrastLevel: "normal-text",
     defaultLight: "#ffffff",
-    defaultDark: "#171717",
+    defaultDark: "#141414",
   },
   {
     // Accent as text carries the same hue as the fill and is still policed at
@@ -243,8 +243,8 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#141414",
-    defaultDark: "#f5f5f7",
+    defaultLight: "#1f5fc7",
+    defaultDark: "#5b9cf5",
   },
   {
     id: "success-surface",
@@ -264,19 +264,18 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultLight: "#0f6144",
     defaultDark: "#6bb299",
   },
-  // The default preset is monochrome, so its warning role carries no hue: the
-  // control fill, a border that still reads at 3:1 on it, and the primary ink.
-  // A warning is told apart by its mark and its words, which the contract
-  // already requires beside any status colour. A theme that wants an amber
-  // warning sets these three roles.
+  // Warning is amber. The Mono style swaps in the neutral trio (the control
+  // fill, a border that still reads at 3:1 on it, and the primary ink); a
+  // warning is still told apart by its mark and its words, which the contract
+  // requires beside any status colour.
   {
     id: "warning-surface",
     displayName: "Warning surface",
     category: "status",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#f0f0ef",
-    defaultDark: "#2b2b2b",
+    defaultLight: "#fbe9bd",
+    defaultDark: "#33270b",
   },
   {
     id: "warning-border",
@@ -284,8 +283,8 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "warning-surface",
     contrastLevel: "ui",
-    defaultLight: "#6e6e6e",
-    defaultDark: "#8a8a8a",
+    defaultLight: "#8a6218",
+    defaultDark: "#c99a2e",
   },
   {
     id: "warning-text",
@@ -293,8 +292,8 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "warning-surface",
     contrastLevel: "normal-text",
-    defaultLight: "#141414",
-    defaultDark: "#f5f5f7",
+    defaultLight: "#5c3d00",
+    defaultDark: "#f2c75c",
   },
   {
     // Targeted at `floating`, not `workspace`: status text sits inside
@@ -487,3 +486,33 @@ export function getDefaultToken(id: string, mode: "light" | "dark"): string {
   const definition = getRoleDefinition(id);
   return mode === "light" ? definition.defaultLight : definition.defaultDark;
 }
+
+/**
+ * What the Mono style draws in place of the colour defaults above: the ink
+ * accent and the neutral warning the app shipped with before colour became the
+ * default. Increased contrast resolves through these too. A preset that sets
+ * its own value for a role keeps it; only a role still at the colour default
+ * is swapped (see resolveEffectiveTokens).
+ */
+export const MONO_STYLE_TOKENS: Readonly<
+  Record<"light" | "dark", Readonly<Record<string, string>>>
+> = {
+  light: {
+    accent: "#141414",
+    "accent-foreground": "#ffffff",
+    "accent-text": "#141414",
+    "primary-foreground": "#ffffff",
+    "warning-surface": "#f0f0ef",
+    "warning-border": "#6e6e6e",
+    "warning-text": "#141414",
+  },
+  dark: {
+    accent: "#f5f5f7",
+    "accent-foreground": "#171717",
+    "accent-text": "#f5f5f7",
+    "primary-foreground": "#171717",
+    "warning-surface": "#2b2b2b",
+    "warning-border": "#8a8a8a",
+    "warning-text": "#f5f5f7",
+  },
+};

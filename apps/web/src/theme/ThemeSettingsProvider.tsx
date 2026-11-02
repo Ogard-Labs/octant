@@ -127,8 +127,13 @@ export function ThemeSettingsProvider(props: {
   const applied = useMemo(() => {
     if (props.settings === undefined) return undefined;
     const accessible = enforceSidebarBackgroundAccessibility(props.settings);
-    return { accessible, resolved: resolveEffectiveTokens(accessible, systemPrefersDark) };
-  }, [props.settings, systemPrefersDark]);
+    // The grey roles follow the combined value, so an OS that asks for
+    // increased contrast gets them even while the in-app setting is off.
+    return {
+      accessible,
+      resolved: resolveEffectiveTokens({ ...accessible, increasedContrast }, systemPrefersDark),
+    };
+  }, [props.settings, systemPrefersDark, increasedContrast]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -179,11 +184,10 @@ export function ThemeSettingsProvider(props: {
       root.dataset.octantReducedMotion = String(accessible.reducedMotion);
       root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
       // Increased contrast keeps the monochrome chrome: colour as decoration is
-      // the first thing that setting exists to take away.
+      // the first thing that setting exists to take away. "default" and the
+      // retired "vivid" both draw the colour look.
       root.dataset.octantStyle =
-        accessible.increasedContrast || accessible.style === undefined
-          ? "default"
-          : accessible.style;
+        increasedContrast || accessible.style === "mono" ? "mono" : "colour";
       root.style.colorScheme = resolved.mode;
       // The desktop owns the approval document; a window only reports the
       // palette it resolved, and only when it has the ordinary host bridge.

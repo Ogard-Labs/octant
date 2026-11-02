@@ -308,8 +308,13 @@ export const DEFAULT_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackgr
 // a plain page, and a replay must not repaint what they already had.
 const PLAIN_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({ kind: "none" });
 
-/** How much colour the chrome carries; the palette itself stays the preset's. */
-export const ThemeStyle = Schema.Literal("default", "vivid");
+/**
+ * How much colour the chrome carries; the palette itself stays the preset's.
+ * "default" and "vivid" both draw the colour look (vivid is the retired name
+ * for what is now the default, kept so stored rows decode); "mono" is the grey
+ * look the app had before colour became the default.
+ */
+export const ThemeStyle = Schema.Literal("default", "vivid", "mono");
 export type ThemeStyle = typeof ThemeStyle.Type;
 
 export const ThemeSettings = Schema.Struct({
@@ -340,9 +345,10 @@ export const ThemeSettings = Schema.Struct({
    */
   glassTint: Schema.optional(Schema.Int.pipe(Schema.between(0, 90))),
   /**
-   * Default keeps the chrome monochrome; Vivid lets count tiles, board marks,
-   * Project accents, and the welcome greeting take colour. Optional so rows
-   * written before the choice existed still decode, as Default.
+   * Absent, "default" and "vivid" draw the colour look: an accent, status
+   * hues, coloured count tiles, board marks, and Project accents. "mono" keeps
+   * the chrome grey. Optional so rows written before the choice existed still
+   * decode, as the colour look.
    */
   style: Schema.optional(ThemeStyle),
   increasedContrast: Schema.Boolean,

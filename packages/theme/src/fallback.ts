@@ -6,6 +6,7 @@ import {
   DEFAULT_LIGHT_TOKENS,
   getRoleDefinition,
   isKnownThemeTokenRole,
+  MONO_STYLE_TOKENS,
 } from "./tokens";
 import { resolveThemePresetTokens } from "./presets";
 
@@ -82,13 +83,31 @@ export function resolveEffectiveTokens(
 ): ResolvedTheme {
   const mode = resolveMode(settings, systemPrefersDark);
   const selectedPresetId = mode === "light" ? settings.lightPresetId : settings.darkPresetId;
-  const base = resolveThemePresetTokens(selectedPresetId, mode);
+  const preset = resolveThemePresetTokens(selectedPresetId, mode);
+  const base: Record<string, string> =
+    settings.style === "mono" || settings.increasedContrast
+      ? withMonoRoles(preset, mode)
+      : { ...preset };
   const { tokens, droppedOverrides } = applySemanticOverrides(
     base,
     settings.semanticOverrides,
     mode,
   );
   return { mode, tokens, droppedOverrides };
+}
+
+// Swaps only roles still at the colour default, so a tinted preset's own accent
+// survives Mono exactly as it did before colour became the default.
+function withMonoRoles(
+  preset: Readonly<Record<string, string>>,
+  mode: "light" | "dark",
+): Record<string, string> {
+  const defaults = mode === "light" ? DEFAULT_LIGHT_TOKENS : DEFAULT_DARK_TOKENS;
+  const tokens: Record<string, string> = { ...preset };
+  for (const [role, mono] of Object.entries(MONO_STYLE_TOKENS[mode])) {
+    if (tokens[role] === defaults[role]) tokens[role] = mono;
+  }
+  return tokens;
 }
 
 export function safeFallbackTheme(systemPrefersDark: boolean): ResolvedTheme {

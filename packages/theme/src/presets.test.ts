@@ -148,7 +148,7 @@ describe("built-in theme preset catalog", () => {
     ).toEqual(BUILT_IN_THEME_PRESET_IDS);
   });
 
-  it("colours every tinted preset's accent while the default stays monochrome", () => {
+  it("colours every tinted preset's accent and the default carries the blue accent", () => {
     const tinted = THEME_PRESETS.filter(
       (preset) => !["system", "light", "dark", "octant"].includes(preset.id),
     );
@@ -165,9 +165,10 @@ describe("built-in theme preset catalog", () => {
         expect(validateThemePreset(preset).valid).toBe(true);
       }
     }
+    // The system preset carries the colour default accent (blue) now.
     const system = getThemePreset("system")!;
-    const grey = parseHexColor(system.tokens.dark!.accent!);
-    expect(Math.max(grey.r, grey.g, grey.b) - Math.min(grey.r, grey.g, grey.b)).toBeLessThan(8);
+    const blue = parseHexColor(system.tokens.dark!.accent!);
+    expect(Math.max(blue.r, blue.g, blue.b) - Math.min(blue.r, blue.g, blue.b)).toBeGreaterThan(40);
     // The OLED presets' page is exactly black: those pixels switch off.
     for (const id of ["ink", "obsidian", "onyx"]) {
       const dark = getThemePreset(id)!.tokens.dark!;

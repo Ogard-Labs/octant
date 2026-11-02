@@ -516,6 +516,16 @@
   display: block;
 }
 
+/* The colour style draws a mark in its brand colour where the colour reads on
+   the tile in this theme mode; the component sets only the modes where it
+   does, so a near-black mark keeps the ink. Mono keeps the ink everywhere. */
+:root[data-octant-style="colour"] .library__logo {
+  color: light-dark(
+    var(--library-logo-light, var(--oct-fg)),
+    var(--library-logo-dark, var(--oct-fg))
+  );
+}
+
 .library-detail__review,
 .library-detail__signin {
   display: grid;

@@ -9,7 +9,7 @@ distinctive implementation structures.
 ## Layering (do not invert)
 
 1. **Tokens** — shared neutral greys and semantic statuses from `@octant/theme`;
-   the base accent is monochrome on every surface.
+   the base accent is the colour style's blue on every surface (the phone has no Mono choice yet).
 2. **Home** — status cards + Workspaces (unchanged by chat chrome).
 3. **Surfaces** — flat opaque panels (default, desktop-consistent) or Apple
    liquid-glass; user-selectable.

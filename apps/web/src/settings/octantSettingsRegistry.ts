@@ -183,7 +183,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("appearance.scheme.style"),
           label: "Style",
           scope: "app",
-          keywords: "style vivid colour color colourful default monochrome tiles accent",
+          keywords: "style colour color colourful mono monochrome grey vivid tiles accent",
         },
         {
           id: settingId("appearance.typography.ui.family"),

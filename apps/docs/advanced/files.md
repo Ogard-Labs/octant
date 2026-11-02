@@ -209,7 +209,7 @@ file. Choose **Import**.
 A created Canvas appears in its thread at the end of the turn that made it, as
 a row you can click to open it. The row shows a live miniature of the Canvas
 and one line about what it holds, such as a plan's next task and how many
-tasks are done. With Settings › Appearance › Style set to Vivid, each Canvas
+tasks are done. With Settings › Appearance › Style set to Colour (the default), each Canvas
 takes a colour from what it holds. Octant can also offer newly authored documents
 beside the conversation.
 

@@ -1,7 +1,8 @@
 /**
  * Connector marks, bundled so the Library never fetches an image. Each is a
  * Simple Icons path (CC0-1.0), drawn in the current text colour so the theme
- * decides the colour and the default monochrome theme stays monochrome. The
+ * decides the colour; the colour style recolours a mark from
+ * `../theme/connectorBrandColors.ts`, and Mono keeps the ink. The
  * source page of every mark is in `source`; the notice is in
  * `../../public/PROVIDER-LOGOS-LICENSE.txt`. A connector with no entry here
  * has no mark with a clear licence and keeps a lettered tile. The marks stay

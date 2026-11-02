@@ -59,9 +59,9 @@ export function ShellState(props: ShellStateProps) {
       data-state={props.state}
       role={props.role ?? (props.state === "loading" ? "status" : undefined)}
     >
-      {/* Every state's mark is neutral ink. The default look is monochrome, and
-          a warning-coloured triangle was the only hue on a screen whose glyph
-          and title already say what is wrong. */}
+      {/* Every state's mark is neutral ink in every style. A warning-coloured
+          triangle on a screen whose glyph and title already say what is wrong
+          reads as an alarm it is not. */}
       <OctantEmptyMedia>
         <StateIcon
           aria-hidden="true"

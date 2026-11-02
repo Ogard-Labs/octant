@@ -27,7 +27,12 @@ import {
   opsDashboardExampleBlocks,
   releaseHealthBoardExampleBlocks,
 } from "@octant/domain";
-import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, getThemePreset } from "@octant/theme";
+import {
+  DEFAULT_DARK_TOKENS,
+  DEFAULT_LIGHT_TOKENS,
+  MONO_STYLE_TOKENS,
+  getThemePreset,
+} from "@octant/theme";
 import { CanvasDocument } from "./CanvasDocument";
 import type { DesignAssetRuntime } from "./blocks/designDocument";
 
@@ -681,20 +686,20 @@ function applyScenario(scenario: ChartThemeScenario): void {
   const lagoon = getThemePreset("lagoon");
   const resolved =
     scenario === "default-light"
-      ? { tokens: DEFAULT_LIGHT_TOKENS, mode: "light" as const, style: "default", increased: false }
+      ? { tokens: DEFAULT_LIGHT_TOKENS, mode: "light" as const, style: "colour", increased: false }
       : scenario === "default-dark"
-        ? { tokens: DEFAULT_DARK_TOKENS, mode: "dark" as const, style: "default", increased: false }
+        ? { tokens: DEFAULT_DARK_TOKENS, mode: "dark" as const, style: "colour", increased: false }
         : scenario === "vivid"
           ? {
               tokens: lagoon?.tokens.dark ?? DEFAULT_DARK_TOKENS,
               mode: "dark" as const,
-              style: "vivid",
+              style: "colour",
               increased: false,
             }
           : {
-              tokens: DEFAULT_DARK_TOKENS,
+              tokens: { ...DEFAULT_DARK_TOKENS, ...MONO_STYLE_TOKENS.dark },
               mode: "dark" as const,
-              style: "default",
+              style: "mono",
               increased: true,
             };
   for (const [role, color] of Object.entries(resolved.tokens)) {

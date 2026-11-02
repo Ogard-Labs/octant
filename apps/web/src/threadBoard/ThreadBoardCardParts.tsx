@@ -6,7 +6,7 @@ import { ProviderGlyph } from "../providers/ProviderGlyph";
  * started), In Progress turns while a card in the column is actually executing
  * and is a filled dot when none is, Waiting is a filled dot, and Done is a
  * check. The shapes differ so the default theme needs no hue to tell the
- * columns apart; the Vivid style tints them from the same hooks.
+ * columns apart; the colour style tints them from the same hooks.
  */
 export function ThreadBoardStatusMark(props: {
   readonly status: string;

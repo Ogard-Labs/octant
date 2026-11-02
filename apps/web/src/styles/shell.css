@@ -922,34 +922,34 @@ html[data-octant-native-host="true"]
   line-height: 1.2;
 }
 
-/* Vivid: each tile takes a palette hue. In the light theme the palette roles
+/* Colour style: each tile takes a palette hue. In the light theme the palette roles
    are dark enough to carry primary-foreground text on a solid face, the
    look the style was approved in; in the dark theme they are light, so the
    face is a tint and the hue moves to the count and icon instead. */
 .sidebar-tile[data-tile="inbox"] {
-  --sidebar-tile-hue: var(--oct-vivid-inbox, var(--octant-palette-blue, currentColor));
+  --sidebar-tile-hue: var(--oct-colour-inbox, var(--octant-palette-blue, currentColor));
 }
 .sidebar-tile[data-tile="running"] {
-  --sidebar-tile-hue: var(--oct-vivid-running, var(--octant-palette-orange, currentColor));
+  --sidebar-tile-hue: var(--oct-colour-running, var(--octant-palette-orange, currentColor));
 }
 .sidebar-tile[data-tile="review"] {
-  --sidebar-tile-hue: var(--oct-vivid-review, var(--octant-palette-purple, currentColor));
+  --sidebar-tile-hue: var(--oct-colour-review, var(--octant-palette-purple, currentColor));
 }
 .sidebar-tile[data-tile="done"] {
-  --sidebar-tile-hue: var(--oct-vivid-done, var(--octant-palette-green, currentColor));
+  --sidebar-tile-hue: var(--oct-colour-done, var(--octant-palette-green, currentColor));
 }
 
-:root[data-octant-style="vivid"] .sidebar-tile__face {
+:root[data-octant-style="colour"] .sidebar-tile__face {
   --sidebar-tile-fill: color-mix(in oklab, var(--sidebar-tile-hue) 18%, transparent);
   border-color: color-mix(in oklab, var(--sidebar-tile-hue) 30%, transparent);
 }
 
-:root[data-octant-style="vivid"] .sidebar-tile__icon,
-:root[data-octant-style="vivid"] .sidebar-tile__count {
+:root[data-octant-style="colour"] .sidebar-tile__icon,
+:root[data-octant-style="colour"] .sidebar-tile__count {
   color: var(--sidebar-tile-hue);
 }
 
-:root[data-octant-style="vivid"][data-octant-theme-mode="light"] .sidebar-tile__face {
+:root[data-octant-style="colour"][data-octant-theme-mode="light"] .sidebar-tile__face {
   border-color: color-mix(in oklab, var(--sidebar-tile-hue) 70%, transparent);
   background: linear-gradient(
     155deg,
@@ -960,13 +960,13 @@ html[data-octant-native-host="true"]
   color: var(--octant-primary-foreground);
 }
 
-:root[data-octant-style="vivid"][data-octant-theme-mode="light"] .sidebar-tile__icon,
-:root[data-octant-style="vivid"][data-octant-theme-mode="light"] .sidebar-tile__count,
-:root[data-octant-style="vivid"][data-octant-theme-mode="light"] .sidebar-tile__label {
+:root[data-octant-style="colour"][data-octant-theme-mode="light"] .sidebar-tile__icon,
+:root[data-octant-style="colour"][data-octant-theme-mode="light"] .sidebar-tile__count,
+:root[data-octant-style="colour"][data-octant-theme-mode="light"] .sidebar-tile__label {
   color: var(--octant-primary-foreground);
 }
 
-:root[data-octant-style="vivid"][data-octant-theme-mode="light"]
+:root[data-octant-style="colour"][data-octant-theme-mode="light"]
   .sidebar-tile:hover
   .sidebar-tile__face {
   filter: brightness(1.06);
@@ -2051,13 +2051,13 @@ html[data-octant-native-host="true"]
     box-shadow: var(--octant-shadow-overlay);
     /* The wide sidebar is transparent over the window surface; as an overlay
        that let the start screen's question, hint, and composer chips print
-       through the header and count tiles at 640px under Vivid and Glass. The
+       through the header and count tiles at 640px under the colour style and Glass. The
        drawer reads on the opaque sidebar colour in every material. */
     background: var(--octant-sidebar-opaque);
   }
 
   /* Rows, not tiles, in the drawer: icon, name, and the count at the trailing
-     edge, with no fill and no hue. The selectors outrank the Vivid tile paint
+     edge, with no fill and no hue. The selectors outrank the colour tile paint
      above, which would otherwise colour them. */
   .sidebar-tiles--rows {
     display: flex;
@@ -3794,9 +3794,9 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   background: currentcolor;
 }
 
-/* The Default style is monochrome, so these inks follow the Board's column
-   marks (active in the primary ink, Waiting quiet, Done secondary); the Vivid
-   style gives them the same hues the Board's marks take there. */
+/* Under Mono these inks follow the Board's column marks (active in the primary
+   ink, Waiting quiet, Done secondary); the colour style gives them the same
+   hues the Board's marks take there. */
 .code-home__row .code-home__badge[data-tone="running"],
 .code-home__row .code-home__badge[data-tone="open"] {
   color: var(--oct-fg);
@@ -3810,17 +3810,17 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   color: var(--oct-fg-2);
 }
 
-:root[data-octant-style="vivid"] .code-home__row .code-home__badge[data-tone="running"],
-:root[data-octant-style="vivid"] .code-home__row .code-home__badge[data-tone="open"] {
-  color: var(--oct-vivid-running);
+:root[data-octant-style="colour"] .code-home__row .code-home__badge[data-tone="running"],
+:root[data-octant-style="colour"] .code-home__row .code-home__badge[data-tone="open"] {
+  color: var(--oct-colour-running);
 }
 
-:root[data-octant-style="vivid"] .code-home__row .code-home__badge[data-tone="waiting"] {
-  color: var(--oct-vivid-review);
+:root[data-octant-style="colour"] .code-home__row .code-home__badge[data-tone="waiting"] {
+  color: var(--oct-colour-review);
 }
 
-:root[data-octant-style="vivid"] .code-home__row .code-home__badge[data-tone="done"] {
-  color: var(--oct-vivid-done);
+:root[data-octant-style="colour"] .code-home__row .code-home__badge[data-tone="done"] {
+  color: var(--oct-colour-done);
 }
 
 .code-home__row .code-home__card-title {
@@ -3990,8 +3990,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   color: var(--oct-meta);
 }
 
-:root[data-octant-style="vivid"] .code-home__fact--branch,
-:root[data-octant-style="vivid"] .code-home__fact--branch > svg {
+:root[data-octant-style="colour"] .code-home__fact--branch,
+:root[data-octant-style="colour"] .code-home__fact--branch > svg {
   color: var(--octant-palette-blue);
 }
 

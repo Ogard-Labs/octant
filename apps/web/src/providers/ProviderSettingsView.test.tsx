@@ -3992,12 +3992,12 @@ describe("ProviderSettingsView", () => {
     }
   });
 
-  it("keeps the state dot neutral by default and lets only Vivid colour it", () => {
+  it("keeps the state dot neutral in Mono and lets the colour style colour it", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8").replace(
       /\s+/g,
       " ",
     );
-    const vivid = readFileSync(resolve(process.cwd(), "src/styles/vivid.css"), "utf8");
+    const vivid = readFileSync(resolve(process.cwd(), "src/styles/colour.css"), "utf8");
 
     // Ready is a filled dot in ink; a ring in ink needs setup; a muted ring is off.
     expect(styles).toMatch(
@@ -4009,9 +4009,9 @@ describe("ProviderSettingsView", () => {
     expect(styles).toMatch(
       /\.prov-state::before \{[^}]*border: 1\.5px solid var\(--octant-text-muted\)/,
     );
-    // The ready and setup colours exist only under the Vivid style.
+    // The ready and setup colours exist only under the colour style.
     expect(vivid).toMatch(
-      /:root\[data-octant-style="vivid"\] \{[^}]*--oct-provider-ready: var\(--octant-palette-green[^}]*--oct-provider-setup: var\(--octant-palette-orange/,
+      /:root\[data-octant-style="colour"\] \{[^}]*--oct-provider-ready: var\(--octant-palette-green[^}]*--oct-provider-setup: var\(--octant-palette-orange/,
     );
   });
 

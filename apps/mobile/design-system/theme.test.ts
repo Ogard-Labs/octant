@@ -17,7 +17,7 @@ describe("mobile theme resolution", () => {
     expect(darkColors.primary).toBe(getDefaultToken("accent", "dark"));
     expect(colorsForScheme("dark").canvas).toBe(darkColors.canvas);
     expect(colorsForScheme("light").canvas).toBe(lightColors.canvas);
-    expect(darkColors.textPrimary).toBe(darkColors.primary);
+    expect(darkColors.textPrimary).toBe(getDefaultToken("text-primary", "dark"));
   });
 
   it("projects shared semantic status colors from the product theme", () => {

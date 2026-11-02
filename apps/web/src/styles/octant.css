@@ -11,7 +11,7 @@
    light value comes first.
 
    Text and semantic colours carry separate light and dark values for
-   contrast. The default action accent is monochrome; the runtime bridge
+   contrast. The static action accent below is the Mono fallback; the runtime bridge
    applies the selected preset and any explicit colour overrides.
 
    Theme resolution: follows the OS by default, and [data-theme] on <html>
@@ -35,7 +35,7 @@
      translucent tint would shift as content passes beneath it */
   --oct-selection: light-dark(#ebebea, #2c2c2c);
 
-  /* Monochrome actions. The runtime theme owns optional tinted accents. */
+  /* Static Mono fallback for actions. The runtime theme owns the accent. */
   --oct-accent: light-dark(#141414, #f5f5f7);
   --oct-accent-fg: light-dark(#141414, #f5f5f7);
   --oct-accent-on: light-dark(#ffffff, #171717);
@@ -1112,7 +1112,8 @@ input.switch:checked::after {
    rather than by its utility classes: the utility track and thumb left the
    "on" thumb flush with the track's edge under a drop shadow, which read as
    a clipped half-moon. Off is a quiet track with a hairline edge and a knob
-   that matches the page; on is the filled track with the inverse knob. The
+   that matches the page; on is the accent-filled track (the ink under Mono)
+   with the inverse knob. The
    earlier off state painted a near-black knob on a pale track, which in
    light mode read as the active one (Providers & Models, where most switches
    are off). Neither state carries a drop shadow on the thumb. */
@@ -1136,8 +1137,8 @@ input.switch:checked::after {
   border-color: var(--octant-text-primary);
 }
 .octant-switch[data-slot="switch"][data-checked] {
-  background: var(--oct-fg);
-  border-color: var(--oct-fg);
+  background: var(--oct-accent);
+  border-color: var(--oct-accent);
 }
 .octant-switch[data-slot="switch"] > [data-slot="switch-thumb"] {
   width: 16px;
