@@ -78,6 +78,7 @@ function harness(
     readonly downloads?: ConstructorParameters<typeof BrowserAutomationService>[0]["downloads"];
     readonly observed?: Partial<Awaited<ReturnType<BrowserRuntimePort["act"]>>>;
     readonly unattended?: boolean;
+    readonly describePoint?: BrowserRuntimePort["describePoint"];
   } = {},
 ) {
   const contexts = new Set<BrowserContextId>();
@@ -85,12 +86,14 @@ function harness(
   let processExit: (() => void) | undefined;
   let personInput: ((contextId: BrowserContextId) => void) | undefined;
   let expire: (() => void) | undefined;
+  const timers: Array<{ delay: number; run: () => void }> = [];
   let now = Date.parse("2026-07-27T20:00:00.000Z");
   const runtime: BrowserRuntimePort = {
     available: vi.fn(async () => true),
     nativeAvailable: vi.fn(async () => true),
     createContext: vi.fn(async (contextId) => void contexts.add(contextId)),
     inspectTarget: vi.fn(async () => ({ sensitive: false })),
+    ...(options.describePoint === undefined ? {} : { describePoint: options.describePoint }),
     act: vi.fn(async (contextId, input) => {
       if (!contexts.has(contextId)) throw new Error("missing context");
       return {
@@ -152,7 +155,8 @@ function harness(
     uuid: () => ids.shift() ?? crypto.randomUUID(),
     clock: () => new Date(now).toISOString(),
     now: () => now,
-    schedule: (_delay, callback) => {
+    schedule: (delay, callback) => {
+      timers.push({ delay, run: callback });
       expire = callback;
       return () => {
         expire = undefined;
@@ -164,6 +168,7 @@ function harness(
       now += milliseconds;
     },
     contexts,
+    timers,
     expire: () => expire?.(),
     processExit: () => processExit?.(),
     personTyped: (contextId: BrowserContextId = contextOne) => personInput?.(contextId),
@@ -1387,9 +1392,445 @@ describe("BrowserAutomationService", () => {
     );
   });
 
+  describe("bounded idle lifetime", () => {
+    it.each([
+      "navigate",
+      "snapshot",
+      "extract-text",
+      "screenshot",
+      "observe-diagnostics",
+      "tab-list",
+    ] as const)(
+      "renews on an authorized explicit %s operation past the original deadline",
+      async (kind) => {
+        const f = harness();
+        await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+        f.advance(240_000);
+        await f.service.act({
+          windowId,
+          capturedBy: "agent",
+          request: request({
+            kind,
+            target: kind === "navigate" ? "https://example.com" : undefined,
+          }),
+        });
+        f.advance(120_000);
+        f.expire();
+        expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+        f.advance(180_000);
+        f.expire();
+        await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+        await f.service.close();
+      },
+    );
+
+    it("keeps an actively used task alive beyond ten minutes, then expires after real idle", async () => {
+      const f = harness();
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, sessionTimeoutMs: 600_000 },
+      });
+      for (let turn = 0; turn < 2; turn += 1) {
+        f.advance(540_000);
+        expect(
+          (await f.service.act({ windowId, capturedBy: "agent", request: request() })).failure,
+        ).toBeUndefined();
+      }
+      f.expire();
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+      f.advance(600_000);
+      f.expire();
+      await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+      await f.service.close();
+    });
+
+    it.each(["stale", "credential"] as const)("does not renew for a %s refusal", async (reason) => {
+      const f = harness();
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      f.advance(240_000);
+      if (reason === "credential")
+        vi.mocked(f.runtime.inspectTarget).mockResolvedValueOnce({ sensitive: true });
+      const refused = await f.service.act({
+        windowId,
+        capturedBy: "agent",
+        refuseStaleRevision: true,
+        request:
+          reason === "stale"
+            ? request({ expectedObservationRevision: 99 })
+            : request({ kind: "type", target: "#password", value: "harmless-fixture" }),
+      });
+      expect(refused.failure?.category).toBe(reason === "stale" ? "stale" : "credential-protected");
+      f.advance(60_000);
+      f.expire();
+      await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+      await f.service.close();
+    });
+
+    it.each(["expiry", "revoke"] as const)(
+      "settles delayed capture storage on %s and never publishes late page output",
+      async (reason) => {
+        let finish!: () => void;
+        const f = harness({
+          captures: {
+            keep: async () => {
+              await new Promise<void>((resolve) => {
+                finish = resolve;
+              });
+              return {
+                status: "kept",
+                captureId: "a0000000-0000-4000-8000-000000000001" as BrowserCaptureId,
+              };
+            },
+          },
+        });
+        await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+        const answer = f.service.act({
+          windowId,
+          capturedBy: "agent",
+          request: request({ kind: "screenshot" }),
+        });
+        let settled = false;
+        void answer.then(() => {
+          settled = true;
+        });
+        await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+        try {
+          if (reason === "expiry") {
+            f.advance(policy.sessionTimeoutMs);
+            f.expire();
+          } else {
+            f.revoke(threadOne);
+            f.service.inspectThread(windowId, threadOne);
+          }
+          await vi.waitFor(() => expect(settled).toBe(true), { timeout: 200 });
+          const result = await answer;
+          expect(result.observation).toBeUndefined();
+          expect(result.evidence).toEqual([]);
+          finish();
+          await Promise.resolve();
+          expect(f.service.inspectThread(windowId, threadOne).observation).toBeUndefined();
+          expect(f.service.snapshotRefs(windowId, threadOne)).toEqual([]);
+        } finally {
+          finish();
+          await answer;
+          await f.service.close();
+        }
+      },
+    );
+
+    it("a prior agent action completing during take-over cannot renew the person's hold", async () => {
+      const f = harness();
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      let finish!: () => void;
+      vi.mocked(f.runtime.act).mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return { url: "https://example.com", title: "Agent finished" };
+      });
+      const answer = f.service.act({ windowId, capturedBy: "agent", request: request() });
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      f.service.takeOver(windowId, threadOne);
+      f.advance(600_000);
+      finish();
+      await answer;
+      f.advance(60_000);
+      f.expire();
+      await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+      await f.service.close();
+    });
+
+    it("an unresponsive credential inspection settles on expiry without typing or renewing", async () => {
+      const f = harness();
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      let finish!: () => void;
+      vi.mocked(f.runtime.inspectTarget).mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return { sensitive: false };
+      });
+      f.advance(240_000);
+      const typing = f.service.act({
+        windowId,
+        capturedBy: "agent",
+        request: request({ kind: "type", target: "#name", value: "Ada" }),
+      });
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      const queued = f.service.act({ windowId, capturedBy: "agent", request: request() });
+      f.advance(60_000);
+      f.expire();
+      expect((await typing).failure?.category).toBe("context-expired");
+      await queued;
+      finish();
+      expect(f.runtime.act).not.toHaveBeenCalled();
+      expect(f.contexts.size).toBe(0);
+      await f.service.close();
+    });
+
+    it("does not use a late credential inspection after authority changes", async () => {
+      const f = harness();
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      let finish!: () => void;
+      vi.mocked(f.runtime.inspectTarget).mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return { sensitive: false };
+      });
+      const typing = f.service.act({
+        windowId,
+        capturedBy: "agent",
+        request: request({ kind: "type", target: "#name", value: "Ada" }),
+      });
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      f.revoke(threadOne);
+      finish();
+      const result = await typing;
+      expect(result.failure?.category).toBe("unauthorized");
+      expect(result.observation).toBeUndefined();
+      expect(f.runtime.act).not.toHaveBeenCalled();
+      await f.service.close();
+    });
+
+    it("a hung point inspection releases the action queue on expiry", async () => {
+      let finish!: () => void;
+      const f = harness({
+        describePoint: async () => {
+          await new Promise<void>((resolve) => {
+            finish = resolve;
+          });
+          return { status: "no-element" };
+        },
+      });
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const pointed = f.service.describePoint({
+        windowId,
+        threadId: threadOne,
+        contextId: contextOne,
+        point: { x: 0.5, y: 0.5 },
+      });
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      const queued = f.service.act({ windowId, capturedBy: "agent", request: request() });
+      f.advance(policy.sessionTimeoutMs);
+      f.expire();
+      expect(await pointed).toEqual({ status: "unavailable" });
+      await queued;
+      finish();
+      expect(f.runtime.act).not.toHaveBeenCalled();
+      await f.service.close();
+    });
+
+    it("a passive preview settles at expiry and cannot publish a late image", async () => {
+      const f = harness();
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      let finish!: () => void;
+      vi.mocked(f.runtime.peek!).mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return {
+          url: "https://example.com",
+          title: "Late private image",
+          screenshotDataUrl: "data:image/png;base64,AAAA",
+        };
+      });
+      const preview = f.service.peekThread(windowId, threadOne);
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      f.advance(policy.sessionTimeoutMs);
+      f.expire();
+      await preview;
+      finish();
+      await Promise.resolve();
+      expect(f.service.inspectThread(windowId, threadOne).observation).toBeUndefined();
+      expect(f.contexts.size).toBe(0);
+      await f.service.close();
+    });
+
+    it("queued work does not renew an unresponsive operation or execute after expiry", async () => {
+      const f = harness();
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      let finish!: () => void;
+      vi.mocked(f.runtime.act).mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return { url: "https://example.com", title: "Late" };
+      });
+      const first = f.service.act({ windowId, capturedBy: "agent", request: request() });
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      f.advance(240_000);
+      const queued = f.service.act({ windowId, capturedBy: "agent", request: request() });
+      f.advance(60_000);
+      f.expire();
+      expect((await first).failure?.category).toBe("context-expired");
+      await queued;
+      finish();
+      expect(f.runtime.act).toHaveBeenCalledOnce();
+      expect(f.contexts.size).toBe(0);
+      await f.service.close();
+    });
+
+    it("late input and take-over cannot revive a page past its idle deadline", async () => {
+      for (const gesture of ["input", "take-over"] as const) {
+        const f = harness();
+        await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+        f.advance(policy.sessionTimeoutMs);
+        if (gesture === "input") f.personTyped();
+        else f.service.takeOver(windowId, threadOne);
+        await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+        expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+        await f.service.close();
+      }
+    });
+
+    it("preserves take-over input retention and early/late release grace", async () => {
+      const f = harness();
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      f.service.takeOver(windowId, threadOne);
+      f.advance(600_000);
+      f.personTyped();
+      f.advance(600_000);
+      f.expire();
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+      f.advance(60_000);
+      f.expire();
+      await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+      await f.service.close();
+      for (const releaseAt of [0, 600_000]) {
+        const held = harness();
+        await held.service.create({ windowId, threadId: threadOne, action: action(), policy });
+        const release = held.service.holdForPerson(windowId, threadOne)!;
+        held.advance(releaseAt);
+        release();
+        const remaining = Math.max(policy.sessionTimeoutMs - releaseAt, 120_000);
+        held.advance(remaining - 1);
+        held.expire();
+        expect(held.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+        held.advance(1);
+        held.expire();
+        await vi.waitFor(() => expect(held.contexts.size).toBe(0));
+        await held.service.close();
+      }
+    });
+
+    it("renews on ordinary native person input but not on passive previews or denied actions", async () => {
+      const active = harness();
+      await active.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      active.advance(240_000);
+      active.personTyped();
+      active.advance(120_000);
+      expect(active.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+      await active.service.close();
+      for (const kind of ["peek", "denied"] as const) {
+        const f = harness();
+        await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+        f.advance(240_000);
+        if (kind === "peek") await f.service.peekThread(windowId, threadOne);
+        else
+          await f.service.act({
+            windowId,
+            capturedBy: "agent",
+            request: request({ target: "https://unapproved.example" }),
+          });
+        f.advance(60_000);
+        f.expire();
+        await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+        await f.service.close();
+      }
+    });
+
+    it("an old queued timer rechecks a renewed deadline instead of expiring active work", async () => {
+      const f = harness();
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const initial = f.timers.at(-1)!;
+      f.advance(240_000);
+      await f.service.act({ windowId, capturedBy: "agent", request: request() });
+      f.advance(60_000);
+      initial.run();
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+      await f.service.close();
+    });
+
+    it("an already queued timer cannot restart expiry scheduling after an explicit stop", async () => {
+      const f = harness();
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const timer = f.timers.at(-1)!;
+      await f.service.stop(windowId, threadOne, contextOne);
+      const count = f.timers.length;
+      f.advance(policy.sessionTimeoutMs);
+      timer.run();
+      expect(f.timers).toHaveLength(count);
+      expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+      await f.service.close();
+    });
+
+    it("bounds creating state and closes a late native creation instead of reviving it", async () => {
+      const f = harness();
+      let finish!: () => void;
+      vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        f.contexts.add(id);
+      });
+      const creation = f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy,
+      });
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      expect(f.timers.at(-1)?.delay).toBe(policy.sessionTimeoutMs);
+      f.advance(policy.sessionTimeoutMs);
+      f.expire();
+      expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+      expect((await creation).context?.state).toBe("expired");
+      finish();
+      await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+      await f.service.close();
+    });
+
+    it("starts idle at activation, and never renews from a late action completion or input", async () => {
+      const f = harness();
+      vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+        f.advance(240_000);
+        f.contexts.add(id);
+      });
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      f.advance(120_000);
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+      vi.mocked(f.runtime.act).mockImplementationOnce(async () => {
+        f.advance(policy.sessionTimeoutMs + 1);
+        return { url: "https://example.com", title: "Late answer" };
+      });
+      const result = await f.service.act({ windowId, capturedBy: "agent", request: request() });
+      expect(result.failure?.category).toBe("context-expired");
+      f.personTyped();
+      expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+      await f.service.close();
+    });
+
+    it("held agent calls do not extend the normal idle clock beyond the release grace", async () => {
+      const f = harness();
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const release = f.service.holdForPerson(windowId, threadOne)!;
+      f.advance(240_000);
+      await f.service.act({ windowId, capturedBy: "agent", request: request() });
+      release();
+      f.advance(120_000);
+      f.expire();
+      await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+      await f.service.close();
+    });
+  });
+
   it("proactively destroys an expired context without waiting for another request", async () => {
-    const { contexts, expire, runtime, service } = harness();
+    const { advance, contexts, expire, runtime, service } = harness();
     await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    advance(policy.sessionTimeoutMs);
     expire();
     await vi.waitFor(() =>
       expect(service.inspectThread(windowId, threadOne)).toEqual({
@@ -1450,6 +1891,7 @@ describe("BrowserAutomationService", () => {
       windowId,
       request: request({ target: "https://evil.example/phish" }),
     });
+    first.advance(policy.sessionTimeoutMs);
     first.expire();
     await vi.waitFor(() => expect(first.contexts.has(contextOne)).toBe(false));
 
