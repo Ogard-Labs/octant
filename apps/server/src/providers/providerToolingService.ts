@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import type {
   ProviderInstance,
@@ -81,6 +81,8 @@ export interface ProviderToolingCaller {
 export class ProviderToolingService {
   readonly #options: ProviderToolingServiceOptions;
   readonly #plans = new Map<string, StoredPlan>();
+  /** Keys the digest that binds a confirmation to what would run; it is not a password hash. */
+  readonly #bindingKey = randomBytes(32);
   readonly #tails = new Map<string, Promise<unknown>>();
   readonly #now: () => number;
   readonly #uuid: () => string;
@@ -180,7 +182,7 @@ export class ProviderToolingService {
         return refusal("unavailable", "The secret could not be kept. Nothing was added.");
       }
     }
-    const digest = digestOf(id, account, command);
+    const digest = digestOf(this.#bindingKey, id, account, command);
     this.#plans.set(planId, {
       planId,
       digest,
@@ -255,7 +257,10 @@ export class ProviderToolingService {
       return refusal("changed-plan", "That is not the command that was shown. Review it again.");
     }
     const account = this.#account(plan.instanceId);
-    if (account === undefined || digestOf(plan.instanceId, account, plan.command) !== plan.digest) {
+    if (
+      account === undefined ||
+      digestOf(this.#bindingKey, plan.instanceId, account, plan.command) !== plan.digest
+    ) {
       await this.#discard(plan);
       return refusal(
         "changed-plan",
@@ -270,7 +275,7 @@ export class ProviderToolingService {
       const current = this.#account(plan.instanceId);
       if (
         current === undefined ||
-        digestOf(plan.instanceId, current, plan.command) !== plan.digest
+        digestOf(this.#bindingKey, plan.instanceId, current, plan.command) !== plan.digest
       ) {
         await this.#discard(plan);
         return refusal(
@@ -429,20 +434,27 @@ function shownCommandLine(
   });
 }
 
-/** Binds a confirmation to what would run: the account, the program, the arguments, the variables. */
+/**
+ * Binds a confirmation to what would run: the account, the program, the
+ * arguments, the variables. A keyed MAC, so a caller cannot compute a digest
+ * for a command it was not shown. The input holds the name of the variable a
+ * held secret travels in, never its value, and the policy keeps a value out of
+ * the arguments and the shown environment.
+ */
 function digestOf(
+  key: Uint8Array,
   id: ProviderInstanceId,
   account: ProviderToolingAccount,
   command: ProviderToolingCommand,
 ): string {
-  return createHash("sha256")
+  return createHmac("sha256", key)
     .update(
       JSON.stringify({
         id: String(id),
         binary: account.binary,
         shown: account.shownEnvironment,
         argv: command.argv,
-        secretVariable: command.secret?.variable ?? null,
+        heldVariable: command.secret?.variable ?? null,
       }),
     )
     .digest("hex");
