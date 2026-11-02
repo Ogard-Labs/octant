@@ -110,8 +110,9 @@ export class ExtensionActivationService {
     const stale =
       query.expectedCatalogEpoch !== undefined && query.expectedCatalogEpoch !== catalogEpoch;
     const packages = evaluated.map(({ packageState, environmentCompatible, components }) => ({
-      // An outside driver's publisher keys and an npm package's source are
-      // lifecycle facts for Settings, not part of what a scope may use.
+      // An outside driver's publisher keys, an npm package's source and the
+      // mark for a server added in Settings are lifecycle facts for Settings,
+      // not part of what a scope may use.
       ...withoutSettingsFacts(packageState),
       components: components.map(({ componentState, policy }) => {
         const activation = {
@@ -162,8 +163,8 @@ export class ExtensionActivationService {
 
 function withoutSettingsFacts(
   packageState: ExtensionPackageState,
-): Omit<ExtensionPackageState, "publisher" | "npm"> {
-  const { publisher: _publisher, npm: _npm, ...rest } = packageState;
+): Omit<ExtensionPackageState, "publisher" | "npm" | "addedInSettings"> {
+  const { publisher: _publisher, npm: _npm, addedInSettings: _added, ...rest } = packageState;
   return rest;
 }
 

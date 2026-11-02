@@ -139,6 +139,20 @@ describe("authoritative scoped extension activation", () => {
     expect(result.catalogEpoch).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 
+  it("resolves a scope that holds a server the person added in Settings", () => {
+    const service = new ExtensionActivationService({
+      policy: { resolve: () => allowedPolicy(1) },
+      catalogStatus: () => "available",
+    });
+
+    const result = service.resolve(withPackage(snapshot(), { addedInSettings: true }), {
+      scope,
+    } as never);
+
+    expect(result.packages).toHaveLength(1);
+    expect(result.packages[0]).not.toHaveProperty("addedInSettings");
+  });
+
   it("preserves the catalog epoch across unrelated global journal sequence drift", () => {
     const service = new ExtensionActivationService({
       policy: { resolve: () => allowedPolicy(1) },
