@@ -259,6 +259,29 @@ describe("BrowserObservation", () => {
 });
 
 describe("BrowserAutomationFailure", () => {
+  it("distinguishes an origin refusal without extending profile or unavailable reasons", () => {
+    expect(
+      decodeBrowserAutomationFailure({
+        category: "policy-denied",
+        reason: "origin-not-approved",
+        message: "Stop, then navigate.",
+      }),
+    ).toMatchObject({ reason: "origin-not-approved" });
+    expect(() =>
+      decodeBrowserAutomationFailure({
+        category: "unavailable",
+        reason: "origin-not-approved",
+        message: "Unavailable.",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeBrowserAutomationFailure({
+        category: "policy-denied",
+        reason: "grant-this-origin",
+        message: "Unknown reason.",
+      }),
+    ).toThrow();
+  });
   it("decodes each failure category", () => {
     for (const category of [
       "invalid",

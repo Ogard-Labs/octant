@@ -40,6 +40,28 @@ page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
 no observation or evidence.
 
+### Recovering the agent's page
+
+If the agent's Browser reaches a site the page has not approved, the tool's
+refusal explains how to recover: stop the page, then navigate to the intended
+site and request its approval. Keep the same Project or Personal profile when
+reopening if you need its sign-in. For an SSO redirect in the Octant app, the
+agent can use **sign-in** so you finish signing in yourself. If you press
+**Continue** while still on an unapproved site, the answer says so and the
+agent cannot read that page.
+
+An expired page reports **context-expired** with the profile it used. It never
+reopens on its own. The agent must navigate explicitly, naming the same profile
+again for Project or Personal. A new page with no profile argument still opens
+Private. The recovery hint contains no page text, picture, password, or account
+detail and is kept only temporarily in the host's bounded memory.
+
+The agent's page still has a ten-minute session from opening; ordinary agent
+activity does not renew it. Sign-in or Take over keeps it open for eleven
+minutes from the handoff or your latest take-over input, then two minutes after
+Continue or Hand back, using whichever deadline is later than the original
+session.
+
 ### Browser profiles
 
 A Browser page is **Private** by default: its cookies and site data live in
