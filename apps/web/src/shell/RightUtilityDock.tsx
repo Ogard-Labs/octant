@@ -1,14 +1,15 @@
-import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
-import { useRef, type ReactNode, type RefObject } from "react";
+import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
 import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import { ShellResizeHandle } from "./ShellResizeHandle";
-import type {
-  RightUtilityDockResolution,
-  RightUtilityDockSurfaceDescriptor,
-  RightUtilityDockSurfaceId,
-  RightUtilityDockTabDescriptor,
+import {
+  dockWidthCeiling,
+  type RightUtilityDockResolution,
+  type RightUtilityDockSurfaceDescriptor,
+  type RightUtilityDockSurfaceId,
+  type RightUtilityDockTabDescriptor,
 } from "./rightUtilityDockModel";
 
 export interface RightUtilityDockProps {
@@ -30,6 +31,8 @@ export interface RightUtilityDockProps {
   readonly onClose: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onCommitWidth: (width: number) => void;
+  /** A drag was abandoned: drop the preview rather than keep the width it started from. */
+  readonly onCancelWidthPreview?: () => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly onPreviewWidth: (width: number) => void;
   readonly onSelectSurface: (tabId: string) => void;
@@ -49,6 +52,27 @@ export interface RightUtilityDockProps {
 
 export function RightUtilityDock(props: RightUtilityDockProps) {
   const closeButton = useRef<HTMLButtonElement>(null);
+  const dock = useRef<HTMLElement>(null);
+  const [workspaceWidth, setWorkspaceWidth] = useState<number>();
+  const ceiling = dockWidthCeiling(workspaceWidth);
+
+  useLayoutEffect(() => {
+    const workspace = dock.current?.parentElement;
+    if (workspace === null || workspace === undefined) return;
+    const measure = () => {
+      const style = getComputedStyle(workspace);
+      const width =
+        workspace.clientWidth -
+        (Number.parseFloat(style.paddingInlineStart) || 0) -
+        (Number.parseFloat(style.paddingInlineEnd) || 0);
+      setWorkspaceWidth(width > 0 ? width : undefined);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, [props.isNarrow, props.open]);
 
   if (!props.open) return null;
 
@@ -114,16 +138,20 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       aria-label="Right Utility Dock"
       className="right-utility-dock window-no-drag"
       id="right-utility-dock"
+      ref={dock}
     >
       <ShellResizeHandle
         accessibleName="Resize utility dock"
         className="right-utility-dock__resize"
         edge="leading"
-        maximum={MAX_CONTEXT_SIDEBAR_WIDTH}
+        maximum={ceiling}
         minimum={MIN_CONTEXT_SIDEBAR_WIDTH}
+        {...(props.onCancelWidthPreview === undefined
+          ? {}
+          : { onCancel: props.onCancelWidthPreview })}
         onCommit={props.onCommitWidth}
         onPreview={props.onPreviewWidth}
-        value={props.width}
+        value={Math.min(props.width, ceiling)}
       />
       {surface}
     </aside>

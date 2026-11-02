@@ -126,6 +126,25 @@ describe("the plan panel", () => {
     );
   });
 
+  it("proposes on Command-Return, but not a second time while the first is pending", async () => {
+    const propose = vi.fn(async () => true);
+    const { rerender } = render(
+      <ThreadPlanPanel controller={controller({ plan: null, propose, pending: true })} />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Plan title" }), {
+      target: { value: "Land the replay fix" },
+    });
+    const steps = screen.getByRole("textbox", { name: "Plan steps" });
+    fireEvent.change(steps, { target: { value: "Fix the projection" } });
+
+    fireEvent.keyDown(steps, { key: "Enter", metaKey: true });
+    expect(propose).not.toHaveBeenCalled();
+
+    rerender(<ThreadPlanPanel controller={controller({ plan: null, propose, pending: false })} />);
+    fireEvent.keyDown(steps, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(propose).toHaveBeenCalledOnce());
+  });
+
   it("offers no controls at all to a window that may only read the plan", () => {
     render(<ThreadPlanPanel controller={controller()} readOnly />);
 

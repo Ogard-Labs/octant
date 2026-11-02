@@ -87,9 +87,10 @@ describe("GitHubRepositoryPicker", () => {
     expect(within(listbox).getByText("atlas-org/repo-2")).toBeInTheDocument();
     expect(within(listbox).getByText("octant/recent-repo")).toBeInTheDocument();
     expect(within(listbox).getAllByText("Private").length).toBeGreaterThan(0);
-    expect(within(listbox).getByText("Public")).toBeInTheDocument();
-    expect(within(listbox).getAllByText("main").length).toBeGreaterThan(0);
-    expect(within(listbox).getByText("read")).toBeInTheDocument();
+    // A row says only what tells it apart: branch and permission were the same
+    // words on every row, and they stay under Repository details.
+    expect(within(listbox).queryByText("Public")).toBeNull();
+    expect(within(listbox).queryByText("main")).toBeNull();
     expect(screen.getByText("Recent")).toBeInTheDocument();
   });
 
@@ -262,11 +263,8 @@ describe("GitHubRepositoryPicker", () => {
       screen.getByText("The organization requires single sign-on authorization for this token."),
     ).toBeVisible();
 
-    await user.type(
-      screen.getByLabelText("Repository link or owner/repository"),
-      "atlas-org/missing",
-    );
-    await user.click(screen.getByRole("button", { name: "Use repository" }));
+    await user.type(screen.getByLabelText("Search GitHub repositories"), "atlas-org/missing");
+    await user.click(screen.getByRole("button", { name: /^Use / }));
     expect(
       await screen.findByText(
         "GitHub needs access to this repository, or the token is missing a scope.",
@@ -408,10 +406,10 @@ describe("GitHubRepositoryPicker", () => {
     await screen.findByText("octant/repo-1");
 
     await user.type(
-      screen.getByLabelText("Repository link or owner/repository"),
+      screen.getByLabelText("Search GitHub repositories"),
       "https://github.com/atlas-org/public-repo",
     );
-    await user.click(screen.getByRole("button", { name: "Use repository" }));
+    await user.click(screen.getByRole("button", { name: /^Use / }));
 
     expect(readCatalogue).toHaveBeenCalledWith({
       kind: "repository",
@@ -443,11 +441,8 @@ describe("GitHubRepositoryPicker", () => {
     render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={onSelect} />);
     await screen.findByText("octant/repo-1");
 
-    await user.type(
-      screen.getByLabelText("Repository link or owner/repository"),
-      "octant/stale-repo",
-    );
-    await user.click(screen.getByRole("button", { name: "Use repository" }));
+    await user.type(screen.getByLabelText("Search GitHub repositories"), "octant/stale-repo");
+    await user.click(screen.getByRole("button", { name: /^Use / }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/refresh failed/i);
     expect(onSelect).not.toHaveBeenCalled();
@@ -471,12 +466,10 @@ describe("GitHubRepositoryPicker", () => {
     render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={onSelect} />);
     await screen.findByText("octant/repo-1");
 
-    await user.type(
-      screen.getByLabelText("Repository link or owner/repository"),
-      "octant/late-repo",
-    );
-    await user.click(screen.getByRole("button", { name: "Use repository" }));
-    fireEvent.click(screen.getByText("octant/repo-1"));
+    await user.type(screen.getByLabelText("Search GitHub repositories"), "octant/late-repo");
+    await user.click(screen.getByRole("button", { name: /^Use / }));
+    await user.clear(screen.getByLabelText("Search GitHub repositories"));
+    fireEvent.click(await screen.findByText("octant/repo-1"));
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ nodeId: "R_node1" }));
 
     resolveRepository?.({
@@ -487,7 +480,7 @@ describe("GitHubRepositoryPicker", () => {
     await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1));
   });
 
-  it("reports an invalid reference and an unavailable resolve honestly", async () => {
+  it("reads plain words as a search and reports an unavailable repository honestly", async () => {
     const user = userEvent.setup();
     const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
       if (request.kind === "recent-repositories") {
@@ -506,16 +499,14 @@ describe("GitHubRepositoryPicker", () => {
     render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={vi.fn()} />);
     await screen.findByText("octant/repo-1");
 
-    const input = screen.getByLabelText("Repository link or owner/repository");
+    const input = screen.getByLabelText("Search GitHub repositories");
     await user.type(input, "not a repository");
-    await user.click(screen.getByRole("button", { name: "Use repository" }));
-    expect(
-      await screen.findByText(/Enter owner\/repository or a github\.com repository URL\./),
-    ).toBeVisible();
+    // Plain words are a search, so they offer no repository to use.
+    expect(screen.queryByRole("button", { name: /^Use / })).toBeNull();
 
     await user.clear(input);
     await user.type(input, "atlas-org/missing");
-    await user.click(screen.getByRole("button", { name: "Use repository" }));
+    await user.click(screen.getByRole("button", { name: /^Use / }));
     expect(
       await screen.findByText("The repository is not visible to this GitHub account."),
     ).toBeVisible();

@@ -1,12 +1,12 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 import { describe, expect, it } from "vitest";
 import {
   RIGHT_UTILITY_DOCK_SURFACES,
+  dockWidthCeiling,
   resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
   WORKBENCH_DOCK_WIDTH,
-  workbenchDockWidth,
   type RightUtilityDockResolutionInput,
   type RightUtilityDockSurfaceAvailability,
   MULTI_INSTANCE_DOCK_SURFACES,
@@ -26,22 +26,57 @@ function surface(id: (typeof RIGHT_UTILITY_DOCK_SURFACES)[number]["id"]) {
   return found;
 }
 
-describe("resolving the right utility dock width", () => {
-  it("uses the compact width only while the dock is an empty launcher", () => {
+describe("how wide the right utility dock is", () => {
+  const narrow = { storedWidth: 360, widthChosen: false };
+
+  it("stays one width from the empty launcher to any tool, so a click moves nothing", () => {
+    expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: [] })).toBe(360);
+    expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["environment"] })).toBe(360);
+  });
+
+  it("holds the Browser's width while its tab is open, whichever tab is in front", () => {
+    expect(
+      resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["environment", "browser"] }),
+    ).toBe(WORKBENCH_DOCK_WIDTH);
+  });
+
+  it("returns to the saved width once the Browser closes", () => {
+    expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["environment"] })).toBe(360);
+  });
+
+  it("leaves a wider saved dock alone", () => {
     expect(
       resolveDockPresentationWidth({
-        configuredWidth: 560,
-        resolution: { kind: "closed", reason: "no-surface" },
-        tabCount: 0,
+        storedWidth: 800,
+        widthChosen: false,
+        tabSurfaces: ["terminal"],
       }),
-    ).toBe(MIN_CONTEXT_SIDEBAR_WIDTH);
+    ).toBe(800);
+  });
+
+  it("keeps a width the person dragged to, even narrower than a Browser asks for", () => {
     expect(
       resolveDockPresentationWidth({
-        configuredWidth: 560,
-        resolution: { kind: "surface", surface: surface("browser") },
-        tabCount: 1,
+        storedWidth: 420,
+        widthChosen: true,
+        tabSurfaces: ["browser"],
       }),
-    ).toBe(560);
+    ).toBe(420);
+  });
+});
+
+describe("how wide the right utility dock may get", () => {
+  it("takes at most half the workspace, so a stored 960px cannot squeeze the thread", () => {
+    expect(dockWidthCeiling(1268)).toBe(634);
+    expect(dockWidthCeiling(2600)).toBe(MAX_CONTEXT_SIDEBAR_WIDTH);
+  });
+
+  it("keeps the minimum in a window too narrow for half to fit a tool", () => {
+    expect(dockWidthCeiling(400)).toBe(MIN_CONTEXT_SIDEBAR_WIDTH);
+  });
+
+  it("does not guess before the workspace has been measured", () => {
+    expect(dockWidthCeiling(undefined)).toBe(MAX_CONTEXT_SIDEBAR_WIDTH);
   });
 });
 
@@ -317,14 +352,5 @@ describe("multi-instance dock surfaces", () => {
     for (const surface of ["environment", "plan", "review", "files", "tests"]) {
       expect(MULTI_INSTANCE_DOCK_SURFACES.has(surface)).toBe(false);
     }
-  });
-});
-
-describe("workbenchDockWidth", () => {
-  it("widens a narrow dock when a Browser or Terminal opens, and leaves other tools and wide docks alone", () => {
-    expect(workbenchDockWidth("browser", 395)).toBe(WORKBENCH_DOCK_WIDTH);
-    expect(workbenchDockWidth("terminal", 420)).toBe(WORKBENCH_DOCK_WIDTH);
-    expect(workbenchDockWidth("browser", 800)).toBeUndefined();
-    expect(workbenchDockWidth("environment", 300)).toBeUndefined();
   });
 });

@@ -37,7 +37,7 @@ describe("ComposerProjectSelector", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     const row = screen.getByRole("option", { name: /^No Project/ });
-    expect(row).toHaveTextContent("/Users/ada/Octant/Work");
+    expect(row).toHaveTextContent("~/Octant/Work");
     await userEvent.click(row);
     expect(onSelect).toHaveBeenCalledWith({
       kind: "default-folder",

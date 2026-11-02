@@ -964,7 +964,7 @@ describe("DraftThreadWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     const row = screen.getByRole("option", { name: /^No Project/ });
     expect(row).not.toHaveAttribute("aria-disabled", "true");
-    expect(row).toHaveTextContent("/Users/ada/Octant/Code");
+    expect(row).toHaveTextContent("~/Octant/Code");
     await user.click(row);
     expect(onEnsureDefaultProject).toHaveBeenCalledWith("code");
   });
@@ -982,7 +982,7 @@ describe("DraftThreadWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     const row = screen.getByRole("option", { name: /^No Project/ });
-    expect(row).toHaveTextContent("/Users/ada/Octant/Work");
+    expect(row).toHaveTextContent("~/Octant/Work");
     expect(row.textContent ?? "").not.toContain("//Work");
   });
 

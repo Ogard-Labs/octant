@@ -344,7 +344,6 @@ import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveDockPresentationWidth,
-  workbenchDockWidth,
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceId,
@@ -1219,6 +1218,7 @@ function LaunchedShell(
     };
   }, [setSidebarCollapsedPersistent, sidebarDrawerOpen, sidebarIsDrawer]);
   const [previewContextWidth, setPreviewContextWidth] = useState<number>();
+  const [dockWidthChosen, setDockWidthChosen] = useState(false);
   const [pendingCodeDeepLink, setPendingCodeDeepLink] = useState<CodeDeepLink>();
   const [computerUseSessionRepresentationCounts, setComputerUseSessionRepresentationCounts] =
     useState<ReadonlyMap<string, ReadonlyMap<string, number>>>(new Map());
@@ -3793,8 +3793,8 @@ function LaunchedShell(
     }
   }
   function widenDockFor(surface: RightUtilityDockSurfaceId) {
-    const width = workbenchDockWidth(surface, controller.settings?.contextSidebarWidth);
-    if (width !== undefined) void controller.updateSettings({ contextSidebarWidth: width });
+    // Each new Browser or Terminal asks for its width again, as one always has.
+    if (surface === "browser" || surface === "terminal") setDockWidthChosen(false);
   }
   function addDockTab(surface: RightUtilityDockSurfaceId) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
@@ -4788,6 +4788,7 @@ function LaunchedShell(
       setPendingUsageFilter,
       setPreviewBottomPanelHeight,
       setPreviewContextWidth,
+      setDockWidthChosen,
       setProjectArchived: projectController.setArchived,
       setProjectColor: projectController.setColor,
       setProjectProviderPolicy: projectController.setProviderPolicy,
@@ -5457,9 +5458,9 @@ function LaunchedShell(
   const dockPresentedOpen =
     dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
   const dockPresentationWidth = resolveDockPresentationWidth({
-    configuredWidth: contextSidebarWidth,
-    resolution: dockResolution,
-    tabCount: dockTabs.length,
+    storedWidth: contextSidebarWidth,
+    widthChosen: dockWidthChosen || previewContextWidth !== undefined,
+    tabSurfaces: dockTabs.map((tab) => tab.surface.id),
   });
   // The bottom panel steps aside for the same reason, and it had not been:
   // a terminal opened on a thread kept a quarter of the viewport on Board,

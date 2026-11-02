@@ -88,6 +88,7 @@ export interface DockContainerProps {
     | "setFallbackDockState"
     | "setPreviewBottomPanelHeight"
     | "setPreviewContextWidth"
+    | "setDockWidthChosen"
     | "setRequestedAgentReview"
     | "setRequestedAgentView"
     | "setSelectedProjectPullRequest"
@@ -605,8 +606,10 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         onCloseTab={actions.closeDockTab}
         onCommitWidth={(width) => {
           actions.setPreviewContextWidth(width);
+          actions.setDockWidthChosen(true);
           void actions.updateSettings({ contextSidebarWidth: width });
         }}
+        onCancelWidthPreview={() => actions.setPreviewContextWidth(undefined)}
         onPreviewWidth={actions.setPreviewContextWidth}
         onOpenTab={actions.addDockTab}
         onSelectSurface={actions.selectDockTab}

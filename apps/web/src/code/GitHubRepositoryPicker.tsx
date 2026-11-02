@@ -91,13 +91,15 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number>();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [linkInput, setLinkInput] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkError, setLinkError] = useState<string>();
   const generation = useRef(0);
   const linkGeneration = useRef(0);
 
-  const trimmedQuery = query.trim();
+  // One field takes a search or a pasted repository. A reference is not a
+  // search term: nothing in the catalogue would match "owner/name" typed whole.
+  const reference = parseGithubRepositoryReference(query);
+  const trimmedQuery = reference === undefined ? query.trim() : "";
 
   const loadPage = useCallback(
     async (search: string, options: { readonly refresh?: boolean } = {}) => {
@@ -233,11 +235,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
    */
   const resolveLink = async (event: React.FormEvent) => {
     event.preventDefault();
-    const reference = parseGithubRepositoryReference(linkInput);
-    if (reference === undefined) {
-      setLinkError("Enter owner/repository or a github.com repository URL.");
-      return;
-    }
+    if (reference === undefined) return;
     const operation = ++linkGeneration.current;
     setLinkBusy(true);
     setLinkError(undefined);
@@ -259,7 +257,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
         );
         return;
       }
-      setLinkInput("");
+      setQuery("");
       select(response.row);
     } catch (error) {
       if (operation !== linkGeneration.current) return;
@@ -296,61 +294,53 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
 
   return (
     <div className="github-picker">
-      <div className="github-picker__toolbar">
-        <label className="octant-popover-search github-picker__search">
-          <Search aria-hidden="true" size={14} />
-          <OctantInput
-            aria-label="Search GitHub repositories"
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setActiveIndex(undefined);
-            }}
-            placeholder="Search repositories…"
-            type="search"
-            unstyled
-            value={query}
-          />
-        </label>
-        <OctantTooltip label="Refresh repositories">
-          <OctantButton
-            aria-label="Refresh repositories"
-            onClick={() => void loadPage(trimmedQuery, { refresh: true })}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            <RefreshCw aria-hidden="true" size={14} />
-          </OctantButton>
-        </OctantTooltip>
-      </div>
-
       <form
-        className="github-picker__link"
+        className="github-picker__form"
         noValidate
         onSubmit={(event) => void resolveLink(event)}
       >
-        <label className="octant-popover-search github-picker__search">
-          <Link aria-hidden="true" size={14} />
-          <OctantInput
-            aria-label="Repository link or owner/repository"
-            onChange={(event) => {
-              setLinkInput(event.target.value);
-              setLinkError(undefined);
-            }}
-            placeholder="owner/repository or GitHub URL"
-            type="text"
-            unstyled
-            value={linkInput}
-          />
-        </label>
-        <OctantButton
-          disabled={linkBusy || linkInput.trim() === ""}
-          size="sm"
-          type="submit"
-          variant="ghost"
-        >
-          {linkBusy ? "Resolving…" : "Use repository"}
-        </OctantButton>
+        <div className="github-picker__toolbar">
+          <label className="octant-popover-search github-picker__search">
+            <Search aria-hidden="true" size={14} />
+            <OctantInput
+              aria-label="Search GitHub repositories"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setActiveIndex(undefined);
+                setLinkError(undefined);
+                // A repository still resolving was asked for by the old text.
+                linkGeneration.current += 1;
+                setLinkBusy(false);
+              }}
+              placeholder="Search, or paste a GitHub link…"
+              type="search"
+              unstyled
+              value={query}
+            />
+          </label>
+          <OctantTooltip label="Refresh repositories">
+            <OctantButton
+              aria-label="Refresh repositories"
+              onClick={() => void loadPage(trimmedQuery, { refresh: true })}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <RefreshCw aria-hidden="true" size={14} />
+            </OctantButton>
+          </OctantTooltip>
+        </div>
+        {reference === undefined ? null : (
+          <OctantButton
+            className="octant-popover-option"
+            disabled={linkBusy}
+            type="submit"
+            variant="bare"
+          >
+            <Link aria-hidden="true" size={14} />
+            {linkBusy ? "Resolving…" : `Use ${reference.owner}/${reference.name}`}
+          </OctantButton>
+        )}
       </form>
       {linkError === undefined ? null : (
         <OctantAlert className="github-picker__note" tone="warning">
@@ -391,7 +381,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
         </>
       ) : null}
 
-      {catalogue.kind === "ready" ? (
+      {catalogue.kind === "ready" && reference === undefined ? (
         <>
           {catalogue.freshness.status === "stale" ? (
             <p className="github-picker__note" role="status">
@@ -520,11 +510,13 @@ function RepositoryOption(props: {
         <span className="github-picker__option-name">
           {row.owner}/{row.name}
         </span>
-        <span className="github-picker__option-meta">
-          <span>{GITHUB_VISIBILITY_LABELS[row.visibility]}</span>
-          {row.defaultBranch === undefined ? null : <span>{row.defaultBranch}</span>}
-          <span>{row.viewerPermission}</span>
-        </span>
+        {/* Only what tells two rows apart. The branch and permission were the
+            same words on every row; they stay under Repository details. */}
+        {row.visibility === "public" ? null : (
+          <span className="github-picker__option-meta">
+            <span>{GITHUB_VISIBILITY_LABELS[row.visibility]}</span>
+          </span>
+        )}
         {props.selected ? (
           <Check
             aria-hidden="true"

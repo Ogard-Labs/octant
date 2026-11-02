@@ -490,7 +490,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   display: block;
   height: 148px;
   padding: 0;
-  cursor: pointer;
+  cursor: default;
 }
 
 .thread-activity-pip__visual--interactive:disabled {
@@ -588,7 +588,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   border: 1px solid var(--octant-glass-border);
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-glass-highlight), var(--octant-shadow-pop);
-  cursor: pointer;
+  cursor: default;
 }
 
 .browser-pip[data-dragging] .browser-pip__open {
@@ -875,7 +875,7 @@ h6 {
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   text-align: left;
@@ -962,7 +962,7 @@ h6 {
 
 .new-project {
   border: 0;
-  cursor: pointer;
+  cursor: default;
   transition:
     background-color var(--oct-motion-fast) ease,
     color var(--oct-motion-fast) ease;
@@ -1143,7 +1143,7 @@ h6 {
 }
 
 .shell-icon-button:active {
-  transform: scale(0.96);
+  background: var(--octant-control-pressed);
 }
 
 .workspace-layer {
@@ -1186,12 +1186,11 @@ h6 {
     minmax(var(--octant-wide-primary-min), 1fr)
     minmax(
       var(--octant-context-sidebar-min),
-      /* The primary column's own minimum is the only ceiling the dock needs.
-         A 38vw cap sat below the stored maximum, so dragging the handle past
-         roughly a third of the window moved the stored width and changed
-         nothing on screen — the control looked broken rather than bounded. */ min(
+      /* dockWidthCeiling: half the workspace, and never past the primary
+         column's own minimum. The handle stops at the same half. */ min(
         var(--octant-context-sidebar-width, 360px),
-        calc(100% - var(--octant-wide-primary-min))
+        calc(100% - var(--octant-wide-primary-min)),
+        50%
       )
     );
 }
@@ -1793,7 +1792,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding: 0 8px;
   color: var(--octant-text-secondary);
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-xs);
   text-align: left;
 }
@@ -1922,7 +1921,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: transparent;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   transition:
@@ -1984,7 +1983,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .settings-view__toggle {
   grid-template-columns: auto 1fr;
-  cursor: pointer;
+  cursor: default;
 }
 
 .settings-view__text-input,
@@ -2007,7 +2006,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 /* No forced color-scheme: the root's declared scheme keeps the native
    popup matched to the active theme, which "dark" broke in light mode. */
 .settings-view__select {
-  cursor: pointer;
+  cursor: default;
 }
 
 .settings-view__checkbox {
@@ -2015,7 +2014,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   height: 16px;
   margin: 0;
   accent-color: var(--octant-accent);
-  cursor: pointer;
+  cursor: default;
 }
 
 .settings-view__range {
@@ -2654,7 +2653,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: var(--oct-space-1) var(--oct-space-2);
   min-height: 32px;
   font-size: var(--oct-text-sm);
-  cursor: pointer;
+  cursor: default;
 }
 
 .endpoint-flow__check > span:last-child:not(.endpoint-tag) {
@@ -2990,7 +2989,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: start;
   gap: var(--oct-space-1) var(--oct-space-3);
-  cursor: pointer;
+  cursor: default;
 }
 
 .endpoint-data__choice > span {
@@ -3127,7 +3126,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .prov-grip-slot .prov-grip {
-  cursor: pointer;
+  cursor: default;
 }
 
 .prov-grip-slot .prov-grip:disabled {
@@ -3689,7 +3688,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: transparent;
   border: 0;
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: var(--oct-text-detail);
 }
@@ -3746,7 +3745,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   text-align: start;
 }
@@ -3790,7 +3789,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: var(--octant-control);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   font: inherit;
 }
 
@@ -4189,7 +4188,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: transparent;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
-  cursor: pointer;
+  cursor: default;
 }
 
 .local-servers__more:hover,
@@ -4314,7 +4313,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .memory-row__audit summary {
-  cursor: pointer;
+  cursor: default;
 }
 
 .memory-row__audit dl {
@@ -4366,7 +4365,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .memory-row__actions button {
   color: var(--octant-text-muted);
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-xs);
 }
 
@@ -5310,7 +5309,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--oct-radius-pill);
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
@@ -5393,7 +5392,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   background: transparent;
   border: 0;
   border-radius: var(--oct-radius-sm) 0 0 var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: var(--oct-text-xs);
   text-align: left;
@@ -5473,7 +5472,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   background: transparent;
   border: 0;
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   /* Six outlined stars down the list were noise; a star shows on the row
      being pointed at, on keyboard focus, and wherever it is already on. */
   opacity: 0;
@@ -5654,7 +5653,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: inherit;
   font: inherit;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
 }
 
 .scaffolds__entry-button[aria-pressed="true"] {
@@ -5662,7 +5661,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 }
 
 .scaffolds__entry-button:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.5;
 }
 
@@ -5931,7 +5930,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   border-radius: var(--oct-radius-sm);
   background: transparent;
   color: inherit;
-  cursor: pointer;
+  cursor: default;
   box-shadow: none;
 }
 
@@ -6059,7 +6058,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-text-secondary);
   background: transparent;
   border: 0;
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-display);
@@ -6116,7 +6115,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  cursor: pointer;
+  cursor: default;
 }
 
 .agent-eligible-models__option--unavailable {
@@ -6145,7 +6144,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   border-radius: var(--oct-radius-sm);
   background: transparent;
   color: var(--octant-text-secondary);
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: var(--oct-text-detail);
 }
@@ -6206,7 +6205,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-detail);
 }
 
@@ -6831,7 +6830,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .code-board__status-option {
   position: relative;
   display: flex;
-  cursor: pointer;
+  cursor: default;
 }
 
 .code-board__status-option input {
@@ -6938,7 +6937,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   display: flex;
   align-items: center;
   gap: var(--oct-space-1);
-  cursor: pointer;
+  cursor: default;
   list-style: none;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-detail);
@@ -7034,7 +7033,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: inherit;
   font: inherit;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
 }
 
 .code-board__card-open:hover .board-card-title {
@@ -7302,7 +7301,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-text-muted);
   font: inherit;
   font-size: var(--oct-text-xs);
-  cursor: pointer;
+  cursor: default;
 }
 
 .environment-filter__toggle:hover {
@@ -7327,7 +7326,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   padding: 2px 4px;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
-  cursor: pointer;
+  cursor: default;
 }
 
 .environment-filter__label {
@@ -7515,7 +7514,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   background: transparent;
   color: inherit;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
 }
 
 .linear-issues__row:hover,

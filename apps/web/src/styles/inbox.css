@@ -24,7 +24,7 @@
   font: inherit;
   text-align: left;
   text-decoration: none;
-  cursor: pointer;
+  cursor: default;
 }
 
 .inbox-view__row:hover .oct-row-label,

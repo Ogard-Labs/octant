@@ -206,7 +206,7 @@
 .code-pr-review__source > summary {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  cursor: pointer;
+  cursor: default;
 }
 
 .code-pr-review__switch {

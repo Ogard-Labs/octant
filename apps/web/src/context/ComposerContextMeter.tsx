@@ -497,20 +497,13 @@ function ContextUsageFallback(props: {
     <>
       {reported === undefined ? (
         <>
-          <UsageHeader
-            title="Provider usage"
-            total={
-              fallback.inputTokens === undefined
-                ? "Not reported"
-                : `${formatTokens(fallback.inputTokens)} in`
-            }
-          />
+          <UsageHeader title="Provider usage" />
           <p className="context-window-popover__source">
             {fallback.inputTokens === undefined || fallback.outputTokens === undefined
               ? props.usageReporting === "not-reported"
                 ? NO_USAGE_REPORTED
                 : "No usage has been reported for this thread."
-              : "This provider reports what a turn spent, but not a context-window maximum, so there is no share of a window to show."}
+              : "This provider doesn't report a context window."}
           </p>
           <AutoCompactRoom room={room} />
           {totals}
@@ -801,12 +794,14 @@ function UsageHeader(props: {
   readonly expanded?: boolean;
   readonly onToggle?: () => void;
   readonly title: string;
-  readonly total: string;
+  readonly total?: string;
 }) {
   return (
     <header className="context-window-popover__header">
       <span className="context-window-popover__title">{props.title}</span>
-      <strong className="context-window-popover__total">{props.total}</strong>
+      {props.total === undefined ? null : (
+        <strong className="context-window-popover__total">{props.total}</strong>
+      )}
       {props.onToggle === undefined ? null : (
         <OctantButton
           aria-controls={props.breakdownId}
@@ -1021,9 +1016,7 @@ function WindowLimitRow(props: {
       name={name.label}
       {...(used === undefined ? {} : { percent: 100 - used })}
       {...(props.showScope && name.scope !== undefined ? { qualifier: name.scope } : {})}
-      {...(limit.resetsAt === undefined
-        ? {}
-        : { reset: resetCountdownLabel(limit.resetsAt, Date.now()) })}
+      {...resetFact(limit.resetsAt, Date.now())}
       value={
         limit.status === "exhausted" ? "Spent" : limit.status === "warning" ? "Low" : "Available"
       }
@@ -1049,9 +1042,22 @@ function BucketLimitRow(props: {
       name={props.label}
       percent={left}
       qualifier={`${compactTokens(remaining)} of ${compactTokens(limit)} left`}
-      {...(resetsAt === undefined ? {} : { reset: resetCountdownLabel(resetsAt, props.now) })}
+      {...resetFact(resetsAt, props.now)}
     />
   );
+}
+
+/**
+ * A reset time already behind us belongs to an old reading, and "Resets now"
+ * beside a figure the provider has not refreshed reads as a promise. It says
+ * nothing until the provider reports again.
+ */
+function resetFact(
+  resetsAt: string | undefined,
+  now: number,
+): { readonly reset: string } | Record<string, never> {
+  if (resetsAt === undefined || new Date(resetsAt).getTime() <= now) return {};
+  return { reset: resetCountdownLabel(resetsAt, now) };
 }
 
 /** Two windows of the same length on different scopes would read alike. */

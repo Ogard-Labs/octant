@@ -24,6 +24,7 @@ function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDock
     ),
     onClose: vi.fn(),
     onCloseTab: vi.fn(),
+    onCancelWidthPreview: vi.fn(),
     onCommitWidth: vi.fn(),
     onOpenTab: vi.fn(),
     onPreviewWidth: vi.fn(),
@@ -79,6 +80,7 @@ describe("RightUtilityDock", () => {
     fireEvent.lostPointerCapture(splitter, { pointerId: 2 });
 
     expect(handlers.onPreviewWidth).toHaveBeenLastCalledWith(360);
+    expect(handlers.onCancelWidthPreview).toHaveBeenCalledOnce();
     expect(handlers.onCommitWidth).not.toHaveBeenCalled();
   });
 

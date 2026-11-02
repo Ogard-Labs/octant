@@ -152,7 +152,7 @@
    markup's radio-in-label idiom. */
 .automation-center__filter,
 .automation-center__view {
-  cursor: pointer;
+  cursor: default;
 }
 
 .automation-center__filter:has(input:checked),
@@ -201,7 +201,7 @@
   padding: 0;
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-display);
-  cursor: pointer;
+  cursor: default;
   text-align: start;
 }
 
@@ -374,7 +374,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-display);
 }
@@ -591,7 +591,7 @@
   font: inherit;
   font-size: var(--oct-text-xs);
   text-align: left;
-  cursor: pointer;
+  cursor: default;
 }
 
 .routine-calendar__entry-time {

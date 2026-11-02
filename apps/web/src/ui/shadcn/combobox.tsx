@@ -28,7 +28,7 @@ export function ComboboxInput({
   return (
     <ComboboxPrimitive.Input
       className={cn(
-        "h-full min-w-0 flex-1 bg-transparent px-3 py-1 text-sm text-foreground outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+        "h-full min-w-0 flex-1 bg-transparent px-3 py-1 text-sm text-foreground outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-default disabled:opacity-50",
         className,
       )}
       data-slot="combobox-input"
@@ -44,7 +44,7 @@ export function ComboboxTrigger({
   return (
     <ComboboxPrimitive.Trigger
       className={cn(
-        "mr-1 inline-flex size-[round(1.75rem,2px)] cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-4",
+        "mr-1 inline-flex size-[round(1.75rem,2px)] cursor-default items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-4",
         className,
       )}
       data-slot="combobox-trigger"
@@ -104,7 +104,7 @@ export function ComboboxItem({
   return (
     <ComboboxPrimitive.Item
       className={cn(
-        "relative flex min-h-[round(2.25rem,2px)] cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
+        "relative flex min-h-[round(2.25rem,2px)] cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
         className,
       )}
       data-slot="combobox-item"

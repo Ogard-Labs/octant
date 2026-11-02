@@ -260,6 +260,7 @@ export type ShellActions = {
   readonly setPendingUsageFilter: Dispatch<SetStateAction<UsageQueryFilter | undefined>>;
   readonly setPreviewBottomPanelHeight: Dispatch<SetStateAction<number | undefined>>;
   readonly setPreviewContextWidth: Dispatch<SetStateAction<number | undefined>>;
+  readonly setDockWidthChosen: Dispatch<SetStateAction<boolean>>;
   readonly setProjectArchived: ProjectController["setArchived"];
   readonly setProjectColor: ProjectController["setColor"];
   readonly setProjectProviderPolicy: ProjectController["setProviderPolicy"];

@@ -129,7 +129,7 @@ export function contextFixture(options: ContextFixtureOptions = {}): ContextInsp
         status: "available",
         limit: 2,
         remaining: 1,
-        resetsAt: "2026-07-18T20:10:00.000Z",
+        resetsAt: "2099-07-18T20:10:00.000Z",
       },
       retry:
         health === "rate-limited"

@@ -1,5 +1,5 @@
 import { ListChecks } from "lucide-react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { useThreadPlan } from "./ThreadPlanContext";
@@ -10,6 +10,7 @@ export function ThreadPlanProposal() {
   const controller = useThreadPlan();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
   if (
     controller === undefined ||
     controller.status === "idle" ||
@@ -33,16 +34,15 @@ export function ThreadPlanProposal() {
         <ListChecks aria-hidden="true" size={16} strokeWidth={1.8} />
       </OctantButton>
       <OctantDialog
-        className="thread-plan-proposal"
-        label="Propose plan"
+        className="project-dialog thread-plan-proposal"
+        label="New plan"
+        labelledBy={titleId}
         onClose={() => setOpen(false)}
         open={open}
         restoreFocus={trigger}
       >
-        <ThreadPlanPanel />
-        <OctantButton onClick={() => setOpen(false)} type="button" variant="ghost">
-          Cancel
-        </OctantButton>
+        <h1 id={titleId}>New plan</h1>
+        <ThreadPlanPanel onCancelProposal={() => setOpen(false)} />
       </OctantDialog>
     </>
   );

@@ -16,6 +16,7 @@ import {
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ChatOnlyVerify } from "./ChatOnlyVerify";
+import { readableModelId } from "./providerModelLabel";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -234,9 +235,18 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     props.groups.find((group) => group.instance.id === activeRailId) ??
     (activeRailId === OCTANT_RAIL_ID ? harnessGroups[0] : undefined) ??
     props.groups[0]!;
+  const describedLabel = selectedModelLabel(
+    props.groups,
+    props.selectedProviderInstanceId,
+    props.selectedModelId,
+  );
   const selectedLabel =
-    selectedModelLabel(props.groups, props.selectedProviderInstanceId, props.selectedModelId) ??
-    (props.selectedModelId === undefined ? undefined : String(props.selectedModelId)) ??
+    // A model nobody described carries its own id as its display name.
+    (describedLabel === undefined || describedLabel === String(props.selectedModelId)
+      ? props.selectedModelId === undefined
+        ? undefined
+        : readableModelId(String(props.selectedModelId))
+      : describedLabel) ??
     props.unselectedLabel ??
     selectedGroup?.sections[0]?.models[0]?.model.displayName ??
     selectedGroup?.instance.displayName ??
@@ -411,7 +421,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         key={`${String(group.instance.id)}:${sectionLabel}:${String(modelId)}`}
       >
         <OctantButton
-          aria-label={picker.model.displayName}
+          aria-label={presentedModelName(picker.model)}
           aria-description={detail === "" ? undefined : detail}
           aria-selected={selected}
           className={`composer-model-picker__model${selected ? " composer-model-picker__model--selected" : ""}${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
@@ -442,7 +452,9 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             />
           ) : null}
           <span className="composer-model-picker__model-copy">
-            <span className="composer-model-picker__model-name">{picker.model.displayName}</span>
+            <span className="composer-model-picker__model-name">
+              {presentedModelName(picker.model)}
+            </span>
             {detail === "" ? null : (
               <span className="composer-model-picker__model-detail">{detail}</span>
             )}
@@ -1161,6 +1173,13 @@ function selectedModelLabel(
     if (match !== undefined) return match.model.displayName;
   }
   return group.hiddenCurrent?.model.displayName ?? group.unavailableCurrent?.model.displayName;
+}
+
+/** A model nobody described carries its raw id as its display name. */
+function presentedModelName(model: { readonly id: unknown; readonly displayName: string }): string {
+  return model.displayName === String(model.id)
+    ? readableModelId(model.displayName)
+    : model.displayName;
 }
 
 function readinessStatus(readiness: PickerGroup["readiness"]): string | undefined {

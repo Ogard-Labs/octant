@@ -42,7 +42,7 @@ export function DropdownMenuTrigger({
   return (
     <MenuPrimitive.Trigger
       className={cn(
-        "inline-flex cursor-pointer items-center justify-center rounded-md outline-none",
+        "inline-flex cursor-default items-center justify-center rounded-md outline-none",
         className,
       )}
       data-slot="dropdown-menu-trigger"
@@ -113,7 +113,7 @@ export function DropdownMenuPopup({
 }
 
 const dropdownMenuItemClassName =
-  "relative flex min-h-7.5 cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag";
+  "relative flex min-h-7.5 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag";
 
 export function DropdownMenuPortal(props: ComponentProps<typeof MenuPrimitive.Portal>) {
   return <MenuPrimitive.Portal {...props} />;

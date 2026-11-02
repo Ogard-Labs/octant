@@ -1,3 +1,4 @@
+import { homeRelativePath } from "../lib/homeRelativePath";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -368,7 +369,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                           </span>
                           {entry.rootPath === "" ? null : (
                             <span className="composer-folder-selector__option-path">
-                              {entry.rootPath}
+                              {homeRelativePath(entry.rootPath)}
                             </span>
                           )}
                         </span>
@@ -473,7 +474,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                               // A refused row says why in the path's place, so the row
                               // stays one line; the full reason is also its title.
                               <span className="composer-folder-selector__option-path">
-                                {entry.disabledReason ?? entry.rootPath}
+                                {entry.disabledReason ?? homeRelativePath(entry.rootPath)}
                               </span>
                             ) : null}
                           </span>

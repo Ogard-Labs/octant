@@ -417,7 +417,7 @@ a {
 }
 button {
   font: inherit;
-  cursor: pointer;
+  cursor: default;
 }
 p {
   text-wrap: pretty;
@@ -467,6 +467,77 @@ svg :focus-visible {
 .environment-git-group__state:focus-visible,
 .zen-surface:focus-visible {
   outline: none;
+}
+
+/* Browsers call a focus restored by script, and any focused text field,
+   keyboard focus. So a closed dialog left a ring on the button that opened it
+   and every field wore one the moment it opened, under a person who had only
+   ever used the pointer. The edge stays for whoever is navigating by keyboard;
+   a field keeps its caret and a brighter border. See inputModality.ts. */
+html[data-octant-input="pointer"] :focus-visible {
+  outline: none;
+}
+
+html[data-octant-input="pointer"] [data-slot="input"]:focus-visible,
+html[data-octant-input="pointer"] [data-slot="textarea"]:focus-visible {
+  border-color: var(--octant-border-strong);
+}
+
+/* ─── window manners ────────────────────────────────────────────────────
+   What separates a window from a page. Words in the chrome do not select when
+   the pointer drags across them, controls keep the arrow (the hand is for a
+   real link), and pictures and links do not lift off as drag ghosts. Reading
+   matter opts back in, so a message, a diff, a value, and an error can still be
+   copied. The list is in :where() so any region that says otherwise wins. */
+html {
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+:where(
+  input,
+  textarea,
+  [contenteditable="true"],
+  [contenteditable="plaintext-only"],
+  pre,
+  code,
+  kbd,
+  samp,
+  blockquote,
+  article,
+  td,
+  dd,
+  [role="alert"],
+  [role="log"],
+  [role="status"],
+  [role="note"],
+  [role="article"],
+  [role="document"],
+  .chat-transcript,
+  .chat-rich-text,
+  .code-pr-review__prose,
+  .published-snapshot__markdown,
+  .preview-viewer,
+  .unified-diff,
+  .canvas-block__rich-text,
+  .settings-view__content-inner
+) {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+:where(button, [role="button"], [role="option"], [role="menuitem"], [role="tab"]) {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+:where(a[href]) {
+  cursor: pointer;
+}
+
+:where(img, svg, a) {
+  -webkit-user-drag: none;
 }
 
 /* ─── layout primitives ─────────────────────────────────────────────── */
@@ -984,7 +1055,7 @@ h4 {
 .textarea[disabled],
 .select[disabled] {
   opacity: var(--oct-disabled-opacity);
-  cursor: not-allowed;
+  cursor: default;
 }
 .textarea {
   min-height: 96px;
@@ -1002,7 +1073,7 @@ h4 {
   gap: var(--oct-space-3);
   font-size: var(--oct-text-sm);
   color: var(--oct-fg-2);
-  cursor: pointer;
+  cursor: default;
 }
 .check input {
   position: relative;
@@ -1066,7 +1137,7 @@ input.switch {
   background: var(--oct-border);
   border: 0;
   display: block;
-  cursor: pointer;
+  cursor: default;
   transition: background var(--oct-motion-base) var(--oct-ease-standard);
 }
 /* 22px is the height that reads right beside a line of text, and it is
@@ -1280,7 +1351,7 @@ input.switch:checked::after {
 }
 /* sortable header: the arrow is the affordance, the aria-sort is the truth */
 .datatable th.sortable {
-  cursor: pointer;
+  cursor: default;
 }
 .datatable th.sortable:hover {
   color: var(--oct-fg);
@@ -2284,7 +2355,7 @@ input.switch:checked::after {
   border: 0;
   border-radius: var(--oct-radius-pill);
   background: var(--oct-accent);
-  cursor: pointer;
+  cursor: default;
 }
 .range::-moz-range-thumb {
   width: 16px;
@@ -2292,7 +2363,7 @@ input.switch:checked::after {
   border: 0;
   border-radius: var(--oct-radius-pill);
   background: var(--oct-accent);
-  cursor: pointer;
+  cursor: default;
 }
 
 /* ─── accordion ───────────────────────────────────────────────────────
@@ -2306,7 +2377,7 @@ input.switch:checked::after {
   justify-content: space-between;
   gap: var(--oct-space-4);
   padding: var(--oct-space-4) 0;
-  cursor: pointer;
+  cursor: default;
   list-style: none;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-base);
@@ -2751,7 +2822,7 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   padding: var(--oct-space-2) var(--oct-space-2);
   list-style: none;
-  cursor: pointer;
+  cursor: default;
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
 }
@@ -3455,7 +3526,7 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   padding: var(--oct-space-2) var(--oct-space-2);
   list-style: none;
-  cursor: pointer;
+  cursor: default;
   color: var(--oct-fg-2);
 }
 .suite > summary::-webkit-details-marker {
@@ -7150,7 +7221,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
-  cursor: pointer;
+  cursor: default;
   list-style: none;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -8580,7 +8651,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   gap: var(--oct-space-2);
   min-height: var(--oct-touch-min);
   padding: 0 var(--oct-space-3);
-  cursor: pointer;
+  cursor: default;
   list-style: none;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
