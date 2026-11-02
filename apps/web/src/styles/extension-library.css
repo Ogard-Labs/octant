@@ -108,8 +108,25 @@
 }
 
 /* The lead row has fewer, roomier cards. */
+.library__group--lead {
+  container-type: inline-size;
+}
+
+/* Six cards: columns of 1, 2, 3 or 6 so the last row is never ragged. */
 .library__grid--lead {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 236px), 1fr));
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container (min-width: 480px) {
+  .library__grid--lead {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 720px) {
+  .library__grid--lead {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .library__grid > li {
@@ -212,7 +229,6 @@
 .library__card-action {
   position: relative;
   z-index: 1;
-  margin-left: calc(var(--oct-space-2) * -1);
 }
 
 .library__card-on {
