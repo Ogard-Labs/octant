@@ -10652,12 +10652,13 @@ access` agree); a thread's own change is journaled as
     (`y` or `yes`); any other answer denies the request, and an input that
     ends without an answer leaves it pending for `octant pair approve`. It
     changes no firewall rule and runs no Tailscale command.
-- **Hosted relay.** Accepted 2026-10-26; only its wire contract and pure
-  policy exist, and nothing calls them: a ciphertext-only relay
-  that splices an already-paired app's pinned TLS session to the host, off by
-  default and holding no authority, is specified in [Hosted relay](design/hosted-relay.md);
-  until it lands, the listener and client trust rules above are the whole of
-  remote reachability.
+- **Hosted relay.** Canceled (maintainer decision, 2026-10-30) because hub and
+  spokes covers remote reach. Only its wire contract and pure policy exist, and
+  nothing calls them. The design of a ciphertext-only relay that splices an
+  already-paired app's pinned TLS session to the host stays in
+  [Hosted relay](design/hosted-relay.md) as a record, and it reopens only on
+  written evidence of a reachability gap and a maintainer's request. The
+  listener and client trust rules above are the whole of remote reachability.
 - **Provider keys on a host without the desktop app.** The desktop saves an
   endpoint's API key or bearer token over native IPC from its own renderer,
   so a browser client — local or paired — has no way to save one and names
@@ -12107,7 +12108,7 @@ Windows Work and Code only after an explicitly approved Windows confinement
 design is documented. The following are authorized as post-preview work
 (maintainer decision, 2026-10-26) and are not part of the technical preview:
 mobile maturity (Android internal builds, redacted push, capture and voice,
-public store distribution), a ciphertext-only hosted relay, a full LSP /
+public store distribution), a full LSP /
 extension host / debugger companion, enterprise directory OAuth and cloud-IAM
 provider identity, disposable Linux desktops for headless hosts, third-party
 provider-driver plugins, and the EU/GDPR compliance package (pending legal
