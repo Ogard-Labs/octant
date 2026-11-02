@@ -63,7 +63,7 @@ function header(
       value={{
         client: reader,
         subject: extra.subject ?? subject,
-        onOpenProviders: extra.onOpenProviders,
+        ...(extra.onOpenProviders === undefined ? {} : { onOpenProviders: extra.onOpenProviders }),
       }}
     >
       <ThreadGuardrailLevel
@@ -72,7 +72,7 @@ function header(
         autoSupported
         projectId="82000000-0000-4000-8000-000000000020"
         factsVersion={extra.version ?? 1}
-        factsActivity={extra.activity}
+        {...(extra.activity === undefined ? {} : { factsActivity: extra.activity })}
       />
     </TaskAccessContext>
   );
