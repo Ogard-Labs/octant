@@ -62,6 +62,11 @@ minutes from the handoff or your latest take-over input, then two minutes after
 Continue or Hand back, using whichever deadline is later than the original
 session.
 
+A Work agent can request a Project or Personal profile. Code's separate agent
+adapter currently opens new pages Private and does not yet accept that profile
+argument; the profile controls for pages you open are available in both modes.
+Expiry recovery does not add Code agent profile selection.
+
 ### Browser profiles
 
 A Browser page is **Private** by default: its cookies and site data live in
@@ -107,7 +112,7 @@ parent domains', and leaves every other cookie unread.
 **Clear cookies…** removes a profile's cookies and keeps its other data.
 
 **What the agent may do on a signed-in page.** A Project or Personal page is
-treated as signed in, because Octant cannot tell. The agent can ask for one by
+treated as signed in, because Octant cannot tell. A Work agent can ask for one by
 passing `profile` (`project` or `personal`) when it opens a page. Octant asks
 you first, naming the site and the profile: "Let the agent use github.com in
 the Personal profile?" Choosing **Always allow** remembers that site for that

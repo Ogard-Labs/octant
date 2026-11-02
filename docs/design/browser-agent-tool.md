@@ -29,6 +29,10 @@ asking the agent.
   answer the same way; they differ only in who approves and how a page opens.
 - The always-visible description tells the model to take a snapshot after it
   navigates and to act by ref. The full usage stays behind `help`.
+- Stored-profile selection through `navigate` is currently wired in Work's
+  adapter only. Code's separate adapter still rejects that argument and opens
+  new pages Private; the shared description is not proof that Code selection
+  is built. See [Browser profiles](browser-profiles.md#choosing-a-profile).
 - Every operation runs on the server's admission path: the thread's authority,
   the model binding, the origin approval, Plan mode, the stale check, and the
   credential check. No operation adds authority a page did not already have.

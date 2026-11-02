@@ -2285,7 +2285,7 @@ Status: Built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](br
 
 Browser pages may keep sign-in in a Project or Personal profile. Private remains the default, and extensions are enabled only per profile.
 
-- Private is the default for every page. The agent's own page is Private unless the person approves otherwise.
+- Private is the default for every page. A Work agent may request a Project or Personal profile through site approval; Code's separate agent adapter still opens new pages Private and does not yet accept the profile argument. The person's profile controls are built in both.
 - On a profile page the agent needs a site approval for each origin and profile, for reading too. Credential fields stay protected.
 - Routines, subagents, paired devices and terminal grants are refused on profile pages.
 - An extension is installed and enabled only by a person at a local window. Install never enables, and no agent, plugin or skill can install or enable.
