@@ -826,6 +826,21 @@ describe("the public-block visual language", () => {
     });
   });
 
+  it("never lets the sidebar header's mode tray shrink under its action buttons", () => {
+    // jsdom has no layout, so the rule is pinned in the CSS. The tray shrank to
+    // 38px in a 220-236px sidebar while Home, Search, New, Hide and history
+    // kept their width, and Code painted 18px under Home. The row must wrap
+    // the actions below a tray that keeps its own width instead.
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const rule = (selector: string) =>
+      shell.match(new RegExp(`(?:^|\\n)${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+
+    expect(rule("\\.sidebar__chrome")).toMatch(/flex-wrap:\s*wrap/);
+    const tray = rule("\\.sidebar__chrome \\.modeswitch");
+    expect(tray).toMatch(/flex:\s*1 0 auto/);
+    expect(tray).toMatch(/min-width:\s*min-content/);
+  });
+
   it("keeps Usage on the open grammar instead of stat cards", () => {
     const usage = readFileSync(join(webRoot, "styles/usage.css"), "utf8");
     const dashboard = readFileSync(join(webRoot, "usage/UsageDashboard.tsx"), "utf8");

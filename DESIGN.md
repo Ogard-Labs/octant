@@ -1240,6 +1240,12 @@ Pull requests the pull-request arrow, Linear a checklist, Projects stacked
 folders, Agents a bot, Automations a calendar clock, Artifacts layers, Image
 generator images, Plugins blocks, and the Activity feed a pulse line.
 
+**Sidebar header width.** The mode tray never shrinks. Where the sidebar header
+(modes, Home when no rail stands beside it, Search, New thread, Hide, Back and
+Forward) cannot fit one row, which is the 220-236px sidebar of a 681-960px
+browser window, the actions wrap to a second row under the tray instead of
+sliding beneath it. The first row keeps its place in the title band.
+
 **Usage rings.** Above Settings, at the foot of either rail, each provider
 that reports a plan window with a figure gets a ring in its identity colour
 around its 12px logo:
