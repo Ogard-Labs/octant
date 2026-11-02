@@ -132,6 +132,8 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
           }}
           onSubmit={(event) => {
             event.preventDefault();
+            // Cmd+Return submits past the disabled button, so the guard lives here.
+            if (controller.pending) return;
             const steps = parseSteps(stepText);
             if (title.trim() === "" || steps.length === 0) return;
             const submit = revising ? controller.revise : controller.propose;

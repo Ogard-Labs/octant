@@ -5,11 +5,12 @@
 
 const NAVIGATION_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"]);
 
-function editing(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA")
-  );
+/** Whether this key edits text where it was pressed rather than moving focus. */
+function movesCaret(key: string, target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable || target.tagName === "TEXTAREA") return true;
+  // Up and Down do nothing in a one-line field except leave it for its list.
+  return target.tagName === "INPUT" && key !== "ArrowUp" && key !== "ArrowDown";
 }
 
 /** Publishes how focus last moved on the document element. Returns a function that stops. */
@@ -19,8 +20,10 @@ export function followInputModality(): () => void {
     root.dataset.octantInput = "pointer";
   };
   const onKeyDown = (event: KeyboardEvent) => {
-    // Inside a field the arrows move the caret, not focus.
-    if (event.key === "Tab" || (NAVIGATION_KEYS.has(event.key) && !editing(event.target))) {
+    if (
+      event.key === "Tab" ||
+      (NAVIGATION_KEYS.has(event.key) && !movesCaret(event.key, event.target))
+    ) {
       root.dataset.octantInput = "keyboard";
     }
   };

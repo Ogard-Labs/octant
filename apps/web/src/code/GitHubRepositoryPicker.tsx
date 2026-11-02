@@ -308,6 +308,9 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
                 setQuery(event.target.value);
                 setActiveIndex(undefined);
                 setLinkError(undefined);
+                // A repository still resolving was asked for by the old text.
+                linkGeneration.current += 1;
+                setLinkBusy(false);
               }}
               placeholder="Search, or paste a GitHub link…"
               type="search"

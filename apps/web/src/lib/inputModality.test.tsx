@@ -36,13 +36,21 @@ describe("following how focus last moved", () => {
     expect(document.documentElement.dataset.octantInput).toBe("pointer");
   });
 
-  it("does not read arrow keys in a text field as moving focus", () => {
+  it("does not read moving the caret in a text field as moving focus", () => {
+    const field = document.createElement("input");
+    const notes = document.createElement("textarea");
+    document.body.append(field, notes);
+    window.dispatchEvent(new Event("pointerdown"));
+    press("ArrowLeft", field);
+    press("ArrowDown", notes);
+    expect(document.documentElement.dataset.octantInput).toBe("pointer");
+  });
+
+  it("reads Down in a one-line field as heading for its list", () => {
     const field = document.createElement("input");
     document.body.append(field);
     window.dispatchEvent(new Event("pointerdown"));
-    press("ArrowLeft", field);
-    expect(document.documentElement.dataset.octantInput).toBe("pointer");
-    press("ArrowDown");
+    press("ArrowDown", field);
     expect(document.documentElement.dataset.octantInput).toBe("keyboard");
   });
 });

@@ -210,7 +210,10 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
               {repository.owner}/{repository.name}
             </span>
             <OctantButton
-              onClick={() => setRepository(undefined)}
+              onClick={() => {
+                setRepository(undefined);
+                setQuery("");
+              }}
               size="sm"
               type="button"
               variant="ghost"
