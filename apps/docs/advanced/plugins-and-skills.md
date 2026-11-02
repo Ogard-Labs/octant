@@ -40,13 +40,23 @@ The **Library** shows connectors, plugins, skills and MCP servers together in
 one grid. Search by name or by what it does, narrow by kind, state or
 provider, and open any card to see where it came from, what it can do and
 what it costs in authority (low, medium or high, from the capabilities it
-declares). A card shows how far along it is: not installed, needs trust, off,
-or on. **Trust this source** and **Turn on** are separate clicks, and
-installing never does either for you; a connector is the one exception, since
-you confirm it once and it installs, trusts and turns on together. To install,
-the card opens **Marketplace**, **Connectors** or **Installed**, where you
-review the package first. The Library fetches nothing, and it works with
-**Marketplace fetches** off.
+declares). The page leads with a **Featured** row of connectors picked for
+everyday work, then lists what you have installed, then what you do not by
+category. A card that is not installed offers its next step: **Connect** for a
+connector (**Add key…** when the service issues a key), **Review** for a plugin.
+An installed card shows its state only when that tells you something: needs
+trust, off, blocked, or on. The three dots on a card are its authority level;
+the detail states it in full.
+
+You can finish in the Library. **Connect** installs, trusts and turns on a
+connector together, since you confirm it once, and starts its sign-in or takes
+its key there. For a plugin found in **Marketplace**, **Review before
+installing** shows what it holds, and **Install** only installs it: **Trust
+this source** and **Turn on** are separate clicks, and installing never does
+either for you. Reading a plugin needs **Marketplace fetches** on. The
+Library itself fetches nothing, shows its Featured row with no network, and
+works with **Marketplace fetches** off. Logos are bundled with Octant; a
+connector without a licensed logo shows a two-letter tile.
 
 ### Installed
 

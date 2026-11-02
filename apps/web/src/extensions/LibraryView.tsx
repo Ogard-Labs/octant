@@ -1,8 +1,15 @@
-import type { DiscoveredAgentToolingListing } from "@octant/contracts/extension-rpc";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import type {
+  DiscoveredAgentToolingListing,
+  ExtensionCommandFailure,
+  ExtensionPackagePreview,
+} from "@octant/contracts/extension-rpc";
 import { BookOpen, Check, Puzzle, Search, Server, X } from "lucide-react";
-import { useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { SettingsSection } from "../settings/primitives";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -10,10 +17,17 @@ import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { connectConnector } from "./connectConnector";
+import { CONNECTOR_LOGOS } from "./connectorLogos";
+import { McpServerSignInControl } from "./McpServerSignInControl";
 import {
   ALL_PROVIDERS,
   LIBRARY_KIND_LABEL,
+  abilitiesFor,
+  authorityFor,
+  featuredItems,
   filterLibrary,
+  groupLibrary,
   libraryCounts,
   libraryProviders,
   type AuthorityLevel,
@@ -57,6 +71,14 @@ const HANDOFF_ACTION: Readonly<Record<LibraryHandoff, string>> = {
   installed: "Open in Installed",
 };
 
+/** What a Marketplace item's review is doing, kept by the screen that fetches it. */
+export interface LibraryInspection {
+  readonly itemId: string;
+  readonly status: "loading" | "ready" | "failed";
+  readonly preview?: ExtensionPackagePreview;
+  readonly message?: string;
+}
+
 export interface LibraryViewProps {
   readonly items: ReadonlyArray<LibraryItem>;
   /** The toggle between the views, kept in the section's actions. */
@@ -73,16 +95,53 @@ export interface LibraryViewProps {
   readonly onOpenAccountTools?: () => void;
   readonly onTrust: (item: LibraryItem, trusted: boolean) => void;
   readonly onPluginDesired: (item: LibraryItem, desired: boolean) => void;
+  /** Connects a catalog connector from the Library; without it a connector can only be opened. */
+  readonly connectClient?: Pick<ExtensionClient, "addUserMcpServer" | "mcpServerSignIn">;
+  /** Whether this host keeps keys and runs sign-ins: the Octant window on it. */
+  readonly localHost?: boolean;
+  /** Told after a connector was added, so the installed set is read again. */
+  readonly onConnected?: () => void;
+  /** Reads what a Marketplace item holds; installing waits for it. */
+  readonly onInspect?: (item: LibraryItem) => void;
+  readonly inspection?: LibraryInspection | undefined;
+  /** Installs a reviewed Marketplace item. Installing never trusts or turns it on. */
+  readonly onInstall?: (item: LibraryItem) => void;
+  readonly installing?: boolean;
 }
 
 export type { DiscoveredAgentToolingListing };
+
+/** A connector connected from here, kept until the installed set shows it. */
+interface FreshConnection {
+  readonly extensionId: string | undefined;
+  readonly componentId: string | undefined;
+}
+
+/** Follow an item that changed identity when it was installed or connected. */
+function resolveOpen(
+  items: ReadonlyArray<LibraryItem>,
+  openId: string | undefined,
+): LibraryItem | undefined {
+  if (openId === undefined) return undefined;
+  const exact = items.find((item) => item.id === openId);
+  if (exact !== undefined) return exact;
+  if (openId.startsWith("marketplace:")) {
+    return items.find((item) => item.id === `package:${openId.slice("marketplace:".length)}`);
+  }
+  if (openId.startsWith("connector:")) {
+    const connectorId = openId.slice("connector:".length);
+    return items.find((item) => item.connectorId === connectorId && item.id.startsWith("package:"));
+  }
+  return undefined;
+}
 
 /**
  * One searchable place for everything an agent can be given: connectors,
  * plugins, skills and MCP servers, from the bundled list, the installed set
  * and what was already found. It reads only what is in hand and never
- * fetches; the card shows where an item stands on the ladder from install to
- * trust to on, and the detail says what it can do and what that costs.
+ * fetches. A card says what to do next: connect a connector, review a
+ * plugin, or where an installed one stands; the detail says what it can do
+ * and what that costs, and finishes the job without leaving the page.
  */
 export function LibraryView(props: LibraryViewProps) {
   const ids = useId();
@@ -93,16 +152,91 @@ export function LibraryView(props: LibraryViewProps) {
     provider: ALL_PROVIDERS,
   });
   const [openId, setOpenId] = useState<string>();
+  const [connectingId, setConnectingId] = useState<string>();
+  const [failure, setFailure] = useState<ExtensionCommandFailure>();
+  const [fresh, setFresh] = useState<Readonly<Record<string, FreshConnection>>>({});
   const opener = useRef<HTMLElement | null>(null);
   const counts = useMemo(() => libraryCounts(props.items), [props.items]);
   const providers = useMemo(() => libraryProviders(props.items), [props.items]);
   const shown = useMemo(() => filterLibrary(props.items, filter), [props.items, filter]);
-  const open = props.items.find((item) => item.id === openId);
+  const lead = useMemo(() => featuredItems(shown, filter), [shown, filter]);
+  const groups = useMemo(() => groupLibrary(shown, filter), [shown, filter]);
+  const open = resolveOpen(props.items, openId);
   const filtering =
     filter.query.trim() !== "" ||
     filter.kind !== "all" ||
     filter.state !== "all" ||
     filter.provider !== ALL_PROVIDERS;
+  const canConnect =
+    props.connectClient !== undefined && props.localHost === true && !props.disabled;
+
+  const connect = async (item: LibraryItem, secret?: string): Promise<boolean> => {
+    if (
+      item.connectorId === undefined ||
+      item.connectorAuth === undefined ||
+      item.address === undefined ||
+      props.connectClient === undefined
+    ) {
+      return false;
+    }
+    const entry = {
+      id: item.connectorId,
+      displayName: item.name,
+      url: item.address,
+      auth: item.connectorAuth,
+    };
+    setConnectingId(item.id);
+    setFailure(undefined);
+    const result = await connectConnector(props.connectClient, entry, secret);
+    setConnectingId(undefined);
+    if (result.kind === "failed") {
+      setFailure(result.failure);
+      return false;
+    }
+    setFresh((current) => ({
+      ...current,
+      [entry.id]: { extensionId: result.extensionId, componentId: result.componentId },
+    }));
+    props.onConnected?.();
+    return true;
+  };
+
+  const act = (item: LibraryItem, element: HTMLElement) => {
+    // A connector that needs no key connects in one press; the rest open the
+    // detail, which holds the key field, the review, and the full authority.
+    if (
+      item.kind === "connector" &&
+      item.state === "available" &&
+      item.connectorAuth?.kind !== "key" &&
+      canConnect
+    ) {
+      void connect(item).then((connected) => {
+        if (connected && item.connectorAuth?.kind === "sign-in") {
+          opener.current = element;
+          setOpenId(item.id);
+        }
+      });
+      return;
+    }
+    opener.current = element;
+    setOpenId(item.id);
+  };
+
+  const renderCard = (item: LibraryItem, variant: "lead" | "row") => (
+    <li key={item.id}>
+      <LibraryCard
+        busy={connectingId === item.id}
+        canConnect={canConnect}
+        item={item}
+        onAct={(element) => act(item, element)}
+        onOpen={(element) => {
+          opener.current = element;
+          setOpenId(item.id);
+        }}
+        variant={variant}
+      />
+    </li>
+  );
 
   return (
     <SettingsSection
@@ -194,6 +328,9 @@ export function LibraryView(props: LibraryViewProps) {
             computer.
           </p>
         ) : null}
+        {failure === undefined || open !== undefined ? null : (
+          <OctantAlert tone="warning">{failure.message}</OctantAlert>
+        )}
         {props.loading === true ? (
           <ul aria-label="Loading the library" aria-busy="true" className="library__grid">
             {Array.from({ length: 6 }, (_, index) => (
@@ -227,52 +364,31 @@ export function LibraryView(props: LibraryViewProps) {
             title={filtering ? "Nothing matches" : "Nothing here yet"}
           />
         ) : (
-          groupByKind(shown, filter.kind === "all").map((group) => (
-            <section aria-label={group.label} className="library__group" key={group.key}>
-              {group.label === undefined ? null : (
+          <>
+            {lead.length === 0 ? null : (
+              <section aria-label="Featured" className="library__group library__group--lead">
                 <h3 className="library__group-title">
-                  {group.label} <span className="library__count">{group.items.length}</span>
+                  Featured{" "}
+                  <span className="library__group-note">
+                    Picked for everyday agent work; the list ships with Octant
+                  </span>
                 </h3>
-              )}
-              <ul className="library__grid">
-                {group.items.map((item) => (
-                  <li key={item.id}>
-                    <article className="library__card" data-state={item.state}>
-                      <LibraryMark item={item} />
-                      <span className="library__card-text">
-                        <OctantButton
-                          className="library__open"
-                          onClick={(event) => {
-                            opener.current = event.currentTarget;
-                            setOpenId(item.id);
-                          }}
-                          type="button"
-                          variant="ghost"
-                        >
-                          {item.name}
-                        </OctantButton>
-                        <span className="library__card-source">
-                          {item.category ?? item.source}
-                          {item.provider === "Every provider" ? "" : ` · ${item.provider}`}
-                        </span>
-                        <span className="library__card-summary">{item.summary}</span>
-                      </span>
-                      <span className="library__card-foot">
-                        {item.state === "available" ? (
-                          <span className="library__card-state">{item.stateLabel}</span>
-                        ) : (
-                          <OctantBadge variant={item.state === "on" ? "success" : "secondary"}>
-                            {item.stateLabel}
-                          </OctantBadge>
-                        )}
-                        <AuthorityDots level={item.authority.level} />
-                      </span>
-                    </article>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))
+                <ul className="library__grid library__grid--lead">
+                  {lead.map((item) => renderCard(item, "lead"))}
+                </ul>
+              </section>
+            )}
+            {groups.map((group) => (
+              <section aria-label={group.title} className="library__group" key={group.key}>
+                <h3 className="library__group-title">
+                  {group.title} <span className="library__count">{group.items.length}</span>
+                </h3>
+                <ul className="library__grid">
+                  {group.items.map((item) => renderCard(item, "row"))}
+                </ul>
+              </section>
+            ))}
+          </>
         )}
       </div>
       {open === undefined ? null : (
@@ -281,9 +397,24 @@ export function LibraryView(props: LibraryViewProps) {
             props.busyExtensionId !== undefined &&
             props.busyExtensionId === open.packageRef?.extensionId
           }
+          canConnect={canConnect}
+          connecting={connectingId !== undefined}
+          connectClient={props.connectClient}
+          connectFailure={failure}
           disabled={props.disabled}
+          fresh={open.connectorId === undefined ? undefined : fresh[open.connectorId]}
+          inspection={props.inspection?.itemId === open.id ? props.inspection : undefined}
+          installing={props.installing === true}
           item={open}
-          onClose={() => setOpenId(undefined)}
+          localHost={props.localHost === true}
+          marketplaceFetchesEnabled={props.marketplaceFetchesEnabled}
+          onClose={() => {
+            setOpenId(undefined);
+            setFailure(undefined);
+          }}
+          onConnect={(secret) => connect(open, secret)}
+          onInspect={() => props.onInspect?.(open)}
+          onInstall={() => props.onInstall?.(open)}
           onOpen={(target) => {
             setOpenId(undefined);
             props.onOpen(target, open);
@@ -297,31 +428,107 @@ export function LibraryView(props: LibraryViewProps) {
   );
 }
 
-interface KindGroup {
-  readonly key: string;
-  readonly label: string | undefined;
-  readonly items: ReadonlyArray<LibraryItem>;
+interface LibraryCardProps {
+  readonly item: LibraryItem;
+  readonly variant: "lead" | "row";
+  readonly busy: boolean;
+  readonly canConnect: boolean;
+  readonly onOpen: (element: HTMLElement) => void;
+  readonly onAct: (element: HTMLElement) => void;
 }
 
-function groupByKind(items: ReadonlyArray<LibraryItem>, split: boolean): ReadonlyArray<KindGroup> {
-  if (!split) return [{ key: "all", label: undefined, items }];
-  return KINDS.map((kind) => ({
-    key: kind,
-    label: LIBRARY_KIND_LABEL[kind],
-    items: items.filter((item) => item.kind === kind),
-  })).filter((group) => group.items.length > 0);
+/** What a card offers before anything is installed: the one next step. */
+function cardAction(item: LibraryItem): string | undefined {
+  if (item.state !== "available") return undefined;
+  if (item.kind === "connector") return item.connectorAuth?.kind === "key" ? "Add key…" : "Connect";
+  return "Review";
+}
+
+function LibraryCard(props: LibraryCardProps) {
+  const { item } = props;
+  const action = cardAction(item);
+  return (
+    <article className={`library__card library__card--${props.variant}`} data-state={item.state}>
+      <LibraryMark item={item} large={props.variant === "lead"} />
+      <span className="library__card-text">
+        <OctantButton
+          className="library__open"
+          onClick={(event) => props.onOpen(event.currentTarget)}
+          type="button"
+          variant="ghost"
+        >
+          {item.name}
+        </OctantButton>
+        <span className="library__card-source">
+          {item.category ?? item.source}
+          {item.provider === "Every provider" ? "" : ` · ${item.provider}`}
+        </span>
+        <span className="library__card-summary">{item.summary}</span>
+      </span>
+      <span className="library__card-foot">
+        {action !== undefined ? (
+          <OctantButton
+            aria-label={`${props.busy ? "Connecting" : action} ${item.name}`}
+            className="library__card-action"
+            disabled={props.busy}
+            onClick={(event) => props.onAct(event.currentTarget)}
+            size="sm"
+            type="button"
+            variant={item.kind === "connector" ? "outline" : "ghost"}
+          >
+            {props.busy ? "Connecting…" : action}
+          </OctantButton>
+        ) : item.state === "on" ? (
+          <span className="library__card-on">
+            <Check aria-hidden="true" size={12} strokeWidth={2} />
+            On
+          </span>
+        ) : (
+          <OctantBadge variant="secondary">{item.stateLabel}</OctantBadge>
+        )}
+        <AuthorityDots level={item.authority.level} showWord={item.authority.level === "high"} />
+      </span>
+    </article>
+  );
+}
+
+/** Two letters, so "Stripe", "Sentry" and "Supabase" are three different tiles. */
+export function monogramFor(name: string): string {
+  const words = name.trim().split(/\s+/);
+  const first = words[0] ?? "";
+  const second = words[1];
+  const letters =
+    second === undefined || second === ""
+      ? first.slice(0, 2)
+      : `${first.slice(0, 1)}${second.slice(0, 1)}`;
+  const text = letters === "" ? "?" : letters;
+  return `${text.slice(0, 1).toLocaleUpperCase()}${text.slice(1).toLocaleLowerCase()}`;
 }
 
 export function LibraryMark(props: { readonly item: LibraryItem; readonly large?: boolean }) {
   const { item } = props;
   const size = props.large === true ? 24 : 20;
+  const logo = item.connectorId === undefined ? undefined : CONNECTOR_LOGOS[item.connectorId];
   let mark: ReactNode;
   if (item.providerLogo !== undefined) {
     mark = <ProviderGlyph displayName={item.provider} driverKind={item.providerLogo} size={size} />;
+  } else if (logo !== undefined) {
+    mark = (
+      <svg
+        aria-hidden="true"
+        className="library__logo"
+        focusable="false"
+        height={size}
+        viewBox="0 0 24 24"
+        width={size}
+      >
+        <path d={logo.path} fill="currentColor" />
+      </svg>
+    );
   } else if (item.kind === "connector") {
     mark = (
       <span aria-hidden="true" className="library__monogram">
-        {item.name.slice(0, 1).toLocaleUpperCase()}
+        {monogramFor(item.name)}
       </span>
     );
   } else if (item.kind === "skill") {
@@ -332,13 +539,16 @@ export function LibraryMark(props: { readonly item: LibraryItem; readonly large?
     mark = <Puzzle aria-hidden="true" size={size} strokeWidth={1.5} />;
   }
   return (
-    <span className={`library__mark${props.large === true ? " library__mark--large" : ""}`}>
+    <span
+      className={`library__mark${props.large === true ? " library__mark--large" : ""}`}
+      data-logo={logo === undefined ? "none" : "mark"}
+    >
       {mark}
     </span>
   );
 }
 
-function AuthorityDots(props: { readonly level: AuthorityLevel }) {
+function AuthorityDots(props: { readonly level: AuthorityLevel; readonly showWord?: boolean }) {
   const filled = AUTHORITY_DOTS[props.level];
   return (
     <span
@@ -351,8 +561,12 @@ function AuthorityDots(props: { readonly level: AuthorityLevel }) {
           <span className="library__dot" data-on={n <= filled ? "true" : "false"} key={n} />
         ))}
       </span>
-      <span className="library__authority-label">{AUTHORITY_SHORT[props.level]}</span>
-      <span className="sr-only"> authority</span>
+      {props.showWord === false ? null : (
+        <span className="library__authority-label">{AUTHORITY_SHORT[props.level]}</span>
+      )}
+      <span className="sr-only">
+        {props.showWord === false ? `${AUTHORITY_SHORT[props.level]} authority` : " authority"}
+      </span>
     </span>
   );
 }
@@ -385,7 +599,19 @@ interface LibraryDetailProps {
   readonly item: LibraryItem;
   readonly busy: boolean;
   readonly disabled: boolean;
+  readonly canConnect: boolean;
+  readonly localHost: boolean;
+  readonly connecting: boolean;
+  readonly connectClient: LibraryViewProps["connectClient"];
+  readonly connectFailure: ExtensionCommandFailure | undefined;
+  readonly fresh: FreshConnection | undefined;
+  readonly inspection: LibraryInspection | undefined;
+  readonly installing: boolean;
+  readonly marketplaceFetchesEnabled: boolean;
   readonly onClose: () => void;
+  readonly onConnect: (secret?: string) => Promise<boolean>;
+  readonly onInspect: () => void;
+  readonly onInstall: () => void;
   readonly onOpen: (target: LibraryHandoff) => void;
   readonly onTrust: (trusted: boolean) => void;
   readonly onPluginDesired: (desired: boolean) => void;
@@ -395,9 +621,24 @@ interface LibraryDetailProps {
 function LibraryDetail(props: LibraryDetailProps) {
   const { item } = props;
   const titleId = useId();
+  const hostPlatform = useHostPlatform();
+  const [key, setKey] = useState("");
   const ref = item.packageRef;
   const next = item.steps.trust === "next" ? "trust" : item.steps.enable === "next" ? "enable" : "";
   const locked = props.disabled || props.busy;
+  const available = ref === undefined;
+  const connector = available && item.kind === "connector" && item.connectorId !== undefined;
+  const reviewable = available && item.marketplaceExtensionId !== undefined;
+  const preview = props.inspection?.status === "ready" ? props.inspection.preview : undefined;
+  const capabilities = preview?.review.declaredCapabilities;
+  const authority = capabilities === undefined ? item.authority : authorityFor(capabilities);
+  const abilities = capabilities === undefined ? item.abilities : abilitiesFor(capabilities);
+  const signInComponent = item.mcpComponentId ?? props.fresh?.componentId;
+  const signInExtension = ref?.extensionId ?? props.fresh?.extensionId;
+  const submitKey = (event: FormEvent) => {
+    event.preventDefault();
+    if (key.trim().length > 0) void props.onConnect(key.trim()).then((ok) => ok && setKey(""));
+  };
   return (
     <OctantDialog
       className="library-detail"
@@ -438,7 +679,7 @@ function LibraryDetail(props: LibraryDetailProps) {
         <section aria-label="What it can do">
           <h4 className="library-detail__label">What it can do</h4>
           <ul className="library-detail__list">
-            {item.abilities.map((line) => (
+            {abilities.map((line) => (
               <li key={line}>{line}</li>
             ))}
           </ul>
@@ -446,10 +687,10 @@ function LibraryDetail(props: LibraryDetailProps) {
         <section aria-label="What it costs in authority">
           <h4 className="library-detail__label">What it costs in authority</h4>
           <p className="library-detail__level">
-            <AuthorityDots level={item.authority.level} />
+            <AuthorityDots level={authority.level} />
           </p>
           <ul className="library-detail__list">
-            {item.authority.lines.map((line) => (
+            {authority.lines.map((line) => (
               <li key={line}>{line}</li>
             ))}
           </ul>
@@ -460,7 +701,118 @@ function LibraryDetail(props: LibraryDetailProps) {
           <span className="oct-meta">Address</span> <code>{item.address}</code>
         </p>
       )}
+      {props.inspection?.status === "loading" ? (
+        <p className="library__note" role="status">
+          Reading what it holds…
+        </p>
+      ) : null}
+      {preview === undefined ? null : (
+        <section aria-label="What it holds" className="library-detail__review">
+          <h4 className="library-detail__label">What it holds</h4>
+          <ul className="library-detail__list">
+            {preview.review.components.map((component) => (
+              <li key={component.id}>
+                {component.displayName} <span className="oct-meta">{component.kind}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="library-detail__meta">
+            {preview.review.provenance.publisher === undefined
+              ? ""
+              : `Publisher ${preview.review.provenance.publisher} · `}
+            {preview.review.provenance.reviewed ? "Source reviewed" : "Source not reviewed"}
+          </p>
+          {preview.diagnostics.length === 0 ? null : (
+            <ul className="library-detail__list">
+              {preview.diagnostics.map((diagnostic) => (
+                <li key={diagnostic.code}>{diagnostic.message}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+      {props.inspection?.status === "failed" ? (
+        <OctantAlert tone="warning">
+          {props.inspection.message ?? "It could not be read."}
+        </OctantAlert>
+      ) : null}
+      {props.connectFailure === undefined ? null : (
+        <OctantAlert tone="warning">{props.connectFailure.message}</OctantAlert>
+      )}
+      {item.connectorAuth?.kind === "sign-in" &&
+      props.connectClient !== undefined &&
+      signInComponent !== undefined &&
+      signInExtension !== undefined ? (
+        <div className="library-detail__signin">
+          <McpServerSignInControl
+            autoBegin={props.fresh !== undefined}
+            client={props.connectClient}
+            componentId={signInComponent}
+            disabled={props.disabled}
+            extensionId={signInExtension}
+          />
+        </div>
+      ) : null}
+      {connector && item.connectorAuth?.kind === "key" && props.canConnect ? (
+        <form
+          aria-label={`${item.name} key`}
+          className="library-detail__key"
+          noValidate
+          onSubmit={submitKey}
+        >
+          <OctantInput
+            aria-label="Key"
+            autoComplete="off"
+            onChange={(event) => setKey(event.currentTarget.value)}
+            placeholder="Paste the key"
+            spellCheck={false}
+            type="password"
+            value={key}
+          />
+          <OctantButton disabled={props.connecting || key.trim() === ""} type="submit">
+            {props.connecting ? "Connecting…" : "Connect"}
+          </OctantButton>
+          <span className="oct-meta">
+            Create one at{" "}
+            <a href={item.connectorAuth.keyPage} rel="noreferrer" target="_blank">
+              {new URL(item.connectorAuth.keyPage).host}
+            </a>
+            . Kept in {thisComputerName(hostPlatform)}&apos;s credential store.
+          </span>
+        </form>
+      ) : null}
       <footer className="library-detail__actions">
+        {connector && item.connectorAuth?.kind !== "key" ? (
+          <OctantButton
+            disabled={!props.canConnect || props.connecting}
+            onClick={() => void props.onConnect()}
+            type="button"
+          >
+            {props.connecting ? "Connecting…" : "Connect"}
+          </OctantButton>
+        ) : null}
+        {reviewable && preview === undefined ? (
+          <OctantButton
+            disabled={
+              !props.marketplaceFetchesEnabled ||
+              props.disabled ||
+              props.inspection?.status === "loading"
+            }
+            onClick={props.onInspect}
+            type="button"
+          >
+            Review before installing
+          </OctantButton>
+        ) : null}
+        {reviewable && preview !== undefined ? (
+          <OctantButton
+            disabled={props.installing || props.disabled}
+            onClick={props.onInstall}
+            type="button"
+          >
+            {props.installing ? "Installing…" : "Install"}
+          </OctantButton>
+        ) : null}
         {ref !== undefined && next === "trust" ? (
           <OctantButton disabled={locked} onClick={() => props.onTrust(true)} type="button">
             Trust this source
@@ -471,7 +823,7 @@ function LibraryDetail(props: LibraryDetailProps) {
             Turn on
           </OctantButton>
         ) : null}
-        {ref !== undefined && item.state === "on" ? (
+        {ref !== undefined && item.state === "on" && item.kind !== "connector" ? (
           <OctantButton
             disabled={locked}
             onClick={() => props.onPluginDesired(false)}
@@ -481,24 +833,31 @@ function LibraryDetail(props: LibraryDetailProps) {
             Turn off
           </OctantButton>
         ) : null}
-        {ref === undefined || item.state === "blocked" ? (
-          <OctantButton
-            onClick={() => props.onOpen(item.handoff)}
-            type="button"
-            variant={ref === undefined ? "default" : "outline"}
-          >
+        {available && !connector && !reviewable ? (
+          <OctantButton onClick={() => props.onOpen(item.handoff)} type="button">
             {HANDOFF_ACTION[item.handoff]}
           </OctantButton>
-        ) : (
-          <OctantButton onClick={() => props.onOpen("installed")} type="button" variant="ghost">
+        ) : null}
+        {ref !== undefined ? (
+          <OctantButton
+            onClick={() => props.onOpen("installed")}
+            type="button"
+            variant={item.state === "blocked" ? "outline" : "ghost"}
+          >
             Open in Installed
           </OctantButton>
-        )}
+        ) : null}
       </footer>
       <p className="library-detail__foot oct-meta">
-        {ref === undefined
-          ? "Installing never trusts or turns anything on by itself. You confirm each step, except a connector, which installs, trusts and turns on as one confirmed act."
-          : "Tool calls follow the thread's approval policy, including approvals you chose to remember."}
+        {connector
+          ? props.localHost
+            ? "Connect adds this server to this host, trusts it and turns it on as one act, the only package that does. Tool calls still follow the thread's approval policy."
+            : "Connect from the Octant window on this host; a browser-hosted Settings cannot keep a key or run a sign-in."
+          : reviewable
+            ? "Install only adds it. You trust it and turn it on as separate steps afterwards."
+            : ref === undefined
+              ? "Installing never trusts or turns anything on by itself. You confirm each step, except a connector, which installs, trusts and turns on as one confirmed act."
+              : "Tool calls follow the thread's approval policy, including approvals you chose to remember."}
       </p>
     </OctantDialog>
   );

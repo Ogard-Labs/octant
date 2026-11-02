@@ -57,7 +57,9 @@
 }
 
 .library__select {
-  min-width: 150px;
+  flex: 0 0 auto;
+  width: 160px;
+  min-width: 0;
 }
 
 .library__note {
@@ -73,24 +75,27 @@
 }
 
 .library__group + .library__group {
-  margin-top: var(--oct-space-2);
+  margin-top: var(--oct-space-4);
 }
 
 .library__group-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-1) var(--oct-space-2);
   margin: 0;
-  color: var(--oct-fg-2);
+  color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
 }
 
-.library__count {
+.library__count,
+.library__group-note {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-regular);
+  letter-spacing: normal;
 }
 
 .library__grid {
@@ -102,6 +107,11 @@
   list-style: none;
 }
 
+/* The lead row has fewer, roomier cards. */
+.library__grid--lead {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 236px), 1fr));
+}
+
 .library__grid > li {
   display: grid;
   min-width: 0;
@@ -111,8 +121,7 @@
   position: relative;
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  align-content: start;
+  grid-template-rows: 1fr auto;
   gap: var(--oct-space-3);
   min-width: 0;
   padding: var(--oct-space-4);
@@ -122,26 +131,35 @@
   border-radius: var(--oct-radius-md);
   transition:
     border-color var(--oct-motion-fast) var(--oct-ease-standard),
-    background-color var(--oct-motion-fast) var(--oct-ease-standard);
+    box-shadow var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
+/* Hover lifts the card with a stronger edge and a soft shadow; it never
+   fills it. Pressed sets it back down. */
 .library__card:hover {
-  background: color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg));
-  border-color: color-mix(in oklab, var(--oct-fg) 22%, transparent);
+  border-color: color-mix(in oklab, var(--oct-fg) 28%, transparent);
+  box-shadow: var(--oct-elev-subtle);
 }
 
 .library__card:active {
-  background: color-mix(in oklab, var(--oct-fg) 6%, var(--oct-bg));
+  box-shadow: none;
+  border-color: color-mix(in oklab, var(--oct-fg) 40%, transparent);
+}
+
+.library__card--lead {
+  grid-template-columns: 48px minmax(0, 1fr);
+  box-shadow: var(--oct-elev-subtle);
 }
 
 .library__card-text {
   display: grid;
+  align-content: start;
   gap: 2px;
   min-width: 0;
 }
 
 /* The name is the card's one button; its ::after stretches over the card so
-   the whole card opens, and the hover and pressed states sit on the card. */
+   the whole card opens. The card's own action sits above that layer. */
 .library__open {
   justify-content: flex-start;
   height: auto;
@@ -149,7 +167,7 @@
   padding: 0;
   overflow: hidden;
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-strong);
   line-height: 1.35;
   text-align: left;
   text-overflow: ellipsis;
@@ -172,21 +190,37 @@
 
 .library__card-summary {
   display: -webkit-box;
-  margin-top: var(--oct-space-1);
+  margin-top: var(--oct-space-2);
   overflow: hidden;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
-  line-height: 1.45;
+  line-height: 1.5;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
 .library__card-foot {
+  position: relative;
   display: flex;
   grid-column: 1 / -1;
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-2);
+  min-height: 28px;
+}
+
+.library__card-action {
+  position: relative;
+  z-index: 1;
+  margin-left: calc(var(--oct-space-2) * -1);
+}
+
+.library__card-on {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
 }
 
 .library__card--skeleton {
@@ -217,10 +251,11 @@
   justify-content: center;
   width: 40px;
   height: 40px;
+  align-self: start;
   color: var(--oct-fg);
-  background: color-mix(in oklab, var(--oct-fg) 5%, var(--oct-bg));
+  background: var(--oct-surface-warm);
   border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
 }
 
 .library__mark--large {
@@ -229,9 +264,16 @@
   border-radius: var(--oct-radius-md);
 }
 
+/* A connector with no licensed mark gets a two-letter tile, set a step
+   quieter than a logo so the page never mixes loud and silent tiles. */
+.library__mark[data-logo="none"] {
+  color: var(--oct-fg-2);
+}
+
 .library__monogram {
-  font-size: var(--oct-text-base);
+  font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-snug);
   line-height: 1;
 }
 
@@ -240,7 +282,6 @@
   align-items: center;
 }
 
-.library__card-state,
 .library__authority-label {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
@@ -410,6 +451,14 @@
 }
 
 @media (max-width: 560px) {
+  /* The view switch has five tabs; it scrolls inside the head instead of
+     widening the page past the phone. */
+  .extensions-settings,
+  .extensions-settings__section,
+  .extensions-settings__section > * {
+    min-width: 0;
+  }
+
   .extensions-settings__section .settings-section-head {
     flex-wrap: wrap;
   }
@@ -445,4 +494,29 @@
   display: flex;
   justify-content: flex-end;
   margin-bottom: var(--oct-space-3);
+}
+
+.library__logo {
+  display: block;
+}
+
+.library-detail__review,
+.library-detail__signin {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.library-detail__key {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.library-detail__key > .oct-meta {
+  grid-column: 1 / -1;
+}
+
+.library__group-note::before {
+  content: "· ";
 }

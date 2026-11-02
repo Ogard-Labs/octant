@@ -209,7 +209,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   display: flex;
   align-items: center;
   padding: 0 var(--oct-space-5);
-  border-bottom: 1px solid var(--octant-border-soft);
 }
 
 /* The page head is a preference window's: the title at the section-label

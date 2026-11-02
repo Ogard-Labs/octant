@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectorCatalog, searchConnectorCatalog } from "./connectorCatalog";
+import { connectorCatalog, featuredConnectors, searchConnectorCatalog } from "./connectorCatalog";
 
 describe("the connectors catalog", () => {
   it("names each connector once, at an https address, with a key page for every key entry", () => {
@@ -34,5 +34,13 @@ describe("the connectors catalog", () => {
       auth: { kind: "sign-in" },
     });
     expect(searchConnectorCatalog("doop").map((entry) => entry.id)).toEqual(["doop"]);
+  });
+
+  it("features a small hand-picked set from the bundled list, Doop among them", () => {
+    const featured = featuredConnectors();
+    expect(featured.length).toBeGreaterThanOrEqual(4);
+    expect(featured.length).toBeLessThanOrEqual(8);
+    expect(featured.map((entry) => entry.id)).toContain("doop");
+    expect(featured.some((entry) => entry.auth.kind === "none")).toBe(true);
   });
 });
