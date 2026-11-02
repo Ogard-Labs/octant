@@ -985,6 +985,19 @@ likewise offers the window's Work or Code Project as "This Project": the dock
 names the Project, never a thread, and shows that Project's own page under the
 Project browsing context rule in the same section.
 
+## Project planner
+
+The Code Project overview's **Project planner** section designates an existing
+thread of that Project, shows its current proposals and offers versioned
+approve/decline decisions. Proposal review keeps the exact intent and Project
+fixed while reusing the ordinary provider/model, checkout and access controls.
+The final action says **Approve and start described task**; only confirmed
+creation sends the intent through the normal first-message path. Refused or
+uncertain replies retain the submitted task identity for inspection, with no
+automatic retry or provider turn. A disconnect disables decisions until the
+current host state has been refreshed. Resulting tasks remain reachable from
+approved proposals. See the [Project planner rule](../architecture.md#modes-chat-work-and-code).
+
 ## Local-server ownership
 
 Local-server stop authority recognizes live terminal descendants by a host process

@@ -7,6 +7,162 @@ import { CodeOverview } from "./CodeOverview";
 import type { CodeController } from "./useCodeController";
 
 describe("CodeOverview", () => {
+  it("keeps a stale proposal refused without retrying and disables decisions while disconnected", async () => {
+    const value = controller();
+    const executePlannerProposal = vi.fn(async () => ({
+      status: "refused",
+      reason: "proposal-changed",
+      message: "The proposal changed; reload and retry.",
+    }));
+    value.client = {
+      ...value.client,
+      readPlanner: vi.fn(async () => ({
+        designation: {
+          kind: "none",
+          projectId: ids.project,
+          updatedAt: "2026-11-02T00:00:00.000Z",
+        },
+        designationVersion: 0,
+        proposals: [
+          {
+            proposal: {
+              id: "70000000-0000-4000-8000-000000000003",
+              projectId: ids.project,
+              plannerThreadId: ids.thread,
+              title: "Review parser",
+              intent: "Only the described parser fix.",
+              status: "pending",
+              proposedAt: "2026-11-02T00:00:00.000Z",
+            },
+            proposalVersion: 2,
+          },
+        ],
+      })),
+      executePlannerProposal,
+    } as never;
+    const onCreateThread = vi.fn();
+    const { rerender } = render(
+      <CodeOverview
+        controller={value}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        showQuickStart={false}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    await screen.findByText("Only the described parser fix.");
+    fireEvent.click(screen.getByRole("button", { name: "Decline proposal" }));
+    expect(await screen.findByText("The proposal changed; reload and retry.")).toBeVisible();
+    expect(executePlannerProposal).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Review and approve" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Review and approve" }));
+    expect(await screen.findByRole("dialog", { name: "Approve planner proposal" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+      "Only the described parser fix.",
+    );
+    expect(screen.getByRole("button", { name: "Approve and start described task" })).toBeDisabled();
+    expect(
+      screen.getByText("Choose an available provider and model before approving this task."),
+    ).toBeVisible();
+    expect(onCreateThread).not.toHaveBeenCalled();
+    rerender(
+      <CodeOverview
+        controller={{ ...value, status: "disconnected" }}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        showQuickStart={false}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Decline proposal", hidden: true })).toBeDisabled();
+    expect(executePlannerProposal).toHaveBeenCalledTimes(1);
+    const readPlanner = value.client.readPlanner;
+    if (readPlanner === undefined) throw new Error("Expected planner fixture");
+    const snapshot = await readPlanner(ids.project as never);
+    const reconnect = Promise.withResolvers<typeof snapshot>();
+    vi.mocked(readPlanner).mockReturnValueOnce(reconnect.promise);
+    rerender(
+      <CodeOverview
+        controller={value}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        showQuickStart={false}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Decline proposal", hidden: true })).toBeDisabled();
+    reconnect.resolve(snapshot);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Decline proposal", hidden: true })).toBeEnabled(),
+    );
+  });
+
+  it("lets a person designate a same-Project planner and decline the exact current proposal", async () => {
+    const value = controller();
+    const proposalId = "70000000-0000-4000-8000-000000000001";
+    const executePlanner = vi.fn(async () => ({ status: "designated" }));
+    const executePlannerProposal = vi.fn(async () => ({ status: "declined" }));
+    value.client = {
+      ...value.client,
+      readPlanner: vi.fn(async () => ({
+        designation: {
+          kind: "none",
+          projectId: ids.project,
+          updatedAt: "2026-11-02T00:00:00.000Z",
+        },
+        designationVersion: 4,
+        proposals: [
+          {
+            proposal: {
+              id: proposalId,
+              projectId: ids.project,
+              plannerThreadId: ids.thread,
+              title: "Describe the next task",
+              intent: "Review the parser and fix the stale branch check.",
+              status: "pending",
+              proposedAt: "2026-11-02T00:00:00.000Z",
+            },
+            proposalVersion: 3,
+          },
+        ],
+      })),
+      executePlanner,
+      executePlannerProposal,
+    } as never;
+    render(
+      <CodeOverview
+        controller={value}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        showQuickStart={false}
+      />,
+    );
+    expect(await screen.findByRole("heading", { name: "Project planner" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Designate planner" }));
+    await waitFor(() =>
+      expect(executePlanner).toHaveBeenCalledWith({
+        kind: "designate-code-planner-thread",
+        projectId: ids.project,
+        threadId: ids.thread,
+        expectedVersion: 4,
+      }),
+    );
+    expect(screen.getByText("Review the parser and fix the stale branch check.")).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Decline proposal" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Decline proposal" }));
+    await waitFor(() =>
+      expect(executePlannerProposal).toHaveBeenCalledWith({
+        kind: "decline-planner-work-proposal",
+        proposalId,
+        expectedVersion: 3,
+      }),
+    );
+  });
+
   it("renders only authoritative thread, checkout, policy, and delivery facts", () => {
     const onOpenReview = vi.fn();
     const onOpenSurface = vi.fn();

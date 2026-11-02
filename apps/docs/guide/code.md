@@ -34,6 +34,28 @@ the same sandbox and approvals as anything else you type there. If the terminal
 is already running a program, the command goes to that program, so stop it
 first. Actions are set from this computer's window, not from a paired device.
 
+## Project planner
+
+Open a Code Project overview and find **Project planner**. Choose an existing
+thread in that Project and select **Designate planner**. Open that thread to ask
+it to survey the Project and propose work. Designation does not let it start
+tasks by itself; you can remove the designation at any time.
+
+The overview lists each proposal's exact task, explanation and status. Choose
+**Decline proposal**, or **Review and approve** to choose the provider/model,
+checkout and access for the described work. The task text and Project stay fixed.
+**Approve and start described task** creates its ordinary Code thread and sends
+that exact first message only after the host confirms creation. **Open created
+task** returns to its work. If its first turn fails, the task retains the prompt
+and refusal so you can recover there.
+
+Reconnect or refresh before making another decision when the host is unavailable
+or a proposal changed. A lost reply can mean a task was already created: Octant
+inspects its submitted identity and reports uncertainty instead of creating a
+second copy or sending a first message. Check that task before retrying. Planner
+designation and decisions use this computer's local window; no phone or CLI
+planner controls are added.
+
 ## Quick tools on the start screen
 
 Once you choose a Project on a Code start screen, **Terminal** and **Browser**

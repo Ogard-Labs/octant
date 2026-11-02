@@ -2455,15 +2455,14 @@ enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
 until all three exist; a standing grant never substitutes for the per-act
 approval.
 
-**The Project planner thread is a server-only capability.** A Code Project may
+**The Project planner thread proposes work for a person to review.** A Code Project may
 designate one of its own Code threads as its planner, whose agent surveys the
 Project's board and proposes new Code threads for a person to accept. The
 server, contracts, domain policy (`@octant/domain/code-planner-policy`), and
-the client-runtime transport implement it; no renderer, phone, or CLI surface
-designates a planner, lists proposals, or resolves them, and the shell does not
-advertise it. Because nothing in the shell designates a planner, no thread
-receives the planner tools in ordinary use. Any later surface must keep the
-rules below:
+client-runtime transport implement it. The Code Project overview's **Project
+planner** section lets a person designate an existing same-Project thread,
+inspect proposals, remove the designation and approve or decline. Phone and CLI
+designation or resolution are not added. The rules are:
 
 - **Routes.** `GET /api/code/planner/:projectId` returns the designation, its
   version, and the proposals; it needs only the authenticated window's access
@@ -2488,6 +2487,26 @@ rules below:
 - **Resolution.** Only a person confirms or declines. A confirm creates its
   thread through the ordinary Code creation command, inside the proposal's own
   Project only; the planner has no creation authority of its own.
+- **Review and execution.** The overview shows the proposal's title, exact
+  intent, rationale and current status. **Review and approve** opens the ordinary
+  Code creation controls for provider/model, checkout and access, with the Project
+  and proposal text fixed. **Approve and start described task** sends the current
+  proposal version and ordinary creation command, then starts the exact intent
+  as the first message only after confirmed creation, through the normal thread
+  authority path. An unavailable selected provider prevents approval. Created
+  tasks remain reachable from the proposal; a failed first turn remains on its
+  created task with the prompt and refusal for explicit recovery.
+- **Freshness and uncertainty.** The overview refreshes proposals and designation
+  on entry, reconnect and after decisions; disconnected, failed or stale review
+  state cannot submit another decision. Commands use the displayed aggregate
+  version and never retry automatically. Reads and decision replies have a
+  thirty-second wait bound; a timeout does not prove cancellation. Creation may
+  precede a concurrent-decline refusal or a lost reply, so the renderer preserves
+  the submitted thread id and reads that task before reporting the outcome. If
+  found, it opens for inspection with an explicit notice that this approval sent
+  no first message. A refusal or uncertain response never starts a provider
+  turn, never creates a replacement task and never grants planner execution
+  authority. The list bounds rendered history to fifty proposals, pending first.
 
 **Routines (Automation Center).** A routine is a host-owned, Project-bound
 definition that starts an ordinary Work or Code thread with a fixed task prompt

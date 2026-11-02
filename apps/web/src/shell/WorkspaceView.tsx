@@ -550,6 +550,7 @@ export interface WorkspaceViewProps {
   readonly onDraftCreateCodeThread?: (
     input: import("../code/composer/CodeComposerAdapter").CodeComposerSubmitInput,
     projectId?: ProjectId,
+    plannerReview?: import("../code/plannerProposalCreation").PlannerProposalReview,
   ) => boolean | void | Promise<boolean | void>;
   /**
    * Records a Code Project's remembered new-thread workspace habit
@@ -2123,9 +2124,9 @@ function renderNonCodeTab(
                     const thread = props.codeController.bootstrap?.threads.find(
                       (candidate) => candidate.id === threadId,
                     );
-                    if (thread !== undefined) {
-                      props.onOpenCodeThread(thread.id, thread.title, thread.projectId);
-                    }
+                    // A planner result can precede the navigation refresh.
+                    // The host still resolves this id and its Project on open.
+                    props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
                   }}
                   projectId={project.id}
                   projectName={project.name}
