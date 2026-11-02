@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -53,6 +53,91 @@ async function store(options: { readonly secrets?: ProviderCredentialStore } = {
 }
 
 describe("MCP servers added by hand", () => {
+  it("adds Paper as a local HTTP package without running its CLI or requesting OAuth", async () => {
+    const { store: servers, registry } = await store();
+    const { source } = await servers.add({
+      name: "Paper",
+      localSetupId: "paper",
+      server: {
+        type: "streamable-http",
+        url: "http://127.0.0.1:29979/mcp",
+        headers: [],
+      },
+    });
+    const folder = registry.get(source.sourceRef)?.absolutePath ?? "";
+    expect(JSON.parse(await readFile(join(folder, "plugin.json"), "utf8"))).toMatchObject({
+      name: "local-paper",
+    });
+    const mcp = await readFile(join(folder, "mcp.json"), "utf8");
+    expect(mcp).toContain("http://127.0.0.1:29979/mcp");
+    expect(mcp).not.toContain("command");
+    expect(mcp).not.toContain("Authorization");
+    expect(servers.localSetupId(source.sourceRef)).toBe("paper");
+    expect(
+      await servers.signInAddress(
+        {
+          source,
+          components: [
+            {
+              component: {
+                id: "mcp-paper" as never,
+                kind: "mcp-server",
+                displayName: "Paper",
+                declaredCapabilities: ["mcp"],
+              },
+            },
+          ],
+        },
+        "mcp-paper",
+        async () => {
+          throw new Error("Local Paper setup must not enter OAuth discovery.");
+        },
+      ),
+    ).toBeUndefined();
+    // An older hand-added package could already have used the newly reserved slug.
+    await writeFile(
+      join(folder, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          Paper: {
+            type: "streamable-http",
+            url: "https://different.example/mcp",
+            headers: {},
+          },
+        },
+      }),
+    );
+    await registry.register(folder);
+    expect(servers.owns(source.sourceRef)).toBe(true);
+    expect(servers.localSetupId(source.sourceRef)).toBeUndefined();
+  });
+
+  it("refuses to attribute other addresses, commands or credentials to the Paper setup", async () => {
+    const { store: servers } = await store();
+    for (const server of [
+      { type: "streamable-http" as const, url: "https://paper.example/mcp", headers: [] },
+      {
+        type: "streamable-http" as const,
+        url: "http://127.0.0.1:29979/mcp",
+        headers: [{ name: "Authorization", value: "secret", secret: true }],
+      },
+      { type: "stdio" as const, command: "paper", args: ["mcp"], env: [] },
+    ])
+      await expect(
+        servers.add({ name: "Paper", localSetupId: "paper", server }),
+      ).rejects.toMatchObject({ category: "invalid" });
+    await expect(
+      servers.add({
+        name: "local-paper",
+        server: {
+          type: "streamable-http",
+          url: "https://other.example/mcp",
+          headers: [],
+        },
+      }),
+    ).rejects.toMatchObject({ category: "invalid" });
+  });
+
   it("writes a package whose secret value is only a reference, and fills it in at launch", async () => {
     const secrets = secretsStore();
     const { store: servers, registry } = await store({ secrets });

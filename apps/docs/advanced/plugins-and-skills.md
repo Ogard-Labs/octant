@@ -377,6 +377,33 @@ Extension packages by the service's name, as **Connector**. **Hide** keeps
 an entry out of sight on this computer; **Show hidden** brings them back.
 Connecting works only from the Octant window on this host.
 
+### Paper Desktop
+
+In the **Library**, search for **Paper**, choose **Set up…**, read the local
+access notice, then choose **Add local server**. This adds Paper through the
+same installed-package flow as Add MCP server, with its local address
+`http://127.0.0.1:29979/mcp`. No hosted connector or OAuth sign-in is required.
+Keep Paper Desktop running with a file open on the same host. Installation
+alone does not check whether that file or its tools are available.
+
+Paper recommends the CLI installed by Paper Desktop: copy its absolute path
+from Paper's MCP panel and use the argument `mcp`. The CLI can expose its tool
+list even when Desktop is closed; actual reads and writes still require
+Desktop and an open file. Octant's confined app-managed command runtime does
+not grant Desktop access, so this Library setup explicitly uses Paper's
+still-supported local HTTP path. It does not run the CLI or widen its sandbox.
+If `paper` is not on your PATH, this local-address setup still works without
+the CLI. For a provider's own native MCP setup, use Paper's copied executable
+path rather than guessing a global installation path.
+
+If tools are unavailable, open Desktop and a file, then retry in your task.
+Restart the agent session if that provider needs to reload its tool list; keep
+the existing task and draft. A Desktop-closed or no-file condition is not
+inferred from installation or a tool list. Trust, turning on, selecting the
+server and the task's usual tool permissions still apply. Turn off or remove
+the package in **Installed** to stop offering its tools. See
+[Paper's current setup instructions](https://paper.design/docs/mcp).
+
 ### Sign in to a hosted server
 
 A server you added by its address can ask you to sign in instead of taking a

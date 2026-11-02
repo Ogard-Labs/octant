@@ -8227,7 +8227,7 @@ them. The card never claims more than the activation ladder would grant.
 
 **Library.** Settings › Skills & Extensions opens on the Library, one
 searchable grid over connectors, plugins, skills and MCP servers. It is a
-projection: it joins the bundled connector list, the installed extension
+projection: it joins the bundled connector list and local Paper setup, the installed extension
 snapshot, the Marketplace results a person already searched for in this
 session, and the read-only local look at what Claude Code and Codex already
 have, and it adds no read of its own, so opening it fetches nothing and the
@@ -8305,6 +8305,45 @@ sight on this computer and Show hidden brings every entry back; that
 preference lives in the renderer's storage, since it changes nothing on the
 host. Connecting works only from the Octant window on the host, like Add
 MCP server.
+
+**Local Paper setup.** Paper is a local MCP server, separate from the hosted
+connector catalog. The Library includes one bundled setup entry that adds an
+ordinary generated user-added package at `http://127.0.0.1:29979/mcp`, with
+no headers or OAuth. The add request carries `localSetupId: paper`; the host
+accepts only that exact loopback address without credentials and reserves the
+`local-paper` slug. The host computes its `localSetupId` only from its generated-package registry
+and the exact stored MCP configuration, and strips every package-supplied
+claim. An older hand-added package with that name and a different address
+therefore never impersonates it. The local
+window confirms adding, trusting and enabling through the existing Add MCP
+server flow. Project/task selection, effective activation, provider capability
+and ordinary MCP approvals remain authoritative; discovery or setup grants no
+extra authority. Opening the Library does not start Paper, run a command,
+contact its local server or read a document.
+
+Paper's official setup documentation, reviewed 2026-11-02, recommends its
+Desktop-installed CLI: copy the absolute executable path from Paper's MCP
+panel and pass `mcp` as the argument. That CLI can list tools while Desktop is
+closed, but reads and writes require Desktop running with a file open. Octant's
+app-managed stdio runtime has no network/Desktop grant, changes HOME to plugin
+data, and refuses launcher scripts; this slice does not relax those boundaries
+or claim native CLI compatibility. The Library therefore explicitly selects
+Paper's still-supported local HTTP path, which Paper serves while a file is
+open. A person configuring a provider's own native MCP setup may use the
+vendor-recommended CLI under that provider's existing authority instead. If the
+CLI is unavailable, the local HTTP setup does not need it. No hosted OAuth
+endpoint or client registration is a prerequisite.
+
+Installation is not a readiness check: the Library says the connection is
+unchecked and guides the person to open Desktop and a file, then retry in their
+task, restarting the agent session when the provider needs to reload tools.
+An unavailable component keeps its actual activation/policy reason; the view
+never guesses whether Desktop is closed or a file is missing. The vendor does
+not document distinct protocol errors for those states, so this setup performs
+no document-reading tool call or invented CLI status probe. Actual native
+Desktop/file recovery and a representative tool read/write require the native
+environment and remain separate acceptance evidence. Source:
+[Paper MCP documentation](https://paper.design/docs/mcp).
 
 **Sign-in to a hosted server.** A user-added server reached over Streamable
 HTTP shows Sign in under its component in Settings. The host decides which

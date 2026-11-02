@@ -913,6 +913,8 @@ export const ExtensionPackageState = Schema.Struct({
    * its own record of the folders it wrote, never from the package.
    */
   addedInSettings: Schema.optional(Schema.Literal(true)),
+  /** Host-verified local setup identity; never trusted from a package claim. */
+  localSetupId: Schema.optional(Schema.Literal("paper")),
   compatibility: ExtensionCompatibility,
   activation: ExtensionActivationState,
   /**

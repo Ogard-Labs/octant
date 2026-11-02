@@ -149,6 +149,8 @@ export const UserAddedMcpServerRequest = Schema.Struct({
    * it, so the package stays recognizable whatever its display name is.
    */
   connectorId: Schema.optional(boundedText(64)),
+  /** A bundled local setup; never a hosted OAuth connector. */
+  localSetupId: Schema.optional(Schema.Literal("paper")),
   server: Schema.Union(
     Schema.Struct({
       type: Schema.Literal("stdio"),
