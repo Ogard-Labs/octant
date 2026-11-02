@@ -459,11 +459,9 @@ export function ReviewPage(props: ReviewPageProps) {
               ),
             })}
         onBack={props.onClose}
-        subtitle={
-          count === 0
-            ? "Finished threads you have not opened, oldest first."
-            : `${String(count)} finished ${count === 1 ? "thread" : "threads"} you have not opened, oldest first.`
-        }
+        {...(count === 0
+          ? {}
+          : { detail: `${String(count)} finished ${count === 1 ? "thread" : "threads"}` })}
         title="To review"
       />
       <section

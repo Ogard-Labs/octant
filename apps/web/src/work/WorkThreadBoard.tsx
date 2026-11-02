@@ -173,7 +173,6 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
   return (
     <Surface ariaLabel="Thread board" className="code-board" measure="wide">
       <SurfaceHeader
-        subtitle="Your threads by status."
         title="Board"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />

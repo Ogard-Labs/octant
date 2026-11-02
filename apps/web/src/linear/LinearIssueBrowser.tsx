@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { failureMessage } from "../lib/failureMessage";
 import { ShellState } from "../shell/ShellState";
+import { SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -180,21 +181,10 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
       className="linear-issues"
       data-narrow={props.isNarrow === true ? "true" : "false"}
     >
-      <header className="code-board__header">
-        <div className="code-board__identity">
-          <h1 className="code-board__title">Linear</h1>
-          <p className="code-board__subtitle">
-            Read-only issues from the connected Linear workspace.
-          </p>
-        </div>
-        <div className="linear-issues__actions">
-          {props.onClose === undefined ? null : (
-            <OctantButton onClick={props.onClose} size="sm" type="button" variant="ghost">
-              Back to workspace
-            </OctantButton>
-          )}
-        </div>
-      </header>
+      <SurfaceHeader
+        title="Linear"
+        {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
+      />
 
       <div className="linear-issues__toolbar">
         <label className="linear-issues__search">

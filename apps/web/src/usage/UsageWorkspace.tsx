@@ -190,7 +190,7 @@ function RecordedUsageWorkspace(
             </>
           }
           {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
-          subtitle={`Operational token attribution for this host, in ${VIEWING_TIME_ZONE}.`}
+          detail={`Times in ${VIEWING_TIME_ZONE}`}
           title="Usage"
         />
 

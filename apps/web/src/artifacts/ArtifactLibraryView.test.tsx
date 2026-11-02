@@ -234,6 +234,27 @@ describe("the artifact gallery", () => {
     expect(screen.getByText(/Showing 2 of 500/)).toBeInTheDocument();
   });
 
+  it("shows only the empty line before anything is made, with no filters to frame it", () => {
+    view({
+      filters: { tab: "by-project", query: "" },
+      listing: { ...listing, entries: [], matchCount: 0 } as ArtifactLibraryListing,
+    });
+
+    expect(screen.getByRole("status")).toHaveClass("surface-empty");
+    expect(screen.queryByLabelText("Search artifacts")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Artifact groups" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the filters over an empty result, as the way out of it", () => {
+    view({
+      filters: { tab: "all", query: "nothing matches" },
+      listing: { ...listing, entries: [], matchCount: 0 } as ArtifactLibraryListing,
+    });
+
+    expect(screen.getByRole("status")).toHaveClass("surface-empty");
+    expect(screen.getByLabelText("Search artifacts")).toBeVisible();
+  });
+
   it("uses the shared empty state and offers a way back when nothing is shared", async () => {
     const user = userEvent.setup();
     const { onFiltersChange } = view({

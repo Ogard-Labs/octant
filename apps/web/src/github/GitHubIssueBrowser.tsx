@@ -440,7 +440,6 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
   return (
     <Surface ariaLabel="GitHub issues" className="github-issue-browser" measure="wide">
       <SurfaceHeader
-        subtitle="Read-only GitHub issues from any repository this host can reach."
         title="Issues"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />

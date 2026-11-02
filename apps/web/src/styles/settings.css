@@ -238,18 +238,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   flex: 0 0 auto;
 }
 
-/* The section labels' size and tracking in primary ink: one step above them,
-   never the 28px page-title role. */
-.settings-view__title {
-  margin: 0;
-  color: var(--octant-text-primary);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.35;
-}
-
 /* One line: a longer description ends in an ellipsis (its full text is the
    tooltip) and the scope mark stays in view after it. */
 .settings-view__description {

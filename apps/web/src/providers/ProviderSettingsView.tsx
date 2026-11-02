@@ -361,8 +361,8 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
     if (ok) setAddAccount(undefined);
     return ok;
   };
-  // The settings shell already renders the pane's `.oct-title` and
-  // `.oct-subtitle`; repeating an identity heading here read as three titles
+  // The settings shell already renders the pane's title and description;
+  // repeating an identity heading here read as three titles
   // in a row, so the pane goes straight to the person's providers and their
   // Defaults. Finding more providers and Octant's own OpenCode copy follow:
   // the OpenCode box used to open the page, above the providers it serves.

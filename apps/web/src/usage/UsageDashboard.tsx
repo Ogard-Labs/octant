@@ -247,9 +247,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
 
   return (
     <section aria-busy={refreshing} aria-label="Usage dashboard" className="usage-dashboard">
-      {props.showHeading === false ? null : (
-        <SurfaceHeader subtitle="Activity and usage across providers." title="Usage" />
-      )}
+      {props.showHeading === false ? null : <SurfaceHeader title="Usage" />}
 
       <div className="surface-toolbar">
         <OctantButton

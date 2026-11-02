@@ -180,7 +180,6 @@ export function InboxView(props: InboxViewProps) {
     <Surface ariaLabel="Inbox" measure="wide">
       <SurfaceHeader
         onBack={props.onClose}
-        subtitle="What is waiting on you, across every mode."
         title="Inbox"
         {...(externalSectionsPresent
           ? {

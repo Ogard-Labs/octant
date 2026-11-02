@@ -38,7 +38,6 @@ export function ImageLibraryView(props: ImageLibraryViewProps) {
                 />
               ),
             })}
-        subtitle="Generate images with an image profile and keep them on this host."
         title="Image generator"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />

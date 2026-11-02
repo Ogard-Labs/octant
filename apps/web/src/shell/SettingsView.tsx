@@ -679,7 +679,7 @@ export function SettingsView(props: SettingsViewProps) {
             <div className="settings-view__page-head" hidden={subPage !== undefined}>
               <header className="settings-view__header">
                 <div className="settings-view__header-text">
-                  <h1 className="settings-view__title" id="settings-heading">
+                  <h1 className="oct-page-title" id="settings-heading">
                     {currentSectionLabel}
                   </h1>
                   {/* The page scope stands in for every matching row's own mark,

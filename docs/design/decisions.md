@@ -1835,7 +1835,7 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 
 - Colour is the default and applies to everyone: a blue accent, amber warning, red failure, green success, coloured count tiles, board marks and connector marks. Colour never stands alone: a state also has a shape or a word. The Mono style draws the grey look; plain empty, loading and informational messages stay neutral in both.
 - The four count destinations carry their hues wherever they show: icons in the rail, tiles when a wide window has no rail, and plain rows (icon in the hue, no fill) at 960px and narrower, the rail's own breakpoint. The title band and the rail are both 44px.
-- Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the page title is bold.
+- Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the large title is bold.
 - Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style.
 - Counts and token figures use English separators whatever the system locale; dates and times follow the locale.
 - Copy about where something runs says "this Mac" only when the host reports macOS, and uses neutral words ("this computer", "credential store") otherwise. The window's own platform never decides it.
@@ -1860,6 +1860,7 @@ Every list, board, reader and preference page is one `Surface`. Settings groups 
 
 - A setting lives on the page of the thing it changes, and a moved setting keeps answering links to its old page.
 - A page names its scope once, under its title. A page header holds one creation action and Back; filters sit in the toolbar.
+- A destination opens on one toolbar row at the Settings page title's size, pinned while the body scrolls, with an icon Back at the leading edge that does not move on press. It carries no description; its one line of detail is only a fact that changes and that a person needs. An empty page is the empty state alone, centred, with search and filters back once there is something to search.
 - Background refresh preserves loaded controls and active drafts; status slots are bounded so a changed status never pushes the form below it.
 
 Status: Built. Since: —. Detail: [DESIGN.md: Page shell](../../DESIGN.md#page-shell) and [Settings stability](../../DESIGN.md#settings-stability).

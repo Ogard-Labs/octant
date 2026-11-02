@@ -88,6 +88,11 @@ export function ArchiveView(props: ArchiveViewProps) {
       .sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
   }, [chatArchive, projectFilter, props.entries]);
 
+  // A filter over nothing frames the one empty line in controls that cannot
+  // change it. Once a filter is chosen it stays, as the way out of its result.
+  const nothingArchived =
+    chatArchive.kind !== "loading" && projectFilter === ALL_PROJECTS && entries.length === 0;
+
   const projectNames = useMemo(
     () => new Map(props.projects.map((project) => [project.id, project.name])),
     [props.projects],
@@ -95,27 +100,25 @@ export function ArchiveView(props: ArchiveViewProps) {
 
   return (
     <Surface ariaLabel="Archive" measure="wide">
-      <SurfaceHeader
-        onBack={props.onClose}
-        subtitle="Threads kept out of active navigation."
-        title="Archive"
-      />
-      <div className="surface-toolbar">
-        <OctantSelectField
-          aria-label="Filter archive by Project"
-          className="w-auto min-w-48"
-          onValueChange={(value) => setProjectFilter(value)}
-          options={[
-            { id: ALL_PROJECTS, label: "All Projects" },
-            { id: UNFILED, label: "Unfiled" },
-            ...props.projects.map((project) => ({
-              id: project.id,
-              label: project.name,
-            })),
-          ]}
-          value={projectFilter}
-        />
-      </div>
+      <SurfaceHeader onBack={props.onClose} title="Archive" />
+      {nothingArchived ? null : (
+        <div className="surface-toolbar">
+          <OctantSelectField
+            aria-label="Filter archive by Project"
+            className="w-auto min-w-48"
+            onValueChange={(value) => setProjectFilter(value)}
+            options={[
+              { id: ALL_PROJECTS, label: "All Projects" },
+              { id: UNFILED, label: "Unfiled" },
+              ...props.projects.map((project) => ({
+                id: project.id,
+                label: project.name,
+              })),
+            ]}
+            value={projectFilter}
+          />
+        </div>
+      )}
 
       {chatArchive.kind === "loading" && props.entries.length === 0 ? (
         <ShellState

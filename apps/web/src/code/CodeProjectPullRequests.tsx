@@ -340,7 +340,6 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   return (
     <Surface ariaLabel="Pull requests" measure="wide">
       <SurfaceHeader
-        subtitle="Active open and draft pull requests from connected Code Projects."
         title="Pull requests"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />

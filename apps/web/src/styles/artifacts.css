@@ -47,6 +47,22 @@
   margin-bottom: var(--oct-space-6);
 }
 
+/* An empty library sits in the middle of the page, as any empty page does. */
+.surface__inner:has(> .artifact-library > .surface-empty) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.artifact-library:has(> .surface-empty) {
+  flex: 1 1 auto;
+}
+
+.artifact-library > .surface-empty {
+  flex: 1 1 auto;
+  align-content: center;
+}
+
 .artifact-library__search {
   display: flex;
   align-items: center;
