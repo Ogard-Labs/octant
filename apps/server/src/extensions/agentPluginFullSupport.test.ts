@@ -1412,6 +1412,131 @@ describe("Agent Plugin MCP session manager", () => {
     expect(manager.sessions()).toEqual([]);
   });
 
+  it("discards an expired HTTP session and discovers its replacement only on a later authorized reconciliation", async () => {
+    const fixture = await httpRecoveryFixture();
+    try {
+      fixture.restart();
+      expect(await fixture.invoke()).toMatchObject({ isError: true });
+      expect(
+        fixture.manager.toolDefinitionsFor(fixture.packageId, "mcp-local", fixture.effective.scope),
+      ).toEqual([]);
+      expect(fixture.manager.failedComponents()).toHaveLength(1);
+      expect(fixture.initializations()).toBe(1);
+      expect(await fixture.invoke()).toMatchObject({ isError: true });
+      expect(fixture.initializations()).toBe(1);
+      expect(fixture.calls()).toBe(1);
+      expect(await fixture.invoke("sibling")).not.toHaveProperty("isError", true);
+      await fixture.manager.reconcile(fixture.effective);
+      expect(fixture.initializations()).toBe(2);
+      expect(fixture.calls()).toBe(1);
+      expect(fixture.effects()).toBe(0);
+      expect(await fixture.invoke()).not.toHaveProperty("isError", true);
+      expect(fixture.effects()).toBe(1);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it.each(["lost-response", "body-loss"] as const)(
+    "never replays a completed side effect after %s",
+    async (failure) => {
+      const fixture = await httpRecoveryFixture();
+      try {
+        fixture.failNext(failure);
+        expect(await fixture.invoke()).toMatchObject({ isError: true });
+        expect(fixture.effects()).toBe(1);
+        expect(fixture.calls()).toBe(1);
+        expect(
+          fixture.manager.toolDefinitionsFor(
+            fixture.packageId,
+            "mcp-local",
+            fixture.effective.scope,
+          ),
+        ).toEqual([]);
+        await fixture.manager.reconcile(fixture.effective);
+        expect(fixture.initializations()).toBe(2);
+        expect(fixture.effects()).toBe(1);
+        expect(fixture.calls()).toBe(1);
+        expect(await fixture.invoke()).not.toHaveProperty("isError", true);
+        expect(fixture.effects()).toBe(2);
+        expect(fixture.calls()).toBe(2);
+      } finally {
+        await fixture.cleanup();
+      }
+    },
+  );
+
+  it("keeps a replacement HTTP session when an older in-flight call is aborted later", async () => {
+    const fixture = await httpRecoveryFixture();
+    const controller = new AbortController();
+    let pending: ReturnType<typeof fixture.invoke> | undefined;
+    try {
+      fixture.failNext("held-response");
+      pending = fixture.invoke("local", controller.signal);
+      await vi.waitFor(() => expect(fixture.calls()).toBe(1));
+      fixture.restart();
+      expect(await fixture.invoke()).toMatchObject({ isError: true });
+      await fixture.manager.reconcile(fixture.effective);
+      expect(fixture.initializations()).toBe(2);
+      controller.abort();
+      expect(await pending).toMatchObject({ isError: true });
+      expect(fixture.manager.failedComponents()).toEqual([]);
+      expect(
+        fixture.manager.toolDefinitionsFor(fixture.packageId, "mcp-local", fixture.effective.scope),
+      ).toHaveLength(1);
+      expect(await fixture.invoke()).not.toHaveProperty("isError", true);
+      expect(fixture.effects()).toBe(2);
+    } finally {
+      controller.abort();
+      await pending?.catch(() => undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it("keeps a working HTTP session after an application-level tool refusal", async () => {
+    const fixture = await httpRecoveryFixture();
+    try {
+      fixture.failNext("application-error");
+      expect(await fixture.invoke()).toMatchObject({ isError: true });
+      expect(fixture.manager.failedComponents()).toEqual([]);
+      await fixture.manager.reconcile(fixture.effective);
+      expect(fixture.initializations()).toBe(1);
+      expect(await fixture.invoke()).not.toHaveProperty("isError", true);
+      expect(fixture.effects()).toBe(1);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it.each(["untrusted", "component-disabled"] as const)(
+    "does not reconnect an expired HTTP session after it becomes %s",
+    async (reason) => {
+      const fixture = await httpRecoveryFixture();
+      try {
+        fixture.restart();
+        expect(await fixture.invoke()).toMatchObject({ isError: true });
+        await fixture.manager.reconcile({
+          ...fixture.effective,
+          packages: fixture.effective.packages.map((pkg) => ({
+            ...pkg,
+            components: pkg.components.map((component) =>
+              String(component.component.id) === "mcp-local"
+                ? { ...component, effectiveState: { kind: "blocked" as const, reason } }
+                : component,
+            ),
+          })),
+        });
+        expect(await fixture.invoke()).toMatchObject({ isError: true });
+        expect(fixture.initializations()).toBe(1);
+        expect(fixture.calls()).toBe(1);
+        expect(fixture.effects()).toBe(0);
+        expect(await fixture.invoke("sibling")).not.toHaveProperty("isError", true);
+      } finally {
+        await fixture.cleanup();
+      }
+    },
+  );
+
   it("times out MCP tool calls and closes the underlying transport", async () => {
     let toolCallAborted = false;
     const fetchImpl = (async (_input, init) => {
@@ -2391,3 +2516,159 @@ describe("Agent Plugins MCP protocol headers", () => {
     await session.close();
   });
 });
+
+/** A stateful HTTP server fixture: a restart forgets only its MCP session, not a completed write. */
+async function httpRecoveryFixture() {
+  const directory = await mkdtemp(join(tmpdir(), "octant-http-recovery-"));
+  const sessionIds = new Map<string, string>();
+  const initializations = new Map<string, number>();
+  const calls = new Map<string, number>();
+  const effects = new Map<string, number>();
+  let nextFailure: "none" | "lost-response" | "body-loss" | "application-error" | "held-response" =
+    "none";
+  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+    const server = String(input).endsWith("/sibling") ? "sibling" : "local";
+    if (init?.method === "DELETE") return new Response(null, { status: 204 });
+    const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string; id?: number };
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "initialize") {
+      const count = (initializations.get(server) ?? 0) + 1;
+      initializations.set(server, count);
+      sessionIds.set(server, `${server}-session-${count}`);
+      return Response.json(
+        {
+          jsonrpc: "2.0",
+          id: body.id,
+          result: {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            serverInfo: { name: server, version: "1" },
+          },
+        },
+        { headers: { "mcp-session-id": sessionIds.get(server) ?? "" } },
+      );
+    }
+    if (body.method === "tools/list")
+      return Response.json({
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { tools: [{ name: "write", inputSchema: { type: "object" } }] },
+      });
+    calls.set(server, (calls.get(server) ?? 0) + 1);
+    if (new Headers(init?.headers).get("mcp-session-id") !== sessionIds.get(server))
+      return new Response("unknown session", { status: 404 });
+    const failure = server === "local" ? nextFailure : "none";
+    if (server === "local") nextFailure = "none";
+    if (failure === "application-error")
+      return Response.json({
+        jsonrpc: "2.0",
+        id: body.id,
+        error: { code: -32602, message: "Invalid tool arguments" },
+      });
+    effects.set(server, (effects.get(server) ?? 0) + 1);
+    if (failure === "held-response")
+      return new Promise<Response>((_resolve, reject) => {
+        const finish = () => {
+          clearTimeout(timeout);
+          init?.signal?.removeEventListener("abort", finish);
+          reject(new DOMException("Held HTTP response was aborted", "AbortError"));
+        };
+        const timeout = setTimeout(finish, 5_000);
+        init?.signal?.addEventListener("abort", finish, { once: true });
+        if (init?.signal?.aborted) finish();
+      });
+    if (failure === "lost-response")
+      throw new TypeError("Response lost after server committed the write");
+    if (failure === "body-loss")
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(
+              new TypeError("Response stream lost after server committed the write"),
+            );
+          },
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    return Response.json({
+      jsonrpc: "2.0",
+      id: body.id,
+      result: { content: [{ type: "text", text: "write complete" }] },
+    });
+  }) as typeof fetch;
+  const manager = new AgentPluginMcpSessionManager({
+    store: {
+      contentRoot: () => directory,
+      pluginDataRoot: () => directory,
+      readVerifiedConfiguration: async () =>
+        JSON.stringify({
+          $schema: AGENT_PLUGINS_MCP_SCHEMA,
+          mcpServers: {
+            local: { type: "streamable-http", url: "https://example.test/local" },
+            sibling: { type: "streamable-http", url: "https://example.test/sibling" },
+          },
+        }),
+    },
+    fetch: fetchImpl,
+    authorizeToolCall: async () => true,
+    recordExternalContentIngestion: () => ({
+      kind: "recorded",
+      taint: { externalContentIngested: true, ingestedSources: ["mcp-tool"] },
+    }),
+  });
+  const single = effectiveMcpSnapshot("mcp-local", "local", {
+    mode: "chat",
+    threadId: "15000000-0000-4000-8000-000000000003" as never,
+  });
+  const effective: ExtensionEffectiveSnapshot = {
+    ...single,
+    packages: single.packages.map((pkg) => {
+      const local = pkg.components[0];
+      if (local === undefined) throw new Error("Recovery fixture has no local component.");
+      return {
+        ...pkg,
+        components: [
+          local,
+          {
+            ...local,
+            component: { ...local.component, id: "mcp-sibling" as never, displayName: "sibling" },
+          },
+        ],
+      };
+    }),
+  };
+  await manager.reconcile(effective);
+  const packageId = String(effective.packages[0]?.packageId);
+  const names = new Map(
+    ["local", "sibling"].map((server) => [
+      server,
+      manager.toolDefinitionsFor(packageId, `mcp-${server}`, effective.scope)[0]?.name ??
+        "missing-tool",
+    ]),
+  );
+  return {
+    manager,
+    effective,
+    packageId,
+    restart: () => {
+      sessionIds.delete("local");
+    },
+    failNext: (failure: typeof nextFailure) => {
+      nextFailure = failure;
+    },
+    initializations: () => initializations.get("local") ?? 0,
+    calls: () => calls.get("local") ?? 0,
+    effects: () => effects.get("local") ?? 0,
+    invoke: (server = "local", signal?: AbortSignal) =>
+      manager.createToolExecutionPort().execute({
+        thread: { id: String(effective.scope.threadId) },
+        name: names.get(server) ?? "missing-tool",
+        inputJson: "{}",
+        ...(signal === undefined ? {} : { signal }),
+      }),
+    cleanup: async () => {
+      await manager.drainAll();
+      await rm(directory, { recursive: true, force: true });
+    },
+  };
+}
