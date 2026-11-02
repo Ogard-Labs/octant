@@ -96,7 +96,6 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
   return (
     <Surface ariaLabel="Projects" className="projects-directory" landmark="nav" measure="wide">
       <SurfaceHeader
-        subtitle="Every Project you have added, across all modes."
         title="Projects"
         {...(actions === undefined ? {} : { actions })}
         {...(props.onBack === undefined ? {} : { onBack: props.onBack })}

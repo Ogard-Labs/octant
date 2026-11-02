@@ -2,8 +2,8 @@
    Surface language: one page shell, one type hierarchy, one composer welcome.
 
    Every list, board, reader, and preference page in the renderer is a
-   "surface". A surface has a header (title, one-line subtitle, actions),
-   an optional toolbar, and sections separated by hairlines. Nothing here
+   "surface". A surface has a one-row header (Back, title, actions), an
+   optional toolbar, and sections separated by hairlines. Nothing here
    paints a control; adapters own controls. This file owns the
    hierarchy the marketing site and the app share (DESIGN.md "Language").
    ───────────────────────────────────────────────────────────────────────── */
@@ -13,17 +13,23 @@
      `.surface--wide`. */
   --oct-surface-measure: 880px;
   --oct-surface-gutter: 24px;
+  /* A window toolbar's row: the 28px rail button with 6px either side. */
+  --oct-surface-header-h: 40px;
+  /* Where the header pins in its scroller. The workspace layer moves it below
+     the window controls that float over its first rail. */
+  --oct-surface-header-top: 0px;
   /* The one size between metadata (12) and body (14). Row descriptions,
      subtitles, and menu details use it; nothing uses 11.5 or 12.5. */
   --oct-text-detail: calc(13 * var(--oct-text-step));
 }
 
 /* ── Type roles ─────────────────────────────────────────────────────────
-   Five roles cover every heading and label. Weight is 500 by default and
-   700 only for the page title and the welcome greeting it grows into;
+   Six roles cover every heading and label. Weight is 500 by default and
+   700 only for the large title and the welcome greeting it grows into;
    uppercase and letter-spaced eyebrows are not part of the language. The
-   title is large on purpose: at 20px a page had no clear top, and the
-   hierarchy fell to the hairlines. */
+   large title is for a page about one thing (a Project, a thread under
+   review). A destination or Settings page is a place the sidebar already
+   named, so it takes the smaller page title on a toolbar's row. */
 
 .oct-title {
   margin: 0;
@@ -42,12 +48,19 @@
   line-height: 1.1;
 }
 
-.oct-subtitle {
+/* The section labels' size and tracking in primary ink: one step above them.
+   Destinations and Settings share it, so the two page heads cannot drift. */
+.oct-page-title {
   margin: 0;
-  color: var(--oct-muted);
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  line-height: 1.45;
-  text-wrap: pretty;
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .oct-section-label {
@@ -103,8 +116,21 @@
 .surface__inner {
   width: min(100% - var(--oct-surface-gutter) * 2, var(--oct-surface-measure));
   min-width: 0;
-  padding: 28px 0 64px;
+  padding: 0 0 64px;
   margin: 0 auto;
+}
+
+/* A page with nothing on it centres its one line in the room under the
+   header, the way an empty window does. */
+.surface__inner:has(> .surface-empty) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.surface__inner > .surface-empty {
+  flex: 1 1 auto;
+  align-content: center;
 }
 
 .surface--wide > .surface__inner {
@@ -112,26 +138,76 @@
   max-width: none;
 }
 
+/* A toolbar, not a page heading: it stays in place while the body scrolls
+   under it. It takes a fill only once something is under it, so at rest the
+   page's ground runs unbroken behind the title. The fill is opaque because the
+   sheet's own colour is 8% white under Glass, and Glass ignores backdrop-filter
+   in the packaged window, so rows read straight through a band of it. The
+   bleed carries the fill across the gutters. */
 .surface-header {
   /* Surface chrome is navigation, like the sidebar: a drag across the header,
      its actions or a section label must not select words. Fields opt back in
      below, so a search box stays usable. */
   user-select: none;
   -webkit-user-select: none;
+  position: sticky;
+  z-index: 2;
+  top: var(--oct-surface-header-top);
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--oct-space-4);
-  margin: 0 0 var(--oct-space-5);
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  min-height: var(--oct-surface-header-h);
+  margin: 0 calc(var(--oct-surface-gutter) * -1) var(--oct-space-3);
+  padding: var(--oct-space-1) var(--oct-surface-gutter);
+  animation: surface-header-fill linear both;
+  animation-range: 0 8px;
+  animation-timeline: scroll(nearest block);
+}
+
+@keyframes surface-header-fill {
+  to {
+    background-color: var(--octant-workspace, var(--oct-bg));
+  }
+}
+
+/* A browser without scroll timelines cannot tell when to fill, so it always does. */
+@supports not (animation-timeline: scroll()) {
+  .surface-header {
+    background-color: var(--octant-workspace, var(--oct-bg));
+  }
+}
+
+/* The glyph, not the button's empty corner, sits on the content's left edge. */
+.surface-header__back {
+  width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
+  flex: 0 0 auto;
+  margin-inline-start: -6px;
+}
+
+/* A press shows in the fill. The icon button's shared press shrinks it and the
+   recipe's sinks it, and a control that moves under the pointer reads as web. */
+.surface-header .surface-header__back:active {
+  transform: none;
+  translate: none;
 }
 
 .surface-header__copy {
-  display: grid;
-  /* Actions wrap before the title and subtitle shrink to a word per line. */
-  flex: 1 1 320px;
+  display: flex;
+  /* Actions wrap to their own row before the title shrinks to a word. */
+  flex: 1 1 160px;
   min-width: 0;
-  gap: var(--oct-space-1);
+  align-items: baseline;
+  gap: var(--oct-space-2);
+}
+
+.surface-header__detail {
+  overflow: hidden;
+  min-width: 0;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .surface-header__actions {
@@ -142,7 +218,6 @@
   flex: 0 0 auto;
   align-items: center;
   gap: var(--oct-space-2);
-  padding-top: 2px;
 }
 
 /* Filters, search, and view switches sit on one row under the header. The

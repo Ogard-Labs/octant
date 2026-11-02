@@ -125,7 +125,6 @@ export function AgentsCenter(props: AgentsCenterProps) {
   return (
     <Surface ariaLabel="Agents" className="agents-center" measure="wide">
       <SurfaceHeader
-        subtitle="Child runs across Chat, Work, and Code."
         title="Agents"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />

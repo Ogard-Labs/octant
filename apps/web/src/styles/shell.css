@@ -2048,10 +2048,29 @@ html[data-octant-native-host="true"]
   }
 
   /* The window controls float over the workspace's first rail. A reader
-     page's title and its Back to workspace action started inside that rail
-     and crowded the controls, so the page starts below it. */
-  .shell-frame .primary-workspace-layer .surface__inner {
-    padding-top: calc(var(--oct-title-rail-h) + var(--oct-space-6));
+     page's header started inside that rail and crowded the controls, so the
+     page starts below it and its header pins there. */
+  .shell-frame .primary-workspace-layer :is(.surface__inner, .linear-issues) {
+    --oct-surface-header-top: var(--oct-title-rail-h);
+    padding-top: var(--oct-title-rail-h);
+  }
+
+  /* The page scrolls under the title band, which belongs to the window frame.
+     With the header pinned below that band, a row scrolled past the header
+     came out again above it, over the window controls. */
+  .shell-frame
+    .primary-workspace-layer
+    > :is(
+      .inbox-layer,
+      .review-layer,
+      .code-board-layer,
+      .archive-layer,
+      .artifact-library-layer,
+      .automation-center-layer,
+      .agents-center-layer,
+      .projects-page-layer
+    ) {
+    clip-path: inset(var(--oct-title-rail-h) 0 0 0);
   }
 
   /* The pane header does not share the traffic lights' compact centreline,

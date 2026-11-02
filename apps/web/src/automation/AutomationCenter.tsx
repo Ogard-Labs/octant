@@ -256,7 +256,6 @@ export function AutomationCenter(props: AutomationCenterProps) {
   return (
     <Surface ariaLabel="Automations" className="automation-center" measure="wide">
       <SurfaceHeader
-        subtitle="Recurring and event-driven Work and Code threads."
         title="Automations"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />

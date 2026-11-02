@@ -32,7 +32,7 @@ describe("surface language", () => {
     for (const role of [
       ".oct-title {",
       ".oct-title--hero {",
-      ".oct-subtitle {",
+      ".oct-page-title {",
       ".oct-section-label {",
       ".oct-row-label {",
       ".oct-row-detail {",
@@ -68,6 +68,18 @@ describe("surface language", () => {
     expect(surface).toContain(".surface-empty {");
     expect(component.match(/Back to workspace/g)).toHaveLength(1);
     expect(component).not.toContain(">Close<");
+  });
+
+  it("gives destinations and Settings one page title, and a Back that does not move on press", () => {
+    const surface = read("styles/surface.css");
+    const title = surface.match(/\.oct-page-title \{[^}]*\}/)?.[0] ?? "";
+    expect(title).toContain("font-size: var(--oct-text-sm);");
+    expect(title).toContain("font-weight: var(--oct-weight-strong);");
+    expect(read("surface/SurfaceHeader.tsx")).toContain('className="oct-page-title"');
+    expect(read("shell/SettingsView.tsx")).toContain('<h1 className="oct-page-title"');
+    const press = surface.match(/\.surface-header__back:active \{[^}]*\}/)?.[0] ?? "";
+    expect(press).toContain("transform: none;");
+    expect(press).toContain("translate: none;");
   });
 
   it("keeps sidebar and menu labels in sentence case", () => {

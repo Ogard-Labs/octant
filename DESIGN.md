@@ -89,7 +89,7 @@ but they do not own a second palette or visual language.
   does. Where a thread's provider has no reviewer, a thread set to Auto reads
   "Ask first" and says why; Full access says it has no sandbox and no
   prompts.
-- **One sentence of help.** A subtitle or row description is one sentence
+- **One sentence of help.** A section note or row description is one sentence
   that says what the thing does. Longer explanations move to the docs.
 - **Numbers read in English.** Counts, sizes, and token figures use the
   English separators whatever the system locale ("1,024", "4.1k"), because
@@ -139,11 +139,11 @@ nothing essential sits under 12px at the default. The roles live in
 | Role          | Size | Weight | Leading | Colour      | Where                                                                                                   |
 | ------------- | ---- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------- |
 | Hero          | 26   | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width) |
-| Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens); Settings pages use a compact head  |
+| Title         | 28   | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)   |
+| Page title    | 14   | 600    | 1.35    | primary     | A destination or Settings page, on a toolbar's row (`oct-page-title`)                                   |
 | Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label                     |
 | Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option                                                                          |
 | Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                          |
-| Subtitle      | 14   | 400    | 1.45    | secondary   | The one line under a page title (`oct-subtitle`)                                                        |
 | Detail        | 13   | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                         |
 | Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                                                                  |
 | Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                 |
@@ -153,8 +153,8 @@ for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
 labels, controls, and every name in navigation (thread titles, sidebar rows,
 Settings sections), so a name stands apart from the facts under it by weight
 rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
-card titles, counts, `strong`, the app's name), and 700 (`--oct-weight-title`)
-only for the page title. The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
+card titles, counts, `strong`, the app's name, a destination's page title), and
+700 (`--oct-weight-title`) only for the large title. The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
 `heavy-weight` finding and ratchets it against the baseline.
 
@@ -286,7 +286,7 @@ Every list, board, reader, and preference page is a `Surface`:
 
 ```
 Surface (reading measure 880px, or wide for boards)
-  SurfaceHeader   title · one-line subtitle · actions · Back to workspace
+  SurfaceHeader   one toolbar row: Back · title · detail · actions
   surface-toolbar search takes the slack · filters · view switch
   SurfaceSection  section label over a hairline
     surface-row   label + detail on the left, control on the right
@@ -294,22 +294,40 @@ Surface (reading measure 880px, or wide for boards)
                   for the next step; not a card
 ```
 
-The header holds the title, one sentence of subtitle, and actions on the
-right: a labelled secondary button for the page's one creation action ("Add
-Project", "New artifact"), then Back. A count belongs in the subtitle, never
-in the title. Filters, including a single Project picker, sit in the toolbar
-under the header, never among the actions, where a wide field wrapped Back
-onto a second line. A page empty state carries the destination's own sidebar
-icon at 20px, and its next step (Clear filters, Add an image profile) is the
-outline button; a page whose next step lives in Settings names the page by
-its rail label.
+The header is a window toolbar, not a page heading: one 40px row at the Settings
+page title's size (`oct-page-title`, 14px, weight 600). The sidebar row already
+named the page, so the header does not describe it. It holds Back, the title,
+and actions at the trailing edge: a labelled secondary button for the page's one
+creation action ("Add Project", "New artifact") or a Refresh. Its one line of
+detail, in the meta ink on the title's line, is only for a fact that changes and
+that a person needs: a count ("3 finished threads"), a time zone. A count
+belongs there, never in the title. A sentence about what the page is for is not
+detail. Filters, including a single Project picker, sit in the toolbar under the
+header, never among the actions, and actions that do not fit wrap to a second
+row rather than squeezing the title.
 
-Leaving a reader route is always the ghost "Back to workspace" control in the
-header. The destination pages the sidebar and its More menu reach (Inbox,
-Board, Pull requests, Projects, Agents, Automations, Artifacts, Image
-generator, Archive, To review) share one frame: the wide measure, so the title, subtitle, and Back
-control sit on the same left and right edges from page to page. A list there
-runs the frame's width; a board's columns may use all of it. Settings is the same shell with a 920px measure and its own
+The header stays in place while the body scrolls under it. At rest it has no fill,
+so the page's ground runs unbroken behind the title; once a row passes beneath it
+takes the opaque workspace colour, under Glass too, so a row never reads through. The page's scroller
+stops at the title band, so a row never comes out above the header.
+
+A page with nothing on it is the empty state alone under that header, centred
+in the room left: no hero and no explanation around it. A page empty state
+carries the destination's own sidebar icon at 20px, and its next step (Clear
+filters, Add an image profile) is the outline button; a page whose next step
+lives in Settings names the page by its rail label. Search, filters and tabs
+show only once there is something to search or filter, and a chosen filter stays
+as the way out of its own empty result.
+
+Leaving a reader route is always the header's Back: a 28px ghost icon control at
+the leading edge, its glyph on the content's left edge, named "Back to
+workspace" for assistive technology and as its tooltip. A press shows in the
+fill; the control neither sinks nor shrinks. The destination pages the sidebar
+and its More menu reach (Inbox, Board, Issues, Linear, Pull requests, Projects,
+Agents, Automations, Artifacts, Image generator, Archive, To review) share one
+frame: the wide measure, so Back, the title, and the actions sit on the same left
+and right edges from page to page. A list there runs the frame's width; a board's
+columns may use all of it. Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. The groups are General (General, Profile,
 Notifications), Look & feel (Appearance, Sidebar, Keybindings), Modes (each
@@ -356,8 +374,9 @@ error instead of retaining another integration's account controls.
 - **Page header.** Compact, as in a preference window: the selected rail row
   already names the page, and search is always in view. There is no
   breadcrumb above it and no icon tile. The page title is the h1, the only
-  heading that names the page, at the section-label scale (14px, weight 600,
-  primary ink), not the 28px `.oct-title`. Under it sits at most one line of
+  heading that names the page, in the page title role every destination uses
+  (`.oct-page-title`: the section-label scale, 14px, weight 600, primary ink).
+  Under it sits at most one line of
   description in the secondary ink: a longer one ends in an ellipsis with its
   full text as the tooltip, and the page scope follows outside the ellipsis.
   An optional ghost action sits at the far edge (Appearance's "Reset to
@@ -1155,7 +1174,7 @@ Static type tokens in `octant.css` are:
   `calc(N * var(--oct-text-step))`, so the 12px floor for meta text is one
   definition.
 - `--oct-text-lg: 17px`, `--oct-text-xl: 20px`, `--oct-text-2xl: 26px`,
-  `--oct-text-3xl: 36px`, `--oct-text-4xl: 72px`. The page title's 28px is the
+  `--oct-text-3xl: 36px`, `--oct-text-4xl: 72px`. The large title's 28px is the
   `oct-title` role's own size, not `--oct-text-2xl`.
 - Body leading `1.5`, snug `1.3`, heading `1.14`, tight `1.1`, code `1.7`.
 - Weights are the ladder in [Scale](#scale). Avoid bolding whole paragraphs.

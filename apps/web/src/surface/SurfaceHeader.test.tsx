@@ -19,18 +19,35 @@ describe("Surface", () => {
     const onBack = vi.fn();
     render(
       <Surface ariaLabel="Inbox">
-        <SurfaceHeader
-          onBack={onBack}
-          subtitle="What is waiting on you, across every mode."
-          title="Inbox"
-        />
+        <SurfaceHeader onBack={onBack} title="Inbox" />
       </Surface>,
     );
 
     expect(screen.getByRole("region", { name: "Inbox" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Inbox" })).toHaveClass("oct-title");
+    expect(screen.getByRole("heading", { level: 1, name: "Inbox" })).toHaveClass("oct-page-title");
     screen.getByRole("button", { name: "Back to workspace" }).click();
     expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("opens on one toolbar row: Back leads, then the title, and actions take the trailing edge", () => {
+    render(
+      <SurfaceHeader
+        actions={<button type="button">Refresh</button>}
+        detail="3 finished threads"
+        onBack={vi.fn()}
+        title="To review"
+      />,
+    );
+
+    const back = screen.getByRole("button", { name: "Back to workspace" });
+    const heading = screen.getByRole("heading", { level: 1, name: "To review" });
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    expect(back.compareDocumentPosition(heading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(heading.compareDocumentPosition(refresh)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // The name is the tooltip too, because the control shows only a glyph.
+    expect(back).toHaveAttribute("title", "Back to workspace");
+    expect(back).not.toHaveTextContent("Back");
+    expect(screen.getByText("3 finished threads")).toHaveClass("oct-meta");
   });
 
   it("keeps boards on the full width while lists keep the reading measure", () => {

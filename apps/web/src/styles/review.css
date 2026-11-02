@@ -26,6 +26,13 @@
   font-size: var(--oct-text-xs);
 }
 
+/* The keys are a hint, and a hint that wraps doubles the page's toolbar. */
+@media (max-width: 1200px) {
+  .review-legend {
+    display: none;
+  }
+}
+
 .review-legend__item {
   display: inline-flex;
   align-items: center;
@@ -62,8 +69,10 @@
 
 .review-list {
   position: sticky;
-  top: var(--oct-space-4);
-  max-height: calc(100vh - var(--oct-space-12));
+  top: calc(var(--oct-surface-header-top) + var(--oct-surface-header-h) + var(--oct-space-3));
+  max-height: calc(
+    100vh - var(--oct-surface-header-top) - var(--oct-surface-header-h) - var(--oct-space-12)
+  );
   overflow: auto;
 }
 

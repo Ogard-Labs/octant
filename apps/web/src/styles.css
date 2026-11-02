@@ -6692,8 +6692,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
    columns and cards from the design system (.board, .board-col, .board-card,
    .st, .fact in octant.css). The shared board card/list details now live in
    board.css; this file keeps the app-specific frame around them — filter
-   popovers and code-board interaction details. The .code-board__header rules
-   stay for the issue browsers, which still draw their own title band. */
+   popovers and code-board interaction details. */
 .code-board-layer {
   position: absolute;
   inset: 0;
@@ -6708,37 +6707,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   place-items: center;
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
-}
-
-.code-board__header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
-  width: min(calc(100% - 32px), 1120px);
-  padding: var(--oct-space-5) 0 var(--oct-space-3);
-  margin: 0 auto;
-}
-
-.code-board__identity {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: var(--oct-space-1) 8px;
-  min-width: 0;
-}
-
-.code-board__title {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
-  color: var(--oct-fg);
-}
-
-.code-board__subtitle {
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
 }
 
 .code-board__status-filter {
@@ -7147,14 +7115,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 /* Narrow viewports collapse the board into a vertically-scrolled grouped
    list; wide but zoomed viewports keep the horizontal kanban columns. */
 @media (max-width: 560px) {
-  .code-board__header {
-    padding: var(--oct-space-4) var(--oct-space-4) 8px;
-  }
-
-  .code-board__subtitle {
-    display: none;
-  }
-
   .code-board__search {
     order: 1;
     flex: 1 1 100%;
@@ -7414,18 +7374,17 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   gap: 12px;
   height: 100%;
   min-height: 0;
-  padding: var(--oct-space-5) clamp(16px, 3vw, 32px) 32px;
+  --oct-surface-gutter: clamp(16px, 3vw, 32px);
+  padding: 0 var(--oct-surface-gutter) 32px;
   margin: 0 auto;
   overflow: auto;
 }
 
-.linear-issues > .code-board__header {
+.linear-issues > .surface-header {
+  flex: 0 0 auto;
   margin-bottom: 0;
-  padding-bottom: var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border);
 }
 
-.linear-issues__actions,
 .linear-issues__filters,
 .linear-issues__meta {
   display: flex;

@@ -100,6 +100,16 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
     filters.projectId !== undefined ||
     filters.mode !== undefined ||
     filters.tag !== undefined;
+  // With nothing made yet there is nothing to search, sort, or arrange, and the
+  // controls would frame one line of text. A filtered or Shared view keeps them,
+  // because the way out of an empty result is through them.
+  const nothingMade =
+    listing !== undefined &&
+    !props.busy &&
+    entries.length === 0 &&
+    synced.length === 0 &&
+    !hasActiveFilters &&
+    filters.tab !== "shared";
   const change = (next: Partial<ArtifactLibraryFilters>) =>
     props.onFiltersChange({ ...filters, ...next });
   // Clearing a filter removes the key rather than setting it to undefined:
@@ -113,7 +123,6 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   return (
     <div className="artifact-library">
       <SurfaceHeader
-        subtitle="What your threads have made, across every Project."
         title="Artifacts"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
         {...(props.onCreate === undefined
@@ -134,135 +143,139 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
             })}
       />
 
-      <div className="surface-toolbar">
-        <div className="surface-toolbar__search artifact-library__search">
-          <Search aria-hidden="true" size={14} strokeWidth={1.8} />
-          <label className="sr-only" htmlFor="artifact-library-search">
-            Search artifacts
-          </label>
-          <OctantInput
-            className="artifact-library__search-input"
-            id="artifact-library-search"
-            onChange={(event) => change({ query: event.target.value })}
-            placeholder="Search artifacts"
-            type="search"
-            unstyled
-            value={filters.query}
-          />
-        </div>
+      {nothingMade ? null : (
+        <>
+          <div className="surface-toolbar">
+            <div className="surface-toolbar__search artifact-library__search">
+              <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+              <label className="sr-only" htmlFor="artifact-library-search">
+                Search artifacts
+              </label>
+              <OctantInput
+                className="artifact-library__search-input"
+                id="artifact-library-search"
+                onChange={(event) => change({ query: event.target.value })}
+                placeholder="Search artifacts"
+                type="search"
+                unstyled
+                value={filters.query}
+              />
+            </div>
 
-        <label className="sr-only" htmlFor="artifact-library-kind">
-          Filter by kind
-        </label>
-        <OctantSelectField
-          className="artifact-library__select select"
-          id="artifact-library-kind"
-          onValueChange={(value) =>
-            value === "" ? clear("kind") : change({ kind: value as ArtifactKind })
-          }
-          options={[
-            { id: "", label: "Any kind" },
-            ...KINDS.map((kind) => ({
-              id: kind,
-              label: `${kind[0]?.toUpperCase()}${kind.slice(1)}`,
-            })),
-          ]}
-          value={filters.kind ?? ""}
-        />
-
-        <label className="sr-only" htmlFor="artifact-library-project">
-          Filter by Project
-        </label>
-        <OctantSelectField
-          className="artifact-library__select select"
-          id="artifact-library-project"
-          onValueChange={(value) =>
-            value === "" ? clear("projectId") : change({ projectId: value as ProjectId })
-          }
-          options={[
-            { id: "", label: "Any Project" },
-            ...(listing?.projects ?? []).map((project) => ({
-              id: String(project.projectId),
-              label: `${project.name} (${String(project.artifactCount)})`,
-            })),
-          ]}
-          value={filters.projectId === undefined ? "" : String(filters.projectId)}
-        />
-
-        <label className="sr-only" htmlFor="artifact-library-mode">
-          Filter by mode
-        </label>
-        <OctantSelectField
-          className="artifact-library__select select"
-          id="artifact-library-mode"
-          onValueChange={(value) =>
-            value === "" ? clear("mode") : change({ mode: value as OctantMode })
-          }
-          options={[
-            { id: "", label: "Any mode" },
-            ...MODES.map((mode) => ({
-              id: mode,
-              label: `${mode[0]?.toUpperCase()}${mode.slice(1)}`,
-            })),
-          ]}
-          value={filters.mode ?? ""}
-        />
-
-        {(listing?.tags ?? []).length === 0 ? null : (
-          <>
-            <label className="sr-only" htmlFor="artifact-library-tag">
-              Filter by tag
+            <label className="sr-only" htmlFor="artifact-library-kind">
+              Filter by kind
             </label>
             <OctantSelectField
               className="artifact-library__select select"
-              id="artifact-library-tag"
-              onValueChange={(value) => (value === "" ? clear("tag") : change({ tag: value }))}
+              id="artifact-library-kind"
+              onValueChange={(value) =>
+                value === "" ? clear("kind") : change({ kind: value as ArtifactKind })
+              }
               options={[
-                { id: "", label: "Any tag" },
-                ...(listing?.tags ?? []).map((tag) => ({
-                  id: tag.name,
-                  label: `${tag.name} (${String(tag.artifactCount)})`,
+                { id: "", label: "Any kind" },
+                ...KINDS.map((kind) => ({
+                  id: kind,
+                  label: `${kind[0]?.toUpperCase()}${kind.slice(1)}`,
                 })),
               ]}
-              value={filters.tag ?? ""}
+              value={filters.kind ?? ""}
             />
-          </>
-        )}
 
-        <OctantToggleGroup<LibraryViewMode>
-          aria-label="Artifact view"
-          className="artifact-library__view"
-          onValueChange={(value) => {
-            const next = value[0];
-            if (next === "gallery" || next === "list") props.onViewChange(next);
-          }}
-          value={[props.view]}
-        >
-          <OctantToggleGroupItem aria-label="Gallery view" value="gallery">
-            <LayoutGrid aria-hidden="true" size={14} strokeWidth={1.8} />
-          </OctantToggleGroupItem>
-          <OctantToggleGroupItem aria-label="List view" value="list">
-            <List aria-hidden="true" size={14} strokeWidth={1.8} />
-          </OctantToggleGroupItem>
-        </OctantToggleGroup>
-      </div>
+            <label className="sr-only" htmlFor="artifact-library-project">
+              Filter by Project
+            </label>
+            <OctantSelectField
+              className="artifact-library__select select"
+              id="artifact-library-project"
+              onValueChange={(value) =>
+                value === "" ? clear("projectId") : change({ projectId: value as ProjectId })
+              }
+              options={[
+                { id: "", label: "Any Project" },
+                ...(listing?.projects ?? []).map((project) => ({
+                  id: String(project.projectId),
+                  label: `${project.name} (${String(project.artifactCount)})`,
+                })),
+              ]}
+              value={filters.projectId === undefined ? "" : String(filters.projectId)}
+            />
 
-      <OctantTabs
-        onValueChange={(value) => {
-          if (TABS.some((tab) => tab.id === value)) {
-            change({ tab: value as ArtifactLibraryTab });
-          }
-        }}
-        value={filters.tab}
-      >
-        <OctantTabsList aria-label="Artifact groups" className="surface-tabs">
-          {TABS.map((tab) => (
-            <OctantTabsTab key={tab.id} value={tab.id}>
-              {tab.label}
-            </OctantTabsTab>
-          ))}
-        </OctantTabsList>
-      </OctantTabs>
+            <label className="sr-only" htmlFor="artifact-library-mode">
+              Filter by mode
+            </label>
+            <OctantSelectField
+              className="artifact-library__select select"
+              id="artifact-library-mode"
+              onValueChange={(value) =>
+                value === "" ? clear("mode") : change({ mode: value as OctantMode })
+              }
+              options={[
+                { id: "", label: "Any mode" },
+                ...MODES.map((mode) => ({
+                  id: mode,
+                  label: `${mode[0]?.toUpperCase()}${mode.slice(1)}`,
+                })),
+              ]}
+              value={filters.mode ?? ""}
+            />
+
+            {(listing?.tags ?? []).length === 0 ? null : (
+              <>
+                <label className="sr-only" htmlFor="artifact-library-tag">
+                  Filter by tag
+                </label>
+                <OctantSelectField
+                  className="artifact-library__select select"
+                  id="artifact-library-tag"
+                  onValueChange={(value) => (value === "" ? clear("tag") : change({ tag: value }))}
+                  options={[
+                    { id: "", label: "Any tag" },
+                    ...(listing?.tags ?? []).map((tag) => ({
+                      id: tag.name,
+                      label: `${tag.name} (${String(tag.artifactCount)})`,
+                    })),
+                  ]}
+                  value={filters.tag ?? ""}
+                />
+              </>
+            )}
+
+            <OctantToggleGroup<LibraryViewMode>
+              aria-label="Artifact view"
+              className="artifact-library__view"
+              onValueChange={(value) => {
+                const next = value[0];
+                if (next === "gallery" || next === "list") props.onViewChange(next);
+              }}
+              value={[props.view]}
+            >
+              <OctantToggleGroupItem aria-label="Gallery view" value="gallery">
+                <LayoutGrid aria-hidden="true" size={14} strokeWidth={1.8} />
+              </OctantToggleGroupItem>
+              <OctantToggleGroupItem aria-label="List view" value="list">
+                <List aria-hidden="true" size={14} strokeWidth={1.8} />
+              </OctantToggleGroupItem>
+            </OctantToggleGroup>
+          </div>
+
+          <OctantTabs
+            onValueChange={(value) => {
+              if (TABS.some((tab) => tab.id === value)) {
+                change({ tab: value as ArtifactLibraryTab });
+              }
+            }}
+            value={filters.tab}
+          >
+            <OctantTabsList aria-label="Artifact groups" className="surface-tabs">
+              {TABS.map((tab) => (
+                <OctantTabsTab key={tab.id} value={tab.id}>
+                  {tab.label}
+                </OctantTabsTab>
+              ))}
+            </OctantTabsList>
+          </OctantTabs>
+        </>
+      )}
 
       {props.message === undefined ? null : (
         <p className="oct-row-detail" role="status">

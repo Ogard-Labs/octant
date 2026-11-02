@@ -1,6 +1,6 @@
 import { ArrowLeft } from "lucide-react";
 import type { ReactNode } from "react";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantIconButton } from "../ui/base/OctantButton";
 
 export interface SurfaceProps {
   /** Names the landmark; surfaces use a labelled `<section>` by default. */
@@ -31,38 +31,52 @@ export function Surface(props: SurfaceProps) {
 
 export interface SurfaceHeaderProps {
   readonly title: string;
-  /** One sentence. Longer explanations belong in a section note. */
-  readonly subtitle?: string;
+  /**
+   * A fact that changes and that a person needs: a count, a time zone. It is
+   * not a description of the page; the sidebar row already named it.
+   */
+  readonly detail?: string;
   readonly titleId?: string;
   /** Primary actions for the whole surface, at the trailing edge. */
   readonly actions?: ReactNode;
   /**
    * The one way to leave a reader route. Every surface that replaces the
-   * workspace offers the same ghost back control; Close, ×, and raised
-   * variants are not part of the language.
+   * workspace offers the same icon control at the leading edge; Close, ×, and
+   * raised variants are not part of the language.
    */
   readonly onBack?: () => void;
 }
 
+/**
+ * The page's toolbar: one row, at the size of the Settings page title, so a
+ * destination opens on its content rather than on a heading about it.
+ */
 export function SurfaceHeader(props: SurfaceHeaderProps) {
   return (
     <header className="surface-header">
+      {props.onBack === undefined ? null : (
+        <OctantIconButton
+          className="surface-header__back"
+          label="Back to workspace"
+          onClick={props.onBack}
+          type="button"
+        >
+          <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.5} />
+        </OctantIconButton>
+      )}
       <div className="surface-header__copy">
-        <h1 className="oct-title" {...(props.titleId === undefined ? {} : { id: props.titleId })}>
+        <h1
+          className="oct-page-title"
+          {...(props.titleId === undefined ? {} : { id: props.titleId })}
+        >
           {props.title}
         </h1>
-        {props.subtitle === undefined ? null : <p className="oct-subtitle">{props.subtitle}</p>}
+        {props.detail === undefined ? null : (
+          <p className="oct-meta surface-header__detail">{props.detail}</p>
+        )}
       </div>
-      {props.actions === undefined && props.onBack === undefined ? null : (
-        <div className="surface-header__actions">
-          {props.actions}
-          {props.onBack === undefined ? null : (
-            <OctantButton onClick={props.onBack} size="sm" type="button" variant="ghost">
-              <ArrowLeft aria-hidden="true" size={14} strokeWidth={1.8} />
-              Back to workspace
-            </OctantButton>
-          )}
-        </div>
+      {props.actions === undefined ? null : (
+        <div className="surface-header__actions">{props.actions}</div>
       )}
     </header>
   );

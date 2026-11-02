@@ -222,7 +222,7 @@ describe("ReviewPage", () => {
     render(<ReviewPage {...props()} />);
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("To review");
-    expect(screen.getByText("3 finished threads you have not opened, oldest first.")).toBeVisible();
+    expect(screen.getByText("3 finished threads")).toBeVisible();
     const rows = within(screen.getByRole("navigation", { name: "Finished threads" })).getAllByRole(
       "button",
     );
@@ -448,7 +448,7 @@ describe("ReviewPage", () => {
 
     view.rerender(<ReviewPage {...page} entries={[third, first]} />);
 
-    expect(screen.getByText("2 finished threads you have not opened, oldest first.")).toBeVisible();
+    expect(screen.getByText("2 finished threads")).toBeVisible();
     expect(
       within(current()).getByRole("heading", { name: "Tidy the settings copy" }),
     ).toBeVisible();

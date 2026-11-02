@@ -210,7 +210,6 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   return (
     <Surface ariaLabel="Thread board" className="code-board" measure="wide">
       <SurfaceHeader
-        subtitle="Your Code threads by status, with the agents working on them."
         title="Board"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />

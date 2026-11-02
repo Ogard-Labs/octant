@@ -68,6 +68,21 @@ describe("ArchiveView", () => {
     expect(screen.queryByRole("button", { name: /Archived brief/ })).not.toBeInTheDocument();
   });
 
+  it("shows only the empty line while nothing is archived, with no filter to frame it", async () => {
+    render(
+      <ArchiveView
+        chatClient={{ search: vi.fn(async () => []) }}
+        entries={[]}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+        projects={[{ id: String(projectId), name: "Octant" }]}
+      />,
+    );
+
+    expect(await screen.findByText("Nothing archived")).toBeVisible();
+    expect(screen.queryByLabelText("Filter archive by Project")).not.toBeInTheDocument();
+  });
+
   it("opens an archived thread through the caller's authoritative route", async () => {
     const user = userEvent.setup();
     const onOpenThread = vi.fn();
