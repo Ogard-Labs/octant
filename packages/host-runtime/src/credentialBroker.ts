@@ -22,6 +22,11 @@ import {
   type LinkedSecretStores,
 } from "./linkedSecretStores";
 import {
+  createGoogleCliSessions,
+  handleGoogleCliBrokerRoute,
+  type GoogleCliSessions,
+} from "./googleCliSessions";
+import {
   createAwsCliSessions,
   handleAwsCliBrokerRoute,
   type AwsCliSessions,
@@ -82,6 +87,11 @@ const ROUTES = new Set([
   "/v1/secret-stores/reference",
   "/v1/secret-stores/clear",
   "/v1/secret-stores/restore",
+  "/v1/cloud-cli/google/reference",
+  "/v1/cloud-cli/google/point",
+  "/v1/cloud-cli/google/restore",
+  "/v1/cloud-cli/google/clear",
+  "/v1/cloud-cli/google/session",
   "/v1/cloud-cli/aws/reference",
   "/v1/cloud-cli/aws/point",
   "/v1/cloud-cli/aws/restore",
@@ -98,6 +108,7 @@ const ROUTES = new Set([
   "/v1/cloud-iam/revoke",
 ]);
 const SECRET_STORE_PREFIX = "/v1/secret-stores/";
+const GOOGLE_CLI_PREFIX = "/v1/cloud-cli/google/";
 const AWS_CLI_PREFIX = "/v1/cloud-cli/aws/";
 const REPLICA_DEVICE_KEY_PREFIX = "/v1/replica-device-keys/";
 const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
@@ -120,6 +131,7 @@ const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], 
 interface LinkedBrokerStores {
   readonly stores: LinkedSecretStores;
   readonly awsCli: AwsCliSessions;
+  readonly googleCli: GoogleCliSessions;
 }
 
 export interface CredentialBroker {
@@ -220,6 +232,12 @@ export async function startCredentialBroker(
       ? undefined
       : {
           stores: linkedSecretStores,
+          googleCli: createGoogleCliSessions({
+            linked: linkedSecretStores,
+            ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
+            ...(oauth?.now === undefined ? {} : { now: oauth.now }),
+            ...(oauth?.timeoutMs === undefined ? {} : { timeoutMs: oauth.timeoutMs }),
+          }),
           awsCli: createAwsCliSessions({
             linked: linkedSecretStores,
             ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
@@ -423,6 +441,19 @@ async function handleBrokerRequest(
     return handleCloudIamBrokerRoute(url.pathname, request, cloudIam);
   }
 
+  if (url.pathname.startsWith(GOOGLE_CLI_PREFIX)) {
+    if (linked === undefined) return failure("not-found", 404);
+    const body = await readJsonRecord(request);
+    if (body.kind === "too-large") return failure("too-large", 413);
+    if (body.kind === "invalid") return failure("invalid-request", 400);
+    return handleGoogleCliBrokerRoute(
+      url.pathname.slice(GOOGLE_CLI_PREFIX.length),
+      body.value,
+      linked.stores,
+      linked.googleCli,
+    );
+  }
+
   if (url.pathname.startsWith(AWS_CLI_PREFIX)) {
     if (linked === undefined) return failure("not-found", 404);
     const body = await readJsonRecord(request);
@@ -437,6 +468,7 @@ async function handleBrokerRequest(
   }
 
   if (url.pathname.startsWith(SECRET_STORE_PREFIX)) {
+    if (url.pathname === `${SECRET_STORE_PREFIX}unlink`) linked?.googleCli.forget();
     if (linked === undefined) return failure("not-found", 404);
     return handleSecretStoreRoute(
       url.pathname.slice(SECRET_STORE_PREFIX.length),
