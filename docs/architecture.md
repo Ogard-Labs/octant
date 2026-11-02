@@ -8678,6 +8678,30 @@ mechanisms are:
       else it reads as set on the thread. A thread keeps the level it started
       with, so a default changed later can make an older thread read as set on
       the thread.
+  - **Access details is a host report, not authority.** The existing Work and
+    Code level indicator opens a read of the task's selected and effective
+    posture, any narrower running-turn or window-session ceiling, current
+    default, reviewer route and reported account/model, and the selected
+    runtime's observed readiness and capabilities. The read uses the existing
+    authenticated Context inspect path and the same subject-read authority;
+    it needs no context plan and adds no remote rights. The host rechecks
+    current Project standing and the original request's live authority after
+    awaited admission. It never probes a provider or makes a model call to
+    paint the report, and includes no credentials or private diagnostics.
+    A current default match is stated as a match, never proof of a historical
+    origin. Unreported facts remain unknown, and an inactive or Done task is
+    not presented as executable. The chosen unavailable Shield account stays
+    named: the Judge asks the person rather than substituting another account.
+    Disabled accounts, unsupported capabilities, temporarily unavailable
+    runtimes and required person review have different wording. Recovery uses
+    existing provider/reviewer/protected-file Settings or asks the host owner;
+    it never elevates a level or suggests bypassing a protected-file refusal.
+    Reports are replaced on a task/client/version change and can be refreshed;
+    an old account report cannot survive a failed refresh as a current fact.
+    Every actual action still passes its own host admission. Routine-created
+    Work and Code tasks read these same host inputs and running ceilings.
+    The existing outside-content notice qualifies its prompt explanation to
+    levels below Full access; review/clear remains a separate person act.
   - **Older recorded levels replay as Full access.** A level journaled by
     the earlier design, which kept a sandboxed no-prompt level and a
     separate switch, replays as Full access; nothing recorded is dropped.
