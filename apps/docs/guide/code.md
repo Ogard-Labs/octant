@@ -143,6 +143,15 @@ in the composer changes it in one click, for new and existing threads alike:
   The first time this computer or a Project picks Full access, Octant shows
   that warning once.
 
+Below Full access, a push or pull-request change recognized in Octant's own
+shell, or in a provider approval request Octant receives, is refused and sent
+to Octant's Git and pull-request tools. Those tools check the repository,
+branch, revision, required checks and your consent. A general shell approval
+does not replace them. A provider's own reviewer can answer commands without
+sending Octant an approval request; Octant cannot enforce this route on
+those commands. A command reported only after it starts is a record of what
+happened. Scripts and hidden targets can also escape command recognition.
+
 Each thread shows its mode and where it came from in one line at the top,
 such as "Auto · set by this Project". Octant records every time a mode is
 lowered: who did it, when, from which mode, and for what scope (everyone, one

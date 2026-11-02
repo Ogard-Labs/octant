@@ -2178,8 +2178,17 @@ Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
 
 - **Guarded and Reviewed.** Pull-request changes go through the
-  pull-request tool, which is the only sanctioned path, and the shell's forge
-  access is a known follow-up (below).
+  pull-request tool, which is the only sanctioned path. Octant refuses a
+  recognizable push or pull-request write before its Harness shell runs it,
+  and before answering a provider approval request that includes the pending
+  command. A generic shell approval or a Judge allow cannot authorize that
+  write: the agent must use the structured tool, whose repository, branch,
+  revision, consent, required-check and live-authority checks still apply.
+  A refused provider approval is recorded as a failed tool row, not as a
+  Shield or provider-reviewer verdict. This refusal applies with or without
+  Shield. A provider reviewer that
+  answers internally never sends Octant that pending command; enforcement
+  on that path is unsupported, as detailed below.
 - **Full access.** The provider's own `git` and forge command-line tool
   are the person's choice, as they would be outside Octant. Octant journals
   each push or pull-request change it observes (a shell command whose
@@ -2202,8 +2211,10 @@ Which path reaches the forge depends on the thread's
   thread's branch in the same Project (`--all` and `--mirror` count when
   there is one) is refused as `forge-<line>` with a message that names the
   merge or push tool, which asks the person, and journaled `refused`; every
-  other one runs and is journaled `ran` with its exit code, at every level,
-  and a record that cannot be kept withholds its output. A provider runtime
+  other Full access command runs and is journaled `ran` with its exit code,
+  and a record that cannot be kept withholds its output. A Full access push
+  is also refused when the branches other threads own cannot be read;
+  unavailable authority never becomes an empty branch list. A provider runtime
   reports a command only as it starts, and only the first line its tool
   start names, so a change on a later line goes unseen; Octant journals it `seen-after-start` and, at Full access,
   names the hard line it crossed; it cannot stop it. A target behind an
@@ -2226,8 +2237,13 @@ root (so `~/.config/gh` and `~/.ssh` are out of reach); whether a
 Keychain-backed credential helper is reachable there has not been measured.
 A push or pull-request change made through that gap is journaled as a
 forge change where Octant sees the command (above), but none of the rules
-above applies to it. Closing the gap at
-Guarded and Reviewed is a known follow-up.
+above can be enforced after it starts. The pre-action refusals above cover
+only recognizable commands Octant executes or receives as pending approval
+calls. Provider-reviewer decisions and Full access tool-start observations
+are records, not consent or pre-action enforcement. Arbitrary scripts,
+aliases, expansions and commands that a runtime does not report cannot be
+classified reliably by this command reader. Complete confinement of those
+provider paths at Guarded and Reviewed remains unsupported.
 
 **Pull-request merge.** A person merges one open pull request from its review
 (`POST /api/code/project-pull-requests/merge`). Beside it, the person may turn

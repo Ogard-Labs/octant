@@ -1,4 +1,14 @@
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -15,6 +25,9 @@ import { childAgentTools } from "../chat/sideChatDelegation";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { createNativeHarnessAuthority } from "./nativeHarnessAuthority";
+import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
+import { createNativeHarnessShell } from "./nativeHarnessShell";
+import type { NativeHarnessShellPort } from "./nativeHarnessTools";
 import { createNativeHarnessComposition } from "./nativeHarnessComposition";
 import { MemoryNativeHarnessTranscriptStore } from "./nativeHarnessTranscriptStore";
 import { searxngHarnessWebSearch } from "./nativeHarnessWebSearch";
@@ -976,6 +989,9 @@ describe("native harness composition", () => {
       readonly withoutEgressRules?: boolean;
       /** How each push or pull-request change's record goes. */
       readonly forgeRecord?: "recorded" | "unavailable";
+      readonly shell?: NativeHarnessShellPort;
+      readonly checkoutRoot?: string;
+      readonly branchesUnavailable?: boolean;
     }) => {
       const recorded = vi.fn((_record: unknown) => input.remoteRecord ?? ("not-remote" as const));
       const forgeRecorded = vi.fn((_record: unknown) => input.forgeRecord ?? ("recorded" as const));
@@ -1002,7 +1018,7 @@ describe("native harness composition", () => {
           readThreadTaint: () => ({ externalContentIngested: false }) as never,
         }),
         isHarnessProvider: () => true,
-        shell: {
+        shell: input.shell ?? {
           run: async (call) => {
             ran.push(call.command);
             return { status: "ran", exitCode: 0, output: "up 3 days", truncated: false };
@@ -1013,10 +1029,10 @@ describe("native harness composition", () => {
           ? {}
           : {
               forgeChanges: {
-                branches: () => ({
-                  ownBranch: "feature/mine",
-                  otherThreadBranches: ["feature/theirs"],
-                }),
+                branches: () => {
+                  if (input.branchesUnavailable) throw new Error("Repository unavailable");
+                  return { ownBranch: "feature/mine", otherThreadBranches: ["feature/theirs"] };
+                },
                 record: forgeRecorded,
               },
             }),
@@ -1051,7 +1067,7 @@ describe("native harness composition", () => {
       });
       const tools = composition.forCode({
         thread: autoThread,
-        checkoutRoot: "/Users/dev/app",
+        checkoutRoot: input.checkoutRoot ?? "/Users/dev/app",
         windowId: "window-1",
       })!;
       const bash = (command: string) =>
@@ -1086,6 +1102,64 @@ describe("native harness composition", () => {
       );
     });
 
+    it("refuses a push when the other threads' branch authority cannot be read", async () => {
+      const harness = setup({
+        fullAccessTag: "not-tagged",
+        forgeRecord: "recorded",
+        branchesUnavailable: true,
+      });
+      expect(await harness.bash("git push origin feature/theirs")).toMatchObject({
+        isError: true,
+        result: { error: "forge-authority-unavailable" },
+      });
+      expect(harness.ran).toEqual([]);
+    });
+
+    it("stops a native forge executable before the script runner can write its sentinel", async () => {
+      const root = mkdtempSync(join(tmpdir(), "octant-forge-boundary-"));
+      const checkout = join(root, "checkout");
+      mkdirSync(checkout);
+      const scripts = join(root, "scripts");
+      const work = join(root, "work");
+      mkdirSync(scripts);
+      mkdirSync(work);
+      const executable = join(checkout, "gh");
+      const sentinel = join(checkout, "ran");
+      writeFileSync(executable, '#!/bin/sh\nprintf ran > "$(dirname "$0")/ran"\n', { mode: 0o700 });
+      const shell = createNativeHarnessShell({
+        scriptDirectory: scripts,
+        process: new RepositoryTestProcessPort({
+          harnessShellScriptDirectory: scripts,
+          temporaryDirectory: work,
+          receiptDirectory: join(root, "receipts"),
+          networkEgress: "allow",
+          // The Full access process port; forge refusal precedes OS confinement.
+          confinement: { prepare: ({ executable, args }) => ({ command: executable, args }) },
+        }),
+      });
+      const command = `${executable} -R other/repository pr merge 7 --squash`;
+      try {
+        const baseline = await shell.run({ command, cwd: checkout, timeoutMs: 5000 });
+        expect(baseline.output).toBe("");
+        expect(baseline).toMatchObject({ status: "ran", exitCode: 0 });
+        expect(existsSync(sentinel)).toBe(true);
+        rmSync(sentinel);
+        const harness = setup({
+          verdict: "allow",
+          forgeRecord: "recorded",
+          shell,
+          checkoutRoot: checkout,
+        });
+        expect(await harness.bash(command)).toMatchObject({
+          isError: true,
+          result: { error: "forge-tool-required" },
+        });
+        expect(existsSync(sentinel)).toBe(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it("runs and journals an ordinary push at Full access, and withholds its output when the record fails", async () => {
       const harness = setup({ fullAccessTag: "not-tagged", forgeRecord: "recorded" });
       expect(await harness.bash("git push -u origin feature/mine")).toMatchObject({
@@ -1098,14 +1172,26 @@ describe("native harness composition", () => {
       expect(JSON.stringify(await failing.bash("git push"))).not.toContain("sent");
     });
 
-    it("leaves a merge below Full access to Shield and journals it once it ran", async () => {
-      const harness = setup({ verdict: "allow", forgeRecord: "recorded" });
-      await harness.bash("gh pr merge 7");
-      expect(harness.ran).toEqual(["gh pr merge 7"]);
-      expect(harness.forgeRecorded).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: "ran" }),
-      );
-    });
+    it.each([
+      "gh pr merge 7",
+      "gh -R other/repo pr merge 7 --squash",
+      "git -C ../other push -f origin main",
+      "git push origin feature/mine",
+      "gh pr create --fill",
+    ])(
+      "sends a forge write below Full access through its scoped tool even when Shield allowed %s",
+      async (command) => {
+        const harness = setup({ verdict: "allow", forgeRecord: "recorded" });
+        expect(await harness.bash(command)).toMatchObject({
+          isError: true,
+          result: { error: "forge-tool-required" },
+        });
+        expect(harness.ran).toEqual([]);
+        expect(harness.forgeRecorded).toHaveBeenCalledWith(
+          expect.objectContaining({ outcome: "refused", command }),
+        );
+      },
+    );
 
     it("tags a Full access command that sends a secret out, and runs it all the same", async () => {
       const harness = setup({ verdict: "allow", fullAccessTag: "recorded" });
