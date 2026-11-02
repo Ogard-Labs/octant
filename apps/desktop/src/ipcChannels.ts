@@ -72,6 +72,7 @@ export const DESKTOP_IPC_CHANNELS = {
   resetBounds: "octant:window:reset-bounds",
   selectProjectRoot: "octant:project:select-root",
   selectLocalPluginFolder: "octant:extensions:select-local-plugin-folder",
+  selectSkillFolder: "octant:extensions:select-skill-folder",
   selectRuntimeBinary: "octant:providers:select-runtime-binary",
   saveSupportBundle: "octant:diagnostics:save-support-bundle",
   saveBrowserProofScreenshots: "octant:browser:save-proof-screenshots",

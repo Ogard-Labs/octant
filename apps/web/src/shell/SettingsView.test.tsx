@@ -1541,12 +1541,23 @@ describe("SettingsView", () => {
   });
 
   it("mounts the Skills & Extensions settings view when an extension client is provided", async () => {
+    const onSettingsChange = vi.fn(async () => true);
+    const pickSkillFolder = vi.fn(async () => "/tmp/selected-skills");
     const extensionClient = {
       snapshot: vi.fn(async () => ({
         sequence: 1,
         snapshotAt: now,
         packages: [],
         collisions: [],
+        skillRoots: [
+          {
+            sourceRef: "folder:opaque",
+            displayName: "missing-skills",
+            status: "missing",
+            skillCount: 0,
+            watching: true,
+          },
+        ],
       })),
       effectiveState: vi.fn(async () => ({
         sequence: 1,
@@ -1572,7 +1583,11 @@ describe("SettingsView", () => {
       projectPins: vi.fn() as never,
       applyDiscoveredTooling: vi.fn() as never,
     };
-    renderSettings({ extensionClient: extensionClient as never });
+    renderSettings({
+      extensionClient: extensionClient as never,
+      onSettingsChange,
+      pickSkillFolder,
+    });
     navigateTo("Skills & Extensions");
     expect(await screen.findAllByRole("heading", { name: "Skills & Extensions" })).toHaveLength(1);
     expect(
@@ -1580,6 +1595,14 @@ describe("SettingsView", () => {
         name: /installed/i,
       }),
     ).toBeVisible();
+    expect(await screen.findByText(/missing-skills: Folder does not exist yet/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
+    await waitFor(() =>
+      expect(onSettingsChange).toHaveBeenCalledWith({
+        skillFolders: { providers: [], folders: ["/tmp/selected-skills"] },
+      }),
+    );
+    expect(pickSkillFolder).toHaveBeenCalledTimes(1);
   });
 
   it("mounts the Host section when a host control client is provided", async () => {

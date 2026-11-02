@@ -288,6 +288,7 @@ export interface OctantHostBridge {
   readonly resetBounds: () => Promise<void>;
   readonly selectProjectRoot: (projectType: BoundProjectType) => Promise<ProjectRootPickerResult>;
   readonly selectLocalPluginFolder: () => Promise<PickerReceiptResult>;
+  readonly selectSkillFolder: () => Promise<PickerReceiptResult>;
   /** Native file picker for a runtime's executable; returns an opaque receipt, never the path. */
   readonly selectRuntimeBinary: () => Promise<PickerReceiptResult>;
   /**
@@ -802,6 +803,8 @@ export function createHostBridge(
         await ipc.invoke(IPC_CHANNELS.selectLocalPluginFolder),
         "local plugin folder",
       ),
+    selectSkillFolder: async () =>
+      decodePickerReceiptResult(await ipc.invoke(IPC_CHANNELS.selectSkillFolder), "skill folder"),
     selectRuntimeBinary: async () =>
       decodePickerReceiptResult(await ipc.invoke(IPC_CHANNELS.selectRuntimeBinary), "binary"),
     saveSupportBundle: async () => {

@@ -5,6 +5,42 @@ const windowA = "44000000-0000-4000-8000-000000000001";
 const windowB = "44000000-0000-4000-8000-000000000002";
 
 describe("LocalPluginImportReceiptStore", () => {
+  it("does not exchange a skill-folder purpose receipt for plugin installation", () => {
+    const store = new LocalPluginImportReceiptStore();
+    const issued = store.issue({
+      windowId: windowA,
+      absolutePath: "/tmp/skills",
+      purpose: "skill-folder",
+      now: 100,
+    });
+    expect(
+      store.consume({ receiptId: issued.receiptId, windowId: windowA, now: 200 }),
+    ).toBeUndefined();
+    expect(
+      store.consume({
+        receiptId: issued.receiptId,
+        windowId: windowB,
+        purpose: "skill-folder",
+        now: 200,
+      }),
+    ).toBeUndefined();
+    expect(
+      store.consume({
+        receiptId: issued.receiptId,
+        windowId: windowA,
+        purpose: "skill-folder",
+        now: 200,
+      }),
+    ).toBe("/tmp/skills");
+    expect(
+      store.consume({
+        receiptId: issued.receiptId,
+        windowId: windowA,
+        purpose: "skill-folder",
+        now: 200,
+      }),
+    ).toBeUndefined();
+  });
   it("consumes a short-lived receipt once for the exact native window", () => {
     const store = new LocalPluginImportReceiptStore({
       randomBytes: () => Uint8Array.from({ length: 32 }, () => 7),

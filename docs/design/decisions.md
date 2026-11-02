@@ -1228,6 +1228,7 @@ Octant discovers skills only from the closed Project allow-list, the user-global
 - A runtime that loads Project skills, MCP servers, hooks or plugins by itself runs with a proven switch or is denied the file in the OS profile. Instruction files stay readable.
 - Two runtimes are refused at start in a Project holding their settings entries, because their loaders fail on a denied file.
 - Skills from Claude Code's and Codex's own folders, turned on one by one, and folders a person adds in Settings are discoverable roots under the same ladder; Octant adds none on its own.
+- Desktop offers a window-owned purpose receipt folder picker alongside manual paths; it records only the existing skill-folder setting and grants no trust or enablement. Chosen-root diagnostics explain zero discovery. Bounded selected-root/package watching covers later creation and package changes; committed-setting reconciliation works without a mounted Settings view, and host teardown prevents late watcher restart.
 
 Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
 
