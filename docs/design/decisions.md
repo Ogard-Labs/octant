@@ -1830,11 +1830,11 @@ Status: Built. Since: —. Detail: [Architecture: Development loop](../architect
 
 ### Visual character, voice and colour
 
-Octant looks like a calm monochrome workbench. Colour names identity or data, never status, and every surface uses the same words, face and hierarchy.
+Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02) and grey is a choice called Mono. Every surface uses the same words, face and hierarchy.
 
-- Chrome is monochrome by default. Colour names identity (a Project, a provider, a count tile under the opt-in Vivid style) and never stands in for status; warning, failure and diff keep their own roles.
+- Colour is the default and applies to everyone: a blue accent, amber warning, red failure, green success, coloured count tiles, board marks and connector marks. Colour never stands alone: a state also has a shape or a word. The Mono style draws the grey look; plain empty, loading and informational messages stay neutral in both.
 - Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the page title is bold.
-- Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status.
+- Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style.
 - Counts and token figures use English separators whatever the system locale; dates and times follow the locale.
 - Copy about where something runs says "this Mac" only when the host reports macOS, and uses neutral words ("this computer", "credential store") otherwise. The window's own platform never decides it.
 

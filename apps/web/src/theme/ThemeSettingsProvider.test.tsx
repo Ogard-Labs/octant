@@ -118,34 +118,26 @@ describe("ThemeSettingsProvider", () => {
     expect(root.getAttribute("data-octant-reduced-motion")).toBeNull();
   });
 
-  it("publishes the chosen style, and keeps the monochrome chrome under increased contrast", () => {
+  it("publishes the colour style by default and the old name, Mono on request, and Mono under increased contrast", () => {
     const root = document.documentElement;
-    const plain = render(
-      <ThemeSettingsProvider settings={DEFAULT_THEME_SETTINGS}>
-        <div>Theme content</div>
-      </ThemeSettingsProvider>,
-    );
-    expect(root.getAttribute("data-octant-style")).toBe("default");
-    plain.unmount();
+    const published = (settings: typeof DEFAULT_THEME_SETTINGS) => {
+      const view = render(
+        <ThemeSettingsProvider settings={settings}>
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      const value = root.getAttribute("data-octant-style");
+      view.unmount();
+      return value;
+    };
+    expect(published(DEFAULT_THEME_SETTINGS)).toBe("colour");
     expect(root.getAttribute("data-octant-style")).toBeNull();
-
-    const vivid = render(
-      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, style: "vivid" }}>
-        <div>Theme content</div>
-      </ThemeSettingsProvider>,
+    expect(published({ ...DEFAULT_THEME_SETTINGS, style: "default" })).toBe("colour");
+    expect(published({ ...DEFAULT_THEME_SETTINGS, style: "vivid" })).toBe("colour");
+    expect(published({ ...DEFAULT_THEME_SETTINGS, style: "mono" })).toBe("mono");
+    expect(published({ ...DEFAULT_THEME_SETTINGS, style: "vivid", increasedContrast: true })).toBe(
+      "mono",
     );
-    expect(root.getAttribute("data-octant-style")).toBe("vivid");
-    vivid.unmount();
-
-    const contrast = render(
-      <ThemeSettingsProvider
-        settings={{ ...DEFAULT_THEME_SETTINGS, style: "vivid", increasedContrast: true }}
-      >
-        <div>Theme content</div>
-      </ThemeSettingsProvider>,
-    );
-    expect(root.getAttribute("data-octant-style")).toBe("default");
-    contrast.unmount();
   });
 
   it("projects the accent-text role so accent used as text carries its own contrast guarantee", () => {

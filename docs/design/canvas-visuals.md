@@ -16,9 +16,8 @@ matrix) builds on them
 rather than inventing a second chart language.
 
 **Hue is for marks only.** Data colour appears on the mark — a bar, a line, a
-slice, a scale cell — never on the chrome. The Default style keeps its
-monochrome chrome, and a chart in the default theme still draws its series in
-the palette hues, because the series are the data. Every mark pairs its hue
+slice, a scale cell — never on the chrome. A chart draws its series in the palette hues in every
+style, Mono included, because the series are the data. Every mark pairs its hue
 with a second channel: a dash pattern on a line, a label in the legend, a value
 in the disclosed table. Colour alone never carries a distinction, and under
 forced colours the marks fall to system colours while the dash pattern and the
@@ -145,7 +144,7 @@ lower-is-better criterion is turned round first, so a longer meter always reads
 better. The highest score is set in strong ink and marked Highest. A full tie
 marks none. The recommended option is the author's call, not the arithmetic's.
 Its column is tinted with the foreground, ruled along the top, and badged with
-an inverted Recommended pill, so emphasis is ink in the monochrome default. An
+an inverted Recommended pill, so emphasis is the ink, in every style. An
 empty coordinate reads as not assessed, never as a zero or a no. Cell notes are
 numbered in reading order and listed under the table. Ordering the options by
 score is view state. The disclosed table reads one row per option. Under forced
@@ -401,7 +400,7 @@ page receives, ahead of the author's own stylesheet:
 - the semantic `--oct-*` tokens as the workspace computes them — ground,
   surface, ink ladder, borders, accent, status foregrounds and tints, chart
   series, the type scale, leading, weights, tracking, spacing, and radii — so
-  the active theme, Vivid, increased contrast, and the interface font size all
+  the active theme, the style, increased contrast, and the interface font size all
   carry in, and the page redraws when any of them changes;
 - the workspace's light or dark scheme; a document is transparent on the
   Canvas surface, a themed screen paints `--oct-bg`;

@@ -3441,7 +3441,7 @@ html[data-octant-increased-contrast="true"]
 
 /* The state dot says which of three things a provider is, without colour: a
    filled ring is ready, a ring in ink needs setup or a sign-in, and a muted
-   ring is off or not checked. A failure keeps its own red role. Vivid colours
+   ring is off or not checked. A failure keeps its own red role. The colour style colours
    the ready dot green and the setup ring orange. */
 .settings-view .prov-state {
   color: var(--octant-text-secondary);

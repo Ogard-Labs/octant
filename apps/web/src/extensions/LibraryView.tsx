@@ -5,7 +5,15 @@ import type {
   ExtensionPackagePreview,
 } from "@octant/contracts/extension-rpc";
 import { BookOpen, Check, Puzzle, Search, Server, X } from "lucide-react";
-import { useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { SettingsSection } from "../settings/primitives";
@@ -18,6 +26,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { connectConnector } from "./connectConnector";
+import { connectorLogoInks } from "../theme/connectorBrandColors";
 import { CONNECTOR_LOGOS } from "./connectorLogos";
 import { McpServerSignInControl } from "./McpServerSignInControl";
 import {
@@ -489,6 +498,14 @@ export function monogramFor(name: string): string {
   return `${text.slice(0, 1).toLocaleUpperCase()}${text.slice(1).toLocaleLowerCase()}`;
 }
 
+function logoInkStyle(connectorId: string): CSSProperties {
+  const inks = connectorLogoInks(connectorId);
+  return {
+    ...(inks.light === undefined ? {} : { "--library-logo-light": inks.light }),
+    ...(inks.dark === undefined ? {} : { "--library-logo-dark": inks.dark }),
+  } as CSSProperties;
+}
+
 export function LibraryMark(props: { readonly item: LibraryItem; readonly large?: boolean }) {
   const { item } = props;
   const size = props.large === true ? 24 : 20;
@@ -502,6 +519,7 @@ export function LibraryMark(props: { readonly item: LibraryItem; readonly large?
         aria-hidden="true"
         className="library__logo"
         focusable="false"
+        style={logoInkStyle(item.connectorId ?? "")}
         height={size}
         viewBox="0 0 24 24"
         width={size}

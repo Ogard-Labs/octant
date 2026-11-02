@@ -1,21 +1,20 @@
-/* ── Vivid style ────────────────────────────────────────────────────────
-   Settings › Appearance › Style. Default keeps the chrome monochrome; Vivid
-   lets the places that name something carry colour: the welcome greeting,
-   the sidebar's count tiles, board column marks, a Project's accent, and a
-   thread's Canvases.
+/* ── Colour style ───────────────────────────────────────────────────────
+   Settings › Appearance › Style. Colour is the default: the places that name
+   something carry colour: the sidebar's count tiles, board column marks, a
+   Project's accent, and a thread's Canvases. Mono keeps them grey.
    Status marks that warn or fail keep their own roles in both styles.
 
    Every hue comes from the preset's palette roles, so a tinted preset or a
-   light theme recolours Vivid with it, and each role already carries its
-   contrast target. The provider never publishes "vivid" under increased
-   contrast, so nothing here has to undo itself there. */
+   light theme recolours the style with it, and each role already carries its
+   contrast target. The provider publishes "mono" under increased contrast, so
+   nothing here has to undo itself there. */
 
-:root[data-octant-style="vivid"] {
-  --oct-vivid-accent: var(--octant-palette-purple, currentColor);
-  --oct-vivid-inbox: var(--octant-palette-blue, currentColor);
-  --oct-vivid-running: var(--octant-palette-orange, currentColor);
-  --oct-vivid-review: var(--octant-palette-purple, currentColor);
-  --oct-vivid-done: var(--octant-palette-green, currentColor);
+:root[data-octant-style="colour"] {
+  --oct-colour-accent: var(--octant-palette-purple, currentColor);
+  --oct-colour-inbox: var(--octant-palette-blue, currentColor);
+  --oct-colour-running: var(--octant-palette-orange, currentColor);
+  --oct-colour-review: var(--octant-palette-purple, currentColor);
+  --oct-colour-done: var(--octant-palette-green, currentColor);
   /* Provider state dots in Settings: ready is green, setup or sign-in orange. */
   --oct-provider-ready: var(--octant-palette-green, currentColor);
   --oct-provider-setup: var(--octant-palette-orange, currentColor);
@@ -51,8 +50,8 @@
   --canvas-hue: var(--octant-palette-blue, currentColor);
 }
 
-:root[data-octant-style="vivid"] .thread-canvas[data-kind],
-:root[data-octant-style="vivid"] .canvas-ref[data-kind] {
+:root[data-octant-style="colour"] .thread-canvas[data-kind],
+:root[data-octant-style="colour"] .canvas-ref[data-kind] {
   border-color: color-mix(in oklab, var(--canvas-hue) 34%, var(--octant-border));
   background: color-mix(
     in oklab,
@@ -61,7 +60,7 @@
   );
 }
 
-:root[data-octant-style="vivid"] .canvas-ref[data-kind]:has(.canvas-ref__hit:hover) {
+:root[data-octant-style="colour"] .canvas-ref[data-kind]:has(.canvas-ref__hit:hover) {
   background: color-mix(
     in oklab,
     var(--canvas-hue) 10%,
@@ -69,32 +68,32 @@
   );
 }
 
-:root[data-octant-style="vivid"] .thread-canvas[data-kind] .thread-canvas__header {
+:root[data-octant-style="colour"] .thread-canvas[data-kind] .thread-canvas__header {
   border-bottom-color: color-mix(in oklab, var(--canvas-hue) 22%, transparent);
 }
 
-:root[data-octant-style="vivid"] .thread-canvas[data-kind] .thread-canvas__icon {
+:root[data-octant-style="colour"] .thread-canvas[data-kind] .thread-canvas__icon {
   color: var(--canvas-hue);
 }
 
-:root[data-octant-style="vivid"] .canvas-ref[data-kind] .canvas-ref__preview {
+:root[data-octant-style="colour"] .canvas-ref[data-kind] .canvas-ref__preview {
   border-color: color-mix(in oklab, var(--canvas-hue) 30%, transparent);
 }
 
-:root[data-octant-style="vivid"] .canvas-ref[data-kind] .canvas-ref__progress-track {
+:root[data-octant-style="colour"] .canvas-ref[data-kind] .canvas-ref__progress-track {
   background: color-mix(in oklab, var(--canvas-hue) 18%, transparent);
 }
 
-:root[data-octant-style="vivid"] .canvas-ref[data-kind] .canvas-ref__progress-fill {
+:root[data-octant-style="colour"] .canvas-ref[data-kind] .canvas-ref__progress-fill {
   background: var(--canvas-hue);
 }
 
-:root[data-octant-style="vivid"] .thread-canvas[data-kind] .canvas-block__metric {
+:root[data-octant-style="colour"] .thread-canvas[data-kind] .canvas-block__metric {
   border-color: color-mix(in oklab, var(--canvas-hue) 24%, transparent);
   background: color-mix(in oklab, var(--canvas-hue) 9%, transparent);
 }
 
-:root[data-octant-style="vivid"] .thread-canvas[data-kind] .canvas-chart__headline-change {
+:root[data-octant-style="colour"] .thread-canvas[data-kind] .canvas-chart__headline-change {
   background: color-mix(in oklab, var(--canvas-hue) 18%, transparent);
   color: var(--canvas-hue);
 }

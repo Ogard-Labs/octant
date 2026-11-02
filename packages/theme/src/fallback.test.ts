@@ -4,7 +4,8 @@ import {
   type ThemeSemanticOverrideEntry,
   type ThemeSettings,
 } from "@octant/contracts/theme";
-import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS } from "./tokens";
+import { meetsContrast } from "./contrast";
+import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, MONO_STYLE_TOKENS } from "./tokens";
 import {
   applySemanticOverrides,
   resolveEffectiveTokens,
@@ -150,5 +151,68 @@ describe("theme fallback policy", () => {
     const resolved = safeFallbackTheme(true);
     expect(resolved.mode).toBe("dark");
     expect(resolved.tokens).toEqual(DEFAULT_DARK_TOKENS);
+  });
+
+  describe("style", () => {
+    for (const [mode, dark] of [
+      ["light", false],
+      ["dark", true],
+    ] as const) {
+      it(`resolves the default style to the colour roles in ${mode}`, () => {
+        for (const style of [undefined, "default", "vivid"]) {
+          const settings = makeSettings(style === undefined ? {} : { style });
+          const { tokens } = resolveEffectiveTokens(settings, dark);
+          expect(tokens["accent"]).toBe(
+            (dark ? DEFAULT_DARK_TOKENS : DEFAULT_LIGHT_TOKENS)["accent"],
+          );
+          expect(tokens["accent"]).not.toBe(MONO_STYLE_TOKENS[mode]["accent"]);
+          expect(tokens["warning-text"]).not.toBe(MONO_STYLE_TOKENS[mode]["warning-text"]);
+        }
+      });
+
+      it(`resolves Mono and increased contrast to the grey roles in ${mode}`, () => {
+        for (const extra of [{ style: "mono" }, { increasedContrast: true }]) {
+          const { tokens } = resolveEffectiveTokens(makeSettings(extra), dark);
+          for (const [role, value] of Object.entries(MONO_STYLE_TOKENS[mode])) {
+            expect(tokens[role]).toBe(value);
+          }
+        }
+      });
+
+      it(`holds contrast on the colour accent and warning roles in ${mode}`, () => {
+        const { tokens } = resolveEffectiveTokens(makeSettings({}), dark);
+        const t = (role: string) => tokens[role]!;
+        expect(meetsContrast(t("accent"), t("workspace"), "ui")).toBe(true);
+        expect(meetsContrast(t("accent-text"), t("workspace"), "normal-text")).toBe(true);
+        expect(meetsContrast(t("accent-foreground"), t("accent"), "normal-text")).toBe(true);
+        expect(meetsContrast(t("primary-foreground"), t("accent"), "normal-text")).toBe(true);
+        expect(meetsContrast(t("warning-text"), t("warning-surface"), "normal-text")).toBe(true);
+        expect(meetsContrast(t("warning-border"), t("warning-surface"), "ui")).toBe(true);
+      });
+    }
+
+    it("keeps a tinted preset's own accent under Mono", () => {
+      const colour = resolveEffectiveTokens(
+        makeSettings({ lightPresetId: "harbor", mode: "light" }),
+        false,
+      );
+      const mono = resolveEffectiveTokens(
+        makeSettings({ lightPresetId: "harbor", mode: "light", style: "mono" }),
+        false,
+      );
+      expect(mono.tokens["accent"]).toBe(colour.tokens["accent"]);
+      expect(mono.tokens["warning-text"]).toBe(MONO_STYLE_TOKENS.light["warning-text"]);
+    });
+
+    it("lets a saved accent override win in both styles", () => {
+      const overrides = [{ role: "accent", color: "#a37cf0" }];
+      for (const style of ["default", "mono"]) {
+        const { tokens } = resolveEffectiveTokens(
+          makeSettings({ style, semanticOverrides: overrides }),
+          true,
+        );
+        expect(tokens["accent"]).toBe("#a37cf0");
+      }
+    });
   });
 });

@@ -5,6 +5,7 @@ import {
   THEME_TOKEN_ROLES,
   getDefaultToken,
   getRoleDefinition,
+  MONO_STYLE_TOKENS,
   isKnownThemeTokenRole,
 } from "./tokens";
 import { parseHexColor } from "./color";
@@ -85,13 +86,17 @@ describe("theme semantic token catalog", () => {
     }
   });
 
-  it("keeps the default preset's warning role free of hue", () => {
-    // The default preset is monochrome. Its warning role was brass, so every
-    // warning mark, note, and badge was the one yellow thing on a grey screen.
+  it("draws warning in amber by default and keeps a neutral trio for Mono", () => {
+    const hue = (hex: string) => {
+      const { r, g, b } = parseHexColor(hex);
+      return Math.max(r, g, b) - Math.min(r, g, b);
+    };
     for (const id of ["warning-surface", "warning-border", "warning-text"] as const) {
       for (const hex of [getRoleDefinition(id).defaultLight, getRoleDefinition(id).defaultDark]) {
-        const { r, g, b } = parseHexColor(hex);
-        expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(2);
+        expect(hue(hex)).toBeGreaterThan(30);
+      }
+      for (const mode of ["light", "dark"] as const) {
+        expect(hue(MONO_STYLE_TOKENS[mode][id]!)).toBeLessThanOrEqual(2);
       }
     }
   });
@@ -126,18 +131,12 @@ describe("theme semantic token catalog", () => {
       workspace: "#ffffff",
       floating: "#fdfdfc",
       "text-primary": "#141414",
-      accent: "#141414",
-      "accent-foreground": "#ffffff",
-      "accent-text": "#141414",
     });
     expect(DEFAULT_DARK_TOKENS).toMatchObject({
       "app-background": "#151515",
       workspace: "#1a1a1a",
       floating: "#232323",
       "text-primary": "#f5f5f7",
-      accent: "#f5f5f7",
-      "accent-foreground": "#171717",
-      "accent-text": "#f5f5f7",
     });
   });
 
@@ -163,7 +162,7 @@ describe("theme semantic token catalog", () => {
     expect(DEFAULT_LIGHT_TOKENS["focus-ring"]).not.toBe(DEFAULT_LIGHT_TOKENS["text-primary"]);
   });
 
-  it("uses theme-appropriate monochrome accent fills", () => {
+  it("uses theme-appropriate accent fills", () => {
     expect(DEFAULT_LIGHT_TOKENS["accent"]).not.toBe(DEFAULT_DARK_TOKENS["accent"]);
     expect(DEFAULT_LIGHT_TOKENS["accent-text"]).toBe(DEFAULT_LIGHT_TOKENS["accent"]);
     expect(DEFAULT_DARK_TOKENS["accent-text"]).toBe(DEFAULT_DARK_TOKENS["accent"]);

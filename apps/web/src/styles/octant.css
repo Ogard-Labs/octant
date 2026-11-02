@@ -1112,7 +1112,8 @@ input.switch:checked::after {
    rather than by its utility classes: the utility track and thumb left the
    "on" thumb flush with the track's edge under a drop shadow, which read as
    a clipped half-moon. Off is a quiet track with a hairline edge and a knob
-   that matches the page; on is the filled track with the inverse knob. The
+   that matches the page; on is the accent-filled track (the ink under Mono)
+   with the inverse knob. The
    earlier off state painted a near-black knob on a pale track, which in
    light mode read as the active one (Providers & Models, where most switches
    are off). Neither state carries a drop shadow on the thumb. */
@@ -1136,8 +1137,8 @@ input.switch:checked::after {
   border-color: var(--octant-text-primary);
 }
 .octant-switch[data-slot="switch"][data-checked] {
-  background: var(--oct-fg);
-  border-color: var(--oct-fg);
+  background: var(--oct-accent);
+  border-color: var(--oct-accent);
 }
 .octant-switch[data-slot="switch"] > [data-slot="switch-thumb"] {
   width: 16px;

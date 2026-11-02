@@ -35,6 +35,8 @@ export function ThemeAppearanceEditor(props: {
   const focusedSetting = props.focusedSetting;
   const theme = props.controller;
   const draft = theme.draft;
+  // Stored "default" and the retired "vivid" both draw the colour look.
+  const shownStyle: ThemeStyle = draft?.style === "mono" ? "mono" : "default";
   const availablePresets = THEME_PRESETS.filter((preset) =>
     isAppearancePresetAvailable(preset.id, props.effectivePlugins ?? FIRST_PARTY_PLUGINS_EFFECTIVE),
   );
@@ -153,7 +155,7 @@ export function ThemeAppearanceEditor(props: {
             />
           </SettingRow>
           <SettingRow
-            description="Default keeps the chrome monochrome. Vivid colours tiles, board marks, and Project accents."
+            description="Colour gives Octant an accent, status hues, and coloured tiles, board marks, and Project accents. Mono keeps everything grey."
             focused={focusedSetting === "appearance.scheme.style"}
             label="Style"
             scope="app"
@@ -163,17 +165,17 @@ export function ThemeAppearanceEditor(props: {
               aria-label="Style"
               onValueChange={(value) => {
                 const selected = value[0];
-                if (selected === undefined || selected === (draft.style ?? "default")) return;
+                if (selected === undefined || selected === shownStyle) return;
                 void theme.applyPatch({ style: selected });
               }}
-              value={[draft.style ?? "default"]}
+              value={[shownStyle]}
             >
-              <OctantToggleGroupItem value="default">Default</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="vivid">Vivid</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="default">Colour</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="mono">Mono</OctantToggleGroupItem>
             </OctantToggleGroup>
           </SettingRow>
           <SettingRow
-            description="Switches, the send button, selected states, and the click ring. Mono keeps the theme's own."
+            description="Switches, the send button, and selected states. Mono is the grey look and sets Style to Mono."
             focused={focusedSetting === "appearance.scheme.accent"}
             label="Accent"
             scope="app"
@@ -195,7 +197,12 @@ export function ThemeAppearanceEditor(props: {
                     key={swatch.id}
                     onClick={() =>
                       void theme.applyPatch({
-                        semanticOverrides: overridesForAccent(draft.semanticOverrides, swatch.id),
+                        ...(swatch.id === "mono" ? { style: "mono" as const } : {}),
+                        semanticOverrides: overridesForAccent(
+                          draft.semanticOverrides,
+                          swatch.id,
+                          draft.style,
+                        ),
                       })
                     }
                     role="radio"

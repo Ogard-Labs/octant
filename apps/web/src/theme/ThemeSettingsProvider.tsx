@@ -179,11 +179,10 @@ export function ThemeSettingsProvider(props: {
       root.dataset.octantReducedMotion = String(accessible.reducedMotion);
       root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
       // Increased contrast keeps the monochrome chrome: colour as decoration is
-      // the first thing that setting exists to take away.
+      // the first thing that setting exists to take away. "default" and the
+      // retired "vivid" both draw the colour look.
       root.dataset.octantStyle =
-        accessible.increasedContrast || accessible.style === undefined
-          ? "default"
-          : accessible.style;
+        accessible.increasedContrast || accessible.style === "mono" ? "mono" : "colour";
       root.style.colorScheme = resolved.mode;
       // The desktop owns the approval document; a window only reports the
       // palette it resolved, and only when it has the ordinary host bridge.

@@ -2,7 +2,7 @@ import { getDefaultToken } from "@octant/theme/tokens";
 
 /**
  * Octant mobile tokens, aligned to the desktop/web palette.
- * Neutral greys, hairline borders, monochrome accent; status colours map to the
+ * Neutral greys, hairline borders, the theme's blue accent; status colours map to the
  * web palette roles so the phone reads as the same product as the desktop.
  * Owned Octant roles — not a third-party clone.
  */
@@ -22,7 +22,7 @@ export type ThemeColors = {
   hairline: string;
   hairlineSoft: string;
   hairlineStrong: string;
-  /** Brand accent — desktop-consistent neutral. */
+  /** Brand accent: the desktop's colour-style accent. The phone has no Mono choice yet. */
   primary: string;
   primaryActive: string;
   primarySoft: string;

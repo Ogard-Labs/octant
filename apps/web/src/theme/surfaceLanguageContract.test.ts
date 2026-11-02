@@ -56,7 +56,7 @@ describe("surface language", () => {
     expect(rule).toContain("font-size: var(--oct-text-2xl);");
     expect(rule).toContain("letter-spacing: -0.012em;");
     // No style recolours the question with its accent.
-    expect(read("styles/vivid.css")).not.toMatch(/oct-title--hero/);
+    expect(read("styles/colour.css")).not.toMatch(/oct-title--hero/);
   });
 
   it("keeps the one page shell and the one way back", () => {

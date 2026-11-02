@@ -31,12 +31,19 @@ connection details, have a Save button.
 
 ### Style
 
-**Style** sits under the color scheme. **Default** keeps the app monochrome.
-**Vivid** adds colour where something has a name: the welcome question, the
-sidebar's count tiles, board columns, and each Project's colour. Vivid uses
-your preset's palette, so it changes with light and dark, and it never
-recolours a warning or an error. It looks best in the light theme.
-**Increased contrast** always uses the Default style.
+**Style** sits under the color scheme. **Colour** is the default: an accent,
+status colours, and colour where something has a name, such as the sidebar's
+count tiles, board columns, each Project's colour, and the logos in the
+Library. It uses your preset's palette, so it changes with light and dark.
+**Mono** keeps the app grey, as it was before. Earlier installs that used
+Default or Vivid now show Colour; choose Mono to go back.
+**Increased contrast** always uses Mono's greys.
+
+**Accent** sits under Style: pick **Blue** (the default), a colour (Clay,
+Amber, Green, Purple), or **Mono**, which also sets Style to Mono. It colours
+switches, the send button, selected states and the click ring on Pulsing
+characters. Text stays in the theme's ink so it stays readable in both light
+and dark.
 
 **Accent** sits under Style: pick **Mono** (the theme's own) or a colour (Clay,
 Amber, Green, Blue, Purple). It colours switches, the send button, selected
@@ -45,12 +52,13 @@ so it stays readable in both light and dark.
 
 ### Style
 
-**Style** sits under the color scheme. **Default** keeps the app monochrome.
-**Vivid** adds colour where something has a name: the welcome question, the
-sidebar's count tiles, board columns, and each Project's colour. Vivid uses
-your preset's palette, so it changes with light and dark, and it never
-recolours a warning or an error. It looks best in the light theme.
-**Increased contrast** always uses the Default style.
+**Style** sits under the color scheme. **Colour** is the default: an accent,
+status colours, and colour where something has a name, such as the sidebar's
+count tiles, board columns, each Project's colour, and the logos in the
+Library. It uses your preset's palette, so it changes with light and dark.
+**Mono** keeps the app grey, as it was before. Earlier installs that used
+Default or Vivid now show Colour; choose Mono to go back.
+**Increased contrast** always uses Mono's greys.
 
 ### Accessibility
 

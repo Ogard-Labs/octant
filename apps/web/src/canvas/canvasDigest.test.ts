@@ -73,7 +73,7 @@ describe("a one-line read of a Canvas", () => {
     ).toEqual({ kind: "document", label: "Document", facts: ["2 sections"] });
   });
 
-  it("files a designed document with documents, so Vivid tints it as one", () => {
+  it("files a designed document with documents, so the colour style tints it as one", () => {
     expect(
       canvasDigest(withBlocks([{ kind: "design", size: "document", frames: [{ html: "" }] }])),
     ).toEqual({ kind: "document", label: "Document", facts: [] });

@@ -33,8 +33,8 @@ under 560px. A card uses the card recipe (`OctantCard`: hairline ring, no
 shadow, the card fill) at a compact 12px rhythm. Its header is an icon at the
 16px step in secondary ink, the title as a section label, and a count as
 tabular meta text; its body is rows or one quiet line in the detail step. No
-card has a hue of its own: the default theme stays monochrome, and a state is
-carried by wording and weight. A row is a bare card-shaped button whose face
+card has a hue of its own: a state is carried by wording and weight, and the
+accent and status roles colour its marks as they do elsewhere. A row is a bare card-shaped button whose face
 fills at 5% ink on hover and focus, the provider mark and a row label on its
 first line, and a mono meta line for what is happening. The Customize panel is a
 popover at most 340px wide: one row per card with a drag grip, the icon, the

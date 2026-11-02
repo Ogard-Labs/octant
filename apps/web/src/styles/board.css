@@ -215,7 +215,7 @@ ul.board-col-body {
 
 /* Column head mark. The shapes differ (hollow ring, turning arc or filled dot,
    filled dot, check) so the default theme tells the columns apart without a
-   hue; the Vivid style below tints them. The slot is 12px so the dot and the
+   hue; the colour style below tints them. The slot is 12px so the dot and the
    check share one centre. */
 .board-status-mark {
   display: inline-flex;
@@ -259,15 +259,15 @@ ul.board-col-body {
   }
 }
 
-:root[data-octant-style="vivid"] .board-status-mark[data-status="in-progress"] {
+:root[data-octant-style="colour"] .board-status-mark[data-status="in-progress"] {
   color: var(--octant-palette-orange);
 }
 
-:root[data-octant-style="vivid"] .board-status-mark[data-status="waiting"] {
+:root[data-octant-style="colour"] .board-status-mark[data-status="waiting"] {
   color: var(--octant-palette-purple);
 }
 
-:root[data-octant-style="vivid"] .board-status-mark[data-status="done"] {
+:root[data-octant-style="colour"] .board-status-mark[data-status="done"] {
   color: var(--octant-palette-green);
 }
 

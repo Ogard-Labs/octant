@@ -2,7 +2,7 @@ import type { CanvasDefinition } from "@octant/contracts/canvas";
 
 type Block = CanvasDefinition["blocks"][number];
 
-/** What a Canvas mostly is, which also picks its colour in the Vivid style. */
+/** What a Canvas mostly is, which also picks its colour in the colour style. */
 export type CanvasDigestKind =
   | "plan"
   | "chart"

@@ -20,9 +20,9 @@ Read the relevant section rather than the entire document:
 
 Octant is a local-first desktop workspace for supervising Chat, Work, and Code
 threads, providers, Projects, agents, changes, and delivery. Its visual north
-star is a calm graphite workbench that shows what is happening at a glance —
-counts, running work, and whose thing is whose — and turns vivid when a person
-asks for it (Settings › Appearance › Style):
+star is a calm, colourful workbench that shows what is happening at a glance —
+counts, running work, and whose thing is whose. Colour is the default; a person
+who prefers grey chooses Mono (Settings › Appearance › Style):
 
 - One active thread, board, Project overview, or Project-level list is the
   primary work surface.
@@ -39,20 +39,31 @@ asks for it (Settings › Appearance › Style):
   its thread (see [Shell and layout](#shell-and-layout)). Neither region
   fabricates a tab or repeats another pane's content.
 - Hierarchy comes from typography (size first, then weight), spacing, cards
-  for discrete objects, and selection fills. In the Default style the chrome is
-  monochrome apart from the accent a person picks (Mono by default); colour
-  names identity (a Project, a provider, a usage ring, a count tile under
-  Vivid) and never stands in for status, which keeps its own warning, failure,
-  and diff roles. Categorical data is the other exception: the context ring and
-  the parts of the context window keep their hues in every style.
+  for discrete objects, and selection fills. Colour is a normal tool: a real
+  accent, status hues (amber warning, red failure, green success), coloured
+  count tiles, board marks, Project and Canvas hues, and brand marks on
+  connectors. It carries meaning, so a mark that names a state also has a shape
+  or a word, and colour never stands alone. Long reading text in the transcript
+  stays neutral for comfort. The Mono style draws the same app in greys. The
+  context ring and the parts of the context window keep their hues, amber then
+  red, in every style.
+
+  _Rationale._ The app first shipped grey so that status and identity colour
+  would stand out, and a calm default suited a review tool. In use it read as
+  unfinished: nothing said what was running, warned, or belonged to what.
+  Colour is now the default for everyone and grey is one click away, so the
+  rules that remain are the ones that protect readers: colours come from the
+  theme, text stays readable, and keyboard focus stays clear.
+
 - Controls are familiar, compact, keyboard reachable, and honest about
   loading, stale, unavailable, permission, and error states.
 
 Avoid dashboard walls (counts belong in a few tiles, not a grid of them),
 neon developer styling, permanent low-frequency controls, oversized setup
-cards, pill-shaped everything, and invented data. Gradients belong to the
-application ground, to a Vivid tile's face, and to a Project's letter tile;
-chrome stays flat. A feature that is not available must explain why and offer the
+cards, pill-shaped everything, and invented data. Gradients and depth are
+ordinary tools used with judgment: the application ground, a count tile's face,
+a Project's letter tile, and a raised card are fine; a gradient that carries no
+meaning, or decoration on a control that already reads, is not. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground: a first-party picture or a
 person's photo, shown plain or through one print effect, or the field of
@@ -152,15 +163,23 @@ body and detail use none.
 
 ### Colour
 
-Neutral graphite, a monochrome accent, semantic statuses, and one neutral
-keyboard focus edge: that is the default preset. The bundled colour presets
-lean every surface toward one hue and keep the accent and focus role available
-for theme compatibility. Text is three greys (primary, secondary, muted) and
-never a fourth; the primary ink is near-white (`#f5f5f7`) in dark and
-near-black (`#141414`) in light, and the monochrome accent follows it.
+Neutral graphite grounds, a blue accent, semantic statuses (amber warning, red
+danger, green success), and one neutral keyboard focus edge: that is the default
+preset. The bundled colour presets lean every surface toward one hue and carry
+their own accent. Text is three greys (primary, secondary, muted) and never a
+fourth; the primary ink is near-white (`#f5f5f7`) in dark and near-black
+(`#141414`) in light.
 
-Appearance › Accent offers a one-click accent colour: Mono (the preset's own)
-or Clay, Amber, Green, Blue, Purple. A swatch overrides the accent fill and
+_Rationale for the accent._ Blue was rendered against Purple on both grounds.
+Blue clears 4.5:1 as text and 3:1 as a fill on the light and the dark page with
+the same hue, and it stays distinct from the amber warning and the green
+success. Purple's light-page text value had to be darkened until it read close
+to the plain ink, which loses the point of an accent.
+
+Appearance › Accent offers a one-click accent colour: Blue (the theme's own),
+Clay, Amber, Green, Purple, or Mono. Mono is the grey look: it sets Style to
+Mono, because the ink accent needs different values in light and dark, which a
+single override cannot hold. A colour swatch overrides the accent fill and
 puts dark ink on it (`accent-foreground` and `primary-foreground`), and leaves accent text on the
 preset's ink, because no swatch clears normal-text contrast on the light page.
 The accent colours switches, the send button, selected states, and sliders;
@@ -169,17 +188,27 @@ state; keyboard focus follows the rule in "Accessibility and reliability". See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
-Settings › Appearance › Style chooses how much of that palette the chrome
-uses. **Default** is the monochrome described above. **Vivid** lets the
-places that name something carry colour: the welcome question, the sidebar's
-count tiles, board column marks, a Project's accent, and a thread's Canvases,
-which take the hue of what they hold (a plan purple, a chart or figures
-amber, a diagram teal, a mockup pink, a table or document blue). Vivid draws every
-hue from the preset's palette roles (`--octant-palette-*`, read through the
-`--oct-vivid-*` aliases in `styles/vivid.css`), so it follows the light or
-dark theme and any tinted preset, and it never recolours a warning, a
-failure, or a diff. The root carries `data-octant-style`; increased contrast
-always publishes `default`. Vivid reads best in the light theme.
+Settings › Appearance › Style chooses between **Colour** (the default) and
+**Mono**. Colour lets the places that name something carry colour: the accent,
+the sidebar's count tiles, board column marks, a Project's accent, connector
+brand marks, and a thread's Canvases, which take the hue of what they hold (a
+plan purple, a chart or figures amber, a diagram teal, a mockup pink, a table
+or document blue). Colour draws every hue from the preset's palette roles
+(`--octant-palette-*`, read through the `--oct-colour-*` aliases in
+`styles/colour.css`), so it follows the light or dark theme and any tinted
+preset. Mono is the grey app the product shipped before colour became the
+default: the ink accent and the neutral warning trio (`MONO_STYLE_TOKENS` in
+`packages/theme/src/tokens.ts`, swapped in only for roles a preset left at the
+colour default), grey tiles and marks, and connector marks in the ink.
+
+Vivid, the earlier name for the colourful look, is folded in: a stored `vivid`
+or `default` value, or none, draws Colour, and `mono` draws Mono, so old rows
+decode and everyone moves to Colour unless they choose Mono. The root carries
+`data-octant-style="colour"` or `"mono"`. Increased contrast always publishes
+`mono` and resolves the Mono roles, as it did before, so it is exactly as
+readable as it was. Plain empty, loading, and informational messages draw their
+mark in neutral ink in both styles; a yellow icon on a message that is not a
+warning is wrong.
 
 ### Shapes and depth
 
@@ -523,8 +552,8 @@ the 12px meta step in meta ink with no fill behind the row. They describe the
 provider the composer will send to (a start screen follows the model menu's
 choice) and read the same host observation as the rail's rings, picked by window
 length (`windowSpan`). A provider that reports no window gets no meters, never
-an empty bar. The fill is the theme's accent role (`--oct-accent`, the ink in the
-monochrome default); a window with a fifth or less left takes the warning ink and
+an empty bar. The fill is the theme's accent role (`--oct-accent`, the ink under
+Mono); a window with a fifth or less left takes the warning ink and
 a spent one the danger ink. The Appearance setting **Usage bars** (`usageBars`,
 Settings › Appearance › Reading) chooses the bar: **Smooth** (default) is a
 three-pixel rounded line; **Pixelated** is a 17 × 3 grid of 2px square cells with
@@ -735,8 +764,8 @@ against a fraction of a millisecond on the GPU). A click over it
 on a start screen (behind every page, only there; a click in a thread or a
 list sends nothing) sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
 it grows, trailed by a fainter echo, and about one click in six draws a heart
-instead, and fades within two seconds. With the default Mono accent the ring
-is the ink, only brighter; a chosen accent colours it. It carries no picture, so the effect controls do not apply, and it
+instead, and fades within two seconds. With the Mono style the ring
+is the ink, only brighter; the accent colours it otherwise. It carries no picture, so the effect controls do not apply, and it
 pauses while the window is hidden. Reduced motion holds it on one still frame
 and takes no rings. Behind a
 start screen the ground is masked away behind the composer and fades out below
@@ -1039,10 +1068,10 @@ and categorical data may retain semantic colour alongside a label or shape.
 | Diff addition | No default surface                                           | `--octant-addition-text`                                                                    |
 | Diff deletion | No default surface                                           | `--octant-deletion-text`                                                                    |
 
-The default preset is monochrome, so its warning role carries no hue: the
-control fill, a border that reads at 3:1 on it, and the primary ink. A warning
-is told apart by its mark and its words. A theme that wants an amber warning
-sets the three warning roles.
+The default preset's warning role is amber (surface, a border that reads at 3:1
+on it, and text that clears 4.5:1 on the surface). The Mono style swaps in the
+neutral trio: the control fill, a border that reads at 3:1 on it, and the
+primary ink. A warning is told apart by its mark and its words in both.
 
 The eight palette roles (`red`, `orange`, `yellow`, `green`, `teal`, `blue`,
 `purple`, `pink`) are for Project View identity, chart marks, and provider or
@@ -1559,7 +1588,7 @@ Board (the Activity feed in Chat, which has no board), To review opens the
 Review page, and Done today opens the Put away shelf (see [Workspace](docs/design/workspace.md#thread-visibility-and-completion)). With the tiles on,
 the Inbox and Board rows are left out because their tiles go to the same
 place. Settings › Sidebar › Count tiles turns them off and brings the rows
-back. Tiles are neutral faces in the Default style; under Vivid each takes a
+back. Tiles are neutral faces under Mono; under Colour each takes a
 palette hue, as a solid face with primary-foreground text in the light theme
 and as a tint with a coloured count in the dark one. In the narrow drawer
 (under 681px) the four destinations are compact rows instead: icon, name, and
@@ -1644,7 +1673,7 @@ thing on the page, and one open card among nine shut ones ran to about eight
 screens. The state line
 reads from a dot that carries the state without colour: a filled ink dot is
 ready, a ring in ink needs setup or a sign-in, a muted ring is off or not
-checked, and a failure keeps its red role. Only under Vivid does ready turn the
+checked, and a failure keeps its red role. Only under Colour does ready turn the
 palette's green and setup the palette's orange. The detected, supported-but-not-
 detected, and other groups are Settings sections; the readiness summary is the
 label's description. Ordering controls appear only in an explicit Reorder mode.
@@ -1822,7 +1851,7 @@ and count, with no rule under it: the name at the section-label step in the
 secondary ink and the count pinned to the trailing edge in the meta ink. The
 mark is told apart by shape, not hue: Ready a hollow ring, In Progress a small
 turning arc while any card in the column is executing and a filled dot when
-none is, Waiting a filled dot, Done a check. Under the Vivid style the marks
+none is, Waiting a filled dot, Done a check. Under the Colour style the marks
 take palette colours (Ready stays grey, In Progress orange, Waiting purple,
 Done green). A Board/List toggle leads the toolbar, and every control on it
 (the segmented choices, search, Filters, Refresh, View) is one rail control
