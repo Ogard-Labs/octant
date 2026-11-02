@@ -1834,6 +1834,8 @@ numbered label when siblings are open. Files, Document, Review, Agents, Canvas,
 Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
 still appears in only one region at a time.
 
+Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
+
 A welcome, Project, or other pane with neither a bound thread nor a valid
 launchable tool keeps the dock closed and omits its toggle. The exception is a
 new Code task's pane before its thread exists: the dock keeps its place, its

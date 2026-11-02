@@ -49,7 +49,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Extensions](#extensions)                                                             | 8         | 7       | 1            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
-| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 8       | 0            | 0                   |
+| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 6       | 2            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **223**   | **190** | **30**       | **3**               |
+| **All areas**                                                                         | **223**   | **189** | **31**       | **3**               |
 
 ## Principles and hard lines
 
@@ -1620,11 +1620,13 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Canvas
 
 A product-feedback note is one comment the person pointed at an element of the running product, journaled on its own aggregate and sent with the next turn exactly once.
 
-- The client sends only where it tapped and the text; the host resolves the element and cuts the crop after checking the caller may see the thread and the browsing context is the window's own. _Here only._
-- The comment is the person's words; the element description is outside content that taints the thread and is framed as content, never instructions. _Here only._
-- A picture travels only to a model that reads images; the crop lives in purgeable evidence storage referenced from the journal, and notes queue per thread up to a small bound. _Here only._
+- The client sends only where it tapped and the text; the host resolves the element and cuts the crop after checking the caller may see the thread and the browsing context is the window's own.
+- The comment is the person's words; the element description is outside content that taints the thread and is framed as content, never instructions.
+- A picture travels only to a model that reads images; the crop lives in purgeable evidence storage referenced from the journal, and notes queue per thread up to a small bound.
+- Built: host-authorized headless Playwright point resolution, bounded pending notes, external-content marking, purgeable crop references and durable once-only delivery.
+- Not built yet: pointed-element capture through the desktop routing/native runtime and the native screenshot/context preview.
 
-Status: Built. Since: —. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
+Status: Partly built. Since: —. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
 
 ### Project actions
 
@@ -1903,7 +1905,7 @@ Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](..
 Quitting the desktop app is guarded so that open provider sessions are never dropped silently.
 
 - Ordinary Quit and Fully quit share one shutdown that confirms when provider sessions remain open or the desktop cannot tell what the host is running.
-- The quit keyboard shortcut needs a second press within 1.5 seconds. Pointer quits, OS shutdown and updater restarts stay immediate.
+- When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds. With no window able to show it, the first press enters guarded shutdown. Pointer quits, OS shutdown and updater restarts stay immediate.
 - Once confirmed, quitting never waits on a person; a fixed deadline ends the app.
 
 Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
@@ -1912,7 +1914,7 @@ Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](..
 
 A new window, its background and its drafts behave predictably.
 
-- A new window starts with the right dock and bottom panel closed; an explicit show or hide is restored per window later. _Here only._
+- Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed, subject to the active pane having an eligible dock subject. The bottom panel starts closed. An explicit show or hide is restored per window later.
 - A photo ground comes from the host's background image library (8 MiB, 4096x4096, PNG, JPEG or WebP). The host refuses to delete a photo while it is showing, and ground settings are kept across kinds. _Here only._
 - While an everywhere background covers the sidebar, the sidebar's own background is not drawn and its controls are disabled with a note; saved sidebar values are kept. _Here only._
 - A new-task composer keeps its identity while its Project changes. A refused binding keeps the prior authorized Project and the draft.
@@ -2384,7 +2386,7 @@ Status: Built. Since: —. Detail: [Provider runtimes: local-server adapter](pro
 
 Octant tells the person when a newer runtime release exists, and runs the runtime's own updater only when they click Update CLI. Discovery never installs or updates anything.
 
-- The check is one anonymous registry lookup with no task, thread, Project, account or host identifier, cached for a day and never made at discovery.
+- Each lookup is one anonymous registry GET with no task, thread, Project, account or host identifier. A successful answer is cached for one day and a failed or refused lookup for one hour. The check is never made at discovery.
 - The check follows the Marketplace fetches switch; with the switch off no request is made.
 - Nothing updates by itself, and the runtime is probed again after the updater exits so a release that fails a floor shows its reason.
 - Update CLI runs only the configured absolute binary's verified update subcommand, only when no active session uses it, on the owning host. The renderer never receives an updater command. _Here only._
@@ -2420,7 +2422,7 @@ Status: Built. Since: —. Detail: [Model endpoints: subscription sign-in lifecy
 A model endpoint's key belongs to the address it was entered for, and a model's limits come from the best source that names them.
 
 - A saved address change deletes the stored key, and the address field says so before saving.
-- A remote model endpoint must use HTTPS; plain HTTP is accepted only for a loopback address. _Here only._
+- A remote model endpoint must use HTTPS; plain HTTP is accepted only for a loopback address.
 - A model's limits and capabilities come from the first source that names them: observed behaviour, runtime metadata, reviewed catalog metadata, user-supplied metadata, then unknown. User-supplied metadata can make a model selectable but never authorizes a side effect. _Here only._
 
 Status: Built. Since: —. Detail: [Model endpoints: endpoint address and stored key](model-endpoints.md#endpoint-address-and-stored-key) and [endpoint list](model-endpoints.md#octant-harness-model-endpoints).

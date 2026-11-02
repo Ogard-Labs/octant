@@ -10154,9 +10154,7 @@ access` agree); a thread's own change is journaled as
   worktree the run was admitted with; a child's worktree is never a journaled
   thread checkout, so none is required. A provider transport that cannot carry
   app-managed tools fails the start with a typed reason rather than dropping
-  the tool. Today each adapter turns its provider's own subagent feature off,
-  because a child the provider starts itself runs outside the journal and the
-  approval path. For the key providers the rule is that their native
+  the tool. For the key providers the rule is that their native
   subagents are on ([Key providers run as themselves](#providers)): Octant
   journals and shows each native child run the provider reports, its tool
   calls reach the same approval path as the parent's at the parent's level,
@@ -10203,6 +10201,25 @@ access` agree); a thread's own change is journaled as
   within the per-image and per-design budgets are returned, the renderer
   inlines them as `data:` images, and the journal holds references only
   ([Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md), F5).
+- **Product feedback notes.** A product-feedback note is the person's comment
+  on an element of the running product. It is journaled on its own aggregate
+  and carried with the next admitted turn exactly once. The client sends the
+  point and comment; after checking the caller can see the thread and the
+  context belongs to that window, the host resolves the element and crop.
+  The comment is the person's words. The page's element description is outside
+  content, marks the thread, and is framed as content rather than instructions.
+  Notes wait in a bounded per-thread queue. Crops live in purgeable evidence
+  storage, with references in the journal, and travel only to an image-capable
+  model. An unavailable crop does not discard the text note. Delivery is claimed
+  durably before the turn carries it, so a failed claim sends nothing and an
+  uncertain delivery is not repeated.
+
+  The pointed-element producer is built for the headless Playwright runtime.
+  The desktop native runtime and its routing runtime do not implement point
+  descriptions, so those surfaces currently refuse capture as unavailable.
+  Native element selection, screenshot/context preview and bounded DOM/style
+  evidence remain not built yet.
+
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
   Remote requests are classified fail-closed by an admission policy and route
