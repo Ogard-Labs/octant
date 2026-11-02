@@ -1370,7 +1370,7 @@ describe("BrowserWorkspace", () => {
       enterAddress("https://example.com/private");
       fireEvent.submit(screen.getByRole("textbox", { name: "Browser URL" }).closest("form")!);
       expect(browser.create).not.toHaveBeenCalled();
-      await user.click(screen.getByRole("button", { name: "Open Private page", exact: true }));
+      await user.click(screen.getByRole("button", { name: "Open Private page" }));
       await waitFor(() => expect(browser.create).toHaveBeenCalledOnce());
       expect(vi.mocked(browser.create).mock.calls[0]?.[0].policy.profile).toBeUndefined();
       expect(browser.selectTaskProfile).not.toHaveBeenCalled();
