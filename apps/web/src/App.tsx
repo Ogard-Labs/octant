@@ -344,7 +344,6 @@ import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveDockPresentationWidth,
-  workbenchDockWidth,
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceId,
@@ -1219,7 +1218,7 @@ function LaunchedShell(
     };
   }, [setSidebarCollapsedPersistent, sidebarDrawerOpen, sidebarIsDrawer]);
   const [previewContextWidth, setPreviewContextWidth] = useState<number>();
-  const [workbenchContextWidth, setWorkbenchContextWidth] = useState<number>();
+  const [dockWidthChosen, setDockWidthChosen] = useState(false);
   const [pendingCodeDeepLink, setPendingCodeDeepLink] = useState<CodeDeepLink>();
   const [computerUseSessionRepresentationCounts, setComputerUseSessionRepresentationCounts] =
     useState<ReadonlyMap<string, ReadonlyMap<string, number>>>(new Map());
@@ -3794,8 +3793,8 @@ function LaunchedShell(
     }
   }
   function widenDockFor(surface: RightUtilityDockSurfaceId) {
-    const width = workbenchDockWidth(surface, controller.settings?.contextSidebarWidth);
-    if (width !== undefined) setWorkbenchContextWidth(width);
+    // Each new Browser or Terminal asks for its width again, as one always has.
+    if (surface === "browser" || surface === "terminal") setDockWidthChosen(false);
   }
   function addDockTab(surface: RightUtilityDockSurfaceId) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
@@ -4181,8 +4180,6 @@ function LaunchedShell(
   }, [dockVisible]);
   useEffect(() => {
     setPreviewContextWidth(undefined);
-    // A width the person dragged to outranks what a tool asked for.
-    setWorkbenchContextWidth(undefined);
   }, [controller.settings?.contextSidebarWidth]);
   useEffect(() => {
     setPreviewSidebarWidth((preview) =>
@@ -4791,6 +4788,7 @@ function LaunchedShell(
       setPendingUsageFilter,
       setPreviewBottomPanelHeight,
       setPreviewContextWidth,
+      setDockWidthChosen,
       setProjectArchived: projectController.setArchived,
       setProjectColor: projectController.setColor,
       setProjectProviderPolicy: projectController.setProviderPolicy,
@@ -5461,7 +5459,7 @@ function LaunchedShell(
     dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
   const dockPresentationWidth = resolveDockPresentationWidth({
     storedWidth: contextSidebarWidth,
-    workbenchWidth: previewContextWidth === undefined ? workbenchContextWidth : undefined,
+    widthChosen: dockWidthChosen || previewContextWidth !== undefined,
     tabSurfaces: dockTabs.map((tab) => tab.surface.id),
   });
   // The bottom panel steps aside for the same reason, and it had not been:

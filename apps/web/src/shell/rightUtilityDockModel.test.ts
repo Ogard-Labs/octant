@@ -7,7 +7,6 @@ import {
   resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
   WORKBENCH_DOCK_WIDTH,
-  workbenchDockWidth,
   type RightUtilityDockResolutionInput,
   type RightUtilityDockSurfaceAvailability,
   MULTI_INSTANCE_DOCK_SURFACES,
@@ -28,27 +27,41 @@ function surface(id: (typeof RIGHT_UTILITY_DOCK_SURFACES)[number]["id"]) {
 }
 
 describe("how wide the right utility dock is", () => {
-  const widths = { storedWidth: 360, workbenchWidth: 640 };
+  const narrow = { storedWidth: 360, widthChosen: false };
 
   it("stays one width from the empty launcher to any tool, so a click moves nothing", () => {
-    expect(resolveDockPresentationWidth({ ...widths, tabSurfaces: [] })).toBe(360);
-    expect(resolveDockPresentationWidth({ ...widths, tabSurfaces: ["environment"] })).toBe(360);
+    expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: [] })).toBe(360);
+    expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["environment"] })).toBe(360);
   });
 
   it("holds the Browser's width while its tab is open, whichever tab is in front", () => {
     expect(
-      resolveDockPresentationWidth({ ...widths, tabSurfaces: ["environment", "browser"] }),
-    ).toBe(640);
+      resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["environment", "browser"] }),
+    ).toBe(WORKBENCH_DOCK_WIDTH);
   });
 
-  it("uses the stored width when no tool has asked for more", () => {
+  it("returns to the saved width once the Browser closes", () => {
+    expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["environment"] })).toBe(360);
+  });
+
+  it("leaves a wider saved dock alone", () => {
     expect(
       resolveDockPresentationWidth({
-        storedWidth: 700,
-        workbenchWidth: undefined,
+        storedWidth: 800,
+        widthChosen: false,
+        tabSurfaces: ["terminal"],
+      }),
+    ).toBe(800);
+  });
+
+  it("keeps a width the person dragged to, even narrower than a Browser asks for", () => {
+    expect(
+      resolveDockPresentationWidth({
+        storedWidth: 420,
+        widthChosen: true,
         tabSurfaces: ["browser"],
       }),
-    ).toBe(700);
+    ).toBe(420);
   });
 });
 
@@ -339,14 +352,5 @@ describe("multi-instance dock surfaces", () => {
     for (const surface of ["environment", "plan", "review", "files", "tests"]) {
       expect(MULTI_INSTANCE_DOCK_SURFACES.has(surface)).toBe(false);
     }
-  });
-});
-
-describe("workbenchDockWidth", () => {
-  it("widens a narrow dock when a Browser or Terminal opens, and leaves other tools and wide docks alone", () => {
-    expect(workbenchDockWidth("browser", 395)).toBe(WORKBENCH_DOCK_WIDTH);
-    expect(workbenchDockWidth("terminal", 420)).toBe(WORKBENCH_DOCK_WIDTH);
-    expect(workbenchDockWidth("browser", 800)).toBeUndefined();
-    expect(workbenchDockWidth("environment", 300)).toBeUndefined();
   });
 });

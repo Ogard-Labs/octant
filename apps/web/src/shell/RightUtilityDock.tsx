@@ -31,6 +31,8 @@ export interface RightUtilityDockProps {
   readonly onClose: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onCommitWidth: (width: number) => void;
+  /** A drag was abandoned: drop the preview rather than keep the width it started from. */
+  readonly onCancelWidthPreview?: () => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly onPreviewWidth: (width: number) => void;
   readonly onSelectSurface: (tabId: string) => void;
@@ -144,6 +146,9 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
         edge="leading"
         maximum={ceiling}
         minimum={MIN_CONTEXT_SIDEBAR_WIDTH}
+        {...(props.onCancelWidthPreview === undefined
+          ? {}
+          : { onCancel: props.onCancelWidthPreview })}
         onCommit={props.onCommitWidth}
         onPreview={props.onPreviewWidth}
         value={Math.min(props.width, ceiling)}

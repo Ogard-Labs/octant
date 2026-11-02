@@ -131,33 +131,25 @@ export const MULTI_INSTANCE_DOCK_SURFACES: ReadonlySet<string> = new Set(["brows
  */
 export const WORKBENCH_DOCK_WIDTH = 640;
 
-/** The width to widen the dock to when this tool opens, or undefined to leave it. */
-export function workbenchDockWidth(
-  surface: RightUtilityDockSurfaceId,
-  configuredWidth: number | undefined,
-): number | undefined {
-  if (surface !== "browser" && surface !== "terminal") return undefined;
-  if (configuredWidth !== undefined && configuredWidth >= WORKBENCH_DOCK_WIDTH) return undefined;
-  return WORKBENCH_DOCK_WIDTH;
-}
-
 /**
  * One width whatever the dock is showing, so a click inside it moves nothing.
  * The empty launcher used to take the 280px minimum while every tool took the
  * stored width, so opening Environment from it threw the dock from 280px to the
  * stored 960px and squeezed the thread beside it. A Browser or Terminal tab that
- * asked for more holds that width even while another tab is in front.
+ * needs more holds that width even while another tab is in front. It is worked
+ * out from the open tabs, so a tab restored after a restart gets it too.
  */
 export function resolveDockPresentationWidth(input: {
   readonly storedWidth: number;
-  readonly workbenchWidth: number | undefined;
+  /** The person sized the dock since a Browser or Terminal last opened, so it stays as they left it. */
+  readonly widthChosen: boolean;
   readonly tabSurfaces: ReadonlyArray<string>;
 }): number {
   const holdsWorkbench = input.tabSurfaces.some(
     (surface) => surface === "browser" || surface === "terminal",
   );
-  return holdsWorkbench && input.workbenchWidth !== undefined
-    ? input.workbenchWidth
+  return holdsWorkbench && !input.widthChosen
+    ? Math.max(input.storedWidth, WORKBENCH_DOCK_WIDTH)
     : input.storedWidth;
 }
 

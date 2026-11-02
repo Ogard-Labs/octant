@@ -2151,7 +2151,8 @@ The right dock has one width whatever it shows, so a click inside it moves
 nothing: the launcher and every tool use the width the person last dragged it to.
 It never takes more than half the workspace, and its handle stops at the same
 half. A Browser or Terminal tab that needs more holds 640px while that tab stays
-open and does not save it.
+open, including one restored after a restart, and does not save it. A width the
+person drags to stands until the next Browser or Terminal opens.
 
 Native Electron title-bar regions are a hard boundary. Interactive controls
 must carry `window-no-drag` and render above the native drag target. Test title-bar
