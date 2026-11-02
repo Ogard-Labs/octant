@@ -289,7 +289,7 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
 - `main` is the only long-lived branch. Work on `feature/*` or `fix/*` branches
   and keep the bottom or standalone pull request targeted at `main`. A dependent
   child in a native GitHub stack may target the immediately preceding feature
-  branch. Never commit directly to `main` unless the maintainer explicitly asks.
+  branch. Never commit directly to `main` unless a maintainer explicitly asks.
 - One pull request delivers one coherent outcome. Link the Linear issue in the PR
   description, not in code or docs.
 - Before creating a branch or pull request, inspect open pull requests and branch
@@ -302,8 +302,8 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
   next change cannot land without the unmerged parent (a real stack).
 - Do not open a sibling `fix/*` or `feature/*` off `main` for work that belongs
   on an in-flight pull request.
-- A report, assessment, audit, or Agent Store / Context document is not a reason
-  to open a GitHub pull request. Those stay in the store or chat.
+- A report, assessment, or audit is not a reason to open a GitHub pull request.
+  Keep it in chat or the tracker.
 - Choose the smallest delivery shape that preserves reviewability:
   - Keep one outcome on one pull request when its jobs are not independently
     reviewable.
@@ -331,7 +331,7 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
   or bottom PR to `main` (or a child PR with its parent stack link), and no
   unexplained changes.
 - A ready PR is not necessarily merge-ready. Required CI and any PR-owned
-  pre-merge QA must pass on the exact head. Never merge without the maintainer's
+  pre-merge QA must pass on the exact head. Never merge without a maintainer's
   explicit instruction for that specific PR.
 - State every skipped or unavailable check and residual risk precisely. Never
   infer success from intent or partial output.
@@ -376,12 +376,12 @@ conditions below are met; it does not authorize merging or releasing.
   one-block rule. Historical statements such as "still In Progress" do not
   reopen a completed issue. (Stacked status blocks grew one issue past 57,000
   characters in October 2026 and hid the current state.)
-- An action only the maintainer can perform (a credential, a billed provider
+- An action only a maintainer can perform (a credential, a billed provider
   turn, a second machine, a signing key, a subjective sign-off) is recorded
   once, in full, as an item on the standing maintainer-actions issue, titled
-  "Maintainer live smokes". Each item names the issue, the exact action, and
-  what it unblocks. The issue's status block still names the blocker in one
-  line (owner "maintainer", the prerequisite, and a link to the list) so the
+  "Maintainer live smokes". Each item names the issue, the exact action, who
+  can perform it, and what it unblocks. The issue's status block still names the blocker in one
+  line (owner "maintainers", the prerequisite, and a link to the list) so the
   closeout rule above is met, but the steps live on the list alone, so a
   maintainer sitting can run the whole list in one pass and hygiene passes do
   not repeat it per issue.

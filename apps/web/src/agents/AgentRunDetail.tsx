@@ -419,7 +419,7 @@ function SteerControl(props: {
 
 /**
  * The host records a reply as it streams, one entry per text delta, so
- * "Hello, Henrik!" arrived as "Hello", ",", " Henrik", "!" and rendered as
+ * "Hello, Sam!" arrived as "Hello", ",", " Sam", "!" and rendered as
  * four paragraphs. Consecutive assistant entries are one message; a status
  * entry between them ends it.
  */

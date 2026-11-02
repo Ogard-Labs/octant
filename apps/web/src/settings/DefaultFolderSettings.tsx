@@ -15,7 +15,7 @@ export interface DefaultFolderSettingsProps {
 
 /**
  * The folder always sits inside the home folder, and the home prefix is what
- * pushed its own name past the ellipsis ("/Users/henrik/Documents/Oc…"). Shown
+ * pushed its own name past the ellipsis ("/Users/sam/Documents/Oc…"). Shown
  * home-relative the part that differs fits; the full path stays in the title.
  */
 function homeRelativePath(folder: string): string {

@@ -1,6 +1,6 @@
 # GitHub Repository Onboarding Threat Model
 
-**Status:** Approved by Henrik (2026-08-28)
+**Status:** Approved by a maintainer (2026-08-28)
 
 **Date:** 2026-08-07 (issue-browser delta approved 2026-08-28)
 
@@ -264,7 +264,7 @@ each, per-comment truncated). The whole framed block is hard-capped at 32 KiB
 
 ## User-chosen destination and pasted repository reference design
 
-This shape is approved by Henrik (2026-09-14) and implemented; it extends the managed clone and the
+This shape is approved by a maintainer (2026-09-14) and implemented; it extends the managed clone and the
 repository catalogue without changing any approval, verification, or revocation control above.
 
 ### Where onboarding starts

@@ -293,7 +293,8 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../ar
 
 The first release is the technical preview for Apple-silicon Macs with the provider-neutral plugin and skill marketplace; signing, notarization and self-update ship as one deliverable, because an updater on an unsigned app is an unauthenticated code-delivery channel.
 
-- A local package built without the maintainer's signing credentials is unsigned.
+- The first release counts as shipped when a maintainer approves the first stable version (a `vMAJOR.MINOR.PATCH` tag, approved in the `stable` environment); daily builds stay previews. That release is the Apple Silicon build, and Linux is not part of it.
+- A local package built without signing credentials a maintainer holds is unsigned.
 - Connectors, a Code thread's own Git and pull-request work, a person's merge from any of their clients, host-local routines, the guardrail levels and the key providers' native features are in scope; Octant Shield is in scope and designed.
 - An agent merge or force-push on its own initiative, cloud scheduling, and an Octant-operated hosted service are out of scope.
 - Physical phones and tablets, and app-store upload, submission and release, are out of scope (maintainer decision, 2026-10-29); Octant drives the simulator only.
@@ -307,7 +308,7 @@ Mobile maturity, a ciphertext-only hosted relay, language services and a debugge
 
 - The authorization covers design and implementation; creating an account, spending money, submitting to a store, deploying a hosted service, or weakening an invariant each needs a separate maintainer action.
 - Remote SSH development environments are in scope; a Code or Work Project on a registered server is built ([Server Projects](server-projects.md)).
-- Release-scope choices (public store distribution, the Windows sequence, the full language-services companion) are the maintainer's to schedule and protect no invariant by themselves.
+- Release-scope choices (public store distribution, the Windows sequence, the full language-services companion) are the maintainers' to schedule and protect no invariant by themselves.
 
 Status: Partly built. Since: 2026-10-26. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
