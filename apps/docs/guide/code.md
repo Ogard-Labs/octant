@@ -51,8 +51,14 @@ and refusal so you can recover there.
 
 Reconnect or refresh before making another decision when the host is unavailable
 or a proposal changed. A lost reply can mean a task was already created: Octant
-inspects its submitted identity and reports uncertainty instead of creating a
-second copy or sending a first message. Check that task before retrying. Planner
+retains its submitted identity and reports uncertainty instead of creating a
+second copy or sending a first message. **Inspect submitted task** opens that
+identity; it may still be starting or unavailable. Approval stays blocked through
+closing and reopening the review, reloading the window, or using another window
+while the host has an unresolved attempt. A missing task or a still-pending
+proposal does not mean the first attempt ended. When the host proves creation
+did not start, refresh the proposal and explicitly review its repaired settings
+before approving again. Planner
 designation and decisions use this computer's local window; no phone or CLI
 planner controls are added.
 

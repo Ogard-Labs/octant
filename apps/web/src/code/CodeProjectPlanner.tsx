@@ -11,6 +11,7 @@ import type { CodeOverviewProps } from "./CodeOverview";
 import { CodeComposerAdapter } from "./composer/CodeComposerAdapter";
 import { useWorktreeRemoteFacts } from "./composer/useWorktreeRemoteFacts";
 import { plannerReply, type PlannerProposalReview } from "./plannerProposalCreation";
+import { readPlannerAttempt, settlePlannerAttempt } from "./plannerProposalAttempt";
 
 /** The person reviews one Project's planner; every write retains its server version. */
 export function CodeProjectPlanner(
@@ -78,6 +79,8 @@ export function CodeProjectPlanner(
       try {
         const pending = client.readPlanner?.(props.projectId);
         const next = pending === undefined ? undefined : await plannerReply(pending);
+        if (!disposed && next !== undefined)
+          for (const entry of next.proposals) settlePlannerAttempt(entry);
         if (!disposed)
           setState({
             projectId: props.projectId,
@@ -164,6 +167,14 @@ export function CodeProjectPlanner(
         entry.proposal.status === "pending" &&
         entry.proposalVersion === review.proposalVersion,
     );
+  const reviewAttempt =
+    review === undefined
+      ? { status: "none" as const }
+      : readPlannerAttempt(
+          view?.proposals.find(
+            (entry) => String(entry.proposal.id) === String(review.proposal.id),
+          ) ?? review,
+        );
   return (
     <section aria-label="Project planner" className="code-project-planner">
       <header className="code-project-overview__section-header">
@@ -251,71 +262,103 @@ export function CodeProjectPlanner(
         </div>
       )}
       <ul className="code-project-planner__proposals">
-        {proposals.map((entry) => (
-          <li key={String(entry.proposal.id)}>
-            <h3>{entry.proposal.title}</h3>
-            <p className="oct-meta">
-              {entry.proposal.status === "confirmed"
-                ? "Approved"
-                : entry.proposal.status === "declined"
-                  ? "Declined"
-                  : "Awaiting your decision"}{" "}
-              ·{" "}
-              <time dateTime={entry.proposal.proposedAt}>
-                {new Date(entry.proposal.proposedAt).toLocaleString()}
-              </time>
-            </p>
-            <p className="code-project-planner__intent">{entry.proposal.intent}</p>
-            {entry.proposal.rationale === undefined ? null : (
-              <p className="oct-row-detail">{entry.proposal.rationale}</p>
-            )}
-            {entry.proposal.status === "confirmed" ? (
-              <OctantButton
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  if (entry.proposal.status === "confirmed")
-                    props.onOpenThread(entry.proposal.createdThreadId);
-                }}
-              >
-                Open created task
-              </OctantButton>
-            ) : entry.proposal.status !== "pending" ? null : (
-              <div className="code-project-planner__controls">
-                <OctantButton
-                  type="button"
-                  variant="secondary"
-                  disabled={
-                    disabled ||
-                    props.onCreateThread === undefined ||
-                    client.executePlannerProposal === undefined
-                  }
-                  onClick={() => setReview(entry)}
-                >
-                  Review and approve
-                </OctantButton>
+        {proposals.map((entry) => {
+          const attempt = readPlannerAttempt(entry);
+          return (
+            <li key={String(entry.proposal.id)}>
+              <h3>{entry.proposal.title}</h3>
+              <p className="oct-meta">
+                {entry.proposal.status === "confirmed"
+                  ? "Approved"
+                  : entry.proposal.status === "declined"
+                    ? "Declined"
+                    : "Awaiting your decision"}{" "}
+                ·{" "}
+                <time dateTime={entry.proposal.proposedAt}>
+                  {new Date(entry.proposal.proposedAt).toLocaleString()}
+                </time>
+              </p>
+              <p className="code-project-planner__intent">{entry.proposal.intent}</p>
+              {entry.proposal.rationale === undefined ? null : (
+                <p className="oct-row-detail">{entry.proposal.rationale}</p>
+              )}
+              {entry.proposal.status === "pending" && attempt.status !== "none" ? (
+                <p className="oct-row-detail" role="status">
+                  {attempt.status === "blocked"
+                    ? "The submitted approval is unresolved. Inspect its task; another approval or decline stays blocked until the host records its outcome."
+                    : "This window cannot retain approval identity. Session storage is required before approving."}
+                </p>
+              ) : null}
+              {entry.proposal.status === "pending" &&
+              entry.proposal.creationAttempt?.status === "failed" ? (
+                <p className="oct-row-detail">
+                  Creation did not start:{" "}
+                  {entry.proposal.creationAttempt.message ?? "The host refused before creation."}{" "}
+                  Review the current settings before explicitly approving again.
+                </p>
+              ) : null}
+              {entry.proposal.status === "pending" && attempt.status === "blocked" ? (
                 <OctantButton
                   type="button"
                   variant="ghost"
-                  disabled={disabled || client.executePlannerProposal === undefined}
-                  onClick={() =>
-                    void mutate(async () =>
-                      client.executePlannerProposal === undefined
-                        ? { status: "refused", message: "Proposal decisions are unavailable." }
-                        : client.executePlannerProposal({
-                            kind: "decline-planner-work-proposal",
-                            proposalId: entry.proposal.id,
-                            expectedVersion: entry.proposalVersion,
-                          }),
-                    )
-                  }
+                  onClick={() => props.onOpenThread(attempt.threadId)}
                 >
-                  Decline proposal
+                  Inspect submitted task
                 </OctantButton>
-              </div>
-            )}
-          </li>
-        ))}
+              ) : null}
+              {entry.proposal.status === "confirmed" ? (
+                <OctantButton
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    if (entry.proposal.status === "confirmed")
+                      props.onOpenThread(entry.proposal.createdThreadId);
+                  }}
+                >
+                  Open created task
+                </OctantButton>
+              ) : entry.proposal.status !== "pending" ? null : (
+                <div className="code-project-planner__controls">
+                  <OctantButton
+                    type="button"
+                    variant="secondary"
+                    disabled={
+                      disabled ||
+                      attempt.status !== "none" ||
+                      props.onCreateThread === undefined ||
+                      client.executePlannerProposal === undefined
+                    }
+                    onClick={() => setReview(entry)}
+                  >
+                    Review and approve
+                  </OctantButton>
+                  <OctantButton
+                    type="button"
+                    variant="ghost"
+                    disabled={
+                      disabled ||
+                      attempt.status === "blocked" ||
+                      client.executePlannerProposal === undefined
+                    }
+                    onClick={() =>
+                      void mutate(async () =>
+                        client.executePlannerProposal === undefined
+                          ? { status: "refused", message: "Proposal decisions are unavailable." }
+                          : client.executePlannerProposal({
+                              kind: "decline-planner-work-proposal",
+                              proposalId: entry.proposal.id,
+                              expectedVersion: entry.proposalVersion,
+                            }),
+                      )
+                    }
+                  >
+                    Decline proposal
+                  </OctantButton>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
       {view !== undefined && proposals.length === 0 ? (
         <p className="oct-row-detail">
@@ -359,12 +402,17 @@ export function CodeProjectPlanner(
                     createDisabledReason:
                       "Refresh the changed proposal and host state before approving.",
                   }
-                : providerReady
-                  ? {}
-                  : {
+                : reviewAttempt.status !== "none"
+                  ? {
                       createDisabledReason:
-                        "Choose an available provider and model before approving this task.",
-                    })}
+                        "The prior approval outcome is unresolved. Inspect its submitted task; no replacement approval can be sent.",
+                    }
+                  : providerReady
+                    ? {}
+                    : {
+                        createDisabledReason:
+                          "Choose an available provider and model before approving this task.",
+                      })}
               {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
               {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
               {...(props.baseRepository === undefined
@@ -396,7 +444,14 @@ export function CodeProjectPlanner(
               execute={props.controller.execute}
               onCancel={() => setReview(undefined)}
               onCreateThread={async (input) => {
-                if (!current || !reviewCurrent || !providerReady || inFlight.current) return false;
+                if (
+                  !current ||
+                  !reviewCurrent ||
+                  reviewAttempt.status !== "none" ||
+                  !providerReady ||
+                  inFlight.current
+                )
+                  return false;
                 inFlight.current = true;
                 setBusy(true);
                 try {

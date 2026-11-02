@@ -2499,14 +2499,29 @@ designation or resolution are not added. The rules are:
 - **Freshness and uncertainty.** The overview refreshes proposals and designation
   on entry, reconnect and after decisions; disconnected, failed or stale review
   state cannot submit another decision. Commands use the displayed aggregate
-  version and never retry automatically. Reads and decision replies have a
-  thirty-second wait bound; a timeout does not prove cancellation. Creation may
-  precede a concurrent-decline refusal or a lost reply, so the renderer preserves
-  the submitted thread id and reads that task before reporting the outcome. If
-  found, it opens for inspection with an explicit notice that this approval sent
-  no first message. A refusal or uncertain response never starts a provider
-  turn, never creates a replacement task and never grants planner execution
-  authority. The list bounds rendered history to fifty proposals, pending first.
+  version and never retry automatically. Before ordinary creation awaits, the
+  host journals a `creating` attempt with the exact submitted thread id on that
+  proposal's aggregate. This versioned admission belongs to one attempt across
+  windows and host restarts; a second confirm or decline cannot overtake it.
+  Reads and decision replies have a thirty-second wait bound; a timeout does not
+  prove cancellation. The renderer writes and verifies that attempt's id and
+  expected version in session storage before dispatch, retaining it across
+  review close, remount and reload. Missing storage makes approval unavailable.
+  A missing task, a fresh pending proposal or declined status never proves that
+  a previous creation ended, and never releases an unknown attempt.
+  The host may record `failed` only from a trusted built-in creation refusal
+  before its worktree-commit or plain-thread-journal boundary was entered. A
+  typed pre-boundary refusal permits an explicit repair retry after a newer
+  authoritative proposal version; generic, custom-service, post-boundary and
+  final-append failures retain `creating`. The observer is host-only, never a
+  wire assertion. Restart with no stored task remains uncertain. A stored
+  same-Project task may repair the proposal linkage, but that observation returns
+  no creation/first-turn permission. The renderer reads only the retained task
+  id and offers inspection; a refused or uncertain response never starts a
+  provider turn or submits a replacement. Only a matching confirmed response
+  enters the ordinary first-send path. Admission/failure facts carry bounded
+  metadata, not raw provider errors. The list bounds rendered history to fifty
+  proposals, pending first.
 
 **Routines (Automation Center).** A routine is a host-owned, Project-bound
 definition that starts an ordinary Work or Code thread with a fixed task prompt

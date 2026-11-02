@@ -4,9 +4,74 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { CodeOverview } from "./CodeOverview";
+import { reservePlannerAttempt, finishPlannerAttempt } from "./plannerProposalAttempt";
+import type { PlannerProposalReview } from "./plannerProposalCreation";
 import type { CodeController } from "./useCodeController";
 
 describe("CodeOverview", () => {
+  it("keeps an unresolved approval blocked after review close and component remount with a fresh pending read", async () => {
+    const value = controller();
+    const entry = {
+      proposal: {
+        id: "70000000-0000-4000-8000-000000000021",
+        projectId: ids.project,
+        plannerThreadId: ids.thread,
+        title: "Uncertain task",
+        intent: "Only this described task.",
+        status: "pending",
+        proposedAt: "2026-11-02T00:00:00.000Z",
+      },
+      proposalVersion: 1,
+    } as PlannerProposalReview;
+    const executePlannerProposal = vi.fn();
+    value.client = {
+      ...value.client,
+      readPlanner: vi.fn(async () => ({
+        designation: {
+          kind: "none",
+          projectId: ids.project,
+          updatedAt: "2026-11-02T00:00:00.000Z",
+        },
+        designationVersion: 0,
+        proposals: [entry],
+      })),
+      executePlannerProposal,
+    } as never;
+    const onCreateThread = vi.fn();
+    const onOpenThread = vi.fn();
+    const element = (
+      <CodeOverview
+        controller={value}
+        onOpenThread={onOpenThread}
+        projectId={ids.project as never}
+        showQuickStart={false}
+        onCreateThread={onCreateThread}
+      />
+    );
+    const rendered = render(element);
+    try {
+      await screen.findByText("Only this described task.");
+      expect(screen.getByRole("button", { name: "Review and approve" })).toBeEnabled();
+      await userEvent.click(screen.getByRole("button", { name: "Review and approve" }));
+      expect(
+        reservePlannerAttempt(entry, "90000000-0000-4000-8000-000000000021" as never).status,
+      ).toBe("none");
+      await userEvent.keyboard("{Escape}");
+      expect(screen.getByRole("button", { name: "Review and approve" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Decline proposal" })).toBeDisabled();
+      rendered.unmount();
+      render(element);
+      await screen.findByText("Only this described task.");
+      expect(screen.getByRole("button", { name: "Review and approve" })).toBeDisabled();
+      await userEvent.click(screen.getByRole("button", { name: "Inspect submitted task" }));
+      expect(onOpenThread).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000021");
+      expect(onCreateThread).not.toHaveBeenCalled();
+      expect(executePlannerProposal).not.toHaveBeenCalled();
+    } finally {
+      finishPlannerAttempt(entry);
+    }
+  });
+
   it("keeps a stale proposal refused without retrying and disables decisions while disconnected", async () => {
     const value = controller();
     const executePlannerProposal = vi.fn(async () => ({

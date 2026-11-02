@@ -26,6 +26,32 @@ const pendingProposal = {
   proposedAt: "2026-08-29T09:00:00.000Z",
 } as const;
 
+it("keeps host creation admission on replay while refusing it in an agent proposal draft", () => {
+  const creationAttempt = {
+    threadId: ids.createdThread,
+    status: "creating",
+    admittedAt: pendingProposal.proposedAt,
+  };
+  expect(decodeCodePlannerWorkProposal({ ...pendingProposal, creationAttempt })).toMatchObject({
+    creationAttempt,
+  });
+  expect(() =>
+    decodeCodePlannerProposalDraft({
+      title: pendingProposal.title,
+      intent: pendingProposal.intent,
+      creationAttempt,
+    }),
+  ).toThrow();
+  expect(() =>
+    decodeCodePlannerProposalCommand({
+      kind: "decline-planner-work-proposal",
+      proposalId: ids.proposal,
+      expectedVersion: 1,
+      creationAttempt,
+    }),
+  ).toThrow();
+});
+
 describe("the Code planner contract", () => {
   it("keeps a designation bound to exactly one thread of one Project", () => {
     const updated = decodeCodePlannerDesignationUpdated({

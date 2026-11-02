@@ -44,8 +44,105 @@ const review = {
   proposalVersion: 3,
 } as CodePlannerView["proposals"][number];
 const creation: CodePlannerThreadCreation = { kind: "create-code-thread", thread };
+function attemptStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+    removeItem: (key: string) => {
+      values.delete(key);
+    },
+  };
+}
 
 describe("creating the task a person approved from a planner proposal", () => {
+  it("releases a retained identity only after a newer authoritative noncreation result for explicit retry", async () => {
+    const storage = attemptStorage();
+    const executePlannerProposal = vi.fn(async () => {
+      throw new Error("Lost reply");
+    });
+    const read = vi.fn(async () => {
+      throw new Error("HTTP404");
+    });
+    await createPlannerProposalTask(
+      { executePlannerProposal, thread: read },
+      review,
+      creation,
+      storage,
+    );
+    const replacement = {
+      kind: "create-code-thread" as const,
+      thread: decodeCodeThread({ ...thread, id: "10000000-0000-4000-8000-000000000011" }),
+    };
+    const newerPending = { ...review, proposalVersion: 4 as never };
+    await createPlannerProposalTask(
+      { executePlannerProposal, thread: read },
+      newerPending,
+      replacement,
+      { ...storage },
+    );
+    expect(executePlannerProposal).toHaveBeenCalledTimes(1);
+    const failed = {
+      ...review,
+      proposal: {
+        ...review.proposal,
+        creationAttempt: {
+          threadId: thread.id,
+          status: "failed" as const,
+          admittedAt: thread.createdAt,
+          message: "Provider unavailable before creation.",
+        },
+      },
+    };
+    await createPlannerProposalTask(
+      { executePlannerProposal, thread: read },
+      failed,
+      replacement,
+      storage,
+    );
+    expect(executePlannerProposal).toHaveBeenCalledTimes(1);
+    const retry = vi.fn(async () => ({
+      status: "confirmed" as const,
+      proposal: {
+        ...review.proposal,
+        status: "confirmed" as const,
+        resolvedAt: thread.createdAt,
+        createdThreadId: replacement.thread.id,
+      },
+      creation: { kind: "thread-created" as const, thread: replacement.thread },
+    }));
+    expect(
+      await createPlannerProposalTask(
+        { executePlannerProposal: retry, thread: read },
+        { ...failed, proposalVersion: 5 as never },
+        replacement,
+        storage,
+      ),
+    ).toMatchObject({ status: "confirmed" });
+    expect(retry).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ expectedVersion: 5, creation: replacement }),
+    );
+  });
+
+  it("dispatches no approval when its identity cannot be retained and read back", async () => {
+    const executePlannerProposal = vi.fn();
+    const read = vi.fn();
+    expect(
+      await createPlannerProposalTask({ executePlannerProposal, thread: read }, review, creation, {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+      }),
+    ).toMatchObject({
+      status: "unconfirmed",
+      message: expect.stringContaining("no request was sent"),
+    });
+    expect(executePlannerProposal).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it("returns only a confirmed ordinary creation for the first-message path", async () => {
     const executePlannerProposal = vi.fn(async () => ({
       status: "confirmed" as const,
@@ -59,7 +156,12 @@ describe("creating the task a person approved from a planner proposal", () => {
     }));
     const read = vi.fn();
     expect(
-      await createPlannerProposalTask({ executePlannerProposal, thread: read }, review, creation),
+      await createPlannerProposalTask(
+        { executePlannerProposal, thread: read },
+        review,
+        creation,
+        attemptStorage(),
+      ),
     ).toMatchObject({ status: "confirmed", creation: { kind: "thread-created", thread } });
     expect(executePlannerProposal).toHaveBeenCalledExactlyOnceWith({
       kind: "confirm-planner-work-proposal",
@@ -83,7 +185,12 @@ describe("creating the task a person approved from a planner proposal", () => {
       });
       const read = vi.fn(async () => ({ thread }) as never);
       expect(
-        await createPlannerProposalTask({ executePlannerProposal, thread: read }, review, creation),
+        await createPlannerProposalTask(
+          { executePlannerProposal, thread: read },
+          review,
+          creation,
+          attemptStorage(),
+        ),
       ).toMatchObject({
         status: "unconfirmed",
         existingThread: thread,
@@ -105,6 +212,7 @@ describe("creating the task a person approved from a planner proposal", () => {
         { executePlannerProposal, thread: read },
         review,
         creation,
+        attemptStorage(),
       );
       await vi.advanceTimersByTimeAsync(30_000);
       expect(await result).toMatchObject({
@@ -131,6 +239,7 @@ describe("creating the task a person approved from a planner proposal", () => {
           },
         },
         creation,
+        attemptStorage(),
       ),
     ).toMatchObject({ status: "unconfirmed" });
     expect(executePlannerProposal).not.toHaveBeenCalled();

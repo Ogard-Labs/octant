@@ -957,6 +957,30 @@ describe("CodeService commands", () => {
     );
   });
 
+  it("reports the host creation boundary before plain-checkout journaling and after every admission gate", async () => {
+    for (const stage of ["before", "journal"] as const) {
+      const boundary = vi.fn();
+      const fixture = serviceFixture({
+        threads: [],
+        ...(stage === "before" ? { isProviderModelAllowed: () => false } : {}),
+      });
+      if (stage === "journal")
+        vi.mocked(fixture.persistence.journal.append).mockImplementation(() => {
+          expect(boundary).toHaveBeenCalledTimes(1);
+          throw new Error("Journal failed after boundary");
+        });
+      await expect(
+        fixture.service.execute(
+          ids.window,
+          { kind: "create-code-thread", thread: thread({ executionPolicy: "approval-gated" }) },
+          undefined,
+          { onCreationBoundary: boundary },
+        ),
+      ).rejects.toBeInstanceOf(CodeServiceError);
+      expect(boundary).toHaveBeenCalledTimes(stage === "before" ? 0 : 1);
+    }
+  });
+
   it("stores a declared reasoning choice without creating a provider handoff", async () => {
     const probe = reasoningProbe();
     const fixture = serviceFixture({ threads: [thread()], probeProvider: async () => probe });
@@ -2836,6 +2860,29 @@ describe("CodeService managed thread creation", () => {
       cleanup: vi.fn(overrides.cleanup ?? (async () => ({ status: "removed" as const }))),
     };
   }
+
+  it("reports the host creation boundary before managed commit and after source validation", async () => {
+    for (const stage of ["prepare", "commit"] as const) {
+      const boundary = vi.fn();
+      const port = mockCreationPort(
+        stage === "prepare"
+          ? { prepare: async () => ({ status: "refused", reason: "ref-unavailable" }) }
+          : {
+              commit: async () => {
+                expect(boundary).toHaveBeenCalledTimes(1);
+                throw new Error("Commit outcome unknown");
+              },
+            },
+      );
+      const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+      await expect(
+        fixture.service.execute(ids.window, managedCommand, undefined, {
+          onCreationBoundary: boundary,
+        }),
+      ).rejects.toBeInstanceOf(CodeServiceError);
+      expect(boundary).toHaveBeenCalledTimes(stage === "prepare" ? 0 : 1);
+    }
+  });
 
   it("creates the managed worktree on the delivery branch, journals checkout + thread, and returns exact provenance", async () => {
     const port = mockCreationPort();
