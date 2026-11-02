@@ -8248,10 +8248,12 @@ results and tools found on this computer; a search is one flat list.
 
 The Library finishes the job in place, through the same commands the other
 views use and under the same server checks. Connect calls the one shared
-connect function Connectors uses: a connector that needs no key connects in
-one press from its card, a key connector takes its key in the detail, and a
-sign-in connector starts its sign-in there; it still installs, trusts and turns
-on as one act, and only on the Octant window of the host. A Marketplace plugin
+connect function Connectors uses: Connect… on a card opens the detail, which
+states the authority in full and holds the one confirming press, the key field
+for a key connector and the sign-in for a sign-in connector; it still installs,
+trusts and turns on as one act, and only on the Octant window of the host.
+Rationale: one press on a card would connect without the authority statement
+in view. A Marketplace plugin
 is read first (the same inspection Marketplace makes, so the Marketplace
 fetches switch still governs it) and then installs with one Install that never
 trusts or turns it on; Trust and Turn on stay separate clicks afterwards.

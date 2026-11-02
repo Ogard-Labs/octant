@@ -201,23 +201,9 @@ export function LibraryView(props: LibraryViewProps) {
     return true;
   };
 
+  // Connect on a card opens the detail, which states the authority in full
+  // and holds the one confirming press, the key field and the sign-in.
   const act = (item: LibraryItem, element: HTMLElement) => {
-    // A connector that needs no key connects in one press; the rest open the
-    // detail, which holds the key field, the review, and the full authority.
-    if (
-      item.kind === "connector" &&
-      item.state === "available" &&
-      item.connectorAuth?.kind !== "key" &&
-      canConnect
-    ) {
-      void connect(item).then((connected) => {
-        if (connected && item.connectorAuth?.kind === "sign-in") {
-          opener.current = element;
-          setOpenId(item.id);
-        }
-      });
-      return;
-    }
     opener.current = element;
     setOpenId(item.id);
   };
@@ -225,8 +211,6 @@ export function LibraryView(props: LibraryViewProps) {
   const renderCard = (item: LibraryItem, variant: "lead" | "row") => (
     <li key={item.id}>
       <LibraryCard
-        busy={connectingId === item.id}
-        canConnect={canConnect}
         item={item}
         onAct={(element) => act(item, element)}
         onOpen={(element) => {
@@ -411,6 +395,8 @@ export function LibraryView(props: LibraryViewProps) {
           onClose={() => {
             setOpenId(undefined);
             setFailure(undefined);
+            // A sign-in starts on its own only right after the person pressed Connect.
+            setFresh({});
           }}
           onConnect={(secret) => connect(open, secret)}
           onInspect={() => props.onInspect?.(open)}
@@ -431,8 +417,6 @@ export function LibraryView(props: LibraryViewProps) {
 interface LibraryCardProps {
   readonly item: LibraryItem;
   readonly variant: "lead" | "row";
-  readonly busy: boolean;
-  readonly canConnect: boolean;
   readonly onOpen: (element: HTMLElement) => void;
   readonly onAct: (element: HTMLElement) => void;
 }
@@ -440,7 +424,8 @@ interface LibraryCardProps {
 /** What a card offers before anything is installed: the one next step. */
 function cardAction(item: LibraryItem): string | undefined {
   if (item.state !== "available") return undefined;
-  if (item.kind === "connector") return item.connectorAuth?.kind === "key" ? "Add key…" : "Connect";
+  if (item.kind === "connector")
+    return item.connectorAuth?.kind === "key" ? "Add key…" : "Connect…";
   return "Review";
 }
 
@@ -468,15 +453,14 @@ function LibraryCard(props: LibraryCardProps) {
       <span className="library__card-foot">
         {action !== undefined ? (
           <OctantButton
-            aria-label={`${props.busy ? "Connecting" : action} ${item.name}`}
+            aria-label={`${action} ${item.name}`}
             className="library__card-action"
-            disabled={props.busy}
             onClick={(event) => props.onAct(event.currentTarget)}
             size="sm"
             type="button"
             variant={item.kind === "connector" ? "outline" : "ghost"}
           >
-            {props.busy ? "Connecting…" : action}
+            {action}
           </OctantButton>
         ) : item.state === "on" ? (
           <span className="library__card-on">

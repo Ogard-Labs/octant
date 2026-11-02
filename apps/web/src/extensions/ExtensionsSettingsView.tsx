@@ -773,36 +773,50 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     [props.client, marketplaceFetchesEnabled],
   );
 
+  /**
+   * Installs the inspected entry. `plainInstall` is the Library's: it never
+   * turns into an npm update that Marketplace left pending, and it leaves
+   * Marketplace's own review state alone. Returns the failure message, if any.
+   */
   const confirmInstall = useCallback(
-    async (entry: ExtensionCatalogEntry, trust = false) => {
-      if (installing) return;
+    async (
+      entry: ExtensionCatalogEntry,
+      trust = false,
+      plainInstall = false,
+    ): Promise<string | undefined> => {
+      if (installing) return "An install is already running.";
+      const updating = !plainInstall && npmUpdateOf === entry.extensionId;
       setInstalling(true);
       setFailure(undefined);
       try {
         const installed = await props.client.execute({
-          kind: npmUpdateOf === entry.extensionId ? "update-package" : "install-package",
+          kind: updating ? "update-package" : "install-package",
           extensionId: entry.extensionId,
           packageId: entry.packageId,
           version: entry.version,
           digest: entry.digest,
-          ...(trust && npmUpdateOf !== entry.extensionId ? { trust: true } : {}),
+          ...(trust && !updating ? { trust: true } : {}),
         });
         if (installed.kind === "extension-command-failed") {
           setFailure({
             category: installed.failure.category,
             message: installed.failure.message,
           });
-          return;
+          return installed.failure.message;
         }
-        setPreview(undefined);
-        setLocalPreview(undefined);
-        setNpmUpdateOf(undefined);
+        if (!plainInstall) {
+          setPreview(undefined);
+          setLocalPreview(undefined);
+          setNpmUpdateOf(undefined);
+        }
         await reload();
+        return undefined;
       } catch {
         setFailure({
           category: "unavailable" as never,
           message: "Extension service is unavailable.",
         });
+        return "Extension service is unavailable.";
       } finally {
         setInstalling(false);
       }
@@ -1002,8 +1016,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const installLibraryItem = async (item: LibraryItem) => {
     const entry = libraryInspection?.preview?.entry ?? marketplaceEntryOf(item);
     if (entry === undefined) return;
-    await confirmInstall(entry);
-    setLibraryInspection(undefined);
+    const failed = await confirmInstall(entry, false, true);
+    setLibraryInspection(
+      failed === undefined ? undefined : { itemId: item.id, status: "failed", message: failed },
+    );
   };
   const libraryPackage = (item: LibraryItem) =>
     snapshot.packages.find((pkg) => String(pkg.extensionId) === item.packageRef?.extensionId);

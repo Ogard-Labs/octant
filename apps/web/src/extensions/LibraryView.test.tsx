@@ -97,7 +97,7 @@ describe("the library view", () => {
 
   it("puts the next step on a card that is not installed and keeps authority findable", () => {
     renderLibrary({ connectClient, localHost: true });
-    expect(screen.getByRole("button", { name: "Connect Linear" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect… Linear" })).toBeTruthy();
     expect(screen.queryByText("Not installed")).toBeNull();
     expect(screen.getAllByText("Medium authority").length).toBeGreaterThan(0);
   });
@@ -126,11 +126,15 @@ describe("the library view", () => {
     );
   });
 
-  it("connects a connector that needs no sign-in from its card in one press", async () => {
+  it("opens a connector's detail from its card and connects only on the confirming press there", async () => {
     const user = userEvent.setup();
     const onConnected = vi.fn();
     renderLibrary({ connectClient, localHost: true, onConnected });
-    await user.click(screen.getByRole("button", { name: "Connect Context7" }));
+    await user.click(screen.getByRole("button", { name: "Connect… Context7" }));
+    expect(addUserMcpServer).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/Sends your requests to/)).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "Connect" }));
     expect(addUserMcpServer).toHaveBeenCalledWith(
       expect.objectContaining({ connectorId: "context7" }),
     );
@@ -174,7 +178,7 @@ describe("the library view", () => {
   it("refuses to connect from a browser-hosted Settings and says why", async () => {
     const user = userEvent.setup();
     renderLibrary({ connectClient, localHost: false });
-    await user.click(screen.getByRole("button", { name: "Connect Linear" }));
+    await user.click(screen.getByRole("button", { name: "Connect… Linear" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("button", { name: "Connect" })).toHaveProperty(
       "disabled",
