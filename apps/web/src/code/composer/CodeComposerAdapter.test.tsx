@@ -1244,7 +1244,7 @@ describe("CodeComposerAdapter interactions", () => {
       );
       await user.click(screen.getByRole("button", { name: "Provider and model" }));
       await user.click(screen.getByRole("option", { name: "Local Codex" }));
-      expect(screen.getByRole("option", { name: "cli-model" })).toBeDisabled();
+      expect(screen.getByRole("option", { name: "Cli Model" })).toBeDisabled();
       expect(onCreateThread).not.toHaveBeenCalled();
     });
   });
