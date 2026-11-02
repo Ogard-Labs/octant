@@ -1379,6 +1379,53 @@ describe("BrowserWorkspace", () => {
       );
     });
 
+    it.each(["client", "thread", "mode"] as const)(
+      "does not reuse a ready task default while a new %s scope read is held",
+      async (changed) => {
+        const browser = client();
+        const initial = { threadId, mode: "work", version: 1, profile: "personal" } as any;
+        browser.readTaskProfile = vi.fn(async () => initial);
+        browser.selectTaskProfile = vi.fn();
+        const rendered = render(<BrowserWorkspace client={browser} tab={tab} />);
+        await screen.findByRole("button", {
+          name: "Default browser profile for this task: Personal",
+        });
+        let finish!: (selection: typeof initial) => void;
+        const held = new Promise<typeof initial>((resolve) => {
+          finish = resolve;
+        });
+        const next = changed === "client" ? client() : browser;
+        next.readTaskProfile = vi.fn(() => held);
+        next.selectTaskProfile = vi.fn();
+        const nextTab = {
+          ...tab,
+          threadId:
+            changed === "thread" ? ("10000000-0000-4000-8000-000000000002" as any) : tab.threadId,
+          mode: changed === "mode" ? ("code" as const) : tab.mode,
+        };
+        rendered.rerender(<BrowserWorkspace client={next} tab={nextTab} />);
+        await waitFor(() => expect(next.readTaskProfile).toHaveBeenCalled());
+        expect(screen.getByRole("button", { name: "Browser profile: Private" })).toBeDisabled();
+        enterAddress("https://example.com/scoped");
+        fireEvent.submit(screen.getByRole("textbox", { name: "Browser URL" }).closest("form")!);
+        expect(next.create).not.toHaveBeenCalled();
+        expect(next.selectTaskProfile).not.toHaveBeenCalled();
+        await act(async () =>
+          finish({
+            ...initial,
+            threadId: nextTab.threadId,
+            mode: nextTab.mode,
+            profile: "private",
+          }),
+        );
+        expect(
+          await screen.findByRole("button", {
+            name: "Default browser profile for this task: Private",
+          }),
+        ).toBeEnabled();
+      },
+    );
+
     it("saves the task default without changing the Project page preference", async () => {
       const browser = client();
       browser.readTaskProfile = vi.fn(
