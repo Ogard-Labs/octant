@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { Schema } from "effect";
+import { ExtensionSnapshot as ExtensionSnapshotSchema } from "@octant/contracts/extension-rpc";
 import type {
   ExtensionCommand,
   ExtensionCommandResult,
@@ -91,12 +93,12 @@ describe("bounded authenticated extension routes", () => {
     const handler = createExtensionRouteHandler({
       service: {
         snapshot: () =>
-          ({
+          Schema.decodeUnknownSync(ExtensionSnapshotSchema)({
             sequence: 0,
             snapshotAt: "2026-07-28T12:00:00.000Z",
             packages: [],
             collisions: [],
-          }) as ExtensionSnapshot,
+          }),
         execute,
       },
       windowAuthorityStore: authorities,
@@ -183,7 +185,7 @@ describe("bounded authenticated extension routes", () => {
   );
 
   it("keeps chosen-root names and diagnostics off paired-device snapshots", async () => {
-    const snapshot = {
+    const snapshot = Schema.decodeUnknownSync(ExtensionSnapshotSchema)({
       sequence: 0,
       snapshotAt: "2026-07-28T12:00:00.000Z",
       packages: [],
@@ -197,7 +199,7 @@ describe("bounded authenticated extension routes", () => {
           watching: true,
         },
       ],
-    } as ExtensionSnapshot;
+    });
     const handler = setup({ snapshot: () => snapshot, execute: vi.fn() });
     expect(await (await handler(request("/api/extensions/snapshot")))?.json()).toHaveProperty(
       "skillRoots",

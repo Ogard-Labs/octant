@@ -2067,7 +2067,21 @@ function SkillFoldersSection({
   readonly skillRoots: ReadonlyArray<SkillRootStatus>;
 }) {
   return (
-    <SettingsSection title="Skill folders">
+    <SettingsSection
+      title="Skill folders"
+      actions={
+        props.extensionClient === undefined ? undefined : (
+          <OctantButton
+            aria-label="Refresh folder status"
+            onClick={onSaved}
+            type="button"
+            variant="outline"
+          >
+            Refresh
+          </OctantButton>
+        )
+      }
+    >
       <SkillFolderSettingsPanel
         {...(props.pickSkillFolder === undefined ? {} : { pickFolder: props.pickSkillFolder })}
         statuses={skillRoots}

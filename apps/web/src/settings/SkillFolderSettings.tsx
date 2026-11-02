@@ -224,7 +224,7 @@ export function SkillFolderSettingsPanel(props: SkillFolderSettingsProps) {
           )}
           {(props.statuses?.length ?? 0) === 0 ? null : (
             <p className="oct-row-detail">
-              Use Refresh above to read the current catalog and folder status.
+              Use Refresh to read the current catalog and folder status.
             </p>
           )}
           {problem === undefined ? null : <OctantAlert tone="warning">{problem}</OctantAlert>}

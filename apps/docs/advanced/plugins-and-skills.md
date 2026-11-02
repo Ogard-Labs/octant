@@ -536,7 +536,7 @@ missing, unreadable, linked or not a directory. A readable empty folder still
 needs packages, each with its own `SKILL.md`. A missing folder is watched for
 creation using only necessary existence metadata, so it can appear later.
 Eligible package changes and removal refresh the catalog too. Live watching is
-bounded; if unavailable, use the existing **Refresh** action. Folder changes
+bounded; if unavailable, use **Refresh** in Skill folders. Folder changes
 from another window are reconciled by the host even with Settings closed.
 Linked folders remain ignored. None of these actions grants access to a skill
 or changes its separate review, trust and enable choices.
