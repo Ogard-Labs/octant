@@ -1424,6 +1424,38 @@ describe("BrowserAutomationService", () => {
       },
     );
 
+    it.each(["snapshot", "extract-text", "screenshot", "wait", "observe-diagnostics"] as const)(
+      "renews explicit terminal %s activity without retaining captures or extending a person hold",
+      async (kind) => {
+        const captures = { keep: vi.fn() };
+        const f = harness({ captures });
+        await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+        f.advance(240_000);
+        const result = await f.service.act({
+          windowId,
+          activityBy: "agent",
+          request: request({ kind }),
+        });
+        expect(result.failure).toBeUndefined();
+        f.advance(120_000);
+        f.expire();
+        expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+        expect(captures.keep).not.toHaveBeenCalled();
+        await f.service.takeOver(windowId, threadOne);
+        f.advance(600_000);
+        const held = await f.service.act({
+          windowId,
+          activityBy: "agent",
+          request: request({ kind }),
+        });
+        expect(held.failure?.category).toBe("unavailable");
+        f.advance(60_000);
+        f.expire();
+        await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+        await f.service.close();
+      },
+    );
+
     it("keeps an actively used task alive beyond ten minutes, then expires after real idle", async () => {
       const f = harness();
       await f.service.create({
@@ -1792,6 +1824,35 @@ describe("BrowserAutomationService", () => {
       await vi.waitFor(() => expect(f.contexts.size).toBe(0));
       await f.service.close();
     });
+
+    it.each(["availability", "creation"] as const)(
+      "refuses a late %s result even when the expiry timer has not run",
+      async (phase) => {
+        const f = harness();
+        if (phase === "availability") {
+          vi.mocked(f.runtime.available).mockImplementationOnce(async () => {
+            f.advance(policy.sessionTimeoutMs);
+            return true;
+          });
+        } else {
+          vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+            f.advance(policy.sessionTimeoutMs);
+            f.contexts.add(id);
+          });
+        }
+        const result = await f.service.create({
+          windowId,
+          threadId: threadOne,
+          action: action(),
+          policy,
+        });
+        expect(result.context?.state).toBe("expired");
+        expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+        await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+        if (phase === "availability") expect(f.runtime.createContext).not.toHaveBeenCalled();
+        await f.service.close();
+      },
+    );
 
     it("starts idle at activation, and never renews from a late action completion or input", async () => {
       const f = harness();

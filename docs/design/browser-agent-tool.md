@@ -492,7 +492,10 @@ page. Creation has that same finite bound from its start; activation starts a
 fresh idle interval. A late native creation is closed after timeout rather than
 made active.
 
-- **Meaningful activity renews idle.** An explicitly requested Browser operation
+- **Meaningful activity renews idle.** Terminal-grant operations use host-owned
+  activity attribution independently of capture retention: an explicit terminal
+  read renews idle without keeping a capture or extending a person's hold.
+  An explicitly requested Browser operation
   renews the interval after authority, policy, revision/ref and credential
   checks, immediately before it reaches the runtime, and again when it finishes
   while the context is still live. Intentional agent reads, snapshots,

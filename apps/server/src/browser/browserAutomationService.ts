@@ -437,6 +437,10 @@ export class BrowserAutomationService {
           await this.#safeClose(contextId);
           return;
         }
+        if (this.#expired(owned)) {
+          await this.#expireContext(owned);
+          return;
+        }
         const refreshedDenial = this.#authorizeCreate(input.action, input.policy, input.threadId);
         if (refreshedDenial !== undefined) {
           owned.status = "failed";
@@ -455,6 +459,10 @@ export class BrowserAutomationService {
         );
         if (owned.abort.signal.aborted || owned.record.state !== "creating") {
           await this.#safeClose(contextId);
+          return;
+        }
+        if (this.#expired(owned)) {
+          await this.#expireContext(owned);
           return;
         }
         owned.record = {
@@ -512,6 +520,8 @@ export class BrowserAutomationService {
      * names the agent tool or the person's pane; an unnamed caller keeps none.
      */
     readonly capturedBy?: BrowserCaptureTaker;
+    /** Trusted caller attribution for admission/idle only; never keeps a capture. */
+    readonly activityBy?: BrowserCaptureTaker;
     /**
      * For an upload: the absolute paths of the files the request names, as the
      * agent tool resolved them inside the thread's workspace after the person
@@ -563,7 +573,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    const byAgent = input.capturedBy === "agent";
+    const byAgent = (input.activityBy ?? input.capturedBy) === "agent";
     if (byAgent) owned.agentActions += 1;
     try {
       const answered = await this.#queueAction(owned, async () => {
@@ -622,11 +632,13 @@ export class BrowserAutomationService {
       readonly windowId: WindowId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
+      readonly activityBy?: BrowserCaptureTaker;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
     },
   ): Promise<BrowserAutomationSnapshot> {
+    const activityBy = input.activityBy ?? input.capturedBy;
     if (owned.abort.signal.aborted || owned.record.state !== "active") {
       return this.#failure(
         owned,
@@ -637,7 +649,7 @@ export class BrowserAutomationService {
     // The tool checked the hold before it queued this call, but the person may
     // have taken the page while it waited behind another action. Checked again
     // here, after dequeuing, so a queued agent call never runs under a hold.
-    if (input.capturedBy === "agent" && owned.waitingForPerson !== undefined) {
+    if (activityBy === "agent" && owned.waitingForPerson !== undefined) {
       return this.#failure(
         owned,
         {
@@ -709,7 +721,7 @@ export class BrowserAutomationService {
     // does not run until the agent has read the page again. After a hand-back
     // the agent is answered with that reading instead of an error.
     if (
-      input.capturedBy === "agent" &&
+      activityBy === "agent" &&
       PERSON_GUARDED_ACTIONS.has(input.request.kind) &&
       owned.personInputs > owned.snapshotPersonInputs
     ) {
@@ -786,12 +798,8 @@ export class BrowserAutomationService {
         );
       }
     }
-    const meaningful =
-      input.capturedBy === "agent" ||
-      input.capturedBy === "person" ||
-      PERSON_PAGE_ACTIONS.has(input.request.kind);
-    if (meaningful && !this.#renewActivity(owned, input.capturedBy !== "agent"))
-      return snapshot(owned);
+    const meaningful = activityBy !== undefined || PERSON_PAGE_ACTIONS.has(input.request.kind);
+    if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
     try {
       const { files: _named, ...action } = resolved.request;
       const effect = await waitForBrowserRuntime(
@@ -959,15 +967,14 @@ export class BrowserAutomationService {
         owned.snapshotPersonInputs = inputsAtStart;
         if (inputsAtStart === owned.personInputs) owned.handedBack = false;
       }
-      if (input.capturedBy !== "agent" && PERSON_PAGE_ACTIONS.has(input.request.kind)) {
+      if (activityBy !== "agent" && PERSON_PAGE_ACTIONS.has(input.request.kind)) {
         this.#notePersonInput(owned);
       }
       owned.evidence.push(evidence);
       if (owned.evidence.length > MAX_RETAINED_BROWSER_EVIDENCE) {
         owned.evidence.splice(0, owned.evidence.length - MAX_RETAINED_BROWSER_EVIDENCE);
       }
-      if (meaningful && !this.#renewActivity(owned, input.capturedBy !== "agent"))
-        return snapshot(owned);
+      if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
       owned.failure = undefined;
       owned.status = "running";
       return snapshot(owned);

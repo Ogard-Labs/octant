@@ -77,6 +77,7 @@ export interface BrowserAppManagedToolsOptions {
       readonly threadId?: BrowserThreadId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
+      readonly activityBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
