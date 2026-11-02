@@ -715,10 +715,11 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent("Output38");
     // The panel must not imply a share of a window when the provider never
     // reported one; it says so in words rather than as an "Unavailable" row.
-    expect(popover).toHaveTextContent(/not a context-window maximum/);
+    expect(popover).toHaveTextContent("doesn't report a context window");
     expect(popover).not.toHaveTextContent("Context maximum");
     expect(popover).toHaveTextContent("Provider account limits");
-    expect(popover).toHaveTextContent(/5-hour limitResets now9%/);
+    // The reset time has passed, so it belongs to an old reading and is not shown.
+    expect(popover).toHaveTextContent(/5-hour limit9%/);
   });
 
   it("moves the ring to its new share instead of snapping between renders", () => {

@@ -344,7 +344,7 @@
 }
 
 .usage-heatmap__table-toggle summary {
-  cursor: pointer;
+  cursor: default;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
 }

@@ -45,10 +45,10 @@ describe("Code plan proposals", () => {
       );
 
       await user.click(await screen.findByRole("button", { name: "Propose plan" }));
-      const dialog = await screen.findByRole("dialog", { name: "Propose plan" });
+      const dialog = await screen.findByRole("dialog", { name: "New plan" });
       expect(within(dialog).queryByRole("textbox", { name: "Plan title" })).not.toBeInTheDocument();
       await user.click(within(dialog).getByRole("button", { name: "Retry" }));
-      expect(screen.getByRole("dialog", { name: "Propose plan" })).toBe(dialog);
+      expect(screen.getByRole("dialog", { name: "New plan" })).toBe(dialog);
       expect(within(dialog).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
       await act(async () => retry.resolve({ plan: null, history: [] }));
       expect(await within(dialog).findByRole("textbox", { name: "Plan title" })).toBeVisible();
@@ -81,12 +81,12 @@ describe("Code plan proposals", () => {
       const entry = await screen.findByRole("button", { name: "Propose plan" });
       entry.focus();
       await user.keyboard("{Enter}");
-      await screen.findByRole("dialog", { name: "Propose plan" });
+      await screen.findByRole("dialog", { name: "New plan" });
       await user.keyboard("{Escape}");
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       expect(entry).toHaveFocus();
       await user.keyboard("{Enter}");
-      const dialog = await screen.findByRole("dialog", { name: "Propose plan" });
+      const dialog = await screen.findByRole("dialog", { name: "New plan" });
       await user.type(
         within(dialog).getByRole("textbox", { name: "Plan title" }),
         "Review the change",

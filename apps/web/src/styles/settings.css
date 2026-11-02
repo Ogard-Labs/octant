@@ -848,7 +848,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   align-items: center;
   gap: 12px;
   padding: 8px var(--oct-space-3);
-  cursor: pointer;
+  cursor: default;
   border-bottom: 1px solid var(--octant-border);
   font-size: var(--oct-text-detail);
 }
@@ -1204,7 +1204,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  cursor: pointer;
+  cursor: default;
   list-style: none;
 }
 
@@ -1229,7 +1229,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
   line-height: 1.45;
-  cursor: pointer;
+  cursor: default;
   list-style: none;
 }
 
@@ -1593,7 +1593,7 @@ textarea.settings-view__text-input {
   white-space: normal;
   text-align: center;
   border-radius: var(--oct-radius-md);
-  cursor: pointer;
+  cursor: default;
   transition: background-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
@@ -2625,7 +2625,7 @@ html[data-octant-increased-contrast="true"]
   display: flex;
   align-items: center;
   gap: var(--oct-space-3);
-  cursor: pointer;
+  cursor: default;
   list-style: none;
 }
 

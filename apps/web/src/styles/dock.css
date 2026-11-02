@@ -159,14 +159,6 @@
   opacity: 1;
 }
 
-/* The recipe's press translate and the icon button's press scale moved the
-   strip under the pointer — the very defect the fixed-width close exists to
-   prevent — so the strip's controls hold still when pressed. */
-.dock-tool-strip__select:active,
-.dock-tool-strip__close:active {
-  transform: none;
-}
-
 .dock-tool-strip__close:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);

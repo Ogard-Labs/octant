@@ -1,5 +1,5 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 
 export type RightUtilityDockSurfaceId =
   | "environment"
@@ -125,8 +125,9 @@ export const MULTI_INSTANCE_DOCK_SURFACES: ReadonlySet<string> = new Set(["brows
  * The width a page or a shell needs to be usable. At the 420px default (and
  * at the narrower widths people had dragged it to) a Browser showed a phone
  * layout of every site and the tab strip had room for one name; opening a
- * Browser or a Terminal widens a narrower dock to this once. The person can
- * still drag it narrower; the next such opening widens it again.
+ * Browser or a Terminal widens a narrower dock to this for as long as such a
+ * tab stays open. It is not saved: when it was, one Browser left every later
+ * Environment and Plan half a window wide.
  */
 export const WORKBENCH_DOCK_WIDTH = 640;
 
@@ -140,14 +141,39 @@ export function workbenchDockWidth(
   return WORKBENCH_DOCK_WIDTH;
 }
 
+/**
+ * One width whatever the dock is showing, so a click inside it moves nothing.
+ * The empty launcher used to take the 280px minimum while every tool took the
+ * stored width, so opening Environment from it threw the dock from 280px to the
+ * stored 960px and squeezed the thread beside it. A Browser or Terminal tab that
+ * asked for more holds that width even while another tab is in front.
+ */
 export function resolveDockPresentationWidth(input: {
-  readonly configuredWidth: number;
-  readonly resolution: RightUtilityDockResolution;
-  readonly tabCount: number;
+  readonly storedWidth: number;
+  readonly workbenchWidth: number | undefined;
+  readonly tabSurfaces: ReadonlyArray<string>;
 }): number {
-  return input.tabCount === 0 && input.resolution.kind === "closed"
-    ? MIN_CONTEXT_SIDEBAR_WIDTH
-    : input.configuredWidth;
+  const holdsWorkbench = input.tabSurfaces.some(
+    (surface) => surface === "browser" || surface === "terminal",
+  );
+  return holdsWorkbench && input.workbenchWidth !== undefined
+    ? input.workbenchWidth
+    : input.storedWidth;
+}
+
+/**
+ * The most of the workspace the dock may take. Half keeps the thread readable
+ * beside any tool. With only the thread's own minimum as a ceiling, a stored
+ * 960px squeezed the transcript to a sliver as soon as anything opened in the
+ * dock. The resize handle stops here too, so a drag never moves a stored width
+ * that the screen would not show.
+ */
+export function dockWidthCeiling(workspaceWidth: number | undefined): number {
+  if (workspaceWidth === undefined) return MAX_CONTEXT_SIDEBAR_WIDTH;
+  return Math.min(
+    MAX_CONTEXT_SIDEBAR_WIDTH,
+    Math.max(MIN_CONTEXT_SIDEBAR_WIDTH, Math.floor(workspaceWidth / 2)),
+  );
 }
 
 export const RIGHT_UTILITY_DOCK_SURFACES = [

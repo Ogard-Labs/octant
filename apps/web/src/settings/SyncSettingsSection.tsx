@@ -360,7 +360,7 @@ function SyncStoreSections(
                 reader users the way the switch's does. */}
             <OctantButton
               aria-describedby={testDisabledReason === undefined ? undefined : testReasonId}
-              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              className="aria-disabled:cursor-default aria-disabled:opacity-50"
               disabled={busy || !view.syncOn}
               focusableWhenDisabled
               onClick={() => void run({ schemaVersion: 1, kind: "test-connection" })}

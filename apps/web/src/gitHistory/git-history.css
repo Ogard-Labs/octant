@@ -185,7 +185,7 @@
   border-bottom: 1px solid var(--oct-border);
 }
 .git-history__diffs summary {
-  cursor: pointer;
+  cursor: default;
   padding: var(--oct-space-3) 12px;
   overflow-wrap: anywhere;
   font-family: var(--oct-font-mono);
@@ -230,7 +230,7 @@
 }
 
 .git-history__message summary {
-  cursor: pointer;
+  cursor: default;
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);
   padding-block: var(--oct-space-2);

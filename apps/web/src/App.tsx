@@ -1219,6 +1219,7 @@ function LaunchedShell(
     };
   }, [setSidebarCollapsedPersistent, sidebarDrawerOpen, sidebarIsDrawer]);
   const [previewContextWidth, setPreviewContextWidth] = useState<number>();
+  const [workbenchContextWidth, setWorkbenchContextWidth] = useState<number>();
   const [pendingCodeDeepLink, setPendingCodeDeepLink] = useState<CodeDeepLink>();
   const [computerUseSessionRepresentationCounts, setComputerUseSessionRepresentationCounts] =
     useState<ReadonlyMap<string, ReadonlyMap<string, number>>>(new Map());
@@ -3794,7 +3795,7 @@ function LaunchedShell(
   }
   function widenDockFor(surface: RightUtilityDockSurfaceId) {
     const width = workbenchDockWidth(surface, controller.settings?.contextSidebarWidth);
-    if (width !== undefined) void controller.updateSettings({ contextSidebarWidth: width });
+    if (width !== undefined) setWorkbenchContextWidth(width);
   }
   function addDockTab(surface: RightUtilityDockSurfaceId) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
@@ -4180,6 +4181,8 @@ function LaunchedShell(
   }, [dockVisible]);
   useEffect(() => {
     setPreviewContextWidth(undefined);
+    // A width the person dragged to outranks what a tool asked for.
+    setWorkbenchContextWidth(undefined);
   }, [controller.settings?.contextSidebarWidth]);
   useEffect(() => {
     setPreviewSidebarWidth((preview) =>
@@ -5457,9 +5460,9 @@ function LaunchedShell(
   const dockPresentedOpen =
     dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
   const dockPresentationWidth = resolveDockPresentationWidth({
-    configuredWidth: contextSidebarWidth,
-    resolution: dockResolution,
-    tabCount: dockTabs.length,
+    storedWidth: contextSidebarWidth,
+    workbenchWidth: previewContextWidth === undefined ? workbenchContextWidth : undefined,
+    tabSurfaces: dockTabs.map((tab) => tab.surface.id),
   });
   // The bottom panel steps aside for the same reason, and it had not been:
   // a terminal opened on a thread kept a quarter of the viewport on Board,

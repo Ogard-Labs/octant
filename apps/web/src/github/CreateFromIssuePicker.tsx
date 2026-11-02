@@ -199,15 +199,25 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
 
   return (
     <div className="create-from-issue">
-      <GitHubRepositoryPicker
-        client={client}
-        onSelect={setRepository}
-        {...(repository === undefined ? {} : { selectedNodeId: repository.nodeId })}
-      />
       {repository === undefined ? (
-        <p className="octant-popover-empty">Choose a repository to list its issues.</p>
+        <GitHubRepositoryPicker client={client} onSelect={setRepository} />
       ) : (
         <>
+          {/* The chosen repository folds to one row, so the issues get the room
+              instead of opening under a list nobody is choosing from any more. */}
+          <div className="create-from-issue__repository">
+            <span>
+              {repository.owner}/{repository.name}
+            </span>
+            <OctantButton
+              onClick={() => setRepository(undefined)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Change
+            </OctantButton>
+          </div>
           <label className="octant-popover-search">
             <Search aria-hidden="true" size={14} />
             <OctantInput

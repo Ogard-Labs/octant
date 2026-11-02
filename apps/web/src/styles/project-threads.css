@@ -102,7 +102,7 @@
   display: block;
   margin-top: var(--oct-space-2);
   color: var(--octant-text-secondary);
-  cursor: pointer;
+  cursor: default;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -235,20 +235,6 @@
   font: inherit;
 }
 
-/* In the Project tree the list's view, filter, and arrangement controls share
-   the Projects heading's row, after the label, so the sidebar has one header
-   row before the first Project. */
-.project-section__header h2 {
-  flex: none;
-}
-
-.project-section__header > .project-nav__toolbar {
-  flex: 1 1 auto;
-  min-width: 0;
-  justify-content: flex-end;
-  margin-inline-start: var(--oct-space-2);
-}
-
 .project-section > .sidebar-section {
   color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
@@ -262,10 +248,7 @@
    they appear with it: kept in flow and in the tab order, so focus still
    reaches them and reveals them, but transparent until the pointer or focus
    is on the section, so a quiet label is only a label. They keep their width
-   while hidden. The list's view, filter, and arrangement controls share this
-   row, and when these grew from zero width on hover they pushed those
-   controls 49px to the left each time the pointer entered the sidebar. An
-   open menu holds them visible: they must not vanish out from under the
+   while hidden. An open menu holds them visible: they must not vanish out from under the
    cursor that opened one. */
 .project-section__header-actions {
   display: flex;
@@ -378,7 +361,7 @@
   /* The bare variant draws nothing, and an open Project is not a filled row:
      the row's own wash is the only fill. It keeps a corner for the focus edge. */
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   text-align: left;
 }
 
@@ -428,7 +411,7 @@
   border: 0;
   border-radius: var(--oct-radius-sm);
   background: transparent;
-  cursor: pointer;
+  cursor: default;
 }
 
 .project-row__copy {
@@ -509,7 +492,7 @@
 .project-row__action {
   min-height: var(--oct-nav-row-h);
   padding: 0 var(--oct-space-2);
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-xs);
 }
 
@@ -568,7 +551,7 @@
   justify-content: space-between;
   padding: 0 var(--oct-nav-inset);
   color: var(--oct-meta);
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
   list-style: none;
@@ -727,7 +710,7 @@
   gap: var(--oct-space-2);
   min-height: var(--oct-control-height-sm);
   padding: 0 var(--oct-space-3);
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: var(--oct-text-sm);
   text-align: left;
@@ -826,7 +809,7 @@
 .project-button {
   min-height: 31px;
   padding: 0 var(--oct-space-3);
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
 }
@@ -1540,7 +1523,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   height: 27px;
   color: var(--octant-text-muted);
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   place-items: center;
 }
 

@@ -482,11 +482,11 @@ html:not([data-octant-reduced-transparency="true"])
 
 .code-file-explorer__entry--file,
 .code-file-explorer__entry--directory {
-  cursor: pointer;
+  cursor: default;
 }
 
 .code-file-explorer__entry--file:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: var(--oct-disabled-opacity);
 }
 
@@ -773,7 +773,7 @@ html:not([data-octant-reduced-transparency="true"])
   padding: var(--oct-space-1) var(--oct-space-2);
   border: 0;
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   font-size: var(--oct-text-xs);
   text-align: left;
 }
@@ -909,10 +909,12 @@ html[data-octant-increased-contrast="true"] .code-diff-pane__warning {
   color: var(--oct-fg);
 }
 
-/* A field and the control that acts on it share one row, so "Use
-   repository" and the refresh control sit beside what they act on instead of
-   hanging under it as loose text. */
-.github-picker__link,
+.github-picker__form {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
 .github-picker__toolbar {
   display: flex;
   align-items: center;
@@ -923,10 +925,6 @@ html[data-octant-increased-contrast="true"] .code-diff-pane__warning {
 .github-picker__search {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.github-picker__link > button {
-  flex: 0 0 auto;
 }
 
 .github-picker__listbox {
@@ -1838,7 +1836,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-project-thread__more summary {
   width: fit-content;
-  cursor: pointer;
+  cursor: default;
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -2460,7 +2458,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   border: 0;
   border-bottom: 1px solid var(--oct-border-soft);
   text-align: left;
-  cursor: pointer;
+  cursor: default;
 }
 
 .code-project-pull-requests__row[aria-pressed="true"] {

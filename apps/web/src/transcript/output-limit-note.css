@@ -19,7 +19,7 @@
   font: inherit;
   text-decoration: underline;
   text-underline-offset: 3px;
-  cursor: pointer;
+  cursor: default;
   appearance: none;
 }
 

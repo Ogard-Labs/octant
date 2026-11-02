@@ -1,8 +1,9 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 import { describe, expect, it } from "vitest";
 import {
   RIGHT_UTILITY_DOCK_SURFACES,
+  dockWidthCeiling,
   resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
   WORKBENCH_DOCK_WIDTH,
@@ -26,22 +27,43 @@ function surface(id: (typeof RIGHT_UTILITY_DOCK_SURFACES)[number]["id"]) {
   return found;
 }
 
-describe("resolving the right utility dock width", () => {
-  it("uses the compact width only while the dock is an empty launcher", () => {
+describe("how wide the right utility dock is", () => {
+  const widths = { storedWidth: 360, workbenchWidth: 640 };
+
+  it("stays one width from the empty launcher to any tool, so a click moves nothing", () => {
+    expect(resolveDockPresentationWidth({ ...widths, tabSurfaces: [] })).toBe(360);
+    expect(resolveDockPresentationWidth({ ...widths, tabSurfaces: ["environment"] })).toBe(360);
+  });
+
+  it("holds the Browser's width while its tab is open, whichever tab is in front", () => {
+    expect(
+      resolveDockPresentationWidth({ ...widths, tabSurfaces: ["environment", "browser"] }),
+    ).toBe(640);
+  });
+
+  it("uses the stored width when no tool has asked for more", () => {
     expect(
       resolveDockPresentationWidth({
-        configuredWidth: 560,
-        resolution: { kind: "closed", reason: "no-surface" },
-        tabCount: 0,
+        storedWidth: 700,
+        workbenchWidth: undefined,
+        tabSurfaces: ["browser"],
       }),
-    ).toBe(MIN_CONTEXT_SIDEBAR_WIDTH);
-    expect(
-      resolveDockPresentationWidth({
-        configuredWidth: 560,
-        resolution: { kind: "surface", surface: surface("browser") },
-        tabCount: 1,
-      }),
-    ).toBe(560);
+    ).toBe(700);
+  });
+});
+
+describe("how wide the right utility dock may get", () => {
+  it("takes at most half the workspace, so a stored 960px cannot squeeze the thread", () => {
+    expect(dockWidthCeiling(1268)).toBe(634);
+    expect(dockWidthCeiling(2600)).toBe(MAX_CONTEXT_SIDEBAR_WIDTH);
+  });
+
+  it("keeps the minimum in a window too narrow for half to fit a tool", () => {
+    expect(dockWidthCeiling(400)).toBe(MIN_CONTEXT_SIDEBAR_WIDTH);
+  });
+
+  it("does not guess before the workspace has been measured", () => {
+    expect(dockWidthCeiling(undefined)).toBe(MAX_CONTEXT_SIDEBAR_WIDTH);
   });
 });
 

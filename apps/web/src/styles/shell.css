@@ -177,7 +177,7 @@ html[data-octant-native-host="true"] .shell--sidebar-rail .shell-frame__native-d
 html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__native-drag-strip {
   right: max(
     var(--octant-window-chrome-reserved-width, 148px),
-    var(--octant-context-sidebar-width, 0px)
+    min(var(--octant-context-sidebar-width, 0px), 50%)
   );
 }
 
@@ -502,7 +502,7 @@ html[data-octant-native-host="true"]
   font: inherit;
   font-weight: var(--oct-weight-display);
   text-decoration: underline;
-  cursor: pointer;
+  cursor: default;
   padding: 0;
 }
 
@@ -545,7 +545,7 @@ html[data-octant-native-host="true"]
      this control has always drawn clear; the rule now says what is rendered. */
   background: transparent;
   color: var(--oct-fg-2);
-  cursor: pointer;
+  cursor: default;
 }
 
 .open-in-menu__trigger:hover,
@@ -572,7 +572,7 @@ html[data-octant-native-host="true"]
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
 }
 
 .window-chrome__new-thread {
@@ -621,7 +621,7 @@ html[data-octant-native-host="true"]
   background: transparent;
   border: 0;
   border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  cursor: default;
   text-align: left;
 }
 
@@ -1063,7 +1063,7 @@ html[data-octant-native-host="true"]
   border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
-  cursor: pointer;
+  cursor: default;
   text-align: left;
 }
 
@@ -1817,7 +1817,7 @@ html[data-octant-native-host="true"]
   padding: 2px 8px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  cursor: pointer;
+  cursor: default;
 }
 
 .shell-frame > .workspace-layer {
@@ -2401,6 +2401,14 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
 
 .composer-folder-selector__trigger {
   max-width: min(15rem, 42vw);
+}
+
+/* On the start screen this control sits on the bare ground, where a picture or
+   the character field ran through its label. */
+.draft-thread__composer .composer-folder-selector {
+  width: fit-content;
+  background: var(--octant-control);
+  border-radius: var(--oct-radius-sm);
 }
 
 .composer-folder-selector__label {
@@ -3583,15 +3591,13 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   white-space: normal;
   transition:
     border-color var(--oct-motion-base) var(--oct-ease-standard),
-    box-shadow var(--oct-motion-base) var(--oct-ease-standard),
-    transform var(--oct-motion-base) var(--oct-ease-standard);
+    box-shadow var(--oct-motion-base) var(--oct-ease-standard);
 }
 
 .draft-thread__intent-cards > button:hover:not(:disabled) {
   border-color: var(--octant-border-strong);
   background: var(--octant-card);
   box-shadow: var(--octant-shadow-xs);
-  transform: translateY(-1px);
 }
 
 .draft-thread__intent-label {

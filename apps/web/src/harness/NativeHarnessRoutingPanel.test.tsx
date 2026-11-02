@@ -258,7 +258,7 @@ describe("NativeHarnessRoutingPanel roles", () => {
     renderPanel({ routing: async () => settings(), updateRouting, fixtures: [local, router] });
 
     await user.click(await screen.findByRole("button", { name: "Planning model" }));
-    await user.click(await screen.findByRole("option", { name: "router-text" }));
+    await user.click(await screen.findByRole("option", { name: "Router Text" }));
 
     expect(updateRouting).toHaveBeenCalledWith({
       configuration: next.configuration,
@@ -267,7 +267,7 @@ describe("NativeHarnessRoutingPanel roles", () => {
     expect(screen.queryByRole("button", { name: /Save/ })).not.toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Planning model" })).toHaveTextContent(
-        "router-text",
+        "Router Text",
       ),
     );
     expect(screen.getByRole("group", { name: "Planning setting" })).toHaveTextContent(
@@ -291,14 +291,14 @@ describe("NativeHarnessRoutingPanel roles", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Planning model" }));
-    await user.click(await screen.findByRole("option", { name: "router-text" }));
+    await user.click(await screen.findByRole("option", { name: "Router Text" }));
 
     expect(
       await screen.findByText("Changed elsewhere. Reloaded; make your change again."),
     ).toBeVisible();
     expect(routing).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Quick jobs model" })).toHaveTextContent(
-      "scribe-2-mini",
+      "Scribe 2 Mini",
     );
     expect(screen.getByRole("button", { name: "Planning model" })).toHaveTextContent(
       "Same as main model",
@@ -347,7 +347,7 @@ describe("NativeHarnessRoutingPanel roles", () => {
     renderPanel({ routing: async () => custom, updateRouting, fixtures: [local, router] });
 
     await user.click(await screen.findByRole("button", { name: "review-pass model" }));
-    await user.click(await screen.findByRole("option", { name: "router-text" }));
+    await user.click(await screen.findByRole("option", { name: "Router Text" }));
 
     expect(updateRouting).toHaveBeenCalledWith({
       configuration: {
@@ -370,9 +370,9 @@ describe("NativeHarnessRoutingPanel roles", () => {
 
     await user.click(await screen.findByRole("button", { name: "Reading images model" }));
 
-    expect(await screen.findByRole("option", { name: "router-vision" })).toBeVisible();
-    expect(screen.queryByRole("option", { name: "router-text" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "scribe-2" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Router Vision" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "Router Text" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Scribe 2" })).not.toBeInTheDocument();
   });
 
   it("says no model can read images when no ready endpoint reports image input", async () => {
@@ -405,7 +405,7 @@ describe("NativeHarnessRoutingPanel backups", () => {
     await user.click(
       within(editor).getByRole("button", { name: "Research and lookups, new backup" }),
     );
-    await user.click(await screen.findByRole("option", { name: "router-text" }));
+    await user.click(await screen.findByRole("option", { name: "Router Text" }));
 
     expect(updateRouting).toHaveBeenCalledWith({
       configuration: chain.configuration,
