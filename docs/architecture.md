@@ -8145,9 +8145,9 @@ only by the provider, never by Octant, and the rule that follows holds. **The
 person reads the exact command first**, as the shell-quoted command line with
 the account's folder variable and a `<secret>` placeholder, plus a plain
 sentence on what it adds, and chooses Run this command once; `plan` returns a
-plan id and a digest of what would run, `apply` runs only that plan, once,
+plan id and a random confirmation token, `apply` runs only that plan with its token, once,
 within ten minutes, in the window that asked, and refuses when the account or
-its folder changed since (`changed-plan`). **Local window only**: every step
+its folder changed since (`changed-plan`), comparing the command written out as text when its turn comes, not a hash. **Local window only**: every step
 needs the window capability, a request forwarded from a paired device is
 refused (`not-a-local-window`), and no agent tool or route reaches it, since
 an agent holds no window capability. **No shell**: the program is started with
