@@ -790,8 +790,12 @@ html[data-octant-native-host="true"]
 .sidebar__chrome {
   display: flex;
   min-height: var(--oct-title-rail-h);
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--oct-space-1);
+  gap: 0 var(--oct-space-1);
+  /* The 32px tray row sits centred in the 38px band, and keeps that
+     centreline when the actions wrap to a second row beneath it. */
+  padding-block: calc((var(--oct-title-rail-h) - 32px) / 2);
   min-width: 0;
 }
 
@@ -802,12 +806,27 @@ html[data-octant-native-host="true"]
   padding-inline: var(--oct-nav-inset);
 }
 
-/* Both presentations fill the row so the action icons keep to its far edge. */
-.sidebar__chrome .modeswitch,
+/* Both presentations fill the row so the action icons keep to its far edge.
+   The name shrinks (it ellipsizes) and never forces a wrap: a zero basis keeps
+   it out of the wrap decision. */
 .sidebar__chrome .mode-trigger,
 .sidebar__chrome .mode-switcher__solo {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+}
+
+/* The icon tray cannot shrink, so it keeps its own width and the actions wrap
+   below it when the row is too narrow for both. Shrinking the tray let Code
+   slide under Home: the narrow desktop sidebar is 220-236px, the browser
+   header carries Home, Search, New, Hide and history beside the tray, and
+   together they need about 244px. */
+.sidebar__chrome .modeswitch {
+  flex: 1 0 auto;
+  min-width: min-content;
+}
+
+.sidebar__chrome > .sidebar__chrome-actions {
+  margin-left: auto;
 }
 
 /* Search and Activity use the same compact shell icon recipe. */
