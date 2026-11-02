@@ -296,3 +296,19 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Connector marks — CC0
+
+The Library shows a mark for each connector it has one for, bundled as inline
+SVG paths in `apps/web/src/extensions/connectorLogos.ts`; nothing is fetched to
+show them. Every path is a Simple Icons path (CC0 1.0), and the page it came
+from is recorded beside it. Marks: Linear, Notion, Stripe, Sentry, Supabase,
+Vercel, GitHub, Figma, Asana, Todoist, Cloudflare (also used for Cloudflare
+docs), Neon, PostHog, Netlify, Prisma, Railway, Webflow, Cloudinary, Convex,
+PayPal, Square, Zapier, Intercom, Mercado Pago and Hugging Face.
+
+Left out, because no mark with a clear source and licence was found: Canva,
+Context7, DeepWiki, Microsoft Learn and Doop. They keep a lettered tile.
+
+The marks remain trademarks of their owners and only identify the service a
+connector reaches.

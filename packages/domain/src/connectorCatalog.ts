@@ -319,6 +319,28 @@ export function connectorCatalog(): ReadonlyArray<ConnectorCatalogEntry> {
   return ENTRIES;
 }
 
+/**
+ * The hand-picked set the Library leads with: the services most agent work
+ * reaches for (code hosting, issues, notes, errors), one that needs no
+ * sign-in so a first connect is a single click, and Doop. Picked from this
+ * bundled list, so it shows with no network.
+ */
+const FEATURED_IDS: ReadonlyArray<string> = [
+  "github",
+  "linear",
+  "notion",
+  "sentry",
+  "context7",
+  "doop",
+];
+
+export function featuredConnectors(): ReadonlyArray<ConnectorCatalogEntry> {
+  return FEATURED_IDS.flatMap((id) => {
+    const entry = connectorById(id);
+    return entry === undefined ? [] : [entry];
+  });
+}
+
 /** Entries whose name or description contains the query, in catalog order; an empty query lists all. */
 export function searchConnectorCatalog(query: string): ReadonlyArray<ConnectorCatalogEntry> {
   const needle = query.trim().toLowerCase();

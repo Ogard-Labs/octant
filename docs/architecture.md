@@ -8232,19 +8232,39 @@ snapshot, the Marketplace results a person already searched for in this
 session, and the read-only local look at what Claude Code and Codex already
 have, and it adds no read of its own, so opening it fetches nothing and the
 Marketplace fetches switch changes nothing about it. Each card shows its
-source, provider, where it stands on the ladder (not installed, needs trust,
-off, on, blocked) and an authority level taken from the capabilities its
-components declare (instructions low; tool servers, network, browser, apps
-and agents medium; files, commands, screen control, credentials, hooks,
-other apps and Apple tooling high; a connector is medium and says which host
-receives requests). Trust and turning on run the same commands as the
-Installed view, one click each, and never together: installing implies
-neither, except a connector, whose one confirmed act installs, trusts and
-turns on. Install, review and connect stay in Marketplace, Connectors and
-Installed, which the Library opens. A connector shows a lettered tile and
-every item a designed fallback, because a bundled logo needs its own source
-and licence record and none exists for these vendors; provider-native items
-use the bundled provider marks.
+source, provider and one next step: a connector that is not installed shows
+Connect (Add key… when the vendor issues a key), a Marketplace or found item
+shows Review, and an installed item shows its state only when the state tells
+something (needs trust, off, blocked, on). The authority level, taken from the
+capabilities its components declare (instructions low; tool servers, network,
+browser, apps and agents medium; files, commands, screen control,
+credentials, hooks, other apps and Apple tooling high; a connector is medium
+and says which host receives requests), stays on every card as three dots and
+is stated in full in the detail. The page leads with a small hand-picked
+Featured row of connectors from the bundled list (`featuredConnectors`), so it
+shows with no network and with Marketplace fetches off, then groups what is
+installed first, then what is not by the catalog's own categories, Marketplace
+results and tools found on this computer; a search is one flat list.
+
+The Library finishes the job in place, through the same commands the other
+views use and under the same server checks. Connect calls the one shared
+connect function Connectors uses: Connect… on a card opens the detail, which
+states the authority in full and holds the one confirming press, the key field
+for a key connector and the sign-in for a sign-in connector; it still installs,
+trusts and turns on as one act, and only on the Octant window of the host.
+Rationale: one press on a card would connect without the authority statement
+in view. A Marketplace plugin
+is read first (the same inspection Marketplace makes, so the Marketplace
+fetches switch still governs it) and then installs with one Install that never
+trusts or turns it on; Trust and Turn on stay separate clicks afterwards.
+Found tools and blocked items still open Installed, which keeps their flows.
+A connector with a bundled mark shows it (`connectorLogos.ts`; each is a
+CC0 Simple Icons path with its source recorded beside it and noticed in
+`PROVIDER-LOGOS-LICENSE.txt`, drawn in the text colour so the theme owns the
+colour); one without a clear source and licence keeps a two-letter tile, so
+Stripe, Sentry and Supabase differ. Rationale: a card that says the same
+thing on every item hides the one thing that differs, and install belongs where
+the person decided to.
 
 **Connectors catalog.** Settings › Skills & Extensions has a Connectors view:
 a bundled, first-party list of hosted MCP servers (`connectorCatalog` in

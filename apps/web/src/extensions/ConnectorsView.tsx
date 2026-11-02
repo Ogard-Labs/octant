@@ -14,6 +14,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { thisComputerName, useHostPlatform } from "../platform";
+import { connectConnector } from "./connectConnector";
 import { McpServerSignInControl } from "./McpServerSignInControl";
 
 const HIDDEN_KEY = "octant.connectors.hidden";
@@ -82,51 +83,22 @@ export function ConnectorsView(props: ConnectorsViewProps) {
     async (entry: ConnectorCatalogEntry, secret?: string) => {
       setBusyId(entry.id);
       setFailure(undefined);
-      try {
-        const result = await client.addUserMcpServer({
-          name: entry.displayName,
-          connectorId: entry.id,
-          server: {
-            type: "streamable-http",
-            url: entry.url,
-            headers:
-              entry.auth.kind === "key" && secret !== undefined
-                ? [
-                    {
-                      name: entry.auth.header,
-                      value:
-                        entry.auth.prefix === undefined ? secret : `${entry.auth.prefix} ${secret}`,
-                      secret: true,
-                    },
-                  ]
-                : [],
-          },
-        });
-        if (result.kind === "extension-command-failed") {
-          setFailure(result.failure);
-          return;
-        }
-        if (result.kind === "extension-state-updated" && result.addedPackage !== undefined) {
-          const added = result.addedPackage;
-          setConnected((current) => ({
-            ...current,
-            [entry.id]: {
-              extensionId: String(added.extensionId),
-              componentId: added.componentId === undefined ? undefined : String(added.componentId),
-            },
-          }));
-        }
-        setKeyFor(undefined);
-        setKey("");
-        props.onConnected();
-      } catch (error) {
-        setFailure({
-          category: "unavailable",
-          message: error instanceof Error ? error.message : "Extension service is unavailable.",
-        });
-      } finally {
-        setBusyId(undefined);
+      const result = await connectConnector(client, entry, secret);
+      setBusyId(undefined);
+      if (result.kind === "failed") {
+        setFailure(result.failure);
+        return;
       }
+      if (result.extensionId !== undefined) {
+        const extensionId = result.extensionId;
+        setConnected((current) => ({
+          ...current,
+          [entry.id]: { extensionId, componentId: result.componentId },
+        }));
+      }
+      setKeyFor(undefined);
+      setKey("");
+      props.onConnected();
     },
     [client, props],
   );

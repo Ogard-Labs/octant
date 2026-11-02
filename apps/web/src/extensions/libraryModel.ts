@@ -8,6 +8,8 @@ import {
   CONNECTOR_CATEGORY_LABEL,
   connectorCatalog,
   connectorPackageName,
+  featuredConnectors,
+  type ConnectorAuth,
   type ConnectorCatalogEntry,
 } from "@octant/domain";
 import { providerFit } from "./providerFit";
@@ -72,6 +74,12 @@ export interface LibraryItem {
     readonly desired: boolean;
   };
   readonly connectorId?: string;
+  /** How a connector signs in, so its detail can take a key or start a sign-in. */
+  readonly connectorAuth?: ConnectorAuth;
+  /** The connector server's component, once connected, for its sign-in control. */
+  readonly mcpComponentId?: string;
+  /** The Marketplace entry this item is, so it can be reviewed and installed here. */
+  readonly marketplaceExtensionId?: string;
   readonly address?: string;
   readonly version?: string;
 }
@@ -85,6 +93,11 @@ export interface LibrarySources {
 }
 
 type Capability = ExtensionCapability;
+
+/** Position in the hand-picked set; an item outside it is not featured. */
+const FEATURED_RANK: ReadonlyMap<string, number> = new Map(
+  featuredConnectors().map((entry, index) => [entry.id, index]),
+);
 
 interface CapabilityFact {
   readonly ability: string;
@@ -185,7 +198,7 @@ export const LIBRARY_STATE_LABEL: Readonly<Record<LibraryState, string>> = {
 type InstalledPackage = ExtensionSnapshot["packages"][number];
 type StandaloneSkill = NonNullable<ExtensionSnapshot["skills"]>[number];
 
-function authorityFor(capabilities: ReadonlyArray<Capability>): LibraryAuthority {
+export function authorityFor(capabilities: ReadonlyArray<Capability>): LibraryAuthority {
   const facts = [...new Set(capabilities)]
     .map((capability) => CAPABILITY_FACTS[capability])
     .sort((a, b) => LEVEL_ORDER[b.level] - LEVEL_ORDER[a.level]);
@@ -196,7 +209,7 @@ function authorityFor(capabilities: ReadonlyArray<Capability>): LibraryAuthority
   return { level: first.level, lines: facts.map((fact) => fact.cost) };
 }
 
-function abilitiesFor(capabilities: ReadonlyArray<Capability>): ReadonlyArray<string> {
+export function abilitiesFor(capabilities: ReadonlyArray<Capability>): ReadonlyArray<string> {
   return [...new Set(capabilities)].map((capability) => CAPABILITY_FACTS[capability].ability);
 }
 
@@ -277,7 +290,7 @@ function packageItem(pkg: InstalledPackage, connectors: ReadonlyArray<ConnectorC
     providers,
     ...(only === undefined ? {} : { providerLogo: only }),
     ...(connector === undefined ? {} : { category: CONNECTOR_CATEGORY_LABEL[connector.category] }),
-    featured: connector?.category === "popular",
+    featured: connector !== undefined && FEATURED_RANK.has(connector.id),
     state,
     stateLabel: LIBRARY_STATE_LABEL[state],
     ...(state === "blocked" && blockedBy?.effectiveState.kind === "blocked"
@@ -294,7 +307,14 @@ function packageItem(pkg: InstalledPackage, connectors: ReadonlyArray<ConnectorC
       desired,
     },
     version: String(pkg.version),
-    ...(connector === undefined ? {} : { connectorId: connector.id, address: connector.url }),
+    ...(connector === undefined
+      ? {}
+      : {
+          connectorId: connector.id,
+          connectorAuth: connector.auth,
+          address: connector.url,
+          ...(server === undefined ? {} : { mcpComponentId: String(server.id) }),
+        }),
   };
   return item;
 }
@@ -345,7 +365,7 @@ function connectorItem(entry: ConnectorCatalogEntry): LibraryItem {
     provider: EVERY_PROVIDER,
     providers: [EVERY_PROVIDER],
     category: CONNECTOR_CATEGORY_LABEL[entry.category],
-    featured: entry.category === "popular",
+    featured: FEATURED_RANK.has(entry.id),
     state: "available",
     stateLabel: LIBRARY_STATE_LABEL.available,
     steps: stepsFor(false, false, false),
@@ -353,6 +373,7 @@ function connectorItem(entry: ConnectorCatalogEntry): LibraryItem {
     authority: { level: "medium", lines },
     handoff: "connectors",
     connectorId: entry.id,
+    connectorAuth: entry.auth,
     address: entry.url,
   };
 }
@@ -373,6 +394,7 @@ function marketplaceItem(entry: ExtensionCatalogEntry): LibraryItem {
     abilities: ["Review lists its parts before you install"],
     authority: { level: "none", lines: ["Unknown until you review it"] },
     handoff: "marketplace",
+    marketplaceExtensionId: String(entry.extensionId),
     version: String(entry.version),
   };
 }
@@ -500,7 +522,8 @@ export function filterLibrary(
     .sort(
       (a, b) =>
         STATE_RANK[a.item.state] - STATE_RANK[b.item.state] ||
-        Number(b.item.featured) - Number(a.item.featured) ||
+        (FEATURED_RANK.get(a.item.connectorId ?? "") ?? Infinity) -
+          (FEATURED_RANK.get(b.item.connectorId ?? "") ?? Infinity) ||
         a.index - b.index,
     )
     .map(({ item }) => item);
@@ -523,4 +546,81 @@ export function libraryCounts(
   };
   for (const item of items) counts[item.kind] += 1;
   return counts;
+}
+
+/** What a person already narrowed to; the lead row and the groups only make sense with none of it. */
+export function isBrowsing(filter: LibraryFilter): boolean {
+  return filter.query.trim() === "" && filter.provider === ALL_PROVIDERS;
+}
+
+/**
+ * The hand-picked connectors not yet connected, in the order they were picked.
+ * They lead the page while a person is browsing everything or connectors, and
+ * leave the groups below so nothing shows twice.
+ */
+export function featuredItems(
+  items: ReadonlyArray<LibraryItem>,
+  filter: LibraryFilter,
+): ReadonlyArray<LibraryItem> {
+  if (!isBrowsing(filter)) return [];
+  if (filter.kind !== "all" && filter.kind !== "connector") return [];
+  if (filter.state === "installed" || filter.state === "attention") return [];
+  return items.filter((item) => item.featured && item.state === "available");
+}
+
+export interface LibraryGroup {
+  readonly key: string;
+  readonly title: string;
+  readonly items: ReadonlyArray<LibraryItem>;
+}
+
+const CATEGORY_ORDER = ["Popular", "Developer tools", "Business"] as const;
+
+function availableGroupTitle(item: LibraryItem): string {
+  if (item.category !== undefined) return item.category;
+  if (item.id.startsWith("found-")) return "Found on this computer";
+  if (item.id.startsWith("marketplace:")) return "From Marketplace";
+  return "More";
+}
+
+/**
+ * Groups for the filtered items: what a person already has first, with what
+ * needs a decision at its head, then what is not installed by the catalog's
+ * own categories, Marketplace results, and tools found in Claude Code and
+ * Codex. A search is one flat list of results; the lead row's items are left
+ * out so they show once.
+ */
+export function groupLibrary(
+  shown: ReadonlyArray<LibraryItem>,
+  filter: LibraryFilter,
+): ReadonlyArray<LibraryGroup> {
+  if (filter.query.trim() !== "") {
+    return shown.length === 0 ? [] : [{ key: "results", title: "Results", items: shown }];
+  }
+  const lead = new Set(featuredItems(shown, filter).map((item) => item.id));
+  const rest = shown.filter((item) => !lead.has(item.id));
+  const groups: LibraryGroup[] = [];
+  const installed = rest.filter((item) => item.state !== "available");
+  if (installed.length > 0) groups.push({ key: "installed", title: "Installed", items: installed });
+  const titles: string[] = [];
+  for (const item of rest) {
+    if (item.state !== "available") continue;
+    const title = availableGroupTitle(item);
+    if (!titles.includes(title)) titles.push(title);
+  }
+  const rank = (title: string) => {
+    const at = (CATEGORY_ORDER as ReadonlyArray<string>).indexOf(title);
+    return at === -1 ? CATEGORY_ORDER.length : at;
+  };
+  titles.sort((a, b) => rank(a) - rank(b));
+  for (const title of titles) {
+    groups.push({
+      key: title,
+      title,
+      items: rest.filter(
+        (item) => item.state === "available" && availableGroupTitle(item) === title,
+      ),
+    });
+  }
+  return groups;
 }

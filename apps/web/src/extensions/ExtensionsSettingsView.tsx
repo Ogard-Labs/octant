@@ -35,7 +35,7 @@ import { AddMcpServerDialog } from "./AddMcpServerDialog";
 import { DiscoveredToolingSection } from "./DiscoveredToolingSection";
 import { McpServerSignInControl } from "./McpServerSignInControl";
 import { ConnectorsView } from "./ConnectorsView";
-import { LibraryView } from "./LibraryView";
+import { LibraryView, type LibraryInspection } from "./LibraryView";
 import { buildLibrary, type LibraryItem } from "./libraryModel";
 import { providerFit } from "./providerFit";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -481,6 +481,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [discovered, setDiscovered] = useState<DiscoveredAgentToolingListing>();
   const [scanFailed, setScanFailed] = useState(false);
   const [libraryBusyId, setLibraryBusyId] = useState<string>();
+  const [libraryInspection, setLibraryInspection] = useState<LibraryInspection>();
   const libraryItems = useMemo(
     () => buildLibrary({ snapshot, marketplace: marketplaceEntries, discovered }),
     [snapshot, marketplaceEntries, discovered],
@@ -772,36 +773,50 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     [props.client, marketplaceFetchesEnabled],
   );
 
+  /**
+   * Installs the inspected entry. `plainInstall` is the Library's: it never
+   * turns into an npm update that Marketplace left pending, and it leaves
+   * Marketplace's own review state alone. Returns the failure message, if any.
+   */
   const confirmInstall = useCallback(
-    async (entry: ExtensionCatalogEntry, trust = false) => {
-      if (installing) return;
+    async (
+      entry: ExtensionCatalogEntry,
+      trust = false,
+      plainInstall = false,
+    ): Promise<string | undefined> => {
+      if (installing) return "An install is already running.";
+      const updating = !plainInstall && npmUpdateOf === entry.extensionId;
       setInstalling(true);
       setFailure(undefined);
       try {
         const installed = await props.client.execute({
-          kind: npmUpdateOf === entry.extensionId ? "update-package" : "install-package",
+          kind: updating ? "update-package" : "install-package",
           extensionId: entry.extensionId,
           packageId: entry.packageId,
           version: entry.version,
           digest: entry.digest,
-          ...(trust && npmUpdateOf !== entry.extensionId ? { trust: true } : {}),
+          ...(trust && !updating ? { trust: true } : {}),
         });
         if (installed.kind === "extension-command-failed") {
           setFailure({
             category: installed.failure.category,
             message: installed.failure.message,
           });
-          return;
+          return installed.failure.message;
         }
-        setPreview(undefined);
-        setLocalPreview(undefined);
-        setNpmUpdateOf(undefined);
+        if (!plainInstall) {
+          setPreview(undefined);
+          setLocalPreview(undefined);
+          setNpmUpdateOf(undefined);
+        }
         await reload();
+        return undefined;
       } catch {
         setFailure({
           category: "unavailable" as never,
           message: "Extension service is unavailable.",
         });
+        return "Extension service is unavailable.";
       } finally {
         setInstalling(false);
       }
@@ -955,6 +970,57 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     );
   }
 
+  const marketplaceEntryOf = (item: LibraryItem) =>
+    marketplaceEntries.find((entry) => String(entry.extensionId) === item.marketplaceExtensionId);
+  // Reading what a Marketplace item holds is the same inspection Marketplace
+  // makes, under the same switch; the Library only shows the result.
+  const inspectLibraryItem = async (item: LibraryItem) => {
+    const entry = marketplaceEntryOf(item);
+    if (entry === undefined) return;
+    if (!marketplaceFetchesEnabled && entry.source.kind === "catalog") {
+      setLibraryInspection({
+        itemId: item.id,
+        status: "failed",
+        message: "Marketplace fetches are turned off in Settings.",
+      });
+      return;
+    }
+    setLibraryInspection({ itemId: item.id, status: "loading" });
+    try {
+      const inspection = await props.client.execute({
+        kind: "inspect-package",
+        source: entry.source,
+        ...(entry.digest === undefined ? {} : { expectedDigest: entry.digest }),
+      });
+      if (inspection.kind === "package-inspected") {
+        setLibraryInspection({ itemId: item.id, status: "ready", preview: inspection.preview });
+      } else {
+        setLibraryInspection({
+          itemId: item.id,
+          status: "failed",
+          message:
+            inspection.kind === "extension-command-failed"
+              ? inspection.failure.message
+              : "It could not be read.",
+        });
+      }
+    } catch {
+      setLibraryInspection({
+        itemId: item.id,
+        status: "failed",
+        message: "Extension service is unavailable.",
+      });
+    }
+  };
+  // Install adds the package and nothing more: no trust, nothing turned on.
+  const installLibraryItem = async (item: LibraryItem) => {
+    const entry = libraryInspection?.preview?.entry ?? marketplaceEntryOf(item);
+    if (entry === undefined) return;
+    const failed = await confirmInstall(entry, false, true);
+    setLibraryInspection(
+      failed === undefined ? undefined : { itemId: item.id, status: "failed", message: failed },
+    );
+  };
   const libraryPackage = (item: LibraryItem) =>
     snapshot.packages.find((pkg) => String(pkg.extensionId) === item.packageRef?.extensionId);
   const libraryLifecycle = (
@@ -1040,8 +1106,18 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             ? {}
             : { onOpenAccountTools: () => setView("account-tools") })}
           busyExtensionId={libraryBusyId}
+          connectClient={props.client}
           disabled={installing || importingLocal}
+          inspection={libraryInspection}
+          installing={installing}
           items={libraryItems}
+          localHost={props.client.toolGrantsAvailable}
+          onConnected={() => {
+            setDiscoveredRevision((revision) => revision + 1);
+            void reload();
+          }}
+          onInspect={(item) => void inspectLibraryItem(item)}
+          onInstall={(item) => void installLibraryItem(item)}
           loading={status === "loading" && snapshot.packages.length === 0}
           marketplaceFetchesEnabled={marketplaceFetchesEnabled}
           onOpen={(target) => setView(target)}

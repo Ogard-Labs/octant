@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
-import { buildLibrary, filterLibrary, ALL_PROVIDERS } from "./libraryModel";
+import {
+  ALL_PROVIDERS,
+  buildLibrary,
+  featuredItems,
+  filterLibrary,
+  groupLibrary,
+  type LibraryFilter,
+} from "./libraryModel";
 
 const base = {
   installed: true,
@@ -234,5 +241,43 @@ describe("the library model", () => {
     const text = JSON.stringify(buildLibrary({ snapshot: snapshot(pkg("a", {})) }));
     expect(text).not.toMatch(/every (tool )?call still asks/);
     expect(text).toContain("approval policy");
+  });
+});
+
+describe("the library's lead row and groups", () => {
+  const all: LibraryFilter = { query: "", kind: "all", state: "all", provider: ALL_PROVIDERS };
+
+  it("leads with the hand-picked connectors that are not connected, in the order picked", () => {
+    const items = filterLibrary(buildLibrary({ snapshot: undefined }), all);
+    const lead = featuredItems(items, all).map((item) => item.connectorId);
+    expect(lead[0]).toBe("github");
+    expect(lead).toContain("doop");
+    expect(lead).toContain("context7");
+  });
+
+  it("drops the lead row while a person searches or narrows to another kind", () => {
+    const items = buildLibrary({ snapshot: undefined });
+    expect(featuredItems(items, { ...all, query: "doop" })).toEqual([]);
+    expect(featuredItems(items, { ...all, kind: "plugin" })).toEqual([]);
+    expect(featuredItems(items, { ...all, state: "installed" })).toEqual([]);
+  });
+
+  it("groups what is left by the catalog's own categories and shows nothing twice", () => {
+    const shown = filterLibrary(buildLibrary({ snapshot: undefined }), all);
+    const groups = groupLibrary(shown, all);
+    expect(groups.map((group) => group.title)).toEqual(["Popular", "Developer tools", "Business"]);
+    const lead = new Set(featuredItems(shown, all).map((item) => item.id));
+    for (const group of groups) {
+      for (const item of group.items) expect(lead.has(item.id)).toBe(false);
+    }
+  });
+
+  it("makes a search one flat list of results", () => {
+    const filter = { ...all, query: "linear" };
+    const groups = groupLibrary(
+      filterLibrary(buildLibrary({ snapshot: undefined }), filter),
+      filter,
+    );
+    expect(groups.map((group) => group.title)).toEqual(["Results"]);
   });
 });
