@@ -288,6 +288,10 @@ function harness() {
     approvals: { validate: async () => true },
     evidence,
     events: {
+      historyForThread: (threadId) => ({
+        status: "ok",
+        frames: frames.filter((frame) => frame.threadId === threadId),
+      }),
       append,
       replay: (input) => {
         const result = frames.filter(
