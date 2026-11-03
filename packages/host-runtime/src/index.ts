@@ -215,6 +215,8 @@ export {
 export {
   DESKTOP_FLAVOR_IDENTITIES,
   desktopIdentity,
+  desktopIdentityForPackage,
+  desktopWindowStorageDirectory,
   resolveDesktopPackageFlavor,
   type DesktopFlavor,
   type DesktopIdentity,

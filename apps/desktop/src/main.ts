@@ -48,6 +48,9 @@ import {
 } from "electron";
 import {
   CredentialStoreFailure,
+  desktopIdentity,
+  desktopIdentityForPackage,
+  desktopWindowStorageDirectory,
   deriveHostRuntimeHostId,
   isLinkedSecretMaterial,
   linkedSecretStoresStatePath,
@@ -1273,7 +1276,12 @@ function readStoredDesktopBridgeSecret(directory: string): string | undefined {
   }
 }
 
-app.setName("Octant");
+const applicationIdentity = app.isPackaged
+  ? desktopIdentityForPackage(
+      JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8")),
+    )
+  : desktopIdentity("stable");
+app.setName(applicationIdentity.productName);
 isolateEachCanvasFrameDocument(app.commandLine);
 const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
   process.env.OCTANT_DATA_DIR,
@@ -1281,7 +1289,10 @@ const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
 );
 const desktopDataDirectory = desktopHostRuntimePaths.dataDirectory;
 const desktopHostId = deriveHostRuntimeHostId(desktopDataDirectory);
-app.setPath("userData", desktopDataDirectory);
+app.setPath(
+  "userData",
+  desktopWindowStorageDirectory(applicationIdentity, desktopDataDirectory, app.getPath("appData")),
+);
 
 let server: ChildProcess | undefined;
 let credentialBroker: CredentialBroker | undefined;
@@ -1750,6 +1761,11 @@ async function resolveExistingHostAttachment() {
 }
 
 async function attachExistingLocalHost(): Promise<LocalHostDescriptor | undefined> {
+  if (!applicationIdentity.mayStartHost) {
+    throw new Error(
+      "Needs a newer Octant. The stable desktop client bridge is not available in this build of Octant Nightly.",
+    );
+  }
   if (server !== undefined) return undefined;
   const attachment = await resolveExistingHostAttachment();
   if (attachment === undefined) return undefined;
@@ -1809,6 +1825,9 @@ function browserProfilesDirectory(): string {
 }
 
 async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
+  if (!applicationIdentity.mayStartHost) {
+    throw new Error("Octant Nightly cannot start a host or migrate shared data.");
+  }
   if (server !== undefined && activeServerUrl !== undefined && serverInstanceId !== undefined) {
     return {
       url: activeServerUrl,
@@ -3993,6 +4012,9 @@ function appUpdates(): ReturnType<typeof createAppUpdateService> {
       platform: process.platform,
       arch: process.arch,
     },
+    ...(app.isPackaged
+      ? { ring: applicationIdentity.defaultRing, allowedRings: applicationIdentity.rings }
+      : {}),
     // Starts off, and stays off until the renderer reports the persisted
     // preference. A default of "on" would mean a host that had been told not to
     // check still checked once on every launch, in the window before the
@@ -4618,7 +4640,7 @@ function installApplicationMenu(): void {
 
 function acceptCodeDeepLink(value: string): void {
   try {
-    const target = parseCodeDeepLink(value);
+    const target = parseCodeDeepLink(value, applicationIdentity.scheme);
     if (mainWindow === undefined || mainWindow.isDestroyed()) pendingCodeDeepLinks.push(target);
     else mainWindow.webContents.send(IPC_CHANNELS.codeDeepLink, target);
   } catch {
@@ -4632,7 +4654,7 @@ function startDesktopInstance(): void {
     app.quit();
     return;
   }
-  app.setAsDefaultProtocolClient("octant");
+  app.setAsDefaultProtocolClient(applicationIdentity.scheme);
   app.on("open-url", (event, url) => {
     event.preventDefault();
     acceptCodeDeepLink(url);
@@ -4640,11 +4662,11 @@ function startDesktopInstance(): void {
   });
   app.on("second-instance", (_event, commandLine) => {
     for (const argument of commandLine)
-      if (argument.startsWith("octant://")) acceptCodeDeepLink(argument);
+      if (argument.startsWith(`${applicationIdentity.scheme}://`)) acceptCodeDeepLink(argument);
     requestActiveWindow();
   });
   for (const argument of process.argv)
-    if (argument.startsWith("octant://")) acceptCodeDeepLink(argument);
+    if (argument.startsWith(`${applicationIdentity.scheme}://`)) acceptCodeDeepLink(argument);
   void app
     .whenReady()
     .then(() => {

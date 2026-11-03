@@ -8,8 +8,22 @@ one host per data folder, how updates are verified, and which rings exist
 [current release boundary](../architecture.md#current-release-boundary)).
 DESIGN.md owns Settings presentation.
 
-Status: approved design, not yet built. Until it is built, there is one app,
-and Settings › Updates switches its ring.
+Status: identity, packaging and update-ring foundations are implemented. The
+functional stable-host desktop client bridge is not built. A packaged Nightly
+launch therefore refuses before importing the host-owning desktop module,
+which prevents credential initialization, host startup and migrations.
+
+The remaining delivery includes the typed per-window native broker connection,
+stable host-only launch and retention, shared sign-in operations, the complete
+`octant-nightly` command, the installer and removal controls, inverted icon,
+Nightly labels, and the functional release preflight. Coexistence, reconnect
+and rollback still need their implementation and packaged evidence. The
+preview/candidate workflow now selects the Nightly flavor and matching artifact
+and payload-smoke paths, but an explicit early gate stops that workflow before
+build, signing or publication. The functional client change must replace the
+gate with lifecycle, credential and native-surface parity evidence. Stable
+release and local packaging are unaffected by that gate.
+Nothing in this foundation authorizes installation or publication.
 
 ## Two apps, one set of data
 
@@ -73,9 +87,12 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 - `octant-nightly` is the Nightly build of the command-line tool. It attaches to
   the same host as `octant`, so a person can try a newer tool against their
   real data without replacing `octant`.
-- The identity is one record per flavor next to `DESKTOP_PACKAGE_IDENTITY`. The
-  desktop process reads its name, scheme, window storage folder, and whether it
-  may start a host from that record, never from a literal.
+- The identity is one record per flavor in `@octant/host-runtime`, consumed by
+  `DESKTOP_PACKAGE_IDENTITY` and desktop packaging. The packaged manifest stamps
+  the flavor, and the desktop reads that manifest rather than a launch
+  environment variable. Its name, scheme, window storage folder, rings and host
+  ownership come from that record. A malformed or mismatched identity refuses
+  startup. Development keeps its existing entry and unrestricted ring tests.
 - `OCTANT_DATA_DIR` and `OCTANT_SERVER_PORT` still override either app, as for a
   development build. A development build (`bun run dev`) is neither app and is
   unchanged.
@@ -116,7 +133,9 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
   the preview key and the stable key, as the preview and candidate rings do
   today. An update for one app can never install the other: the signed ring
   must equal a ring the app follows, and on macOS the platform updater's
-  code-signature check also requires the running app's bundle id.
+  code-signature check also requires the running app's bundle id. An update
+  check or download that finishes after its ring was changed or refused cannot
+  restore the older offer, failure or native download result.
 - Nothing has shipped on any ring, so no install needs moving between apps.
 - **Release order.** The first technical preview ships as Octant on the
   `stable` ring, so a person's first install has a host. Octant Nightly is

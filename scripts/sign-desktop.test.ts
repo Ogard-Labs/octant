@@ -131,11 +131,12 @@ describe("signPackagedDesktop", () => {
 });
 
 describe("signAndNotarizeDesktop", () => {
-  async function record() {
+  async function record(productName = "Octant") {
     const argv: string[][] = [];
     await signAndNotarizeDesktop({
       repositoryRoot: "/repo",
-      appPath: "/repo/out/Octant.app",
+      appPath: `/repo/out/${productName}.app`,
+      productName,
       archivePath: "/repo/out/Octant-0.1.0-arm64.zip",
       credentials: { identity: "Developer ID", notaryProfile: "profile", teamId: "TEAM" },
       run: async (command) => void argv.push([...command]),
@@ -150,6 +151,18 @@ describe("signAndNotarizeDesktop", () => {
     });
     return argv;
   }
+
+  it("signs Nightly's actual Electron helper bundles under its separate product name", async () => {
+    const commands = await record("Octant Nightly");
+    const targets = commands.filter((argv) => argv.includes("--sign")).map((argv) => argv.at(-1));
+    expect(targets).toContain(
+      "/repo/out/Octant Nightly.app/Contents/Frameworks/Octant Nightly Helper.app",
+    );
+    expect(targets).toContain(
+      "/repo/out/Octant Nightly.app/Contents/Frameworks/Octant Nightly Helper (Renderer).app",
+    );
+    expect(targets.some((target) => target?.includes("/Octant Helper"))).toBe(false);
+  });
 
   it("signs every nested payload before the bundle that contains them", async () => {
     // `codesign` seals a bundle including what is inside it, so a nested binary

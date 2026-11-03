@@ -37,9 +37,16 @@ import {
   SIGNING_ENVIRONMENT_VARIABLES,
 } from "./sign-desktop";
 
+import {
+  DESKTOP_FLAVOR_IDENTITIES,
+  desktopIdentity,
+  resolveDesktopPackageFlavor,
+  type DesktopIdentity,
+} from "@octant/host-runtime";
+
 export const DESKTOP_PACKAGE_IDENTITY = {
-  bundleId: "app.octant.desktop",
-  productName: "Octant",
+  bundleId: DESKTOP_FLAVOR_IDENTITIES.stable.bundleId,
+  productName: DESKTOP_FLAVOR_IDENTITIES.stable.productName,
   /**
    * The release this repository is working toward. One place, because the
    * updater compares it against the feed and an app that cannot say which
@@ -466,13 +473,19 @@ export function validateCodeWebAssets(paths: ReadonlyArray<string>): void {
   }
 }
 
-export function validateNativePayloadAllowlist(paths: ReadonlyArray<string>): void {
+export function validateNativePayloadAllowlist(
+  paths: ReadonlyArray<string>,
+  identity: DesktopIdentity = desktopIdentity("stable"),
+): void {
+  const allowed = new Set(
+    Array.from(ALLOWED_DARWIN_NATIVE_PAYLOADS, (path) => packagedBundlePath(path, identity)),
+  );
   for (const path of paths) {
     const nativeCandidate =
       path.includes("/Contents/Resources/native/") ||
       path.endsWith(".node") ||
       path.endsWith("/spawn-helper");
-    if (nativeCandidate && !ALLOWED_DARWIN_NATIVE_PAYLOADS.has(path)) {
+    if (nativeCandidate && !allowed.has(path)) {
       throw new Error(`Packaged bundle contains unexpected native payload ${path}.`);
     }
   }
@@ -495,8 +508,11 @@ export function validateLinuxNativePayloadAllowlist(paths: ReadonlyArray<string>
   }
 }
 
-export function selectFinalBundlePaths(paths: ReadonlyArray<string>): ReadonlyArray<string> {
-  const prefix = `${DESKTOP_PACKAGE_IDENTITY.productName}.app/`;
+export function selectFinalBundlePaths(
+  paths: ReadonlyArray<string>,
+  identity: DesktopIdentity = desktopIdentity("stable"),
+): ReadonlyArray<string> {
+  const prefix = `${identity.productName}.app/`;
   return paths.filter((path) => path.startsWith(prefix));
 }
 
@@ -508,8 +524,11 @@ export function selectLinuxPackagePaths(
   return paths.filter((path) => path.startsWith(prefix));
 }
 
-export function linuxPackageDirectoryName(target: DesktopPackageTarget): string {
-  return `${DESKTOP_PACKAGE_IDENTITY.productName}-${target.platform}-${target.arch}`;
+export function linuxPackageDirectoryName(
+  target: DesktopPackageTarget,
+  identity: DesktopIdentity = desktopIdentity("stable"),
+): string {
+  return `${identity.productName}-${target.platform}-${target.arch}`;
 }
 
 export async function pruneUnusedNativePayloads(
@@ -608,10 +627,14 @@ export function nativeDebugStripForPlatform(
   return platform === "darwin" ? stripMachODebugMetadata : stripElfDebugMetadata;
 }
 
-export function packagedBundlePath(requiredPath: string): string {
-  return requiredPath.startsWith(`${DESKTOP_PACKAGE_IDENTITY.productName}.app/`)
-    ? requiredPath
-    : `${DESKTOP_PACKAGE_IDENTITY.productName}.app/Contents/Resources/app/${requiredPath}`;
+export function packagedBundlePath(
+  requiredPath: string,
+  identity: DesktopIdentity = desktopIdentity("stable"),
+): string {
+  if (requiredPath.startsWith(`${identity.productName}.app/`)) return requiredPath;
+  if (requiredPath.startsWith("Octant.app/"))
+    return `${identity.productName}.app/${requiredPath.slice("Octant.app/".length)}`;
+  return `${identity.productName}.app/Contents/Resources/app/${requiredPath}`;
 }
 
 export function packagedLinuxBundlePath(
@@ -672,9 +695,11 @@ export function createPackagerOptions(
   out: string,
   version: string,
   target: DesktopPackageTarget = DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+  identity: DesktopIdentity = desktopIdentity("stable"),
 ): PackagerOptions {
+  resolveDesktopPackageFlavor({ OCTANT_PACKAGE_FLAVOR: identity.flavor }, version);
   return {
-    appBundleId: DESKTOP_PACKAGE_IDENTITY.bundleId,
+    appBundleId: identity.bundleId,
     appVersion: version,
     arch: target.arch,
     asar: false,
@@ -696,12 +721,12 @@ export function createPackagerOptions(
       target.platform === "darwin"
         ? resolve(dir, "apps/desktop/resources/icon.icns")
         : resolve(dir, "apps/desktop/resources/icon.png"),
-    name: DESKTOP_PACKAGE_IDENTITY.productName,
+    name: identity.productName,
     out,
     overwrite: true,
     platform: target.platform,
     prune: false,
-    protocols: [{ name: "Octant Code links", schemes: ["octant"] }],
+    protocols: [{ name: `${identity.productName} Code links`, schemes: [identity.scheme] }],
   };
 }
 
@@ -913,13 +938,18 @@ export function validateSandboxedPreloads(entries: ReadonlyArray<PackagedPayload
   }
 }
 
-export function createDesktopRuntimeManifest(version: string) {
+export function createDesktopRuntimeManifest(
+  version: string,
+  identity: DesktopIdentity = desktopIdentity("stable"),
+) {
+  resolveDesktopPackageFlavor({ OCTANT_PACKAGE_FLAVOR: identity.flavor }, version);
   return {
     name: "@octant/desktop-runtime",
     private: true,
     type: "module",
     version,
-    productName: DESKTOP_PACKAGE_IDENTITY.productName,
+    productName: identity.productName,
+    octantDesktopFlavor: identity.flavor,
     main: "apps/desktop/dist/entry.mjs",
   };
 }
@@ -929,6 +959,7 @@ export async function stageDesktopRuntime(
   stageRoot: string,
   target: DesktopPackageTarget = DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
   version: string = resolveReleaseVersion(process.env),
+  identity: DesktopIdentity = desktopIdentity(resolveDesktopPackageFlavor(process.env, version)),
 ): Promise<void> {
   await rm(stageRoot, { recursive: true, force: true });
   await mkdir(stageRoot, { recursive: true });
@@ -943,7 +974,7 @@ export async function stageDesktopRuntime(
   await copyBuiltDirectory(repositoryRoot, stageRoot, "apps/server/dist");
   await copyBuiltDirectory(repositoryRoot, stageRoot, "apps/web/dist");
 
-  await writeJson(join(stageRoot, "package.json"), createDesktopRuntimeManifest(version));
+  await writeJson(join(stageRoot, "package.json"), createDesktopRuntimeManifest(version, identity));
   await writeJson(join(stageRoot, "apps/server/package.json"), createServerRuntimeManifest());
 
   await stageExternalRuntimePackages(repositoryRoot, stageRoot);
@@ -1076,26 +1107,27 @@ async function packageDarwinDesktop(
   repositoryRoot: string,
   target: DesktopPackageTarget,
 ): Promise<string> {
+  const version = resolveReleaseVersion(process.env);
+  const identity = desktopIdentity(resolveDesktopPackageFlavor(process.env, version));
   const outRoot = resolve(repositoryRoot, "out");
   const stageRoot = join(outRoot, STAGE_DIRECTORY);
   const packagerRoot = join(outRoot, PACKAGER_DIRECTORY);
-  const finalApp = join(outRoot, `${DESKTOP_PACKAGE_IDENTITY.productName}.app`);
+  const finalApp = join(outRoot, `${identity.productName}.app`);
 
   await mkdir(outRoot, { recursive: true });
-  const version = resolveReleaseVersion(process.env);
-  await stageDesktopRuntime(repositoryRoot, stageRoot, target, version);
+  await stageDesktopRuntime(repositoryRoot, stageRoot, target, version, identity);
   await rm(packagerRoot, { recursive: true, force: true });
   await rm(finalApp, { recursive: true, force: true });
 
   const packagedDirectories = await packager(
-    createPackagerOptions(stageRoot, packagerRoot, version, target),
+    createPackagerOptions(stageRoot, packagerRoot, version, target, identity),
   );
   if (packagedDirectories.length !== 1) {
     throw new Error(
       `Expected one packaged desktop directory, received ${packagedDirectories.length}.`,
     );
   }
-  const packagedApp = join(packagedDirectories[0]!, `${DESKTOP_PACKAGE_IDENTITY.productName}.app`);
+  const packagedApp = join(packagedDirectories[0]!, `${identity.productName}.app`);
   await rename(packagedApp, finalApp);
   await rm(packagerRoot, { recursive: true, force: true });
 
@@ -1109,6 +1141,7 @@ async function packageDarwinDesktop(
   await installTerminalLauncher(
     repositoryRoot,
     join(finalApp, "Contents/Resources", TERMINAL_LAUNCHER_DIRECTORY_NAME),
+    identity.productName,
   );
   const keychainHelper = join(nativeResources, "octant-keychain-helper");
   await buildKeychainHelper(
@@ -1135,21 +1168,21 @@ async function packageDarwinDesktop(
   validatePackagedPayload(await collectPayloadEntries(packagedPayload), target);
   const bundleEntries = await collectPayloadEntries(outRoot);
   const bundlePaths = new Set(bundleEntries.map((entry) => entry.path));
-  validateNativePayloadAllowlist(selectFinalBundlePaths([...bundlePaths]));
+  validateNativePayloadAllowlist(selectFinalBundlePaths([...bundlePaths], identity), identity);
   for (const requiredPath of REQUIRED_PACKAGED_FILES) {
-    if (!bundlePaths.has(packagedBundlePath(requiredPath))) {
+    if (!bundlePaths.has(packagedBundlePath(requiredPath, identity))) {
       throw new Error(`Packaged bundle is missing ${requiredPath}.`);
     }
   }
   for (const forbiddenPath of FORBIDDEN_PACKAGED_FILES) {
-    if (bundlePaths.has(forbiddenPath)) {
+    if (bundlePaths.has(packagedBundlePath(forbiddenPath, identity))) {
       throw new Error(`Packaged bundle contains duplicate helper path ${forbiddenPath}.`);
     }
   }
   validatePackagedRendererPolicy(
     await readFile(join(packagedPayload, "apps/web/dist/index.html"), "utf8"),
   );
-  await validateBundleIdentity(finalApp);
+  await validateBundleIdentity(finalApp, identity);
   return finalApp;
 }
 
@@ -1169,24 +1202,22 @@ async function packageLinuxDesktop(
   readonly portableDirectoryPath: string;
 }> {
   const version = resolveReleaseVersion(process.env);
+  const identity = desktopIdentity(resolveDesktopPackageFlavor(process.env, version));
   const outRoot = resolve(repositoryRoot, "out");
   const stageRoot = join(outRoot, STAGE_DIRECTORY);
   const packagerRoot = join(outRoot, PACKAGER_DIRECTORY);
-  const packageDirName = linuxPackageDirectoryName(target);
+  const packageDirName = linuxPackageDirectoryName(target, identity);
   const finalPackageDir = join(outRoot, packageDirName);
-  const appImagePath = join(
-    outRoot,
-    `${DESKTOP_PACKAGE_IDENTITY.productName}-${version}-${target.id}.AppImage`,
-  );
+  const appImagePath = join(outRoot, `${identity.productName}-${version}-${target.id}.AppImage`);
 
   await mkdir(outRoot, { recursive: true });
-  await stageDesktopRuntime(repositoryRoot, stageRoot, target, version);
+  await stageDesktopRuntime(repositoryRoot, stageRoot, target, version, identity);
   await rm(packagerRoot, { recursive: true, force: true });
   await rm(finalPackageDir, { recursive: true, force: true });
   await rm(appImagePath, { force: true });
 
   const packagedDirectories = await packager(
-    createPackagerOptions(stageRoot, packagerRoot, version, target),
+    createPackagerOptions(stageRoot, packagerRoot, version, target, identity),
   );
   if (packagedDirectories.length !== 1) {
     throw new Error(
@@ -1217,7 +1248,7 @@ async function packageLinuxDesktop(
   validatePackagedRendererPolicy(
     await readFile(join(packagedPayload, "apps/web/dist/index.html"), "utf8"),
   );
-  await validateLinuxPackageIdentity(finalPackageDir);
+  await validateLinuxPackageIdentity(finalPackageDir, identity);
 
   const appImage = await buildLinuxAppImage({
     repositoryRoot,
@@ -1225,6 +1256,7 @@ async function packageLinuxDesktop(
     appImagePath,
     version,
     target,
+    identity,
   });
   return {
     target,
@@ -1233,16 +1265,20 @@ async function packageLinuxDesktop(
   };
 }
 
-export function createLinuxDesktopEntry(version: string): string {
+export function createLinuxDesktopEntry(
+  version: string,
+  identity: DesktopIdentity = desktopIdentity("stable"),
+): string {
   return [
     "[Desktop Entry]",
     "Type=Application",
-    `Name=${DESKTOP_PACKAGE_IDENTITY.productName}`,
+    `Name=${identity.productName}`,
     `Comment=Octant desktop Machine ${version}`,
-    `Exec=${DESKTOP_PACKAGE_IDENTITY.productName}`,
-    "Icon=octant",
+    `Exec=${identity.productName.includes(" ") ? `"${identity.productName}"` : identity.productName} %U`,
+    `Icon=${identity.scheme}`,
+    `MimeType=x-scheme-handler/${identity.scheme};`,
     "Categories=Development;",
-    "StartupWMClass=Octant",
+    `StartupWMClass=${identity.productName}`,
     "Terminal=false",
     "",
   ].join("\n");
@@ -1263,27 +1299,29 @@ export function createLinuxAppRunScript(executableName: string): string {
 }
 
 export async function stageLinuxAppDir(input: {
+  readonly identity?: DesktopIdentity;
   readonly packageDirectory: string;
   readonly appDir: string;
   readonly version: string;
 }): Promise<void> {
+  const identity = input.identity ?? desktopIdentity("stable");
   await rm(input.appDir, { recursive: true, force: true });
   await mkdir(input.appDir, { recursive: true });
   await cp(input.packageDirectory, input.appDir, { recursive: true });
   await writeFile(
     join(input.appDir, "AppRun"),
-    createLinuxAppRunScript(DESKTOP_PACKAGE_IDENTITY.productName),
+    createLinuxAppRunScript(identity.productName),
     "utf8",
   );
   await chmod(join(input.appDir, "AppRun"), 0o755);
   await writeFile(
-    join(input.appDir, "octant.desktop"),
-    createLinuxDesktopEntry(input.version),
+    join(input.appDir, `${identity.scheme}.desktop`),
+    createLinuxDesktopEntry(input.version, identity),
     "utf8",
   );
   await cp(
     join(input.packageDirectory, "resources/app/apps/desktop/resources/icon.png"),
-    join(input.appDir, "octant.png"),
+    join(input.appDir, `${identity.scheme}.png`),
   );
 }
 
@@ -1297,6 +1335,7 @@ export const APPIMAGE_TOOL_SHA256 =
   "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0";
 
 async function buildLinuxAppImage(input: {
+  readonly identity: DesktopIdentity;
   readonly repositoryRoot: string;
   readonly packageDirectory: string;
   readonly appImagePath: string;
@@ -1308,14 +1347,15 @@ async function buildLinuxAppImage(input: {
     input.repositoryRoot,
     "out",
     ".appdir",
-    linuxPackageDirectoryName(input.target),
+    linuxPackageDirectoryName(input.target, input.identity),
   );
   await stageLinuxAppDir({
     packageDirectory: input.packageDirectory,
     appDir,
     version: input.version,
+    identity: input.identity,
   });
-  await validateLinuxAppDirIdentity(appDir);
+  await validateLinuxAppDirIdentity(appDir, input.identity);
   const appImageTool = await ensureAppImageTool(toolsRoot);
   await runCommand([appImageTool, "--no-appstream", appDir, input.appImagePath], {
     env: {
@@ -1362,25 +1402,59 @@ async function assertAppImageToolDigest(toolPath: string): Promise<void> {
   }
 }
 
-async function validateLinuxPackageIdentity(packageDirectory: string): Promise<void> {
-  await access(join(packageDirectory, DESKTOP_PACKAGE_IDENTITY.productName), 1);
+async function validateLinuxPackageIdentity(
+  packageDirectory: string,
+  identity: DesktopIdentity,
+): Promise<void> {
+  await access(join(packageDirectory, identity.productName), 1);
 }
 
 /**
  * The desktop entry is written into the AppDir during staging, not into the
  * electron-packager directory, so identity for that file is checked here.
  */
-async function validateLinuxAppDirIdentity(appDir: string): Promise<void> {
-  await access(join(appDir, DESKTOP_PACKAGE_IDENTITY.productName), 1);
-  const desktopPath = join(appDir, "octant.desktop");
+export function validateLinuxDesktopEntry(desktop: string, identity: DesktopIdentity): void {
+  const entries = new Map<string, string>();
+  let inEntry = false;
+  for (const line of desktop.split(/\r?\n/)) {
+    const value = line.trim();
+    if (value.startsWith("[")) {
+      inEntry = value === "[Desktop Entry]";
+      continue;
+    }
+    if (!inEntry || value === "" || value.startsWith("#")) continue;
+    const equals = value.indexOf("=");
+    if (equals < 1) throw new Error("Packaged Linux desktop entry is malformed.");
+    const key = value.slice(0, equals);
+    if (entries.has(key)) throw new Error("Packaged Linux desktop entry repeats a property.");
+    entries.set(key, value.slice(equals + 1));
+  }
+  const executable = identity.productName.includes(" ")
+    ? `"${identity.productName}"`
+    : identity.productName;
+  if (
+    entries.get("Name") !== identity.productName ||
+    entries.get("Exec") !== `${executable} %U` ||
+    entries.get("Icon") !== identity.scheme ||
+    entries.get("StartupWMClass") !== identity.productName ||
+    entries.get("MimeType") !== `x-scheme-handler/${identity.scheme};`
+  ) {
+    throw new Error("Packaged Linux desktop entry does not match its application identity.");
+  }
+}
+
+async function validateLinuxAppDirIdentity(
+  appDir: string,
+  identity: DesktopIdentity,
+): Promise<void> {
+  await access(join(appDir, identity.productName), 1);
+  const desktopPath = join(appDir, `${identity.scheme}.desktop`);
   const existing = await stat(desktopPath).catch(() => undefined);
   if (existing?.isFile() !== true) {
-    throw new Error("Packaged Linux AppDir is missing octant.desktop.");
+    throw new Error(`Packaged Linux AppDir is missing ${identity.scheme}.desktop.`);
   }
   const desktop = await readFile(desktopPath, "utf8");
-  if (!desktop.includes(`Name=${DESKTOP_PACKAGE_IDENTITY.productName}`)) {
-    throw new Error("Packaged Linux desktop entry is not Octant.");
-  }
+  validateLinuxDesktopEntry(desktop, identity);
 }
 
 /**
@@ -1493,6 +1567,9 @@ export async function signPackagedDesktop(input: {
     appPath: input.appPath,
     archivePath,
     credentials: resolution.credentials,
+    productName: desktopIdentity(
+      resolveDesktopPackageFlavor(input.environment, resolveReleaseVersion(input.environment)),
+    ).productName,
     run: input.run,
     runForOutput: input.runForOutput,
   });
@@ -1728,14 +1805,34 @@ function containsForbiddenIdentity(content: string): boolean {
   return forbidden.test(content);
 }
 
-async function validateBundleIdentity(appPath: string): Promise<void> {
-  const infoPlist = await readFile(join(appPath, "Contents/Info.plist"), "utf8");
-  if (!infoPlist.includes(DESKTOP_PACKAGE_IDENTITY.bundleId)) {
-    throw new Error("Packaged app bundle identifier is not Octant-specific.");
+export function validateDarwinBundleIdentity(value: unknown, identity: DesktopIdentity): void {
+  const metadata =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Readonly<Record<string, unknown>>)
+      : undefined;
+  if (
+    metadata?.CFBundleIdentifier !== identity.bundleId ||
+    metadata.CFBundleName !== identity.productName ||
+    metadata.CFBundleExecutable !== identity.productName ||
+    (metadata.CFBundleDisplayName !== undefined &&
+      metadata.CFBundleDisplayName !== identity.productName)
+  ) {
+    throw new Error("Packaged app bundle does not match its application identity.");
   }
-  if (!infoPlist.includes(DESKTOP_PACKAGE_IDENTITY.productName)) {
-    throw new Error("Packaged app product name is not Octant.");
-  }
+}
+
+export async function validateBundleIdentity(
+  appPath: string,
+  identity: DesktopIdentity,
+): Promise<void> {
+  const metadata: unknown = JSON.parse(
+    execFileSync(
+      "/usr/bin/plutil",
+      ["-convert", "json", "-o", "-", join(appPath, "Contents/Info.plist")],
+      { encoding: "utf8" },
+    ),
+  );
+  validateDarwinBundleIdentity(metadata, identity);
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {

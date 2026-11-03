@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
+import { desktopIdentity } from "@octant/host-runtime";
 import {
   assertPackagedServerStarts,
   packagedServerBundle,
@@ -36,6 +37,15 @@ describe("assertPackagedServerStarts", () => {
     );
     expect(packagedServerEntry(bundle)).toBe(
       resolve("/repo/out/Octant.app/Contents/Resources/app/apps/server/dist/main.mjs"),
+    );
+  });
+
+  it("selects Nightly's bundle and executable without falling back to an installed stable app", () => {
+    const identity = desktopIdentity("nightly");
+    const bundle = packagedServerBundle("/repo", identity);
+    expect(bundle).toBe(resolve("/repo/out/Octant Nightly.app"));
+    expect(packagedServerExecutable(bundle, identity)).toBe(
+      resolve("/repo/out/Octant Nightly.app/Contents/MacOS/Octant Nightly"),
     );
   });
 });

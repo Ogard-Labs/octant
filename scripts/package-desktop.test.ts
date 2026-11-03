@@ -14,6 +14,7 @@ import {
 } from "../apps/desktop/tsdown.config";
 import { SERVER_INTERNAL_RUNTIME_PATTERN } from "../apps/server/tsdown.config";
 import { describe, expect, it, vi } from "vitest";
+import { desktopIdentity } from "@octant/host-runtime";
 import {
   DESKTOP_PACKAGE_IDENTITY,
   DESKTOP_PACKAGE_TARGETS,
@@ -64,6 +65,9 @@ import {
   validateCodeWebAssets,
   validateLinuxNativePayloadAllowlist,
   validateNativePayloadAllowlist,
+  validateDarwinBundleIdentity,
+  validateLinuxDesktopEntry,
+  validateBundleIdentity,
   waitForChildExit,
   stageBundledLanguageServer,
   stageExternalRuntimePackages,
@@ -181,6 +185,56 @@ describe("desktop packaging boundary", () => {
     ).toThrow(/OCTANT_PACKAGE_TARGET/);
   });
 
+  it("packages Nightly under its own bundle, executable and link scheme and stamps its flavor", () => {
+    const identity = desktopIdentity("nightly");
+    const version = "0.1.0-preview.20261103.1";
+    expect(
+      createPackagerOptions(
+        "/tmp/stage",
+        "/tmp/out",
+        version,
+        DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+        identity,
+      ),
+    ).toMatchObject({
+      appBundleId: "app.octant.desktop.nightly",
+      name: "Octant Nightly",
+      protocols: [{ name: "Octant Nightly Code links", schemes: ["octant-nightly"] }],
+    });
+    expect(createDesktopRuntimeManifest(version, identity)).toMatchObject({
+      productName: "Octant Nightly",
+      octantDesktopFlavor: "nightly",
+    });
+    expect(packagedBundlePath("apps/web/dist/index.html", identity)).toBe(
+      "Octant Nightly.app/Contents/Resources/app/apps/web/dist/index.html",
+    );
+    expect(linuxPackageDirectoryName(DESKTOP_PACKAGE_TARGETS["linux-x64"], identity)).toBe(
+      "Octant Nightly-linux-x64",
+    );
+    expect(createLinuxDesktopEntry(version, identity)).toContain("StartupWMClass=Octant Nightly");
+    expect(createLinuxDesktopEntry(version, identity)).toContain(
+      "MimeType=x-scheme-handler/octant-nightly;",
+    );
+    const helper = "Octant Nightly.app/Contents/Resources/native/octant-keychain-helper";
+    expect(() => validateNativePayloadAllowlist([helper], identity)).not.toThrow();
+    expect(() => validateNativePayloadAllowlist([helper])).toThrow();
+    expect(() =>
+      validateNativePayloadAllowlist(
+        ["Octant Nightly.app/Contents/Resources/native/unknown-helper"],
+        identity,
+      ),
+    ).toThrow();
+    expect(() =>
+      createPackagerOptions(
+        "/tmp/stage",
+        "/tmp/out",
+        "0.1.0",
+        DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+        identity,
+      ),
+    ).toThrow();
+  });
+
   it("uses only Octant product and bundle identity", () => {
     expect(DESKTOP_PACKAGE_IDENTITY).toEqual({
       bundleId: "app.octant.desktop",
@@ -188,6 +242,47 @@ describe("desktop packaging boundary", () => {
       version: "0.1.0",
     });
   });
+
+  it.each(["stable", "nightly"] as const)(
+    "refuses swapped app identity when validating a %s bundle",
+    (flavor) => {
+      const expected = desktopIdentity(flavor);
+      const other = desktopIdentity(flavor === "stable" ? "nightly" : "stable");
+      const metadata = (identity: typeof expected) => ({
+        CFBundleIdentifier: identity.bundleId,
+        CFBundleName: identity.productName,
+        CFBundleExecutable: identity.productName,
+      });
+      expect(() => validateDarwinBundleIdentity(metadata(expected), expected)).not.toThrow();
+      expect(() => validateDarwinBundleIdentity(metadata(other), expected)).toThrow();
+      expect(() =>
+        validateLinuxDesktopEntry(createLinuxDesktopEntry("0.1.0", expected), expected),
+      ).not.toThrow();
+      expect(() =>
+        validateLinuxDesktopEntry(createLinuxDesktopEntry("0.1.0", other), expected),
+      ).toThrow();
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "reads bundle identity through the native property-list parser",
+    async () => {
+      const root = await mkdtemp(resolve(tmpdir(), "octant-bundle-identity-"));
+      try {
+        await mkdir(resolve(root, "Contents"));
+        await writeFile(
+          resolve(root, "Contents/Info.plist"),
+          '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>app.octant.desktop.nightly</string><key>CFBundleName</key><string>Octant Nightly</string><key>CFBundleExecutable</key><string>Octant Nightly</string></dict></plist>',
+        );
+        await expect(
+          validateBundleIdentity(root, desktopIdentity("nightly")),
+        ).resolves.toBeUndefined();
+        await expect(validateBundleIdentity(root, desktopIdentity("stable"))).rejects.toThrow();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("bundles internal Octant packages into both Electron runtimes", () => {
     for (const pattern of [DESKTOP_INTERNAL_RUNTIME_PATTERN, SERVER_INTERNAL_RUNTIME_PATTERN]) {
@@ -996,9 +1091,9 @@ describe("desktop packaging boundary", () => {
 
   it("reports the packaged release version through the Electron runtime manifest", () => {
     expect(createDesktopRuntimeManifest("0.1.0").version).toBe("0.1.0");
-    expect(createDesktopRuntimeManifest("0.1.0-preview.20260915.1").version).toBe(
-      "0.1.0-preview.20260915.1",
-    );
+    expect(
+      createDesktopRuntimeManifest("0.1.0-preview.20260915.1", desktopIdentity("nightly")).version,
+    ).toBe("0.1.0-preview.20260915.1");
   });
 
   it("refuses a release version that is not the one this repository declares", () => {
@@ -1123,43 +1218,46 @@ describe("desktop packaging boundary", () => {
 });
 
 describe("the terminal launcher the desktop app ships", () => {
-  it("runs the bundled octant with the app's own runtime in Node mode from wherever the app sits", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "octant-terminal-launcher-"));
-    try {
-      const repository = resolve(root, "repository");
-      await mkdir(resolve(repository, "packages/cli/dist"), { recursive: true });
-      await writeFile(
-        resolve(repository, "packages/cli/dist/terminalLauncherMain.mjs"),
-        "// bundle\n",
-      );
-      // An app moved to a path with a space, as a person's Applications folder can be.
-      const contents = resolve(root, "Moved Apps/Octant.app/Contents");
-      const launcher = resolve(contents, "Resources/terminal-launcher");
-      await installTerminalLauncher(repository, launcher);
-      await mkdir(resolve(contents, "MacOS"), { recursive: true });
-      // Stands in for the app's executable: reports how it was started.
-      await writeFile(
-        resolve(contents, "MacOS/Octant"),
-        '#!/bin/sh\nprintf "%s\\n" "node-mode=$ELECTRON_RUN_AS_NODE" "$@"\n',
-        { mode: 0o755 },
-      );
+  it.each(["Octant", "Octant Nightly"])(
+    "runs the bundled terminal command with %s's own runtime from a moved app",
+    async (productName) => {
+      const root = await mkdtemp(resolve(tmpdir(), "octant-terminal-launcher-"));
+      try {
+        const repository = resolve(root, "repository");
+        await mkdir(resolve(repository, "packages/cli/dist"), { recursive: true });
+        await writeFile(
+          resolve(repository, "packages/cli/dist/terminalLauncherMain.mjs"),
+          "// bundle\n",
+        );
+        // An app moved to a path with a space, as a person's Applications folder can be.
+        const contents = resolve(root, `Moved Apps/${productName}.app/Contents`);
+        const launcher = resolve(contents, "Resources/terminal-launcher");
+        await installTerminalLauncher(repository, launcher, productName);
+        await mkdir(resolve(contents, "MacOS"), { recursive: true });
+        // Stands in for the app's executable: reports how it was started.
+        await writeFile(
+          resolve(contents, `MacOS/${productName}`),
+          '#!/bin/sh\nprintf "%s\\n" "node-mode=$ELECTRON_RUN_AS_NODE" "$@"\n',
+          { mode: 0o755 },
+        );
 
-      expect((await readdir(launcher)).sort()).toEqual(["octant", "octant.mjs"]);
-      expect((await stat(resolve(launcher, "octant"))).mode & 0o777).toBe(0o755);
-      expect((await stat(resolve(launcher, "octant.mjs"))).mode & 0o777).toBe(0o644);
-      const output = execFileSync("/bin/sh", ["-c", "octant mcp --help"], {
-        env: { PATH: `${launcher}:/usr/bin:/bin` },
-        encoding: "utf8",
-      });
-      expect(output.split("\n")).toEqual([
-        "node-mode=1",
-        `${launcher}/octant.mjs`,
-        "mcp",
-        "--help",
-        "",
-      ]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
+        expect((await readdir(launcher)).sort()).toEqual(["octant", "octant.mjs"]);
+        expect((await stat(resolve(launcher, "octant"))).mode & 0o777).toBe(0o755);
+        expect((await stat(resolve(launcher, "octant.mjs"))).mode & 0o777).toBe(0o644);
+        const output = execFileSync("/bin/sh", ["-c", "octant mcp --help"], {
+          env: { PATH: `${launcher}:/usr/bin:/bin` },
+          encoding: "utf8",
+        });
+        expect(output.split("\n")).toEqual([
+          "node-mode=1",
+          `${launcher}/octant.mjs`,
+          "mcp",
+          "--help",
+          "",
+        ]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 });

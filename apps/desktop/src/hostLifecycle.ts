@@ -37,12 +37,10 @@ export interface HostLifecycleOperations {
   readonly attach: () => Promise<LocalHostDescriptor | undefined>;
   readonly start: () => Promise<LocalHostDescriptor>;
   readonly stop: (host: LocalHostDescriptor) => Promise<void>;
-  /** Stable keeps its brokers alive while another desktop client has windows. */
-  readonly retainForClients?: () => Promise<boolean>;
 }
 
 export type HostAction = "start" | "stop" | "restart";
-export type HostQuitResult = "stopped" | "attached" | "cancelled" | "retained";
+export type HostQuitResult = "stopped" | "attached" | "cancelled";
 
 export function canRunHostAction(snapshot: LocalHostSnapshot, action: HostAction): boolean {
   if (action === "start") {
@@ -223,7 +221,6 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
       const current = snapshot();
       if (current.state === "stopped" || current.ownership === undefined) return "stopped";
       if (current.ownership === "managed") return "attached";
-      if (await operations.retainForClients?.()) return "retained";
       if (shouldConfirmQuit(current) && !(await confirmQuit())) return "cancelled";
       const stopping = host;
       if (stopping !== undefined) await operations.stop(stopping);
