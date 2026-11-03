@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { workExternalInputReceipt } from "./workExternalInput";
 import { createAutomationWorkDispatchPort } from "../automation/automationWorkDispatchPort";
 import {
   buildAutomationRunForOccurrence,
@@ -118,6 +119,275 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
+  it("journals the exact accepted framed input and keeps it through projection replay and an identical retry", async () => {
+    const run = vi.fn(async () => ({ kind: "completed" as const, response: "Done" }));
+    const fixture = serviceFixture({ turnRuntime: { run } });
+    const requests: Array<
+      Parameters<WorkTurnServiceDependencies["persistence"]["journal"]["append"]>[0]
+    > = [];
+    fixture.persistence.journal.append.mockImplementation(
+      (request: Parameters<WorkTurnServiceDependencies["persistence"]["journal"]["append"]>[0]) => {
+        requests.push(request);
+      },
+    );
+    const data = {
+      referenceId: "owned-workflow:receipt-1",
+      content: frameExternalContentForModel({
+        origin: "external-content",
+        sourceLabel: "controlled-workflow",
+        body: "Observed metadata",
+        section: "workspace-context",
+      }),
+    };
+    const first = await fixture.service.startFirstTurn(ids.window, startCommand(), {
+      externalData: data,
+    });
+    expect(first.kind).toBe("accepted");
+    await fixture.waitForIdle();
+    const accepted = requests
+      .flatMap((request) => request.events)
+      .find((event) => event.eventName === "work.turn-accepted@1");
+    if (accepted === undefined) throw new Error("Expected accepted journal evidence");
+    const decoded = decodeWorkTurnAccepted(JSON.parse(JSON.stringify(accepted.payload)));
+    expect(decoded.externalInput).toEqual(workExternalInputReceipt(data));
+    const restored = new WorkTurnProjection();
+    restored.apply(decoded);
+    expect(restored.lookup(ids.request)?.externalInput).toEqual(decoded.externalInput);
+    const result = await fixture.service.startFirstTurn(ids.window, startCommand(), {
+      externalData: data,
+    });
+    expect(result.kind).toBe("accepted");
+    // An ordinary idempotent lookup still returns the existing turn; it asserts no new host input.
+    expect((await fixture.service.startFirstTurn(ids.window, startCommand())).kind).toBe(
+      "accepted",
+    );
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it.each(["missing", "reference", "body", "section"] as const)(
+    "refuses %s input evidence on an existing Work request without running a provider again",
+    async (change) => {
+      const run = vi.fn(async () => ({ kind: "completed" as const, response: "Done" }));
+      const fixture = serviceFixture({ turnRuntime: { run } });
+      const data = {
+        referenceId: "owned-workflow:receipt-1",
+        content: frameExternalContentForModel({
+          origin: "external-content",
+          sourceLabel: "controlled-workflow",
+          body: "Original",
+          section: "workspace-context",
+        }),
+      };
+      await fixture.service.startFirstTurn(
+        ids.window,
+        startCommand(),
+        change === "missing" ? {} : { externalData: data },
+      );
+      await fixture.waitForIdle();
+      const modified =
+        change === "missing"
+          ? data
+          : {
+              referenceId: change === "reference" ? "owned-workflow:receipt-2" : data.referenceId,
+              content: {
+                ...data.content,
+                ...(change === "body" ? { text: `${data.content.text} changed` } : {}),
+                ...(change === "section" ? { section: "conversation" as const } : {}),
+              },
+            };
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand(), { externalData: modified }),
+      ).rejects.toMatchObject({
+        failure: { category: "stale", message: expect.stringContaining("unconfirmed") },
+      });
+      expect(run).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("refuses required framed input that cannot fit before acceptance or provider execution", async () => {
+    const run = vi.fn(async () => ({ kind: "completed" as const, response: "Done" }));
+    const fixture = serviceFixture({ turnRuntime: { run }, safeInputBudgetTokens: 500 });
+    const requests: Array<
+      Parameters<WorkTurnServiceDependencies["persistence"]["journal"]["append"]>[0]
+    > = [];
+    fixture.persistence.journal.append.mockImplementation(
+      (request: Parameters<WorkTurnServiceDependencies["persistence"]["journal"]["append"]>[0]) => {
+        requests.push(request);
+      },
+    );
+    const controlRun = vi.fn(async () => ({ kind: "completed" as const, response: "Done" }));
+    const control = serviceFixture({
+      turnRuntime: { run: controlRun },
+      safeInputBudgetTokens: 500,
+    });
+    await control.service.startFirstTurn(ids.window, startCommand(), {
+      externalData: {
+        referenceId: "owned-workflow:small",
+        content: frameExternalContentForModel({
+          origin: "external-content",
+          sourceLabel: "controlled-workflow",
+          body: "Small metadata",
+          section: "workspace-context",
+        }),
+      },
+    });
+    await control.waitForIdle();
+    expect(controlRun).toHaveBeenCalledOnce();
+    const data = {
+      referenceId: "owned-workflow:oversized",
+      content: frameExternalContentForModel({
+        origin: "external-content",
+        sourceLabel: "controlled-workflow",
+        body: "required metadata ".repeat(4000),
+        section: "workspace-context",
+      }),
+    };
+    await expect(
+      fixture.service.startFirstTurn(ids.window, startCommand(), { externalData: data }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.projection.lookup(ids.request)).toBeUndefined();
+    expect(run).not.toHaveBeenCalled();
+    expect(
+      requests
+        .flatMap((request) => request.events)
+        .some((event) => event.eventName === "work.turn-accepted@1"),
+    ).toBe(false);
+  });
+
+  it("captures the accepted frame before preparation awaits", async () => {
+    const inputs: Array<Parameters<WorkTurnRuntimePort["run"]>[0]> = [];
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          inputs.push(input);
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    const content = {
+      ...frameExternalContentForModel({
+        origin: "external-content",
+        sourceLabel: "controlled-workflow",
+        body: "Original snapshot",
+        section: "workspace-context",
+      }),
+    };
+    const data = { referenceId: "owned-workflow:snapshot", content };
+    const receipt = workExternalInputReceipt(data);
+    const pending = fixture.service.startFirstTurn(ids.window, startCommand(), {
+      externalData: data,
+    });
+    content.text = "changed after admission began";
+    expect((await pending).kind).toBe("accepted");
+    await fixture.waitForIdle();
+    expect(fixture.projection.lookup(ids.request)?.externalInput).toEqual(receipt);
+    expect(JSON.stringify(inputs[0]?.context)).toContain("Original snapshot");
+    expect(JSON.stringify(inputs[0]?.context)).not.toContain("changed after admission began");
+  });
+
+  it.each(["same", "missing", "different"] as const)(
+    "checks %s accepted input when a concurrent writer wins the actual journal append",
+    async (variant) => {
+      const run = vi.fn(async () => ({ kind: "completed" as const, response: "Done" }));
+      const fixture = serviceFixture({ turnRuntime: { run } });
+      const data = {
+        referenceId: "owned-workflow:conflict",
+        content: frameExternalContentForModel({
+          origin: "external-content",
+          sourceLabel: "controlled-workflow",
+          body: "Exact frame",
+          section: "workspace-context",
+        }),
+      };
+      fixture.persistence.journal.append.mockImplementation(
+        (
+          request: Parameters<WorkTurnServiceDependencies["persistence"]["journal"]["append"]>[0],
+        ) => {
+          const accepted = request.events.find(
+            (event) => event.eventName === "work.turn-accepted@1",
+          );
+          if (accepted === undefined) throw new Error("Expected only the attempted acceptance");
+          const decoded = decodeWorkTurnAccepted(accepted.payload);
+          const { externalInput: _input, ...legacy } = decoded;
+          fixture.projection.apply(
+            decodeWorkTurnAccepted(
+              variant === "missing"
+                ? legacy
+                : {
+                    ...decoded,
+                    externalInput:
+                      variant === "same"
+                        ? decoded.externalInput
+                        : { referenceId: data.referenceId, digest: "b".repeat(64) },
+                  },
+            ),
+          );
+          throw new ConcurrencyConflict({
+            aggregateType: "work-turn",
+            aggregateId: String(ids.request),
+            expectedVersion: 0,
+            actualVersion: 1,
+          });
+        },
+      );
+      const result = fixture.service.startFirstTurn(ids.window, startCommand(), {
+        externalData: data,
+      });
+      if (variant === "same") expect((await result).kind).toBe("accepted");
+      else
+        await expect(result).rejects.toMatchObject({
+          failure: { category: "stale", message: expect.stringContaining("unconfirmed") },
+        });
+      expect(run).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps stored input evidence isolated from returned and replay event objects", async () => {
+    const fixture = serviceFixture();
+    const data = {
+      referenceId: "owned-workflow:immutable",
+      content: frameExternalContentForModel({
+        origin: "external-content",
+        sourceLabel: "controlled-workflow",
+        body: "Exact frame",
+        section: "workspace-context",
+      }),
+    };
+    const expected = workExternalInputReceipt(data);
+    await fixture.service.startFirstTurn(ids.window, startCommand(), { externalData: data });
+    await fixture.waitForIdle();
+    const views = [
+      fixture.projection.lookup(ids.request),
+      fixture.projection.latestForThread(ids.thread),
+      ...fixture.projection.listForThread(ids.thread),
+      ...fixture.projection.listForProject(ids.project),
+    ];
+    for (const view of views) {
+      if (view?.externalInput === undefined) throw new Error("Expected accepted input");
+      expect(Reflect.set(view.externalInput, "digest", "b".repeat(64))).toBe(false);
+      Reflect.set(view, "externalInput", { referenceId: "forged", digest: "b".repeat(64) });
+      expect(fixture.projection.lookup(ids.request)?.externalInput).toEqual(expected);
+    }
+    const event = decodeWorkTurnAccepted({
+      ...startCommand(),
+      kind: "turn-accepted",
+      projectId: ids.project,
+      providerSessionId: ids.session,
+      capabilities: WORK_TURN_CAPABILITIES,
+      acceptedAt: now,
+      externalInput: expected,
+    });
+    const replay = new WorkTurnProjection();
+    replay.apply(event);
+    if (event.externalInput === undefined) throw new Error("Expected event receipt");
+    Reflect.set(event.externalInput, "digest", "b".repeat(64));
+    replay.markInterruptedOnRestart(now);
+    const restored = replay.lookup(ids.request);
+    if (restored === undefined) throw new Error("Expected replayed owner");
+    Reflect.set(restored, "externalInput", { referenceId: "forged", digest: "b".repeat(64) });
+    expect(replay.lookup(ids.request)?.externalInput).toEqual(expected);
+  });
+
   it("refuses to credit observed files to a pre-existing ordinary turn without input evidence", async () => {
     const sent: Array<Parameters<ProviderConnection["send"]>[0]> = [];
     const original = summaryDriver("Done");

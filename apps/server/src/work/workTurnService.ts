@@ -143,6 +143,8 @@ import {
   type WorkTurnRuntimeOutcome,
   type WorkTurnRuntimePort,
 } from "./workTurnRuntime";
+import { workExternalInputReceipt, sameWorkExternalInput } from "./workExternalInput";
+import type { WorkExternalInputReceipt } from "@octant/contracts/work-turns";
 import { WorkTurnLiveStore } from "./workTurnLiveStore";
 import { WorkTurnUsageStore } from "./workTurnUsageStore";
 import { isRoutineHostScope } from "../routineHostScope";
@@ -703,7 +705,13 @@ export class WorkTurnService {
     const command = decodeStartWorkThreadTurnCommand(input);
     const existing = this.#projection.lookup(command.requestId);
     if (existing !== undefined && command.delivery === undefined) {
-      return this.#lookupMatching(command, existing);
+      return this.#lookupMatching(
+        command,
+        existing,
+        options?.externalData === undefined
+          ? undefined
+          : workExternalInputReceipt(options.externalData),
+      );
     }
     // The turn reads the conversation it plans from while it is prepared, so
     // no compaction may be under way when it starts, and none may start until
@@ -771,6 +779,15 @@ export class WorkTurnService {
     command: StartWorkThreadTurnCommand,
     options: WorkTurnStartOptions | undefined,
   ): Promise<WorkTurnLookupResult> {
+    const externalData =
+      options?.externalData === undefined
+        ? undefined
+        : {
+            referenceId: options.externalData.referenceId,
+            content: { ...options.externalData.content },
+          };
+    const externalInput =
+      externalData === undefined ? undefined : workExternalInputReceipt(externalData);
     if (options?.admissionCurrent?.() === false) {
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
     }
@@ -1152,16 +1169,16 @@ export class WorkTurnService {
           command.threadId,
         )),
         ...this.#issueContextContribution(command.threadId),
-        ...(options?.externalData === undefined
+        ...(externalData === undefined
           ? []
           : [
               {
-                text: options.externalData.content.text,
+                text: externalData.content.text,
                 sourceKind: "message" as const,
-                referenceId: options.externalData.referenceId,
+                referenceId: externalData.referenceId,
                 category: "workspace-context" as const,
                 posture: "required" as const,
-                block: { kind: "user-message" as const, text: options.externalData.content.text },
+                block: { kind: "user-message" as const, text: externalData.content.text },
               },
             ]),
         {
@@ -1259,6 +1276,7 @@ export class WorkTurnService {
           providerSessionId,
           ...(resumeCursor === undefined ? {} : { resumeCursor }),
           ...(handoff === undefined ? {} : { handoff: handoff.record }),
+          ...(externalInput === undefined ? {} : { externalInput }),
           prompt: command.prompt,
           ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
           ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
@@ -1274,7 +1292,7 @@ export class WorkTurnService {
       this.#settleSpendReservation(command.requestId);
       if (error instanceof ConcurrencyConflict) {
         const duplicate = this.#projection.lookup(command.requestId);
-        if (duplicate !== undefined) return this.#lookupMatching(command, duplicate);
+        if (duplicate !== undefined) return this.#lookupMatching(command, duplicate, externalInput);
         throw this.#failure("stale", "Work turn already exists.");
       }
       throw this.#mapFailure(error);
@@ -2568,7 +2586,16 @@ export class WorkTurnService {
   #lookupMatching(
     command: ReturnType<typeof decodeStartWorkThreadTurnCommand>,
     existing: WorkTurnState,
+    externalInput?: WorkExternalInputReceipt,
   ): WorkTurnLookupResult {
+    if (
+      externalInput !== undefined &&
+      !sameWorkExternalInput(existing.externalInput, externalInput)
+    )
+      throw this.#failure(
+        "stale",
+        "External input acceptance is unconfirmed for this Work request. Open the existing task; do not resend automatically.",
+      );
     if (
       String(existing.threadId) !== String(command.threadId) ||
       String(existing.turnId) !== String(command.turnId) ||
