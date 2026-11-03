@@ -8686,8 +8686,12 @@ mechanisms are:
     authenticated Context inspect path and the same subject-read authority;
     it needs no context plan and adds no remote rights. The host rechecks
     current Project standing and the original request's live authority after
-    awaited admission. It never probes a provider or makes a model call to
-    paint the report, and includes no credentials or private diagnostics.
+    awaited admission. A server-backed Work thread uses the existing server
+    Project catalog's exact derived binding, not a manufactured local Project;
+    its current default is Work's global setting. Catalog removal or a changed
+    binding refuses private facts. Known turn refusals and Done remain readable
+    where ordinary thread reads allow them, without an executable-level claim.
+    It never probes a provider or makes a model call to paint the report, and includes no credentials or private diagnostics.
     A current default match is stated as a match, never proof of a historical
     origin. Unreported facts remain unknown, and an inactive or Done task is
     not presented as executable. The chosen unavailable Shield account stays

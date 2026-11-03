@@ -32,6 +32,8 @@ export interface TaskAccessSubjectDependencies {
   readonly session: Pick<CodeSessionAuthorityStore, "effectiveThread">;
   readonly activeCode: (thread: CodeThread) => CodeThread;
   readonly runningWork: (id: string) => WorkAccess | undefined;
+  /** The existing server Work catalog's exact binding predicate, not a local Project grant. */
+  readonly holdsServerWorkThread?: (thread: WorkThread) => boolean;
   readonly workStanding?: (
     thread: WorkThread,
   ) => "project-unavailable" | "binding-changed" | undefined;
@@ -82,8 +84,9 @@ export function createTaskAccessSubjectReader(deps: TaskAccessSubjectDependencie
     if (subject.aggregateType !== "work-thread") return undefined;
     const thread = deps.work(decodeWorkThreadId(id));
     if (thread === undefined) return undefined;
-    const project = deps.project(thread.projectId);
-    if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
+    const onServer = deps.holdsServerWorkThread?.(thread) === true;
+    const project = onServer ? undefined : deps.project(thread.projectId);
+    if (!onServer && (project?.type !== "work" || project.lifecycle !== "active")) return undefined;
     const settings = deps.workSettings();
     const access = deps.runningWork(id) ?? thread.access;
     const turnRefusal = deps.workStanding?.(thread);
@@ -105,7 +108,7 @@ export function createTaskAccessSubjectReader(deps: TaskAccessSubjectDependencie
             default: {
               mode: defaultWorkPermissionModeFor({ project, settings }),
               scope:
-                project.defaultPermissionMode !== undefined
+                project?.defaultPermissionMode !== undefined
                   ? ("project" as const)
                   : ("global" as const),
             },

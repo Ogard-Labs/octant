@@ -33,11 +33,14 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 import type { HarnessWiring } from "./harness";
+import type { HarnessStateWiring } from "./harnessState";
+import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 
 export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<AuthorityWiring, "browserCaptures" | "windowAuthorityStore" | "codeSessionAuthority"> &
   Pick<AgentRunsWiring, "capacityScheduler"> &
   Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield"> &
+  Pick<HarnessStateWiring, "serverProjectStore"> &
   Pick<IntegrationsWiring, "agentMessageProjection"> &
   Pick<WorkspaceWiring, "contextHarness" | "projectService" | "spendCeilingService"> &
   Pick<CodeWiring, "canAccessCodeProject"> &
@@ -84,6 +87,7 @@ export function wireContext(deps: ContextDependencies) {
     projectService,
     providerRuntimeRegistry,
     routeCodeService,
+    serverProjectStore,
     spendCeilingService,
     windowAuthorityStore,
     workThreadProjection,
@@ -473,6 +477,8 @@ export function wireContext(deps: ContextDependencies) {
       session: codeSessionAuthority,
       activeCode: (thread) => codeOperationRuntime?.threadWithActiveTurnPosture?.(thread) ?? thread,
       runningWork: (id) => workTurnService.runningTurnAccess(id),
+      holdsServerWorkThread: (thread) =>
+        serverWorkProjectOf(serverProjectStore, thread) !== undefined,
       workStanding: (thread) => workTurnService.turnStandingRefusal(thread),
       tainted: (id) =>
         readThreadExternalContentTaint(persistence.connection, id).externalContentIngested,

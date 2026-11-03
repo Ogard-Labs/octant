@@ -1021,6 +1021,7 @@ export function startOctantServer(
         providerRuntimeRegistry,
         browserToolApprovalService,
         routeCodeService,
+        serverProjectStore,
         spendCeilingService,
         windowAuthorityStore,
         workThreadProjection,

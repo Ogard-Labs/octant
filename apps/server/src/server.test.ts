@@ -59,6 +59,7 @@ import { WorkThreadService } from "./work/workThreadService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
 import * as contextWiring from "./wiring/context";
+import { ServerProjectStore } from "./serverProjects/serverProjectStore";
 import { CodeSessionAuthorityStore } from "./code/codeSessionAuthorityStore";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
 
@@ -92,6 +93,7 @@ describe("startOctantServer", () => {
       const dependencies = wire.mock.calls[0]?.[0];
       expect(dependencies?.codeSessionAuthority).toBeInstanceOf(CodeSessionAuthorityStore);
       expect(dependencies?.hostShield.describe).toBeTypeOf("function");
+      expect(dependencies?.serverProjectStore).toBeInstanceOf(ServerProjectStore);
     } finally {
       wire.mockRestore();
     }
