@@ -1348,7 +1348,12 @@ describe("code client", () => {
     const controller = new AbortController();
     await expect(
       client.syncLanguageDocument?.(
-        decodeCodeLanguageDocumentRequest({ kind: "change", ...scope, text: "unsaved text" }),
+        decodeCodeLanguageDocumentRequest({
+          kind: "change",
+          ...scope,
+          text: "unsaved text",
+          expectedRevision: revision,
+        }),
         controller.signal,
       ),
     ).resolves.toMatchObject({ documentVersion: 2, documentRevision: revision });

@@ -957,30 +957,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
           }
           const caller = { scopeId: authenticatedWindowId, principal: callerKind };
-          if (route.kind === "language-documents") {
-            let document: CodeLanguageDocumentRequest;
-            try {
-              document = decodeCodeLanguageDocumentRequest(value);
-            } catch {
-              throw new CodeRouteRejected("Code language document request is invalid.", 400);
-            }
-            return jsonResponse(
-              decodeCodeLanguageDocumentResult(
-                await dependencies.language.syncDocument(caller, document),
-              ),
-              200,
-              origin,
-            );
-          }
-          let read: CodeLanguageReadRequest;
-          try {
-            read = decodeCodeLanguageReadRequest(value);
-          } catch {
-            throw new CodeRouteRejected("Code language read is invalid.", 400);
-          }
+          let featureActive = true;
           const assertFeatureCaller = () => {
-            if (read.kind !== "references" && read.kind !== "capabilities") return;
-            if (request.signal.aborted || principalAbortSignal?.aborted)
+            if (!featureActive || request.signal.aborted || principalAbortSignal?.aborted)
               throw new CodeRouteRejected("Code language read is unauthorized.", 401);
             // A cached transport principal identifies the original window; it
             // cannot authorize a new feature after body/read awaits.
@@ -1000,10 +979,64 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               }
             }
           };
-          assertFeatureCaller();
-          const answer = await dependencies.language.read(caller, read);
-          assertFeatureCaller();
-          return jsonResponse(decodeCodeLanguageReadResult(answer), 200, origin);
+          const featureCaller = {
+            ...caller,
+            isCurrent: () => {
+              try {
+                assertFeatureCaller();
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          };
+          if (route.kind === "language-documents") {
+            let document: CodeLanguageDocumentRequest;
+            try {
+              document = decodeCodeLanguageDocumentRequest(value);
+            } catch {
+              throw new CodeRouteRejected("Code language document request is invalid.", 400);
+            }
+            if (document.kind === "change" && document.expectedRevision !== undefined) {
+              try {
+                assertFeatureCaller();
+                const answer = await dependencies.language.syncDocument(featureCaller, document);
+                assertFeatureCaller();
+                return jsonResponse(decodeCodeLanguageDocumentResult(answer), 200, origin);
+              } finally {
+                featureActive = false;
+              }
+            }
+            return jsonResponse(
+              decodeCodeLanguageDocumentResult(
+                await dependencies.language.syncDocument(caller, document),
+              ),
+              200,
+              origin,
+            );
+          }
+          let read: CodeLanguageReadRequest;
+          try {
+            read = decodeCodeLanguageReadRequest(value);
+          } catch {
+            throw new CodeRouteRejected("Code language read is invalid.", 400);
+          }
+
+          if (read.kind === "references" || read.kind === "capabilities") {
+            try {
+              assertFeatureCaller();
+              const answer = await dependencies.language.read(featureCaller, read);
+              assertFeatureCaller();
+              return jsonResponse(decodeCodeLanguageReadResult(answer), 200, origin);
+            } finally {
+              featureActive = false;
+            }
+          }
+          return jsonResponse(
+            decodeCodeLanguageReadResult(await dependencies.language.read(caller, read)),
+            200,
+            origin,
+          );
         }
         case "terminal-inspection": {
           requireMethodAndEmptyQuery(request, url, "POST");

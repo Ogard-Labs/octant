@@ -124,6 +124,7 @@ export function useCodeLanguageServices(
   /** The text the host holds, so an unchanged editor sends nothing. */
   const syncedText = useRef<string | undefined>(undefined);
   const fileId = useRef<CodeFileId | undefined>(undefined);
+  const documentRevision = useRef<string | undefined>(undefined);
   /** Bumped when the document is reopened or released; stale answers are dropped. */
   const session = useRef(0);
   const readSequence = useRef(0);
@@ -155,6 +156,7 @@ export function useCodeLanguageServices(
     referenceSequence.current += 1;
     referenceAbort.current?.abort();
     fileId.current = undefined;
+    documentRevision.current = undefined;
     syncedText.current = undefined;
     startingPolls.current = 0;
     reopened.current = false;
@@ -195,6 +197,7 @@ export function useCodeLanguageServices(
      */
     const refuse = (reason: CodeLanguageRefusalReason) => {
       fileId.current = undefined;
+      documentRevision.current = undefined;
       syncedText.current = undefined;
       show(refusedState(reason));
     };
@@ -263,6 +266,7 @@ export function useCodeLanguageServices(
       switch (result.status) {
         case "synced":
           fileId.current = result.fileId;
+          documentRevision.current = result.documentRevision;
           syncedText.current = sentText;
           readDiagnostics();
           // Text typed while this was in flight has not been sent yet.
@@ -297,6 +301,7 @@ export function useCodeLanguageServices(
     function open() {
       if (sync === undefined) return;
       fileId.current = undefined;
+      documentRevision.current = undefined;
       // Opening is the host's retry and resets a crashed server's budget, so
       // an edit reopens only what the host answered `too-large`; any other
       // answer to this open stands until the person retries.
@@ -339,6 +344,7 @@ export function useCodeLanguageServices(
       clearTimer();
       const held = fileId.current;
       fileId.current = undefined;
+      documentRevision.current = undefined;
       syncRef.current = undefined;
       readRef.current = undefined;
       // The host closes the document when the last holder lets it go; one
@@ -471,8 +477,20 @@ export function useCodeLanguageServices(
         if (support.references !== "supported")
           return { status: "unsupported", capability: "references", support: support.references };
         // This is an acknowledgement of the person's current draft, not a save.
+        const expectedRevision = documentRevision.current;
+        if (expectedRevision === undefined)
+          return unavailable(
+            "The host could not confirm the current file text. Reconnect or open this file externally.",
+          );
         const acknowledged = await sync(
-          { kind: "change", threadId, checkoutId, fileId: opened, text: currentText },
+          {
+            kind: "change",
+            threadId,
+            checkoutId,
+            fileId: opened,
+            text: currentText,
+            expectedRevision,
+          },
           controller.signal,
         );
         if (!current()) return stopped();
@@ -485,6 +503,7 @@ export function useCodeLanguageServices(
           return unavailable(
             "The host could not confirm the current file text. Reconnect or open this file externally.",
           );
+        documentRevision.current = acknowledged.documentRevision;
         const answer = await read(
           {
             kind: "references",

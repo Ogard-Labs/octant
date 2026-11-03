@@ -176,6 +176,8 @@ export interface CodeLanguageAuthority {
 export interface CodeLanguageCaller {
   readonly scopeId: WindowId;
   readonly principal: PrincipalKind;
+  /** Host-owned original request proof; never decoded from a document or read body. */
+  readonly isCurrent?: () => boolean;
 }
 
 /** The shell-command approvals `repo-tooling` servers need, journaled per Project. */
@@ -412,6 +414,69 @@ export class CodeLanguageService {
     }
     if (request.kind === "close") {
       this.#release(record, document, String(request.fileId));
+      return {
+        status: "synced",
+        ...scope,
+        documentVersion: document.version,
+        documentRevision: document.revision,
+      };
+    }
+    if (request.expectedRevision !== undefined) {
+      // Foreground reference preparation must not become an implicit restart.
+      if (caller.isCurrent === undefined) return { status: "refused", reason: "no-reach" };
+      if (document.revision !== request.expectedRevision) return { status: "stale" };
+      if (!fitsFrame(request.text)) return { status: "too-large", ...scope };
+      const connection = record.connection;
+      const generation = record.generation;
+      const admitted = await this.#readFeature(caller, { kind: "capabilities", ...scope });
+      const fresh = this.#authorize(caller, request.threadId, request.checkoutId);
+      if (fresh.status === "refused") return fresh;
+      if (admitted.status === "refused" || admitted.status === "unavailable") return admitted;
+      if (
+        admitted.status !== "capabilities" ||
+        admitted.references !== "supported" ||
+        fresh.thread.projectId !== authorized.thread.projectId ||
+        fresh.thread.bindingRevisionId !== authorized.thread.bindingRevisionId ||
+        this.#documentReference(request) !== reference ||
+        this.#servers.get(record.key) !== record ||
+        record.documents.get(reference.uri) !== document ||
+        record.state !== "ready" ||
+        record.generation !== generation ||
+        connection === undefined ||
+        connection.closed ||
+        record.connection !== connection ||
+        document.revision !== request.expectedRevision
+      )
+        return { status: "stale" };
+      const chosen = this.#componentFor(document.path);
+      if (chosen.status === "refused") return chosen;
+      if (
+        chosen.component.componentKey !== record.component.componentKey ||
+        chosen.component.approvalKey !== record.component.approvalKey
+      )
+        return { status: "stale" };
+      const decision = decideLanguageServerLaunch({
+        launchClass: chosen.component.launchClass,
+        posture: fresh.thread.executionPolicy,
+        platform: this.#platform,
+        startedBy: caller.principal,
+        shellCommandApproval: this.#approvalHolds(
+          fresh.thread.projectId,
+          fresh.checkout.id,
+          chosen.component,
+        )
+          ? "granted"
+          : "absent",
+      });
+      if (decision.status === "refused") return decision;
+      document.text = request.text;
+      document.version += 1;
+      document.revision = randomUUID();
+      document.lastTouched = this.#now();
+      connection.notify("textDocument/didChange", {
+        textDocument: { uri: document.uri, version: document.version },
+        contentChanges: [{ text: document.text }],
+      });
       return {
         status: "synced",
         ...scope,
@@ -945,6 +1010,7 @@ export class CodeLanguageService {
     threadId: CodeThreadId,
     checkoutId: CodeCheckoutId,
   ): Authorized {
+    if (caller.isCurrent?.() === false) return { status: "refused", reason: "no-reach" };
     const thread = this.#authority.readThread(threadId);
     // A thread the caller cannot reach reads the same as one that does not
     // exist, so a refusal never says which threads are on this host.

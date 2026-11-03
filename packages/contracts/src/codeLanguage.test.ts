@@ -49,6 +49,32 @@ describe("Code language read contracts", () => {
     ).toBe("definition");
   });
 
+  it("allows exact foreground revision guards only on changes and never accepts caller authority from a body", () => {
+    const expectedRevision = "90000000-0000-4000-8000-000000000001";
+    const change = { kind: "change", ...scope, text: "draft", expectedRevision };
+    expect(decodeCodeLanguageDocumentRequest(change)).toEqual(change);
+    expect(decodeCodeLanguageDocumentResult({ status: "stale" })).toEqual({ status: "stale" });
+    expect(() =>
+      decodeCodeLanguageDocumentRequest({ ...change, expectedRevision: "bad" }),
+    ).toThrow();
+    expect(() => decodeCodeLanguageDocumentRequest({ ...change, isCurrent: () => true })).toThrow();
+    expect(() =>
+      decodeCodeLanguageDocumentRequest({ ...change, windowId: scope.threadId }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeLanguageDocumentRequest({
+        kind: "open",
+        threadId: scope.threadId,
+        checkoutId: scope.checkoutId,
+        path: "b.ts",
+        text: "draft",
+        expectedRevision,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeLanguageDocumentRequest({ kind: "close", ...scope, expectedRevision }),
+    ).toThrow();
+  });
   it("binds a references read to a known acknowledged version and document revision", () => {
     const read = {
       kind: "references",

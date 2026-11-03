@@ -1,3 +1,4 @@
+import { codeLanguageReferencesFixture } from "./code/codeLanguageReferencesTestFixtures";
 import {
   decodeCodeCheckoutIdentity,
   decodeCodeThread,
@@ -702,7 +703,11 @@ describe("Code routes", () => {
         references: "supported",
       });
       expect(read).toHaveBeenLastCalledWith(
-        { scopeId: scope, principal: local ? "local-window" : "remote-device" },
+        expect.objectContaining({
+          scopeId: scope,
+          principal: local ? "local-window" : "remote-device",
+          isCurrent: expect.any(Function),
+        }),
         expect.objectContaining({ kind: "capabilities" }),
       );
       block = true;
@@ -728,6 +733,120 @@ describe("Code routes", () => {
       expect(body).not.toContain("supported");
     },
   );
+
+  it.each(["revoked", "expired", "replaced-header"] as const)(
+    "blocks the actual foreground sync before didChange after held root admission becomes %s",
+    async (change) => {
+      const f = codeLanguageReferencesFixture();
+      const opened = await f.open();
+      if (opened.status !== "synced" || opened.documentRevision === undefined)
+        throw new Error("No acknowledged document");
+      const store = new WindowAuthorityStore();
+      let clock = 0;
+      store.register({ windowId: f.caller.scopeId, capability, now: clock });
+      const route = routeFixture({}, undefined, undefined, [], f.service, undefined, {
+        store,
+        now: () => clock,
+      });
+      const incoming = request("/api/code/language/documents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "change",
+          threadId: f.state.thread.id,
+          checkoutId: f.state.checkout.id,
+          fileId: f.fileId,
+          text: "must not forward this draft",
+          expectedRevision: opened.documentRevision,
+        }),
+      });
+      bindPrincipalRouteContext(incoming, {
+        principal: resolveLocalWindowPrincipal({ request: incoming, store, now: clock }),
+        scopeId: f.caller.scopeId,
+      });
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let waiting = false;
+      f.state.controls.beforeRoot = async () => {
+        waiting = true;
+        await held;
+      };
+      const pending = route(incoming);
+      try {
+        await vi.waitFor(() => expect(waiting).toBe(true));
+        if (change === "expired") clock = WINDOW_AUTHORITY_TTL_MS + 1;
+        else {
+          store.revoke(f.caller.scopeId);
+          if (change === "replaced-header") {
+            store.register({
+              windowId: f.caller.scopeId,
+              capability: "B".repeat(42) + "A",
+              now: clock,
+            });
+            incoming.headers.set("x-octant-window-capability", "B".repeat(42) + "A");
+          }
+        }
+        release();
+        const answer = await pending;
+        expect(answer?.status).toBe(401);
+        expect(f.received.some((message) => message.method === "textDocument/didChange")).toBe(
+          false,
+        );
+        expect(f.launches).toEqual([f.checkout]);
+        const body = await answer?.text();
+        expect(body).not.toContain(f.fileId);
+        expect(body).not.toContain("must not forward");
+      } finally {
+        release();
+        await pending;
+      }
+    },
+  );
+  it("retires the host-owned foreground sync proof when its route has settled", async () => {
+    const f = codeLanguageReferencesFixture();
+    const opened = await f.open();
+    if (opened.status !== "synced" || opened.documentRevision === undefined)
+      throw new Error("No acknowledged document");
+    const store = new WindowAuthorityStore();
+    store.register({ windowId: f.caller.scopeId, capability, now: 0 });
+    const sync = vi.spyOn(f.service, "syncDocument");
+    const route = routeFixture({}, undefined, undefined, [], f.service, undefined, {
+      store,
+      now: () => 1,
+    });
+    const incoming = request("/api/code/language/documents", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "change",
+        threadId: f.state.thread.id,
+        checkoutId: f.state.checkout.id,
+        fileId: f.fileId,
+        text: "current draft",
+        expectedRevision: opened.documentRevision,
+      }),
+    });
+    const response = await route(incoming);
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({ status: "synced", documentVersion: 2 });
+    const caller = sync.mock.calls[0]?.[0];
+    expect(caller?.isCurrent?.()).toBe(false);
+    const result = await f.service.syncDocument(caller ?? f.caller, {
+      kind: "change",
+      threadId: f.state.thread.id,
+      checkoutId: f.state.checkout.id,
+      fileId: f.fileId,
+      text: "late draft",
+      expectedRevision: opened.documentRevision,
+    });
+    expect(result).toEqual({ status: "refused", reason: "no-reach" });
+    expect(
+      f.received.filter((message) => message.method === "textDocument/didChange"),
+    ).toHaveLength(1);
+    expect(f.launches).toEqual([f.checkout]);
+  });
 
   it("carries a language server approval from a local window only, and refuses a paired device before the service", async () => {
     const approve = vi.fn(async () => ({

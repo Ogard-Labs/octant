@@ -220,14 +220,18 @@ export const CodeLanguageDocumentRequest = Schema.Union(
     path: CodeProjectFilePath,
     text: documentText,
   }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("change"), ...scope, text: documentText }).annotations(
-    strict,
-  ),
+  Schema.Struct({
+    kind: Schema.Literal("change"),
+    ...scope,
+    text: documentText,
+    expectedRevision: Schema.optional(Schema.UUID),
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("close"), ...scope }).annotations(strict),
 );
 export type CodeLanguageDocumentRequest = typeof CodeLanguageDocumentRequest.Type;
 
 export const CodeLanguageDocumentResult = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("stale") }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("synced"),
     ...scope,

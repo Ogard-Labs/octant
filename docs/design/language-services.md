@@ -382,6 +382,11 @@ design left a choice open.
   document, component, and physical root; they never start or retarget a server.
   Existing document open/sync and diagnostics/definition behavior is unchanged.
 - Before a query the renderer syncs the current draft in memory, without saving.
+  That foreground change carries the last acknowledged `expectedRevision`. It
+  requires the exact ready document/connection/component/root and the host's
+  current original request proof, checked again after awaits before `didChange`;
+  missing or retired proof refuses. A mismatch returns `stale` without starting,
+  retargeting or changing a document. Ordinary open/change syncing is unchanged.
   A successful sync may acknowledge a numeric `documentVersion` and ephemeral
   `documentRevision`, bound to that connection and document instance. References
   name both, and a close/reopen, replacement connection, or intervening edit

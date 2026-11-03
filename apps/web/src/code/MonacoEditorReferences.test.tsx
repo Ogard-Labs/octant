@@ -34,6 +34,7 @@ function fixture() {
     beforeReference?: () => Promise<void>;
     beforeCapability?: () => Promise<void>;
     wrongRevision?: boolean;
+    guardedStale?: boolean;
   } = { support: "supported", oldHost: false };
   const signals: Array<AbortSignal | undefined> = [];
   const client: Pick<CodeClient, "content" | "save" | "syncLanguageDocument" | "readLanguage"> = {
@@ -42,7 +43,14 @@ function fixture() {
       throw new Error("References must not save a file");
     }),
     syncLanguageDocument: vi.fn(async (request) => {
-      if (request.kind === "change") version++;
+      if (request.kind === "change") {
+        if (
+          request.expectedRevision !== undefined &&
+          (state.guardedStale || request.expectedRevision !== revision())
+        )
+          return decodeCodeLanguageDocumentResult({ status: "stale" });
+        version++;
+      }
       return decodeCodeLanguageDocumentResult({
         status: "synced",
         ...scope,
@@ -172,7 +180,11 @@ describe("references in the actual Code editor pane", () => {
       expectedRevision: "90000000-0000-4000-8000-000000000002",
     });
     expect(f.client.syncLanguageDocument).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "change", text: text + "// unsaved draft\n" }),
+      expect.objectContaining({
+        kind: "change",
+        text: text + "// unsaved draft\n",
+        expectedRevision: "90000000-0000-4000-8000-000000000001",
+      }),
       expect.any(AbortSignal),
     );
     expect(f.client.save).not.toHaveBeenCalled();
@@ -250,6 +262,38 @@ describe("references in the actual Code editor pane", () => {
         expect(screen.getByRole("button", { name: "Find references in checkout" })).toHaveFocus();
     },
   );
+  it("shows stale foreground preparation without an implicit retry and recovers only on explicit recheck", async () => {
+    const f = fixture();
+    f.state.guardedStale = true;
+    const user = userEvent.setup();
+    render(
+      <MonacoEditorPane
+        client={f.client}
+        file={f.file}
+        loadRuntime={f.loadRuntime}
+        languageTiming={{ debounceMs: 10000, pollMs: 10000 }}
+      />,
+    );
+    await screen.findByText("No problems found");
+    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    const region = await screen.findByRole("region", { name: "References" });
+    await within(region).findByText(/file changed while finding references/);
+    expect(f.requests.filter((request) => request.kind === "references")).toHaveLength(0);
+    expect(f.requests.filter((request) => request.kind === "capabilities")).toHaveLength(1);
+    expect(f.client.syncLanguageDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "change",
+        expectedRevision: "90000000-0000-4000-8000-000000000001",
+      }),
+      expect.any(AbortSignal),
+    );
+    f.state.guardedStale = false;
+    await user.click(within(region).getByRole("button", { name: "Recheck references" }));
+    await within(region).findByText(/snapshot/);
+    expect(f.requests.filter((request) => request.kind === "references")).toHaveLength(1);
+    expect(f.requests.filter((request) => request.kind === "capabilities")).toHaveLength(2);
+    expect(f.client.save).not.toHaveBeenCalled();
+  });
   it("settles a never-answering optional transport at the total budget and suppresses its late reply", async () => {
     const f = fixture();
     let release: () => void = () => undefined;
