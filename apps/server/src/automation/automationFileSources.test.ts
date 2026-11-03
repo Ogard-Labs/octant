@@ -20,11 +20,15 @@ import { AutomationProjection } from "./automationProjection";
 import { AutomationCommandService } from "./automationCommandService";
 import { AutomationSchedulerService } from "./automationSchedulerService";
 import { AutomationFileSources } from "./automationFileSources";
-import { prepareAutomationFileRunAdmission } from "./automationFileSourceAuthority";
+import {
+  prepareAutomationFileRunAdmission,
+  prepareAutomationFileDefinition,
+} from "./automationFileSourceAuthority";
 import { prepareAutomationFileSource } from "./automationFileSourceScan";
 import { initialAutomationFileCheckpoint } from "./automationFileSourceState";
 import {
   automationDefinitionFixture,
+  automationDefinitionDraftFixture,
   automationLocalWindowPrincipal,
   AUTOMATION_TEST_IDS,
 } from "./automationTestFixtures";
@@ -249,6 +253,94 @@ function reviewCommand(
 }
 
 describe("file input reconciliation on the host routine owner", () => {
+  it.each(["skip", "run-once"] as const)(
+    "retains an edited baseline's explicit review across transient source loss and %s recovery",
+    async (missedRunPolicy) => {
+      let unavailable = false;
+      const filesystem: WorkFilesystemPort = {
+        ...liveWorkFilesystem,
+        lstat: async (path) => {
+          if (unavailable && path.endsWith("/Inbox"))
+            throw new Error("Transient input unavailable.");
+          return liveWorkFilesystem.lstat(path);
+        },
+      };
+      const host = await fixture(filesystem, missedRunPolicy);
+      await writeFile(join(host.directory, "Inbox/baseline.txt"), "existing input");
+      await host.sources.reconcile();
+      host.advance();
+      await host.sources.reconcile();
+      const before = host.projection.getFileSource(host.definition.id);
+      expect(before).toMatchObject({ baselineReady: true, phase: "watching", automaticStarts: 0 });
+      const draft = automationDefinitionDraftFixture({
+        trigger: host.definition.trigger,
+        missedRunPolicy,
+        displayName: "Edited input routine",
+      });
+      const currentDefinition = host.projection.getDefinition(host.definition.id);
+      if (currentDefinition === undefined) throw new Error("Missing current definition.");
+      const prepared = await prepareAutomationFileDefinition({
+        automationId: host.definition.id,
+        expectedVersion: currentDefinition.version,
+        filesystem,
+        authority: {
+          canonicalRoot: host.directory,
+          bindingIdentity: "actual-host-project-binding",
+          current: () => true,
+        },
+        definition: draft,
+        current: () => true,
+        signal: new AbortController().signal,
+        now: () => host.definition.createdAt,
+      });
+      const update = decodeAutomationCommand({
+        kind: "update-automation",
+        automationId: host.definition.id,
+        expectedVersion: currentDefinition.version,
+        principal: automationLocalWindowPrincipal(),
+        origin: { kind: "interactive" },
+        definition: draft,
+      });
+      expect(host.commands.execute(update, undefined, prepared)).toMatchObject({ kind: "automation-updated" });
+      expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
+        phase: "needs-rearm",
+        reason: "definition-changed",
+      });
+      unavailable = true;
+      await host.sources.reconcile();
+      expect(host.projection.getFileSource(host.definition.id)?.phase).toBe("unavailable");
+      unavailable = false;
+      await writeFile(join(host.directory, "Inbox/arrived.txt"), "arrived after editing");
+      await host.sources.reconcile();
+      host.advance();
+      await host.sources.reconcile();
+      expect(host.offers).toEqual([]);
+      expect(host.projection.latestRun(host.definition.id)).toBeUndefined();
+      expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
+        phase: "held",
+        reason: "definition-changed",
+        automaticStarts: 0,
+        armGeneration: before?.armGeneration,
+        baseline: before?.baseline,
+        held: { files: ["arrived.txt"] },
+      });
+      const command = reviewCommand(host, "skip");
+      const rearm = await host.sources.prepareRearm({
+        command,
+        current: () => true,
+        signal: new AbortController().signal,
+      });
+      expect(host.commands.execute(command, undefined, rearm)).toMatchObject({
+        kind: "automation-resumed",
+      });
+      expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
+        phase: "watching",
+        armGeneration: 2,
+        automaticStarts: 0,
+      });
+    },
+  );
+
   it("delivers a settled source through normal Work dispatch, holds its output, and admits only an explicit protected reviewed batch", async () => {
     const host = await fixture();
     const definition = host.definition;
