@@ -94,7 +94,11 @@ async function harness(timeoutMs = 10000) {
   });
   await linked.link("onepassword");
   const requests: { url: string; init?: RequestInit }[] = [];
-  const endpoint = {
+  const endpoint: {
+    status: number;
+    gate: Promise<void>;
+    body: { access_token: string; token_type: string; expires_in: number; scope?: string };
+  } = {
     status: 200,
     gate: Promise.resolve(),
     body: { access_token: "fixture-short-token-12345", token_type: "Bearer", expires_in: 3600 },

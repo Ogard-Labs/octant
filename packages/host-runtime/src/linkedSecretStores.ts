@@ -113,7 +113,8 @@ export interface GoogleCliPointer {
 }
 
 export type GoogleCliPointerState =
-  | { readonly status: "none" | "unavailable" }
+  | { readonly status: "none" }
+  | { readonly status: "unavailable" }
   | { readonly status: "configured"; readonly pointer: GoogleCliPointer };
 
 export function googleCliPointerOf(value: unknown): GoogleCliPointer | undefined {
