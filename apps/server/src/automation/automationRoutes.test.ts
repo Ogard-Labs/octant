@@ -264,7 +264,7 @@ describe("automation routes", () => {
     expect(projection.latestRun(body.automationId)).toBeUndefined();
   });
 
-  it.each(["window", "Project"])(
+  it.each(["window", "rotated window", "Project"])(
     "refuses a late prepared Save after its %s ownership was revoked",
     async (owner) => {
       const root = mkdtempSync(join(tmpdir(), "octant-file-save-revoke-"));
@@ -320,8 +320,11 @@ describe("automation routes", () => {
         }),
       );
       await entered;
-      if (owner === "window") harness.authority.revoke(windowId);
-      else accessible = false;
+      if (owner === "window" || owner === "rotated window") {
+        harness.authority.revoke(windowId);
+        if (owner === "rotated window")
+          harness.authority.register({ windowId, capability: `${"B".repeat(42)}A`, now: 1 });
+      } else accessible = false;
       release?.();
       expect(await json(await pending)).toMatchObject({
         kind: "automation-command-failed",

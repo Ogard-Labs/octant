@@ -26,7 +26,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { resolveNextAutomationOccurrence } from "@octant/domain";
-import { ClientPrincipalError } from "../clientPrincipal";
+import { ClientPrincipalError, WINDOW_CAPABILITY_HEADER } from "../clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "../principalRouteContext";
 import type { ProjectService } from "../projectService";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -166,7 +166,7 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
         return await handleHistory(dependencies, context, url, origin);
       }
       if (route === "commands" && request.method === "POST") {
-        return await handleCommand(dependencies, context, body, origin, request.signal);
+        return await handleCommand(dependencies, context, body, origin, request);
       }
       if (route === "proposals" && request.method === "GET") {
         return jsonResponse(
@@ -373,8 +373,25 @@ async function handleCommand(
   context: PrincipalRouteContext,
   body: unknown,
   origin: string | null,
-  signal: AbortSignal,
+  request: Request,
 ): Promise<Response> {
+  const signal = request.signal;
+  // File setup/review is local HTTP only. Retain the original capability, not merely
+  // a window id that could be revoked and registered again while preparation awaits.
+  const capability = request.headers.get(WINDOW_CAPABILITY_HEADER);
+  const localAuthorityCurrent = () => {
+    if (context.principal.kind !== "local-window" || capability === null) return false;
+    try {
+      return (
+        dependencies.windowAuthorityStore.authenticate(
+          capability,
+          dependencies.now?.() ?? Date.now(),
+        ) === context.scopeId
+      );
+    } catch {
+      return false;
+    }
+  };
   if (!isRecord(body)) {
     return failureResponse("Automation command is invalid.", 400, origin);
   }
@@ -469,9 +486,7 @@ async function handleCommand(
     const current = () =>
       !signal.aborted &&
       context.abortSignal?.aborted !== true &&
-      dependencies.windowAuthorityStore
-        .listWindowIds(dependencies.now?.() ?? Date.now())
-        .includes(context.scopeId) &&
+      localAuthorityCurrent() &&
       dependencies.projection.getDefinition(checked.automationId)?.version ===
         checked.expectedVersion;
     try {
@@ -538,9 +553,7 @@ async function handleCommand(
     const current = () =>
       !signal.aborted &&
       context.abortSignal?.aborted !== true &&
-      dependencies.windowAuthorityStore
-        .listWindowIds(dependencies.now?.() ?? Date.now())
-        .includes(context.scopeId) &&
+      localAuthorityCurrent() &&
       (checked.kind === "create-automation"
         ? dependencies.projection.getDefinition(checked.automationId) === undefined
         : dependencies.projection.getDefinition(checked.automationId)?.version ===

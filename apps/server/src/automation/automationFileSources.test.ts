@@ -420,6 +420,15 @@ describe("file input reconciliation on the host routine owner", () => {
     const capability = "A".repeat(43);
     const authority = new WindowAuthorityStore();
     authority.register({ windowId: window, capability, now: 0 });
+    let holdReview = false;
+    let reviewEntered: (() => void) | undefined;
+    let releaseReview: (() => void) | undefined;
+    const enteredReview = new Promise<void>((resolve) => {
+      reviewEntered = resolve;
+    });
+    const pendingReview = new Promise<void>((resolve) => {
+      releaseReview = resolve;
+    });
     const route = createAutomationRouteHandler({
       projection: host.projection,
       commands: host.commands,
@@ -429,7 +438,14 @@ describe("file input reconciliation on the host routine owner", () => {
       },
       hostId: "local",
       now: () => 1,
-      prepareFileRearm: (input) => host.sources.prepareRearm(input),
+      prepareFileRearm: async (input) => {
+        const proof = await host.sources.prepareRearm(input);
+        if (holdReview) {
+          reviewEntered?.();
+          await pendingReview;
+        }
+        return proof;
+      },
     });
     const fetch = new Proxy(globalThis.fetch, {
       apply: async (_target, _receiver, args: Parameters<typeof globalThis.fetch>) => {
@@ -438,7 +454,7 @@ describe("file input reconciliation on the host routine owner", () => {
         return response;
       },
     });
-    const client = createAutomationClient({
+    let client = createAutomationClient({
       baseUrl: "http://127.0.0.1",
       fetch,
       windowCapability: capability,
@@ -468,6 +484,25 @@ describe("file input reconciliation on the host routine owner", () => {
       reason: "blocked",
     });
     expect(host.projection.getFileSource(definition.id)?.automaticStarts).toBe(1);
+    holdReview = true;
+    const oldDecision = client.execute(decision);
+    await enteredReview;
+    authority.revoke(window);
+    const replacementCapability = `${"B".repeat(42)}A`;
+    authority.register({ windowId: window, capability: replacementCapability, now: 1 });
+    releaseReview?.();
+    expect(await oldDecision).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "stale-version",
+    });
+    expect(host.projection.getFileSource(definition.id)?.automaticStarts).toBe(1);
+    expect(delivered).toHaveLength(1);
+    holdReview = false;
+    client = createAutomationClient({
+      baseUrl: "http://127.0.0.1",
+      fetch,
+      windowCapability: replacementCapability,
+    });
     const result = await client.execute(decision);
     expect(result.kind).toBe("automation-run-accepted");
     expect(await client.execute(decision)).toMatchObject({
