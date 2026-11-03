@@ -4,6 +4,7 @@ import {
   decodeWorkTurnState,
   decodeWorkThreadId,
   decodeWorkTurnId,
+  decodeWorkTurnRequestId,
   WORK_TURN_CAPABILITIES,
   type WorkTurnState,
 } from "@octant/contracts";
@@ -87,7 +88,7 @@ function fixture() {
       acceptedAt: definition.createdAt,
     }),
   );
-  const turn = projection.lookup(run.firstTurnRequestId);
+  const turn = projection.lookup(decodeWorkTurnRequestId(run.firstTurnRequestId));
   if (turn === undefined) throw new Error("Expected acceptance");
   const prepare = vi.fn(async () => () => true);
   const mark = vi.fn(() => true);

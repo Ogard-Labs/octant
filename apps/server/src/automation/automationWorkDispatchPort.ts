@@ -11,6 +11,7 @@ import {
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import {
   decodeWorkTurnId,
+  decodeStartWorkThreadTurnCommand,
   decodeWorkTurnRequestId,
   type WorkTurnRequestId,
   type WorkTurnState,
@@ -52,7 +53,7 @@ export interface AutomationWorkTurnService {
     readonly turn?: {
       readonly requestId: string;
       readonly status?: string;
-      readonly externalInput?: WorkExternalInputReceipt;
+      readonly externalInput?: WorkTurnState["externalInput"];
     };
     readonly message?: string;
   }>;
@@ -191,8 +192,8 @@ async function startOrRecover(
   const turnId = decodeWorkTurnId(
     deterministicUuid(`automation-work-turn:${String(input.run.occurrenceKey)}`),
   );
-  const command = {
-    kind: "start-work-thread-turn" as const,
+  const command = decodeStartWorkThreadTurnCommand({
+    kind: "start-work-thread-turn",
     requestId: decodeWorkTurnRequestId(String(input.firstTurnRequestId)),
     threadId: input.threadId,
     turnId,
@@ -206,7 +207,7 @@ async function startOrRecover(
       providerInstanceId: snapshot.executionProfile.providerInstanceId,
       modelId: snapshot.executionProfile.modelId,
     },
-  };
+  });
 
   try {
     const expectedInput =
