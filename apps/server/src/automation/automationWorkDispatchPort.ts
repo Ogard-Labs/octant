@@ -9,7 +9,15 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
-import { decodeWorkTurnId, decodeWorkTurnRequestId } from "@octant/contracts/work-turns";
+import {
+  decodeWorkTurnId,
+  decodeWorkTurnRequestId,
+  type WorkTurnRequestId,
+  type WorkTurnState,
+  type WorkExternalInputReceipt,
+  type StartWorkThreadTurnCommand,
+} from "@octant/contracts/work-turns";
+import { sameWorkExternalInput, workExternalInputReceipt } from "../work/workExternalInput";
 import { WorkTurnServiceError, type WorkTurnStartOptions } from "../work/workTurnService";
 import type {
   AutomationWorkDispatchPort,
@@ -41,7 +49,11 @@ export interface AutomationWorkTurnService {
     options?: Pick<WorkTurnStartOptions, "accessCeiling" | "externalData" | "admissionCurrent">,
   ) => Promise<{
     readonly kind: string;
-    readonly turn?: { readonly requestId: string; readonly status?: string };
+    readonly turn?: {
+      readonly requestId: string;
+      readonly status?: string;
+      readonly externalInput?: WorkExternalInputReceipt;
+    };
     readonly message?: string;
   }>;
 }
@@ -51,6 +63,8 @@ export interface CreateAutomationWorkDispatchPortOptions {
   readonly turns: AutomationWorkTurnService;
   readonly clock: () => UtcTimestamp;
   readonly uuid: () => string;
+  /** Existing host projection, required to prove input-backed acceptance before live source reads. */
+  readonly readTurn?: (requestId: WorkTurnRequestId) => WorkTurnState | undefined;
   readonly prepareFileInput?: (
     run: AutomationRun,
     signal: AbortSignal,
@@ -167,19 +181,6 @@ async function startOrRecover(
     };
   }
   const fileContext = automationFileContext(input.run);
-  const fileCurrent =
-    fileContext === undefined ? undefined : await prepareFileAdmission(options, input.run);
-  if (
-    fileContext !== undefined &&
-    (fileCurrent?.() !== true ||
-      options.markFileInput === undefined ||
-      input.promptDigest !== automationPromptDigest(automationDispatchPromptText(input.run)))
-  )
-    return {
-      kind: "failed",
-      reason: "provider-launch-failed",
-      message: "File input delivery is unavailable or its retained admission changed.",
-    };
   // A follow-up goes back into a thread a person made, which may work in a
   // subfolder of the Project; its turn names that folder, as the person's own
   // next turn would.
@@ -208,6 +209,36 @@ async function startOrRecover(
   };
 
   try {
+    const expectedInput =
+      fileContext === undefined ? undefined : workExternalInputReceipt(fileContext);
+    if (fileContext !== undefined) {
+      if (
+        options.readTurn === undefined ||
+        input.promptDigest !== automationPromptDigest(automationDispatchPromptText(input.run))
+      )
+        return unconfirmedFileInput();
+      const retained = options.readTurn(command.requestId);
+      if (retained !== undefined) {
+        if (!matchesFileAcceptance(retained, command, expectedInput)) return unconfirmedFileInput();
+        // This is the original acceptance, not a new delivery or a provider-completion claim.
+        return {
+          kind: "accepted",
+          runtimeReceipt: `work-turn:${String(input.firstTurnRequestId)}`,
+          acceptedAt: retained.acceptedAt,
+        };
+      }
+    }
+    const fileCurrent =
+      fileContext === undefined ? undefined : await prepareFileAdmission(options, input.run);
+    if (
+      fileContext !== undefined &&
+      (fileCurrent?.() !== true || options.markFileInput === undefined)
+    )
+      return {
+        kind: "failed",
+        reason: "provider-launch-failed",
+        message: "File input delivery is unavailable or its retained admission changed.",
+      };
     // A routine thread takes its access from the host's Work default, the
     // level a Work Project's new threads start at. Nobody is present for this
     // turn, so it runs ask-first unless the routine's captured authority
@@ -244,6 +275,14 @@ async function startOrRecover(
                 : "ask-first"),
           }),
     });
+    if (
+      fileContext !== undefined &&
+      (result.kind === "accepted" || result.kind === "ambiguous") &&
+      (result.turn?.requestId !== command.requestId ||
+        !sameWorkExternalInput(result.turn?.externalInput, expectedInput) ||
+        !matchesFileAcceptance(options.readTurn?.(command.requestId), command, expectedInput))
+    )
+      return unconfirmedFileInput();
     if (result.kind === "accepted") {
       return {
         kind: "accepted",
@@ -283,6 +322,42 @@ async function startOrRecover(
       message: error instanceof Error ? error.message : "Work provider turn recovery failed.",
     };
   }
+}
+
+function matchesFileAcceptance(
+  retained: WorkTurnState | undefined,
+  command: StartWorkThreadTurnCommand,
+  expectedInput: WorkExternalInputReceipt | undefined,
+): boolean {
+  if (retained === undefined) return false;
+  const expected = command.authority;
+  return (
+    retained.requestId === command.requestId &&
+    retained.threadId === command.threadId &&
+    retained.turnId === command.turnId &&
+    retained.projectId === expected.projectId &&
+    retained.prompt === command.prompt &&
+    retained.delivery === undefined &&
+    (retained.attachments?.length ?? 0) === 0 &&
+    (retained.extensionSelections?.length ?? 0) === 0 &&
+    retained.authority.hostId === expected.hostId &&
+    retained.authority.projectId === expected.projectId &&
+    retained.authority.bindingRevisionId === expected.bindingRevisionId &&
+    retained.authority.workingDirectory === expected.workingDirectory &&
+    retained.authority.confinementPosture === expected.confinementPosture &&
+    retained.authority.providerInstanceId === expected.providerInstanceId &&
+    retained.authority.modelId === expected.modelId &&
+    sameWorkExternalInput(retained.externalInput, expectedInput)
+  );
+}
+
+function unconfirmedFileInput(): AutomationFirstTurnLaunchOutcome {
+  return {
+    kind: "failed",
+    reason: "recovery-failed",
+    message:
+      "File input acceptance is unconfirmed for this Work request. Open the existing task; do not resend automatically.",
+  };
 }
 
 /** One finite acquisition stage; a late filesystem result can never resume dispatch. */

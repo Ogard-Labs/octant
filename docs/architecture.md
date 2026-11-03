@@ -2566,7 +2566,14 @@ the thread it came from.
   delivered as bounded framed external data through the ordinary Work context
   plan, separately from the person's fixed task, without copying file contents
   into the routine journal or prompt. Current protected-read and authority rules
-  still govern the task's actual reads. More than 64 retained unsettled owned
+  still govern the task's actual reads. Ordinary Work acceptance journals a
+  host-computed reference and digest of the exact framed input. Recovery requires
+  the original request, turn, thread, Project, binding, provider, model, fixed
+  task and input receipt; matching acceptance is recovered before reading or
+  marking the live source again. Missing legacy evidence or a mismatch remains
+  unconfirmed and never causes automatic resend or retroactive input adoption.
+  The receipt proves accepted input, not provider delivery or completion.
+  More than 64 retained unsettled owned
   runs makes quiescence unknown rather than dropping older ownership: finish and
   review the Project's tasks and cleanup, then archive that routine and explicitly
   configure a new one; neither Resume nor Save clears this hold. Existing timed/manual

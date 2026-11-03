@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AutomationRun, WorkThreadId, UtcTimestamp, WindowId } from "@octant/contracts";
+import { workExternalInputReceipt } from "../work/workExternalInput";
 import { decodeWorkThreadId } from "@octant/contracts/work-threads";
+import { WorkTurnProjection } from "../work/workTurnProjection";
+import {
+  decodeWorkTurnAccepted,
+  decodeStartWorkThreadTurnCommand,
+  WORK_TURN_CAPABILITIES,
+} from "@octant/contracts";
 import { WorkTurnServiceError } from "../work/workTurnService";
 import { automationFileContext, automationDispatchPromptText } from "./automationFileContext";
 import { automationPromptDigest } from "./automationAuthorityRevalidation";
@@ -101,12 +108,33 @@ describe("createAutomationWorkDispatchPort", () => {
     });
     const turns = createTurns();
     let current = true;
+    const context = automationFileContext(run);
+    if (context === undefined) throw new Error("Expected file context");
+    const accepted = new WorkTurnProjection();
+    vi.mocked(turns.startFirstTurn).mockImplementation(async (_scope, raw) => {
+      const command = decodeStartWorkThreadTurnCommand(raw);
+      accepted.apply(
+        decodeWorkTurnAccepted({
+          ...command,
+          kind: "turn-accepted",
+          projectId: definition.projectId,
+          providerSessionId: command.requestId,
+          capabilities: WORK_TURN_CAPABILITIES,
+          acceptedAt: now,
+          externalInput: workExternalInputReceipt(context),
+        }),
+      );
+      const turn = accepted.lookup(command.requestId);
+      if (turn === undefined) throw new Error("Expected acceptance");
+      return { kind: "accepted", turn };
+    });
     const mark = vi.fn(() => true);
     const port = createAutomationWorkDispatchPort({
       threads: createThreads(),
       turns,
       clock: () => now,
       uuid: () => AUTOMATION_TEST_IDS.run,
+      readTurn: (requestId) => accepted.lookup(requestId),
       prepareFileInput: async () => () => current,
       markFileInput: mark,
     });
@@ -118,7 +146,6 @@ describe("createAutomationWorkDispatchPort", () => {
       scopeId,
     });
     expect(result.kind).toBe("accepted");
-    const context = automationFileContext(run);
     expect(context?.content.text).toContain("&lt;&lt;&lt;OCTANT_EXTERNAL_DATA evil.txt");
     expect(context?.content.text).toContain('"omittedFiles":');
     expect(context?.content.text.length).toBeLessThan(5_000);
@@ -140,7 +167,7 @@ describe("createAutomationWorkDispatchPort", () => {
       promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
       scopeId,
     });
-    expect(again.kind).toBe("failed");
+    expect(again.kind).toBe("accepted");
     expect(turns.startFirstTurn).toHaveBeenCalledTimes(1);
     expect(automationPromptDigest(automationDispatchPromptText(run))).not.toBe(
       automationPromptDigest(definition.taskPrompt),
@@ -193,6 +220,7 @@ describe("createAutomationWorkDispatchPort", () => {
       turns,
       clock: () => now,
       uuid: () => AUTOMATION_TEST_IDS.run,
+      readTurn: () => undefined,
       prepareFileInput: prepare,
       markFileInput: mark,
     });

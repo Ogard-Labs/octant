@@ -1,3 +1,4 @@
+import { workExternalInputReceipt } from "../work/workExternalInput";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -442,6 +443,9 @@ describe("file input reconciliation on the host routine owner", () => {
             turnId: command.turnId,
             projectId: definition.projectId,
             authority: command.authority,
+            ...(options?.externalData === undefined
+              ? {}
+              : { externalInput: workExternalInputReceipt(options.externalData) }),
             providerSessionId: command.requestId,
             prompt: command.prompt,
             capabilities: WORK_TURN_CAPABILITIES,
@@ -484,6 +488,7 @@ describe("file input reconciliation on the host routine owner", () => {
       },
       clock: () => definition.createdAt,
       uuid: randomUUID,
+      readTurn: (requestId) => turns.lookup(requestId),
       prepareFileInput: (run, signal) =>
         prepareAutomationFileRunAdmission({
           run,

@@ -281,6 +281,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     },
   });
   const automationWorkDispatch = createAutomationWorkDispatchPort({
+    readTurn: (requestId) => workTurnProjection.lookup(requestId),
     prepareFileInput: async (run, signal) => {
       const authority = resolveAutomationFileSourceAuthority(
         automationAuthorityDeps,

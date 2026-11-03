@@ -24,6 +24,7 @@ import {
   decodeProviderRuntimeEvent,
   decodeNativeHarnessSlotCandidate,
   EventActor,
+  ReplayCursor,
   type WorkAccess,
 } from "@octant/contracts";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
@@ -77,7 +78,7 @@ import { createWorkTurnRouteHandler } from "../workTurnRoutes";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { WorkAttachmentStore } from "./workAttachmentStore";
 import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
-import { WorkTurnProjection } from "./workTurnProjection";
+import { WorkTurnProjection, hydrateWorkTurnProjectionFromJournal } from "./workTurnProjection";
 import {
   WORK_THREAD_MARKED_DONE_TURN_REFUSAL,
   type RunningWorkTurnAccess,
@@ -466,73 +467,123 @@ describe("WorkTurnService", () => {
         ),
         prompt: definition.taskPrompt,
       };
-      if (scenario === "legacy") {
-        expect((await fixture.service.startFirstTurn(ids.window, command)).kind).toBe("accepted");
-        await fixture.waitForIdle(command.requestId);
-        expect(sent).toHaveLength(1);
-        expect(JSON.stringify(sent[0])).not.toContain("report.txt");
-      }
-      let current = true;
-      let loseReply = true;
-      const prepare = vi.fn(async () => () => current);
-      const mark = vi.fn(() => true);
-      const adapter = createAutomationWorkDispatchPort({
-        threads: {
-          bootstrap: async () => ({ threads: [{ id: ids.thread }] }),
-          execute: async () => ({ kind: "unused" }),
-        },
-        turns: {
-          startFirstTurn: async (scope, input, options) => {
-            const result = await fixture.service.startFirstTurn(scope, input, options);
-            if (scenario === "lost reply" && loseReply) {
-              loseReply = false;
-              throw new Error("Controlled lost accepted reply");
-            }
-            return result;
-          },
-        },
-        readTurn: (requestId) => fixture.projection.lookup(requestId),
+      const storageRoot = await mkdtemp(join(tmpdir(), "octant-work-file-receipt-"));
+      attachmentRoots.push(storageRoot);
+      const databasePath = join(storageRoot, "receipt.sqlite3");
+      let storage = openSqlite(databasePath);
+      applyMigrations(storage, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection: storage,
+        registry: registries.events,
+        projections: registries.projections,
         clock: () => now,
-        uuid: randomUUID,
-        prepareFileInput: prepare,
-        markFileInput: mark,
       });
-      expect(automationFileContext(run)?.content.text).toContain("report.txt");
-      const result = await adapter.startOrRecoverFirstTurn({
-        run,
-        threadId: ids.thread,
-        firstTurnRequestId: run.firstTurnRequestId,
-        promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
-        scopeId: ROUTINE_HOST_SCOPE_ID,
-      });
-      expect(result.kind).toBe("failed");
-      if (scenario === "lost reply") {
-        await fixture.waitForIdle(command.requestId);
-        expect(JSON.stringify(sent[0])).toContain("report.txt");
-        const retainedContext = automationFileContext(run);
-        if (retainedContext === undefined) throw new Error("Expected file context");
-        expect(fixture.projection.lookup(command.requestId)?.externalInput).toEqual(
-          workExternalInputReceipt(retainedContext),
-        );
-        current = false;
-        const recovered = await adapter.startOrRecoverFirstTurn({
+      fixture.persistence.journal.append.mockImplementation(
+        (
+          request: Parameters<WorkTurnServiceDependencies["persistence"]["journal"]["append"]>[0],
+        ) => {
+          journal.append(request);
+        },
+      );
+      let readProjection = fixture.projection;
+      try {
+        if (scenario === "legacy") {
+          expect((await fixture.service.startFirstTurn(ids.window, command)).kind).toBe("accepted");
+          await fixture.waitForIdle(command.requestId);
+          expect(sent).toHaveLength(1);
+          expect(JSON.stringify(sent[0])).not.toContain("report.txt");
+        }
+        let current = true;
+        let loseReply = true;
+        const prepare = vi.fn(async () => () => current);
+        const mark = vi.fn(() => true);
+        const adapter = createAutomationWorkDispatchPort({
+          threads: {
+            bootstrap: async () => ({ threads: [{ id: ids.thread }] }),
+            execute: async () => ({ kind: "unused" }),
+          },
+          turns: {
+            startFirstTurn: async (scope, input, options) => {
+              const result = await fixture.service.startFirstTurn(scope, input, options);
+              if (scenario === "lost reply" && loseReply) {
+                loseReply = false;
+                throw new Error("Controlled lost accepted reply");
+              }
+              return result;
+            },
+          },
+          readTurn: (requestId) => readProjection.lookup(requestId),
+          clock: () => now,
+          uuid: randomUUID,
+          prepareFileInput: prepare,
+          markFileInput: mark,
+        });
+        expect(automationFileContext(run)?.content.text).toContain("report.txt");
+        const result = await adapter.startOrRecoverFirstTurn({
           run,
           threadId: ids.thread,
           firstTurnRequestId: run.firstTurnRequestId,
           promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
           scopeId: ROUTINE_HOST_SCOPE_ID,
         });
-        expect(recovered).toMatchObject({
-          kind: "accepted",
-          runtimeReceipt: `work-turn:${run.firstTurnRequestId}`,
-        });
-        expect(prepare).toHaveBeenCalledOnce();
-        expect(mark).toHaveBeenCalledOnce();
-      } else {
-        expect(prepare).not.toHaveBeenCalled();
-        expect(mark).not.toHaveBeenCalled();
+        expect(result.kind).toBe("failed");
+        if (scenario === "lost reply") {
+          await fixture.waitForIdle(command.requestId);
+          expect(JSON.stringify(sent[0])).toContain("report.txt");
+          const retainedContext = automationFileContext(run);
+          if (retainedContext === undefined) throw new Error("Expected file context");
+          expect(fixture.projection.lookup(command.requestId)?.externalInput).toEqual(
+            workExternalInputReceipt(retainedContext),
+          );
+          storage.close();
+          storage = openSqlite(databasePath);
+          const reopenedRegistries = createPhase1RuntimeRegistries();
+          const replayJournal = new Journal({
+            connection: storage,
+            registry: reopenedRegistries.events,
+            projections: reopenedRegistries.projections,
+            clock: () => now,
+          });
+          readProjection = new WorkTurnProjection();
+          expect(
+            hydrateWorkTurnProjectionFromJournal({
+              replay: (cursor) =>
+                replayJournal.replayAggregateType({
+                  ...Schema.decodeUnknownSync(ReplayCursor)({
+                    afterSequence: cursor.afterSequence,
+                    limit: cursor.limit,
+                  }),
+                  aggregateType: cursor.aggregateType ?? "work-turn",
+                }),
+              projection: readProjection,
+            }),
+          ).toBe("ok");
+          expect(readProjection.lookup(command.requestId)?.externalInput).toEqual(
+            workExternalInputReceipt(retainedContext),
+          );
+          current = false;
+          const recovered = await adapter.startOrRecoverFirstTurn({
+            run,
+            threadId: ids.thread,
+            firstTurnRequestId: run.firstTurnRequestId,
+            promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
+            scopeId: ROUTINE_HOST_SCOPE_ID,
+          });
+          expect(recovered).toMatchObject({
+            kind: "accepted",
+            runtimeReceipt: `work-turn:${run.firstTurnRequestId}`,
+          });
+          expect(prepare).toHaveBeenCalledOnce();
+          expect(mark).toHaveBeenCalledOnce();
+        } else {
+          expect(prepare).not.toHaveBeenCalled();
+          expect(mark).not.toHaveBeenCalled();
+        }
+        expect(sent).toHaveLength(1);
+      } finally {
+        storage.close();
       }
-      expect(sent).toHaveLength(1);
     },
   );
 
