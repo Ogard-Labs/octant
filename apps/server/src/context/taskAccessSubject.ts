@@ -85,8 +85,9 @@ export function createTaskAccessSubjectReader(deps: TaskAccessSubjectDependencie
     const thread = deps.work(decodeWorkThreadId(id));
     if (thread === undefined) return undefined;
     const onServer = deps.holdsServerWorkThread?.(thread) === true;
-    const project = onServer ? undefined : deps.project(thread.projectId);
-    if (!onServer && (project?.type !== "work" || project.lifecycle !== "active")) return undefined;
+    const local = onServer ? undefined : deps.project(thread.projectId);
+    const project = local?.type === "work" ? local : undefined;
+    if (!onServer && project?.lifecycle !== "active") return undefined;
     const settings = deps.workSettings();
     const access = deps.runningWork(id) ?? thread.access;
     const turnRefusal = deps.workStanding?.(thread);
