@@ -60,6 +60,7 @@ import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceServic
 import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
 
+import * as foundationsWiringModule from "./wiring/foundations";
 import * as automationWiringModule from "./wiring/automation";
 import * as agentRunsWiringModule from "./wiring/agentRuns";
 import * as harnessWiringModule from "./wiring/harness";
@@ -77,6 +78,14 @@ describe("startOctantServer", () => {
   it("composes file-routine activity and external-data ownership from the actual earlier startup owners", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-routine-source-composition-"));
     directories.push(directory);
+    const originalFoundations = foundationsWiringModule.wireFoundations;
+    let foundations: ReturnType<typeof originalFoundations> | undefined;
+    const foundationsSpy = vi
+      .spyOn(foundationsWiringModule, "wireFoundations")
+      .mockImplementation((input) => {
+        foundations = originalFoundations(input);
+        return foundations;
+      });
     const originalAgentRuns = agentRunsWiringModule.wireAgentRuns;
     const originalHarness = harnessWiringModule.wireHarness;
     const originalAutomation = automationWiringModule.wireAutomation;
@@ -96,6 +105,9 @@ describe("startOctantServer", () => {
     const automationSpy = vi
       .spyOn(automationWiringModule, "wireAutomation")
       .mockImplementation((input) => {
+        expect(foundations).toBeDefined();
+        expect(input.workTurnProjection).toBeDefined();
+        expect(input.workTurnProjection).toBe(foundations?.workTurnProjection);
         expect(agents).toBeDefined();
         expect(harness).toBeDefined();
         expect(input.agentRunOrchestration).toBeDefined();
@@ -138,6 +150,7 @@ describe("startOctantServer", () => {
       automationSpy.mockRestore();
       harnessSpy.mockRestore();
       agentSpy.mockRestore();
+      foundationsSpy.mockRestore();
     }
   });
 

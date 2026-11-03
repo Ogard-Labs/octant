@@ -1080,6 +1080,7 @@ export function startOctantServer(
       routineProposalService,
       windowAuthorityStore,
       workThreadProjection,
+      workTurnProjection,
       workThreadService,
       workThreadServiceWithWorkflows,
       workTurnService,
