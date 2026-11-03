@@ -69,6 +69,13 @@ prohibited, Thread prohibited, Not installed, Untrusted, Plugin disabled,
 Component disabled, Incompatible, Quarantined, Draining, Broken,
 Unavailable, Interrupted, or Waiting.
 
+Turning off an executable component waits for its supervised process group to
+stop. If cleanup cannot prove which process group it owns, or a signal is
+denied, it reports failure and keeps its local ownership receipt. Restarting
+Octant does not make an uncertain process safe to stop: a surviving group whose
+original leader has exited needs live ownership evidence. Octant preserves the
+receipt rather than signalling a potentially unrelated process.
+
 Standalone skills show name, availability, source label, qualified identity,
 review and desired state, effective state, content bytes, description, and
 diagnostics. A **Name collisions** section appears when the same skill name
