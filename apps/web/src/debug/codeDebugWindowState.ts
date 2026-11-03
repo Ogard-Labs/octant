@@ -200,6 +200,12 @@ export class CodeDebugWindowState {
     const lines = current.breakpoints.get(path) ?? [];
     const breakpoints = new Map(current.breakpoints);
     const files = new Map(current.breakpointFiles);
+    const candidate = observation ?? files.get(path)?.observed;
+    // A clean pane cannot release another live or retained draft's hold.
+    const observed =
+      candidate !== undefined && this.#hasDirtyEditor(JSON.stringify([key, path]))
+        ? { ...candidate, clean: false }
+        : candidate;
     let outcome: BreakpointToggle;
     if (lines.includes(line)) {
       const remaining = lines.filter((candidate) => candidate !== line);
@@ -207,6 +213,8 @@ export class CodeDebugWindowState {
       else breakpoints.set(path, remaining);
       if (remaining.length === 0) {
         files.delete(path);
+      } else if (this.#persistence !== undefined || current.breakpointFiles !== undefined) {
+        files.set(path, fileState(files.get(path)?.binding, observed, remaining));
       }
       outcome = "removed";
     } else if (lines.length >= MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE) {
@@ -220,7 +228,6 @@ export class CodeDebugWindowState {
       );
       if (this.#persistence !== undefined || current.breakpointFiles !== undefined) {
         let binding = files.get(path)?.binding;
-        const observed = observation ?? files.get(path)?.observed;
         if (observed !== undefined && lines.length === 0) binding = bindingFrom(observed);
         else if (
           binding !== undefined &&

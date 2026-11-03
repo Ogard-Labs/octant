@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { MonacoAdapterRuntime } from "./MonacoEditorAdapter";
 import { MonacoEditorPane, type CodeEditorFileProjection } from "./MonacoEditorPane";
 import { codeDebugThreadKey, codeDebugWindowState } from "../debug/codeDebugWindowState";
-import { CodeDebugWindowState } from "../debug/codeDebugWindowState";
+import { CodeDebugWindowState, fileBreakpoints } from "../debug/codeDebugWindowState";
 import { CodeDebugWindowStoreContext } from "../debug/CodeDebugWindowProvider";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { decodeCodeFileMetadata } from "@octant/contracts/code";
@@ -164,6 +164,11 @@ describe("MonacoEditorPane", () => {
       await waitFor(() => expect(clean.options).toBeDefined());
       if (sharedStore) act(() => clean.options?.onChange("const answer = 42;\n"));
       expect(store.reacceptFile(key, file.path)).toBe(false);
+      // The clean pane must not turn another pane's live dirty draft into
+      // adapter-ready locations merely by adding another gutter breakpoint.
+      act(() => clean.options?.onToggleBreakpoint?.(2));
+      expect(store.read(key).breakpointFiles?.get(file.path)?.reason).toBe("unsaved");
+      expect(fileBreakpoints(store.read(key))).toEqual([]);
       pane.unmount();
       const read = {
         projectId,

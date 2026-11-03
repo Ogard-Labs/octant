@@ -61,6 +61,28 @@ const observation = {
   clean: true,
 };
 describe("breakpoint configuration survives only within its endpoint and window", () => {
+  it("keeps remaining and newly selected lines unresolved while another editor still owns an unsaved draft", () => {
+    const store = new CodeDebugWindowState({ ...scope, storage: new MemoryStorage() });
+    store.toggleBreakpoint(key, path, 3, observation);
+    store.toggleBreakpoint(key, path, 4, observation);
+    let dirty = true;
+    const release = store.trackEditor(key, path, {}, () => dirty);
+    store.toggleBreakpoint(key, path, 3, observation);
+    expect(store.read(key).breakpoints.get(path)).toEqual([4]);
+    expect(fileBreakpoints(store.read(key))).toEqual([]);
+    expect(store.read(key).breakpointFiles?.get(path)?.reason).toBe("unsaved");
+    store.toggleBreakpoint(key, path, 4, observation);
+    store.toggleBreakpoint(key, path, 5, observation);
+    expect(fileBreakpoints(store.read(key))).toEqual([]);
+    expect(store.reacceptFile(key, path)).toBe(false);
+    dirty = false;
+    release();
+    store.observeFile(key, path, observation);
+    expect(store.read(key).breakpointFiles?.get(path)?.reason).toBe("unconfirmed");
+    expect(store.reacceptFile(key, path)).toBe(true);
+    expect(fileBreakpoints(store.read(key))).toEqual([{ path, breakpoints: [{ line: 5 }] }]);
+  });
+
   it("restores saved lines unresolved without restoring a debug session, then enables only an exact authorized file match", () => {
     const storage = new MemoryStorage();
     const first = new CodeDebugWindowState({ ...scope, storage });
