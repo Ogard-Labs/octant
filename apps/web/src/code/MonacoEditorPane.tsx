@@ -578,6 +578,10 @@ function AvailableEditor(
       )}
       {visibleReferences === undefined ? null : (
         <CodeReferences
+          onReloadLanguage={() => {
+            closeReferences();
+            retryLanguage();
+          }}
           checkout={props.checkoutLabel ?? String(checkoutId).slice(0, 8)}
           busy={visibleReferences.busy}
           {...(visibleReferences.result === undefined ? {} : { result: visibleReferences.result })}

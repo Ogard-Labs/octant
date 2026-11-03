@@ -56,7 +56,7 @@ export type CodeLanguageDefinitionOutcome =
 
 export type CodeLanguageReferencesOutcome =
   | Extract<CodeLanguageReadResult, { readonly status: "references" | "unsupported" }>
-  | { readonly status: "unavailable"; readonly message: string };
+  | { readonly status: "unavailable"; readonly message: string; readonly reloadLanguage?: true };
 
 export interface CodeLanguageServices {
   readonly state: CodeLanguageEditorState;
@@ -125,6 +125,15 @@ export function useCodeLanguageServices(
   const syncedText = useRef<string | undefined>(undefined);
   const fileId = useRef<CodeFileId | undefined>(undefined);
   const documentRevision = useRef<string | undefined>(undefined);
+  const pendingReferenceSync = useRef<
+    | {
+        readonly generation: number;
+        readonly fileId: CodeFileId;
+        readonly priorRevision: string;
+        readonly text: string;
+      }
+    | undefined
+  >(undefined);
   /** Bumped when the document is reopened or released; stale answers are dropped. */
   const session = useRef(0);
   const readSequence = useRef(0);
@@ -157,6 +166,7 @@ export function useCodeLanguageServices(
     referenceAbort.current?.abort();
     fileId.current = undefined;
     documentRevision.current = undefined;
+    pendingReferenceSync.current = undefined;
     syncedText.current = undefined;
     startingPolls.current = 0;
     reopened.current = false;
@@ -424,6 +434,22 @@ export function useCodeLanguageServices(
           "Language services are not available for this file. Retry or open it externally.",
         );
       const generation = session.current;
+      const reloadRequired = (): CodeLanguageReferencesOutcome => ({
+        status: "unavailable",
+        reloadLanguage: true,
+        message:
+          "The previous text sync could not be confirmed. Reload the language document explicitly, then find references again.",
+      });
+      const pending = pendingReferenceSync.current;
+      if (pending !== undefined) {
+        if (
+          pending.generation === generation &&
+          pending.fileId === opened &&
+          pending.priorRevision === documentRevision.current
+        )
+          return reloadRequired();
+        pendingReferenceSync.current = undefined;
+      }
       const sequence = ++referenceSequence.current;
       referenceAbort.current?.abort();
       const controller = new AbortController();
@@ -482,20 +508,51 @@ export function useCodeLanguageServices(
           return unavailable(
             "The host could not confirm the current file text. Reconnect or open this file externally.",
           );
-        const acknowledged = await sync(
-          {
-            kind: "change",
-            threadId,
-            checkoutId,
-            fileId: opened,
-            text: currentText,
-            expectedRevision,
-          },
-          controller.signal,
-        );
+        const attempt = {
+          generation,
+          fileId: opened,
+          priorRevision: expectedRevision,
+          text: currentText,
+        };
+        pendingReferenceSync.current = attempt;
+        let acknowledged: CodeLanguageDocumentResult;
+        try {
+          acknowledged = await sync(
+            {
+              kind: "change",
+              threadId,
+              checkoutId,
+              fileId: opened,
+              text: currentText,
+              expectedRevision,
+            },
+            controller.signal,
+          );
+        } catch {
+          return current() ? reloadRequired() : stopped();
+        }
+        // Cancelling the query does not undo an already-applied memory sync.
+        // Keep only an acknowledgement of this exact original document/text,
+        // never a stale reply over a newer session or acknowledged revision.
+        if (
+          acknowledged.status === "synced" &&
+          matches(acknowledged) &&
+          acknowledged.documentVersion !== undefined &&
+          acknowledged.documentRevision !== undefined &&
+          currentReferenceIdentity.current === referenceIdentity &&
+          session.current === generation &&
+          fileId.current === opened &&
+          textRef.current === currentText &&
+          documentRevision.current === expectedRevision
+        ) {
+          documentRevision.current = acknowledged.documentRevision;
+          syncedText.current = currentText;
+          if (pendingReferenceSync.current === attempt) pendingReferenceSync.current = undefined;
+        } else if (acknowledged.status !== "synced" && pendingReferenceSync.current === attempt)
+          pendingReferenceSync.current = undefined;
         if (!current()) return stopped();
         if (acknowledged.status !== "synced" || !matches(acknowledged))
-          return unanswered(acknowledged);
+          return acknowledged.status === "stale" ? reloadRequired() : unanswered(acknowledged);
         if (
           acknowledged.documentVersion === undefined ||
           acknowledged.documentRevision === undefined
@@ -503,7 +560,7 @@ export function useCodeLanguageServices(
           return unavailable(
             "The host could not confirm the current file text. Reconnect or open this file externally.",
           );
-        documentRevision.current = acknowledged.documentRevision;
+        if (documentRevision.current !== acknowledged.documentRevision) return reloadRequired();
         const answer = await read(
           {
             kind: "references",

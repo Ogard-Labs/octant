@@ -49,6 +49,13 @@ a location outside this checkout shows only a notice. **Recheck references**
 queries again explicitly. **Close references** or **Escape** closes the list.
 Changing the source text or switching files hides old results.
 
+Closing a query may happen after the host accepted its in-memory text sync.
+If that acknowledgement arrives safely, the next query uses it. If the reply
+is lost, choose **Reload language document**, then **Find references in
+checkout** again. Reload explicitly reconnects this file under the current
+language-server permissions; **Recheck references** alone never opens or
+starts a server. It does not save your file or silently retry the old query.
+
 Unsupported, unknown, unavailable, stale, or timed-out support stays visible.
 Where configured, **Open externally** uses your existing editor handoff. An
 older host that cannot acknowledge the current text cannot supply this query;

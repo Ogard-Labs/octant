@@ -384,7 +384,7 @@ Status: Built. Since: —. Detail: [Architecture: Desktop menu bar](../architect
 
 Code editor language services and the debugger run as confined children the server launches per checkout. Agents read the same servers through two read-only tools.
 
-- Explicit checkout references use actual initialized support and current acknowledged draft identity, stay bounded and read-only, and never start or retarget a server. Unknown/unsupported support has an explicit external-editor fallback; rename and reviewed text-only quick fixes remain follow-on work.
+- Explicit checkout references use actual initialized support and current acknowledged draft identity, stay bounded and read-only, and never start or retarget a server. Cancelled queries may retain only an exact late document acknowledgement; a genuinely lost reply offers a distinct person-controlled language-document reload, never an implicit restart from Recheck. Unknown/unsupported support has an explicit external-editor fallback; rename and reviewed text-only quick fixes remain follow-on work.
 - The bundled language server can be switched off in Settings; a person can add a static server from a local folder, which installs untrusted and disabled until reviewed and switched on.
 - A repository-tooling server starts only after a local-window approval, never in Plan or for a paired device, and agents never start or read through one.
 - Debugger routes are local-window only with no remote action and no agent tool; nothing a session shows is journaled and breakpoints are never persisted.

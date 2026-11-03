@@ -392,6 +392,14 @@ design left a choice open.
   name both, and a close/reopen, replacement connection, or intervening edit
   invalidates the old acknowledgement even if the numeric version is reused.
   An older host with no acknowledgement cannot confirm a references query.
+  Closing a query does not undo a foreground memory sync already admitted by
+  the host. A usable late acknowledgement advances only the exact original
+  client/file/session/text and prior revision; it never publishes cancelled
+  references or replaces a newer acknowledgement. If the reply is genuinely
+  lost or stale, Find/Recheck refuses rather than looping with an obsolete
+  revision. **Reload language document** explicitly invokes the existing
+  person-controlled open/retry path under current root, launch approval and
+  authority; Find/Recheck never invokes that path implicitly.
 - The adapter accepts Locations only, with at most 1,000 candidate locations and
   64 distinct inside-root files. It removes exact duplicates and marks omitted
   work `truncated`. Paths and ranges reuse definition containment and outside

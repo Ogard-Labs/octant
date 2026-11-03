@@ -33,6 +33,9 @@ function fixture() {
     oldHost: boolean;
     beforeReference?: () => Promise<void>;
     beforeCapability?: () => Promise<void>;
+    beforeSyncReply?: () => Promise<void>;
+    loseSyncReply?: boolean;
+    reopenRefusal?: "approval-required" | "no-reach";
     wrongRevision?: boolean;
     guardedStale?: boolean;
   } = { support: "supported", oldHost: false };
@@ -43,6 +46,8 @@ function fixture() {
       throw new Error("References must not save a file");
     }),
     syncLanguageDocument: vi.fn(async (request) => {
+      if (request.kind === "open" && state.reopenRefusal !== undefined)
+        return decodeCodeLanguageDocumentResult({ status: "refused", reason: state.reopenRefusal });
       if (request.kind === "change") {
         if (
           request.expectedRevision !== undefined &&
@@ -51,11 +56,19 @@ function fixture() {
           return decodeCodeLanguageDocumentResult({ status: "stale" });
         version++;
       }
-      return decodeCodeLanguageDocumentResult({
+      const answer = decodeCodeLanguageDocumentResult({
         status: "synced",
         ...scope,
         ...(state.oldHost ? {} : { documentVersion: version, documentRevision: revision() }),
       });
+      if (request.kind === "change" && request.expectedRevision !== undefined) {
+        await state.beforeSyncReply?.();
+        if (state.loseSyncReply) {
+          state.loseSyncReply = false;
+          throw Error("Host applied sync but reply was lost");
+        }
+      }
+      return answer;
     }),
     readLanguage: vi.fn(async (request, signal) => {
       requests.push(request);
@@ -138,6 +151,7 @@ function fixture() {
     state,
     requests,
     signals,
+    version: () => version,
     get options() {
       return options;
     },
@@ -277,7 +291,7 @@ describe("references in the actual Code editor pane", () => {
     await screen.findByText("No problems found");
     await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
     const region = await screen.findByRole("region", { name: "References" });
-    await within(region).findByText(/file changed while finding references/);
+    await within(region).findByRole("button", { name: "Reload language document" });
     expect(f.requests.filter((request) => request.kind === "references")).toHaveLength(0);
     expect(f.requests.filter((request) => request.kind === "capabilities")).toHaveLength(1);
     expect(f.client.syncLanguageDocument).toHaveBeenCalledWith(
@@ -420,3 +434,195 @@ describe("references in the actual Code editor pane", () => {
     expect(f.client.save).not.toHaveBeenCalled();
   });
 });
+
+it("records an unchanged document's late guarded acknowledgement after the person closes References", async () => {
+  const f = fixture();
+  const user = userEvent.setup();
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.state.beforeSyncReply = () => held;
+  render(
+    <MonacoEditorPane
+      client={f.client}
+      file={f.file}
+      loadRuntime={f.loadRuntime}
+      onOpenFile={() => {}}
+      languageTiming={{ debounceMs: 10000, pollMs: 10000 }}
+    />,
+  );
+  await screen.findByText("No problems found");
+  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await waitFor(() => expect(f.version()).toBe(2));
+  await user.click(screen.getByRole("button", { name: "Close references" }));
+  release();
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
+  delete f.state.beforeSyncReply;
+  expect(f.requests.filter((request) => request.kind === "references")).toHaveLength(0);
+  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  expect(await screen.findByRole("button", { name: "Open a.ts:1:14" })).toBeVisible();
+  expect(f.client.syncLanguageDocument).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      kind: "change",
+      expectedRevision: "90000000-0000-4000-8000-000000000002",
+    }),
+    expect.any(AbortSignal),
+  );
+  expect(f.client.save).not.toHaveBeenCalled();
+});
+it("recovers a genuinely lost text acknowledgement only through an explicit language-document reload", async () => {
+  const f = fixture();
+  const user = userEvent.setup();
+  f.state.loseSyncReply = true;
+  render(
+    <MonacoEditorPane
+      client={f.client}
+      file={f.file}
+      loadRuntime={f.loadRuntime}
+      onOpenFile={() => {}}
+      languageTiming={{ debounceMs: 10000, pollMs: 10000 }}
+    />,
+  );
+  await screen.findByText("No problems found");
+  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await waitFor(() => expect(f.version()).toBe(2));
+  await screen.findByRole("alert");
+  await user.click(screen.getByRole("button", { name: "Recheck references" }));
+  expect(await screen.findByRole("button", { name: "Reload language document" })).toBeVisible();
+  expect(
+    vi
+      .mocked(f.client.syncLanguageDocument)
+      .mock.calls.filter(([request]) => request.kind === "open"),
+  ).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: "Reload language document" }));
+  await waitFor(() =>
+    expect(
+      vi
+        .mocked(f.client.syncLanguageDocument)
+        .mock.calls.filter(([request]) => request.kind === "open"),
+    ).toHaveLength(2),
+  );
+  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  expect(await screen.findByRole("button", { name: "Open a.ts:1:14" })).toBeVisible();
+  expect(f.client.save).not.toHaveBeenCalled();
+});
+
+it("never replaces a newer acknowledged edited document with a cancelled sync's late reply", async () => {
+  const f = fixture();
+  const user = userEvent.setup();
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.state.beforeSyncReply = () => held;
+  render(
+    <MonacoEditorPane
+      client={f.client}
+      file={f.file}
+      loadRuntime={f.loadRuntime}
+      onOpenFile={() => {}}
+      languageTiming={{ debounceMs: 5, pollMs: 10000 }}
+    />,
+  );
+  await screen.findByText("No problems found");
+  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await waitFor(() => expect(f.version()).toBe(2));
+  await user.click(screen.getByRole("button", { name: "Close references" }));
+  act(() => f.options?.onChange(text + "// new draft"));
+  await waitFor(() => expect(f.version()).toBe(3));
+  release();
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
+  delete f.state.beforeSyncReply;
+  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  expect(await screen.findByRole("button", { name: "Open a.ts:1:14" })).toBeVisible();
+  expect(f.client.syncLanguageDocument).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      kind: "change",
+      expectedRevision: "90000000-0000-4000-8000-000000000003",
+      text: text + "// new draft",
+    }),
+    expect.any(AbortSignal),
+  );
+});
+it("does not adopt a late acknowledgement after the same file is rebound to another client", async () => {
+  const first = fixture();
+  const next = fixture();
+  const user = userEvent.setup();
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  first.state.beforeSyncReply = () => held;
+  const view = render(
+    <MonacoEditorPane
+      client={first.client}
+      file={first.file}
+      loadRuntime={first.loadRuntime}
+      onOpenFile={() => {}}
+      languageTiming={{ debounceMs: 10000, pollMs: 10000 }}
+    />,
+  );
+  await screen.findByText("No problems found");
+  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await waitFor(() => expect(first.version()).toBe(2));
+  view.rerender(
+    <MonacoEditorPane
+      client={next.client}
+      file={next.file}
+      loadRuntime={first.loadRuntime}
+      onOpenFile={() => {}}
+      languageTiming={{ debounceMs: 10000, pollMs: 10000 }}
+    />,
+  );
+  await waitFor(() =>
+    expect(next.client.syncLanguageDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "open" }),
+    ),
+  );
+  release();
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
+  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  expect(await screen.findByRole("button", { name: "Open a.ts:1:14" })).toBeVisible();
+  expect(next.client.syncLanguageDocument).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      kind: "change",
+      expectedRevision: "90000000-0000-4000-8000-000000000001",
+    }),
+    expect.any(AbortSignal),
+  );
+  expect(first.requests.filter((request) => request.kind === "references")).toHaveLength(0);
+});
+it.each(["approval-required", "no-reach"] as const)(
+  "keeps explicit lost-reply recovery behind the host's normal %s refusal",
+  async (reason) => {
+    const f = fixture();
+    const user = userEvent.setup();
+    f.state.loseSyncReply = true;
+    render(
+      <MonacoEditorPane
+        client={f.client}
+        file={f.file}
+        loadRuntime={f.loadRuntime}
+        onOpenFile={() => {}}
+        languageTiming={{ debounceMs: 10000, pollMs: 10000 }}
+      />,
+    );
+    await screen.findByText("No problems found");
+    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    await screen.findByRole("button", { name: "Reload language document" });
+    f.state.reopenRefusal = reason;
+    await user.click(screen.getByRole("button", { name: "Reload language document" }));
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(f.client.syncLanguageDocument)
+          .mock.calls.filter(([request]) => request.kind === "open"),
+      ).toHaveLength(2),
+    );
+    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    await screen.findByRole("alert");
+    expect(f.requests.filter((request) => request.kind === "references")).toHaveLength(0);
+    expect(f.client.save).not.toHaveBeenCalled();
+  },
+);

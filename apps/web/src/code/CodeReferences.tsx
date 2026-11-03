@@ -15,6 +15,7 @@ export function CodeReferences(props: {
   readonly canOpen: (path: string) => boolean;
   readonly onRecheck: () => void;
   readonly onClose: () => void;
+  readonly onReloadLanguage?: () => void;
   readonly onOpenExternal?: () => void;
 }) {
   const result = props.result;
@@ -110,6 +111,24 @@ export function CodeReferences(props: {
                 : "This server does not offer references for this file."
               : result.message}
           </OctantAlert>
+          {result.status === "unavailable" &&
+          result.reloadLanguage === true &&
+          props.onReloadLanguage !== undefined ? (
+            <>
+              <p className="oct-meta">
+                Reload reconnects this file under its current tooling permissions. Recheck alone
+                does not reopen it.
+              </p>
+              <OctantButton
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={props.onReloadLanguage}
+              >
+                Reload language document
+              </OctantButton>
+            </>
+          ) : null}
           {props.onOpenExternal === undefined ? null : (
             <OctantButton
               type="button"
