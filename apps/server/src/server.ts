@@ -1,3 +1,6 @@
+import { CredentialRequests } from "./credentials/credentialRequests";
+import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
+import { createCredentialRequestTools } from "./credentials/credentialRequestTools";
 import {
   startupFailedOutput,
   UNCLASSIFIED_STARTUP_FAILURE,
@@ -287,6 +290,7 @@ export function startOctantServer(
       githubReadToolService,
       githubRoutes,
       integrationRoutes,
+      credentialOperations,
       linearIssueContextService,
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
@@ -1144,7 +1148,25 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    const credentialRequests = new CredentialRequests();
+    yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
+    const credentialRequestRoutes = createCredentialRequestRoutes(
+      credentialRequests,
+      windowAuthorityStore,
+    );
+    contributeCodeTools(({ windowId, thread, readThread }) =>
+      createCredentialRequestTools({
+        service: credentialRequests,
+        windowId: String(windowId),
+        thread,
+        readThread,
+        operations: credentialOperations,
+        windowCurrent: () =>
+          windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
+      }),
+    );
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
+      credentialRequestRoutes,
       agentMessageRoutes,
       agentProfileRoutes,
       agentRunRouteDependencies,

@@ -10795,7 +10795,50 @@ access` agree); a thread's own change is journaled as
     an unreachable store leaves the request for the next start. The authority
     boundary above is unchanged: the new route sits behind the same bridge
     secret, window capability, no-`Origin`, and loopback checks.
-    <a id="linked-secret-stores"></a>
+
+- **One-use credential cards.** The app-managed `request_credential` tool can
+  ask a person at the owning local window to authorize one supported integration
+  operation. The first consumer is `linear-account-check`, a fixed read-only
+  `viewer { id }` request to `https://api.linear.app/graphql`. It is available
+  in Code when the provider carries app-managed tools, the profile allows the
+  tool, the thread is active and outside Plan, and the integration is effective.
+  The host supplies the label, purpose, destination and action text from the
+  registered consumer; agents cannot supply a URL, query, credential reference,
+  file destination or command. Consumer descriptors use the public
+  `@octant/plugin-api/credential-request` contract and register through
+  `IntegrationHostPort.registerCredentialOperation`. The host snapshots bounded
+  descriptors, rejects duplicate identifiers and unsafe destinations, and returns
+  an idempotent release function. The tool lists only the currently effective
+  registrations and rechecks that the same registration still exists at use.
+  The bundled consumer registers from its plugin factory through this same port;
+  server startup does not import its descriptor or name its operation.
+  - The card submits privately to `/api/credential-requests`, authenticated to
+    its originating window. Paired clients are refused. It neither submits a
+    chat message nor writes a credential to the journal. The host immediately
+    claims the request before asynchronous work, rechecks thread, Project,
+    checkout, provider, profile and window authority, and performs at most one
+    HTTPS request with redirects refused. The secret is transient request
+    material in the host process, not a saved Keychain item or a broker grant
+    reusable by another operation. No file, environment variable, persistent
+    token slot or shell receives it. This deliberate one-shot path avoids
+    creating stored material that needs later cleanup.
+  - Requests expire after ten minutes of process-monotonic time; expiry is
+    checked at submission. Cancellation, lost authority and tool-set teardown
+    abort pending use. A restart loses every request. One window/thread has at
+    most one outstanding request, and the host holds at most 128 records.
+    Network use has a 15-second deadline and a 16 KiB response bound. Only a
+    typed status returns to the model; response content and raw errors do not.
+    There is no automatic retry or saved sign-in. An already transmitted
+    credential cannot be recalled by cancellation.
+  - Consent is one explicit submission in the card. Host-generated privacy
+    text describes this specific consumer, not a general guarantee about every
+    tool. A future credential-bearing command needs a separate consumer and
+    its ordinary execution approval; it cannot reuse this card's grant.
+    Administrator passwords and arbitrary command/file delivery are not
+    supported. Linked-store selection is a separate follow-up; this card does
+    not widen the existing linked-store or provider-credential interfaces.
+
+<a id="linked-secret-stores"></a>
 
 - **Linked secret stores.** A person may link a secret store they already use
   and point a credential at an item in it. Octant never holds the value: the
