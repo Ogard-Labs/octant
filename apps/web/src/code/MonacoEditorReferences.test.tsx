@@ -24,6 +24,11 @@ const path = decodeCodeProjectFilePath("b.ts");
 const text = 'import { value } from "./a";\nconsole.log(value);\n';
 const scope = { threadId, checkoutId, fileId };
 const range = { start: { line: 0, character: 13 }, end: { line: 0, character: 18 } };
+function recordedSync(client: Pick<CodeClient, "syncLanguageDocument">) {
+  const sync = client.syncLanguageDocument;
+  if (sync === undefined) throw Error("Fixture has no document sync");
+  return vi.mocked(sync);
+}
 function fixture() {
   let version = 1;
   const revision = () => `90000000-0000-4000-8000-${String(version).padStart(12, "0")}`;
@@ -615,9 +620,7 @@ it.each(["approval-required", "no-reach"] as const)(
     await user.click(screen.getByRole("button", { name: "Reload language document" }));
     await waitFor(() =>
       expect(
-        vi
-          .mocked(f.client.syncLanguageDocument)
-          .mock.calls.filter(([request]) => request.kind === "open"),
+        recordedSync(f.client).mock.calls.filter(([request]) => request.kind === "open"),
       ).toHaveLength(2),
     );
     await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
