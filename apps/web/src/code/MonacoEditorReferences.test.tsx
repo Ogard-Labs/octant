@@ -496,16 +496,12 @@ it("recovers a genuinely lost text acknowledgement only through an explicit lang
   await user.click(screen.getByRole("button", { name: "Recheck references" }));
   expect(await screen.findByRole("button", { name: "Reload language document" })).toBeVisible();
   expect(
-    vi
-      .mocked(f.client.syncLanguageDocument)
-      .mock.calls.filter(([request]) => request.kind === "open"),
+    recordedSync(f.client).mock.calls.filter(([request]) => request.kind === "open"),
   ).toHaveLength(1);
   await user.click(screen.getByRole("button", { name: "Reload language document" }));
   await waitFor(() =>
     expect(
-      vi
-        .mocked(f.client.syncLanguageDocument)
-        .mock.calls.filter(([request]) => request.kind === "open"),
+      recordedSync(f.client).mock.calls.filter(([request]) => request.kind === "open"),
     ).toHaveLength(2),
   );
   await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
