@@ -388,108 +388,153 @@ describe("WorkTurnService", () => {
     expect(replay.lookup(ids.request)?.externalInput).toEqual(expected);
   });
 
-  it("refuses to credit observed files to a pre-existing ordinary turn without input evidence", async () => {
-    const sent: Array<Parameters<ProviderConnection["send"]>[0]> = [];
-    const original = summaryDriver("Done");
-    const driver: ProviderDriver = {
-      kind: "openai-compatible",
-      probe: () => Effect.die("unused"),
-      acquire: (input) =>
-        original.acquire(input).pipe(
-          Effect.map((connection) => ({
-            ...connection,
-            send: (turn: Parameters<ProviderConnection["send"]>[0]) => {
-              sent.push(turn);
-              return connection.send(turn);
-            },
-          })),
+  it.each(["legacy", "lost reply"] as const)(
+    "recovers only exact retained file input after %s without a provider replay",
+    async (scenario) => {
+      const sent: Array<Parameters<ProviderConnection["send"]>[0]> = [];
+      const original = summaryDriver("Done");
+      const driver: ProviderDriver = {
+        kind: "openai-compatible",
+        probe: () => Effect.die("unused"),
+        acquire: (input) =>
+          original.acquire(input).pipe(
+            Effect.map((connection) => ({
+              ...connection,
+              send: (turn: Parameters<ProviderConnection["send"]>[0]) => {
+                sent.push(turn);
+                return connection.send(turn);
+              },
+            })),
+          ),
+      };
+      const fixture = serviceFixture({
+        turnRuntime: new WorkTurnRuntime(),
+        resolveDriver: () => driver,
+      });
+      const base = automationDefinitionFixture();
+      if (base.binding.kind !== "work") throw new Error("Expected Work definition");
+      const definition = automationDefinitionFixture({
+        projectId: ids.project,
+        taskPrompt: "Summarize observed file changes.",
+        binding: {
+          ...base.binding,
+          kind: "work",
+          projectId: ids.project,
+          bindingRevisionId: decodeBindingRevisionId(ids.binding),
+        },
+        executionProfile: {
+          ...base.executionProfile,
+          projectId: ids.project,
+          providerInstanceId: decodeProviderInstanceId(ids.provider),
+          modelId: decodeProviderModelId("model-a"),
+        },
+        trigger: {
+          kind: "file-arrival",
+          directory: "Inbox",
+          includeExtensions: [],
+          excludeDirectories: [],
+          settleSeconds: 2,
+          automaticStartLimit: 8,
+        },
+        nextDueAt: null,
+      });
+      const files = ["report.txt"];
+      const snapshot = files.map((path) => ({ path, digest: "b".repeat(64), size: 4 }));
+      const checkpoint = {
+        ...initialAutomationFileCheckpoint("a".repeat(64), now),
+        baselineReady: true,
+        automaticStarts: 1,
+        phase: "watching" as const,
+        baseline: snapshot,
+        baselineDigest: automationSourceSnapshotDigest(snapshot),
+      };
+      const run = buildAutomationRunForOccurrence({
+        definition,
+        now,
+        occurrence: {
+          kind: "file-arrival",
+          automationId: definition.id,
+          definitionRevision: definition.definitionRevision,
+          source: { checkpoint, files, automaticStartOrdinal: 1 },
+        },
+      });
+      const command = {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId(run.firstTurnRequestId),
+        turnId: decodeWorkTurnId(
+          deterministicAutomationUuid(`automation-work-turn:${run.occurrenceKey}`),
         ),
-    };
-    const fixture = serviceFixture({
-      turnRuntime: new WorkTurnRuntime(),
-      resolveDriver: () => driver,
-    });
-    const base = automationDefinitionFixture();
-    if (base.binding.kind !== "work") throw new Error("Expected Work definition");
-    const definition = automationDefinitionFixture({
-      projectId: ids.project,
-      taskPrompt: "Summarize observed file changes.",
-      binding: {
-        ...base.binding,
-        kind: "work",
-        projectId: ids.project,
-        bindingRevisionId: decodeBindingRevisionId(ids.binding),
-      },
-      executionProfile: {
-        ...base.executionProfile,
-        projectId: ids.project,
-        providerInstanceId: decodeProviderInstanceId(ids.provider),
-        modelId: decodeProviderModelId("model-a"),
-      },
-      trigger: {
-        kind: "file-arrival",
-        directory: "Inbox",
-        includeExtensions: [],
-        excludeDirectories: [],
-        settleSeconds: 2,
-        automaticStartLimit: 8,
-      },
-      nextDueAt: null,
-    });
-    const files = ["report.txt"];
-    const snapshot = files.map((path) => ({ path, digest: "b".repeat(64), size: 4 }));
-    const checkpoint = {
-      ...initialAutomationFileCheckpoint("a".repeat(64), now),
-      baselineReady: true,
-      automaticStarts: 1,
-      phase: "watching" as const,
-      baseline: snapshot,
-      baselineDigest: automationSourceSnapshotDigest(snapshot),
-    };
-    const run = buildAutomationRunForOccurrence({
-      definition,
-      now,
-      occurrence: {
-        kind: "file-arrival",
-        automationId: definition.id,
-        definitionRevision: definition.definitionRevision,
-        source: { checkpoint, files, automaticStartOrdinal: 1 },
-      },
-    });
-    const command = {
-      ...startCommand(),
-      requestId: decodeWorkTurnRequestId(run.firstTurnRequestId),
-      turnId: decodeWorkTurnId(
-        deterministicAutomationUuid(`automation-work-turn:${run.occurrenceKey}`),
-      ),
-      prompt: definition.taskPrompt,
-    };
-    expect((await fixture.service.startFirstTurn(ids.window, command)).kind).toBe("accepted");
-    await fixture.waitForIdle(command.requestId);
-    expect(sent).toHaveLength(1);
-    expect(JSON.stringify(sent[0])).not.toContain("report.txt");
-    const adapter = createAutomationWorkDispatchPort({
-      threads: {
-        bootstrap: async () => ({ threads: [{ id: ids.thread }] }),
-        execute: async () => ({ kind: "unused" }),
-      },
-      turns: fixture.service,
-      clock: () => now,
-      uuid: randomUUID,
-      prepareFileInput: async () => () => true,
-      markFileInput: () => true,
-    });
-    expect(automationFileContext(run)?.content.text).toContain("report.txt");
-    const result = await adapter.startOrRecoverFirstTurn({
-      run,
-      threadId: ids.thread,
-      firstTurnRequestId: run.firstTurnRequestId,
-      promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
-      scopeId: ROUTINE_HOST_SCOPE_ID,
-    });
-    expect(result.kind).toBe("failed");
-    expect(sent).toHaveLength(1);
-  });
+        prompt: definition.taskPrompt,
+      };
+      if (scenario === "legacy") {
+        expect((await fixture.service.startFirstTurn(ids.window, command)).kind).toBe("accepted");
+        await fixture.waitForIdle(command.requestId);
+        expect(sent).toHaveLength(1);
+        expect(JSON.stringify(sent[0])).not.toContain("report.txt");
+      }
+      let current = true;
+      let loseReply = true;
+      const prepare = vi.fn(async () => () => current);
+      const mark = vi.fn(() => true);
+      const adapter = createAutomationWorkDispatchPort({
+        threads: {
+          bootstrap: async () => ({ threads: [{ id: ids.thread }] }),
+          execute: async () => ({ kind: "unused" }),
+        },
+        turns: {
+          startFirstTurn: async (scope, input, options) => {
+            const result = await fixture.service.startFirstTurn(scope, input, options);
+            if (scenario === "lost reply" && loseReply) {
+              loseReply = false;
+              throw new Error("Controlled lost accepted reply");
+            }
+            return result;
+          },
+        },
+        readTurn: (requestId) => fixture.projection.lookup(requestId),
+        clock: () => now,
+        uuid: randomUUID,
+        prepareFileInput: prepare,
+        markFileInput: mark,
+      });
+      expect(automationFileContext(run)?.content.text).toContain("report.txt");
+      const result = await adapter.startOrRecoverFirstTurn({
+        run,
+        threadId: ids.thread,
+        firstTurnRequestId: run.firstTurnRequestId,
+        promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
+        scopeId: ROUTINE_HOST_SCOPE_ID,
+      });
+      expect(result.kind).toBe("failed");
+      if (scenario === "lost reply") {
+        await fixture.waitForIdle(command.requestId);
+        expect(JSON.stringify(sent[0])).toContain("report.txt");
+        const retainedContext = automationFileContext(run);
+        if (retainedContext === undefined) throw new Error("Expected file context");
+        expect(fixture.projection.lookup(command.requestId)?.externalInput).toEqual(
+          workExternalInputReceipt(retainedContext),
+        );
+        current = false;
+        const recovered = await adapter.startOrRecoverFirstTurn({
+          run,
+          threadId: ids.thread,
+          firstTurnRequestId: run.firstTurnRequestId,
+          promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
+          scopeId: ROUTINE_HOST_SCOPE_ID,
+        });
+        expect(recovered).toMatchObject({
+          kind: "accepted",
+          runtimeReceipt: `work-turn:${run.firstTurnRequestId}`,
+        });
+        expect(prepare).toHaveBeenCalledOnce();
+        expect(mark).toHaveBeenCalledOnce();
+      } else {
+        expect(prepare).not.toHaveBeenCalled();
+        expect(mark).not.toHaveBeenCalled();
+      }
+      expect(sent).toHaveLength(1);
+    },
+  );
 
   it.each(["unchanged", "input directory", "Project root"] as const)(
     "keeps the exact physical source admission through actual SDK startup (%s)",
