@@ -40,11 +40,12 @@ const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, "0")
 const now = "2026-08-18T09:00:00.000Z";
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const windowId = decodeWindowId(id(1));
+const nativeRepositoryId: `repo_${string}` = `repo_${"a".repeat(64)}`;
 const source = decodeCodeThread({
   id: id(2),
   projectId: id(3),
   bindingRevisionId: id(4),
-  repositoryId: `repo_${"a".repeat(64)}`,
+  repositoryId: nativeRepositoryId,
   checkoutId: id(5),
   title: "Hunk owner",
   lifecycle: "active",
@@ -131,7 +132,7 @@ function harness() {
     repository: {
       observe: async () => ({
         status: "available",
-        repositoryId: source.repositoryId,
+        repositoryId: nativeRepositoryId,
         repositoryRoot,
         commonDirectory: join(repositoryRoot, ".git"),
         objectDirectory: join(repositoryRoot, ".git/objects"),
@@ -245,8 +246,10 @@ function harness() {
     ),
     read: vi.fn(async () => patch),
   };
-  const unused = vi.fn();
-  const serviceOptions = {
+  const unused = vi.fn(() => {
+    throw new Error("Unexpected unused hunk fixture port.");
+  });
+  const serviceOptions: CodeOperationServiceOptions = {
     authority: {
       readThread: () => activeThread,
       readCheckout: () => checkout,
@@ -264,7 +267,7 @@ function harness() {
           ? undefined
           : {
               checkoutRoot: root.rootPath,
-              rootCurrent: root.current,
+              ...(root.current === undefined ? {} : { rootCurrent: root.current }),
               rootIdentity: root.rootIdentity,
               shell: "/bin/sh",
               credentialReferences: [],
@@ -300,15 +303,13 @@ function harness() {
       start: unused,
       holdsTurn: () => false,
       threadsWritingIn: () =>
-        otherWriter
-          ? [{ threadId: id(12), projectId: source.projectId, title: "Other writer" }]
-          : [],
+        otherWriter ? [decodeCodeThread({ ...source, id: id(12), title: "Other writer" })] : [],
     },
     terminals: { launch: unused, attach: unused, write: unused, resize: unused, terminate: unused },
     repositoryTests: { discover: unused, run: unused, cancel: unused },
     pullRequests: { ensure: unused, observeReview: unused },
-    reviewFindings: { record: unused },
-  } as CodeOperationServiceOptions;
+    reviewFindings: { create: unused, changeState: unused },
+  };
   const service = new CodeOperationService(serviceOptions);
   const prepare = (operation = 9) =>
     service.execute(

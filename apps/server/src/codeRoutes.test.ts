@@ -1,5 +1,6 @@
 import {
   decodeCodeCheckoutIdentity,
+  decodeCodeEvidenceContentId,
   decodeCodeThread,
   decodeCodeThreadId,
   decodeCodeOperationId,
@@ -24,7 +25,7 @@ const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000902");
 const operationId = decodeCodeOperationId("00000000-0000-4000-8000-000000000909");
 const checkoutId = "00000000-0000-4000-8000-000000000903";
-const contentId = "00000000-0000-4000-8000-000000000904";
+const contentId = decodeCodeEvidenceContentId("00000000-0000-4000-8000-000000000904");
 const projectId = "00000000-0000-4000-8000-000000000906";
 const bindingRevisionId = "00000000-0000-4000-8000-000000000907";
 const providerInstanceId = "00000000-0000-4000-8000-000000000908";

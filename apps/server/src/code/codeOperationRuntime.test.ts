@@ -9962,7 +9962,10 @@ it.each(["stage-git-hunks", "unstage-git-hunks", "reverse-git-hunks"] as const)(
         await fixture.runtime.prepareApproval(windowId, {
           effect: {
             kind: "operation",
-            command: { ...command, comparisonOperationId: operationId(1975) },
+            command: decodeCodeOperationCommand({
+              ...command,
+              comparisonOperationId: operationId(1975),
+            }),
           },
         }),
       ).toBeUndefined();
