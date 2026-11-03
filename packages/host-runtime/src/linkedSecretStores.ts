@@ -89,7 +89,7 @@ export interface LinkedSecretStores {
   readonly awsCliPointer: () => Promise<AwsCliPointer | undefined>;
   /** Writes or removes that pointer. It names items; it never holds their values. */
   readonly setAwsCliPointer: (pointer: AwsCliPointer | undefined) => Promise<void>;
-  readonly googleCliPointer?: () => Promise<GoogleCliPointer | undefined>;
+  readonly googleCliPointer?: () => Promise<GoogleCliPointerState>;
   readonly setGoogleCliPointer?: (pointer: GoogleCliPointer | undefined) => Promise<void>;
 }
 
@@ -111,6 +111,10 @@ export interface GoogleCliPointer {
   readonly serviceAccountEmail: string;
   readonly scopes: ReadonlyArray<string>;
 }
+
+export type GoogleCliPointerState =
+  | { readonly status: "none" | "unavailable" }
+  | { readonly status: "configured"; readonly pointer: GoogleCliPointer };
 
 export function googleCliPointerOf(value: unknown): GoogleCliPointer | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
@@ -454,7 +458,32 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       return result.status === "read" ? { status: "found" } : result;
     },
     awsCliPointer: async () => (await load()).aws,
-    googleCliPointer: async () => (await load()).google,
+    googleCliPointer: async () => {
+      try {
+        const text = await readFile(options.statePath, "utf8");
+        if (Buffer.byteLength(text, "utf8") > 64 * 1024) return { status: "unavailable" };
+        const parsed: unknown = JSON.parse(text);
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+          return { status: "unavailable" };
+        const record = parsed as Record<string, unknown>;
+        if (
+          record.version !== 1 ||
+          typeof record.stores !== "object" ||
+          record.stores === null ||
+          Array.isArray(record.stores)
+        )
+          return { status: "unavailable" };
+        if (record.google === undefined) return { status: "none" };
+        const pointer = googleCliPointerOf(record.google);
+        return pointer === undefined
+          ? { status: "unavailable" }
+          : { status: "configured", pointer };
+      } catch (error) {
+        return error instanceof Error && "code" in error && error.code === "ENOENT"
+          ? { status: "none" }
+          : { status: "unavailable" };
+      }
+    },
     setGoogleCliPointer: async (pointer) => {
       await update((current) => {
         const { google: _removed, ...state } = current;

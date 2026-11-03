@@ -84,8 +84,35 @@ secret is removed from any output Octant keeps.
 If the store is locked or an item is gone, the command runs without AWS
 credentials and the AWS command line says it found none. **Remove** stops
 handing out sessions. Claude Code, Codex, and other providers' own commands
-do not get a session. The Google Cloud and Azure command lines are not
-supported yet.
+do not get a session. Azure command-line credentials are not supported yet.
+
+## Let gcloud use a service account
+
+For `gcloud` commands in Octant's own shell:
+
+1. Keep the service-account JSON in an item in your linked 1Password store.
+2. Open **Settings › Secret stores › Google Cloud command line** and enter
+   its item address, exact service-account email, and the Google OAuth scope
+   URLs these commands need.
+3. Choose **Review Google Cloud account**, check the account and scopes, then
+   choose **Use this service account**. Cancel leaves the account unchanged.
+
+The broker reads the signing key; the command receives only an expiring token
+in its own temporary file and private configuration. Tokens last at most one
+hour and are not refreshed during a command. The account's IAM roles can
+allow access to several cloud Projects: choosing a task's Project does not
+narrow those roles. This channel does not supply ADC, `gsutil`, `bq`, delegated
+users, impersonation, provider-native commands, or worktree setup.
+
+**Read current Google account** reports the saved reference and last known
+token expiry without issuing a token. If a change is not confirmed, read the
+current account before retrying. **Remove Google Cloud account** and unlink
+stop pending and future use; tokens already received by running commands may
+remain valid until expiry. They do not sign out the host or revoke the cloud
+account. When a configured channel is unavailable, Octant supplies an empty
+token file and isolated configuration with a recovery message, rather than
+using the host's saved sign-in. If command recovery is unavailable, repair it
+and restart the host; ordinary token-free commands remain available.
 
 ## When the store is locked or the item is gone
 

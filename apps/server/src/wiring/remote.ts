@@ -116,6 +116,7 @@ import type { AuthorityWiring } from "./authority";
 import type { BrowserWiring } from "./browser";
 import type { FoundationsWiring } from "./foundations";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
+import type { HarnessWiring } from "./harness";
 import type { HarnessStateWiring } from "./harnessState";
 import { checkDelegationParent } from "../hub/delegationParentCheck";
 import type { IntegrationsWiring } from "./integrations";
@@ -146,6 +147,7 @@ export type RemoteDependencies = Pick<
   ServerStart,
   "options" | "persistence" | "serve" | "startedAt" | "version"
 > &
+  Pick<HarnessWiring, "beginGoogleCliChange"> &
   Pick<AuthorityWiring, "browserCaptureStore" | "personMemory" | "windowAuthorityStore"> &
   Pick<
     AgentRunsWiring,
@@ -964,6 +966,7 @@ export function wireRemote(deps: RemoteDependencies) {
   // the host journals each link and each change to a key's reference.
   const secretStoresRoutes = createSecretStoresRouteHandler({
     service: createSecretStoresService({
+      beginGoogleCliChange: deps.beginGoogleCliChange,
       broker:
         options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
           ? undefined

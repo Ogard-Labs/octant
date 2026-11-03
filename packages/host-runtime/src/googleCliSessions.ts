@@ -22,11 +22,12 @@ type GoogleCliConfigureResult =
   | { readonly status: "pointed" | "superseded" | "refused" }
   | Exclude<LinkedSecretRead, { readonly status: "read" }>;
 type GoogleCliClearResult =
-  | { readonly status: "none" }
+  | { readonly status: "none" | "unavailable" }
   | ({ readonly status: "cleared" } & GoogleCliPointer);
 export interface GoogleCliSessions {
   readonly session: () => Promise<GoogleCliSessionResult>;
   readonly forget: () => void;
+  readonly sessionExpiresAt: (pointer: GoogleCliPointer) => string | undefined;
   readonly configure: (
     pointer: GoogleCliPointer,
     restoring: boolean,
@@ -92,6 +93,11 @@ export function createGoogleCliSessions(options: {
         });
         if (!response.ok || response.body === null) return { status: "refused" };
         const reader = response.body.getReader();
+        const cancel = () => {
+          void reader.cancel().catch(() => undefined);
+        };
+        controller.signal.addEventListener("abort", cancel, { once: true });
+        if (controller.signal.aborted) cancel();
         let bytes = 0;
         const chunks: Uint8Array[] = [];
         try {
@@ -106,6 +112,7 @@ export function createGoogleCliSessions(options: {
             chunks.push(result.value);
           }
         } finally {
+          controller.signal.removeEventListener("abort", cancel);
           reader.releaseLock();
         }
         if (controller.signal.aborted) return { status: "unavailable" };
@@ -154,6 +161,8 @@ export function createGoogleCliSessions(options: {
     held = undefined;
   };
   return {
+    sessionExpiresAt: (pointer) =>
+      held?.key === JSON.stringify(pointer) ? held.value.expiration : undefined,
     configure: async (pointer, restoring) => {
       const version = ++selection;
       forget();
@@ -183,18 +192,25 @@ export function createGoogleCliSessions(options: {
       selection += 1;
       forget();
       return commit<GoogleCliClearResult>(async () => {
-        const pointer = await options.linked.googleCliPointer?.();
+        const current = await options.linked.googleCliPointer?.();
+        if (current === undefined || current.status === "unavailable")
+          return { status: "unavailable" };
         await options.linked.setGoogleCliPointer?.(undefined);
-        return pointer === undefined ? { status: "none" } : { status: "cleared", ...pointer };
+        return current.status === "none"
+          ? { status: "none" }
+          : { status: "cleared", ...current.pointer };
       });
     },
     forget: () => {
-      generation += 1;
-      held = undefined;
+      selection += 1;
+      forget();
     },
     session: async () => {
-      const pointer = await options.linked.googleCliPointer?.();
-      if (pointer === undefined) return { status: "none" };
+      const selection = await options.linked.googleCliPointer?.();
+      if (selection === undefined || selection.status === "unavailable")
+        return { status: "unavailable" };
+      if (selection.status === "none") return { status: "none" };
+      const pointer = selection.pointer;
       if (!(await options.linked.isLinked(pointer.store))) return { status: "not-linked" };
       const key = JSON.stringify(pointer);
       if (held?.key === key && Date.parse(held.value.expiration) - now() > 60000) return held.value;
@@ -202,7 +218,10 @@ export function createGoogleCliSessions(options: {
       const value = await issue(pointer, started);
       const current = await options.linked.googleCliPointer?.();
       const linked = await options.linked.isLinked(pointer.store);
-      if (started !== generation || JSON.stringify(current) !== key || !linked)
+      if (started !== generation) return { status: "none" };
+      if (current === undefined || current.status === "unavailable")
+        return { status: "unavailable" };
+      if (current.status !== "configured" || JSON.stringify(current.pointer) !== key || !linked)
         return { status: "none" };
       if (value.status === "issued") held = { key, value };
       return value;
@@ -263,10 +282,17 @@ export async function handleGoogleCliBrokerRoute(
       return Response.json({ error: "invalid-request" }, { status: 400 });
     if (operation === "session") return Response.json(await sessions.session());
     if (operation === "clear") return Response.json(await sessions.clear());
-    const pointer = await linked.googleCliPointer?.();
-    return Response.json(
-      pointer === undefined ? { status: "none" } : { status: "linked", ...pointer },
-    );
+    const current = await linked.googleCliPointer?.();
+    if (current === undefined || current.status === "unavailable")
+      return Response.json({ status: "unavailable" });
+    if (current.status === "none") return Response.json({ status: "none" });
+    const pointer = current.pointer;
+    const sessionExpiresAt = sessions.sessionExpiresAt(pointer);
+    return Response.json({
+      status: "linked",
+      ...pointer,
+      ...(sessionExpiresAt === undefined ? {} : { sessionExpiresAt }),
+    });
   }
   if (operation !== "point" && operation !== "restore")
     return Response.json({ error: "invalid-request" }, { status: 400 });

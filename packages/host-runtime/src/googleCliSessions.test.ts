@@ -1,6 +1,6 @@
 import { Server } from "node:http";
 import { generateKeyPairSync, verify } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -135,6 +135,37 @@ async function harness(timeoutMs = 10000) {
 }
 
 describe("Google command-line sessions from an explicitly selected linked account", () => {
+  it("does not apply a pending account selection after unlink and a later relink", async () => {
+    const h = await harness();
+    const gate = Promise.withResolvers<void>();
+    h.item.gate = gate.promise;
+    const pending = h.post("point", pointer);
+    await vi.waitFor(() => expect(h.item.reads).toBeGreaterThan(0));
+    for (const operation of ["unlink", "link"]) {
+      const answer = await h.broker.fetchForTest(
+        new Request(new URL(`/v1/secret-stores/${operation}`, h.broker.url), {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-credential-broker-token": h.broker.token,
+          },
+          body: JSON.stringify({ store: "onepassword" }),
+        }),
+      );
+      expect(answer.status).toBe(200);
+    }
+    gate.resolve();
+    expect((await pending).body).toEqual({ status: "superseded" });
+    expect((await h.post("reference")).body).toEqual({ status: "none" });
+  });
+  it("reports unreadable configuration as unavailable rather than an unconfigured ambient fallback", async () => {
+    const h = await harness();
+    await h.post("point", pointer);
+    await writeFile(join(h.directory, "linked.json"), "{not valid metadata");
+    expect((await h.post("session")).body).toEqual({ status: "unavailable" });
+    expect((await h.post("reference")).body).toEqual({ status: "unavailable" });
+    expect(h.requests).toHaveLength(0);
+  });
   it("keeps pending and cached sessions unusable after clear, expiry, or unlink", async () => {
     const h = await harness();
     await h.post("point", pointer);
@@ -213,14 +244,14 @@ describe("Google command-line sessions from an explicitly selected linked accoun
       h.linked.setGoogleCliPointer?.({ ...pointer, store: "onepassword" }),
       h.linked.setAwsCliPointer(aws),
     ]);
-    expect(await h.linked.googleCliPointer?.()).toEqual(pointer);
+    expect(await h.linked.googleCliPointer?.()).toEqual({ status: "configured", pointer });
     expect(await h.linked.awsCliPointer()).toEqual(aws);
     await Promise.all([
       h.linked.setGoogleCliPointer?.({ ...pointer, store: "onepassword" }),
       h.linked.unlink("onepassword"),
     ]);
     expect(await h.linked.isLinked("onepassword")).toBe(false);
-    expect(await h.linked.googleCliPointer?.()).toEqual(pointer);
+    expect(await h.linked.googleCliPointer?.()).toEqual({ status: "configured", pointer });
   });
   it("does not resurrect a pending account selection after the person cleared it", async () => {
     const h = await harness();

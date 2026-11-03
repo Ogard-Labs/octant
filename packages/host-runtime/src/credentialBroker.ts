@@ -304,6 +304,7 @@ export async function startCredentialBroker(
   const close = (): Promise<void> => {
     if (closing !== undefined) return closing;
     closing = (async () => {
+      linked?.googleCli.forget();
       await runtime.close();
       await cloudIam.close();
       await new Promise<void>((resolve, reject) => {
