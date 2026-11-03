@@ -74,8 +74,14 @@ async function fixture(
     await mkdir(join(directory, "Inbox"));
   }
   const connection = openSqlite(join(directory, "events.sqlite3"));
-  cleanups.push(async () => {
+  let databaseClosed = false;
+  const closeDatabase = () => {
+    if (databaseClosed) return;
     connection.close();
+    databaseClosed = true;
+  };
+  cleanups.push(async () => {
+    closeDatabase();
   });
   const initialDefinition = automationDefinitionFixture({
     missedRunPolicy,
@@ -172,6 +178,7 @@ async function fixture(
   });
   return {
     directory,
+    closeDatabase,
     journal,
     definition,
     store,
@@ -330,6 +337,7 @@ describe("file input reconciliation on the host routine owner", () => {
         failedRevision,
       );
       host.sources.close();
+      host.closeDatabase();
       host = await fixture(filesystem, missedRunPolicy, host.directory);
       expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
         phase: "unavailable",
