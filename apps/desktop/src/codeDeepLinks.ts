@@ -16,12 +16,12 @@ export type CodeDeepLink =
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function parseCodeDeepLink(input: string): CodeDeepLink {
+export function parseCodeDeepLink(input: string, scheme = "octant"): CodeDeepLink {
   try {
     if (/%5c/i.test(input)) return invalid();
     const url = new URL(input);
     if (
-      url.protocol !== "octant:" ||
+      url.protocol !== `${scheme}:` ||
       url.hostname !== "code" ||
       url.username ||
       url.password ||

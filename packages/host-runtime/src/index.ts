@@ -212,3 +212,10 @@ export {
   prepareBrowserDownloadHoldRoot,
   type BrowserDownloadHoldKind,
 } from "./browserDownloadHold";
+export {
+  DESKTOP_FLAVOR_IDENTITIES,
+  desktopIdentity,
+  resolveDesktopPackageFlavor,
+  type DesktopFlavor,
+  type DesktopIdentity,
+} from "./desktopIdentity";

@@ -70,6 +70,7 @@ export interface AppUpdateServiceOptions {
    * preview build follows previews unless it is told otherwise.
    */
   readonly ring?: AppReleaseRing;
+  readonly allowedRings?: ReadonlyArray<AppReleaseRing>;
   readonly verifier?: FeedVerifier;
   readonly fetchImpl?: typeof globalThis.fetch;
   readonly clock?: () => string;
@@ -117,6 +118,9 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     });
   let automaticChecks = options.automaticChecks;
   let ring: AppReleaseRing = options.ring ?? ringForVersion(options.app.version);
+  if (options.allowedRings !== undefined && !options.allowedRings.includes(ring)) {
+    throw new TypeError("This app cannot follow the configured release ring.");
+  }
   let state: AppUpdateState = {
     status: "idle",
     currentVersion: options.app.version,
@@ -272,6 +276,9 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
      * check answers for the new ring from scratch.
      */
     setRing(next: AppReleaseRing): AppUpdateState {
+      if (options.allowedRings !== undefined && !options.allowedRings.includes(next)) {
+        return publishWithoutOffer({ status: "refused", refusal: "wrong-ring", message: refusalMessage("wrong-ring") });
+      }
       if (next === ring) return state;
       ring = next;
       releaseLoopback();

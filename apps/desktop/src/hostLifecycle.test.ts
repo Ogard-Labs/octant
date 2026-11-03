@@ -21,6 +21,19 @@ const managedHost: LocalHostDescriptor = {
 };
 
 describe("desktop host lifecycle", () => {
+  it("retains the stable host when a Nightly window still needs its brokers", async () => {
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const lifecycle = createHostLifecycleController({
+      attach: async () => undefined,
+      start: async () => desktopHost,
+      stop,
+      retainForClients: async () => true,
+    });
+    await lifecycle.ensureRunning();
+    await expect(lifecycle.prepareQuit(() => true)).resolves.toBe("retained");
+    expect(stop).not.toHaveBeenCalled();
+    expect(lifecycle.snapshot().state).toBe("running");
+  });
   it("keeps an Electron-owned host alive when the last window closes", async () => {
     const stop = vi.fn().mockResolvedValue(undefined);
     const lifecycle = createHostLifecycleController({
