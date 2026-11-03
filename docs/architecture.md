@@ -4746,10 +4746,12 @@ Octant sent inside the prompt is counted. Per runtime:
   output and reasoning tokens, plus `modelContextWindow`), OpenCode (per-step
   tokens and the model's `limit.context`) and Pi (assistant `message_end` usage;
   the occupancy is the last message's input, cache and output) report one
-  figure and no categories. The ACP driver reports no usage at all, so an ACP
-  thread shows no window, and its context meter says the runtime reports no
-  usage (from the runtime's integration `context.usage`) rather than that none
-  has arrived yet. That holds in every mode: a Work or Chat thread is planned by
+  figure and no categories. Verified Mistral Vibe 3.0.3 ACP updates also report
+  an independent context reading and per-turn token deltas, as specified in
+  [Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface). Other
+  ACP runtimes report no usage through the driver, so their context meters
+  say the runtime reports no usage (from integration `context.usage`) rather
+  than that none has arrived yet. That holds in every mode: a Work or Chat thread is planned by
   Octant, so its meter still shows Octant's own estimate, and the line stands
   where a window's share would be. Lists of tools, MCP servers, skills or instruction
   files exist in some runtimes but carry no token weight, so they are not parts.
@@ -4788,7 +4790,7 @@ the turn runner reports `compacted` for the rest of a turn once the adapter's
 | Codex app-server  | Each turn's input is a `userMessage` in the thread and is sent with every later request. Compaction rebuilds the thread from a summary and as many recent user messages as fit in 20,000 tokens, so what survives is Codex's choice. Octant sees compaction as the `contextCompaction` item.                                                                                                                               | `kept`, or `compacted` for the rest of a turn in which a `contextCompaction` item arrived | `build_compacted_history` and `COMPACT_USER_MESSAGE_MAX_TOKENS` in codex-rs `core/src/compact.rs`; the item in `codexProtocol.ts` |
 | OpenCode          | Each prompt is a user message sent again with every request. A completed compaction sends the summary and at most a recent tail of messages. Octant sees `session.compacted` (1.x), `session.next.compaction.ended` (2.x) and `session.compaction.ended` (2.0.22).                                                                                                                                                         | `kept`, or `compacted` for the rest of a prompt in which compaction ended                 | `filterCompacted` in opencode `packages/opencode/src/session/message-v2.ts`; the events in `@opencode-ai/sdk`                     |
 | Pi                | Each prompt is a session entry sent with every request. A compaction keeps a summary and the entries from `firstKeptEntryId` on. Octant sees `compaction_end`; one without `result` (aborted or failed) changed nothing.                                                                                                                                                                                                   | `kept`, or `compacted` when a `compaction_end` with a `result` arrived during the prompt  | Pi's JSON event stream docs (`packages/coding-agent/docs/json.md`, `compaction_start`/`compaction_end`)                           |
-| ACP agents        | Each agent manages its own history; the protocol says nothing about what it keeps or compacts, and the driver reports no usage.                                                                                                                                                                                                                                                                                            | absent                                                                                    | ACP driver (`acpDriver.ts`, usage `unsupported`)                                                                                  |
+| ACP agents        | Each agent manages its own history; Octant has no verified prompt-retention or compaction evidence. Vibe 3.0.3 reports usage and context without that breakdown; other ACP runtimes report no usage.                                                                                                                                                                                                                       | absent                                                                                    | ACP driver; verified Vibe usage in [Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)                          |
 | Any other adapter | Not determined.                                                                                                                                                                                                                                                                                                                                                                                                            | absent                                                                                    | —                                                                                                                                 |
 
 From that the turn runner builds the parts (`octantWindowBreakdown` in
@@ -5925,7 +5927,7 @@ reported one. The Claude mapper reports the turn so far after each model call,
 summed by message id. Every turn that reached the provider leaves exactly one
 ledger row however it ended — completed, failed, cancelled, or interrupted —
 and Work keeps usage the provider reports after a cancel. A turn that reached
-the provider and reported nothing (an ACP agent in Code reports no usage) is
+the provider and reported nothing (most ACP agents in Code report no usage) is
 recorded as unreported and unpriced; whether token and money ceilings refuse
 after it depends on its provider (below). A turn refused or failed before the
 provider leaves no row. A Code turn
@@ -9735,8 +9737,10 @@ access` agree); a thread's own change is journaled as
     ([why](design/provider-runtimes.md#mistral-vibe-surface)); reading usage,
     compaction, review, and questions from `vibe-acp`'s own ACP extensions is
     allowed, not built yet.
-  - **ACP agents** do not report usage, so a spend ceiling leaves their turns
-    out and says so. They report no file changes or diffs, ask no user
+  - **ACP agents** report no usage except verified Mistral Vibe 3.0.3. Its
+    cumulative counters become per-turn deltas; provider cost stays absent
+    ([Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)).
+    A spend ceiling leaves other ACP turns out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
     resume, and offer Octant's tools only on macOS when the agent serves HTTP
     MCP. fx is also refused in Chat and Plan.
