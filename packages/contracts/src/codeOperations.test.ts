@@ -335,6 +335,14 @@ describe("Code operation contracts", () => {
         },
         authorization: { kind: "full-access" },
       },
+      { kind: "prepare-git-hunks", ...scope, gitOperationId: ids.git, scope: "unstaged" },
+      ...(["stage-git-hunks", "unstage-git-hunks", "reverse-git-hunks"] as const).map((kind) => ({
+        kind,
+        ...scope,
+        gitOperationId: ids.git,
+        comparisonOperationId: ids.operation,
+        selected: ["d".repeat(64)],
+      })),
       {
         kind: "stage-git",
         ...scope,

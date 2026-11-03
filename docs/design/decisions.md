@@ -1998,6 +1998,7 @@ The dock is contextual: it follows the active pane's thread and Project, and nev
 - Each thread keeps its own open tools and selected tool; a tool with no valid subject shows an explicit unavailable state. _Here only._
 - A saved layout never starts a new shell. Restoring a Terminal tab may reattach to an existing process; otherwise it offers Start terminal.
 - Git History stays read-only in every posture, Plan included. Browsing or refreshing it never fetches, checks out, stages, reverts or resets. _Here only._
+- Current Code Review selects exact staged or unstaged text hunks through retained host comparison identities; stage and unstage preserve unrelated changes, and reversal confirms selected unstaged loss under the existing root writer guard and approval policy. Stale, unsupported and captured views never silently become whole-file mutations.
 - Hand off is authorized exactly as export is. An unreadable thread is refused identically, and a paired device may hand off only threads it may read. _Here only._
 - The Files tool lists the whole bound folder. A listed file opens through a host-minted target id and opaque reference, never a path; a forgotten or cross-Project token resolves to nothing. _Here only._
 

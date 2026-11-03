@@ -430,10 +430,12 @@ export interface CodeRouteService {
     threadId: CodeThreadId,
     operationId: CodeOperationId,
     contentId: string,
+    admissionCurrent?: () => boolean,
   ) => Promise<CodeContentRead> | CodeContentRead;
   readonly readOperationContents?: (
     authenticatedWindowId: WindowId,
     input: CodeEvidenceBatchRequest,
+    admissionCurrent?: () => boolean,
   ) => Promise<CodeEvidenceBatchResponse> | CodeEvidenceBatchResponse;
   readonly saveFile: (
     authenticatedWindowId: WindowId,
@@ -612,6 +614,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // route directly.
     let operationInitiator: "user" | "agent";
     let callerKind: "local-window" | "remote-device";
+    let hunkAdmissionCurrent: () => boolean;
     try {
       if (url.searchParams.has("windowId")) {
         throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
@@ -624,6 +627,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
       authenticatedWindowId = principalContext.scopeId;
       callerKind = principalContext.principal.kind;
       operationInitiator = callerKind === "local-window" ? "user" : "agent";
+      const capability = request.headers.get("x-octant-window-capability") ?? "";
+      hunkAdmissionCurrent = () => {
+        if (request.signal.aborted || principalContext.abortSignal?.aborted === true) return false;
+        if (principalContext.principal.kind === "remote-device") return true;
+        try {
+          return (
+            String(dependencies.windowAuthorityStore.authenticate(capability, now())) ===
+              String(principalContext.scopeId) &&
+            String(principalContext.principal.windowId) === String(principalContext.scopeId)
+          );
+        } catch {
+          return false;
+        }
+      };
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failureResponse(
@@ -768,6 +785,14 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           const operationResult = decodeCodeOperationResult(
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {
               initiator: operationInitiator,
+              ...([
+                "prepare-git-hunks",
+                "stage-git-hunks",
+                "unstage-git-hunks",
+                "reverse-git-hunks",
+              ].includes(operation.kind)
+                ? { admissionCurrent: hunkAdmissionCurrent }
+                : {}),
             }),
           );
           if (operationResult.operationId !== operation.operationId) {
@@ -1807,6 +1832,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               threadId,
               operationId,
               contentId,
+              hunkAdmissionCurrent,
             ),
             origin,
           );
@@ -2045,7 +2071,11 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           }
           return jsonResponse(
             decodeCodeEvidenceBatchResponse(
-              await dependencies.service.readOperationContents(authenticatedWindowId, input),
+              await dependencies.service.readOperationContents(
+                authenticatedWindowId,
+                input,
+                hunkAdmissionCurrent,
+              ),
             ),
             200,
             origin,

@@ -1652,8 +1652,39 @@ until the overwrite finishes, including when it fails. Discard also refuses
 while its own thread has a starting or live turn, as a rewind does: that turn
 could otherwise write the files being discarded. The existing reviewed-state
 token and tracked-path checks still apply. Stage and unstage do not discard
-files and keep their existing rules. No command currently reaches commit revert;
-a future destructive reversal must reuse this protection.
+files and keep their existing rules. Reversing selected unstaged hunks uses
+this same destructive-operation gate, own-turn refusal and root writer hold.
+It reverses only the selected patch; it never substitutes whole-file discard.
+No command here reaches commit revert.
+
+Current Review can select exact text hunks from **Index → Working tree** for
+stage or reversal, or **HEAD → Index** for unstage. A combined HEAD-to-working-tree
+view is not an unstaged comparison. The host retains the canonical comparison,
+its digest, hunk identities and an opaque digest of the original host root/binding
+witness; commands carry only its operation reference and
+selected identities, never renderer-supplied patches. Before applying, the host
+revalidates the original live principal, Project binding, checkout and physical
+root, current posture, reviewed state and exact canonical bytes. It checks again
+after queued work and native preflight, with a final synchronous authority/root
+proof after launch preparation. Git receives a bounded patch on stdin with no
+three-way or whitespace fallback; a preflight that relocates a hunk is refused.
+A replaced physical root cannot adopt an old comparison even when its Git bytes
+match. A missing original witness requires a fresh comparison; the stable host
+witness remains usable after restart while the same root and authority remain.
+The managed writer hold excludes competing Octant writes during reversal.
+Unmanaged external processes can still race after the last native preflight and
+state check; this is not a filesystem-wide atomic compare-and-swap.
+
+Binary, rename, conflict, nonregular-file/mode and ambiguous-path comparisons
+explain why selection is unavailable. Truncated or non-UTF-8 bytes cannot become
+an editable patch. Captured, historical and branch review views remain read-only.
+The person confirms reversal and ordinary approval policy still applies. After a
+write, Review rereads current state. If authority retires after a launched write,
+the private operation stream retains only its minimal mutation outcome, never
+fresh comparison or error bytes; the retired caller is told the checkout may
+have changed and must Refresh. An authorized replay reads that outcome instead
+of applying the same operation again; an uncertain native result stays failed
+rather than being presented as proof that nothing changed.
 
 **Rewind and fork instead of edit (maintainer decision, 2026-11-01).** Chat,
 Work and Code threads do not edit a sent message: editing rewrites what the

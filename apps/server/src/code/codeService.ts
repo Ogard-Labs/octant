@@ -569,6 +569,8 @@ export interface ManagedCodeThreadCreationPort {
 }
 
 export interface CodeFileRootResolution {
+  /** Host-only retained binding/physical proof; never a renderer assertion. */
+  readonly current?: () => boolean;
   readonly fileId: CodeFileId;
   readonly rootPath: string;
   readonly rootIdentity: FileIdentity;

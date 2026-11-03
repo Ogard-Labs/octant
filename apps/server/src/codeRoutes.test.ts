@@ -1238,7 +1238,9 @@ describe("Code routes", () => {
 
   it("returns operation evidence only through its thread and operation authority scope", async () => {
     const bytes = new TextEncoder().encode("diff evidence");
-    const readOperationContent = vi.fn(() => ({
+    const readOperationContent = vi.fn<
+      NonNullable<Parameters<typeof createCodeRouteHandler>[0]["service"]["readOperationContent"]>
+    >(() => ({
       bytes,
       digest: "ccca685709aa9e68d44defdeaa97fcd6da17e124ec1b1e7e0e83e85b8b45cc9a",
       byteLength: bytes.byteLength,
@@ -1251,11 +1253,20 @@ describe("Code routes", () => {
 
     expect(response?.status).toBe(200);
     expect(new TextDecoder().decode(await response!.arrayBuffer())).toBe("diff evidence");
-    expect(readOperationContent).toHaveBeenCalledWith(windowId, threadId, operationId, contentId);
+    expect(readOperationContent).toHaveBeenCalledWith(
+      windowId,
+      threadId,
+      operationId,
+      contentId,
+      expect.any(Function),
+    );
+    expect(readOperationContent.mock.calls[0]?.[4]?.()).toBe(true);
   });
 
   it("hydrates one conversation page through a single authorized evidence batch", async () => {
-    const readOperationContents = vi.fn(async () => ({
+    const readOperationContents = vi.fn<
+      NonNullable<Parameters<typeof createCodeRouteHandler>[0]["service"]["readOperationContents"]>
+    >(async () => ({
       threadId,
       items: [{ operationId, contentId, text: "display text" }],
     }));
@@ -1274,10 +1285,15 @@ describe("Code routes", () => {
       threadId,
       items: [{ operationId, contentId, text: "display text" }],
     });
-    expect(readOperationContents).toHaveBeenCalledWith(windowId, {
-      threadId,
-      items: [{ operationId, contentId }],
-    });
+    expect(readOperationContents).toHaveBeenCalledWith(
+      windowId,
+      {
+        threadId,
+        items: [{ operationId, contentId }],
+      },
+      expect.any(Function),
+    );
+    expect(readOperationContents.mock.calls[0]?.[2]?.()).toBe(true);
   });
 
   it("accepts canonical raw UTF-8 save metadata without exposing a root path", async () => {
