@@ -1,9 +1,15 @@
-import { decodeEventActor, decodeWindowId } from "@octant/contracts";
+import {
+  decodeEventActor,
+  decodeWindowId,
+  decodeProductFeedbackCommandResult,
+} from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { ProductFeedbackError, ProductFeedbackService } from "./browser/productFeedbackService";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { createProductFeedbackRouteHandler } from "./productFeedbackRoutes";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
+import { productFeedbackPersistenceFixture } from "./browser/productFeedback.test-fixtures";
+import { readThreadExternalContentTaint } from "./context/externalContentTaintProjection";
 
 const windowId = decodeWindowId("11111111-1111-4111-8111-111111111111");
 const capability = `${"A".repeat(42)}A`;
@@ -42,6 +48,121 @@ function handler(
 }
 
 describe("pointed-at feedback routes", () => {
+  it.each(["native-read", "commit-scope"] as const)(
+    "retains original request identity during %s without storing it in a completed preview",
+    async (phase) => {
+      for (const replacement of ["header", "bound-context"] as const) {
+        const entered = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        let hold = false;
+        const boundary = async () => {
+          if (!hold) return;
+          entered.resolve();
+          await release.promise;
+        };
+        const fixture = productFeedbackPersistenceFixture({
+          windowId,
+          threadId,
+          mode: "code",
+          current: () => true,
+          ...(phase === "native-read"
+            ? { beforePointRead: boundary }
+            : { beforeScopeRead: boundary }),
+        });
+        const store = new WindowAuthorityStore();
+        store.register({ windowId, capability, now: 0 });
+        const serviceResults: string[] = [];
+        const handle = createProductFeedbackRouteHandler({
+          windowAuthorityStore: store,
+          now: () => 0,
+          feedback: {
+            list: (...args) => fixture.service.list(...args),
+            readCropForNote: (...args) => fixture.service.readCropForNote(...args),
+            execute: async (...args) => {
+              const result = await fixture.service.execute(...args);
+              serviceResults.push(result.kind);
+              return result;
+            },
+          },
+        });
+        const request = (command: unknown, signal?: AbortSignal) => {
+          const value = new Request("http://127.0.0.1/api/feedback/commands", {
+            method: "POST",
+            headers: { "x-octant-window-capability": capability },
+            body: JSON.stringify(command),
+            ...(signal === undefined ? {} : { signal }),
+          });
+          bindPrincipalRouteContext(value, {
+            scopeId: windowId,
+            principal: { kind: "local-window", windowId, capabilityGeneration: 0 },
+          });
+          return value;
+        };
+        const prepare = {
+          kind: "prepare-product-feedback",
+          threadId,
+          contextId,
+          expectedObservationRevision: 0,
+          point: { x: 0.2, y: 0.15 },
+        };
+        try {
+          let command: unknown = prepare;
+          let previewId: string | undefined;
+          if (phase === "commit-scope") {
+            const controller = new AbortController();
+            const response = await handle(request(prepare, controller.signal));
+            const prepared = decodeProductFeedbackCommandResult(await response?.json());
+            if (prepared.kind !== "feedback-prepared") throw Error("Preview unavailable");
+            previewId = prepared.preview.id;
+            // A completed prepare's transport lifetime is not its preview lifetime.
+            controller.abort();
+            command = {
+              kind: "commit-product-feedback",
+              threadId,
+              previewId,
+              comment: "Preserve my intended comment",
+            };
+          }
+          hold = true;
+          const original = request(command);
+          const pending = handle(original);
+          await entered.promise;
+          if (replacement === "header")
+            original.headers.set("x-octant-window-capability", "B".repeat(43));
+          else
+            bindPrincipalRouteContext(original, {
+              scopeId: windowId,
+              principal: { kind: "local-window", windowId, capabilityGeneration: 0 },
+            });
+          release.resolve();
+          expect((await pending)?.status).toBe(401);
+          expect(serviceResults.at(-1)).toBe("feedback-refused");
+          expect(
+            fixture.connection.prepare("SELECT COUNT(*) AS count FROM event_journal").get(),
+          ).toMatchObject({ count: 0 });
+          expect(
+            fixture.connection
+              .prepare("SELECT COUNT(*) AS count FROM code_evidence_content_store")
+              .get(),
+          ).toMatchObject({ count: 0 });
+          expect(
+            readThreadExternalContentTaint(fixture.connection, threadId).externalContentIngested,
+          ).toBe(false);
+          if (previewId !== undefined) {
+            hold = false;
+            const retried = await handle(request(command));
+            expect(retried?.status).toBe(200);
+            expect(decodeProductFeedbackCommandResult(await retried?.json()).kind).toBe(
+              "feedback-captured",
+            );
+          }
+        } finally {
+          release.resolve();
+          fixture.close();
+        }
+      }
+    },
+  );
   it("answers a thread's notes to the window that authenticated", async () => {
     const { handle, list } = handler();
 

@@ -1189,6 +1189,9 @@ describe("CodeOperationRuntime", () => {
           read: unused,
           execute: unused,
           subscribe: unused,
+          readContent: unused,
+          saveFile: unused,
+          openFile: unused,
           executeOperation: (owner, command, options) =>
             fixture.runtime.execute(owner, command, options),
         },

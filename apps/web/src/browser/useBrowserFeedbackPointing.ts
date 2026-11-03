@@ -3,11 +3,15 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import type { ProductFeedback } from "./useProductFeedback";
 
 type PointInput = Parameters<ProductFeedback["prepare"]>[0];
+type PointBridge = Pick<
+  OctantHostBridge,
+  "selectBrowserSurfacePoint" | "subscribeBrowserSurfaceState"
+>;
 interface Owner {
   readonly contextId: string | undefined;
   readonly threadId: string | undefined;
   readonly native: boolean;
-  readonly bridge: OctantHostBridge | undefined;
+  readonly bridge: PointBridge | undefined;
   readonly prepare: ProductFeedback["prepare"];
   readonly cancelPrepare: ProductFeedback["cancelPrepare"];
   readonly pauseRefresh: ProductFeedback["pauseRefresh"];
@@ -27,7 +31,7 @@ export function useBrowserFeedbackPointing(input: {
   readonly contextId: string | undefined;
   readonly threadId: string | undefined;
   readonly native: boolean;
-  readonly bridge?: OctantHostBridge;
+  readonly bridge?: PointBridge;
   readonly feedback: Pick<ProductFeedback, "prepare" | "cancelPrepare" | "pauseRefresh">;
   readonly unavailableReason?: string;
 }) {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   WORK_TURN_CAPABILITIES,
+  decodeStartWorkThreadTurnCommand,
   decodeContextCompactionId,
   decodeContextSubjectRef,
   decodeProviderRuntimeEvent,
@@ -204,7 +205,7 @@ describe("WorkTurnService", () => {
           externalContentIngested: true,
           ingestedSources: ["browser-page"],
         });
-        let command = startCommand();
+        let command = decodeStartWorkThreadTurnCommand(startCommand());
         const upload = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000001");
         if (scenario === "image") {
           await fixture.service.stageAttachment(ids.window, {

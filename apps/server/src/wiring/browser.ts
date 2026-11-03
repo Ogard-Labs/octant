@@ -58,7 +58,7 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<ProvidersWiring, "localPluginImportReceipts" | "providerDataDirectory"> &
-  Pick<FoundationsWiring, "browserAuthority" | "codeEvidence">;
+  Pick<FoundationsWiring, "browserAuthority" | "codeEvidence" | "workThreadProjection">;
 
 export function wireBrowser(deps: BrowserDependencies) {
   const {
@@ -75,6 +75,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     providerDataDirectory,
     shellService,
     windowAuthorityStore,
+    workThreadProjection,
   } = deps;
   return Effect.gen(function* () {
     const rememberedBrowserOrigins = () =>
@@ -356,7 +357,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     // the journal keeps only the reference.
     const resolveFeedbackThread = createProductFeedbackThreadScope({
       readCodeThread: persistence.readCodeThread,
-      readWorkThread: persistence.readWorkThread,
+      readWorkThread: (threadId) => workThreadProjection.read(threadId),
       readProject: persistence.readProject,
       canUseWindow: (windowId) =>
         windowAuthorityStore.listWindowIds().includes(windowId) &&

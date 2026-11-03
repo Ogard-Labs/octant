@@ -30,6 +30,8 @@ export function productFeedbackPersistenceFixture(options: {
   readonly longEvidence?: boolean;
   readonly cropDataUrl?: string;
   readonly now?: string;
+  readonly beforeScopeRead?: () => Promise<void>;
+  readonly beforePointRead?: () => Promise<void>;
 }) {
   const now = options.now ?? "2026-11-03T10:00:00.000Z";
   const directory = mkdtempSync(join(tmpdir(), "octant-feedback-work-"));
@@ -57,30 +59,35 @@ export function productFeedbackPersistenceFixture(options: {
       readNotes: (id) => readProductFeedbackNotes(connection, id),
       canAccessThread: async (windowId, threadId) =>
         windowId === options.windowId && threadId === options.threadId && options.current(),
-      resolveThread: async (windowId, threadId) =>
-        windowId === options.windowId && threadId === options.threadId
+      resolveThread: async (windowId, threadId) => {
+        await options.beforeScopeRead?.();
+        return windowId === options.windowId && threadId === options.threadId
           ? { mode: options.mode, current: options.current }
-          : undefined,
+          : undefined;
+      },
       browser: {
-        describePoint: async () => ({
-          status: "described",
-          element: {
-            selector: "main > button",
-            text: options.longEvidence ? "x".repeat(2_048) : "Save changes",
-            bounds: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 },
-            context: {
-              captureId: "f".repeat(64),
-              viewport: { width: 1000, height: 800 },
-              tag: "button",
-              ancestors: ["main"],
-              children: [],
-              styles: [{ property: "margin", value: "8px" }],
-              omissions: ["form-values-excluded"],
+        describePoint: async () => {
+          await options.beforePointRead?.();
+          return {
+            status: "described",
+            element: {
+              selector: "main > button",
+              text: options.longEvidence ? "x".repeat(2_048) : "Save changes",
+              bounds: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 },
+              context: {
+                captureId: "f".repeat(64),
+                viewport: { width: 1000, height: 800 },
+                tag: "button",
+                ancestors: ["main"],
+                children: [],
+                styles: [{ property: "margin", value: "8px" }],
+                omissions: ["form-values-excluded"],
+              },
             },
-          },
-          url: "https://example.test/" + (options.longEvidence ? "p".repeat(3_000) : "settings"),
-          cropDataUrl: options.cropDataUrl ?? "data:image/jpeg;base64,cGljdHVyZQ==",
-        }),
+            url: "https://example.test/" + (options.longEvidence ? "p".repeat(3_000) : "settings"),
+            cropDataUrl: options.cropDataUrl ?? "data:image/jpeg;base64,cGljdHVyZQ==",
+          };
+        },
       },
       crops: {
         put: (data) => crops.put(data),

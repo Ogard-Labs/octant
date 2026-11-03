@@ -72,17 +72,19 @@ async function listNotes(
   } catch (error) {
     return authenticationFailure(error, "Feedback list", origin);
   }
-  const threadId = url.searchParams.get("threadId") ?? "";
-  if (threadId.length === 0 || threadId.length > MAX_THREAD_ID_LENGTH) {
-    return failure("Feedback list request is invalid.", 400, origin);
-  }
   try {
+    const threadId = url.searchParams.get("threadId") ?? "";
+    if (threadId.length === 0 || threadId.length > MAX_THREAD_ID_LENGTH) {
+      return failure("Feedback list request is invalid.", 400, origin);
+    }
     const notes = await deps.feedback.list(admission.windowId, threadId, admission.execution);
     if (!admission.responseCurrent())
       return failure("Feedback authority changed. Reconnect and refresh notes.", 401, origin);
     return json({ notes }, origin);
   } catch (error) {
     return serviceFailure(error, "Feedback list failed.", origin);
+  } finally {
+    admission.finish();
   }
 }
 
@@ -100,13 +102,13 @@ async function executeCommand(
   } catch (error) {
     return authenticationFailure(error, "Feedback command", origin);
   }
-  let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return failure("Feedback command body is invalid.", 400, origin);
-  }
-  try {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return failure("Feedback command body is invalid.", 400, origin);
+    }
     if (!admission.responseCurrent())
       return failure("Feedback authority changed. Reconnect and refresh notes.", 401, origin);
     const result = await deps.feedback.execute(admission.windowId, body, admission.execution);
@@ -119,6 +121,8 @@ async function executeCommand(
     return json(result, origin);
   } catch (error) {
     return serviceFailure(error, "Feedback command failed.", origin);
+  } finally {
+    admission.finish();
   }
 }
 
@@ -130,6 +134,7 @@ function authenticateFeedback(
   readonly windowId: WindowId;
   readonly execution: ProductFeedbackExecutionContext;
   readonly responseCurrent: () => boolean;
+  readonly finish: () => void;
 } {
   const context = authenticateRoutePrincipal({ request, store, now: now() });
   if (context.principal.kind !== "local-window")
@@ -139,15 +144,24 @@ function authenticateFeedback(
     );
   const windowId = context.scopeId;
   const capability = request.headers.get("x-octant-window-capability") ?? "";
-  // This small closure can outlive the prepare request in a bounded preview.
-  // Retain only the raw capability/principal, never the Request or its body.
+  let inFlight: (() => boolean) | undefined = retainRouteAdmissionCurrent({
+    request,
+    context,
+    store,
+    now,
+  });
+  let retired = false;
+  // Check the original request while it is in flight. A completed preview
+  // retains only the capability and sticky retirement state after finish().
   const admissionCurrent = () => {
-    if (context.abortSignal?.aborted) return false;
+    if (retired) return false;
     try {
-      return store.authenticate(capability, now()) === windowId;
+      if (store.authenticate(capability, now()) !== windowId || inFlight?.() === false)
+        retired = true;
     } catch {
-      return false;
+      retired = true;
     }
+    return !retired;
   };
   if (!admissionCurrent())
     throw new WindowAuthorityError("unauthorized", "Feedback authority is unavailable.");
@@ -160,7 +174,13 @@ function authenticateFeedback(
           ? request.signal
           : AbortSignal.any([request.signal, context.abortSignal]),
     },
-    responseCurrent: retainRouteAdmissionCurrent({ request, context, store, now }),
+    responseCurrent: admissionCurrent,
+    finish: () => {
+      admissionCurrent();
+      // Completed previews retain only the original capability and sticky result,
+      // never the HTTP request, its body or its transport lifetime.
+      inFlight = undefined;
+    },
   };
 }
 
@@ -171,9 +191,10 @@ async function readCrop(
   deps: ProductFeedbackRouteDependencies,
   now: () => number,
 ): Promise<Response> {
+  let admission: ReturnType<typeof authenticateFeedback> | undefined;
   try {
     if (url.search !== "") return failure("Feedback crop request is invalid.", 400, origin);
-    const admission = authenticateFeedback(request, deps.windowAuthorityStore, now);
+    admission = authenticateFeedback(request, deps.windowAuthorityStore, now);
     const noteId = url.pathname.split("/")[4] ?? "";
     const dataUrl = await deps.feedback.readCropForNote(
       admission.windowId,
@@ -187,6 +208,8 @@ async function readCrop(
     if (error instanceof WindowAuthorityError)
       return authenticationFailure(error, "Feedback crop", origin);
     return serviceFailure(error, "Feedback crop is unavailable.", origin);
+  } finally {
+    admission?.finish();
   }
 }
 

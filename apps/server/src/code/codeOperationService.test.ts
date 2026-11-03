@@ -1858,7 +1858,11 @@ describe("CodeOperationService", () => {
     const release = Promise.withResolvers<void>();
     const entered = Promise.withResolvers<void>();
     let current = true;
-    const takeProductFeedbackForTurn = vi.fn(() => ({ attachments: [] }));
+    const prepare = vi.fn(() => ({ attachments: [], take: () => ({ attachments: [] }) }));
+    const takeProductFeedbackForTurn = Object.assign(
+      vi.fn(() => ({ attachments: [] })),
+      { prepare },
+    );
     const fixture = providerTurnFixture({ takeProductFeedbackForTurn });
     fixture.evidence.read.mockImplementation(async () => {
       entered.resolve();
@@ -1885,6 +1889,7 @@ describe("CodeOperationService", () => {
     });
     expect(fixture.turns.start).not.toHaveBeenCalled();
     expect(takeProductFeedbackForTurn).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
     expect(fixture.events.append).toHaveBeenLastCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({

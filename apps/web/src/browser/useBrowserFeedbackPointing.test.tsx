@@ -6,6 +6,10 @@ import { useBrowserFeedbackPointing } from "./useBrowserFeedbackPointing";
 
 const contextId = "60000000-0000-4000-8000-000000000001";
 const threadId = "10000000-0000-4000-8000-000000000001";
+type PointBridge = Pick<
+  OctantHostBridge,
+  "selectBrowserSurfacePoint" | "subscribeBrowserSurfaceState"
+>;
 function transport(holdFirstReply = false) {
   const listeners = new Set<(state: BrowserSurfaceState) => void>();
   const base: BrowserSurfaceState = {
@@ -49,7 +53,7 @@ function transport(holdFirstReply = false) {
       return state;
     },
   );
-  const bridge: OctantHostBridge = {
+  const bridge: PointBridge = {
     selectBrowserSurfacePoint: select,
     subscribeBrowserSurfaceState: (listener) => {
       listeners.add(listener);
@@ -82,11 +86,7 @@ function feedback() {
     pauseRefresh: vi.fn(),
   };
 }
-function Pane(props: {
-  name: string;
-  bridge: OctantHostBridge;
-  feedback: ReturnType<typeof feedback>;
-}) {
+function Pane(props: { name: string; bridge: PointBridge; feedback: ReturnType<typeof feedback> }) {
   const pointing = useBrowserFeedbackPointing({
     contextId,
     threadId,

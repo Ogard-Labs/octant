@@ -632,6 +632,7 @@ export function startOctantServer(
       productFeedbackRoutes,
       productFeedbackService,
       projectBrowserService,
+      resolveFeedbackThread,
       windowHoldsProject,
     } = yield* wireBrowser({
       browserAuthority,
@@ -647,6 +648,7 @@ export function startOctantServer(
       providerDataDirectory,
       shellService,
       windowAuthorityStore,
+      workThreadProjection,
     });
     const {
       androidToolchainService,
@@ -734,6 +736,7 @@ export function startOctantServer(
       persistence,
       probeProviderForThreads,
       productFeedbackService,
+      resolveFeedbackThread,
       projectPullRequestActionService,
       projectPullRequestCadence,
       projectPullRequestService,
@@ -936,12 +939,14 @@ export function startOctantServer(
       peekCreateFromIssueFramed,
       persistence,
       probeProviderForThreads,
+      productFeedbackService,
       projectService,
       providerRuntimeRegistry,
       refreshStandaloneSkills,
       browserAutomationService,
       browserFlows,
       browserToolApprovalService,
+      resolveFeedbackThread,
       resolveCanvasWorkspace,
       resolveSelectedExtensions,
       pinnedExtensionIds,
