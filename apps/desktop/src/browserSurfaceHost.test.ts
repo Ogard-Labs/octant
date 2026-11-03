@@ -61,7 +61,7 @@ function view(): BrowserSurfaceViewPort {
   };
 }
 
-async function selectedSurface() {
+async function selectedSurface(extraTab = false) {
   const created = view();
   vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(false);
   let screenshot: (() => Promise<unknown>) | undefined;
@@ -117,7 +117,15 @@ async function selectedSurface() {
     if (method === "Page.captureScreenshot") return screenshot?.() ?? { data: "/9j/AA==" };
     throw new Error(`Unexpected native protocol command ${method}`);
   });
-  const host = createBrowserSurfaceHost({ createView: () => created });
+  const second = view();
+  let allocated = false;
+  const host = createBrowserSurfaceHost({
+    createView: () => {
+      if (allocated) return second;
+      allocated = true;
+      return created;
+    },
+  });
   const owner = { windowId: "window-a", threadId };
   await host.createContext({
     contextId,
@@ -126,7 +134,7 @@ async function selectedSurface() {
       profileMode: "isolated",
       allowedOrigins: ["https://example.com"],
       credentialFieldProtection: true,
-      maxConcurrentTabs: 1,
+      maxConcurrentTabs: extraTab ? 2 : 1,
       sessionTimeoutMs: 300_000,
     },
   });
@@ -151,6 +159,7 @@ async function selectedSurface() {
   return {
     host,
     created,
+    second,
     selected,
     holdScreenshot: (read: () => Promise<unknown>) => {
       screenshot = read;
@@ -159,6 +168,87 @@ async function selectedSurface() {
 }
 
 describe("BrowserSurfaceHost", () => {
+  it.each(["fresh-gesture", "window", "document", "tab", "capture-finished"] as const)(
+    "bounds selected release suppression to its original gesture: %s",
+    async (retirement) => {
+      const f = await selectedSurface(retirement === "tab");
+      const owner = { windowId: "window-a", threadId };
+      const mouse = vi
+        .mocked(f.created.webContents.on)
+        .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
+      const down = vi.fn();
+      try {
+        f.host.setPointSelection(contextId, owner, true, "61000000-0000-4000-8000-000000000777");
+        mouse?.({ preventDefault: down }, { type: "mouseDown", button: "left", x: 160, y: 120 });
+        expect(down).toHaveBeenCalledOnce();
+        let activeMouse = mouse;
+        if (retirement === "window") {
+          f.host.detach(contextId, owner);
+          f.host.attach(
+            contextId,
+            owner,
+            {
+              contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+              isDestroyed: () => false,
+              webContents: { send: vi.fn() },
+            },
+            { x: 0, y: 0, width: 640, height: 480 },
+          );
+        }
+        if (retirement === "document")
+          vi.mocked(f.created.webContents.on).mock.calls.find(
+            ([event]) => event === "did-navigate",
+          )?.[1]();
+        if (retirement === "tab") {
+          await f.host.act(contextId, {
+            kind: "tab-open",
+            target: "https://example.com/next",
+            include: [],
+          });
+          activeMouse = vi
+            .mocked(f.second.webContents.on)
+            .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
+        }
+        if (retirement === "capture-finished") {
+          const selected = f.host.state(contextId).pointSelection;
+          if (selected?.status !== "selected") throw Error("Missing selected point");
+          await f.host.describePoint(
+            contextId,
+            selected.point,
+            new AbortController().signal,
+            selected.selectionId,
+          );
+          expect(f.host.state(contextId).pointSelection).toBeUndefined();
+        }
+        if (retirement === "fresh-gesture")
+          activeMouse?.(
+            { preventDefault: vi.fn() },
+            { type: "mouseDown", button: "left", x: 100, y: 100 },
+          );
+        const firstUp = vi.fn();
+        activeMouse?.(
+          { preventDefault: firstUp },
+          { type: "mouseUp", button: "left", x: 100, y: 100 },
+        );
+        expect(firstUp).toHaveBeenCalledTimes(retirement === "capture-finished" ? 1 : 0);
+        const ordinaryDown = vi.fn(),
+          ordinaryUp = vi.fn();
+        activeMouse?.(
+          { preventDefault: ordinaryDown },
+          { type: "mouseDown", button: "left", x: 100, y: 100 },
+        );
+        activeMouse?.(
+          { preventDefault: ordinaryUp },
+          { type: "mouseUp", button: "left", x: 100, y: 100 },
+        );
+        expect(ordinaryDown).not.toHaveBeenCalled();
+        expect(ordinaryUp).not.toHaveBeenCalled();
+      } finally {
+        await f.host.closeAll();
+      }
+    },
+  );
+
   it("keeps a replacement panel's selection when an older panel cancels", async () => {
     const f = await selectedSurface();
     const owner = { windowId: "window-a", threadId };

@@ -279,7 +279,13 @@ interface OwnedSurface {
       }
     | undefined;
   pointSelectionTimer: ReturnType<typeof setTimeout> | undefined;
-  suppressSelectionRelease: boolean;
+  selectionRelease:
+    | {
+        readonly tabId: string;
+        readonly documentRevision: number;
+        readonly shellWindow: BrowserSurfaceShellWindowPort;
+      }
+    | undefined;
   readonly owner: BrowserSurfaceOwner;
   readonly policy: BrowserContextPolicy;
   /** Every open tab, in the order the person opened them. */
@@ -745,10 +751,24 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           event.preventDefault();
       };
       if (typeof input === "object" && input !== null && "type" in input) {
-        if (input.type === "mouseUp" && owned.suppressSelectionRelease) {
-          owned.suppressSelectionRelease = false;
-          prevent();
-          return;
+        // A missed up outside this view cannot own the next physical gesture.
+        if (input.type === "mouseDown") owned.selectionRelease = undefined;
+        if (input.type === "mouseUp") {
+          const release = owned.selectionRelease;
+          owned.selectionRelease = undefined;
+          if (
+            release !== undefined &&
+            "button" in input &&
+            input.button === "left" &&
+            release.tabId === tabId &&
+            owned.activeTabId === tabId &&
+            release.documentRevision === tab.documentRevision &&
+            owned.shellWindow === release.shellWindow &&
+            !release.shellWindow.isDestroyed()
+          ) {
+            prevent();
+            return;
+          }
         }
         const selection = owned.pointSelection;
         if (selection !== undefined && selection.expiresAt <= Date.now())
@@ -790,7 +810,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 point: { x: input.x / bounds.width, y: input.y / bounds.height },
               };
               selection.personInputs = owned.personInputs + 1;
-              owned.suppressSelectionRelease = true;
+              owned.selectionRelease = {
+                tabId,
+                documentRevision: tab.documentRevision,
+                shellWindow: selection.shellWindow,
+              };
               prevent();
             } else clearPointSelection(owned);
           }
@@ -868,7 +892,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         pointSelection: undefined,
         lifetime: new AbortController(),
         pointSelectionTimer: undefined,
-        suppressSelectionRelease: false,
+        selectionRelease: undefined,
         lastBounds: undefined,
         userGrantedOrigins: [],
         extensionLoads: 0,
