@@ -364,12 +364,21 @@ function AvailableEditor(
     const release = debugStore.trackEditor(
       debugKey,
       path,
-      props.draftStore ?? debugEditorOwner.current,
-      () => (active && dirtyRef.current) || props.draftStore?.read(draftKey) !== undefined,
+      debugEditorOwner.current,
+      () => active && dirtyRef.current,
     );
     return () => {
       active = false;
       release();
+      // A live pane owns its own dirty ref. After release, only the existing
+      // retained draft store may keep a hold, never another pane's clean ref.
+      if (props.draftStore !== undefined)
+        debugStore.trackEditor(
+          debugKey,
+          path,
+          props.draftStore,
+          () => props.draftStore?.read(draftKey) !== undefined,
+        )();
     };
   }, [debugStore, debugKey, path, props.draftStore, draftKey]);
   const breakpointLines = activeBreakpoints(debugState).get(path);

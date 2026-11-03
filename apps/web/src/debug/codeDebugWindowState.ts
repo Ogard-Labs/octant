@@ -306,14 +306,13 @@ export class CodeDebugWindowState {
           for (const path of this.#threads.get(key)?.breakpoints.keys() ?? []) {
             this.#editorDrafts.delete(JSON.stringify([key, path]));
           }
-          this.#threads.set(
-            key,
-            removed
-              ? scope === undefined
-                ? EMPTY
-                : PERSISTENT_EMPTY
-              : { ...PERSISTENT_EMPTY, persistenceWarning: PURGE_WARNING },
-          );
+          this.#threads.set(key, {
+            ...(scope === undefined ? EMPTY : PERSISTENT_EMPTY),
+            // A pending Start retains the exact selection map. Even an empty
+            // purged selection must invalidate that original admission.
+            breakpoints: new Map(),
+            ...(removed ? {} : { persistenceWarning: PURGE_WARNING }),
+          });
         }
       } catch {
         /* In-memory standalone callers may use keys without a persisted namespace. */

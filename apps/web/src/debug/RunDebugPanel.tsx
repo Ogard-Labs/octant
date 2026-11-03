@@ -12,7 +12,7 @@ import type {
   CodeDebugConfigurationsResult,
 } from "@octant/contracts/code-debug";
 import { Bug, Play, Plus, RotateCw } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { codeEditorRevealKey, requestCodeEditorReveal } from "../code/codeEditorReveal";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -90,7 +90,16 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
   const store = props.store ?? windowStore;
   const key = codeDebugThreadKey(String(threadId), String(checkoutId));
   const thread = useCodeDebugThreadState(key, store);
-  const [listing, setListing] = useState<Listing>({ kind: "loading" });
+  const admission = useMemo(
+    () => ({ client, store, key, fileClient: props.fileClient, projectId: props.projectId }),
+    [client, store, key, props.fileClient, props.projectId],
+  );
+  const currentAdmission = useRef(admission);
+  currentAdmission.current = admission;
+  const listingAdmission = useRef(admission);
+  const [receivedListing, setListing] = useState<Listing>({ kind: "loading" });
+  const listing: Listing =
+    listingAdmission.current === admission ? receivedListing : { kind: "loading" };
   const [localOnly, setLocalOnly] = useState(false);
   const [editing, setEditing] = useState<Editing>({ kind: "none" });
   /** The person came back to the list from a card or the form, so its heading takes focus. */
@@ -107,6 +116,10 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
   const warn = useCallback((text: string) => setNotice({ tone: "warning", text }), []);
   const [ended, setEnded] = useState<string>();
   const [pending, setPending] = useState<string>();
+  useEffect(() => {
+    setPending(undefined);
+    setLocalOnly(false);
+  }, [admission]);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -141,21 +154,23 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
         checkoutId,
         ...(currentFile === undefined ? {} : { currentFile }),
       });
-      if (!mounted.current) return;
+      if (!mounted.current || currentAdmission.current !== admission) return;
+      listingAdmission.current = admission;
       setListing(
         result.status === "listed"
           ? { kind: "listed", result }
           : { kind: "refused", text: refusalText(result.reason), reason: result.reason },
       );
     } catch (error) {
-      if (!mounted.current) return;
+      if (!mounted.current || currentAdmission.current !== admission) return;
       if (error instanceof CodeDebugClientFailure && error.kind === "local-only") {
         setLocalOnly(true);
         return;
       }
+      listingAdmission.current = admission;
       setListing({ kind: "unreachable" });
     }
-  }, [checkoutId, client, currentFile, threadId]);
+  }, [admission, checkoutId, client, currentFile, threadId]);
 
   // Read again when the editor's current file changes, since a launch file's
   // `${file}` entries propose from it.
@@ -195,9 +210,16 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
       setEnded(undefined);
       setReturnedToList(false);
       try {
+        const selection = store.read(key).breakpoints;
         await validation.revalidate();
-        if (!mounted.current) return;
+        if (!mounted.current || currentAdmission.current !== admission) return;
         const current = store.read(key);
+        if (current.breakpoints !== selection) {
+          warn(
+            "The breakpoint selection changed while checking. Review it and press Start again. Nothing was started.",
+          );
+          return;
+        }
         if (
           current.breakpointFiles !== undefined &&
           [...current.breakpoints.keys()].some(
@@ -215,19 +237,19 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
           configuration,
           breakpoints: fileBreakpoints(store.read(key)),
         });
-        if (!mounted.current) return;
+        if (!mounted.current || currentAdmission.current !== admission) return;
         if (answer.status === "started") {
           store.setSession(key, { sessionId: answer.sessionId, name: configuration.name });
           return;
         }
         warn(startAnswerText(answer));
       } catch (error) {
-        failed(error);
+        if (currentAdmission.current === admission) failed(error);
       } finally {
-        if (mounted.current) setPending(undefined);
+        if (mounted.current && currentAdmission.current === admission) setPending(undefined);
       }
     },
-    [checkoutId, client, failed, key, store, threadId, validation.revalidate, warn],
+    [admission, checkoutId, client, failed, key, store, threadId, validation.revalidate, warn],
   );
 
   const confirm = useCallback(

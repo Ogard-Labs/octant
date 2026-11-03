@@ -1144,8 +1144,8 @@ Rejected: a read-only agent tool for the stopped state now.
   Project/file identity and content digest needed to check them; never source
   text, variables, output, expressions, stopped frames or a session ID. It is
   not journaled, backed up, exported or replicated by the host. The host receives
-  verified locations at Start and keeps none after the session. A host thread
-  purge clears that origin's exact Code thread configuration across its window
+  verified locations at Start and keeps none after the session. A successful person-triggered thread
+  purge result received by this browser clears that origin's exact Code thread configuration across its window
   and checkout namespaces; another mode with the same ID is unaffected. A local
   storage failure is reported and cleanup can be retried without another host
   purge. A renderer that was offline during the purge cannot claim remote device

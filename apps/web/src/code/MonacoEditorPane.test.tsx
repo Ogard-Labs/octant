@@ -91,9 +91,13 @@ describe("MonacoEditorPane", () => {
     expect(new CodeDebugWindowState(scope).read(key).breakpoints.size).toBe(0);
   });
 
-  it.each([false, true])(
-    "releases only a discarded pane's dirty hold, preserving a retained draft=%s",
-    async (retainDraft) => {
+  it.each([
+    [false, false],
+    [true, false],
+    [true, true],
+  ] as const)(
+    "releases only a discarded pane dirty hold, retained draft=%s shared store=%s",
+    async (retainDraft, sharedStore) => {
       const values = new Map<string, string>();
       const storage = {
         getItem: (key: string) => values.get(key) ?? null,
@@ -153,10 +157,12 @@ describe("MonacoEditorPane", () => {
             client={code}
             file={file}
             loadRuntime={clean.loadRuntime}
+            {...(sharedStore ? { draftStore: drafts } : {})}
           />
         </CodeDebugWindowStoreContext.Provider>,
       );
       await waitFor(() => expect(clean.options).toBeDefined());
+      if (sharedStore) act(() => clean.options?.onChange("const answer = 42;\n"));
       expect(store.reacceptFile(key, file.path)).toBe(false);
       pane.unmount();
       const read = {
@@ -167,8 +173,8 @@ describe("MonacoEditorPane", () => {
         clean: true,
       };
       act(() => store.observeFile(key, file.path, read));
-      expect(store.reacceptFile(key, file.path)).toBe(!retainDraft);
-      if (retainDraft) {
+      expect(store.reacceptFile(key, file.path)).toBe(!retainDraft || sharedStore);
+      if (retainDraft && !sharedStore) {
         draftValues.clear();
         act(() => store.observeFile(key, file.path, read));
         expect(store.reacceptFile(key, file.path)).toBe(true);

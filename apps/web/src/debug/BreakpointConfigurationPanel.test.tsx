@@ -13,7 +13,7 @@ import {
 import { decodeCodeDebugConfigurationsResult } from "@octant/contracts/code-debug";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { decodeCodeFileOpenResultEnvelope } from "@octant/contracts/code-operations";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import { act, render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CodeDebugWindowState, codeDebugThreadKey } from "./codeDebugWindowState";
@@ -227,6 +227,121 @@ describe("saved breakpoint locations in the actual Run and debug panel", () => {
     await user.click(screen.getByRole("button", { name: "Start Run fixture" }));
     expect(await screen.findByText(/Nothing was started/)).toBeVisible();
     await waitFor(() => expect(f.files.openFile).toHaveBeenCalledTimes(2));
+    expect(f.client.start).not.toHaveBeenCalled();
+  });
+  it.each(["purge", "client"] as const)(
+    "refuses a held Start after %s replaces its original admission",
+    async (change) => {
+      const f = fixture();
+      const user = userEvent.setup();
+      vi.mocked(f.client.configurations).mockResolvedValue(
+        decodeCodeDebugConfigurationsResult({
+          status: "listed",
+          adapters: [
+            {
+              adapter: "10000000-0000-4000-8000-000000000001/adapter",
+              displayName: "Fixture adapter",
+              runtimes: ["node"],
+              packageName: "Fixture tools",
+              packageVersion: "1.0.0",
+            },
+          ],
+          approved: [
+            {
+              configurationDigest: `sha256:${"a".repeat(64)}`,
+              configuration: {
+                name: "Run fixture",
+                adapter: "10000000-0000-4000-8000-000000000001/adapter",
+                program: "src/main.js",
+                args: [],
+                env: [],
+                stopOnEntry: false,
+              },
+              scope: "checkout",
+            },
+          ],
+          launchFile: { status: "absent" },
+        }),
+      );
+      const view = render(
+        <RunDebugPanel
+          client={f.client}
+          fileClient={f.files}
+          projectId={projectId}
+          threadId={threadId}
+          checkoutId={checkoutId}
+          store={f.store}
+        />,
+      );
+      await screen.findByText("Verified");
+      let release: (value: Uint8Array) => void = () => undefined;
+      const held = new Promise<Uint8Array>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(f.files.content).mockImplementationOnce(() => held);
+      await user.click(screen.getByRole("button", { name: "Start Run fixture" }));
+      await waitFor(() => expect(f.files.content).toHaveBeenCalledTimes(2));
+      const nextClient = { ...f.client, start: vi.fn(f.client.start) };
+      if (change === "purge")
+        act(() => {
+          f.store.purgeThread(threadId);
+        });
+      else
+        view.rerender(
+          <RunDebugPanel
+            client={nextClient}
+            fileClient={f.files}
+            projectId={projectId}
+            threadId={threadId}
+            checkoutId={checkoutId}
+            store={f.store}
+          />,
+        );
+      await act(async () => {
+        release(new TextEncoder().encode("a\nb\nc\nd\n"));
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Start Run fixture" })).toBeEnabled(),
+      );
+      expect(f.client.start).not.toHaveBeenCalled();
+      expect(nextClient.start).not.toHaveBeenCalled();
+    },
+  );
+  it("hides the previous client's listing until the replacement passes its own local gate", async () => {
+    const f = fixture();
+    const view = render(
+      <RunDebugPanel
+        client={f.client}
+        fileClient={f.files}
+        projectId={projectId}
+        threadId={threadId}
+        checkoutId={checkoutId}
+        store={f.store}
+      />,
+    );
+    await screen.findByText("Verified");
+    let refuse: (reason: Error) => void = () => undefined;
+    const held = new Promise<never>((_resolve, reject) => {
+      refuse = reject;
+    });
+    const nextClient = { ...f.client, configurations: vi.fn(() => held) };
+    view.rerender(
+      <RunDebugPanel
+        client={nextClient}
+        fileClient={f.files}
+        projectId={projectId}
+        threadId={threadId}
+        checkoutId={checkoutId}
+        store={f.store}
+      />,
+    );
+    expect(screen.queryByRole("region", { name: "Breakpoints" })).not.toBeInTheDocument();
+    expect(f.files.openFile).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      refuse(new CodeDebugClientFailure("local-only", "Local only"));
+    });
+    expect(await screen.findByText(/Debugging stays on this computer/)).toBeVisible();
+    expect(f.files.openFile).toHaveBeenCalledTimes(1);
     expect(f.client.start).not.toHaveBeenCalled();
   });
 });
