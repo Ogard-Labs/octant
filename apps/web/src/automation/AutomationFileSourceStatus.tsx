@@ -153,8 +153,11 @@ export function AutomationFileSourceStatus(props: {
             type="button"
             variant="secondary"
             onClick={() => {
-              setMessage(undefined);
-              setRequiresRefresh(false);
+              setMessage(
+                requiresRefresh
+                  ? "Refresh details and run history before choosing again; the previous review is unconfirmed."
+                  : undefined,
+              );
               setReview({ automation, source });
             }}
           >

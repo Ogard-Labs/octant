@@ -146,7 +146,10 @@ export function reconcileAutomationFileObservation(input: {
   if (
     previous.busyChangeObserved ||
     previous.phase === "held" ||
-    (previous.activityWindow.length !== 0 && changed)
+    (changed &&
+      (previous.activityWindow.length !== 0 ||
+        previous.reason === "known-activity" ||
+        previous.reason === "activity-unknown"))
   ) {
     if (
       previous.phase === "held" &&
@@ -197,7 +200,11 @@ export function reconcileAutomationFileObservation(input: {
       ? { kind: "checkpoint", checkpoint: next(base, true) }
       : { kind: "unchanged" };
   }
-  if (files.length === 0 || (input.coverageGap && input.missedRunPolicy === "skip"))
+  if (
+    files.length === 0 ||
+    previous.phase === "arming" ||
+    (input.coverageGap && input.missedRunPolicy === "skip")
+  )
     return { kind: "checkpoint", checkpoint: next(base, true) };
   const count = previous.automaticStarts + 1;
   const claimed = next(

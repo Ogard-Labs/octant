@@ -208,6 +208,11 @@ export class AutomationProjection implements Projection {
           validateFileSourceFrame(payload.fileSource, event);
           this.#fileSources.set(payload.automation.id, payload.fileSource);
         }
+        // An intentional pause is not an offline catch-up request. Keep its
+        // baseline/budget, but require a fresh settled baseline on ordinary Resume.
+        // Held or unknown activity ownership is never cleared by this transition.
+        if (payload.automation.lifecycle === "paused" && previous?.phase === "watching")
+          this.#fileSources.set(payload.automation.id, { ...previous, phase: "arming" });
         this.#upsertDefinition(payload.automation);
         return;
       }

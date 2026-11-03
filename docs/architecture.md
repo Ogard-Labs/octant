@@ -2545,7 +2545,10 @@ the thread it came from.
   enable; status shows remaining starts and retained input. Re-arm binds the
   exact current definition/source/observation/batch and current authority,
   explicitly either runs the held surviving batch once or skips it. A blind
-  Resume never drops held input or resets the budget. A review that loses its
+  Resume never drops held input or resets the budget. An intentional pause of
+  a watching source requires a new settled baseline on ordinary Resume rather
+  than applying offline catch-up to paused-period changes; existing held or
+  unknown activity remains held. A review that loses its
   response remains unconfirmed: refresh details and run history before another
   explicit decision; the client never resends it automatically. Input paths are
   delivered as bounded framed external data through the ordinary Work context

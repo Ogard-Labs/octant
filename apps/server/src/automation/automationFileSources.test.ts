@@ -16,6 +16,7 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { liveWorkFilesystem, type WorkFilesystemPort } from "../work/workFilesystemPort";
 import { AutomationEventStore } from "./automationEventStore";
+import { AutomationProjection } from "./automationProjection";
 import { AutomationCommandService } from "./automationCommandService";
 import { AutomationSchedulerService } from "./automationSchedulerService";
 import { AutomationFileSources } from "./automationFileSources";
@@ -56,7 +57,10 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
-async function fixture(filesystem: WorkFilesystemPort = liveWorkFilesystem) {
+async function fixture(
+  filesystem: WorkFilesystemPort = liveWorkFilesystem,
+  missedRunPolicy: "skip" | "run-once" = "skip",
+) {
   const directory = await mkdtemp(join(tmpdir(), "octant-file-source-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   await mkdir(join(directory, "Inbox"));
@@ -65,6 +69,7 @@ async function fixture(filesystem: WorkFilesystemPort = liveWorkFilesystem) {
     connection.close();
   });
   const definition = automationDefinitionFixture({
+    missedRunPolicy,
     trigger: {
       kind: "file-arrival",
       directory: "Inbox",
@@ -721,6 +726,65 @@ describe("file input reconciliation on the host routine owner", () => {
     },
   );
 
+  it("baselines an intentional paused interval on Resume without offline catch-up or resetting the allowance", async () => {
+    const host = await fixture(liveWorkFilesystem, "run-once");
+    await host.sources.reconcile();
+    host.advance();
+    await host.sources.reconcile();
+    await writeFile(join(host.directory, "Inbox/first.txt"), "arrival");
+    await host.sources.reconcile();
+    host.advance();
+    await host.sources.reconcile();
+    const run = host.projection.latestRun(host.definition.id);
+    if (run === undefined) throw new Error("Expected first claim");
+    host.store.appendRunStatusChanged({
+      automationId: run.automationId,
+      runId: run.id,
+      previousLifecycle: run.lifecycle,
+      lifecycle: "failed",
+      failure: { reason: "runtime-failed", message: "Controlled terminal result" },
+      version: run.version + 1,
+      expectedVersion: run.version,
+      updatedAt: run.updatedAt,
+    });
+    await host.sources.reconcile();
+    host.advance();
+    await host.sources.reconcile();
+    const lifecycle = (kind: "pause-automation" | "resume-automation") => {
+      const definition = host.projection.getDefinition(host.definition.id);
+      if (definition === undefined) throw new Error("Missing definition");
+      return host.commands.execute(
+        decodeAutomationCommand({
+          kind,
+          automationId: definition.id,
+          expectedVersion: definition.version,
+          principal: automationLocalWindowPrincipal(),
+          origin: { kind: "interactive" },
+        }),
+      );
+    };
+    expect(lifecycle("pause-automation").kind).toBe("automation-paused");
+    const replayed = new AutomationProjection();
+    host.store.replayEach((frame) => replayed.applyEnvelope(frame));
+    expect(replayed.getFileSource(host.definition.id)).toMatchObject({
+      phase: "arming",
+      baselineReady: true,
+      automaticStarts: 1,
+    });
+    await host.sources.reconcile();
+    await writeFile(join(host.directory, "Inbox/paused.txt"), "intentional non-observation");
+    expect(lifecycle("resume-automation").kind).toBe("automation-resumed");
+    await host.sources.reconcile();
+    host.advance();
+    await host.sources.reconcile();
+    expect(host.offers).toHaveLength(1);
+    expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
+      phase: "watching",
+      automaticStarts: 1,
+      baseline: [{ path: "first.txt" }, { path: "paused.txt" }],
+    });
+  });
+
   it("keeps an unrelated source observing while another confined file read is held", async () => {
     let release: (() => void) | undefined;
     let entered: (() => void) | undefined;
@@ -812,6 +876,35 @@ describe("file input reconciliation on the host routine owner", () => {
     expect(host.offers).toHaveLength(1);
     expect(host.projection.getFileSource(host.definition.id)?.automaticStarts).toBe(1);
   });
+  it.each(["busy", "unknown"] as const)(
+    "holds a late change through the first settled quiet scan after %s activity",
+    async (activity) => {
+      const host = await fixture();
+      await host.sources.reconcile();
+      host.advance();
+      await host.sources.reconcile();
+      host.activity(activity);
+      await host.sources.reconcile();
+      expect(host.projection.getFileSource(host.definition.id)?.reason).toBe(
+        activity === "busy" ? "known-activity" : "activity-unknown",
+      );
+      host.activity("quiet");
+      await writeFile(
+        join(host.directory, "Inbox/late-output.txt"),
+        "writer unknown after known activity",
+      );
+      await host.sources.reconcile();
+      host.advance();
+      await host.sources.reconcile();
+      expect(host.offers).toHaveLength(0);
+      expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
+        phase: "held",
+        automaticStarts: 0,
+        held: { files: ["late-output.txt"] },
+      });
+    },
+  );
+
   it("durably holds observed busy output instead of treating it as a fresh arrival", async () => {
     const host = await fixture();
     await host.sources.reconcile();

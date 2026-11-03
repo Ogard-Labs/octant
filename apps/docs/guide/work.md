@@ -231,7 +231,9 @@ Review the held files, task, profile, level ceiling and delivery target. **Run
 once and re-arm** starts one task for that batch and counts it against the new
 allowance. **Skip these changes and re-arm** records the current baseline
 without a task. Pausing, restarting, quiet time and **Run now** do not reset the
-allowance or discard held input.
+allowance or discard held input. After intentionally pausing a watching source,
+Resume establishes a fresh settled baseline without starting a task for changes
+made while paused; already-held or unknown activity still needs review.
 
 If a review response is unconfirmed, refresh details and history before
 choosing again. Octant does not automatically resend that decision; closing

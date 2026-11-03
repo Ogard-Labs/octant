@@ -175,13 +175,20 @@ describe("file input status and person review", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("invoice.txt");
     expect(screen.getByRole("button", { name: "Refresh details and history" })).toBeEnabled();
     expect(mutations).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Close review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review and re-arm" }));
+    expect(screen.getByRole("button", { name: "Refresh details and history" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Skip these changes and re-arm" }),
+    ).not.toBeInTheDocument();
+    expect(mutations).toBe(1);
     await act(async () => {
       release?.(
         new Response(JSON.stringify({ kind: "automation-resumed", automation: definition })),
       );
       await Promise.resolve();
     });
-    expect(screen.getByRole("alert")).toHaveTextContent("has not confirmed");
+    expect(screen.getByRole("button", { name: "Refresh details and history" })).toBeEnabled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(mutations).toBe(1);
   });
