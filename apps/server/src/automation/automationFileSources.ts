@@ -12,6 +12,7 @@ import type { AutomationProjection } from "./automationProjection";
 import type { AutomationSchedulerService } from "./automationSchedulerService";
 import {
   AutomationFileSourceScanError,
+  automationFileSourceCurrent,
   prepareAutomationFileSource,
   scanAutomationFileSource,
 } from "./automationFileSourceScan";
@@ -82,7 +83,13 @@ export class AutomationFileSources {
       throw new AutomationFileSourceReviewError("File re-arm requires the current local window.");
     const definition = this.#options.projection.getDefinition(command.automationId);
     const checkpoint = this.#options.projection.getFileSource(command.automationId);
-    const source = this.#sources.get(command.automationId);
+    let source = this.#sources.get(command.automationId);
+    // A paused observer must not own (and abort) the person's new review proof.
+    if (definition?.lifecycle === "paused" && source !== undefined) {
+      this.#retire(source);
+      this.#sources.delete(command.automationId);
+      source = undefined;
+    }
     if (
       definition?.trigger.kind !== "file-arrival" ||
       definition.version !== command.expectedVersion ||
@@ -203,6 +210,12 @@ export class AutomationFileSources {
         activityWindow: [],
         busyChangeObserved: false,
       };
+      const retained = () =>
+        current() && automationFileSourceCurrent(this.#options.filesystem, root) && current();
+      if (!retained())
+        throw new AutomationFileSourceReviewError(
+          "The input folder changed. Edit it before re-arming.",
+        );
       return {
         kind: "rearm",
         automationId: command.automationId,
@@ -210,7 +223,7 @@ export class AutomationFileSources {
         checkpoint: next,
         review,
         files,
-        current,
+        current: retained,
       };
     } finally {
       if (source !== undefined) source.scanning = false;
@@ -427,12 +440,15 @@ export class AutomationFileSources {
         missedRunPolicy: definition.missedRunPolicy,
       });
       if (!current()) return;
+      const retained = () =>
+        current() && automationFileSourceCurrent(this.#options.filesystem, root) && current();
+      if (!retained()) throw new AutomationFileSourceScanError("source-changed");
       const outcome = this.#options.scheduler.commitFileObservation({
         automationId: definition.id,
         expectedVersion: definition.version,
         previousObservationRevision: checkpoint.observationRevision,
         decision,
-        current,
+        current: retained,
       });
       if (outcome === "committed" && settled) source.coverageGap = false;
     } catch (error) {

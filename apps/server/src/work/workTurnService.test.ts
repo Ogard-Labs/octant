@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
+  AutomationId,
+  UtcTimestamp,
   WORK_TURN_CAPABILITIES,
   decodeContextCompactionId,
   decodeContextSubjectRef,
@@ -29,7 +31,7 @@ import {
   decodeProviderModelId,
 } from "@octant/contracts";
 import { unavailableProviderServiceLimits } from "@octant/provider-sdk/context-facts";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -47,12 +49,11 @@ import {
   decodeWindowId,
   type AgentRun,
   type Project,
-  type UtcTimestamp,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import { Effect, Queue, Schema, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProviderDriver, ProviderConnection } from "@octant/provider-sdk/driver";
 import { BROWSER_TOOL_HOST_LINE, browserUseSelection } from "@octant/plugin-host/browser-use";
 import { createWorkThreadMentionDirectory } from "../chat/threadMentionService";
 import { createWorkTurnRouteHandler } from "../workTurnRoutes";
@@ -68,7 +69,10 @@ import {
   type WorkTurnServiceDependencies,
 } from "./workTurnService";
 import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
-import type { WorkTurnRuntimePort } from "./workTurnRuntime";
+import { WorkTurnRuntime, type WorkTurnRuntimePort } from "./workTurnRuntime";
+import { prepareAutomationFileDefinition } from "../automation/automationFileSourceAuthority";
+import { automationDefinitionDraftFixture } from "../automation/automationTestFixtures";
+import { liveWorkFilesystem } from "./workFilesystemPort";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -95,6 +99,104 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
+  it.each(["unchanged", "input directory", "Project root"] as const)(
+    "keeps the exact physical source admission through actual SDK startup (%s)",
+    async (replaced) => {
+      const root = await mkdtemp(join(tmpdir(), "octant-routine-sdk-fence-"));
+      attachmentRoots.push(root, `${root}-old`);
+      await mkdir(join(root, "Inbox"));
+      const definition = automationDefinitionDraftFixture({
+        trigger: {
+          kind: "file-arrival",
+          directory: "Inbox",
+          includeExtensions: [],
+          excludeDirectories: [],
+          settleSeconds: 2,
+          automaticStartLimit: 8,
+        },
+      });
+      const proof = await prepareAutomationFileDefinition({
+        automationId: Schema.decodeUnknownSync(AutomationId)(randomUUID()),
+        expectedVersion: 0,
+        filesystem: liveWorkFilesystem,
+        authority: {
+          canonicalRoot: root,
+          bindingIdentity: "retained local binding",
+          current: () => true,
+        },
+        definition,
+        current: () => true,
+        signal: new AbortController().signal,
+        now: () => Schema.decodeUnknownSync(UtcTimestamp)(now),
+      });
+      const entered = deferred<void>();
+      const release = deferred<void>();
+      const events = Effect.runSync(
+        Queue.unbounded<ReturnType<typeof decodeProviderRuntimeEvent>>(),
+      );
+      let submitted = 0;
+      const connection: ProviderConnection = {
+        subscribe: Effect.succeed(Stream.fromQueue(events)),
+        start: (input) =>
+          Effect.promise(async () => {
+            entered.resolve();
+            await release.promise;
+            return { sessionId: input.sessionId };
+          }),
+        resume: () => Effect.die("No retained SDK session in this fixture"),
+        send: (input) =>
+          Effect.gen(function* () {
+            submitted++;
+            yield* Queue.offer(
+              events,
+              decodeProviderRuntimeEvent({
+                instanceId: ids.provider,
+                sequence: 1,
+                correlationId: randomUUID(),
+                occurredAt: now,
+                kind: "completed",
+                sessionId: input.sessionId,
+              }),
+            );
+          }),
+        interrupt: () => Effect.void,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const fixture = serviceFixture({
+        project: workProject({ binding: { canonicalRoot: root } }),
+        turnRuntime: new WorkTurnRuntime({ timeoutMs: 1000 }),
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          acquire: () => Effect.succeed(connection),
+        }),
+      });
+      expect(proof.current()).toBe(true);
+      await fixture.service.startFirstTurn(ids.window, startCommand(), {
+        admissionCurrent: proof.current,
+      });
+      await entered.promise;
+      if (replaced === "input directory") {
+        await rename(join(root, "Inbox"), join(root, "old-input"));
+        await mkdir(join(root, "Inbox"));
+      } else if (replaced === "Project root") {
+        await rename(root, `${root}-old`);
+        await mkdir(root);
+        await mkdir(join(root, "Inbox"));
+      }
+      release.resolve();
+      await fixture.waitForIdle();
+      expect(submitted).toBe(replaced === "unchanged" ? 1 : 0);
+      expect(fixture.projection.lookup(ids.request)).toMatchObject(
+        replaced === "unchanged"
+          ? { status: "completed" }
+          : { status: "failed", failure: { category: "unauthorized" } },
+      );
+    },
+  );
+
   it("keeps owned host file data in required workspace context while the fixed task stays the current request", async () => {
     const seen: string[] = [];
     const fixture = serviceFixture({

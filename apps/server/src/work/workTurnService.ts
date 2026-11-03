@@ -1159,7 +1159,7 @@ export class WorkTurnService {
                 text: options.externalData.content.text,
                 sourceKind: "message" as const,
                 referenceId: options.externalData.referenceId,
-                category: options.externalData.content.section,
+                category: "workspace-context" as const,
                 posture: "required" as const,
                 block: { kind: "user-message" as const, text: options.externalData.content.text },
               },
@@ -1806,6 +1806,9 @@ export class WorkTurnService {
         });
       }
       const outcome = await this.#turnRuntime.run({
+        ...(input.admissionCurrent === undefined
+          ? {}
+          : { admissionCurrent: input.admissionCurrent }),
         command: input.command,
         providerSessionId: input.providerSessionId,
         ...(this.#outsideContentMarks === undefined

@@ -463,6 +463,7 @@ export function startOctantServer(
       workThreadProjection,
     });
     const {
+      readHarnessProcessReceipts,
       personMemorySweep,
       runtimeForgeChanges,
       followUpCreation,
@@ -1065,6 +1066,9 @@ export function startOctantServer(
       pushGatewaySetting,
       pushNotificationTokenStore,
     } = wireAutomation({
+      agentRunOrchestration,
+      externalContentIngestionStore,
+      readHarnessProcessReceipts,
       capacityScheduler,
       chatService,
       codeCompletedThreadSource,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,6 +20,7 @@ import { AutomationProjection } from "./automationProjection";
 import { AutomationCommandService } from "./automationCommandService";
 import { AutomationSchedulerService } from "./automationSchedulerService";
 import { AutomationFileSources } from "./automationFileSources";
+import { prepareAutomationFileRunAdmission } from "./automationFileSourceAuthority";
 import { prepareAutomationFileSource } from "./automationFileSourceScan";
 import { initialAutomationFileCheckpoint } from "./automationFileSourceState";
 import {
@@ -100,6 +101,7 @@ async function fixture(
   let allowed = true;
   let monotonic = 0;
   let activity: "quiet" | "busy" | "unknown" = "quiet";
+  let activityObserver: (() => Promise<"quiet" | "busy" | "unknown">) | undefined;
   let hint: (() => void) | undefined;
   let watchClosed = 0;
   const offers: AutomationDispatchOffer[] = [];
@@ -148,7 +150,7 @@ async function fixture(
             current: () => allowed,
           }
         : undefined,
-    activity: async () => activity,
+    activity: async () => (activityObserver === undefined ? activity : activityObserver()),
     now: () => definition.createdAt,
     monotonic: () => monotonic,
     wake: () => undefined,
@@ -177,6 +179,9 @@ async function fixture(
     hint: () => hint?.(),
     revoke: () => {
       allowed = false;
+    },
+    observeActivity: (next: typeof activityObserver) => {
+      activityObserver = next;
     },
     activity: (next: typeof activity) => {
       activity = next;
@@ -268,6 +273,8 @@ describe("file input reconciliation on the host routine owner", () => {
         },
       ],
     });
+    if (project.type !== "work") throw new Error("Expected a Work Project");
+    const projectSummary = { ...project, bindingRevisionId: project.bindingHistory[0].revisionId };
     const provider = Schema.decodeUnknownSync(ProviderInstance)({
       id: definition.executionProfile.providerInstanceId,
       displayName: "Controlled provider",
@@ -350,7 +357,18 @@ describe("file input reconciliation on the host routine owner", () => {
       },
       clock: () => definition.createdAt,
       uuid: randomUUID,
-      fileInputCurrent: current,
+      prepareFileInput: (run, signal) =>
+        prepareAutomationFileRunAdmission({
+          run,
+          filesystem: liveWorkFilesystem,
+          authority: {
+            canonicalRoot: host.directory,
+            bindingIdentity: "actual-host-project-binding",
+            current: () => current(run),
+          },
+          current: () => current(run),
+          signal,
+        }),
       markFileInput: ({ contentReference }) => {
         marked.push(contentReference);
         return true;
@@ -439,7 +457,12 @@ describe("file input reconciliation on the host routine owner", () => {
       commands: host.commands,
       windowAuthorityStore: authority,
       projects: {
-        bootstrap: async () => ({ active: [project], archived: [], availability: [], memory: [] }),
+        bootstrap: async () => ({
+          active: [projectSummary],
+          archived: [],
+          availability: [],
+          memory: [],
+        }),
       },
       hostId: "local",
       now: () => 1,
@@ -591,44 +614,86 @@ describe("file input reconciliation on the host routine owner", () => {
     });
   });
 
-  it("keeps paused held input reachable for an explicit current review without ordinary Resume dropping it", async () => {
-    const host = await heldFixture();
-    const definition = host.projection.getDefinition(host.definition.id);
-    if (definition === undefined) throw new Error("Missing definition");
-    host.store.appendDefinitionLifecycleChanged({
-      automation: {
-        ...definition,
-        lifecycle: "paused",
-        version: Schema.decodeUnknownSync(AggregateVersion)(definition.version + 1),
-      },
-      previousLifecycle: definition.lifecycle,
-      expectedVersion: definition.version,
-    });
-    await host.sources.reconcile();
-    const command = reviewCommand(host, "skip");
-    expect(
-      host.commands.execute(
-        decodeAutomationCommand({
-          kind: "resume-automation",
-          automationId: command.automationId,
-          expectedVersion: command.expectedVersion,
-          principal: command.principal,
-          origin: command.origin,
-        }),
-      ),
-    ).toMatchObject({ kind: "automation-command-failed", reason: "blocked" });
-    const proof = await host.sources.prepareRearm({
-      command,
-      current: () => true,
-      signal: new AbortController().signal,
-    });
-    expect(host.commands.execute(command, undefined, proof).kind).toBe("automation-resumed");
-    expect(host.projection.getDefinition(host.definition.id)?.lifecycle).toBe("enabled");
-    expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
-      automaticStarts: 0,
-      armGeneration: 2,
-    });
-  });
+  it.each(["final activity await", "returned proof"] as const)(
+    "refuses selected-directory replacement at the re-arm %s boundary",
+    async (stage) => {
+      const host = await heldFixture();
+      const command = reviewCommand(host, "run-once");
+      const replace = async () => {
+        await rename(join(host.directory, "Inbox"), join(host.directory, "prior-input"));
+        await mkdir(join(host.directory, "Inbox"));
+      };
+      let observations = 0;
+      if (stage === "final activity await")
+        host.observeActivity(async () => {
+          observations++;
+          if (observations === 2) await replace();
+          return "quiet";
+        });
+      const prepared = host.sources.prepareRearm({
+        command,
+        current: () => true,
+        signal: new AbortController().signal,
+      });
+      if (stage === "final activity await") await expect(prepared).rejects.toThrow();
+      else {
+        const proof = await prepared;
+        await replace();
+        expect(host.commands.execute(command, undefined, proof)).toMatchObject({
+          kind: "automation-command-failed",
+          reason: "stale-version",
+        });
+      }
+      expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
+        phase: "held",
+        automaticStarts: 1,
+        armGeneration: 1,
+      });
+      expect(host.offers).toHaveLength(1);
+    },
+  );
+
+  it.each(["before coordinator", "after coordinator"])(
+    "keeps paused held input reachable for an explicit current review %s without ordinary Resume dropping it",
+    async (timing) => {
+      const host = await heldFixture();
+      const definition = host.projection.getDefinition(host.definition.id);
+      if (definition === undefined) throw new Error("Missing definition");
+      host.store.appendDefinitionLifecycleChanged({
+        automation: {
+          ...definition,
+          lifecycle: "paused",
+          version: Schema.decodeUnknownSync(AggregateVersion)(definition.version + 1),
+        },
+        previousLifecycle: definition.lifecycle,
+        expectedVersion: definition.version,
+      });
+      if (timing === "after coordinator") await host.sources.reconcile();
+      const command = reviewCommand(host, "skip");
+      expect(
+        host.commands.execute(
+          decodeAutomationCommand({
+            kind: "resume-automation",
+            automationId: command.automationId,
+            expectedVersion: command.expectedVersion,
+            principal: command.principal,
+            origin: command.origin,
+          }),
+        ),
+      ).toMatchObject({ kind: "automation-command-failed", reason: "blocked" });
+      const proof = await host.sources.prepareRearm({
+        command,
+        current: () => true,
+        signal: new AbortController().signal,
+      });
+      expect(host.commands.execute(command, undefined, proof).kind).toBe("automation-resumed");
+      expect(host.projection.getDefinition(host.definition.id)?.lifecycle).toBe("enabled");
+      expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
+        automaticStarts: 0,
+        armGeneration: 2,
+      });
+    },
+  );
 
   it("cannot clear a changed batch or commit after the review's person authority is revoked", async () => {
     const host = await heldFixture();

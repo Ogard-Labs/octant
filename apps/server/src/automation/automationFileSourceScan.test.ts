@@ -6,7 +6,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AutomationFileArrivalTrigger } from "@octant/contracts";
 import { liveWorkFilesystem, type WorkFilesystemPort } from "../work/workFilesystemPort";
 import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
-import { prepareAutomationFileSource, scanAutomationFileSource } from "./automationFileSourceScan";
+import {
+  automationFileSourceCurrent,
+  prepareAutomationFileSource,
+  scanAutomationFileSource,
+} from "./automationFileSourceScan";
 
 const trigger: AutomationFileArrivalTrigger = {
   kind: "file-arrival",
@@ -47,6 +51,12 @@ async function setup(filesystem: WorkFilesystemPort = liveWorkFilesystem) {
 }
 
 describe("confined file-arrival observations", () => {
+  it("refuses a final admission proof when the filesystem has no native current-directory capability", async () => {
+    const source = await setup();
+    const { currentDirectoryIdentity: _native, ...withoutCurrentIdentity } = liveWorkFilesystem;
+    expect(automationFileSourceCurrent(withoutCurrentIdentity, source.root)).toBe(false);
+    expect(automationFileSourceCurrent(liveWorkFilesystem, source.root)).toBe(true);
+  });
   it("hashes the complete selected regular-file set without excluded, hidden or linked files", async () => {
     const source = await setup();
     await mkdir(join(source.path, "Inbox/processed"));

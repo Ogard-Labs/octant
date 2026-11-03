@@ -304,7 +304,7 @@ describe("AutomationDefinitionEditor creation", () => {
 
   it.each(["Code", "Chat"])("does not offer file arrivals for %s", async (mode) => {
     render(<AutomationDefinitionEditor {...editorProps()} />);
-    await userEvent.click(screen.getByRole("button", { name: mode, exact: true }));
+    await userEvent.click(screen.getByRole("button", { name: mode }));
     await userEvent.click(screen.getByLabelText("Schedule"));
     expect(
       screen.queryByRole("option", { name: "When files arrive or change" }),

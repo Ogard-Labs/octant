@@ -4,6 +4,7 @@ import {
   AutomationThreadRoutineRequest,
   RoutineProposal,
   decodeAutomationTrigger,
+  decodeAutomationScheduledTrigger,
 } from "./automation";
 
 const trigger = {
@@ -42,6 +43,11 @@ describe("bounded Work file-arrival trigger", () => {
     expect(() => decodeAutomationTrigger({ ...trigger, token: "must-not-pass" })).toThrow();
   });
   it("keeps file triggers out of thread-agent proposals and thread follow-ups", () => {
+    expect(() => decodeAutomationScheduledTrigger(trigger)).toThrow();
+    expect(
+      decodeAutomationScheduledTrigger({ kind: "once", scheduledAt: "2026-11-03T12:00:00.000Z" })
+        .kind,
+    ).toBe("once");
     const request = {
       threadId: "11111111-1111-4111-8111-111111111111",
       mode: "work",

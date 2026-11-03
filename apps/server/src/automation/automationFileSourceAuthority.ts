@@ -1,6 +1,7 @@
 import { currentProtectedFilesChoice } from "../process/secretGuard";
 import type {
   AutomationId,
+  AutomationRun,
   AutomationDefinitionSnapshot,
   AutomationDefinitionDraft,
   AutomationFileSourceCheckpoint,
@@ -15,6 +16,7 @@ import {
 } from "./resolveAutomationAuthorityLiveFacts";
 import {
   prepareAutomationFileSource,
+  automationFileSourceCurrent,
   AutomationFileSourceScanError,
 } from "./automationFileSourceScan";
 import { initialAutomationFileCheckpoint } from "./automationFileSourceState";
@@ -127,6 +129,41 @@ export async function prepareAutomationFileDefinition(input: {
     expectedVersion: input.expectedVersion,
     definition: input.definition,
     checkpoint: initialAutomationFileCheckpoint(root.sourceIdentity, input.now()),
-    current,
+    current: () => current() && automationFileSourceCurrent(input.filesystem, root) && current(),
   };
+}
+
+/** Capture one host-owned run's exact source; the proof never adopts replacement paths. */
+export async function prepareAutomationFileRunAdmission(input: {
+  readonly run: AutomationRun;
+  readonly filesystem: WorkFilesystemPort;
+  readonly authority: AutomationFileSourceAuthority;
+  readonly current: () => boolean;
+  readonly signal: AbortSignal;
+}): Promise<(() => boolean) | undefined> {
+  const { run } = input;
+  if (
+    run.occurrence.kind !== "file-arrival" ||
+    run.definitionSnapshot.trigger.kind !== "file-arrival"
+  )
+    return undefined;
+  const protectedChoice = currentProtectedFilesChoice();
+  const current = () =>
+    !input.signal.aborted &&
+    input.current() &&
+    input.authority.current() &&
+    currentProtectedFilesChoice() === protectedChoice;
+  const root = await prepareAutomationFileSource({
+    filesystem: input.filesystem,
+    canonicalRoot: input.authority.canonicalRoot,
+    bindingIdentity: input.authority.bindingIdentity,
+    trigger: run.definitionSnapshot.trigger,
+    current,
+    signal: input.signal,
+  });
+  if (root.sourceIdentity !== run.occurrence.source.checkpoint.sourceIdentity || !current())
+    return undefined;
+  const retained = () =>
+    current() && automationFileSourceCurrent(input.filesystem, root) && current();
+  return retained() ? retained : undefined;
 }

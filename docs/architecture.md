@@ -2527,6 +2527,14 @@ the thread it came from.
   directory entries, 256 matching files, 16 MiB per file and 64 MiB of content.
   Current host/Project/binding/profile/provider authority and cursor ownership
   are rechecked after asynchronous work, before journal or dispatch admission.
+  The native resolver retains the exact canonical root and input-directory
+  device/inode identities. Its synchronous current proof is checked after all
+  awaited preparation at source/review commit and ordinary Work acceptance,
+  then again after provider session startup immediately before prompt send;
+  replacement paths are never silently adopted. A filesystem without that
+  native capability cannot authorize a new file admission. Run-input proof
+  acquisition has a 10-second stage bound and invalidates late results rather
+  than resubmitting a task; this is not an end-to-end task deadline.
 - **File baseline, recovery and feedback.** The first complete settled scan is
   baseline only. A bounded source cursor lives in the routine's existing journal
   and projection. A deterministic occurrence creates its run first, then commits

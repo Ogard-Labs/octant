@@ -107,7 +107,7 @@ describe("createAutomationWorkDispatchPort", () => {
       turns,
       clock: () => now,
       uuid: () => AUTOMATION_TEST_IDS.run,
-      fileInputCurrent: () => current,
+      prepareFileInput: async () => () => current,
       markFileInput: mark,
     });
     const result = await port.startOrRecoverFirstTurn({
@@ -146,6 +146,90 @@ describe("createAutomationWorkDispatchPort", () => {
       automationPromptDigest(definition.taskPrompt),
     );
   });
+  it("bounds uncooperative file-proof acquisition, aborts its owner and ignores a late proof without retry", async () => {
+    const definition = automationDefinitionFixture({
+      trigger: {
+        kind: "file-arrival",
+        directory: "Inbox",
+        includeExtensions: [],
+        excludeDirectories: [],
+        settleSeconds: 2,
+        automaticStartLimit: 8,
+      },
+      nextDueAt: null,
+    });
+    const files = ["input.txt"];
+    const snapshot = files.map((path) => ({ path, digest: "b".repeat(64), size: 1 }));
+    const checkpoint = {
+      ...initialAutomationFileCheckpoint("a".repeat(64), now),
+      baselineReady: true,
+      automaticStarts: 1,
+      phase: "watching" as const,
+      baseline: snapshot,
+      baselineDigest: automationSourceSnapshotDigest(snapshot),
+    };
+    const run = buildAutomationRunForOccurrence({
+      definition,
+      now,
+      occurrence: {
+        kind: "file-arrival",
+        automationId: definition.id,
+        definitionRevision: definition.definitionRevision,
+        source: { checkpoint, files, automaticStartOrdinal: 1 },
+      },
+    });
+    let release: ((proof: () => boolean) => void) | undefined;
+    let owner: AbortSignal | undefined;
+    const prepare = vi.fn((_run: AutomationRun, signal: AbortSignal) => {
+      owner = signal;
+      return new Promise<() => boolean>((resolve) => {
+        release = resolve;
+      });
+    });
+    const turns = createTurns();
+    const mark = vi.fn(() => true);
+    const port = createAutomationWorkDispatchPort({
+      threads: createThreads(),
+      turns,
+      clock: () => now,
+      uuid: () => AUTOMATION_TEST_IDS.run,
+      prepareFileInput: prepare,
+      markFileInput: mark,
+    });
+    vi.useFakeTimers();
+    try {
+      const pending = port.startOrRecoverFirstTurn({
+        run,
+        threadId,
+        firstTurnRequestId: run.firstTurnRequestId,
+        promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
+        scopeId,
+      });
+      const ordinary = workRun();
+      expect(
+        await port.startOrRecoverFirstTurn({
+          run: ordinary,
+          threadId,
+          firstTurnRequestId: ordinary.firstTurnRequestId,
+          promptDigest: automationPromptDigest(ordinary.definitionSnapshot.taskPrompt),
+          scopeId,
+        }),
+      ).toMatchObject({ kind: "accepted" });
+      expect(turns.startFirstTurn).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(await pending).toMatchObject({ kind: "failed", reason: "provider-launch-failed" });
+      expect(owner?.aborted).toBe(true);
+      release?.(() => true);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(prepare).toHaveBeenCalledTimes(1);
+      expect(mark).not.toHaveBeenCalled();
+      expect(turns.startFirstTurn).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("creates a Work thread from the definition snapshot and reuses the dispatcher thread id", async () => {
     const threads = createThreads();
     const port = createAutomationWorkDispatchPort({

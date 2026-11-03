@@ -51,7 +51,10 @@ export interface CreateAutomationWorkDispatchPortOptions {
   readonly turns: AutomationWorkTurnService;
   readonly clock: () => UtcTimestamp;
   readonly uuid: () => string;
-  readonly fileInputCurrent?: (run: AutomationRun) => boolean;
+  readonly prepareFileInput?: (
+    run: AutomationRun,
+    signal: AbortSignal,
+  ) => Promise<(() => boolean) | undefined>;
   readonly markFileInput?: (input: {
     readonly run: AutomationRun;
     readonly threadId: WorkThreadId;
@@ -164,9 +167,11 @@ async function startOrRecover(
     };
   }
   const fileContext = automationFileContext(input.run);
+  const fileCurrent =
+    fileContext === undefined ? undefined : await prepareFileAdmission(options, input.run);
   if (
     fileContext !== undefined &&
-    (options.fileInputCurrent?.(input.run) !== true ||
+    (fileCurrent?.() !== true ||
       options.markFileInput === undefined ||
       input.promptDigest !== automationPromptDigest(automationDispatchPromptText(input.run)))
   )
@@ -227,7 +232,7 @@ async function startOrRecover(
         ? {}
         : {
             externalData: fileContext,
-            admissionCurrent: () => options.fileInputCurrent?.(input.run) === true,
+            admissionCurrent: () => fileCurrent?.() === true,
           }),
       ...(snapshot.projectLevel === "opted-in"
         ? {}
@@ -277,6 +282,42 @@ async function startOrRecover(
       reason: "recovery-failed",
       message: error instanceof Error ? error.message : "Work provider turn recovery failed.",
     };
+  }
+}
+
+/** One finite acquisition stage; a late filesystem result can never resume dispatch. */
+async function prepareFileAdmission(
+  options: CreateAutomationWorkDispatchPortOptions,
+  run: AutomationRun,
+): Promise<(() => boolean) | undefined> {
+  if (options.prepareFileInput === undefined) return undefined;
+  const controller = new AbortController();
+  const deadline = performance.now() + 10_000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const prepared = Promise.resolve(options.prepareFileInput(run, controller.signal)).then(
+      (proof) => {
+        if (controller.signal.aborted || performance.now() >= deadline) {
+          controller.abort();
+          return undefined;
+        }
+        return proof === undefined ? undefined : () => !controller.signal.aborted && proof();
+      },
+    );
+    return await Promise.race([
+      prepared,
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          resolve(undefined);
+        }, 10_000);
+      }),
+    ]);
+  } catch {
+    controller.abort();
+    return undefined;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

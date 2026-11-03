@@ -6,6 +6,7 @@ import { Schema } from "effect";
 import { AutomationFileSources } from "../automation/automationFileSources";
 import {
   prepareAutomationFileDefinition,
+  prepareAutomationFileRunAdmission,
   resolveAutomationFileSourceAuthority,
 } from "../automation/automationFileSourceAuthority";
 import { captureAutomationDefinitionSnapshot } from "../automation/automationRunIdentity";
@@ -280,7 +281,21 @@ export function wireAutomation(deps: AutomationDependencies) {
     },
   });
   const automationWorkDispatch = createAutomationWorkDispatchPort({
-    fileInputCurrent: routineFileInputCurrent,
+    prepareFileInput: async (run, signal) => {
+      const authority = resolveAutomationFileSourceAuthority(
+        automationAuthorityDeps,
+        run.definitionSnapshot,
+        new Date().toISOString() as UtcTimestamp,
+      );
+      if (authority === undefined) return undefined;
+      return prepareAutomationFileRunAdmission({
+        run,
+        filesystem: liveWorkFilesystem,
+        authority,
+        current: () => routineFileInputCurrent(run),
+        signal,
+      });
+    },
     markFileInput: ({ run, threadId, contentReference }) => {
       if (!routineFileInputCurrent(run)) return false;
       try {

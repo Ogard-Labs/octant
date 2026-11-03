@@ -4,7 +4,7 @@ import {
   decodeAutomationCommand,
   decodeAutomationFollowUpRequest,
   decodeAutomationThreadRoutineRequest,
-  decodeAutomationTrigger,
+  decodeAutomationScheduledTrigger,
   decodeRoutineProposalDecision,
   decodeRoutineProposalId,
   decodeRoutineProposalDecisionResult,
@@ -774,7 +774,10 @@ async function handleFollowUp(
       origin,
     );
   }
-  const trigger = decodeAutomationTrigger({ kind: "once", scheduledAt: request.scheduledAt });
+  const trigger = decodeAutomationScheduledTrigger({
+    kind: "once",
+    scheduledAt: request.scheduledAt,
+  });
   if (request.kind === "schedule-follow-up") {
     const result = await createThreadRoutine(dependencies, context, {
       proposalId: decodeRoutineProposalId((dependencies.uuid ?? randomUUID)()),

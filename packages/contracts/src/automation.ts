@@ -1623,6 +1623,9 @@ export const decodeAutomationDefinitionRevision = Schema.decodeUnknownSync(
   AutomationDefinitionRevision,
 );
 export const decodeAutomationTrigger = Schema.decodeUnknownSync(AutomationTrigger);
+export const decodeAutomationScheduledTrigger = Schema.decodeUnknownSync(
+  AutomationScheduledTrigger,
+);
 export const decodeAutomationAuthority = Schema.decodeUnknownSync(AutomationAuthority);
 export const decodeAutomationMissedRunCap = Schema.decodeUnknownSync(AutomationMissedRunCap);
 export const decodeAutomationDefinitionDraft = Schema.decodeUnknownSync(AutomationDefinitionDraft);

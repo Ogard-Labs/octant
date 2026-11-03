@@ -29,6 +29,26 @@ export interface AutomationFileSourceRoot {
   readonly sourceIdentity: string;
 }
 
+/** Final native proof of the exact directories resolved earlier; absence is not authority. */
+export function automationFileSourceCurrent(
+  filesystem: WorkFilesystemPort,
+  root: AutomationFileSourceRoot,
+): boolean {
+  try {
+    for (const [path, expected] of [
+      [root.canonicalRoot, root.rootIdentity],
+      [root.canonicalDirectory, root.directoryIdentity],
+    ] as const) {
+      const actual = filesystem.currentDirectoryIdentity?.(path);
+      if (actual === undefined || actual.canonicalPath !== path || !sameIdentity(actual, expected))
+        return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class AutomationFileSourceScanError extends Error {
   override readonly name = "AutomationFileSourceScanError";
   constructor(
