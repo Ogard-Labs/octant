@@ -1,3 +1,8 @@
+import { CredentialRequests } from "./credentials/credentialRequests";
+import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
+import { createCredentialRequestTools } from "./credentials/credentialRequestTools";
+import { linearCredentialOperation } from "./plugins/linear/linearCredentialOperation";
+import { isLinearIntegrationEffective } from "./github/githubIntegrationEffective";
 import {
   startupFailedOutput,
   UNCLASSIFIED_STARTUP_FAILURE,
@@ -1144,7 +1149,26 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    const credentialRequests = new CredentialRequests();
+    yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
+    const credentialRequestRoutes = createCredentialRequestRoutes(
+      credentialRequests,
+      windowAuthorityStore,
+    );
+    contributeCodeTools(({ windowId, thread, readThread }) =>
+      createCredentialRequestTools({
+        service: credentialRequests,
+        windowId: String(windowId),
+        thread,
+        readThread,
+        effective: () => isLinearIntegrationEffective(extensionApiService.snapshot()),
+        windowCurrent: () =>
+          windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
+        operation: linearCredentialOperation,
+      }),
+    );
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
+      credentialRequestRoutes,
       agentMessageRoutes,
       agentProfileRoutes,
       agentRunRouteDependencies,

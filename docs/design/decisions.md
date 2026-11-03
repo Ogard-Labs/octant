@@ -1761,6 +1761,17 @@ The host, not a provider child and not the renderer, owns provider sign-in flows
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Host-driven provider sign-in](../architecture.md#security-and-authority).
 
+### One-use credential cards
+
+A local person can enter a token in a conversation card for one fixed integration operation without sending it to the model or saving a sign-in.
+
+- The host supplies the purpose, destination and action; an agent cannot choose an arbitrary URL or command.
+- Submission consumes the request once, checks current thread and window authority, and sends no response content or raw error to the agent.
+- Expiry, decline, cancellation and restart prevent future use. The host cannot recall a token already transmitted.
+- The first consumer is a read-only Linear account check in Code. Command credentials, linked-store selection and administrator authentication remain separate work.
+
+Status: Partially built. Since: 2026-11-03. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
+
 ### Account usage reads
 
 Plan limits for providers that report them only from an account endpoint are read with the sign-in the provider's own CLI saved.

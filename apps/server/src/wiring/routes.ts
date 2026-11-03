@@ -27,7 +27,9 @@ import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
 import type { WorkRequestsWiring } from "./workRequests";
 
-export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence"> &
+export type RoutesDependencies = {
+  readonly credentialRequestRoutes: (request: Request) => Promise<Response | undefined>;
+} & Pick<ServerStart, "latencyStats" | "persistence"> &
   Pick<AgentRunsWiring, "agentRunRouteDependencies" | "agentRunSettingsRoutes"> &
   Pick<
     IntegrationsWiring,
@@ -142,6 +144,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
 
 export function wireRoutes(deps: RoutesDependencies) {
   const {
+    credentialRequestRoutes,
     agentMessageRoutes,
     agentProfileRoutes,
     agentRunRouteDependencies,
@@ -271,6 +274,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await sideTaskRoutes(request)) ??
     (await githubRoutes(request)) ??
     (await integrationRoutes(request)) ??
+    (await credentialRequestRoutes(request)) ??
     (await githubCloneRoutes(request)) ??
     (await agentProfileRoutes(request)) ??
     (await folderBrowseRoutes(request)) ??
