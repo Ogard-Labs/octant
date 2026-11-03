@@ -108,6 +108,8 @@ it("composes the real persisted Code and hydrated Work feedback owner through se
               ],
               ...(mode === "code" ? { codeAccessPersistence: "current-session" } : {}),
             });
+            if (project.type === "chat")
+              throw Error("Feedback fixture requires a bound task Project");
             const common = {
               id: randomUUID(),
               projectId: project.id,
