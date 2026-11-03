@@ -912,6 +912,7 @@ export function wireHarness(deps: HarnessDependencies) {
   // what later areas add.
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   return {
+    credentialCommandProcess: harnessFullAccessProcessPort,
     personMemorySweep,
     runtimeForgeChanges,
     followUpCreation,

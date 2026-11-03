@@ -212,3 +212,7 @@ export {
   prepareBrowserDownloadHoldRoot,
   type BrowserDownloadHoldKind,
 } from "./browserDownloadHold";
+
+export { onePasswordCommandCredentials } from "./onePasswordCommandCredentials";
+
+export { resolveOnePasswordExecutable } from "./linkedSecretStores";

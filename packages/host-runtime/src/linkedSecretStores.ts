@@ -18,6 +18,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -76,6 +77,7 @@ export type LinkSecretStoreResult =
   | { readonly status: "unavailable" };
 
 export interface LinkedSecretStores {
+  readonly commandLinkRevision?: () => Promise<string | undefined>;
   readonly status: () => Promise<ReadonlyArray<LinkedSecretStoreStatus>>;
   readonly link: (kind: LinkedSecretStoreKind) => Promise<LinkSecretStoreResult>;
   readonly unlink: (kind: LinkedSecretStoreKind) => Promise<void>;
@@ -218,6 +220,27 @@ export interface OnePasswordAdapterOptions {
   readonly timeoutMs?: number;
 }
 
+export async function resolveOnePasswordExecutable(
+  options: Pick<OnePasswordAdapterOptions, "executablePath" | "env"> = {},
+): Promise<string | undefined> {
+  if (options.executablePath !== undefined) return options.executablePath;
+  const candidates = [
+    ...ONE_PASSWORD_LOCATIONS,
+    ...((options.env ?? process.env).PATH?.split(process.platform === "win32" ? ";" : ":")
+      .filter((directory) => directory.startsWith("/"))
+      .map((directory) => join(directory, "op")) ?? []),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Try the next location.
+    }
+  }
+  return undefined;
+}
+
 export function makeOnePasswordAdapter(
   options: OnePasswordAdapterOptions = {},
 ): LinkedSecretStoreAdapter {
@@ -231,24 +254,7 @@ export function makeOnePasswordAdapter(
       Object.entries(source).filter(([name]) => !name.toUpperCase().startsWith("OCTANT_")),
     );
   };
-  const executable = async (): Promise<string | undefined> => {
-    if (options.executablePath !== undefined) return options.executablePath;
-    const candidates = [
-      ...ONE_PASSWORD_LOCATIONS,
-      ...((options.env ?? process.env).PATH?.split(process.platform === "win32" ? ";" : ":")
-        .filter((directory) => directory.startsWith("/"))
-        .map((directory) => join(directory, "op")) ?? []),
-    ];
-    for (const candidate of candidates) {
-      try {
-        await access(candidate, constants.X_OK);
-        return candidate;
-      } catch {
-        // Try the next location.
-      }
-    }
-    return undefined;
-  };
+  const executable = () => resolveOnePasswordExecutable(options);
   const classify = (outcome: CommandOutcome): "ok" | "locked" | "missing" | "unavailable" => {
     if (outcome.kind !== "exited") return "unavailable";
     if (outcome.exitCode === 0) return "ok";
@@ -317,6 +323,8 @@ export function linkedSecretStoresStatePath(dataDirectory: string): string {
 
 export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): LinkedSecretStores {
   const adapters = options.adapters ?? [makeOnePasswordAdapter()];
+  const commandSession = randomUUID();
+  let commandGeneration = 0;
   const now = options.now ?? (() => new Date().toISOString());
   const adapterFor = (kind: LinkedSecretStoreKind): LinkedSecretStoreAdapter | undefined =>
     adapters.find((adapter) => adapter.kind === kind);
@@ -372,6 +380,7 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       );
     },
     link: async (kind) => {
+      commandGeneration += 1;
       const adapter = adapterFor(kind);
       if (adapter === undefined) return { status: "unavailable" };
       // Linking is the person's decision, and it needs the store open now: a
@@ -383,10 +392,18 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       return { status: "linked" };
     },
     unlink: async (kind) => {
+      commandGeneration += 1;
       const state = await load();
       const { [kind]: _removed, ...rest } = state.stores;
       // A pointer stays, and fails closed until the store is linked again.
       await save({ ...state, stores: rest });
+    },
+    commandLinkRevision: async () => {
+      const generation = commandGeneration;
+      const linked = (await load()).stores.onepassword;
+      return linked === undefined || generation !== commandGeneration
+        ? undefined
+        : `${commandSession}:${generation}:${linked.linkedAt}`;
     },
     isLinked: async (kind) => (await load()).stores[kind] !== undefined,
     isValidReference: (kind, reference) => adapterFor(kind)?.isValidReference(reference) ?? false,

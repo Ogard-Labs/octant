@@ -1,3 +1,7 @@
+import {
+  decodeCommandCredentialJournalRecord,
+  type CommandCredentialJournalRecord,
+} from "@octant/contracts/command-credentials";
 import { Schema } from "effect";
 import { ActorId, AggregateId, CorrelationId, EventId, LOCAL_HOST_ID } from "@octant/contracts";
 import {
@@ -75,4 +79,27 @@ function isRecordList(
   input: SecretStoreJournalRecord | ReadonlyArray<SecretStoreJournalRecord>,
 ): input is ReadonlyArray<SecretStoreJournalRecord> {
   return Array.isArray(input);
+}
+
+/** Rebuild only reference bindings; run output never enters the journal. */
+export function readCommandCredentialHistory(
+  journal: Journal,
+): ReadonlyArray<CommandCredentialJournalRecord> {
+  const records: CommandCredentialJournalRecord[] = [];
+  let afterSequence = 0;
+  while (true) {
+    const page = journal.replayAggregateType({
+      aggregateType: SECRET_STORE_AGGREGATE_TYPE,
+      afterSequence,
+      limit: 1000,
+      payloadPrefix: { path: "name", prefix: "command-binding." },
+    });
+    if (page.length === 0) break;
+    for (const event of page) {
+      records.push(decodeCommandCredentialJournalRecord(event.payload));
+      afterSequence = event.globalSequence;
+    }
+    if (page.length < 1000) break;
+  }
+  return records;
 }

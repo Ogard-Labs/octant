@@ -1,3 +1,4 @@
+import { CommandCredentialJournalRecord } from "./commandCredentials";
 /**
  * Linked external secret stores: Settings › Secret stores, and the record the
  * journal keeps of them.
@@ -209,6 +210,7 @@ const CredentialTarget = Schema.Union(
  * is never an input to any of these records.
  */
 export const SecretStoreJournalRecord = Schema.Union(
+  CommandCredentialJournalRecord,
   Schema.Struct({
     name: Schema.Literal("secret-store.linked"),
     store: SecretStoreKind,

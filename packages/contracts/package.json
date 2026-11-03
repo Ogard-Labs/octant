@@ -156,7 +156,8 @@
     "./desktop-lease": "./src/desktopLease.ts",
     "./simulator-device": "./src/simulatorDevice.ts",
     "./managed-tooling": "./src/managedTooling.ts",
-    "./credential-request": "./src/credentialRequest.ts"
+    "./credential-request": "./src/credentialRequest.ts",
+    "./command-credentials": "./src/commandCredentials.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

@@ -10910,6 +10910,51 @@ access` agree); a thread's own change is journaled as
     gone or its store locked by then); if it cannot be put back, the new pointer
     is removed and the answer says so, so an unjournaled pointer never stays
     active.
+  - **Named credential commands.** Settings › Secret stores saves a fixed
+    reference-only binding for one Code Project: canonical recipient executable
+    and SHA-256 digest, bounded fixed arguments, relative Project directory,
+    explicit account ID and 1–8 immutable vault/item/section/field environment
+    references. The installed `op` 2 executable, version and digest are pinned
+    at save time through the same discovery locations as the linked-store adapter;
+    replacement requires a new binding. The discovery invokes only `--version`.
+    Reserved process, loader, Git, SSH, credential-tool and Octant environment
+    names cannot become mappings; this is not an exhaustive defence against
+    arbitrary runtimes or a hostile recipient at Full access.
+    A normal Code task's `octant_command` tool selects only a binding ID;
+    the Code conversation offers the same review/run service to the person.
+    Every run needs a separate one-use human approval within three minutes,
+    current Full access, and the originating registered local window. Plan and
+    all other access levels refuse this channel; their command-credential
+    acceptance remains unimplemented. No routine, managed-child tool set,
+    paired scope or headless caller inherits it.
+    The server derives the current Project, checkout, profile, provider and
+    active-turn posture. After process preparation it rechecks Project/checkout
+    authority synchronously, asks the owning root seam to verify the managed
+    receipt and root identity, and checks the broker's linked-store revision.
+    Same-process window revocation, unlink, binding edits and authority changes
+    invalidate pending use; across broker/filesystem awaits these are the last
+    observed revisions, not an atomic distributed revocation transaction.
+    The broker's fixed `/v1/secret-stores/command-use` route validates references
+    and link revision only. It cannot launch a process or return a secret.
+    The existing owned process port executes `op run --account ID -- RECIPIENT
+ARGS` with references, a sanitized inherited baseline, bounded output and a
+    1–300 second run timeout. The approval deadline stops governing after actual
+    child start. The recipient and descendants have ordinary Full access and
+    receive credentials directly from `op`; default vendor concealment cannot
+    prevent encoding, file writes or network disclosure. Octant does not claim
+    exact-value redaction for values it never receives.
+    Cancellation before spawn has no command effect. After spawn, cancellation
+    requests owned process-group termination and reports possible effects,
+    including uncertain cleanup; it cannot undo effects or revoke a credential.
+    Exit zero proves process exit only, not account authorization or success of
+    the intended business operation. Journal records reference bindings,
+    revisions and approved/started/outcome metadata, never resolved values or
+    process output. Restart restores bindings, not approvals or output.
+    Preparation operation IDs replay only while their in-memory request/receipt
+    is retained. After eviction or restart, preparation needs a distinct request
+    and fresh approval; an old approval ID refuses. A new approval does not
+    imply an earlier process or its effects stopped. The one-time HTTPS token
+    card and AWS temporary-session path remain independent.
   - **AWS command line.** Settings › Secret stores › AWS command line points
     the AWS command line at the two items that hold the person's access key
     pair (`point-aws-cli-key`; the broker proves both resolve now, as for a
