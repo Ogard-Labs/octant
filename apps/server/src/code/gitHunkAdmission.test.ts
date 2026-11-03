@@ -301,6 +301,9 @@ function harness() {
     },
     turns: {
       start: unused,
+      answerInput: unused,
+      answerApproval: unused,
+      cancel: unused,
       holdsTurn: () => false,
       threadsWritingIn: () =>
         otherWriter ? [decodeCodeThread({ ...source, id: id(12), title: "Other writer" })] : [],
