@@ -1,5 +1,8 @@
 import {
   deriveAutomationOccurrenceKey,
+  decodeWorkTurnRequestId,
+  type WorkTurnRequestId,
+  type WorkTurnState,
   type AutomationDefinition,
   type AutomationId,
   type AutomationOccurrenceKeyText,
@@ -94,6 +97,12 @@ export interface AutomationSchedulerServiceOptions {
   /** Wall clock: selects due occurrences and bounds persisted leases. */
   readonly now: () => UtcTimestamp;
   readonly config?: Partial<AutomationSchedulerConfig>;
+  /** Only persisted first-turn truth; never starts or recovers a provider call. */
+  readonly readWorkTurn?: (requestId: WorkTurnRequestId) => WorkTurnState | undefined;
+  readonly onRunStatusChanged?: (input: {
+    readonly run: AutomationRun;
+    readonly previousLifecycle: AutomationRun["lifecycle"];
+  }) => void;
   /**
    * Called when a live rehydration cannot finish. The projection is then
    * empty, so the host must report Automation history as unloaded and stop
@@ -137,6 +146,8 @@ export class AutomationSchedulerService {
   readonly #now: () => UtcTimestamp;
   readonly #onHistoryUnavailable: (() => void) | undefined;
   readonly #config: AutomationSchedulerConfig;
+  readonly #readWorkTurn: AutomationSchedulerServiceOptions["readWorkTurn"];
+  readonly #onRunStatusChanged: AutomationSchedulerServiceOptions["onRunStatusChanged"];
   readonly #offered = new Set<string>();
   #notify: (() => void) | undefined;
   #pokedWhileWorking = false;
@@ -149,6 +160,8 @@ export class AutomationSchedulerService {
     this.#now = options.now;
     this.#onHistoryUnavailable = options.onHistoryUnavailable;
     this.#config = { ...AUTOMATION_SCHEDULER_DEFAULTS, ...options.config };
+    this.#readWorkTurn = options.readWorkTurn;
+    this.#onRunStatusChanged = options.onRunStatusChanged;
   }
 
   /**
@@ -263,6 +276,8 @@ export class AutomationSchedulerService {
     }
 
     // 2. Interrupted-lease recovery and dispatch re-offers for the active run.
+    const previousActive = this.#projection.activeRun(definition.id);
+    if (previousActive !== undefined) this.#observeWorkTurn(previousActive, out);
     const active = this.#projection.activeRun(definition.id);
     if (active !== undefined) this.#recoverAndOffer(definition, active, out);
 
@@ -277,6 +292,76 @@ export class AutomationSchedulerService {
     // 4. Due/missed reconciliation only schedules enabled definitions.
     if (definition.lifecycle !== "enabled" || definition.nextDueAt === null) return;
     this.#reconcileDue(definition, out);
+  }
+
+  #observeWorkTurn(run: AutomationRun, out: PassCollector): void {
+    const snapshot = run.definitionSnapshot;
+    if (
+      snapshot.mode !== "work" ||
+      snapshot.binding.kind !== "work" ||
+      (run.lifecycle !== "running" && run.lifecycle !== "waiting") ||
+      run.threadId === undefined ||
+      run.firstTurnAcceptance === undefined ||
+      run.firstTurnAcceptance.runtimeReceipt !== `work-turn:${run.firstTurnRequestId}`
+    )
+      return;
+    const turn = this.#readWorkTurn?.(decodeWorkTurnRequestId(String(run.firstTurnRequestId)));
+    if (
+      turn === undefined ||
+      String(turn.requestId) !== String(run.firstTurnRequestId) ||
+      String(turn.threadId) !== String(run.threadId) ||
+      String(turn.projectId) !== String(snapshot.projectId) ||
+      String(turn.authority.projectId) !== String(snapshot.projectId) ||
+      String(turn.authority.hostId) !== String(snapshot.hostId) ||
+      String(turn.authority.bindingRevisionId) !== String(snapshot.binding.bindingRevisionId) ||
+      String(turn.authority.providerInstanceId) !==
+        String(snapshot.executionProfile.providerInstanceId) ||
+      String(turn.authority.modelId) !== String(snapshot.executionProfile.modelId)
+    )
+      return;
+    const lifecycle =
+      turn.status === "completed"
+        ? "completed"
+        : turn.status === "cancelled" ||
+            (turn.status === "failed" && turn.failure?.category === "interrupted")
+          ? "interrupted"
+          : turn.status === "failed"
+            ? "failed"
+            : turn.status === "waiting"
+              ? "waiting"
+              : "running";
+    if (lifecycle === run.lifecycle) return;
+    try {
+      this.#store.appendRunStatusChanged({
+        automationId: run.automationId,
+        runId: run.id,
+        previousLifecycle: run.lifecycle,
+        lifecycle,
+        version: run.version + 1,
+        expectedVersion: run.version,
+        ...(lifecycle === "failed"
+          ? {
+              failure: {
+                reason: "runtime-failed" as const,
+                message: "The routine's Work turn failed. Open its thread for details.",
+              },
+            }
+          : {}),
+        updatedAt: out.now,
+      });
+    } catch (error) {
+      if (!isConflict(error)) throw error;
+      this.#rehydrate();
+      return;
+    }
+    const current = this.#projection.getRun(run.id);
+    if (current !== undefined) {
+      try {
+        this.#onRunStatusChanged?.({ run: current, previousLifecycle: run.lifecycle });
+      } catch {
+        /* Notification failure never changes the persisted run outcome. */
+      }
+    }
   }
 
   #repairClaim(definition: AutomationDefinition, run: AutomationRun, out: PassCollector): void {

@@ -2698,6 +2698,16 @@ the thread it came from.
   claim commits the deterministic run before the occurrence ledger, so a crash
   repairs forward to the same run and never dispatches twice. Run-now and
   cancel are idempotent by request id.
+- **Work first-turn outcomes.** The existing scheduler observes the retained
+  Work turn request after acceptance, matching its runtime receipt, thread,
+  Project, host, binding, provider and model against the run's captured snapshot.
+  Only journaled terminal truth releases that run's active slot; missing or
+  mismatched evidence stays active, and a changed current definition never
+  replaces the captured owner. A cancelled/interrupted Work turn records an
+  interrupted run; a failed turn records runtime failure. The status commits
+  before another occurrence may be claimed. Replay and notification failure
+  never send the old provider call again. This observes first-turn completion,
+  not proof that delegated children or background processes are quiescent.
 - **Turning one off.** Pause stops future occurrences; Resume restarts from the
   next occurrence; Archive ends the routine and keeps its history (there is no
   delete). Cancel stops a run before its first turn starts; afterwards the

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type CapacityReservationId,
+  type AutomationRun,
   type CodeThreadId,
   decodeChatThreadId,
   decodeCodeThreadId,
@@ -67,7 +68,7 @@ export type AutomationDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<ChatWiring, "chatService"> &
   Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService"> &
-  Pick<FoundationsWiring, "workThreadProjection">;
+  Pick<FoundationsWiring, "workThreadProjection" | "workTurnProjection">;
 
 export function wireAutomation(deps: AutomationDependencies) {
   const {
@@ -82,6 +83,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     routineProposalService,
     windowAuthorityStore,
     workThreadProjection,
+    workTurnProjection,
     workThreadService,
     workThreadServiceWithWorkflows,
     workTurnService,
@@ -277,6 +279,16 @@ export function wireAutomation(deps: AutomationDependencies) {
     },
     clock: () => new Date().toISOString() as UtcTimestamp,
   });
+  const observeRunStatusChanged = (input: {
+    readonly run: AutomationRun;
+    readonly previousLifecycle: AutomationRun["lifecycle"];
+  }) => {
+    try {
+      automationNotificationDelivery.observeRunStatusChanged(input);
+    } catch {
+      /* Notification failure never changes run lifecycle truth. */
+    }
+  };
   const automationDispatch = new AutomationDispatchService({
     store: automationEventStore,
     projection: persistence.automationProjection,
@@ -415,15 +427,11 @@ export function wireAutomation(deps: AutomationDependencies) {
         { definition, run },
       ),
     now: () => new Date().toISOString() as UtcTimestamp,
-    onRunStatusChanged: (input) => {
-      try {
-        automationNotificationDelivery.observeRunStatusChanged(input);
-      } catch {
-        // Notification failure never changes run lifecycle truth.
-      }
-    },
+    onRunStatusChanged: observeRunStatusChanged,
   });
   const automationScheduler = new AutomationSchedulerService({
+    readWorkTurn: (requestId) => workTurnProjection.lookup(requestId),
+    onRunStatusChanged: observeRunStatusChanged,
     store: automationEventStore,
     projection: persistence.automationProjection,
     dispatch: automationDispatch,
