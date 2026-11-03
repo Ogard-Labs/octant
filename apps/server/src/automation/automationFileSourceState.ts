@@ -94,7 +94,9 @@ export function reconcileAutomationFileObservation(input: {
     previous.reason === "source-changed" ||
     previous.reason === "authority-changed"
   )
-    return { kind: "unchanged" };
+    return previous.phase === "unavailable"
+      ? checkpoint({ phase: "needs-rearm" })
+      : { kind: "unchanged" };
   if (input.activity !== "quiet") {
     const activityReason =
       previous.reason === "definition-changed"

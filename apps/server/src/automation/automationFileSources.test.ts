@@ -17,6 +17,7 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { liveWorkFilesystem, type WorkFilesystemPort } from "../work/workFilesystemPort";
 import { AutomationEventStore } from "./automationEventStore";
 import { AutomationProjection } from "./automationProjection";
+import { hydrateAutomationProjection } from "./automationProjection";
 import { AutomationCommandService } from "./automationCommandService";
 import { AutomationSchedulerService } from "./automationSchedulerService";
 import { AutomationFileSources } from "./automationFileSources";
@@ -65,15 +66,18 @@ afterEach(async () => {
 async function fixture(
   filesystem: WorkFilesystemPort = liveWorkFilesystem,
   missedRunPolicy: "skip" | "run-once" = "skip",
+  resumeDirectory?: string,
 ) {
-  const directory = await mkdtemp(join(tmpdir(), "octant-file-source-"));
-  cleanups.push(() => rm(directory, { recursive: true, force: true }));
-  await mkdir(join(directory, "Inbox"));
+  const directory = resumeDirectory ?? (await mkdtemp(join(tmpdir(), "octant-file-source-")));
+  if (resumeDirectory === undefined) {
+    cleanups.push(() => rm(directory, { recursive: true, force: true }));
+    await mkdir(join(directory, "Inbox"));
+  }
   const connection = openSqlite(join(directory, "events.sqlite3"));
   cleanups.push(async () => {
     connection.close();
   });
-  const definition = automationDefinitionFixture({
+  const initialDefinition = automationDefinitionFixture({
     missedRunPolicy,
     trigger: {
       kind: "file-arrival",
@@ -85,13 +89,13 @@ async function fixture(
     },
     nextDueAt: null,
   });
-  applyMigrations(connection, MIGRATIONS, () => definition.createdAt);
+  applyMigrations(connection, MIGRATIONS, () => initialDefinition.createdAt);
   const runtime = createPhase1RuntimeRegistries();
   const journal = new Journal({
     connection,
     registry: runtime.events,
     projections: runtime.projections,
-    clock: () => definition.createdAt,
+    clock: () => initialDefinition.createdAt,
   });
   const store = new AutomationEventStore({
     journal,
@@ -102,6 +106,9 @@ async function fixture(
     }),
   });
   const projection = runtime.automationProjection;
+  if (resumeDirectory !== undefined && hydrateAutomationProjection({ store, projection }) !== "ok")
+    throw new Error("Could not reload the original file source journal.");
+  const definition = projection.getDefinition(initialDefinition.id) ?? initialDefinition;
   let allowed = true;
   let monotonic = 0;
   let activity: "quiet" | "busy" | "unknown" = "quiet";
@@ -128,10 +135,11 @@ async function fixture(
     signal: new AbortController().signal,
     current: () => true,
   });
-  store.appendDefinitionCreated({
-    automation: definition,
-    fileSource: initialAutomationFileCheckpoint(root.sourceIdentity, definition.createdAt),
-  });
+  if (resumeDirectory === undefined)
+    store.appendDefinitionCreated({
+      automation: definition,
+      fileSource: initialAutomationFileCheckpoint(root.sourceIdentity, definition.createdAt),
+    });
   const sources = new AutomationFileSources({
     projection,
     scheduler,
@@ -253,9 +261,14 @@ function reviewCommand(
 }
 
 describe("file input reconciliation on the host routine owner", () => {
-  it.each(["skip", "run-once"] as const)(
-    "retains an edited baseline's explicit review across transient source loss and %s recovery",
-    async (missedRunPolicy) => {
+  it.each([
+    ["skip", true],
+    ["skip", false],
+    ["run-once", true],
+    ["run-once", false],
+  ] as const)(
+    "retains an edited baseline's review across unavailable journal reload and %s recovery; arrivals=%s",
+    async (missedRunPolicy, arrives) => {
       let unavailable = false;
       const filesystem: WorkFilesystemPort = {
         ...liveWorkFilesystem,
@@ -265,7 +278,7 @@ describe("file input reconciliation on the host routine owner", () => {
           return liveWorkFilesystem.lstat(path);
         },
       };
-      const host = await fixture(filesystem, missedRunPolicy);
+      let host = await fixture(filesystem, missedRunPolicy);
       await writeFile(join(host.directory, "Inbox/baseline.txt"), "existing input");
       await host.sources.reconcile();
       host.advance();
@@ -301,7 +314,9 @@ describe("file input reconciliation on the host routine owner", () => {
         origin: { kind: "interactive" },
         definition: draft,
       });
-      expect(host.commands.execute(update, undefined, prepared)).toMatchObject({ kind: "automation-updated" });
+      expect(host.commands.execute(update, undefined, prepared)).toMatchObject({
+        kind: "automation-updated",
+      });
       expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
         phase: "needs-rearm",
         reason: "definition-changed",
@@ -309,8 +324,20 @@ describe("file input reconciliation on the host routine owner", () => {
       unavailable = true;
       await host.sources.reconcile();
       expect(host.projection.getFileSource(host.definition.id)?.phase).toBe("unavailable");
+      const failedRevision = host.projection.getFileSource(host.definition.id)?.observationRevision;
+      await host.sources.reconcile();
+      expect(host.projection.getFileSource(host.definition.id)?.observationRevision).toBe(
+        failedRevision,
+      );
+      host.sources.close();
+      host = await fixture(filesystem, missedRunPolicy, host.directory);
+      expect(host.projection.getFileSource(host.definition.id)).toMatchObject({
+        phase: "unavailable",
+        reason: "definition-changed",
+      });
       unavailable = false;
-      await writeFile(join(host.directory, "Inbox/arrived.txt"), "arrived after editing");
+      if (arrives)
+        await writeFile(join(host.directory, "Inbox/arrived.txt"), "arrived after editing");
       await host.sources.reconcile();
       host.advance();
       await host.sources.reconcile();
@@ -322,7 +349,7 @@ describe("file input reconciliation on the host routine owner", () => {
         automaticStarts: 0,
         armGeneration: before?.armGeneration,
         baseline: before?.baseline,
-        held: { files: ["arrived.txt"] },
+        held: { files: arrives ? ["arrived.txt"] : [] },
       });
       const command = reviewCommand(host, "skip");
       const rearm = await host.sources.prepareRearm({

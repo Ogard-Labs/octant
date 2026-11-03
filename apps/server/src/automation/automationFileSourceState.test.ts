@@ -56,6 +56,32 @@ function saved(decision: ReturnType<typeof observe>): AutomationFileSourceCheckp
 }
 
 describe("durable file source decisions", () => {
+  it.each(["source-changed", "authority-changed", "activity-history-limit"] as const)(
+    "restores availability without discarding the %s review hold",
+    (reason) => {
+      const previous: AutomationFileSourceCheckpoint = {
+        ...watching(),
+        phase: "unavailable",
+        reason,
+        coverageGap: true,
+      };
+      const decision = observe(previous, [...baseline, file("new.txt")], {
+        missedRunPolicy: "run-once",
+        coverageGap: true,
+      });
+      expect(decision.kind).toBe("checkpoint");
+      expect(saved(decision)).toMatchObject({
+        phase: "needs-rearm",
+        reason,
+        automaticStarts: 0,
+        armGeneration: previous.armGeneration,
+        baseline: previous.baseline,
+      });
+      expect(
+        observe(saved(decision), [...baseline, file("new.txt")], { missedRunPolicy: "run-once" }),
+      ).toEqual({ kind: "unchanged" });
+    },
+  );
   it("baselines pre-existing input without an automatic start", () => {
     const decision = observe(initialAutomationFileCheckpoint(digest, at), baseline);
     expect(decision.kind).toBe("checkpoint");

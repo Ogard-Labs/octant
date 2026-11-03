@@ -469,7 +469,24 @@ export class AutomationFileSources {
     source.coverageGap = true;
     source.candidateDigest = undefined;
     source.quietSince = undefined;
-    if (previous.reason === reason && previous.coverageGap) return;
+    // Availability does not discharge a previously required person decision.
+    // Keep the existing durable review reason beside the unavailable phase.
+    const reviewReason =
+      previous.reason === "definition-changed" ||
+      previous.reason === "source-changed" ||
+      previous.reason === "authority-changed"
+        ? previous.reason
+        : undefined;
+    const retainedReason =
+      previous.reason === "activity-history-limit"
+        ? previous.reason
+        : reason === "source-unavailable" || reason === "source-limit"
+          ? (reviewReason ?? reason)
+          : reason;
+    const phase =
+      reason === "source-changed" || reason === "authority-changed" ? "needs-rearm" : "unavailable";
+    if (previous.reason === retainedReason && previous.phase === phase && previous.coverageGap)
+      return;
     this.#options.scheduler.commitFileObservation({
       automationId: definition.id,
       expectedVersion: definition.version,
@@ -480,11 +497,8 @@ export class AutomationFileSources {
         checkpoint: {
           ...previous,
           observationRevision: previous.observationRevision + 1,
-          phase:
-            reason === "source-changed" || reason === "authority-changed"
-              ? "needs-rearm"
-              : "unavailable",
-          reason,
+          phase,
+          reason: retainedReason,
           coverageGap: true,
           observedAt: this.#options.now(),
         },

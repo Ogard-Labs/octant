@@ -2543,7 +2543,11 @@ the thread it came from.
   loss records a coverage gap. Offline skip/run-once sees only net changed
   surviving final-state files, at most one batch; files created and deleted while
   unobserved cannot be reconstructed. Neither quiet time nor restart resets the
-  arm budget. Any matching change observed while the routine, known managed
+  arm budget. Temporary source unavailability or a scan limit never waives a
+  required review after an edit, root/authority change or retained-activity
+  overflow. The same durable cursor keeps that review reason across failure and
+  restart; recovering availability cannot silently re-arm or dispatch a batch.
+  Any matching change observed while the routine, known managed
   descendants or existing Project-root harness process receipts remain active,
   through the first settled quiescent scan, is held for explicit Review/Re-arm.
   Missing or uncertain ownership does not prove quiescence. It may be outside
