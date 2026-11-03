@@ -22,6 +22,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const MAX_CODE_LANGUAGE_DIAGNOSTICS = 1_000;
 export const MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH = 2_048;
 export const MAX_CODE_LANGUAGE_DEFINITION_TARGETS = 64;
+export const MAX_CODE_LANGUAGE_REFERENCES = 1_000;
+export const MAX_CODE_LANGUAGE_REFERENCE_FILES = 64;
 const MAX_POSITION = 2_147_483_647;
 
 const scope = { threadId: CodeThreadId, checkoutId: CodeCheckoutId, fileId: CodeFileId };
@@ -52,6 +54,15 @@ export const CodeLanguageReadRequest = Schema.Union(
     kind: Schema.Literal("definition"),
     ...scope,
     position: CodeLanguagePosition,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("capabilities"), ...scope }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("references"),
+    ...scope,
+    position: CodeLanguagePosition,
+    includeDeclaration: Schema.Boolean,
+    expectedVersion: Schema.Int.pipe(Schema.positive()),
+    expectedRevision: Schema.UUID,
   }).annotations(strict),
 );
 export type CodeLanguageReadRequest = typeof CodeLanguageReadRequest.Type;
@@ -123,7 +134,39 @@ export type CodeLanguageRefusalReason = typeof CodeLanguageRefusalReason.Type;
 export const CodeLanguageUnavailableReason = Schema.Literal("starting", "crashed", "timed-out");
 export type CodeLanguageUnavailableReason = typeof CodeLanguageUnavailableReason.Type;
 
+export const CodeLanguageReferenceSupport = Schema.Literal("supported", "unsupported", "unknown");
+export type CodeLanguageReferenceSupport = typeof CodeLanguageReferenceSupport.Type;
+
 export const CodeLanguageReadResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("capabilities"),
+    ...scope,
+    references: CodeLanguageReferenceSupport,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("references"),
+    ...scope,
+    documentVersion: Schema.Int.pipe(Schema.positive()),
+    documentRevision: Schema.UUID,
+    targets: Schema.Array(CodeLanguageDefinitionTarget).pipe(
+      Schema.maxItems(MAX_CODE_LANGUAGE_REFERENCES),
+      Schema.filter(
+        (targets) =>
+          new Set(
+            targets
+              .filter((target) => target.kind === "checkout-location")
+              .map((target) => target.path),
+          ).size <= MAX_CODE_LANGUAGE_REFERENCE_FILES,
+      ),
+    ),
+    truncated: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("unsupported"),
+    capability: Schema.Literal("references"),
+    support: Schema.Literal("unsupported", "unknown"),
+  }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("stale") }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("diagnostics"),
     ...scope,
@@ -185,7 +228,13 @@ export const CodeLanguageDocumentRequest = Schema.Union(
 export type CodeLanguageDocumentRequest = typeof CodeLanguageDocumentRequest.Type;
 
 export const CodeLanguageDocumentResult = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("synced"), ...scope }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("synced"),
+    ...scope,
+    // Older hosts may omit it; new cross-file reads require a known version.
+    documentVersion: Schema.optional(Schema.Int.pipe(Schema.positive())),
+    documentRevision: Schema.optional(Schema.UUID),
+  }).annotations(strict),
   /** The text is past the server's frame cap, so it is not sent. */
   Schema.Struct({ status: Schema.Literal("too-large"), ...scope }).annotations(strict),
   Schema.Struct({

@@ -15,7 +15,11 @@ import type {
   CodeLanguageRefusalReason,
 } from "@octant/contracts/code-language";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { refusedState, type CodeLanguageEditorState } from "./codeLanguageEditor";
+import {
+  languageStatusText,
+  refusedState,
+  type CodeLanguageEditorState,
+} from "./codeLanguageEditor";
 
 /**
  * Keeps one editor's file open with the host's language server and reads its
@@ -50,11 +54,19 @@ export type CodeLanguageDefinitionOutcome =
   /** The host holds no document for this file, so no server can answer. */
   | { readonly status: "unserved" };
 
+export type CodeLanguageReferencesOutcome =
+  | Extract<CodeLanguageReadResult, { readonly status: "references" | "unsupported" }>
+  | { readonly status: "unavailable"; readonly message: string };
+
 export interface CodeLanguageServices {
   readonly state: CodeLanguageEditorState;
   /** The server's diagnostics, or undefined while no server serves the file. */
   readonly diagnostics: ReadonlyArray<CodeLanguageDiagnostic> | undefined;
   readonly definition: (position: CodeLanguagePosition) => Promise<CodeLanguageDefinitionOutcome>;
+  readonly references: (
+    position: CodeLanguagePosition,
+  ) => Promise<CodeLanguageReferencesOutcome | undefined>;
+  readonly cancelReferences: () => void;
   /** Opens the file again: how a person retries a server that stopped. */
   readonly retry: () => void;
   /** Reads diagnostics again, for when other files may have changed them. */
@@ -115,6 +127,14 @@ export function useCodeLanguageServices(
   /** Bumped when the document is reopened or released; stale answers are dropped. */
   const session = useRef(0);
   const readSequence = useRef(0);
+  const referenceSequence = useRef(0);
+  const referenceAbort = useRef<AbortController | undefined>(undefined);
+  const referenceIdentity = useMemo(
+    () => ({ active, client, threadId, checkoutId, path }),
+    [active, client, threadId, checkoutId, path],
+  );
+  const currentReferenceIdentity = useRef(referenceIdentity);
+  currentReferenceIdentity.current = referenceIdentity;
   const startingPolls = useRef(0);
   const reopened = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -132,6 +152,8 @@ export function useCodeLanguageServices(
   useEffect(() => {
     clearTimer();
     const current = ++session.current;
+    referenceSequence.current += 1;
+    referenceAbort.current?.abort();
     fileId.current = undefined;
     syncedText.current = undefined;
     startingPolls.current = 0;
@@ -310,6 +332,8 @@ export function useCodeLanguageServices(
 
     return () => {
       session.current += 1;
+      referenceSequence.current += 1;
+      referenceAbort.current?.abort();
       clearTimeout(startingNotice);
       clearTimeout(resend);
       clearTimer();
@@ -370,6 +394,152 @@ export function useCodeLanguageServices(
     [checkoutId, client, show, threadId],
   );
 
+  const cancelReferences = useCallback(() => {
+    referenceSequence.current += 1;
+    referenceAbort.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    referenceSequence.current += 1;
+    referenceAbort.current?.abort();
+  }, [text]);
+
+  const references = useCallback(
+    async (position: CodeLanguagePosition): Promise<CodeLanguageReferencesOutcome | undefined> => {
+      const unavailable = (message: string): CodeLanguageReferencesOutcome => ({
+        status: "unavailable",
+        message,
+      });
+      const opened = fileId.current;
+      const read = client.readLanguage?.bind(client);
+      const sync = client.syncLanguageDocument?.bind(client);
+      if (!active || opened === undefined || read === undefined || sync === undefined)
+        return unavailable(
+          "Language services are not available for this file. Retry or open it externally.",
+        );
+      const generation = session.current;
+      const sequence = ++referenceSequence.current;
+      referenceAbort.current?.abort();
+      const controller = new AbortController();
+      referenceAbort.current = controller;
+      const currentText = textRef.current;
+      const deadline = performance.now() + 15000;
+      const live = () =>
+        currentReferenceIdentity.current === referenceIdentity &&
+        session.current === generation &&
+        referenceSequence.current === sequence &&
+        fileId.current === opened &&
+        textRef.current === currentText;
+      const current = () => live() && !controller.signal.aborted && performance.now() < deadline;
+      const timedOut = unavailable(
+        "The language server did not answer in time. Retry or open this file externally.",
+      );
+      const stopped = () =>
+        live() && (controller.signal.aborted || performance.now() >= deadline)
+          ? timedOut
+          : undefined;
+      const matches = (answer: {
+        readonly threadId: CodeThreadId;
+        readonly checkoutId: CodeCheckoutId;
+        readonly fileId: CodeFileId;
+      }) =>
+        answer.threadId === threadId &&
+        answer.checkoutId === checkoutId &&
+        answer.fileId === opened;
+      const unanswered = (
+        answer: CodeLanguageReadResult | CodeLanguageDocumentResult,
+      ): CodeLanguageReferencesOutcome =>
+        answer.status === "refused"
+          ? unavailable(
+              languageStatusText(refusedState(answer.reason)) ??
+                "No language server reads this file. Open it externally.",
+            )
+          : answer.status === "stale"
+            ? unavailable(
+                "The file changed while finding references. Check the current text and try again.",
+              )
+            : unavailable(
+                "References are not available from this host. Retry or open this file externally.",
+              );
+      const operation = async (): Promise<CodeLanguageReferencesOutcome | undefined> => {
+        const support = await read(
+          { kind: "capabilities", threadId, checkoutId, fileId: opened },
+          controller.signal,
+        );
+        if (!current()) return stopped();
+        if (support.status !== "capabilities" || !matches(support)) return unanswered(support);
+        if (support.references !== "supported")
+          return { status: "unsupported", capability: "references", support: support.references };
+        // This is an acknowledgement of the person's current draft, not a save.
+        const acknowledged = await sync(
+          { kind: "change", threadId, checkoutId, fileId: opened, text: currentText },
+          controller.signal,
+        );
+        if (!current()) return stopped();
+        if (acknowledged.status !== "synced" || !matches(acknowledged))
+          return unanswered(acknowledged);
+        if (
+          acknowledged.documentVersion === undefined ||
+          acknowledged.documentRevision === undefined
+        )
+          return unavailable(
+            "The host could not confirm the current file text. Reconnect or open this file externally.",
+          );
+        const answer = await read(
+          {
+            kind: "references",
+            threadId,
+            checkoutId,
+            fileId: opened,
+            position,
+            includeDeclaration: true,
+            expectedVersion: acknowledged.documentVersion,
+            expectedRevision: acknowledged.documentRevision,
+          },
+          controller.signal,
+        );
+        if (!current()) return stopped();
+        if (answer.status === "unsupported") return answer;
+        if (answer.status !== "references") return unanswered(answer);
+        if (
+          !matches(answer) ||
+          answer.documentVersion !== acknowledged.documentVersion ||
+          answer.documentRevision !== acknowledged.documentRevision
+        )
+          return unavailable(
+            "The host answered for another file revision. Check the current text and try again.",
+          );
+        return answer;
+      };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const answer = await Promise.race([
+          operation().catch(() =>
+            current()
+              ? unavailable(
+                  "References could not be read from the host. Retry or open this file externally.",
+                )
+              : stopped(),
+          ),
+          new Promise<CodeLanguageReferencesOutcome | undefined>((resolve) => {
+            controller.signal.addEventListener(
+              "abort",
+              () => resolve(live() ? timedOut : undefined),
+              { once: true },
+            );
+            timer = setTimeout(() => controller.abort(), 15000);
+          }),
+        ]);
+        return current() ? answer : stopped();
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+        if (referenceAbort.current === controller) referenceAbort.current = undefined;
+      }
+    },
+    [active, checkoutId, client, referenceIdentity, threadId],
+  );
+
   const retry = useCallback(() => setOpenGeneration((generation) => generation + 1), []);
   const refresh = useCallback(() => readRef.current?.(), []);
 
@@ -398,5 +568,5 @@ export function useCodeLanguageServices(
     };
   }, [checkoutId, client, path, retry, show, threadId]);
 
-  return { state, diagnostics, definition, retry, refresh, approve };
+  return { state, diagnostics, definition, references, cancelReferences, retry, refresh, approve };
 }

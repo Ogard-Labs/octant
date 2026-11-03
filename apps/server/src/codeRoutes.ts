@@ -184,6 +184,7 @@ import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
 import type { PairedMergeUnlockPort } from "./hub/pairedMergeUnlock";
+import { resolveLocalWindowPrincipal, WINDOW_CAPABILITY_HEADER } from "./clientPrincipal";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -612,6 +613,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // route directly.
     let operationInitiator: "user" | "agent";
     let callerKind: "local-window" | "remote-device";
+    let principalAbortSignal: AbortSignal | undefined;
+    const originalWindowCapability = request.headers.get(WINDOW_CAPABILITY_HEADER);
     try {
       if (url.searchParams.has("windowId")) {
         throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
@@ -623,6 +626,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
       });
       authenticatedWindowId = principalContext.scopeId;
       callerKind = principalContext.principal.kind;
+      principalAbortSignal = principalContext.abortSignal;
       operationInitiator = callerKind === "local-window" ? "user" : "agent";
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
@@ -974,11 +978,32 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           } catch {
             throw new CodeRouteRejected("Code language read is invalid.", 400);
           }
-          return jsonResponse(
-            decodeCodeLanguageReadResult(await dependencies.language.read(caller, read)),
-            200,
-            origin,
-          );
+          const assertFeatureCaller = () => {
+            if (read.kind !== "references" && read.kind !== "capabilities") return;
+            if (request.signal.aborted || principalAbortSignal?.aborted)
+              throw new CodeRouteRejected("Code language read is unauthorized.", 401);
+            // A cached transport principal identifies the original window; it
+            // cannot authorize a new feature after body/read awaits.
+            if (callerKind === "local-window") {
+              try {
+                if (request.headers.get(WINDOW_CAPABILITY_HEADER) !== originalWindowCapability)
+                  throw new Error("Capability changed");
+                const live = resolveLocalWindowPrincipal({
+                  request,
+                  store: dependencies.windowAuthorityStore,
+                  now: now(),
+                });
+                if (live.windowId !== String(authenticatedWindowId))
+                  throw new Error("Window changed");
+              } catch {
+                throw new CodeRouteRejected("Code language read is unauthorized.", 401);
+              }
+            }
+          };
+          assertFeatureCaller();
+          const answer = await dependencies.language.read(caller, read);
+          assertFeatureCaller();
+          return jsonResponse(decodeCodeLanguageReadResult(answer), 200, origin);
         }
         case "terminal-inspection": {
           requireMethodAndEmptyQuery(request, url, "POST");
@@ -2116,7 +2141,13 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         return failureResponse(
           {
             category:
-              error.status === 409 ? "stale" : error.status === 503 ? "unavailable" : "invalid",
+              error.status === 401
+                ? "unauthorized"
+                : error.status === 409
+                  ? "stale"
+                  : error.status === 503
+                    ? "unavailable"
+                    : "invalid",
             message: error.message,
           },
           error.status,

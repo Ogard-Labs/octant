@@ -9,9 +9,9 @@ import {
   type CodeOperationEventFrame,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { createRemoteDevicePrincipal, resolveLocalWindowPrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
-import { WindowAuthorityStore } from "./windowAuthorityStore";
+import { WindowAuthorityStore, WINDOW_AUTHORITY_TTL_MS } from "./windowAuthorityStore";
 import {
   MAX_CODE_FILE_BODY_SIZE,
   MAX_CODE_NDJSON_LINE_BYTES,
@@ -569,6 +569,165 @@ describe("Code routes", () => {
       diagnostics,
     );
   });
+
+  it.each(["revoked", "expired", "rotated", "rotated-with-header"] as const)(
+    "revalidates bound local reference admission after a held Request body becomes %s",
+    async (change) => {
+      const store = new WindowAuthorityStore();
+      let clock = 0;
+      store.register({ windowId, capability, now: clock });
+      const fileId = "00000000-0000-4000-8000-000000000931";
+      const read = vi.fn(async () => ({
+        status: "references",
+        threadId,
+        checkoutId,
+        fileId,
+        documentVersion: 1,
+        documentRevision: "90000000-0000-4000-8000-000000000001",
+        targets: [],
+        truncated: false,
+      }));
+      const route = routeFixture(
+        {},
+        undefined,
+        undefined,
+        [],
+        { syncDocument: vi.fn(), read },
+        undefined,
+        { store, now: () => clock },
+      );
+      const payload = {
+        kind: "references",
+        threadId,
+        checkoutId,
+        fileId,
+        position: { line: 0, character: 0 },
+        includeDeclaration: true,
+        expectedVersion: 1,
+        expectedRevision: "90000000-0000-4000-8000-000000000001",
+      };
+      let finish: () => void = () => undefined;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          finish = () => {
+            controller.enqueue(new TextEncoder().encode(JSON.stringify(payload)));
+            controller.close();
+          };
+        },
+      });
+      const init: RequestInit & { duplex: "half" } = {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        duplex: "half",
+      };
+      const pendingRequest = request("/api/code/language/read", init);
+      bindPrincipalRouteContext(pendingRequest, {
+        principal: resolveLocalWindowPrincipal({ request: pendingRequest, store, now: clock }),
+        scopeId: windowId,
+      });
+      const answer = route(pendingRequest);
+      expect(read).not.toHaveBeenCalled();
+      if (change === "expired") clock = WINDOW_AUTHORITY_TTL_MS + 1;
+      else {
+        store.revoke(windowId);
+        if (change === "rotated" || change === "rotated-with-header")
+          store.register({ windowId, capability: "B".repeat(42) + "A", now: clock });
+        if (change === "rotated-with-header")
+          pendingRequest.headers.set("x-octant-window-capability", "B".repeat(42) + "A");
+      }
+      finish();
+      expect((await answer)?.status).toBe(401);
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["local", "local-expired", "local-rotated", "local-replaced-header", "remote"] as const)(
+    "answers current %s capability reads and suppresses a held answer after authority is lost",
+    async (kind) => {
+      const store = new WindowAuthorityStore();
+      let clock = 1;
+      store.register({ windowId, capability, now: 0 });
+      const local = kind !== "remote";
+      const fileId = "00000000-0000-4000-8000-000000000931";
+      const deviceId = decodeWindowId("00000000-0000-4000-8000-000000000932");
+      const scope = local ? windowId : deviceId;
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let block = false;
+      const read = vi.fn(async () => {
+        if (block) await held;
+        return { status: "capabilities", threadId, checkoutId, fileId, references: "supported" };
+      });
+      const route = routeFixture(
+        {},
+        undefined,
+        undefined,
+        [],
+        { syncDocument: vi.fn(), read },
+        undefined,
+        { store, now: () => clock },
+      );
+      const controller = new AbortController();
+      const build = () => {
+        const incoming = request("/api/code/language/read", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "capabilities", threadId, checkoutId, fileId }),
+        });
+        const principal = local
+          ? resolveLocalWindowPrincipal({ request: incoming, store, now: 1 })
+          : createRemoteDevicePrincipal({
+              hostId: "local" as never,
+              deviceId: deviceId as never,
+              credentialGeneration: 1,
+              origin: "https://octant.invalid",
+              protocolVersion: 1,
+              capabilityDigest: "b".repeat(64),
+              sessionId: "00000000-0000-4000-8000-000000000933" as never,
+            });
+        bindPrincipalRouteContext(incoming, {
+          principal,
+          scopeId: scope,
+          abortSignal: controller.signal,
+        });
+        return incoming;
+      };
+      const first = await route(build());
+      expect(first?.status).toBe(200);
+      await expect(first?.json()).resolves.toMatchObject({
+        status: "capabilities",
+        references: "supported",
+      });
+      expect(read).toHaveBeenLastCalledWith(
+        { scopeId: scope, principal: local ? "local-window" : "remote-device" },
+        expect.objectContaining({ kind: "capabilities" }),
+      );
+      block = true;
+      const incoming = build();
+      const pending = route(incoming);
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+      if (!local) controller.abort();
+      else if (kind === "local-expired") clock = WINDOW_AUTHORITY_TTL_MS + 1;
+      else {
+        store.revoke(windowId);
+        if (kind !== "local") {
+          store.register({ windowId, capability: "B".repeat(42) + "A", now: clock });
+          if (kind === "local-replaced-header")
+            incoming.headers.set("x-octant-window-capability", "B".repeat(42) + "A");
+        }
+      }
+      release();
+      const denied = await pending;
+      expect(denied?.status).toBe(401);
+      const body = await denied?.text();
+      expect(body).toContain("unauthorized");
+      expect(body).not.toContain(fileId);
+      expect(body).not.toContain("supported");
+    },
+  );
 
   it("carries a language server approval from a local window only, and refuses a paired device before the service", async () => {
     const approve = vi.fn(async () => ({
@@ -2608,9 +2767,10 @@ function routeFixture(
     readonly approve?: (...args: never[]) => unknown;
   },
   debug?: Readonly<Record<"configurations" | "approve" | "start" | "session", unknown>>,
+  authority?: { readonly store: WindowAuthorityStore; readonly now: () => number },
 ) {
-  const store = new WindowAuthorityStore();
-  store.register({ windowId, capability, now: 0 });
+  const store = authority?.store ?? new WindowAuthorityStore();
+  if (authority === undefined) store.register({ windowId, capability, now: 0 });
   for (const extra of extraWindows) {
     store.register({ windowId: extra.windowId, capability: extra.capability, now: 0 });
   }
@@ -2632,7 +2792,7 @@ function routeFixture(
   return createCodeRouteHandler({
     service: service as never,
     windowAuthorityStore: store,
-    now: () => 1,
+    now: authority?.now ?? (() => 1),
     ...(pairedMergeUnlock === undefined
       ? {}
       : { pairedMergeUnlock: () => pairedMergeUnlock as never }),

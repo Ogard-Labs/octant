@@ -18,6 +18,7 @@ export const LANGUAGE_SERVER_FRAME_CAP_BYTES = 4 * 1024 * 1024;
 /** Headers are a line or two; anything longer is not a frame. */
 const MAX_HEADER_BYTES = 8 * 1024;
 const MAX_CONFIGURATION_ITEMS = 256;
+const MAX_DYNAMIC_REGISTRATIONS = 256;
 
 const METHOD_NOT_FOUND = -32601;
 const REQUEST_FAILED = -32803;
@@ -26,7 +27,8 @@ export type LanguageServerClientRequest =
   | "initialize"
   | "shutdown"
   | "textDocument/diagnostic"
-  | "textDocument/definition";
+  | "textDocument/definition"
+  | "textDocument/references";
 
 export type LanguageServerClientNotification =
   | "initialized"
@@ -42,6 +44,7 @@ const CLIENT_REQUESTS: ReadonlySet<string> = new Set<LanguageServerClientRequest
   "shutdown",
   "textDocument/diagnostic",
   "textDocument/definition",
+  "textDocument/references",
 ]);
 const CLIENT_NOTIFICATIONS: ReadonlySet<string> = new Set<LanguageServerClientNotification>([
   "initialized",
@@ -63,6 +66,7 @@ const REGISTRABLE_METHODS: ReadonlySet<string> = new Set([
   "textDocument/didClose",
   "textDocument/diagnostic",
   "textDocument/definition",
+  "textDocument/references",
   "workspace/didChangeWatchedFiles",
 ]);
 
@@ -102,7 +106,10 @@ export class LanguageServerConnection {
     | ((uri: string, diagnostics: ReadonlyArray<unknown>) => void)
     | undefined;
   readonly #pending = new Map<number, PendingRequest>();
-  readonly #registrations = new Map<string, string>();
+  readonly #registrations = new Map<
+    string,
+    { readonly method: string; readonly options: unknown }
+  >();
   #buffered: Buffer = Buffer.alloc(0);
   #nextId = 1;
   #closed = false;
@@ -125,7 +132,19 @@ export class LanguageServerConnection {
 
   /** Whether the server registered `method` dynamically and has not lost it. */
   registered(method: LanguageServerClientNotification | LanguageServerClientRequest): boolean {
-    return [...this.#registrations.values()].includes(method);
+    return [...this.#registrations.values()].some((registration) => registration.method === method);
+  }
+
+  /** Only selectors this adapter can judge may enable a file's reference action. */
+  referencesRegistrationSupport(languageId: string): "supported" | "unsupported" | "unknown" {
+    let unknown = false;
+    for (const registration of this.#registrations.values()) {
+      if (registration.method !== "textDocument/references") continue;
+      const support = referenceSelectorSupport(registration.options, languageId);
+      if (support === "supported") return support;
+      if (support === "unknown") unknown = true;
+    }
+    return unknown ? "unknown" : "unsupported";
   }
 
   request(
@@ -280,7 +299,11 @@ export class LanguageServerConnection {
             typeof registration.method === "string" &&
             REGISTRABLE_METHODS.has(registration.method),
         );
-        if (!accepted || registrations.length === 0) {
+        const ids = new Set(this.#registrations.keys());
+        for (const registration of registrations)
+          if (isRecord(registration) && typeof registration.id === "string")
+            ids.add(registration.id);
+        if (!accepted || registrations.length === 0 || ids.size > MAX_DYNAMIC_REGISTRATIONS) {
           this.#write({
             jsonrpc: "2.0",
             id,
@@ -290,9 +313,38 @@ export class LanguageServerConnection {
         }
         for (const registration of registrations) {
           if (isRecord(registration)) {
-            this.#registrations.set(String(registration.id), String(registration.method));
+            this.#registrations.set(String(registration.id), {
+              method: String(registration.method),
+              options: registration.registerOptions,
+            });
           }
         }
+        this.#write({ jsonrpc: "2.0", id, result: null });
+        return;
+      }
+      case "client/unregisterCapability": {
+        // The protocol deliberately spells this field `unregisterations`.
+        const items =
+          isRecord(params) && Array.isArray(params.unregisterations) ? params.unregisterations : [];
+        if (
+          items.length === 0 ||
+          items.length > MAX_DYNAMIC_REGISTRATIONS ||
+          !items.every(
+            (item) =>
+              isRecord(item) &&
+              typeof item.id === "string" &&
+              typeof item.method === "string" &&
+              this.#registrations.get(item.id)?.method === item.method,
+          )
+        ) {
+          this.#write({
+            jsonrpc: "2.0",
+            id,
+            error: { code: REQUEST_FAILED, message: "Octant does not accept this unregistration." },
+          });
+          return;
+        }
+        for (const item of items) if (isRecord(item)) this.#registrations.delete(String(item.id));
         this.#write({ jsonrpc: "2.0", id, result: null });
         return;
       }
@@ -344,4 +396,38 @@ export function contentLength(header: string): number | undefined {
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function referenceSelectorSupport(
+  options: unknown,
+  languageId: string,
+): "supported" | "unsupported" | "unknown" {
+  if (options === undefined) return "supported";
+  if (!isRecord(options)) return "unknown";
+  const selectors = options.documentSelector;
+  if (selectors === undefined || selectors === null) return "supported";
+  if (!Array.isArray(selectors)) return "unknown";
+  let unknown = false;
+  for (const selector of selectors) {
+    if (!isRecord(selector)) {
+      unknown = true;
+      continue;
+    }
+    if (
+      (typeof selector.language === "string" && selector.language !== languageId) ||
+      (typeof selector.scheme === "string" && selector.scheme !== "file")
+    )
+      continue;
+    if (
+      (selector.language !== undefined && typeof selector.language !== "string") ||
+      (selector.scheme !== undefined && typeof selector.scheme !== "string") ||
+      selector.pattern !== undefined ||
+      Object.keys(selector).some((key) => !["language", "scheme", "pattern"].includes(key))
+    ) {
+      unknown = true;
+      continue;
+    }
+    return "supported";
+  }
+  return unknown ? "unknown" : "unsupported";
 }
