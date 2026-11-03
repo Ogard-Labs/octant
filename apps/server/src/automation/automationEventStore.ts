@@ -5,6 +5,7 @@ import {
   AutomationCancellationTombstone as AutomationCancellationTombstoneSchema,
   AutomationFileSourceObserved,
   type AutomationFileSourceCheckpoint,
+  type AutomationFileSourceReview,
   AutomationDefinitionCreated,
   AutomationDefinitionExhausted,
   AutomationDefinitionLifecycleChanged,
@@ -150,6 +151,8 @@ export interface AppendAutomationDefinitionUpdatedInput {
 
 export interface AppendAutomationDefinitionLifecycleChangedInput {
   readonly automation: AutomationDefinition;
+  readonly fileSource?: AutomationFileSourceCheckpoint;
+  readonly fileSourceReview?: AutomationFileSourceReview;
   readonly previousLifecycle: AutomationLifecycle;
   readonly expectedVersion: number;
 }
@@ -209,6 +212,14 @@ export interface AppendAutomationNotificationRefInput {
 
 /** One typed frame of a scheduler occurrence-ledger append batch. */
 export type AutomationOccurrenceLedgerEvent =
+  | {
+      readonly kind: "file-source-rearmed";
+      readonly automation: AutomationDefinition;
+      readonly previousLifecycle: AutomationLifecycle;
+      readonly checkpoint: AutomationFileSourceCheckpoint;
+      readonly review: AutomationFileSourceReview;
+      readonly at: UtcTimestamp;
+    }
   | {
       readonly kind: "file-source-observed";
       readonly definitionRevision: number;
@@ -364,13 +375,8 @@ export class AutomationEventStore {
       });
       if (payload.fileSource !== undefined) {
         validateAutomationFileCheckpoint(payload.fileSource);
-        if (
-          payload.automation.trigger.kind !== "file-arrival" ||
-          payload.fileSource.baselineReady ||
-          payload.fileSource.observationRevision !== 1 ||
-          payload.fileSource.armGeneration !== 1
-        )
-          throw new Error("Initial file source must be unarmed.");
+        if (payload.automation.trigger.kind !== "file-arrival")
+          throw new Error("A file source belongs to a file trigger.");
       }
       if (payload.automation.version !== expectedVersion + 1) {
         throw new Error("updated definition version must extend the expected head");
@@ -404,8 +410,13 @@ export class AutomationEventStore {
       expectedVersion = decodeAggregateVersion(input.expectedVersion);
       payload = decodeDefinitionLifecycleChanged({
         automation: input.automation,
+        ...(input.fileSource === undefined ? {} : { fileSource: input.fileSource }),
+        ...(input.fileSourceReview === undefined
+          ? {}
+          : { fileSourceReview: input.fileSourceReview }),
         previousLifecycle: input.previousLifecycle,
       });
+      if (payload.fileSource !== undefined) validateAutomationFileCheckpoint(payload.fileSource);
       if (payload.automation.version !== expectedVersion + 1) {
         throw new Error("lifecycle change version must extend the expected head");
       }
@@ -449,6 +460,22 @@ export class AutomationEventStore {
       expectedVersion = decodeAggregateVersion(input.expectedVersion);
       prepared = input.events.map((event, index) => {
         switch (event.kind) {
+          case "file-source-rearmed":
+            validateAutomationFileCheckpoint(event.checkpoint);
+            if (
+              event.automation.version !== expectedVersion + index + 1 ||
+              event.review.expectedDefinitionVersion !== expectedVersion
+            )
+              throw new Error("File re-arm must extend the reviewed definition head.");
+            return {
+              eventName: AUTOMATION_DEFINITION_LIFECYCLE_CHANGED,
+              payload: decodeDefinitionLifecycleChanged({
+                automation: event.automation,
+                previousLifecycle: event.previousLifecycle,
+                fileSource: event.checkpoint,
+                fileSourceReview: event.review,
+              }),
+            };
           case "file-source-observed":
             validateAutomationFileCheckpoint(event.checkpoint);
             return {

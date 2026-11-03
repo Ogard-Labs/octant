@@ -72,6 +72,7 @@ import type { WorkTurnRuntimePort } from "./workTurnRuntime";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { frameExternalContentForModel } from "../context/externalContentFraming";
 
 const attachmentRoots: string[] = [];
 
@@ -94,6 +95,35 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
+  it("keeps owned host file data in required workspace context while the fixed task stays the current request", async () => {
+    const seen: string[] = [];
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          seen.push(JSON.stringify(input.context));
+          return { kind: "completed", response: "Controlled provider completed" };
+        },
+      },
+    });
+    const externalData = {
+      referenceId: "automation-file-batch:fixture",
+      content: frameExternalContentForModel({
+        origin: "external-content",
+        sourceLabel: "file-arrival-routine",
+        section: "workspace-context",
+        body: JSON.stringify({ directory: "Inbox", files: ["invoice.txt"] }),
+      }),
+    };
+    await fixture.service.startFirstTurn(ids.window, startCommand(), {
+      externalData,
+      admissionCurrent: () => true,
+    });
+    await fixture.waitForIdle();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain("OCTANT_EXTERNAL_DATA");
+    expect(seen[0]).toContain("invoice.txt");
+    expect(fixture.projection.lookup(ids.request)?.prompt).toBe(startCommand().prompt);
+  });
   it.each([false, true])(
     "refuses a host turn revoked while its file context is loading (native conversation: %s)",
     async (nativeConversation) => {

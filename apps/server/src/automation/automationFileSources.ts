@@ -1,8 +1,10 @@
+import { currentProtectedFilesChoice } from "../process/secretGuard";
 import type {
   AutomationDefinition,
   AutomationId,
   AutomationFileSourceCheckpoint,
   UtcTimestamp,
+  AutomationCommand,
 } from "@octant/contracts";
 import type { WorkFilesystemPort } from "../work/workFilesystemPort";
 import type { WorkFileWatchPort, WorkFileWatchSubscription } from "../work/workFileWatchPort";
@@ -14,6 +16,7 @@ import {
   scanAutomationFileSource,
 } from "./automationFileSourceScan";
 import { reconcileAutomationFileObservation } from "./automationFileSourceState";
+import type { AutomationFileSourceRearmPreparation } from "./automationFileSourceAuthority";
 
 export interface AutomationFileSourceAuthority {
   readonly canonicalRoot: string;
@@ -40,6 +43,10 @@ export interface AutomationFileSourcesOptions {
   readonly wake: () => void;
 }
 
+export class AutomationFileSourceReviewError extends Error {
+  override readonly name = "AutomationFileSourceReviewError";
+}
+
 interface SourceObservation {
   readonly signature: string;
   readonly controller: AbortController;
@@ -55,12 +62,168 @@ interface SourceObservation {
 export class AutomationFileSources {
   readonly #options: AutomationFileSourcesOptions;
   readonly #sources = new Map<AutomationId, SourceObservation>();
+  readonly #reviews = new Set<AutomationId>();
   #scanning = 0;
   #closed = false;
   #nextSource = 0;
 
   constructor(options: AutomationFileSourcesOptions) {
     this.#options = options;
+  }
+
+  /** A current person decision, not an automatic retry of a previous run. */
+  async prepareRearm(input: {
+    readonly command: Extract<AutomationCommand, { readonly kind: "rearm-file-automation" }>;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }): Promise<AutomationFileSourceRearmPreparation> {
+    const { command } = input;
+    if (command.principal.kind !== "local-window")
+      throw new AutomationFileSourceReviewError("File re-arm requires the current local window.");
+    const definition = this.#options.projection.getDefinition(command.automationId);
+    const checkpoint = this.#options.projection.getFileSource(command.automationId);
+    const source = this.#sources.get(command.automationId);
+    if (
+      definition?.trigger.kind !== "file-arrival" ||
+      definition.version !== command.expectedVersion ||
+      checkpoint === undefined ||
+      checkpoint.sourceIdentity !== command.sourceIdentity ||
+      checkpoint.observationRevision !== command.observationRevision ||
+      (checkpoint.held?.digest ?? checkpoint.baselineDigest) !== command.batchDigest ||
+      source?.scanning === true ||
+      this.#reviews.has(command.automationId) ||
+      this.#scanning >= 2 ||
+      !checkpoint.baselineReady ||
+      (checkpoint.phase !== "held" &&
+        !(checkpoint.phase === "needs-rearm" && checkpoint.reason === "automatic-start-limit"))
+    )
+      throw new AutomationFileSourceReviewError(
+        "The input is still settling or the review changed. Refresh and try again.",
+      );
+    const authority = this.#options.authority(definition);
+    if (authority === undefined)
+      throw new AutomationFileSourceReviewError(
+        "The Project authority changed. Edit this routine first.",
+      );
+    const protectedChoice = currentProtectedFilesChoice();
+    const hint = source?.hints;
+    const signal =
+      source === undefined
+        ? input.signal
+        : AbortSignal.any([input.signal, source.controller.signal]);
+    const current = () =>
+      !this.#closed &&
+      !signal.aborted &&
+      currentProtectedFilesChoice() === protectedChoice &&
+      input.current() &&
+      authority.current() &&
+      this.#sources.get(command.automationId) === source &&
+      source?.hints === hint &&
+      this.#options.projection.getDefinition(command.automationId)?.version ===
+        command.expectedVersion &&
+      this.#options.projection.getFileSource(command.automationId) === checkpoint;
+    if (source !== undefined) source.scanning = true;
+    this.#reviews.add(command.automationId);
+    this.#scanning += 1;
+    try {
+      if (!current()) throw new AutomationFileSourceReviewError("The review authority changed.");
+      const root = await prepareAutomationFileSource({
+        filesystem: this.#options.filesystem,
+        canonicalRoot: authority.canonicalRoot,
+        bindingIdentity: authority.bindingIdentity,
+        trigger: definition.trigger,
+        current,
+        signal,
+      });
+      if (!current() || root.sourceIdentity !== command.sourceIdentity)
+        throw new AutomationFileSourceReviewError(
+          "The input folder changed. Edit the routine before re-arming it.",
+        );
+      const before = await this.#options.activity({
+        definition,
+        canonicalRoot: root.canonicalRoot,
+        checkpoint,
+      });
+      if (!current() || before !== "quiet")
+        throw new AutomationFileSourceReviewError(
+          "Known Project activity or uncertain cleanup still holds this input. Finish it before re-arming.",
+        );
+      const observation = await scanAutomationFileSource({
+        filesystem: this.#options.filesystem,
+        root,
+        trigger: definition.trigger,
+        signal,
+        current,
+      });
+      if (!current() || observation.digest !== command.batchDigest)
+        throw new AutomationFileSourceReviewError(
+          "The input changed after the review. Refresh the held batch and try again.",
+        );
+      const after = await this.#options.activity({
+        definition,
+        canonicalRoot: root.canonicalRoot,
+        checkpoint,
+      });
+      if (!current() || after !== "quiet")
+        throw new AutomationFileSourceReviewError(
+          "Known Project activity or uncertain cleanup still holds this input. Finish it before re-arming.",
+        );
+      const files = checkpoint.held?.files ?? [];
+      if (command.disposition === "run-once" && files.length === 0)
+        throw new AutomationFileSourceReviewError(
+          "No changed surviving input remains. Choose Skip these changes and re-arm.",
+        );
+      const review = {
+        expectedDefinitionVersion: command.expectedVersion,
+        previousSourceIdentity: command.sourceIdentity,
+        previousObservationRevision: command.observationRevision,
+        previousBatchDigest: command.batchDigest,
+        disposition: command.disposition,
+        reviewedWindowId: command.principal.windowId,
+        reviewedCapabilityGeneration: command.principal.capabilityGeneration,
+        reviewedAt: this.#options.now(),
+      };
+      const next: AutomationFileSourceCheckpoint = {
+        sourceIdentity: checkpoint.sourceIdentity,
+        observationRevision: checkpoint.observationRevision + 1,
+        armGeneration: checkpoint.armGeneration + 1,
+        automaticStarts: command.disposition === "run-once" ? 1 : 0,
+        baselineReady: true,
+        baseline: observation.snapshot,
+        baselineDigest: observation.digest,
+        observedAt: this.#options.now(),
+        phase:
+          command.disposition === "run-once" && definition.trigger.automaticStartLimit === 1
+            ? "needs-rearm"
+            : "watching",
+        ...(command.disposition === "run-once" && definition.trigger.automaticStartLimit === 1
+          ? { reason: "automatic-start-limit" as const }
+          : {}),
+        coverageGap: checkpoint.coverageGap,
+        activityWindow: [],
+        busyChangeObserved: false,
+      };
+      return {
+        kind: "rearm",
+        automationId: command.automationId,
+        expectedVersion: command.expectedVersion,
+        checkpoint: next,
+        review,
+        files,
+        current,
+      };
+    } finally {
+      if (source !== undefined) source.scanning = false;
+      this.#reviews.delete(command.automationId);
+      this.#scanning -= 1;
+      if (
+        source !== undefined &&
+        this.#options.projection.getDefinition(command.automationId)?.lifecycle !== "enabled"
+      ) {
+        this.#retire(source);
+        this.#sources.delete(command.automationId);
+      }
+    }
   }
 
   /** Called by the existing host scheduler. It never awaits filesystem work. */
@@ -75,7 +238,7 @@ export class AutomationFileSources {
       );
     const present = new Set(definitions.map((definition) => definition.id));
     for (const [id, source] of this.#sources)
-      if (!present.has(id)) {
+      if (!present.has(id) && !this.#reviews.has(id)) {
         this.#retire(source);
         this.#sources.delete(id);
       }
@@ -85,9 +248,15 @@ export class AutomationFileSources {
     for (let offset = 0; offset < definitions.length; offset += 1) {
       const index = (start + offset) % definitions.length;
       const definition = definitions[index];
-      if (definition === undefined) continue;
+      if (definition === undefined || this.#reviews.has(definition.id)) continue;
+      const pendingRun = this.#options.projection.latestRun(definition.id);
+      if (
+        pendingRun?.occurrence.kind === "file-arrival" &&
+        !this.#options.projection.isOccurrenceConsumed(definition.id, pendingRun.occurrenceKey)
+      )
+        continue;
       const checkpoint = this.#options.projection.getFileSource(definition.id);
-      if (checkpoint === undefined) continue; // No captured source identity is never a read grant.
+      if (checkpoint === undefined || checkpoint.reason === "activity-history-limit") continue; // No captured source identity is never a read grant.
       const signature = JSON.stringify([
         definition.definitionRevision,
         definition.trigger,
@@ -152,13 +321,18 @@ export class AutomationFileSources {
   ): Promise<void> {
     if (definition.trigger.kind !== "file-arrival") return;
     const authority = this.#options.authority(definition);
+    const protectedChoice = currentProtectedFilesChoice();
     const ownerCurrent = () =>
       !this.#closed &&
       !source.controller.signal.aborted &&
       this.#sources.get(definition.id) === source &&
       this.#options.projection.getDefinition(definition.id)?.version === definition.version &&
       this.#options.projection.getFileSource(definition.id) === checkpoint;
-    const current = () => ownerCurrent() && authority !== undefined && authority.current();
+    const current = () =>
+      ownerCurrent() &&
+      currentProtectedFilesChoice() === protectedChoice &&
+      authority !== undefined &&
+      authority.current();
     if (!ownerCurrent()) return;
     if (authority === undefined || !authority.current()) {
       this.#fail(definition, checkpoint, source, "authority-changed", ownerCurrent);

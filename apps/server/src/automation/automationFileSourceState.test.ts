@@ -154,9 +154,28 @@ describe("durable file source decisions", () => {
     });
   });
   it("never adopts a changed source or definition from a later observation", () => {
-    for (const reason of ["source-changed", "authority-changed", "definition-changed"] as const)
+    for (const reason of ["source-changed", "authority-changed", "activity-history-limit"] as const)
       expect(observe({ ...watching(), phase: "needs-rearm", reason }, [file("new.txt")])).toEqual({
         kind: "unchanged",
       });
+  });
+  it("keeps an edited definition held for person review instead of automatically adopting its baseline", () => {
+    const previous = {
+      ...watching(),
+      phase: "needs-rearm" as const,
+      reason: "definition-changed" as const,
+      automaticStarts: 4,
+    };
+    const busy = saved(observe(previous, [file("new.txt")], { activity: "busy" }));
+    expect(busy.reason).toBe("definition-changed");
+    const held = saved(observe(busy, [file("new.txt")]));
+    expect(held).toMatchObject({
+      phase: "held",
+      reason: "definition-changed",
+      automaticStarts: 4,
+      armGeneration: 1,
+      baseline,
+      held: { files: ["new.txt"] },
+    });
   });
 });

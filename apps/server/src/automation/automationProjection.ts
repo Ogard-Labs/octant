@@ -169,19 +169,48 @@ export class AutomationProjection implements Projection {
         const payload = decodeDefinitionUpdated(event.payload);
         const existing = this.#definitions.get(payload.automation.id);
         if (existing !== undefined && existing.version >= payload.automation.version) return;
-        const initialSource = !this.#fileSources.has(payload.automation.id)
-          ? payload.fileSource
-          : undefined;
-        this.#upsertDefinition(payload.automation);
-        if (initialSource !== undefined) {
-          validateFileSourceFrame(initialSource, event);
-          this.#fileSources.set(payload.automation.id, initialSource);
+        const previous = this.#fileSources.get(payload.automation.id);
+        if (payload.fileSource !== undefined) {
+          validateFileSourceFrame(payload.fileSource, event);
+          if (
+            previous !== undefined &&
+            (payload.fileSource.observationRevision !== previous.observationRevision + 1 ||
+              payload.fileSource.armGeneration !== previous.armGeneration ||
+              payload.fileSource.automaticStarts !== previous.automaticStarts ||
+              payload.fileSource.baselineDigest !== previous.baselineDigest)
+          )
+            throw invalidFileSourceFrame(event);
         }
+        this.#upsertDefinition(payload.automation);
+        if (payload.fileSource !== undefined)
+          this.#fileSources.set(payload.automation.id, payload.fileSource);
         return;
       }
-      case AUTOMATION_DEFINITION_LIFECYCLE_CHANGED:
-        this.#upsertDefinition(decodeDefinitionLifecycleChanged(event.payload).automation);
+      case AUTOMATION_DEFINITION_LIFECYCLE_CHANGED: {
+        const payload = decodeDefinitionLifecycleChanged(event.payload);
+        const existing = this.#definitions.get(payload.automation.id);
+        if (existing !== undefined && existing.version >= payload.automation.version) return;
+        const previous = this.#fileSources.get(payload.automation.id);
+        if (payload.fileSource !== undefined && payload.fileSourceReview !== undefined) {
+          const review = payload.fileSourceReview;
+          if (
+            existing === undefined ||
+            previous === undefined ||
+            existing.version !== review.expectedDefinitionVersion ||
+            previous.sourceIdentity !== review.previousSourceIdentity ||
+            previous.observationRevision !== review.previousObservationRevision ||
+            (previous.held?.digest ?? previous.baselineDigest) !== review.previousBatchDigest ||
+            payload.fileSource.armGeneration !== previous.armGeneration + 1 ||
+            payload.fileSource.observationRevision !== previous.observationRevision + 1 ||
+            payload.fileSource.automaticStarts !== (review.disposition === "run-once" ? 1 : 0)
+          )
+            throw invalidFileSourceFrame(event);
+          validateFileSourceFrame(payload.fileSource, event);
+          this.#fileSources.set(payload.automation.id, payload.fileSource);
+        }
+        this.#upsertDefinition(payload.automation);
         return;
+      }
       case AUTOMATION_DEFINITION_EXHAUSTED:
         this.#applyDefinitionExhausted(event);
         return;
@@ -220,6 +249,11 @@ export class AutomationProjection implements Projection {
         // projection tolerates them so replay never quarantines on them.
         return;
     }
+  }
+
+  getFileSourceSummary(automationId: AutomationId): AutomationSummary["fileSource"] {
+    const definition = this.#definitions.get(automationId);
+    return definition === undefined ? undefined : this.#summarize(definition).fileSource;
   }
 
   getFileSource(automationId: AutomationId): AutomationFileSourceCheckpoint | undefined {
@@ -344,6 +378,12 @@ export class AutomationProjection implements Projection {
               ),
               ...(source === undefined ? {} : { observedAt: source.observedAt }),
               coverageGap: source?.coverageGap ?? false,
+              ...(source === undefined
+                ? {}
+                : {
+                    sourceIdentity: source.sourceIdentity,
+                    reviewDigest: source.held?.digest ?? source.baselineDigest,
+                  }),
               heldFiles: source?.held?.files ?? [],
               ...(source?.held === undefined ? {} : { heldDigest: source.held.digest }),
             },
@@ -428,10 +468,12 @@ export class AutomationProjection implements Projection {
     if (payload.occurrence.kind === "file-arrival") {
       const source = this.#fileSources.get(payload.automationId);
       if (source !== undefined && !source.activityWindow.includes(payload.runId))
-        this.#fileSources.set(payload.automationId, {
-          ...source,
-          activityWindow: [...source.activityWindow, payload.runId],
-        });
+        this.#fileSources.set(
+          payload.automationId,
+          source.activityWindow.length >= 64
+            ? { ...source, phase: "needs-rearm", reason: "activity-history-limit" }
+            : { ...source, activityWindow: [...source.activityWindow, payload.runId] },
+        );
     }
   }
 
@@ -514,7 +556,7 @@ export class AutomationProjection implements Projection {
       this.#fileSources.set(
         run.automationId,
         source.activityWindow.length >= 64
-          ? { ...source, phase: "needs-rearm", reason: "activity-unknown" }
+          ? { ...source, phase: "needs-rearm", reason: "activity-history-limit" }
           : { ...source, activityWindow: [...source.activityWindow, run.id] },
       );
     }

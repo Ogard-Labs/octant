@@ -74,7 +74,6 @@ import {
   type ProviderResumeCursor,
   type ProviderInstance,
   type ProviderModel,
-  type ProviderSwitchConversationHandoff,
   type ThreadTaskProgressList,
   type ThreadWorkingDirectory,
   type WindowId,
@@ -203,6 +202,8 @@ interface WorkUsageFacts {
 }
 
 export interface WorkTurnStartOptions {
+  /** Required framed data from an owned host workflow, never a wire-supplied instruction. */
+  readonly externalData?: { readonly content: FramedExternalContent; readonly referenceId: string };
   /**
    * The most this turn may run at, for a caller whose own authority may be
    * narrower than the thread's (a goal-loop round, a routine, a delegation):
@@ -1151,6 +1152,18 @@ export class WorkTurnService {
           command.threadId,
         )),
         ...this.#issueContextContribution(command.threadId),
+        ...(options?.externalData === undefined
+          ? []
+          : [
+              {
+                text: options.externalData.content.text,
+                sourceKind: "message" as const,
+                referenceId: options.externalData.referenceId,
+                category: options.externalData.content.section,
+                posture: "required" as const,
+                block: { kind: "user-message" as const, text: options.externalData.content.text },
+              },
+            ]),
         {
           text: command.prompt,
           sourceKind: "message",

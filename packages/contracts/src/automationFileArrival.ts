@@ -80,6 +80,7 @@ export const AutomationFileSourceReason = Schema.Literal(
   "definition-changed",
   "known-activity",
   "activity-unknown",
+  "activity-history-limit",
 );
 export const AutomationFileHeldBatch = Schema.Struct({
   files: Schema.Array(AutomationSourceRelativePath).pipe(
@@ -121,6 +122,18 @@ export const AutomationFileSourceCheckpoint = Schema.Struct({
   );
 export type AutomationFileSourceCheckpoint = typeof AutomationFileSourceCheckpoint.Type;
 
+export const AutomationFileSourceReview = Schema.Struct({
+  expectedDefinitionVersion: positiveCounter,
+  previousObservationRevision: positiveCounter,
+  previousSourceIdentity: AutomationSourceDigest,
+  previousBatchDigest: AutomationSourceDigest,
+  disposition: Schema.Literal("skip", "run-once"),
+  reviewedWindowId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  reviewedCapabilityGeneration: counter,
+  reviewedAt: UtcTimestamp,
+}).annotations(strict);
+export type AutomationFileSourceReview = typeof AutomationFileSourceReview.Type;
+
 export const AutomationFileArrivalReceipt = Schema.Struct({
   checkpoint: AutomationFileSourceCheckpoint,
   files: Schema.Array(AutomationSourceRelativePath).pipe(
@@ -128,11 +141,13 @@ export const AutomationFileArrivalReceipt = Schema.Struct({
     Schema.maxItems(MAX_AUTOMATION_SOURCE_FILES),
   ),
   automaticStartOrdinal: Schema.Int.pipe(Schema.between(1, MAX_AUTOMATION_FILE_START_LIMIT)),
+  rearm: Schema.optional(AutomationFileSourceReview),
 })
   .annotations(strict)
   .pipe(
     Schema.filter(
       (receipt) =>
+        (receipt.rearm === undefined || receipt.rearm.disposition === "run-once") &&
         receipt.automaticStartOrdinal === receipt.checkpoint.automaticStarts &&
         receipt.checkpoint.baselineReady &&
         (receipt.checkpoint.phase === "watching" ||
@@ -157,6 +172,8 @@ export const AutomationFileSourceSummary = Schema.Struct({
     Schema.maxItems(MAX_AUTOMATION_SOURCE_FILES),
   ),
   heldDigest: Schema.optional(AutomationSourceDigest),
+  sourceIdentity: Schema.optional(AutomationSourceDigest),
+  reviewDigest: Schema.optional(AutomationSourceDigest),
 }).annotations(strict);
 export type AutomationFileSourceSummary = typeof AutomationFileSourceSummary.Type;
 export const decodeAutomationFileSourceCheckpoint = Schema.decodeUnknownSync(

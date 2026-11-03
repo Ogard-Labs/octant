@@ -2545,7 +2545,16 @@ the thread it came from.
   enable; status shows remaining starts and retained input. Re-arm binds the
   exact current definition/source/observation/batch and current authority,
   explicitly either runs the held surviving batch once or skips it. A blind
-  Resume never drops held input or resets the budget. Existing timed/manual
+  Resume never drops held input or resets the budget. A review that loses its
+  response remains unconfirmed: refresh details and run history before another
+  explicit decision; the client never resends it automatically. Input paths are
+  delivered as bounded framed external data through the ordinary Work context
+  plan, separately from the person's fixed task, without copying file contents
+  into the routine journal or prompt. Current protected-read and authority rules
+  still govern the task's actual reads. More than 64 retained unsettled owned
+  runs makes quiescence unknown rather than dropping older ownership: finish and
+  review the Project's tasks and cleanup, then archive that routine and explicitly
+  configure a new one; neither Resume nor Save clears this hold. Existing timed/manual
   routines retain their behavior. Code input transfer is a separate remaining
   implementation gate, since its managed checkout does not inherit uncommitted
   Work input files.

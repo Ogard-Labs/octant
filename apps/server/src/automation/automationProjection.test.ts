@@ -113,6 +113,52 @@ function runId(suffix: string): AutomationRunId {
 }
 
 describe("automation projection", () => {
+  it("retains an explicit unknown-activity hold when manual starts exceed the owned window bound, including replay", () => {
+    const { store, projection } = createHarness();
+    const definition = automationDefinitionFixture({
+      trigger: {
+        kind: "file-arrival",
+        directory: "Inbox",
+        includeExtensions: ["txt"],
+        excludeDirectories: [],
+        settleSeconds: 2,
+        automaticStartLimit: 8,
+      },
+      nextDueAt: null,
+    });
+    store.appendDefinitionCreated({
+      automation: definition,
+      fileSource: initialAutomationFileCheckpoint("a".repeat(64), now),
+    });
+    for (let index = 0; index < 65; index++) {
+      const suffix = String(3000 + index);
+      const run = automationRunForDefinition(definition, {
+        id: runId(suffix),
+        runNowRequestId: `ad000000-0000-4000-8000-00000000${suffix}`,
+      });
+      store.appendRunCreated({ run });
+      store.appendRunStatusChanged({
+        automationId: run.automationId,
+        runId: run.id,
+        previousLifecycle: "queued",
+        lifecycle: "cancelled",
+        version: 2,
+        expectedVersion: 1,
+        updatedAt: now,
+      });
+    }
+    const source = projection.getFileSource(definition.id);
+    expect(source).toMatchObject({
+      phase: "needs-rearm",
+      reason: "activity-history-limit",
+      automaticStarts: 0,
+    });
+    expect(source?.activityWindow).toHaveLength(64);
+    const rebuilt = new AutomationProjection();
+    store.replayEach((frame) => rebuilt.applyEnvelope(frame));
+    expect(rebuilt.getFileSource(definition.id)).toEqual(source);
+  });
+
   it("atomically retains a complete file observation and one debit with its deterministic run through replay", () => {
     const { store, projection } = createHarness();
     const definition = automationDefinitionFixture({

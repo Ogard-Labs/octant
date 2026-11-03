@@ -1,5 +1,6 @@
 import {
   deriveAutomationOccurrenceKey,
+  decodeAutomationDefinition,
   decodeWorkTurnRequestId,
   type WorkTurnRequestId,
   type WorkTurnState,
@@ -453,6 +454,68 @@ export class AutomationSchedulerService {
 
   #repairClaim(definition: AutomationDefinition, run: AutomationRun, out: PassCollector): void {
     const events: Array<AutomationOccurrenceLedgerEvent> = [];
+    if (run.occurrence.kind === "file-arrival" && run.occurrence.source.rearm !== undefined) {
+      const review = run.occurrence.source.rearm;
+      const previous = this.#projection.getFileSource(definition.id);
+      if (
+        definition.lifecycle !== "archived" &&
+        definition.definitionRevision === run.occurrence.definitionRevision &&
+        definition.version === review.expectedDefinitionVersion &&
+        previous?.sourceIdentity === review.previousSourceIdentity &&
+        previous.observationRevision === review.previousObservationRevision &&
+        (previous.held?.digest ?? previous.baselineDigest) === review.previousBatchDigest
+      ) {
+        const { blockedReason: _blocked, nextDueResolution: _resolution, ...base } = definition;
+        const rearmed = decodeAutomationDefinition({
+          ...base,
+          lifecycle: "enabled",
+          nextDueAt: null,
+          version: definition.version + 1,
+          updatedAt: review.reviewedAt,
+          updatedBy: {
+            kind: "local-window",
+            windowId: review.reviewedWindowId,
+            capabilityGeneration: review.reviewedCapabilityGeneration,
+          },
+        });
+        this.#store.appendOccurrenceLedger({
+          automationId: definition.id,
+          expectedVersion: definition.version,
+          events: [
+            {
+              kind: "file-source-rearmed",
+              automation: rearmed,
+              previousLifecycle: definition.lifecycle,
+              checkpoint: run.occurrence.source.checkpoint,
+              review,
+              at: out.now,
+            },
+            { kind: "occurrence-claimed", occurrence: run.occurrence, runId: run.id, at: out.now },
+          ],
+        });
+      } else {
+        if (isAutomationRunLifecycleActive(run.lifecycle))
+          this.#store.appendRunStatusChanged({
+            automationId: definition.id,
+            runId: run.id,
+            previousLifecycle: run.lifecycle,
+            lifecycle: "failed",
+            version: run.version + 1,
+            expectedVersion: run.version,
+            failure: {
+              reason: "recovery-failed",
+              message:
+                "The file re-arm review was superseded before admission completed. No task was sent. Review the current input again.",
+            },
+            updatedAt: out.now,
+          });
+        this.#appendLedger(definition.id, [
+          { kind: "occurrence-claimed", occurrence: run.occurrence, runId: run.id, at: out.now },
+        ]);
+      }
+      out.repairedRunIds.push(run.id);
+      return;
+    }
     if (
       run.occurrence.kind === "file-arrival" &&
       run.occurrence.definitionRevision === definition.definitionRevision
@@ -787,6 +850,8 @@ export class AutomationSchedulerService {
     if (refreshed === undefined) return;
     const remaining = events.filter((event) => {
       switch (event.kind) {
+        case "file-source-rearmed":
+          return refreshed.version === event.review.expectedDefinitionVersion;
         case "file-source-observed":
           return (
             (this.#projection.getFileSource(automationId)?.observationRevision ?? 0) <

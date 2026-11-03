@@ -238,6 +238,79 @@ describe("AutomationDefinitionEditor creation", () => {
       .calls[0]![0] as AutomationDefinitionDraft;
   }
 
+  it("previews a bounded Work file trigger and submits the chosen folder separately from readiness", async () => {
+    const submit = vi.fn(async (_draft: AutomationDefinitionDraft) => undefined);
+    render(<AutomationDefinitionEditor {...editorProps({ onSubmit: submit })} />);
+    await fillWorkRoutine();
+    await chooseLabeledOption("Schedule", "When files arrive or change");
+    fireEvent.change(screen.getByLabelText("Input folder in this Project"), {
+      target: { value: "Inbox" },
+    });
+    fireEvent.change(screen.getByLabelText("File suffixes"), { target: { value: "PDF, .txt" } });
+    fireEvent.change(screen.getByLabelText("Excluded folders"), {
+      target: { value: "output, processed" },
+    });
+    expect(screen.getByLabelText("Automatic runs per arm")).toHaveValue(8);
+    expect(screen.getByRole("region", { name: "File arrival preview" })).toHaveTextContent(
+      "first complete scan is a baseline",
+    );
+    expect(screen.getByRole("region", { name: "File arrival preview" })).toHaveTextContent(
+      "At most 8 automatic runs per arm",
+    );
+    expect(screen.getByRole("region", { name: "File arrival preview" })).toHaveTextContent(
+      "cannot tell which program wrote a file",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({
+      mode: "work",
+      targetPolicy: "new-thread",
+      trigger: {
+        kind: "file-arrival",
+        directory: "Inbox",
+        includeExtensions: ["pdf", "txt"],
+        excludeDirectories: ["output", "processed"],
+        settleSeconds: 5,
+        automaticStartLimit: 8,
+      },
+    });
+  });
+
+  it("keeps file choices and the task on unsafe-path or host preparation refusal", async () => {
+    const submit = vi.fn(
+      async (_draft: AutomationDefinitionDraft) =>
+        "The input folder was not available. Choose an existing Project folder.",
+    );
+    render(<AutomationDefinitionEditor {...editorProps({ onSubmit: submit })} />);
+    await fillWorkRoutine();
+    await chooseLabeledOption("Schedule", "When files arrive or change");
+    fireEvent.change(screen.getByLabelText("Input folder in this Project"), {
+      target: { value: "../outside" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
+    expect(submit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Input folder in this Project")).toHaveValue("../outside");
+    fireEvent.change(screen.getByLabelText("Input folder in this Project"), {
+      target: { value: "Inbox" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
+    await screen.findByText(
+      "The input folder was not available. Choose an existing Project folder.",
+    );
+    expect(screen.getByLabelText("Input folder in this Project")).toHaveValue("Inbox");
+    expect(screen.getByLabelText("Task for each run")).toHaveValue("Summarize open work.");
+    expect(screen.getByLabelText("Automatic runs per arm")).toHaveValue(8);
+  });
+
+  it.each(["Code", "Chat"])("does not offer file arrivals for %s", async (mode) => {
+    render(<AutomationDefinitionEditor {...editorProps()} />);
+    await userEvent.click(screen.getByRole("button", { name: mode, exact: true }));
+    await userEvent.click(screen.getByLabelText("Schedule"));
+    expect(
+      screen.queryByRole("option", { name: "When files arrive or change" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("records the person's choice to run at the Project's mode, Full access included", async () => {
     const props = editorProps();
     render(<AutomationDefinitionEditor {...props} />);

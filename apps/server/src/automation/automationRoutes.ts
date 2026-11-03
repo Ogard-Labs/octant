@@ -35,7 +35,11 @@ import type { AutomationCommandService } from "./automationCommandService";
 import type { AutomationProjection } from "./automationProjection";
 import type { RoutineProposalService } from "./routineProposalService";
 import type { ThreadRoutineDraftResult } from "./threadRoutineDraft";
-import type { AutomationFileSourcePreparation } from "./automationFileSourceAuthority";
+import type {
+  AutomationFileSourcePreparation,
+  AutomationFileSourceRearmPreparation,
+} from "./automationFileSourceAuthority";
+import { AutomationFileSourceReviewError } from "./automationFileSources";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -67,6 +71,11 @@ export interface AutomationRouteDependencies {
   };
   readonly now?: () => number;
   readonly uuid?: () => string;
+  readonly prepareFileRearm?: (input: {
+    readonly command: Extract<AutomationCommand, { readonly kind: "rearm-file-automation" }>;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<AutomationFileSourceRearmPreparation>;
   readonly prepareFileSource?: (input: {
     readonly command: Extract<
       AutomationCommand,
@@ -299,9 +308,11 @@ async function handleGet(
     return failureResponse("Automation is unavailable.", 404, origin);
   }
   const runs = dependencies.projection.listRuns({ automationId, limit: DETAIL_RUNS_LIMIT });
+  const fileSource = dependencies.projection.getFileSourceSummary(automationId);
   return jsonResponse(
     decodeAutomationQueryResponse({
       kind: "automation-detail",
+      ...(fileSource === undefined ? {} : { fileSource }),
       automation: definition,
       runs: runs.runs,
     }),
@@ -433,7 +444,74 @@ async function handleCommand(
     principal: context.principal,
     origin: { kind: "interactive" },
   } as AutomationCommand;
-  let preparation: AutomationFileSourcePreparation | undefined;
+  let preparation:
+    | AutomationFileSourcePreparation
+    | AutomationFileSourceRearmPreparation
+    | undefined;
+  if (command.kind === "rearm-file-automation") {
+    if (context.principal.kind !== "local-window")
+      return jsonResponse(
+        commandFailure(
+          "unauthorized",
+          "Re-arm this file routine from an Octant window on this host.",
+        ),
+        200,
+        origin,
+      );
+    let checked: AutomationCommand;
+    try {
+      checked = decodeAutomationCommand(command);
+    } catch {
+      return jsonResponse(commandFailure("invalid", "The input review is invalid."), 200, origin);
+    }
+    if (checked.kind !== "rearm-file-automation")
+      return jsonResponse(commandFailure("invalid", "The input review is invalid."), 200, origin);
+    const current = () =>
+      !signal.aborted &&
+      context.abortSignal?.aborted !== true &&
+      dependencies.windowAuthorityStore
+        .listWindowIds(dependencies.now?.() ?? Date.now())
+        .includes(context.scopeId) &&
+      dependencies.projection.getDefinition(checked.automationId)?.version ===
+        checked.expectedVersion;
+    try {
+      if (dependencies.prepareFileRearm === undefined || !current())
+        return jsonResponse(
+          commandFailure(
+            "blocked",
+            "The current input review is unavailable. Refresh and try again.",
+          ),
+          200,
+          origin,
+        );
+      preparation = await dependencies.prepareFileRearm({ command: checked, current, signal });
+      const latestProjects = await accessibleProjects(dependencies, context);
+      if (
+        !current() ||
+        !preparation.current() ||
+        authorizeCommandProject(dependencies, body, latestProjects) !== undefined
+      )
+        return jsonResponse(
+          commandFailure(
+            "stale-version",
+            "The input review or its authority changed. Refresh it before re-arming.",
+          ),
+          200,
+          origin,
+        );
+    } catch (error) {
+      return jsonResponse(
+        commandFailure(
+          "blocked",
+          error instanceof AutomationFileSourceReviewError
+            ? error.message
+            : "The input could not be verified. Check the Project, refresh and try again.",
+        ),
+        200,
+        origin,
+      );
+    }
+  }
   if (
     (command.kind === "create-automation" || command.kind === "update-automation") &&
     isRecord(body.definition) &&

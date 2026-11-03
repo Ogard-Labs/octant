@@ -55,7 +55,11 @@ export interface AutomationClientOptions {
 
 export interface AutomationClient {
   list(input?: AutomationListInput, signal?: AbortSignal): Promise<AutomationListResponse>;
-  get(automationId: AutomationId, signal?: AbortSignal): Promise<AutomationDetailResponse>;
+  get(
+    automationId: AutomationId,
+    signal?: AbortSignal,
+    context?: { readonly fileSourceReview: true },
+  ): Promise<AutomationDetailResponse>;
   history(input: AutomationHistoryInput, signal?: AbortSignal): Promise<AutomationHistoryResponse>;
   execute(command: AutomationClientCommand, signal?: AbortSignal): Promise<AutomationCommandResult>;
   /**
@@ -83,7 +87,12 @@ export interface AutomationClient {
   ): Promise<RoutineProposalDecisionResult>;
 }
 
-export type AutomationClientFailureCategory = "aborted" | "network" | "http" | "contract";
+export type AutomationClientFailureCategory =
+  | "aborted"
+  | "network"
+  | "http"
+  | "contract"
+  | "timeout";
 
 export class AutomationClientFailure extends Error {
   override readonly name = "AutomationClientFailure";
@@ -98,6 +107,7 @@ export class AutomationClientFailure extends Error {
 }
 
 const DEFAULT_MAX_ATTEMPTS = 2;
+export const FILE_ROUTINE_REQUEST_TIMEOUT_MS = 30_000;
 
 export function createAutomationClient(options: AutomationClientOptions): AutomationClient {
   const headers = { "x-octant-window-capability": options.windowCapability };
@@ -122,9 +132,31 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
         signal,
       );
     },
-    get(automationId, signal) {
+    get(automationId, signal, context) {
       const url = new URL("/api/automations/get", options.baseUrl);
       url.searchParams.set("automationId", String(automationId));
+      if (context?.fileSourceReview)
+        return fileRoutineRequest(
+          (boundedSignal) =>
+            request(
+              options.fetch,
+              url.toString(),
+              { method: "GET", headers },
+              (value) => {
+                const detail = decodeQueryKind(value, "automation-detail");
+                if (detail.automation.id !== automationId)
+                  throw new AutomationClientFailure(
+                    "contract",
+                    "The file-routine review returned a different routine.",
+                  );
+                return detail;
+              },
+              1,
+              boundedSignal,
+            ),
+          signal,
+          "The file-routine details did not arrive in time. Refresh and try again.",
+        );
       return request(
         options.fetch,
         url.toString(),
@@ -149,6 +181,29 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
       );
     },
     execute(command, signal) {
+      if (
+        command.kind === "rearm-file-automation" ||
+        ((command.kind === "create-automation" || command.kind === "update-automation") &&
+          command.definition.trigger.kind === "file-arrival")
+      ) {
+        return fileRoutineRequest(
+          (boundedSignal) =>
+            request(
+              options.fetch,
+              new URL("/api/automations/commands", options.baseUrl).toString(),
+              {
+                method: "POST",
+                headers: { ...headers, "content-type": "application/json" },
+                body: JSON.stringify(command),
+              },
+              (value) => decodeFileCommandResult(value, command),
+              1,
+              boundedSignal,
+            ),
+          signal,
+          "The host has not confirmed this file-routine change. Refresh its details and history before trying again.",
+        );
+      }
       return request(
         options.fetch,
         new URL("/api/automations/commands", options.baseUrl).toString(),
@@ -223,6 +278,44 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
   };
 }
 
+/** A file setup/re-arm has one caller attempt and an unknown-outcome deadline, including body reads. */
+async function fileRoutineRequest<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal | undefined,
+  timeoutMessage: string,
+): Promise<T> {
+  const controller = new AbortController();
+  const combined =
+    signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () =>
+      reject(new AutomationClientFailure("aborted", "Automation request was cancelled."));
+    if (combined.aborted) onAbort();
+    else combined.addEventListener("abort", onAbort, { once: true });
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation(combined),
+      aborted,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new AutomationClientFailure("timeout", timeoutMessage));
+          controller.abort();
+        }, FILE_ROUTINE_REQUEST_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    if (error instanceof AutomationClientFailure && error.category === "network")
+      throw new AutomationClientFailure("network", timeoutMessage);
+    throw error;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (onAbort !== undefined) combined.removeEventListener("abort", onAbort);
+  }
+}
+
 function decodeProposalAnswer<T>(decode: () => T): T {
   try {
     return decode();
@@ -268,6 +361,40 @@ function decodeCommandResult(value: unknown): AutomationCommandResult {
       "Automation command result did not match the contract.",
     );
   }
+}
+
+function decodeFileCommandResult(
+  value: unknown,
+  command: AutomationClientCommand,
+): AutomationCommandResult {
+  const result = decodeCommandResult(value);
+  const owner =
+    "automation" in result
+      ? result.automation.id
+      : "run" in result
+        ? result.run.automationId
+        : "automationId" in result
+          ? result.automationId
+          : undefined;
+  if (owner !== undefined && owner !== command.automationId)
+    throw new AutomationClientFailure("contract", "The host returned a different file routine.");
+  if (command.kind === "rearm-file-automation" && result.kind === "automation-run-accepted") {
+    const occurrence = result.run.occurrence;
+    const review = occurrence.kind === "file-arrival" ? occurrence.source.rearm : undefined;
+    if (
+      command.disposition !== "run-once" ||
+      review === undefined ||
+      review.expectedDefinitionVersion !== command.expectedVersion ||
+      review.previousSourceIdentity !== command.sourceIdentity ||
+      review.previousObservationRevision !== command.observationRevision ||
+      review.previousBatchDigest !== command.batchDigest
+    )
+      throw new AutomationClientFailure(
+        "contract",
+        "The host returned a different file-input decision.",
+      );
+  }
+  return result;
 }
 
 /**

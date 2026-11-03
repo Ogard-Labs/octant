@@ -1,8 +1,10 @@
+import { currentProtectedFilesChoice } from "../process/secretGuard";
 import type {
   AutomationId,
   AutomationDefinitionSnapshot,
   AutomationDefinitionDraft,
   AutomationFileSourceCheckpoint,
+  AutomationFileSourceReview,
   UtcTimestamp,
 } from "@octant/contracts";
 import type { WorkFilesystemPort } from "../work/workFilesystemPort";
@@ -20,10 +22,21 @@ import type { AutomationFileSourceAuthority } from "./automationFileSources";
 
 /** A transient protected-route proof; never accepted from or returned to the renderer. */
 export interface AutomationFileSourcePreparation {
+  readonly kind: "definition";
   readonly automationId: AutomationId;
   readonly expectedVersion: number;
   readonly definition: AutomationDefinitionDraft;
   readonly checkpoint: AutomationFileSourceCheckpoint;
+  readonly current: () => boolean;
+}
+
+export interface AutomationFileSourceRearmPreparation {
+  readonly kind: "rearm";
+  readonly automationId: AutomationId;
+  readonly expectedVersion: number;
+  readonly checkpoint: AutomationFileSourceCheckpoint;
+  readonly review: AutomationFileSourceReview;
+  readonly files: ReadonlyArray<string>;
   readonly current: () => boolean;
 }
 
@@ -93,7 +106,12 @@ export async function prepareAutomationFileDefinition(input: {
 }): Promise<AutomationFileSourcePreparation> {
   if (input.definition.trigger.kind !== "file-arrival")
     throw new AutomationFileSourceScanError("authority-changed");
-  const current = () => !input.signal.aborted && input.current() && input.authority.current();
+  const protectedChoice = currentProtectedFilesChoice();
+  const current = () =>
+    !input.signal.aborted &&
+    input.current() &&
+    input.authority.current() &&
+    currentProtectedFilesChoice() === protectedChoice;
   const root = await prepareAutomationFileSource({
     filesystem: input.filesystem,
     canonicalRoot: input.authority.canonicalRoot,
@@ -104,6 +122,7 @@ export async function prepareAutomationFileDefinition(input: {
   });
   if (!current()) throw new AutomationFileSourceScanError("authority-changed");
   return {
+    kind: "definition",
     automationId: input.automationId,
     expectedVersion: input.expectedVersion,
     definition: input.definition,

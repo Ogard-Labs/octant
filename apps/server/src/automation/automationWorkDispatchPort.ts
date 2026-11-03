@@ -1,15 +1,16 @@
+import { automationFileContext, automationDispatchPromptText } from "./automationFileContext";
+import { automationPromptDigest } from "./automationAuthorityRevalidation";
 import { createHash } from "node:crypto";
 import {
   automationFollowUpTurnPrompt,
   type AutomationRun,
-  type WorkAccess,
   type WorkThreadId,
   type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeWorkTurnId, decodeWorkTurnRequestId } from "@octant/contracts/work-turns";
-import { WorkTurnServiceError } from "../work/workTurnService";
+import { WorkTurnServiceError, type WorkTurnStartOptions } from "../work/workTurnService";
 import type {
   AutomationWorkDispatchPort,
   AutomationFirstTurnLaunchOutcome,
@@ -37,7 +38,7 @@ export interface AutomationWorkTurnService {
   readonly startFirstTurn: (
     scopeId: WindowId,
     command: unknown,
-    options?: { readonly accessCeiling?: WorkAccess },
+    options?: Pick<WorkTurnStartOptions, "accessCeiling" | "externalData" | "admissionCurrent">,
   ) => Promise<{
     readonly kind: string;
     readonly turn?: { readonly requestId: string; readonly status?: string };
@@ -50,6 +51,12 @@ export interface CreateAutomationWorkDispatchPortOptions {
   readonly turns: AutomationWorkTurnService;
   readonly clock: () => UtcTimestamp;
   readonly uuid: () => string;
+  readonly fileInputCurrent?: (run: AutomationRun) => boolean;
+  readonly markFileInput?: (input: {
+    readonly run: AutomationRun;
+    readonly threadId: WorkThreadId;
+    readonly contentReference: string;
+  }) => boolean;
 }
 
 /**
@@ -156,7 +163,18 @@ async function startOrRecover(
       message: "Work Automation binding is missing for the first turn.",
     };
   }
-  void input.promptDigest;
+  const fileContext = automationFileContext(input.run);
+  if (
+    fileContext !== undefined &&
+    (options.fileInputCurrent?.(input.run) !== true ||
+      options.markFileInput === undefined ||
+      input.promptDigest !== automationPromptDigest(automationDispatchPromptText(input.run)))
+  )
+    return {
+      kind: "failed",
+      reason: "provider-launch-failed",
+      message: "File input delivery is unavailable or its retained admission changed.",
+    };
   // A follow-up goes back into a thread a person made, which may work in a
   // subfolder of the Project; its turn names that folder, as the person's own
   // next turn would.
@@ -191,10 +209,27 @@ async function startOrRecover(
     // itself is auto-accept-edits, or the person opted this routine into the
     // Project's level, Full access included, or picked a level on the routine,
     // which is the ceiling; the ceiling only narrows.
-    const result = await options.turns.startFirstTurn(
-      input.scopeId,
-      command,
-      snapshot.projectLevel === "opted-in"
+    if (
+      fileContext !== undefined &&
+      options.markFileInput?.({
+        run: input.run,
+        threadId: input.threadId,
+        contentReference: fileContext.referenceId,
+      }) !== true
+    )
+      return {
+        kind: "failed",
+        reason: "provider-launch-failed",
+        message: "The observed file context could not be recorded. No task was sent.",
+      };
+    const result = await options.turns.startFirstTurn(input.scopeId, command, {
+      ...(fileContext === undefined
+        ? {}
+        : {
+            externalData: fileContext,
+            admissionCurrent: () => options.fileInputCurrent?.(input.run) === true,
+          }),
+      ...(snapshot.projectLevel === "opted-in"
         ? {}
         : {
             accessCeiling:
@@ -202,8 +237,8 @@ async function startOrRecover(
               (input.run.authoritySnapshot.effective.executionPolicy === "auto-accept-edits"
                 ? "auto-accept-edits"
                 : "ask-first"),
-          },
-    );
+          }),
+    });
     if (result.kind === "accepted") {
       return {
         kind: "accepted",

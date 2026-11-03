@@ -90,21 +90,27 @@ export function reconcileAutomationFileObservation(input: {
 
   // A changed definition/root requires explicit review, regardless of later quiet scans.
   if (
-    previous.reason === "definition-changed" ||
+    previous.reason === "activity-history-limit" ||
     previous.reason === "source-changed" ||
     previous.reason === "authority-changed"
   )
     return { kind: "unchanged" };
   if (input.activity !== "quiet") {
+    const activityReason =
+      previous.reason === "definition-changed"
+        ? "definition-changed"
+        : input.activity === "unknown"
+          ? "activity-unknown"
+          : "known-activity";
     if (
-      previous.reason === (input.activity === "unknown" ? "activity-unknown" : "known-activity") &&
+      previous.reason === activityReason &&
       previous.busyChangeObserved === (previous.busyChangeObserved || changed) &&
       (!changed || previous.held?.digest === digest)
     )
       return { kind: "unchanged" };
     return checkpoint({
       phase: previous.baselineReady ? "needs-rearm" : "arming",
-      reason: input.activity === "unknown" ? "activity-unknown" : "known-activity",
+      reason: activityReason,
       busyChangeObserved: previous.busyChangeObserved || (previous.baselineReady && changed),
       ...(previous.baselineReady && changed ? { held } : {}),
     });
@@ -127,6 +133,15 @@ export function reconcileAutomationFileObservation(input: {
         true,
       ),
     };
+  }
+  if (previous.reason === "definition-changed") {
+    if (
+      previous.phase === "held" &&
+      previous.held?.digest === digest &&
+      previous.activityWindow.length === 0
+    )
+      return { kind: "unchanged" };
+    return checkpoint({ phase: "held", reason: "definition-changed", activityWindow: [], held });
   }
   if (
     previous.busyChangeObserved ||

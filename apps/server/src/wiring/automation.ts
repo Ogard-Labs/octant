@@ -1,3 +1,6 @@
+import { secretGuardRefusal } from "../process/secretGuard";
+import { joinWorkPath } from "../work/workPathConfinement";
+import { revalidateAutomationAuthority } from "../automation/automationAuthorityRevalidation";
 import { randomUUID } from "node:crypto";
 import { Schema } from "effect";
 import { AutomationFileSources } from "../automation/automationFileSources";
@@ -65,7 +68,11 @@ import { createPushGatewaySetting } from "../remote/pushGatewaySetting";
 import type { HostSigningPort } from "../remote/remoteProtocolService";
 import { readDeviceRegistrations } from "../persistence/remoteAccessProjection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-import { defaultPermissionModeFor, defaultShellSettings } from "@octant/domain";
+import {
+  defaultPermissionModeFor,
+  defaultShellSettings,
+  isAutomationRunLifecycleActive,
+} from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -77,7 +84,10 @@ import type { WorkWiring } from "./work";
 
 export type AutomationDependencies = Pick<ServerStart, "persistence"> &
   Pick<AuthorityWiring, "liveTurns" | "routineProposalService" | "windowAuthorityStore"> &
-  Pick<AgentRunsWiring, "capacityScheduler" | "agentRunOrchestration"> &
+  Pick<
+    AgentRunsWiring,
+    "capacityScheduler" | "agentRunOrchestration" | "externalContentIngestionStore"
+  > &
   Pick<HarnessWiring, "readHarnessProcessReceipts"> &
   Pick<WorkspaceWiring, "projectService"> &
   Pick<
@@ -92,6 +102,7 @@ export function wireAutomation(deps: AutomationDependencies) {
   const {
     capacityScheduler,
     agentRunOrchestration,
+    externalContentIngestionStore,
     readHarnessProcessReceipts,
     chatService,
     codeCompletedThreadSource,
@@ -269,6 +280,22 @@ export function wireAutomation(deps: AutomationDependencies) {
     },
   });
   const automationWorkDispatch = createAutomationWorkDispatchPort({
+    fileInputCurrent: routineFileInputCurrent,
+    markFileInput: ({ run, threadId, contentReference }) => {
+      if (!routineFileInputCurrent(run)) return false;
+      try {
+        const marked = externalContentIngestionStore.record({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel: "file-arrival-routine" },
+          contentReference,
+          correlationId: randomUUID(),
+          authorized: true,
+        });
+        return marked.kind === "recorded" || marked.kind === "already-recorded";
+      } catch {
+        return false;
+      }
+    },
     threads: {
       execute: async (windowId, command) =>
         workThreadServiceWithWorkflows.execute(windowId, command as never) as Promise<{
@@ -347,6 +374,39 @@ export function wireAutomation(deps: AutomationDependencies) {
       );
     },
   };
+  function routineFileInputCurrent(captured: AutomationRun): boolean {
+    const definition = persistence.automationProjection.getDefinition(captured.automationId);
+    const run = persistence.automationProjection.getRun(captured.id);
+    if (
+      definition?.lifecycle !== "enabled" ||
+      run === undefined ||
+      run.cancellationTombstone !== undefined ||
+      !isAutomationRunLifecycleActive(run.lifecycle) ||
+      run.occurrence.kind !== "file-arrival" ||
+      run.definitionSnapshot.trigger.kind !== "file-arrival"
+    )
+      return false;
+    const source = persistence.automationProjection.getFileSource(definition.id);
+    if (
+      source?.sourceIdentity !== run.occurrence.source.checkpoint.sourceIdentity ||
+      source.armGeneration !== run.occurrence.source.checkpoint.armGeneration
+    )
+      return false;
+    const facts = resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, { definition, run });
+    if (
+      facts.project?.type !== "work" ||
+      revalidateAutomationAuthority({ definition, run, facts }).kind !== "ok"
+    )
+      return false;
+    const root = facts.project.binding.canonicalRoot;
+    const input =
+      run.definitionSnapshot.trigger.directory === "."
+        ? root
+        : joinWorkPath(root, run.definitionSnapshot.trigger.directory);
+    return run.occurrence.source.files.every(
+      (path) => secretGuardRefusal(joinWorkPath(input, path)) === undefined,
+    );
+  }
   const automationDispatch = new AutomationDispatchService({
     store: automationEventStore,
     projection: persistence.automationProjection,
@@ -548,6 +608,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     projects: projectService,
     hostId: String(LOCAL_HOST_ID),
     historyAvailable: () => automationHistoryAvailable,
+    prepareFileRearm: (input) => automationFileSources.prepareRearm(input),
     prepareFileSource: async ({ command, current, signal }) => {
       const previous = persistence.automationProjection.getDefinition(command.automationId);
       const snapshot = Schema.decodeUnknownSync(AutomationDefinitionSnapshot)({

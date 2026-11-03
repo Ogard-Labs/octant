@@ -3,6 +3,8 @@ import {
   AutomationFileArrivalReceipt,
   AutomationFileSourceCheckpoint,
   AutomationFileSourceSummary,
+  AutomationFileSourceReview,
+  AutomationSourceDigest,
 } from "./automationFileArrival";
 export * from "./automationFileArrival";
 import { Schema } from "effect";
@@ -1041,6 +1043,14 @@ const AutomationCommandFields = {
 
 export const AutomationCommand = Schema.Union(
   Schema.Struct({
+    kind: Schema.Literal("rearm-file-automation"),
+    ...AutomationCommandFields,
+    sourceIdentity: AutomationSourceDigest,
+    observationRevision: Schema.Int.pipe(Schema.between(1, Number.MAX_SAFE_INTEGER)),
+    batchDigest: AutomationSourceDigest,
+    disposition: Schema.Literal("skip", "run-once"),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-automation"),
     ...AutomationCommandFields,
     definition: AutomationDefinitionDraft,
@@ -1310,6 +1320,7 @@ export const AutomationListResponse = Schema.Struct({
 export type AutomationListResponse = typeof AutomationListResponse.Type;
 
 export const AutomationDetailResponse = Schema.Struct({
+  fileSource: Schema.optional(AutomationFileSourceSummary),
   kind: Schema.Literal("automation-detail"),
   automation: AutomationDefinition,
   runs: Schema.Array(AutomationRun).pipe(Schema.maxItems(MAX_AUTOMATION_HISTORY_ENTRIES)),
@@ -1370,7 +1381,31 @@ export type AutomationDefinitionUpdated = typeof AutomationDefinitionUpdated.Typ
 export const AutomationDefinitionLifecycleChanged = Schema.Struct({
   automation: AutomationPersistedDefinition,
   previousLifecycle: AutomationLifecycle,
-}).annotations(strict);
+  fileSource: Schema.optional(AutomationFileSourceCheckpoint),
+  fileSourceReview: Schema.optional(AutomationFileSourceReview),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (event) =>
+        (event.fileSource === undefined) === (event.fileSourceReview === undefined) &&
+        (event.fileSource === undefined ||
+          (event.fileSourceReview !== undefined &&
+            event.automation.trigger.kind === "file-arrival" &&
+            event.automation.lifecycle === "enabled" &&
+            event.automation.updatedBy.kind === "local-window" &&
+            event.automation.updatedBy.windowId === event.fileSourceReview.reviewedWindowId &&
+            event.automation.updatedBy.capabilityGeneration ===
+              event.fileSourceReview.reviewedCapabilityGeneration &&
+            event.automation.version === event.fileSourceReview.expectedDefinitionVersion + 1 &&
+            event.fileSource.sourceIdentity === event.fileSourceReview.previousSourceIdentity &&
+            event.fileSource.observationRevision ===
+              event.fileSourceReview.previousObservationRevision + 1 &&
+            event.fileSource.baselineReady &&
+            event.fileSource.automaticStarts ===
+              (event.fileSourceReview.disposition === "run-once" ? 1 : 0))),
+    ),
+  );
 export type AutomationDefinitionLifecycleChanged = typeof AutomationDefinitionLifecycleChanged.Type;
 
 export const AutomationFileSourceObserved = Schema.Struct({

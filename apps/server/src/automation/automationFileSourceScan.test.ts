@@ -189,6 +189,16 @@ describe("confined file-arrival observations", () => {
       applyProtectedFilesChoice(previous);
     }
   });
+  it("blocks an overlong nested relative path without reporting a partial baseline", async () => {
+    const source = await setup();
+    const nested = Array.from({ length: 6 }, (_, index) => `${index}${"a".repeat(180)}`);
+    await mkdir(join(source.path, "Inbox", ...nested), { recursive: true });
+    await writeFile(
+      join(source.path, "Inbox", ...nested, "new.txt"),
+      "not a complete permitted scan",
+    );
+    await expect(source.scan()).rejects.toMatchObject({ reason: "source-limit" });
+  });
   it("blocks unsupported nonhidden names instead of publishing a truncated baseline", async () => {
     const source = await setup();
     await writeFile(join(source.path, "Inbox/not:supported.txt"), "input");
