@@ -158,6 +158,23 @@ describe("desktop packaging boundary", () => {
     });
   });
 
+  it("seals Nightly's application entry while preserving the stable host runtime layout", () => {
+    const nightly = createPackagerOptions(
+      "/tmp/stage",
+      "/tmp/out",
+      "0.1.0-preview.20261103.1",
+      DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+      desktopIdentity("nightly"),
+    );
+    expect(nightly.asar).toEqual({
+      unpack: expect.stringContaining(
+        "apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
+      ),
+    });
+    expect(nightly.asar).toEqual({ unpack: expect.not.stringContaining("*.js") });
+    expect(createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0").asar).toBe(false);
+  });
+
   it("resolves packaging targets from the host or an explicit override", () => {
     expect(resolveDesktopPackageTarget({}, { platform: "darwin", arch: "arm64" }).id).toBe(
       "darwin-arm64",
@@ -1232,7 +1249,11 @@ describe("the terminal launcher the desktop app ships", () => {
         // An app moved to a path with a space, as a person's Applications folder can be.
         const contents = resolve(root, `Moved Apps/${productName}.app/Contents`);
         const launcher = resolve(contents, "Resources/terminal-launcher");
-        await installTerminalLauncher(repository, launcher, productName);
+        await installTerminalLauncher(
+          repository,
+          launcher,
+          desktopIdentity(productName === "Octant" ? "stable" : "nightly"),
+        );
         await mkdir(resolve(contents, "MacOS"), { recursive: true });
         // Stands in for the app's executable: reports how it was started.
         await writeFile(
@@ -1241,16 +1262,20 @@ describe("the terminal launcher the desktop app ships", () => {
           { mode: 0o755 },
         );
 
-        expect((await readdir(launcher)).sort()).toEqual(["octant", "octant.mjs"]);
+        expect((await readdir(launcher)).sort()).toEqual(
+          productName === "Octant" ? ["octant", "octant.mjs"] : ["octant"],
+        );
         expect((await stat(resolve(launcher, "octant"))).mode & 0o777).toBe(0o755);
-        expect((await stat(resolve(launcher, "octant.mjs"))).mode & 0o777).toBe(0o644);
+        if (productName === "Octant")
+          expect((await stat(resolve(launcher, "octant.mjs"))).mode & 0o777).toBe(0o644);
         const output = execFileSync("/bin/sh", ["-c", "octant mcp --help"], {
           env: { PATH: `${launcher}:/usr/bin:/bin` },
           encoding: "utf8",
         });
         expect(output.split("\n")).toEqual([
-          "node-mode=1",
-          `${launcher}/octant.mjs`,
+          ...(productName === "Octant"
+            ? ["node-mode=1", `${launcher}/octant.mjs`]
+            : ["node-mode=", "--octant-terminal-cli"]),
           "mcp",
           "--help",
           "",

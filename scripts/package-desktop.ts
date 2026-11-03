@@ -1,4 +1,11 @@
 import { packager, type Options as PackagerOptions } from "@electron/packager";
+import {
+  prepareNightlyRuntimeFuses,
+  readNightlyArchive,
+  NIGHTLY_UNPACKED_FILES,
+  packagedNativePath,
+} from "./desktop-client-runtime";
+import { NIGHTLY_TERMINAL_SWITCH } from "../apps/desktop/src/desktopLaunch";
 import { rebuild, type RebuildOptions } from "@electron/rebuild";
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -328,7 +335,8 @@ export const REQUIRED_DARWIN_MANAGED_TOOL_FILES = [
 
 /**
  * The terminal's `octant` (only `octant mcp`): a shell launcher and the one-file
- * bundle it runs with the app's own runtime in Node mode. The host puts this
+ * bundle Stable runs in Node mode. Nightly uses a fixed sealed entry role,
+ * so it needs only the shell launcher. The host puts this
  * folder on a Code thread terminal's `PATH` while the terminal holds a Browser
  * grant, so nothing else may be added to it.
  */
@@ -373,14 +381,21 @@ export const PACKAGED_EXECUTABLE_FILES = [
  * can be moved or translocated; the host grants the terminal read access to the
  * same folder and runtime.
  */
-export function terminalLauncherScript(productName: string): string {
+export function terminalLauncherScript(identity: DesktopIdentity): string {
   return [
     "#!/bin/sh",
     "# The Octant app's `octant` for a Code thread terminal that may use the Browser.",
-    "# It runs `octant mcp` with the app's own runtime in Node mode.",
+    "# It runs only the scoped terminal command with the app's own runtime.",
     'launcher_directory=$(dirname -- "$0")',
-    "export ELECTRON_RUN_AS_NODE=1",
-    `exec "$launcher_directory/../../MacOS/${productName}" "$launcher_directory/octant.mjs" "$@"`,
+    ...(identity.flavor === "nightly"
+      ? [
+          "unset ELECTRON_RUN_AS_NODE",
+          `exec "$launcher_directory/../../MacOS/${identity.productName}" ${NIGHTLY_TERMINAL_SWITCH} "$@"`,
+        ]
+      : [
+          "export ELECTRON_RUN_AS_NODE=1",
+          `exec "$launcher_directory/../../MacOS/${identity.productName}" "$launcher_directory/octant.mjs" "$@"`,
+        ]),
     "",
   ].join("\n");
 }
@@ -389,17 +404,19 @@ export function terminalLauncherScript(productName: string): string {
 export async function installTerminalLauncher(
   repositoryRoot: string,
   directory: string,
-  productName: string = DESKTOP_PACKAGE_IDENTITY.productName,
+  identity: DesktopIdentity = desktopIdentity("stable"),
 ): Promise<void> {
   const bundle = "packages/cli/dist/terminalLauncherMain.mjs";
-  if (!existsSync(resolve(repositoryRoot, bundle))) {
+  if (identity.flavor === "stable" && !existsSync(resolve(repositoryRoot, bundle))) {
     throw new Error(`Required built output is missing: ${bundle}. Run bun run build first.`);
   }
   await rm(directory, { recursive: true, force: true });
   await mkdir(directory, { recursive: true });
-  await cp(resolve(repositoryRoot, bundle), join(directory, "octant.mjs"));
-  await chmod(join(directory, "octant.mjs"), 0o644);
-  await writeFile(join(directory, "octant"), terminalLauncherScript(productName), { mode: 0o755 });
+  if (identity.flavor === "stable") {
+    await cp(resolve(repositoryRoot, bundle), join(directory, "octant.mjs"));
+    await chmod(join(directory, "octant.mjs"), 0o644);
+  }
+  await writeFile(join(directory, "octant"), terminalLauncherScript(identity), { mode: 0o755 });
   await chmod(join(directory, "octant"), 0o755);
 }
 export const PACKAGED_LINUX_EXECUTABLE_FILES = [LINUX_LANGUAGE_SERVER_BINARY] as const;
@@ -702,7 +719,10 @@ export function createPackagerOptions(
     appBundleId: identity.bundleId,
     appVersion: version,
     arch: target.arch,
-    asar: false,
+    asar:
+      target.platform === "darwin" && identity.flavor === "nightly"
+        ? { unpack: `**/{${NIGHTLY_UNPACKED_FILES.join(",")}}` }
+        : false,
     dir,
     electronVersion: ELECTRON_VERSION,
     // macOS terminates a process that opens the microphone without this
@@ -1141,7 +1161,7 @@ async function packageDarwinDesktop(
   await installTerminalLauncher(
     repositoryRoot,
     join(finalApp, "Contents/Resources", TERMINAL_LAUNCHER_DIRECTORY_NAME),
-    identity.productName,
+    identity,
   );
   const keychainHelper = join(nativeResources, "octant-keychain-helper");
   await buildKeychainHelper(
@@ -1158,18 +1178,66 @@ async function packageDarwinDesktop(
     join(nativeResources, "octant-device-helper"),
   );
   for (const relativePath of PACKAGED_EXECUTABLE_FILES) {
-    await access(join(finalApp, "Contents/Resources", relativePath), 1);
+    await access(
+      join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`, identity)),
+      1,
+    );
   }
   for (const relativePath of PACKAGED_ARM64_FILES) {
-    await validatePackagedArm64(join(finalApp, "Contents/Resources", relativePath));
+    await validatePackagedArm64(
+      join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`, identity)),
+    );
   }
 
   const packagedPayload = join(finalApp, "Contents/Resources/app");
-  validatePackagedPayload(await collectPayloadEntries(packagedPayload), target);
+  const archive = join(finalApp, "Contents/Resources/app.asar");
+  const sealed = identity.flavor === "nightly";
+  if (sealed && existsSync(packagedPayload))
+    throw new Error("Nightly contains an unsealed application directory.");
+  const archiveEntries = sealed
+    ? readNightlyArchive(
+        archive,
+        JSON.parse(
+          execFileSync(
+            "/usr/bin/plutil",
+            [
+              "-extract",
+              "ElectronAsarIntegrity",
+              "json",
+              "-o",
+              "-",
+              join(finalApp, "Contents/Info.plist"),
+            ],
+            { encoding: "utf8" },
+          ),
+        ),
+      )
+    : [];
+  const payloadEntries = sealed ? archiveEntries : await collectPayloadEntries(packagedPayload);
+  validatePackagedPayload(payloadEntries, target);
   const bundleEntries = await collectPayloadEntries(outRoot);
-  const bundlePaths = new Set(bundleEntries.map((entry) => entry.path));
+  const bundlePaths = new Set([
+    ...bundleEntries.map((entry) => {
+      if (
+        sealed &&
+        entry.path.startsWith(`${identity.productName}.app/Contents/Resources/app.asar.unpacked/`)
+      ) {
+        const payload = entry.path.slice(
+          `${identity.productName}.app/Contents/Resources/app.asar.unpacked/`.length,
+        );
+        if (!new Set<string>(NIGHTLY_UNPACKED_FILES).has(payload))
+          throw new Error(`Unexpected loose Nightly native payload: ${payload}.`);
+        return entry.path.replace("/app.asar.unpacked/", "/app/");
+      }
+      return entry.path;
+    }),
+    ...archiveEntries.map(
+      (entry) => `${identity.productName}.app/Contents/Resources/app/${entry.path}`,
+    ),
+  ]);
   validateNativePayloadAllowlist(selectFinalBundlePaths([...bundlePaths], identity), identity);
   for (const requiredPath of REQUIRED_PACKAGED_FILES) {
+    if (sealed && requiredPath.endsWith("/terminal-launcher/octant.mjs")) continue;
     if (!bundlePaths.has(packagedBundlePath(requiredPath, identity))) {
       throw new Error(`Packaged bundle is missing ${requiredPath}.`);
     }
@@ -1180,8 +1248,11 @@ async function packageDarwinDesktop(
     }
   }
   validatePackagedRendererPolicy(
-    await readFile(join(packagedPayload, "apps/web/dist/index.html"), "utf8"),
+    sealed
+      ? (payloadEntries.find((entry) => entry.path === "apps/web/dist/index.html")?.content ?? "")
+      : await readFile(join(packagedPayload, "apps/web/dist/index.html"), "utf8"),
   );
+  await prepareNightlyRuntimeFuses(finalApp, identity);
   await validateBundleIdentity(finalApp, identity);
   return finalApp;
 }
@@ -1567,9 +1638,9 @@ export async function signPackagedDesktop(input: {
     appPath: input.appPath,
     archivePath,
     credentials: resolution.credentials,
-    productName: desktopIdentity(
+    identity: desktopIdentity(
       resolveDesktopPackageFlavor(input.environment, resolveReleaseVersion(input.environment)),
-    ).productName,
+    ),
     run: input.run,
     runForOutput: input.runForOutput,
   });

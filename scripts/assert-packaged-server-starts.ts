@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -8,8 +8,12 @@ import {
   appOutputContext,
   packagedServerEnvironment,
   spawnPackagedApplication,
+  runBoundedCommand,
   stagePackagedAppBundle,
 } from "./packaged-smoke-process";
+
+import { validateNightlyRuntimeFuses } from "./desktop-client-runtime";
+import { NIGHTLY_TERMINAL_SWITCH } from "../apps/desktop/src/desktopLaunch";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -76,6 +80,27 @@ export async function assertPackagedServerStarts(input: {
   }
   const appBundle = stagePackagedAppBundle(sourceBundle);
   const executable = packagedServerExecutable(appBundle, identity);
+  if (identity.flavor === "nightly") {
+    if (!existsSync(resolve(appBundle, "Contents/Resources/app.asar")))
+      throw new Error("Nightly is missing its sealed application archive.");
+    await validateNightlyRuntimeFuses(appBundle);
+    const dataDirectory = await mkdtemp(resolve(tmpdir(), "octant-packaged-client-start."));
+    try {
+      const output = await runBoundedCommand(
+        executable,
+        [NIGHTLY_TERMINAL_SWITCH, "mcp", "--help"],
+        packagedServerEnvironment(process.env, dataDirectory),
+        20_000,
+      );
+      if (!output.startsWith("octant mcp\n"))
+        throw new Error("Nightly did not run its scoped terminal command.");
+      if ((await readdir(dataDirectory)).length !== 0)
+        throw new Error("Nightly's terminal command wrote host data.");
+    } finally {
+      await rm(dataDirectory, { recursive: true, force: true });
+    }
+    return;
+  }
   const serverEntry = packagedServerEntry(appBundle);
   if (!existsSync(executable) || !existsSync(serverEntry)) {
     throw new Error("The packaged app is missing its Octant executable or server entry.");
@@ -119,7 +144,11 @@ async function main(): Promise<void> {
     repositoryRoot,
     identity: desktopIdentity(process.env.OCTANT_PACKAGE_FLAVOR ?? "stable"),
   });
-  console.log("Packaged server started outside the checkout.");
+  console.log(
+    process.env.OCTANT_PACKAGE_FLAVOR === "nightly"
+      ? "Packaged Nightly scoped terminal command ran outside the checkout without host data."
+      : "Packaged server started outside the checkout.",
+  );
 }
 
 if (import.meta.main) {
