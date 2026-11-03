@@ -471,7 +471,7 @@ describe("AutomationDispatchService", () => {
     const fixture = await persistedWorkRoutine(
       variant === "receipt" ? { receipt: "work-turn:unrelated" } : {},
     );
-    const { session, definition, run, workTurns, startCount } = fixture;
+    const { session, run, workTurns, startCount } = fixture;
     try {
       const other = "bb000000-0000-4000-8000-000000000010";
       const read: NonNullable<
@@ -535,7 +535,7 @@ describe("AutomationDispatchService", () => {
   it.each(["cancelled", "failed", "waiting"] as const)(
     "records actual Work %s truth without replay",
     async (status) => {
-      const { session, definition, run, workTurns, startCount } = await persistedWorkRoutine({
+      const { session, run, workTurns, startCount } = await persistedWorkRoutine({
         status,
       });
       try {
@@ -629,7 +629,7 @@ describe("AutomationDispatchService", () => {
   });
 
   it("does not admit the next occurrence until terminal status is durably committed", async () => {
-    const { session, definition, run, workTurns, startCount } = await persistedWorkRoutine();
+    const { session, run, workTurns, startCount } = await persistedWorkRoutine();
     try {
       const append = session.store.appendRunStatusChanged.bind(session.store);
       const failed = vi
