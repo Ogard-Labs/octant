@@ -11,10 +11,171 @@ import { describe, expect, it, vi } from "vitest";
 import type { MonacoAdapterRuntime } from "./MonacoEditorAdapter";
 import { MonacoEditorPane, type CodeEditorFileProjection } from "./MonacoEditorPane";
 import { codeDebugThreadKey, codeDebugWindowState } from "../debug/codeDebugWindowState";
+import { CodeDebugWindowState } from "../debug/codeDebugWindowState";
+import { CodeDebugWindowStoreContext } from "../debug/CodeDebugWindowProvider";
+import { decodeProjectId } from "@octant/contracts/projects";
+import { decodeCodeFileMetadata } from "@octant/contracts/code";
 
 const codeStyles = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
 
 describe("MonacoEditorPane", () => {
+  it("persists actual gutter selections and shows changed restored locations unresolved rather than moving them", async () => {
+    const values = new Map<string, string>();
+    const storage: Storage = {
+      get length() {
+        return values.size;
+      },
+      key: (index) => [...values.keys()][index] ?? null,
+      clear: () => values.clear(),
+      getItem: (name) => values.get(name) ?? null,
+      setItem: (name, value) => {
+        values.set(name, value);
+      },
+      removeItem: (name) => {
+        values.delete(name);
+      },
+    };
+    const scope = {
+      origin: "http://127.0.0.1:13773",
+      windowId: "40000000-0000-4000-8000-000000000001",
+      storage,
+    };
+    const projectId = decodeProjectId("50000000-0000-4000-8000-000000000001");
+    const first = new CodeDebugWindowState(scope);
+    const firstRuntime = runtime();
+    const file = textFile();
+    const mounted = render(
+      <CodeDebugWindowStoreContext.Provider value={first}>
+        <MonacoEditorPane
+          debugProjectId={projectId}
+          client={client({ text: "first\nsecond\nthird\n" })}
+          file={file}
+          loadRuntime={firstRuntime.loadRuntime}
+        />
+      </CodeDebugWindowStoreContext.Provider>,
+    );
+    await waitFor(() => expect(firstRuntime.options?.onToggleBreakpoint).toBeDefined());
+    act(() => firstRuntime.options?.onToggleBreakpoint?.(3));
+    const key = codeDebugThreadKey(ids.thread, ids.checkout);
+    await waitFor(() =>
+      expect(firstRuntime.setDebugDecorations).toHaveBeenLastCalledWith({ breakpoints: [3] }),
+    );
+    mounted.unmount();
+    const restored = new CodeDebugWindowState(scope);
+    expect(restored.read(key).breakpoints.get(file.path)).toEqual([3]);
+    expect(restored.read(key).session).toBeUndefined();
+    const nextRuntime = runtime();
+    const changedMetadata = decodeCodeFileMetadata({ ...file.metadata, digest: "b".repeat(64) });
+    render(
+      <CodeDebugWindowStoreContext.Provider value={restored}>
+        <MonacoEditorPane
+          debugProjectId={projectId}
+          client={client({ text: "changed\nsecond\nthird\n" })}
+          file={{
+            ...file,
+            metadata: changedMetadata,
+            content: { ...file.content, digest: changedMetadata.digest },
+          }}
+          loadRuntime={nextRuntime.loadRuntime}
+        />
+      </CodeDebugWindowStoreContext.Provider>,
+    );
+    await waitFor(() =>
+      expect(nextRuntime.setDebugDecorations).toHaveBeenLastCalledWith({
+        breakpoints: [],
+        unresolvedBreakpoints: [3],
+      }),
+    );
+    expect(restored.read(key).breakpointFiles?.get(file.path)?.reason).toBe("changed");
+    act(() => nextRuntime.options?.onToggleBreakpoint?.(3));
+    expect(new CodeDebugWindowState(scope).read(key).breakpoints.size).toBe(0);
+  });
+
+  it.each([false, true])(
+    "releases only a discarded pane's dirty hold, preserving a retained draft=%s",
+    async (retainDraft) => {
+      const values = new Map<string, string>();
+      const storage = {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          values.set(key, value);
+        },
+        removeItem: (key: string) => {
+          values.delete(key);
+        },
+        key: (index: number) => [...values.keys()][index] ?? null,
+        get length() {
+          return values.size;
+        },
+      };
+      const store = new CodeDebugWindowState({
+        origin: "http://localhost:13773",
+        windowId: "window-1",
+        storage,
+      });
+      const draftValues = new Map<string, string>();
+      const drafts = {
+        read: (key: string) => draftValues.get(key),
+        write: (key: string, value: string) => {
+          draftValues.set(key, value);
+        },
+        clear: (key: string) => {
+          draftValues.delete(key);
+        },
+      };
+      const projectId = decodeProjectId("50000000-0000-4000-8000-000000000001");
+      const file = textFile();
+      const first = runtime();
+      const code = client();
+      const pane = render(
+        <CodeDebugWindowStoreContext.Provider value={store}>
+          <MonacoEditorPane
+            debugProjectId={projectId}
+            client={code}
+            file={file}
+            loadRuntime={first.loadRuntime}
+            {...(retainDraft ? { draftStore: drafts } : {})}
+          />
+        </CodeDebugWindowStoreContext.Provider>,
+      );
+      await waitFor(() => expect(first.options?.onToggleBreakpoint).toBeDefined());
+      act(() => first.options?.onToggleBreakpoint?.(1));
+      act(() => first.options?.onChange("unsaved changes"));
+      const key = codeDebugThreadKey(ids.thread, ids.checkout);
+      await waitFor(() =>
+        expect(store.read(key).breakpointFiles?.get(file.path)?.reason).toBe("unsaved"),
+      );
+      const clean = runtime();
+      const other = render(
+        <CodeDebugWindowStoreContext.Provider value={store}>
+          <MonacoEditorPane
+            debugProjectId={projectId}
+            client={code}
+            file={file}
+            loadRuntime={clean.loadRuntime}
+          />
+        </CodeDebugWindowStoreContext.Provider>,
+      );
+      await waitFor(() => expect(clean.options).toBeDefined());
+      expect(store.reacceptFile(key, file.path)).toBe(false);
+      pane.unmount();
+      const read = {
+        projectId,
+        fileId: file.fileId,
+        metadata: file.metadata,
+        lineCount: 4,
+        clean: true,
+      };
+      act(() => store.observeFile(key, file.path, read));
+      expect(store.reacceptFile(key, file.path)).toBe(!retainDraft);
+      if (retainDraft) {
+        draftValues.clear();
+        act(() => store.observeFile(key, file.path, read));
+        expect(store.reacceptFile(key, file.path)).toBe(true);
+      }
+      other.unmount();
+    },
+  );
   it("sets a breakpoint from the gutter for the thread's debugging and marks the line the program stopped on", async () => {
     const fixture = runtime();
     render(

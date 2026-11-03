@@ -2,6 +2,8 @@ import {
   CodeDebugClientFailure,
   type CodeDebugClient,
 } from "@octant/client-runtime/code-debug-client";
+import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { ProjectId } from "@octant/contracts/projects";
 import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/contracts/code";
 import type {
   CodeDebugAdapterSummary,
@@ -20,11 +22,13 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import {
   codeDebugThreadKey,
-  codeDebugWindowState,
   fileBreakpoints,
   useCodeDebugThreadState,
   type CodeDebugWindowState,
 } from "./codeDebugWindowState";
+import { useCodeDebugWindowStore } from "./CodeDebugWindowProvider";
+import { useCodeBreakpointValidation } from "./useCodeBreakpointValidation";
+import { BreakpointConfigurationList } from "./BreakpointConfigurationList";
 import { DebugSessionView } from "./DebugSessionView";
 import {
   adapterIdentity,
@@ -45,7 +49,7 @@ type Listed = Extract<CodeDebugConfigurationsResult, { readonly status: "listed"
 type Listing =
   | { readonly kind: "loading" }
   | { readonly kind: "listed"; readonly result: Listed }
-  | { readonly kind: "refused"; readonly text: string }
+  | { readonly kind: "refused"; readonly text: string; readonly reason: string }
   | { readonly kind: "unreachable" };
 
 type Editing =
@@ -61,6 +65,8 @@ type Editing =
     };
 
 export interface RunDebugPanelProps {
+  readonly fileClient?: Pick<CodeClient, "openFile" | "content">;
+  readonly projectId?: ProjectId;
   readonly client: CodeDebugClient;
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
@@ -80,7 +86,8 @@ export interface RunDebugPanelProps {
  */
 export function RunDebugPanel(props: RunDebugPanelProps) {
   const { client, threadId, checkoutId, onOpenFile } = props;
-  const store = props.store ?? codeDebugWindowState;
+  const windowStore = useCodeDebugWindowStore();
+  const store = props.store ?? windowStore;
   const key = codeDebugThreadKey(String(threadId), String(checkoutId));
   const thread = useCodeDebugThreadState(key, store);
   const [listing, setListing] = useState<Listing>({ kind: "loading" });
@@ -138,7 +145,7 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
       setListing(
         result.status === "listed"
           ? { kind: "listed", result }
-          : { kind: "refused", text: refusalText(result.reason) },
+          : { kind: "refused", text: refusalText(result.reason), reason: result.reason },
       );
     } catch (error) {
       if (!mounted.current) return;
@@ -155,6 +162,18 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  const validation = useCodeBreakpointValidation({
+    ...(props.fileClient === undefined ? {} : { client: props.fileClient }),
+    ...(props.projectId === undefined ? {} : { projectId: props.projectId }),
+    store,
+    threadKey: key,
+    threadId,
+    checkoutId,
+    enabled:
+      !localOnly &&
+      (listing.kind === "listed" ||
+        (listing.kind === "refused" && listing.reason === "plan-read-only")),
+  });
 
   const showLocation = useCallback(
     (path: CodeRelativePath, line: number) => {
@@ -176,6 +195,20 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
       setEnded(undefined);
       setReturnedToList(false);
       try {
+        await validation.revalidate();
+        if (!mounted.current) return;
+        const current = store.read(key);
+        if (
+          current.breakpointFiles !== undefined &&
+          [...current.breakpoints.keys()].some(
+            (path) => current.breakpointFiles?.get(path)?.status !== "verified",
+          )
+        ) {
+          warn(
+            "Review or remove unresolved breakpoint locations before starting. Nothing was started.",
+          );
+          return;
+        }
         const answer = await client.start({
           threadId,
           checkoutId,
@@ -194,7 +227,7 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
         if (mounted.current) setPending(undefined);
       }
     },
-    [checkoutId, client, failed, key, store, threadId],
+    [checkoutId, client, failed, key, store, threadId, validation.revalidate, warn],
   );
 
   const confirm = useCallback(
@@ -242,85 +275,102 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
           <OctantIconButton
             disabled={listing.kind === "loading"}
             label="Refresh configurations"
-            onClick={() => void refresh()}
+            onClick={() => {
+              void refresh();
+              validation.refresh();
+            }}
             type="button"
           >
             <RotateCw aria-hidden="true" size={14} />
           </OctantIconButton>
         ) : null}
       </header>
-      {localOnly ? (
-        <div className="run-debug__body">
-          <Refusal text={LOCAL_ONLY_TEXT} title="Debugging stays on this computer" />
-        </div>
-      ) : session !== undefined ? (
-        <DebugSessionView
-          checkoutId={checkoutId}
-          client={client}
-          key={String(session.sessionId)}
-          name={session.name}
-          onEnded={(text) => {
-            store.setSession(key, undefined);
-            if (text === LOCAL_ONLY_TEXT) setLocalOnly(true);
-            else setEnded(text);
-            void refresh();
-          }}
-          onShowLocation={showLocation}
-          sessionId={session.sessionId}
-          store={store}
-          threadId={threadId}
-          {...(props.pollMs === undefined ? {} : { pollMs: props.pollMs })}
-        />
-      ) : (
-        <div className="run-debug__body">
-          {ended === undefined ? null : <EndedLine text={ended} />}
-          {notice === undefined ? null : (
-            <OctantAlert tone={notice.tone}>{notice.text}</OctantAlert>
-          )}
-          {editing.kind === "none" ? (
-            <Configurations
-              focusHeading={returnedToList}
-              listing={listing}
-              onConfirm={(configuration, unusedFields) =>
-                setEditing({ kind: "confirm", configuration, unusedFields })
-              }
-              onStart={(configuration) => void start(configuration)}
-              onWrite={(adapter) => setEditing({ kind: "draft", draft: emptyDraft(adapter) })}
-              pending={pending}
-            />
-          ) : editing.kind === "draft" ? (
-            <ConfigurationForm
-              adapters={listing.kind === "listed" ? listing.result.adapters : []}
-              draft={editing.draft}
-              {...(editing.message === undefined ? {} : { message: editing.message })}
-              onCancel={showList}
-              onReview={(draft) => {
-                const reading = readDraft(draft);
-                setEditing(
-                  reading.status === "ready"
-                    ? { kind: "confirm", configuration: reading.configuration, draft }
-                    : { kind: "draft", draft, message: reading.message },
-                );
-              }}
-            />
-          ) : (
-            <ConfirmationCard
-              adapters={listing.kind === "listed" ? listing.result.adapters : []}
-              configuration={editing.configuration}
-              onBack={() =>
-                editing.draft === undefined
-                  ? showList()
-                  : setEditing({ kind: "draft", draft: editing.draft })
-              }
-              onConfirm={(scope) => void confirm(editing.configuration, scope)}
-              pending={pending}
-              {...(editing.unusedFields === undefined
-                ? {}
-                : { unusedFields: editing.unusedFields })}
-            />
-          )}
-        </div>
-      )}
+      <div className="run-debug__content">
+        {!localOnly &&
+        (listing.kind === "listed" ||
+          (listing.kind === "refused" && listing.reason === "plan-read-only")) ? (
+          <BreakpointConfigurationList
+            state={thread}
+            pending={validation.pending}
+            {...(onOpenFile === undefined ? {} : { onOpen: showLocation })}
+            onRemove={(path, line) => store.removeBreakpoint(key, path, line)}
+            onRecheck={validation.refresh}
+            onReaccept={validation.reaccept}
+          />
+        ) : null}
+        {localOnly ? (
+          <div className="run-debug__body">
+            <Refusal text={LOCAL_ONLY_TEXT} title="Debugging stays on this computer" />
+          </div>
+        ) : session !== undefined ? (
+          <DebugSessionView
+            checkoutId={checkoutId}
+            client={client}
+            key={String(session.sessionId)}
+            name={session.name}
+            onEnded={(text) => {
+              store.setSession(key, undefined);
+              if (text === LOCAL_ONLY_TEXT) setLocalOnly(true);
+              else setEnded(text);
+              void refresh();
+            }}
+            onShowLocation={showLocation}
+            sessionId={session.sessionId}
+            store={store}
+            threadId={threadId}
+            {...(props.pollMs === undefined ? {} : { pollMs: props.pollMs })}
+          />
+        ) : (
+          <div className="run-debug__body">
+            {ended === undefined ? null : <EndedLine text={ended} />}
+            {notice === undefined ? null : (
+              <OctantAlert tone={notice.tone}>{notice.text}</OctantAlert>
+            )}
+            {editing.kind === "none" ? (
+              <Configurations
+                focusHeading={returnedToList}
+                listing={listing}
+                onConfirm={(configuration, unusedFields) =>
+                  setEditing({ kind: "confirm", configuration, unusedFields })
+                }
+                onStart={(configuration) => void start(configuration)}
+                onWrite={(adapter) => setEditing({ kind: "draft", draft: emptyDraft(adapter) })}
+                pending={pending}
+              />
+            ) : editing.kind === "draft" ? (
+              <ConfigurationForm
+                adapters={listing.kind === "listed" ? listing.result.adapters : []}
+                draft={editing.draft}
+                {...(editing.message === undefined ? {} : { message: editing.message })}
+                onCancel={showList}
+                onReview={(draft) => {
+                  const reading = readDraft(draft);
+                  setEditing(
+                    reading.status === "ready"
+                      ? { kind: "confirm", configuration: reading.configuration, draft }
+                      : { kind: "draft", draft, message: reading.message },
+                  );
+                }}
+              />
+            ) : (
+              <ConfirmationCard
+                adapters={listing.kind === "listed" ? listing.result.adapters : []}
+                configuration={editing.configuration}
+                onBack={() =>
+                  editing.draft === undefined
+                    ? showList()
+                    : setEditing({ kind: "draft", draft: editing.draft })
+                }
+                onConfirm={(scope) => void confirm(editing.configuration, scope)}
+                pending={pending}
+                {...(editing.unusedFields === undefined
+                  ? {}
+                  : { unusedFields: editing.unusedFields })}
+              />
+            )}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

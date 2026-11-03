@@ -21,6 +21,7 @@ import {
   THREAD_PURGE_RETAINED_SCOPES,
 } from "@octant/domain";
 import { purgeComposerThreadDrafts } from "../composer/composerThreadDraftStore";
+import { useCodeDebugWindowStore } from "../debug/CodeDebugWindowProvider";
 import { HostMemoryLimits } from "./HostMemoryLimits";
 import { HostPrivacyExport } from "./HostPrivacyExport";
 import { driverLabel } from "../providers/providerSettingsPresentation";
@@ -683,6 +684,11 @@ function ThreadRetentionPanel({
   readonly projects: ReadonlyArray<PrivacyTarget>;
   readonly threads: ReadonlyArray<PrivacyTarget>;
 }) {
+  const breakpointStore = useCodeDebugWindowStore();
+  const [breakpointCleanup, setBreakpointCleanup] = useState<{
+    readonly store: typeof breakpointStore;
+    readonly threadIds: ReadonlyArray<string>;
+  }>();
   const [state, setState] = useState<ThreadRetentionState | undefined>();
   const [scopeKind, setScopeKind] = useState<RetentionScope["kind"]>("host");
   const [mode, setMode] = useState<"chat" | "work" | "code">("chat");
@@ -870,10 +876,16 @@ function ThreadRetentionPanel({
                 .then(async (result) => {
                   setOutcome(result);
                   if (!("kind" in result)) {
-                    purgeComposerThreadDrafts([
+                    const purgedIds = [
                       ...result.purged.map((thread) => String(thread.threadId)),
                       ...result.alreadyPurged.map((thread) => String(thread.threadId)),
-                    ]);
+                    ];
+                    purgeComposerThreadDrafts(purgedIds);
+                    const failedIds = [...result.purged, ...result.alreadyPurged]
+                      .filter((thread) => thread.mode === "code")
+                      .map((thread) => String(thread.threadId))
+                      .filter((id) => !breakpointStore.purgeThread(id));
+                    setBreakpointCleanup({ store: breakpointStore, threadIds: failedIds });
                   }
                   await load();
                 })
@@ -888,6 +900,24 @@ function ThreadRetentionPanel({
             Purge
           </OctantButton>
         </div>
+        {breakpointCleanup?.store === breakpointStore && breakpointCleanup.threadIds.length > 0 ? (
+          <SettingsState kind="error">
+            Thread history was purged, but saved breakpoint configuration could not be removed.
+            Check this browser's device storage, then retry cleanup.
+            <OctantButton
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                const failedIds = breakpointCleanup.threadIds.filter(
+                  (id) => !breakpointCleanup.store.purgeThread(id),
+                );
+                setBreakpointCleanup({ store: breakpointCleanup.store, threadIds: failedIds });
+              }}
+            >
+              Retry breakpoint cleanup
+            </OctantButton>
+          </SettingsState>
+        ) : null}
         {outcome === undefined ? null : "kind" in outcome ? (
           <SettingsState kind="error">{outcome.guidance}</SettingsState>
         ) : "operation" in outcome ? (

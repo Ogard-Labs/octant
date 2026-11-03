@@ -268,7 +268,9 @@ describe("Run and debug panel", () => {
 
     // Stopped at the breakpoint: the editor is asked to show the line.
     expect(await screen.findByText("Paused · breakpoint")).toBeVisible();
-    expect(await screen.findByText("src/main.js:3")).toBeVisible();
+    expect(
+      await within(screen.getByRole("region", { name: "Call stack" })).findByText("src/main.js:3"),
+    ).toBeVisible();
     expect(screen.getByText("Outside the checkout")).toBeVisible();
     await waitFor(() => expect(store.read(key).stopped).toEqual({ path: "src/main.js", line: 3 }));
     expect(onOpenFile).toHaveBeenCalledWith("src/main.js");

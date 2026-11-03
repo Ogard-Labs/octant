@@ -8,6 +8,7 @@ import type {
   CodeThreadId,
 } from "@octant/contracts/code";
 import type { CodeEvidenceReference } from "@octant/contracts/code-operations";
+import type { ProjectId } from "@octant/contracts/projects";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -38,10 +39,11 @@ import {
 } from "@octant/contracts/code-debug";
 import {
   codeDebugThreadKey,
-  codeDebugWindowState,
+  activeBreakpoints,
   useCodeDebugThreadState,
   type BreakpointToggle,
 } from "../debug/codeDebugWindowState";
+import { useCodeDebugWindowStore } from "../debug/CodeDebugWindowProvider";
 
 interface CodeEditorFileFields {
   readonly checkoutId: CodeCheckoutId;
@@ -68,6 +70,7 @@ export type CodeEditorFileProjection = CodeEditorFileFields &
   );
 
 export interface MonacoEditorPaneProps {
+  readonly debugProjectId?: ProjectId;
   /**
    * The language methods are optional: without them the editor keeps
    * Monaco's own single-file services and shows no language state.
@@ -122,6 +125,18 @@ function AvailableEditor(
   const dirtyRef = useRef(false);
   const draftRef = useRef("");
   const metadataRef = useRef(props.file.metadata);
+  const debugLoadedFile = useRef<
+    { readonly key: string; readonly metadata: CodeFileMetadata } | undefined
+  >(undefined);
+  const debugFileKey = JSON.stringify([
+    props.file.threadId,
+    props.file.checkoutId,
+    props.file.fileId,
+    props.file.path,
+    props.file.content.contentId,
+  ]);
+  const currentDebugFileKey = useRef(debugFileKey);
+  currentDebugFileKey.current = debugFileKey;
   const requestGeneration = useRef(0);
   const mounted = useRef(true);
   // Manual edits are the user's own action; only Plan mode is read-only.
@@ -148,6 +163,7 @@ function AvailableEditor(
       return;
     }
     metadataRef.current = props.file.metadata;
+    debugLoadedFile.current = undefined;
     const request = ++requestGeneration.current;
     setLoadState({ kind: "loading" });
     setConflict(undefined);
@@ -162,6 +178,7 @@ function AvailableEditor(
           throw new Error("The file is not valid UTF-8 and cannot be edited.");
         }
         if (!mounted.current || request !== requestGeneration.current) return;
+        debugLoadedFile.current = { key: debugFileKey, metadata: props.file.metadata };
         const restoredDraft = props.draftStore?.read(draftKey);
         const nextDraft = restoredDraft ?? text;
         const nextDirty = nextDraft !== text;
@@ -185,6 +202,7 @@ function AvailableEditor(
     props.file.metadata,
     reloadGeneration,
     draftKey,
+    debugFileKey,
   ]);
 
   const save = useCallback(async () => {
@@ -214,6 +232,8 @@ function AvailableEditor(
       switch (result.status) {
         case "completed":
           metadataRef.current = result.metadata;
+          if (currentDebugFileKey.current === debugFileKey)
+            debugLoadedFile.current = { key: debugFileKey, metadata: result.metadata };
           setLoadState({ kind: "ready", text: savedDraft });
           const nextDirty = draftRef.current !== savedDraft;
           setDirty(nextDirty);
@@ -234,6 +254,7 @@ function AvailableEditor(
     }
   }, [
     dirty,
+    debugFileKey,
     draftKey,
     loadState.kind,
     props.client,
@@ -334,32 +355,77 @@ function AvailableEditor(
 
   // Breakpoints are this window's state for the thread, shared with the Run
   // and debug panel, which sends them at Start and while a session runs.
+  const debugStore = useCodeDebugWindowStore();
   const debugKey = codeDebugThreadKey(String(threadId), String(checkoutId));
-  const debugState = useCodeDebugThreadState(debugKey);
-  const breakpointLines = debugState.breakpoints.get(path);
+  const debugState = useCodeDebugThreadState(debugKey, debugStore);
+  const debugEditorOwner = useRef({});
+  useEffect(() => {
+    let active = true;
+    const release = debugStore.trackEditor(
+      debugKey,
+      path,
+      props.draftStore ?? debugEditorOwner.current,
+      () => (active && dirtyRef.current) || props.draftStore?.read(draftKey) !== undefined,
+    );
+    return () => {
+      active = false;
+      release();
+    };
+  }, [debugStore, debugKey, path, props.draftStore, draftKey]);
+  const breakpointLines = activeBreakpoints(debugState).get(path);
+  const unresolvedLines =
+    debugState.breakpointFiles?.get(path)?.status === "unresolved"
+      ? debugState.breakpoints
+          .get(path)
+          ?.filter(
+            (line) =>
+              loadState.kind === "ready" &&
+              debugLoadedFile.current?.key === debugFileKey &&
+              line <= loadState.text.split("\n").length,
+          )
+      : undefined;
   const stoppedLine = debugState.stopped?.path === path ? debugState.stopped.line : undefined;
   const debugDecorations = useMemo(
     () => ({
       breakpoints: breakpointLines ?? [],
+      ...(unresolvedLines?.length ? { unresolvedBreakpoints: unresolvedLines } : {}),
       ...(stoppedLine === undefined ? {} : { stoppedLine }),
     }),
-    [breakpointLines, stoppedLine],
+    [breakpointLines, unresolvedLines, stoppedLine],
   );
+  const debugObservation = useCallback(() => {
+    const loaded = debugLoadedFile.current;
+    return props.debugProjectId === undefined ||
+      loadState.kind !== "ready" ||
+      loaded?.key !== debugFileKey
+      ? undefined
+      : {
+          projectId: props.debugProjectId,
+          fileId: props.file.fileId,
+          metadata: loaded.metadata,
+          lineCount: loadState.text.split("\n").length,
+          clean: !dirty,
+        };
+  }, [props.debugProjectId, props.file.fileId, debugFileKey, loadState, dirty]);
+  useEffect(() => {
+    if (props.debugProjectId !== undefined)
+      debugStore.observeFile(debugKey, path, debugObservation(), "unavailable");
+  }, [props.debugProjectId, debugStore, debugKey, path, debugObservation]);
   // A toggle past the bounds the host takes at Start sets nothing; the
   // person hears why rather than seeing the gutter ignore them.
   const [breakpointNotice, setBreakpointNotice] = useState<string>();
   const toggleBreakpoint = useCallback(
     (lineNumber: number) => {
-      const outcome = codeDebugWindowState.toggleBreakpoint(debugKey, path, lineNumber);
+      const outcome = debugStore.toggleBreakpoint(debugKey, path, lineNumber, debugObservation());
       setBreakpointNotice(breakpointLimitText(outcome));
     },
-    [debugKey, path],
+    [debugKey, path, debugStore, debugObservation],
   );
   // The panel's launch file proposals fill `${file}` from the file the person
   // last had in front of them.
   useEffect(() => {
-    if (ready) codeDebugWindowState.setCurrentFile(debugKey, path);
-  }, [debugKey, path, ready]);
+    if (ready) debugStore.setCurrentFile(debugKey, path);
+  }, [debugKey, path, ready, debugStore]);
 
   return (
     <section
@@ -371,7 +437,7 @@ function AvailableEditor(
         // on in Settings; focus moving within the pane is neither.
         const from = event.relatedTarget;
         if (from instanceof Node && event.currentTarget.contains(from)) return;
-        codeDebugWindowState.setCurrentFile(debugKey, path);
+        debugStore.setCurrentFile(debugKey, path);
         if (language.state.kind === "ready") refreshLanguage();
         else if (language.state.kind === "off") retryLanguage();
       }}
@@ -512,6 +578,8 @@ function breakpointLimitText(outcome: BreakpointToggle): string | undefined {
       return `This file already has ${MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE} breakpoints, the most a debug session takes. Remove one to add another.`;
     case "files-full":
       return `Breakpoints are already set in ${MAX_CODE_DEBUG_BREAKPOINT_FILES} files, the most a debug session takes. Clear another file's breakpoints to set one here.`;
+    case "invalid-line":
+      return "This is not a valid breakpoint line.";
   }
 }
 
