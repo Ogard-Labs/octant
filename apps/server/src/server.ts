@@ -1,8 +1,6 @@
 import { CredentialRequests } from "./credentials/credentialRequests";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
 import { createCredentialRequestTools } from "./credentials/credentialRequestTools";
-import { linearCredentialOperation } from "./plugins/linear/linearCredentialOperation";
-import { isLinearIntegrationEffective } from "./github/githubIntegrationEffective";
 import {
   startupFailedOutput,
   UNCLASSIFIED_STARTUP_FAILURE,
@@ -292,6 +290,7 @@ export function startOctantServer(
       githubReadToolService,
       githubRoutes,
       integrationRoutes,
+      credentialOperations,
       linearIssueContextService,
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
@@ -1161,10 +1160,9 @@ export function startOctantServer(
         windowId: String(windowId),
         thread,
         readThread,
-        effective: () => isLinearIntegrationEffective(extensionApiService.snapshot()),
+        operations: credentialOperations,
         windowCurrent: () =>
           windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
-        operation: linearCredentialOperation,
       }),
     );
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({

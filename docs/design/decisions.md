@@ -1765,8 +1765,9 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Host-d
 
 A local person can enter a token in a conversation card for one fixed integration operation without sending it to the model or saving a sign-in.
 
-- The host supplies the purpose, destination and action; an agent cannot choose an arbitrary URL or command.
+- Integrations register fixed operations through the public host port. The host supplies their purpose, destination and action; an agent cannot choose an arbitrary URL or command.
 - Submission consumes the request once, checks current thread and window authority, and sends no response content or raw error to the agent.
+- The compact card shows the destination and one-use scope, with masked input, an explicit reveal control and right-aligned actions. Accepted submissions stay disabled until the host settles them.
 - Expiry, decline, cancellation and restart prevent future use. The host cannot recall a token already transmitted.
 - The first consumer is a read-only Linear account check in Code. Command credentials, linked-store selection and administrator authentication remain separate work.
 

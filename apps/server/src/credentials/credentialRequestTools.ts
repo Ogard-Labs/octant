@@ -10,9 +10,8 @@ export function createCredentialRequestTools(options: {
   readonly windowId: string;
   readonly thread: CodeThread;
   readonly readThread: () => CodeThread | undefined;
-  readonly effective: () => boolean;
+  readonly operations: () => ReadonlyArray<CredentialOperation>;
   readonly windowCurrent: () => boolean;
-  readonly operation: CredentialOperation;
 }): AppManagedToolSet {
   const lifetime = new AbortController();
   const current = () => {
@@ -20,7 +19,6 @@ export function createCredentialRequestTools(options: {
       const thread = options.readThread();
       return (
         !lifetime.signal.aborted &&
-        options.effective() &&
         options.windowCurrent() &&
         thread !== undefined &&
         thread.lifecycle === "active" &&
@@ -37,7 +35,23 @@ export function createCredentialRequestTools(options: {
     }
   };
   return {
-    definitions: current() ? [REQUEST_CREDENTIAL_TOOL] : [],
+    definitions:
+      current() && options.operations().length > 0
+        ? [
+            {
+              ...REQUEST_CREDENTIAL_TOOL,
+              inputSchema: {
+                ...REQUEST_CREDENTIAL_TOOL.inputSchema,
+                properties: {
+                  operation: {
+                    type: "string",
+                    enum: options.operations().map((operation) => operation.id),
+                  },
+                },
+              },
+            },
+          ]
+        : [],
     close: async () => {
       lifetime.abort();
     },
@@ -56,15 +70,18 @@ export function createCredentialRequestTools(options: {
         input === null ||
         Object.keys(input).length !== 1 ||
         !("operation" in input) ||
-        input.operation !== options.operation.id
+        typeof input.operation !== "string"
       ) {
         return { result: { status: "unsupported-operation" }, isError: true };
       }
+      const operation = options.operations().find((candidate) => candidate.id === input.operation);
+      if (operation === undefined)
+        return { result: { status: "unsupported-operation" }, isError: true };
       const result = await options.service.request({
         windowId: options.windowId,
         threadId: String(options.thread.id),
-        current,
-        operation: options.operation,
+        current: () => current() && options.operations().includes(operation),
+        operation,
         signal: signal === undefined ? lifetime.signal : AbortSignal.any([signal, lifetime.signal]),
       });
       return { result, isError: result.status !== "used" };

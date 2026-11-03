@@ -114,7 +114,9 @@ An agent can use `request_credential` to open a private card in its Code
 conversation. Currently this supports a one-time Linear account access check.
 Enter the API token and choose **Check access**, or choose **Decline**. The token
 is sent only to Linear for the displayed check; it does not become a chat
-message or a saved sign-in. Expand **Access details** to see the destination.
+message or a saved sign-in. The destination and one-use scope are shown above
+the field. Use **Show token** to check your entry, or expand **Not saved or added
+to chat** for handling details.
 
 The request expires after ten minutes and ends when the turn is cancelled or
 loses access. If the connection fails, Octant clears your entry and does not

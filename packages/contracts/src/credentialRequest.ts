@@ -40,10 +40,10 @@ export type CredentialRequestAnswer = typeof CredentialRequestAnswer.Type;
 export const REQUEST_CREDENTIAL_TOOL = {
   name: "request_credential",
   description:
-    "Ask the person for a credential in Octant's private card and perform the named supported operation once. Never ask for a token in chat. No credential value or readable file is returned. Currently supports linear-account-check only; shell commands and administrator passwords are unsupported.",
+    "Ask the person for a credential in Octant's private card and perform the named supported operation once. Never ask for a token in chat. No credential value or readable file is returned. Only the listed integration operations are supported; shell commands and administrator passwords are unsupported.",
   inputSchema: {
     type: "object",
-    properties: { operation: { type: "string", enum: ["linear-account-check"] } },
+    properties: { operation: { type: "string", enum: [] as ReadonlyArray<string> } },
     required: ["operation"],
     additionalProperties: false,
   },

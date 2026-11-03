@@ -10805,7 +10805,13 @@ access` agree); a thread's own change is journaled as
   The host supplies the label, purpose, destination and action text from the
   registered consumer; agents cannot supply a URL, query, credential reference,
   file destination or command. Consumer descriptors use the public
-  `@octant/plugin-api/credential-request` contract.
+  `@octant/plugin-api/credential-request` contract and register through
+  `IntegrationHostPort.registerCredentialOperation`. The host snapshots bounded
+  descriptors, rejects duplicate identifiers and unsafe destinations, and returns
+  an idempotent release function. The tool lists only the currently effective
+  registrations and rechecks that the same registration still exists at use.
+  The bundled consumer registers from its plugin factory through this same port;
+  server startup does not import its descriptor or name its operation.
   - The card submits privately to `/api/credential-requests`, authenticated to
     its originating window. Paired clients are refused. It neither submits a
     chat message nor writes a credential to the journal. The host immediately

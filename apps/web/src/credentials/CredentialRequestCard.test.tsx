@@ -57,4 +57,24 @@ describe("credential card", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Token not saved");
   });
+  it("lets the person reveal a token and masks it again on submission", async () => {
+    const user = userEvent.setup();
+    render(<CredentialRequestCard card={card} answer={async () => true} />);
+    const input = screen.getByLabelText("Linear API token", { selector: "input" });
+    await user.type(input, "dummy-token");
+    await user.click(screen.getByRole("button", { name: "Show token" }));
+    expect(input).toHaveAttribute("type", "text");
+    await user.click(screen.getByRole("button", { name: "Check access" }));
+    expect(input).toHaveAttribute("type", "password");
+    expect(input).toHaveValue("");
+  });
+  it("keeps an accepted submission disabled until the host publishes its outcome", async () => {
+    const user = userEvent.setup();
+    render(<CredentialRequestCard card={card} answer={async () => true} />);
+    const input = screen.getByLabelText("Linear API token", { selector: "input" });
+    await user.type(input, "dummy-token{Enter}");
+    expect(input).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Check access" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for confirmation");
+  });
 });

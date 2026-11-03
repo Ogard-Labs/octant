@@ -41,9 +41,8 @@ describe("credential tool authority", () => {
       windowId: "window",
       thread,
       readThread: () => thread,
-      effective: () => true,
+      operations: () => [linearCredentialOperation],
       windowCurrent: () => true,
-      operation: linearCredentialOperation,
     });
     expect(tools.definitions.map((d) => d.name)).toEqual(["request_credential"]);
     const pending = tools.execute({
@@ -53,6 +52,31 @@ describe("credential tool authority", () => {
     expect(service.view("window", String(thread.id)).requests).toHaveLength(1);
     await tools.close?.();
     expect(await pending).toMatchObject({ result: { status: "cancelled" } });
+    service.close();
+  });
+  it("offers a registered integration operation and cancels it when withdrawn", async () => {
+    const service = new CredentialRequests();
+    const thread = codeThread();
+    const operation = { ...linearCredentialOperation, id: "example-check" };
+    let registered = true;
+    const tools = createCredentialRequestTools({
+      service,
+      windowId: "window",
+      thread,
+      readThread: () => thread,
+      windowCurrent: () => true,
+      operations: () => (registered ? [operation] : []),
+    });
+    expect(JSON.stringify(tools.definitions)).toContain("example-check");
+    const pending = tools.execute({
+      name: "request_credential",
+      inputJson: '{"operation":"example-check"}',
+    });
+    expect(service.view("window", String(thread.id)).requests).toHaveLength(1);
+    registered = false;
+    expect(service.view("window", String(thread.id)).requests[0]?.state).toBe("cancelled");
+    expect(await pending).toMatchObject({ result: { status: "cancelled" } });
+    await tools.close?.();
     service.close();
   });
   it.each(["plan", "disabled", "window", "rebound", "profile"] as const)(
@@ -73,9 +97,8 @@ describe("credential tool authority", () => {
         windowId: "window",
         thread,
         readThread: () => current,
-        effective: () => boundary !== "disabled",
+        operations: () => (boundary === "disabled" ? [] : [linearCredentialOperation]),
         windowCurrent: () => boundary !== "window",
-        operation: linearCredentialOperation,
       });
       expect(tools.definitions).toEqual([]);
       expect(
@@ -83,7 +106,9 @@ describe("credential tool authority", () => {
           name: "request_credential",
           inputJson: '{"operation":"linear-account-check"}',
         }),
-      ).toMatchObject({ result: { status: "refused" } });
+      ).toMatchObject({
+        result: { status: boundary === "disabled" ? "unsupported-operation" : "refused" },
+      });
       expect(service.view("window", String(thread.id)).requests).toEqual([]);
       service.close();
     },
