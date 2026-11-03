@@ -37,6 +37,15 @@ import {
   unavailableAutomationWorkDispatchPort,
 } from "./automationTestFixtures";
 import { buildAutomationAuthorityFactsFromHost } from "./automationDispatchService";
+import { WorkTurnProjection } from "../work/workTurnProjection";
+import { createAutomationWorkDispatchPort } from "./automationWorkDispatchPort";
+import { decodeWorkThreadId } from "@octant/contracts";
+import {
+  decodeStartWorkThreadTurnCommand,
+  decodeWorkTurnAccepted,
+  decodeWorkTurnUpdated,
+  WORK_TURN_CAPABILITIES,
+} from "@octant/contracts/work-turns";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 const directories: Array<string> = [];
@@ -59,6 +68,7 @@ function nextUuid(): string {
 }
 
 interface Session {
+  readonly journal: Journal;
   readonly connection: SqliteConnection;
   readonly store: AutomationEventStore;
   readonly projection: AutomationProjection;
@@ -77,7 +87,7 @@ function openSession(): Session {
     clock: () => "2026-08-10T12:00:00.000Z",
   });
   const store = new AutomationEventStore({ journal, uuid: nextUuid, actor });
-  return { connection, store, projection: runtime.automationProjection };
+  return { connection, journal, store, projection: runtime.automationProjection };
 }
 
 const INTERVAL_ANCHOR = "2026-08-10T13:00:00.000Z";
@@ -292,6 +302,109 @@ function alwaysAdmit(): AutomationCapacityAdmissionPort {
 }
 
 describe("AutomationDispatchService", () => {
+  it("releases the routine slot after the persisted first Work turn has completed", async () => {
+    const session = openSession();
+    try {
+      const definition = workDefinition();
+      const run = claimQueuedRun(session, definition);
+      const workTurns = new WorkTurnProjection();
+      const work = createAutomationWorkDispatchPort({
+        threads: {
+          bootstrap: async () => ({ threads: [] }),
+          execute: async (_scope, raw) => {
+            if (typeof raw !== "object" || raw === null || !("threadId" in raw))
+              throw new Error("Missing actual created thread identity");
+            return { kind: "thread-created", thread: { id: decodeWorkThreadId(raw.threadId) } };
+          },
+        },
+        turns: {
+          startFirstTurn: async (_scope, raw) => {
+            const command = decodeStartWorkThreadTurnCommand(raw);
+            const accepted = decodeWorkTurnAccepted({
+              kind: "turn-accepted",
+              requestId: command.requestId,
+              threadId: command.threadId,
+              turnId: command.turnId,
+              projectId: definition.projectId,
+              authority: command.authority,
+              providerSessionId: run.firstTurnRequestId,
+              prompt: command.prompt,
+              capabilities: WORK_TURN_CAPABILITIES,
+              acceptedAt: "2026-08-10T13:00:23.000Z",
+            });
+            const completed = decodeWorkTurnUpdated({
+              kind: "turn-updated",
+              requestId: command.requestId,
+              threadId: command.threadId,
+              turnId: command.turnId,
+              status: "completed",
+              response: "Controlled provider finished",
+              updatedAt: "2026-08-10T13:00:23.000Z",
+            });
+            session.journal.append({
+              aggregate: { aggregateType: "work-turn", aggregateId: command.requestId },
+              expectedVersion: 0,
+              events: [
+                {
+                  eventId: nextUuid(),
+                  eventName: "work.turn-accepted@1",
+                  eventVersion: 1,
+                  correlationId: nextUuid(),
+                  actor,
+                  payload: accepted,
+                  occurredAt: accepted.acceptedAt,
+                },
+                {
+                  eventId: nextUuid(),
+                  eventName: "work.turn-updated@1",
+                  eventVersion: 1,
+                  correlationId: nextUuid(),
+                  actor,
+                  payload: completed,
+                  occurredAt: completed.updatedAt,
+                },
+              ],
+            });
+            workTurns.apply(accepted);
+            workTurns.apply(completed);
+            const persisted = workTurns.lookup(command.requestId);
+            if (persisted === undefined) throw new Error("Missing journaled Work turn");
+            return { kind: "accepted", turn: persisted };
+          },
+        },
+        clock: () => "2026-08-10T13:00:23.000Z" as UtcTimestamp,
+        uuid: nextUuid,
+      });
+      const dispatcher = new AutomationDispatchService({
+        store: session.store,
+        projection: session.projection,
+        code: createCodePort().port,
+        work,
+        capacity: alwaysAdmit(),
+        resolveFacts: () => matchingFacts(definition),
+        now: () => "2026-08-10T13:00:23.000Z" as UtcTimestamp,
+      });
+      await dispatcher.dispatchNow(definition.id, run.id);
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+      expect(workTurns.listForProject(definition.projectId)[0]?.status).toBe("completed");
+      expect(session.projection.getRun(run.id)?.firstTurnAcceptance?.runtimeReceipt).toBe(
+        `work-turn:${run.firstTurnRequestId}`,
+      );
+      const scheduler = new AutomationSchedulerService({
+        store: session.store,
+        projection: session.projection,
+        dispatch: dispatcher,
+        readWorkTurn: (requestId) => workTurns.lookup(requestId),
+        now: () => "2026-08-10T14:00:10.000Z" as UtcTimestamp,
+      });
+      const next = scheduler.runPass();
+      expect.soft(session.projection.getRun(run.id)?.lifecycle).toBe("completed");
+      expect.soft(next.deferredAutomationIds).not.toContain(definition.id);
+      expect.soft(next.claimedRunIds).toHaveLength(1);
+    } finally {
+      session.connection.close();
+    }
+  });
   it("creates exactly one Code thread per occurrence and links the dispatch intent", async () => {
     const session = openSession();
     const definition = codeDefinition();
