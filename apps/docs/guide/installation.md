@@ -96,9 +96,12 @@ Octant's host and approved executable tools use that same separate runtime. This
 `octant-nightly` command or a functional Nightly desktop bridge.
 
 Nightly's separate application identity and packaging foundation are available
-for development. It is not yet a usable second app: startup reports that the
-stable desktop client bridge is unavailable before it opens host data or
-initializes credentials. Installation and publication remain pending.
+for development. It is not yet a usable second app. On macOS, ordinary Nightly
+startup first authenticates a status check with a compatible signed Octant in
+the same login session. Development/ad-hoc builds refuse this connection; a
+missing response can mean Octant is closed or too old. A successful status check
+still reports the unfinished desktop client bridge before opening host data or
+initializing credentials. Installation and publication remain pending.
 
 A local desktop package defaults to Octant. An explicitly selected
 `OCTANT_PACKAGE_FLAVOR=nightly` requires a matching dated preview or candidate

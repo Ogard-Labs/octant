@@ -89,3 +89,5 @@ export function resolveDesktopHostRoot(options: {
     ? resolve(options.resourcesPath, "app")
     : options.appRoot;
 }
+
+export const DESKTOP_PEER_STATUS_FILENAME = "octant-desktop-peer-status.node";

@@ -77,6 +77,21 @@ import {
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
 describe("desktop packaging boundary", () => {
+  it("requires the signed desktop entry marker and exact native status resource", () => {
+    const identity = desktopIdentity("stable");
+    const metadata = {
+      CFBundleIdentifier: identity.bundleId,
+      CFBundleName: identity.productName,
+      CFBundleExecutable: identity.productName,
+    };
+    expect(() => validateDarwinBundleIdentity(metadata, identity)).toThrow(/entry policy/);
+    expect(() =>
+      validateNativePayloadAllowlist([
+        "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
+      ]),
+    ).not.toThrow();
+  });
+
   it("stages native SDK dependencies once at their signed runtime location", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "octant-package-dependencies-"));
     try {
@@ -125,6 +140,7 @@ describe("desktop packaging boundary", () => {
       dir: "/tmp/octant-stage",
       electronVersion: "43.7.11",
       extendInfo: {
+        OctantDesktopEntryPolicy: "sealed-main-v1",
         NSMicrophoneUsageDescription:
           "Octant uses the microphone to dictate a message when you press the microphone button.",
       },
@@ -271,6 +287,7 @@ describe("desktop packaging boundary", () => {
       const other = desktopIdentity(flavor === "stable" ? "nightly" : "stable");
       const metadata = (identity: typeof expected) => ({
         CFBundleIdentifier: identity.bundleId,
+        OctantDesktopEntryPolicy: "sealed-main-v1",
         CFBundleName: identity.productName,
         CFBundleExecutable: identity.productName,
       });
@@ -293,7 +310,7 @@ describe("desktop packaging boundary", () => {
         await mkdir(resolve(root, "Contents"));
         await writeFile(
           resolve(root, "Contents/Info.plist"),
-          '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>app.octant.desktop.nightly</string><key>CFBundleName</key><string>Octant Nightly</string><key>CFBundleExecutable</key><string>Octant Nightly</string></dict></plist>',
+          '<?xml version="1.0"?><plist version="1.0"><dict><key>OctantDesktopEntryPolicy</key><string>sealed-main-v1</string><key>CFBundleIdentifier</key><string>app.octant.desktop.nightly</string><key>CFBundleName</key><string>Octant Nightly</string><key>CFBundleExecutable</key><string>Octant Nightly</string></dict></plist>',
         );
         await expect(
           validateBundleIdentity(root, desktopIdentity("nightly")),
@@ -350,6 +367,7 @@ describe("desktop packaging boundary", () => {
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
       "Octant.app/Contents/Resources/native/octant-device-helper",
+      "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
       "Octant.app/Contents/Resources/native/cua-driver",
       "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
       "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
@@ -392,6 +410,7 @@ describe("desktop packaging boundary", () => {
       "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
     ]);
     expect(PACKAGED_ARM64_FILES).toEqual([
+      "native/octant-desktop-peer-status.node",
       "native/octant-keychain-helper",
       "native/octant-code-file-helper",
       "native/octant-device-helper",
@@ -411,7 +430,7 @@ describe("desktop packaging boundary", () => {
     expect(FORBIDDEN_PACKAGED_FILES).toContain(
       "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-device-helper",
     );
-    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(3);
+    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(4);
     expect(FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS).toEqual([
       /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk-[^/]+\//,
       /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk\/(?:vendor\/)?claude(?:\.exe)?$/,
@@ -636,6 +655,7 @@ describe("desktop packaging boundary", () => {
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
       "Octant.app/Contents/Resources/native/octant-device-helper",
+      "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",

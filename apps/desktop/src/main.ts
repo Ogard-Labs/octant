@@ -1,3 +1,4 @@
+import { loadDesktopPeerStatus, ownDesktopPeerStatus } from "./desktopPeerStatus";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
 import { createNativeCodeApprovalViewHost } from "./nativeCodeApprovalView";
 import { startComputerUseBroker, type ComputerUseBroker } from "./computerUseBroker";
@@ -4514,12 +4515,24 @@ function forceExitAfterStalledQuit(owned: {
   };
 }
 
+let desktopPeerStatusOwner: ReturnType<typeof ownDesktopPeerStatus> | undefined;
+
 async function stopHostForQuit(): Promise<void> {
-  await shutdownSecondaryProjectWindows();
-  await projectWindowLifecycle.shutdown(async () => {
-    const result = await hostLifecycle.prepareQuit(() => true);
-    if (result === "cancelled") throw new Error("Octant quit was cancelled.");
-  });
+  const host = (async () => {
+    await shutdownSecondaryProjectWindows();
+    await projectWindowLifecycle.shutdown(async () => {
+      const result = await hostLifecycle.prepareQuit(() => true);
+      if (result === "cancelled") throw new Error("Octant quit was cancelled.");
+    });
+  })();
+  const native = desktopPeerStatusOwner?.close();
+  const [hostResult, nativeResult] = await Promise.allSettled([host, native]);
+  if (
+    nativeResult.status === "rejected" ||
+    (nativeResult.value !== undefined && nativeResult.value.kind === "failed")
+  )
+    logQuitProblem("Octant could not finish closing its desktop status endpoint.");
+  if (hostResult.status === "rejected") throw hostResult.reason;
 }
 
 function finishQuit(): void {
@@ -4690,6 +4703,14 @@ function startDesktopInstance(): void {
   void app
     .whenReady()
     .then(() => {
+      if (!preparingQuit && !quitPrepared && applicationIdentity.flavor === "stable") {
+        const native = loadDesktopPeerStatus({
+          packaged: app.isPackaged,
+          platform: process.platform,
+          resourcesPath: process.resourcesPath,
+        });
+        if (native !== undefined) desktopPeerStatusOwner = ownDesktopPeerStatus(native);
+      }
       installApplicationMenu();
       return requestActiveWindow();
     })
