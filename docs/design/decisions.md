@@ -40,7 +40,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
-| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 4       | 0            | 0                   |
+| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 9       | 1            | 0                   |
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **223**   | **190** | **30**       | **3**               |
+| **All areas**                                                                         | **223**   | **189** | **31**       | **3**               |
 
 ## Principles and hard lines
 
@@ -795,7 +795,11 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - A Work run observes the exact retained first-turn request and captured receipt/thread/Project/host/binding/provider/model. Proven terminal status is journaled before the active slot is reused; missing/mismatched evidence stays active, edits do not replace the run snapshot, and replay or notification failure never redelivers the provider call. First-turn completion does not prove child/process quiescence.
 - A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
 
-Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+- A new file trigger is Work/new-thread only, under the main local Project root, using the existing Secret guard and confined reads. The existing journal owns its baseline, deterministic batch and finite automatic-start budget (default 8, selectable 1–32); no restart or quiet reset. Hidden/linked/protected input is excluded, unsupported or incomplete scans block, and filesystem hints never identify writers.
+- File changes during the known routine/child/process activity window are held for explicit current-authority Review/Re-arm, with the held batch preserved. Offline recovery sees net surviving final-state changes only. The run-first source/claim ledger repairs without a second run or budget debit.
+- **Not built yet:** the complete file-trigger editor/preview and reviewed re-arm journey, final host lifecycle integration evidence, and Code input-transfer support. The source contracts, confined scans, cursor/claim foundation and Work first-turn observer do not by themselves complete the file-trigger journey.
+
+Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Routine authority level
 

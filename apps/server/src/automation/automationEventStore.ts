@@ -3,6 +3,8 @@ import {
   AggregateVersion,
   AutomationBlocked,
   AutomationCancellationTombstone as AutomationCancellationTombstoneSchema,
+  AutomationFileSourceObserved,
+  type AutomationFileSourceCheckpoint,
   AutomationDefinitionCreated,
   AutomationDefinitionExhausted,
   AutomationDefinitionLifecycleChanged,
@@ -38,6 +40,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import { validateAutomationFileCheckpoint } from "./automationFileSourceState";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
 import {
@@ -49,6 +52,7 @@ import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/jour
 export const AUTOMATION_DEFINITION_AGGREGATE_TYPE = "automation-definition";
 export const AUTOMATION_RUN_AGGREGATE_TYPE = "automation-run";
 
+export const AUTOMATION_FILE_SOURCE_OBSERVED = "automation-file-source-observed@1";
 export const AUTOMATION_DEFINITION_CREATED = "automation-definition-created@1";
 export const AUTOMATION_DEFINITION_UPDATED = "automation-definition-updated@1";
 export const AUTOMATION_DEFINITION_LIFECYCLE_CHANGED = "automation-definition-lifecycle-changed@1";
@@ -70,6 +74,7 @@ const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
+const decodeFileSourceObserved = Schema.decodeUnknownSync(AutomationFileSourceObserved);
 const decodeDefinitionCreated = Schema.decodeUnknownSync(AutomationDefinitionCreated);
 const decodeDefinitionUpdated = Schema.decodeUnknownSync(AutomationDefinitionUpdated);
 const decodeDefinitionLifecycleChanged = Schema.decodeUnknownSync(
@@ -94,6 +99,7 @@ const decodeNotificationRefRecorded = Schema.decodeUnknownSync(AutomationNotific
  */
 export function registerAutomationEvents(registry: EventRegistry): EventRegistry {
   return registry
+    .register(AUTOMATION_FILE_SOURCE_OBSERVED, 1, AutomationFileSourceObserved)
     .register(AUTOMATION_DEFINITION_CREATED, 1, AutomationDefinitionCreated)
     .register(AUTOMATION_DEFINITION_UPDATED, 1, AutomationDefinitionUpdated)
     .register(AUTOMATION_DEFINITION_LIFECYCLE_CHANGED, 1, AutomationDefinitionLifecycleChanged)
@@ -132,10 +138,12 @@ export interface AutomationEventStoreOptions {
 
 export interface AppendAutomationDefinitionCreatedInput {
   readonly automation: AutomationDefinition;
+  readonly fileSource?: AutomationFileSourceCheckpoint;
 }
 
 export interface AppendAutomationDefinitionUpdatedInput {
   readonly automation: AutomationDefinition;
+  readonly fileSource?: AutomationFileSourceCheckpoint;
   readonly previousDefinitionRevision: number;
   readonly expectedVersion: number;
 }
@@ -202,6 +210,12 @@ export interface AppendAutomationNotificationRefInput {
 /** One typed frame of a scheduler occurrence-ledger append batch. */
 export type AutomationOccurrenceLedgerEvent =
   | {
+      readonly kind: "file-source-observed";
+      readonly definitionRevision: number;
+      readonly checkpoint: AutomationFileSourceCheckpoint;
+      readonly at: UtcTimestamp;
+    }
+  | {
       readonly kind: "occurrence-skipped";
       readonly occurrence: AutomationScheduledOccurrence;
       readonly reason: "missed-run-policy" | "missed-run-cap-recovery";
@@ -252,6 +266,7 @@ const AUTOMATION_AGGREGATE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 const DEFINITION_EVENT_NAMES: ReadonlySet<string> = new Set([
+  AUTOMATION_FILE_SOURCE_OBSERVED,
   AUTOMATION_DEFINITION_CREATED,
   AUTOMATION_DEFINITION_UPDATED,
   AUTOMATION_DEFINITION_LIFECYCLE_CHANGED,
@@ -300,7 +315,20 @@ export class AutomationEventStore {
     let payload: AutomationDefinitionCreated;
     let aggregateId: typeof AggregateId.Type;
     try {
-      payload = decodeDefinitionCreated({ automation: input.automation });
+      payload = decodeDefinitionCreated({
+        automation: input.automation,
+        ...(input.fileSource === undefined ? {} : { fileSource: input.fileSource }),
+      });
+      if (payload.fileSource !== undefined) {
+        validateAutomationFileCheckpoint(payload.fileSource);
+        if (
+          payload.automation.trigger.kind !== "file-arrival" ||
+          payload.fileSource.baselineReady ||
+          payload.fileSource.observationRevision !== 1 ||
+          payload.fileSource.armGeneration !== 1
+        )
+          throw new Error("Initial file source must be unarmed.");
+      }
       if (payload.automation.version !== 1) {
         throw new Error("created definition must start at version 1");
       }
@@ -331,8 +359,19 @@ export class AutomationEventStore {
       expectedVersion = decodeAggregateVersion(input.expectedVersion);
       payload = decodeDefinitionUpdated({
         automation: input.automation,
+        ...(input.fileSource === undefined ? {} : { fileSource: input.fileSource }),
         previousDefinitionRevision: input.previousDefinitionRevision,
       });
+      if (payload.fileSource !== undefined) {
+        validateAutomationFileCheckpoint(payload.fileSource);
+        if (
+          payload.automation.trigger.kind !== "file-arrival" ||
+          payload.fileSource.baselineReady ||
+          payload.fileSource.observationRevision !== 1 ||
+          payload.fileSource.armGeneration !== 1
+        )
+          throw new Error("Initial file source must be unarmed.");
+      }
       if (payload.automation.version !== expectedVersion + 1) {
         throw new Error("updated definition version must extend the expected head");
       }
@@ -410,6 +449,17 @@ export class AutomationEventStore {
       expectedVersion = decodeAggregateVersion(input.expectedVersion);
       prepared = input.events.map((event, index) => {
         switch (event.kind) {
+          case "file-source-observed":
+            validateAutomationFileCheckpoint(event.checkpoint);
+            return {
+              eventName: AUTOMATION_FILE_SOURCE_OBSERVED,
+              payload: decodeFileSourceObserved({
+                automationId: input.automationId,
+                definitionRevision: event.definitionRevision,
+                checkpoint: event.checkpoint,
+                recordedAt: event.at,
+              }),
+            };
           case "occurrence-skipped":
             return {
               eventName: AUTOMATION_OCCURRENCE_SKIPPED,

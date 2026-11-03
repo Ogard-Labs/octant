@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   decodeAutomationCommandResult,
+  decodeAutomationCommand,
   decodeAutomationFollowUpRequest,
   decodeAutomationThreadRoutineRequest,
   decodeAutomationTrigger,
@@ -34,6 +35,7 @@ import type { AutomationCommandService } from "./automationCommandService";
 import type { AutomationProjection } from "./automationProjection";
 import type { RoutineProposalService } from "./routineProposalService";
 import type { ThreadRoutineDraftResult } from "./threadRoutineDraft";
+import type { AutomationFileSourcePreparation } from "./automationFileSourceAuthority";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -65,6 +67,14 @@ export interface AutomationRouteDependencies {
   };
   readonly now?: () => number;
   readonly uuid?: () => string;
+  readonly prepareFileSource?: (input: {
+    readonly command: Extract<
+      AutomationCommand,
+      { readonly kind: "create-automation" | "update-automation" }
+    >;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<AutomationFileSourcePreparation>;
 }
 
 /**
@@ -147,7 +157,7 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
         return await handleHistory(dependencies, context, url, origin);
       }
       if (route === "commands" && request.method === "POST") {
-        return await handleCommand(dependencies, context, body, origin);
+        return await handleCommand(dependencies, context, body, origin, request.signal);
       }
       if (route === "proposals" && request.method === "GET") {
         return jsonResponse(
@@ -352,6 +362,7 @@ async function handleCommand(
   context: PrincipalRouteContext,
   body: unknown,
   origin: string | null,
+  signal: AbortSignal,
 ): Promise<Response> {
   if (!isRecord(body)) {
     return failureResponse("Automation command is invalid.", 400, origin);
@@ -422,7 +433,77 @@ async function handleCommand(
     principal: context.principal,
     origin: { kind: "interactive" },
   } as AutomationCommand;
-  const result = dependencies.commands.execute(command);
+  let preparation: AutomationFileSourcePreparation | undefined;
+  if (
+    (command.kind === "create-automation" || command.kind === "update-automation") &&
+    isRecord(body.definition) &&
+    isRecord(body.definition.trigger) &&
+    body.definition.trigger.kind === "file-arrival"
+  ) {
+    if (context.principal.kind !== "local-window")
+      return jsonResponse(
+        commandFailure(
+          "unauthorized",
+          "Configure a file routine from an Octant window on this host.",
+        ),
+        200,
+        origin,
+      );
+    let checked: AutomationCommand;
+    try {
+      checked = decodeAutomationCommand(command);
+    } catch {
+      return jsonResponse(commandFailure("invalid", "The file routine is invalid."), 200, origin);
+    }
+    if (checked.kind !== "create-automation" && checked.kind !== "update-automation")
+      return jsonResponse(commandFailure("invalid", "The file routine is invalid."), 200, origin);
+    const current = () =>
+      !signal.aborted &&
+      context.abortSignal?.aborted !== true &&
+      dependencies.windowAuthorityStore
+        .listWindowIds(dependencies.now?.() ?? Date.now())
+        .includes(context.scopeId) &&
+      (checked.kind === "create-automation"
+        ? dependencies.projection.getDefinition(checked.automationId) === undefined
+        : dependencies.projection.getDefinition(checked.automationId)?.version ===
+          checked.expectedVersion);
+    try {
+      if (dependencies.prepareFileSource === undefined || !current())
+        return jsonResponse(
+          commandFailure(
+            "blocked",
+            "The local input folder is unavailable. Check the Project and try again.",
+          ),
+          200,
+          origin,
+        );
+      preparation = await dependencies.prepareFileSource({ command: checked, current, signal });
+      const latestProjects = await accessibleProjects(dependencies, context);
+      if (
+        !current() ||
+        !preparation.current() ||
+        authorizeCommandProject(dependencies, body, latestProjects) !== undefined
+      )
+        return jsonResponse(
+          commandFailure(
+            "unauthorized",
+            "The file routine's Project or window authority changed. Review it and try again.",
+          ),
+          200,
+          origin,
+        );
+    } catch {
+      return jsonResponse(
+        commandFailure(
+          "blocked",
+          "The local input folder is unavailable or changed. Check the Project and try again.",
+        ),
+        200,
+        origin,
+      );
+    }
+  }
+  const result = dependencies.commands.execute(command, undefined, preparation);
   return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
 }
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -7,6 +7,7 @@ import {
   decodeAutomationCommandResult,
   decodeAutomationQueryResponse,
   decodeWindowId,
+  UtcTimestamp,
   type AutomationCommand,
   type AutomationId,
 } from "@octant/contracts";
@@ -22,7 +23,9 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { AutomationCommandService } from "./automationCommandService";
 import { AutomationEventStore, registerAutomationEvents } from "./automationEventStore";
 import { AutomationProjection } from "./automationProjection";
-import { createAutomationRouteHandler } from "./automationRoutes";
+import { createAutomationRouteHandler, type AutomationRouteDependencies } from "./automationRoutes";
+import { prepareAutomationFileDefinition } from "./automationFileSourceAuthority";
+import { liveWorkFilesystem } from "../work/workFilesystemPort";
 import {
   AUTOMATION_TEST_IDS,
   AUTOMATION_TEST_NOW,
@@ -69,6 +72,7 @@ interface Harness {
   readonly handler: (request: Request) => Promise<Response | undefined>;
   readonly service: AutomationCommandService;
   readonly projection: AutomationProjection;
+  readonly authority: WindowAuthorityStore;
 }
 
 function activeProject(id: string, name: string) {
@@ -87,7 +91,13 @@ function activeProject(id: string, name: string) {
   };
 }
 
-function createHarness(options: { readonly historyAvailable?: () => boolean } = {}): Harness {
+function createHarness(
+  options: {
+    readonly historyAvailable?: () => boolean;
+    readonly prepareFileSource?: AutomationRouteDependencies["prepareFileSource"];
+    readonly projectAccessible?: () => boolean;
+  } = {},
+): Harness {
   const connection = openConnection();
   const registry = registerAutomationEvents(new EventRegistry());
   const projection = new AutomationProjection();
@@ -115,19 +125,25 @@ function createHarness(options: { readonly historyAvailable?: () => boolean } = 
     projects: {
       bootstrap: async () => ({
         // Only the fixture Project is accessible; AUTOMATION_TEST_IDS.otherProject is not.
-        active: [activeProject(AUTOMATION_TEST_IDS.project, "Automation Project")],
+        active:
+          options.projectAccessible?.() === false
+            ? []
+            : [activeProject(AUTOMATION_TEST_IDS.project, "Automation Project")],
         archived: [],
         availability: [],
         memory: [],
       }),
     },
     hostId: "local",
+    ...(options.prepareFileSource === undefined
+      ? {}
+      : { prepareFileSource: options.prepareFileSource }),
     ...(options.historyAvailable === undefined
       ? {}
       : { historyAvailable: options.historyAvailable }),
     now: () => 1,
   });
-  return { handler, service, projection };
+  return { handler, service, projection, authority };
 }
 
 const localPrincipal = {
@@ -192,6 +208,160 @@ async function json(response: Response | undefined): Promise<unknown> {
 }
 
 describe("automation routes", () => {
+  it("saves file setup through actual protected folder preparation without reading files or claiming readiness", async () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-file-save-"));
+    directories.push(root);
+    mkdirSync(join(root, "Inbox"));
+    writeFileSync(join(root, "Inbox/already.txt"), "not an arrival");
+    let reads = 0;
+    const { handler, projection } = createHarness({
+      prepareFileSource: (input) =>
+        prepareAutomationFileDefinition({
+          automationId: input.command.automationId,
+          expectedVersion: input.command.expectedVersion,
+          filesystem: {
+            ...liveWorkFilesystem,
+            openFile: async () => {
+              reads += 1;
+              throw new Error("Save must not read file content");
+            },
+          },
+          authority: {
+            canonicalRoot: root,
+            bindingIdentity: "fixture host-owned Project binding",
+            current: input.current,
+          },
+          definition: input.command.definition,
+          current: input.current,
+          signal: input.signal,
+          now: () => Schema.decodeUnknownSync(UtcTimestamp)(now),
+        }),
+    });
+    const body = {
+      kind: "create-automation",
+      automationId: automationId("6001"),
+      expectedVersion: 0,
+      definition: automationDefinitionDraftFixture({
+        trigger: {
+          kind: "file-arrival",
+          directory: "Inbox",
+          includeExtensions: ["txt"],
+          excludeDirectories: [],
+          settleSeconds: 2,
+          automaticStartLimit: 8,
+        },
+      }),
+    };
+    expect(await json(await handler(postCommand(body)))).toMatchObject({
+      kind: "automation-created",
+    });
+    expect(projection.getFileSource(body.automationId)).toMatchObject({
+      baselineReady: false,
+      phase: "arming",
+      automaticStarts: 0,
+    });
+    expect(reads).toBe(0);
+    expect(projection.latestRun(body.automationId)).toBeUndefined();
+  });
+
+  it.each(["window", "Project"])(
+    "refuses a late prepared Save after its %s ownership was revoked",
+    async (owner) => {
+      const root = mkdtempSync(join(tmpdir(), "octant-file-save-revoke-"));
+      directories.push(root);
+      mkdirSync(join(root, "Inbox"));
+      let release: (() => void) | undefined;
+      let start: (() => void) | undefined;
+      const entered = new Promise<void>((resolve) => {
+        start = resolve;
+      });
+      const hold = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let accessible = true;
+      const harness = createHarness({
+        projectAccessible: () => accessible,
+        prepareFileSource: async (input) => {
+          const proof = await prepareAutomationFileDefinition({
+            automationId: input.command.automationId,
+            expectedVersion: input.command.expectedVersion,
+            filesystem: liveWorkFilesystem,
+            authority: {
+              canonicalRoot: root,
+              bindingIdentity: "fixture Project binding",
+              current: input.current,
+            },
+            definition: input.command.definition,
+            current: input.current,
+            signal: input.signal,
+            now: () => Schema.decodeUnknownSync(UtcTimestamp)(now),
+          });
+          start?.();
+          await hold;
+          return proof;
+        },
+      });
+      const id = automationId("6002");
+      const pending = harness.handler(
+        postCommand({
+          kind: "create-automation",
+          automationId: id,
+          expectedVersion: 0,
+          definition: automationDefinitionDraftFixture({
+            trigger: {
+              kind: "file-arrival",
+              directory: "Inbox",
+              includeExtensions: [],
+              excludeDirectories: [],
+              settleSeconds: 2,
+              automaticStartLimit: 8,
+            },
+          }),
+        }),
+      );
+      await entered;
+      if (owner === "window") harness.authority.revoke(windowId);
+      else accessible = false;
+      release?.();
+      expect(await json(await pending)).toMatchObject({
+        kind: "automation-command-failed",
+        reason: "unauthorized",
+      });
+      expect(harness.projection.getDefinition(id)).toBeUndefined();
+      expect(harness.projection.getFileSource(id)).toBeUndefined();
+    },
+  );
+
+  it("refuses a caller-supplied source proof or a Save without host folder preparation", async () => {
+    const { handler, projection } = createHarness();
+    const id = automationId("6003");
+    const body = {
+      kind: "create-automation",
+      automationId: id,
+      expectedVersion: 0,
+      definition: automationDefinitionDraftFixture({
+        trigger: {
+          kind: "file-arrival",
+          directory: "Inbox",
+          includeExtensions: [],
+          excludeDirectories: [],
+          settleSeconds: 2,
+          automaticStartLimit: 8,
+        },
+      }),
+    };
+    expect(
+      await json(
+        await handler(postCommand({ ...body, fileSource: { sourceIdentity: "a".repeat(64) } })),
+      ),
+    ).toMatchObject({ kind: "automation-command-failed", reason: "invalid" });
+    expect(await json(await handler(postCommand(body)))).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "blocked",
+    });
+    expect(projection.getDefinition(id)).toBeUndefined();
+  });
+
   it("passes through unrelated paths", async () => {
     const { handler } = createHarness();
     expect(await handler(getRequest("/api/unrelated"))).toBeUndefined();

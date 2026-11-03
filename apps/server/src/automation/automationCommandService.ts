@@ -23,6 +23,7 @@ import {
   validateAutomationDefinition,
 } from "@octant/domain";
 import { AutomationEventStore, AutomationEventStoreError } from "./automationEventStore";
+import type { AutomationFileSourcePreparation } from "./automationFileSourceAuthority";
 import type { AutomationProjection } from "./automationProjection";
 import {
   automationRunIdForOccurrence,
@@ -82,7 +83,11 @@ export class AutomationCommandService {
    * `provenance` is what the host itself knows about a create, never part of
    * the wire command: a route body cannot claim a thread proposed its routine.
    */
-  execute(input: AutomationCommand, provenance?: AutomationProvenance): AutomationCommandResult {
+  execute(
+    input: AutomationCommand,
+    provenance?: AutomationProvenance,
+    source?: AutomationFileSourcePreparation,
+  ): AutomationCommandResult {
     let command: AutomationCommand;
     try {
       command = decodeAutomationCommand(input);
@@ -102,9 +107,9 @@ export class AutomationCommandService {
     try {
       switch (command.kind) {
         case "create-automation":
-          return this.#create(command, provenance);
+          return this.#create(command, provenance, source);
         case "update-automation":
-          return this.#update(command);
+          return this.#update(command, source);
         case "pause-automation":
           return this.#changeLifecycle(command, "paused", "automation-paused");
         case "resume-automation":
@@ -134,6 +139,7 @@ export class AutomationCommandService {
   #create(
     command: Extract<AutomationCommand, { readonly kind: "create-automation" }>,
     provenance: AutomationProvenance | undefined,
+    source: AutomationFileSourcePreparation | undefined,
   ): AutomationCommandResult {
     if (String(command.definition.hostId) !== this.#hostId) {
       return failure("unauthorized", "Automation definitions are owned by exactly one host.", {
@@ -145,6 +151,14 @@ export class AutomationCommandService {
         automationId: command.automationId,
       });
     }
+    if (
+      command.definition.trigger.kind === "file-arrival" &&
+      (provenance !== undefined || !this.#sourcePrepared(command, source))
+    )
+      return failure(
+        "blocked",
+        "Choose an available local Work input folder before saving this file routine.",
+      );
     const now = this.#now();
     const paused = command.initialLifecycle === "paused";
     const definition = validateAutomationDefinition(
@@ -162,17 +176,31 @@ export class AutomationCommandService {
         updatedAt: now,
       }),
     );
-    this.#store.appendDefinitionCreated({ automation: definition });
+    this.#store.appendDefinitionCreated({
+      automation: definition,
+      ...(command.definition.trigger.kind === "file-arrival" && source !== undefined
+        ? { fileSource: source.checkpoint }
+        : {}),
+    });
     return { kind: "automation-created", automation: definition };
   }
 
   #update(
     command: Extract<AutomationCommand, { readonly kind: "update-automation" }>,
+    source: AutomationFileSourcePreparation | undefined,
   ): AutomationCommandResult {
     const existing = this.#projection.getDefinition(command.automationId);
     const gate = this.#gateDefinitionMutation(existing, command);
     if (gate !== undefined) return gate;
     const current = existing as AutomationDefinition;
+    if (
+      command.definition.trigger.kind === "file-arrival" &&
+      !this.#sourcePrepared(command, source)
+    )
+      return failure(
+        "blocked",
+        "Choose an available local Work input folder before saving this file routine.",
+      );
     if (String(command.definition.hostId) !== this.#hostId) {
       return failure("unauthorized", "Automation definitions cannot move between hosts.", {
         automationId: command.automationId,
@@ -206,6 +234,11 @@ export class AutomationCommandService {
     );
     this.#store.appendDefinitionUpdated({
       automation: updated,
+      ...(command.definition.trigger.kind === "file-arrival" &&
+      source !== undefined &&
+      this.#projection.getFileSource(current.id) === undefined
+        ? { fileSource: source.checkpoint }
+        : {}),
       previousDefinitionRevision: current.definitionRevision,
       expectedVersion: current.version,
     });
@@ -225,6 +258,19 @@ export class AutomationCommandService {
     const gate = this.#gateDefinitionMutation(existing, command, allowArchived);
     if (gate !== undefined) return gate;
     const current = existing as AutomationDefinition;
+    const source = this.#projection.getFileSource(current.id);
+    if (
+      lifecycle === "enabled" &&
+      current.trigger.kind === "file-arrival" &&
+      (source === undefined ||
+        source.phase === "held" ||
+        source.phase === "needs-rearm" ||
+        source.automaticStarts >= current.trigger.automaticStartLimit)
+    )
+      return failure(
+        "blocked",
+        "Review this file routine and explicitly re-arm its input before resuming.",
+      );
     if (current.lifecycle === lifecycle) {
       return { kind: resultKind, automation: current };
     }
@@ -392,7 +438,25 @@ export class AutomationCommandService {
     return undefined;
   }
 
+  #sourcePrepared(
+    command: Extract<
+      AutomationCommand,
+      { readonly kind: "create-automation" | "update-automation" }
+    >,
+    source: AutomationFileSourcePreparation | undefined,
+  ): boolean {
+    return (
+      command.principal.kind === "local-window" &&
+      source !== undefined &&
+      source.automationId === command.automationId &&
+      source.expectedVersion === command.expectedVersion &&
+      JSON.stringify(source.definition) === JSON.stringify(command.definition) &&
+      source.current()
+    );
+  }
+
   #dueState(trigger: AutomationTrigger): DueState {
+    if (trigger.kind === "file-arrival") return { nextDueAt: null };
     if (trigger.kind === "once") return { nextDueAt: trigger.scheduledAt };
     const now = this.#now();
     const nextDueAt = resolveNextAutomationOccurrence({ trigger, after: now, inclusive: true });

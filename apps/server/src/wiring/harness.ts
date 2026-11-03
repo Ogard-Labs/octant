@@ -1,3 +1,4 @@
+import { readOwnedProcessReceipts } from "../process/nodeOwnedProcessReceipt";
 import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -912,6 +913,14 @@ export function wireHarness(deps: HarnessDependencies) {
   // what later areas add.
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   return {
+    readHarnessProcessReceipts: async () =>
+      (
+        await readOwnedProcessReceipts({
+          receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+          supervisor: "repository-test-runner",
+        })
+      ).map((row) => row.receipt),
+
     personMemorySweep,
     runtimeForgeChanges,
     followUpCreation,

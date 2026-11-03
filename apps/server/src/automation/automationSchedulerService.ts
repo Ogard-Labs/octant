@@ -9,6 +9,7 @@ import {
   type AutomationRun,
   type AutomationRunId,
   type AutomationScheduledOccurrence,
+  type AutomationFileArrivalOccurrence,
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
@@ -31,6 +32,7 @@ import {
   automationRunIdForOccurrence,
   buildAutomationRunForOccurrence,
 } from "./automationRunIdentity";
+import type { AutomationFileObservationDecision } from "./automationFileSourceState";
 
 export interface AutomationSchedulerConfig {
   /**
@@ -97,6 +99,8 @@ export interface AutomationSchedulerServiceOptions {
   /** Wall clock: selects due occurrences and bounds persisted leases. */
   readonly now: () => UtcTimestamp;
   readonly config?: Partial<AutomationSchedulerConfig>;
+  readonly reconcileFileSources?: () => number | undefined;
+  readonly stopFileSources?: () => void;
   /** Only persisted first-turn truth; never starts or recovers a provider call. */
   readonly readWorkTurn?: (requestId: WorkTurnRequestId) => WorkTurnState | undefined;
   readonly onRunStatusChanged?: (input: {
@@ -146,6 +150,8 @@ export class AutomationSchedulerService {
   readonly #now: () => UtcTimestamp;
   readonly #onHistoryUnavailable: (() => void) | undefined;
   readonly #config: AutomationSchedulerConfig;
+  readonly #reconcileFileSources: AutomationSchedulerServiceOptions["reconcileFileSources"];
+  readonly #stopFileSources: AutomationSchedulerServiceOptions["stopFileSources"];
   readonly #readWorkTurn: AutomationSchedulerServiceOptions["readWorkTurn"];
   readonly #onRunStatusChanged: AutomationSchedulerServiceOptions["onRunStatusChanged"];
   readonly #offered = new Set<string>();
@@ -161,6 +167,8 @@ export class AutomationSchedulerService {
     this.#onHistoryUnavailable = options.onHistoryUnavailable;
     this.#config = { ...AUTOMATION_SCHEDULER_DEFAULTS, ...options.config };
     this.#readWorkTurn = options.readWorkTurn;
+    this.#reconcileFileSources = options.reconcileFileSources;
+    this.#stopFileSources = options.stopFileSources;
     this.#onRunStatusChanged = options.onRunStatusChanged;
   }
 
@@ -207,6 +215,76 @@ export class AutomationSchedulerService {
     };
   }
 
+  /** Same run-first ledger as timed claims, after the source's last async authority fence. */
+  commitFileObservation(input: {
+    readonly automationId: AutomationId;
+    readonly expectedVersion: number;
+    readonly previousObservationRevision: number;
+    readonly decision: AutomationFileObservationDecision;
+    readonly current: () => boolean;
+  }): "committed" | "stale" {
+    if (!input.current()) return "stale";
+    const definition = this.#projection.getDefinition(input.automationId);
+    const previous = this.#projection.getFileSource(input.automationId);
+    if (
+      definition === undefined ||
+      definition.version !== input.expectedVersion ||
+      definition.lifecycle !== "enabled" ||
+      definition.trigger.kind !== "file-arrival" ||
+      previous?.observationRevision !== input.previousObservationRevision
+    )
+      return "stale";
+    const decision = input.decision;
+    if (decision.kind === "unchanged") return "committed";
+    const checkpoint =
+      decision.kind === "claim" ? decision.receipt.checkpoint : decision.checkpoint;
+    if (
+      checkpoint.sourceIdentity !== previous.sourceIdentity ||
+      checkpoint.observationRevision !== previous.observationRevision + 1 ||
+      checkpoint.armGeneration !== previous.armGeneration ||
+      checkpoint.automaticStarts !== previous.automaticStarts + (decision.kind === "claim" ? 1 : 0)
+    )
+      return "stale";
+    const at = this.#now();
+    const events: Array<AutomationOccurrenceLedgerEvent> = [
+      {
+        kind: "file-source-observed",
+        definitionRevision: definition.definitionRevision,
+        checkpoint,
+        at,
+      },
+    ];
+    let run: AutomationRun | undefined;
+    if (decision.kind === "claim") {
+      if (
+        this.#projection.activeRun(definition.id) !== undefined ||
+        checkpoint.automaticStarts > definition.trigger.automaticStartLimit
+      )
+        return "stale";
+      const occurrence: AutomationFileArrivalOccurrence = {
+        kind: "file-arrival",
+        automationId: definition.id,
+        definitionRevision: definition.definitionRevision,
+        source: decision.receipt,
+      };
+      run = buildAutomationRunForOccurrence({ definition, occurrence, now: at });
+      this.#store.appendRunCreated({ run });
+      events.push({ kind: "occurrence-claimed", occurrence, runId: run.id, at });
+    }
+    // No await: captured authority, run ownership and the optimistic ledger commit are one admission.
+    this.#store.appendOccurrenceLedger({
+      automationId: definition.id,
+      expectedVersion: definition.version,
+      events,
+    });
+    if (run !== undefined)
+      this.#offer(
+        this.#definition(definition.id) ?? definition,
+        this.#projection.getRun(run.id) ?? run,
+      );
+    return "committed";
+  }
+
   /**
    * The Effect-owned scheduler loop: run one pass, then sleep until the next
    * due instant, lease expiry, or poll bound — whichever comes first — or
@@ -223,7 +301,15 @@ export class AutomationSchedulerService {
         // the timer fiber; the next tick retries against the journal.
         summary = undefined;
       }
-      return this.#awaitWake(this.#delayMsFor(summary));
+      let sourceDelay: number | undefined;
+      try {
+        sourceDelay = this.#reconcileFileSources?.();
+      } catch {
+        /* Source failure cannot stop timed routines. */
+      }
+      return this.#awaitWake(
+        Math.min(this.#delayMsFor(summary), sourceDelay ?? Number.POSITIVE_INFINITY),
+      );
     });
     return Effect.forever(tick);
   }
@@ -236,6 +322,7 @@ export class AutomationSchedulerService {
 
   /** Interrupt the loop and wait for the fiber to settle. Idempotent. */
   async stop(): Promise<void> {
+    this.#stopFileSources?.();
     const fiber = this.#fiber;
     if (fiber === undefined) return;
     this.#fiber = undefined;
@@ -267,7 +354,7 @@ export class AutomationSchedulerService {
     const latest = this.#projection.latestRun(definition.id);
     if (
       latest !== undefined &&
-      latest.occurrence.kind === "scheduled" &&
+      latest.occurrence.kind !== "manual" &&
       !this.#projection.isOccurrenceConsumed(definition.id, latest.occurrenceKey)
     ) {
       this.#repairClaim(definition, latest, out);
@@ -366,6 +453,34 @@ export class AutomationSchedulerService {
 
   #repairClaim(definition: AutomationDefinition, run: AutomationRun, out: PassCollector): void {
     const events: Array<AutomationOccurrenceLedgerEvent> = [];
+    if (
+      run.occurrence.kind === "file-arrival" &&
+      run.occurrence.definitionRevision === definition.definitionRevision
+    ) {
+      const previous = this.#projection.getFileSource(definition.id);
+      const checkpoint = run.occurrence.source.checkpoint;
+      if (
+        previous === undefined ||
+        previous.sourceIdentity !== checkpoint.sourceIdentity ||
+        previous.armGeneration !== checkpoint.armGeneration
+      )
+        throw new Error("File occurrence recovery requires its retained source identity.");
+      if (
+        previous.observationRevision === checkpoint.observationRevision - 1 &&
+        previous.automaticStarts === checkpoint.automaticStarts - 1
+      )
+        events.push({
+          kind: "file-source-observed",
+          definitionRevision: definition.definitionRevision,
+          checkpoint,
+          at: out.now,
+        });
+      else if (
+        previous.observationRevision !== checkpoint.observationRevision ||
+        previous.automaticStarts !== checkpoint.automaticStarts
+      )
+        throw new Error("File occurrence recovery cannot replace a newer observation.");
+    }
     if (
       run.scheduledAt !== null &&
       run.occurrence.kind === "scheduled" &&
@@ -672,6 +787,11 @@ export class AutomationSchedulerService {
     if (refreshed === undefined) return;
     const remaining = events.filter((event) => {
       switch (event.kind) {
+        case "file-source-observed":
+          return (
+            (this.#projection.getFileSource(automationId)?.observationRevision ?? 0) <
+            event.checkpoint.observationRevision
+          );
         case "occurrence-skipped":
         case "occurrence-claimed":
           return !this.#projection.isOccurrenceConsumed(
