@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   awaitQuietPage,
+  captureBrowserFeedbackPoint,
   BROWSER_DIALOG_POLICY,
   BROWSER_SETTLE_CAP_MS,
   BROWSER_SHADOW_HOP,
@@ -38,7 +39,6 @@ import {
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
 } from "@octant/contracts/browser-automation";
-import { MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS } from "@octant/contracts/product-feedback";
 import { browserDownloadHoldRoot, prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
 import { chromium } from "playwright-core";
 import {
@@ -187,6 +187,8 @@ export interface PlaywrightElementPort {
 /** A DevTools protocol session on one page, which the runtime owns and drops with the page. */
 export interface PlaywrightProtocolSessionPort {
   send(method: string, parameters?: Record<string, unknown>): Promise<unknown>;
+  /** Only the owner of a dedicated session detaches it. */
+  detach?(): Promise<void>;
 }
 
 export interface PlaywrightFramePort {
@@ -464,71 +466,57 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     return { sensitive };
   }
 
-  /**
-   * Name the element under one point and cut a picture of it.
-   *
-   * The page is read in the page, because only the page knows what is under a
-   * coordinate: the evaluated function resolves the element, walks a short
-   * selector path to it, and reports its accessible identity and box. Nothing
-   * here acts on the page — a description costs the same as looking.
-   */
+  /** A dedicated CDP session shares the native capture's bounded privacy rules. */
   async describePoint(
     contextId: BrowserContextId,
     point: { readonly x: number; readonly y: number },
     signal: AbortSignal,
   ): Promise<BrowserPointObservation> {
     const page = await this.#page(contextId, signal);
-    const viewport = page.viewportSize();
-    if (viewport === null) return { status: "no-element" };
-    const described = await page.evaluate(describeElementAtPoint, {
-      x: point.x * viewport.width,
-      y: point.y * viewport.height,
-      viewportWidth: viewport.width,
-      viewportHeight: viewport.height,
-    });
-    throwIfAborted(signal);
-    if (described === null) return { status: "no-element" };
-    const crop = await this.#cropDataUrl(page, described.bounds, viewport);
-    throwIfAborted(signal);
-    return {
-      status: "described",
-      element: described,
-      ...(crop === undefined ? {} : { cropDataUrl: crop }),
-      url: page.url(),
-      title: await page.title(),
+    const owned = this.#contexts.get(contextId);
+    const current = () =>
+      !signal.aborted &&
+      owned !== undefined &&
+      this.#contexts.get(contextId) === owned &&
+      owned.page === page &&
+      originAllowed(page.url(), owned.allowedOrigins);
+    if (!current()) return { status: "unavailable", reason: "page-changed" };
+    const opening = page.context?.().newCDPSession(page);
+    if (opening === undefined) return { status: "unavailable", reason: "capture-unavailable" };
+    let session: PlaywrightProtocolSessionPort | undefined;
+    let finished = false;
+    const release = (value: PlaywrightProtocolSessionPort) => {
+      void value.detach?.().catch(() => undefined);
     };
-  }
-
-  async #cropDataUrl(
-    page: PlaywrightPagePort,
-    bounds: {
-      readonly x: number;
-      readonly y: number;
-      readonly width: number;
-      readonly height: number;
-    },
-    viewport: { readonly width: number; readonly height: number },
-  ): Promise<string | undefined> {
-    // A little air around the element keeps the crop legible: an element cut to
-    // its exact box reads as a fragment with nothing to place it against.
-    const padX = Math.min(24, viewport.width * 0.05);
-    const padY = Math.min(24, viewport.height * 0.05);
-    const x = Math.max(0, bounds.x * viewport.width - padX);
-    const y = Math.max(0, bounds.y * viewport.height - padY);
-    const width = Math.min(viewport.width - x, bounds.width * viewport.width + padX * 2);
-    const height = Math.min(viewport.height - y, bounds.height * viewport.height + padY * 2);
-    if (width < 1 || height < 1) return undefined;
+    // A port ignoring abort may finish opening later; it never gains a reader
+    // and its dedicated session is still released. No shared debugger is touched.
+    const opened = opening.then((value) => {
+      if (finished || !current()) release(value);
+      else session = value;
+      return value;
+    });
     try {
-      const bytes = await page.screenshot({
-        type: "jpeg",
-        quality: 60,
-        scale: "css",
-        clip: { x, y, width, height },
-      });
-      const url = jpegDataUrl(bytes);
-      return url.length <= MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS ? url : undefined;
-    } catch {
-      return undefined;
+      return await captureBrowserFeedbackPoint(
+        {
+          send: async (method, parameters) => {
+            const value = await opened;
+            if (!current()) throw new Error("Feedback page changed.");
+            return value.send(method, parameters);
+          },
+          current,
+          admits: (url) => owned !== undefined && originAllowed(url, owned.allowedOrigins),
+          sensitive: () => sensitiveDocument(page),
+          digest: (value) => createHash("sha256").update(value).digest("hex"),
+        },
+        point,
+        signal,
+      );
+    } finally {
+      finished = true;
+      if (session !== undefined) release(session);
+      // Attach a rejection handler even if credential protection refused
+      // before the capture needed its protocol session.
+      void opened.catch(() => undefined);
     }
   }
 
@@ -1695,74 +1683,6 @@ async function boundedScreenshotDataUrl(page: PlaywrightPagePort): Promise<strin
   }
   await page.setViewportSize(originalViewport);
   return undefined;
-}
-
-/**
- * Runs inside the page: only the page can say what is under a coordinate.
- *
- * The selector is a short structural path — id when there is one, otherwise tag
- * plus nth-of-type — which is enough to name the element to a person and to an
- * agent without pretending to be a durable test locator. Text and accessible
- * name are bounded here, at the source, so nothing unbounded ever crosses back.
- */
-export function describeElementAtPoint(argument: {
-  readonly x: number;
-  readonly y: number;
-  readonly viewportWidth: number;
-  readonly viewportHeight: number;
-}): {
-  readonly selector: string;
-  readonly role?: string;
-  readonly accessibleName?: string;
-  readonly text?: string;
-  readonly bounds: {
-    readonly x: number;
-    readonly y: number;
-    readonly width: number;
-    readonly height: number;
-  };
-} | null {
-  const element = document.elementFromPoint(argument.x, argument.y);
-  if (element === null) return null;
-
-  const step = (node: Element): string => {
-    const id = node.getAttribute("id");
-    if (id !== null && id.trim().length > 0 && /^[A-Za-z][\w-]*$/.test(id)) return `#${id}`;
-    const tag = node.tagName.toLowerCase();
-    const parent = node.parentElement;
-    if (parent === null) return tag;
-    const siblings = [...parent.children].filter((child) => child.tagName === node.tagName);
-    return siblings.length <= 1 ? tag : `${tag}:nth-of-type(${String(siblings.indexOf(node) + 1)})`;
-  };
-
-  const path: string[] = [];
-  let current: Element | null = element;
-  while (current !== null && path.length < 6 && current.tagName.toLowerCase() !== "html") {
-    const piece = step(current);
-    path.unshift(piece);
-    if (piece.startsWith("#")) break;
-    current = current.parentElement;
-  }
-
-  const rect = element.getBoundingClientRect();
-  const label = element.getAttribute("aria-label");
-  const role = element.getAttribute("role");
-  const text = (element.textContent ?? "").replace(/\s+/g, " ").trim();
-  const implicitRole = element.tagName.toLowerCase();
-  return {
-    selector: path.join(" > ").slice(0, 1_024),
-    role: (role ?? implicitRole).slice(0, 64),
-    ...(label === null || label.trim().length === 0
-      ? {}
-      : { accessibleName: label.trim().slice(0, 512) }),
-    ...(text.length === 0 ? {} : { text: text.slice(0, 2_048) }),
-    bounds: {
-      x: Math.min(1, Math.max(0, rect.left / argument.viewportWidth)),
-      y: Math.min(1, Math.max(0, rect.top / argument.viewportHeight)),
-      width: Math.min(1, Math.max(0, rect.width / argument.viewportWidth)),
-      height: Math.min(1, Math.max(0, rect.height / argument.viewportHeight)),
-    },
-  };
 }
 
 function jpegDataUrl(bytes: Uint8Array): string {

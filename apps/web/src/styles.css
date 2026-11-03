@@ -5715,6 +5715,31 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   border-top: 1px solid var(--octant-border-subtle);
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
+  box-sizing: border-box;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(45%, 420px);
+  overflow: auto;
+}
+
+.browser-workspace--feedback {
+  display: flex;
+  flex-direction: column;
+}
+
+.browser-workspace--feedback > .browser-workspace__chrome {
+  flex: 0 0 var(--oct-title-rail-h, 40px);
+}
+
+.browser-workspace--feedback > .browser-workspace__message {
+  flex: 0 0 auto;
+}
+
+.browser-workspace--feedback > .browser-workspace__native,
+.browser-workspace--feedback > .browser-workspace__remote,
+.browser-workspace--feedback > .browser-workspace__start {
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .product-feedback__header {
@@ -5732,6 +5757,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .product-feedback__composer-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--oct-space-1);
 }
 
@@ -5753,8 +5779,47 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .product-feedback__note {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
+  padding-block: var(--oct-space-2);
+  border-top: 1px solid var(--octant-border-subtle);
+}
+
+.product-feedback__selection {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.product-feedback__note-heading {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font: inherit;
+}
+
+.product-feedback__crop {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+}
+
+.product-feedback__evidence,
+.product-feedback__source {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.product-feedback__evidence dd {
+  margin-inline-start: var(--oct-space-2);
+}
+
+.product-feedback__evidence th,
+.product-feedback__evidence td {
+  padding: var(--oct-space-1);
+  text-align: start;
+  vertical-align: top;
 }
 
 .product-feedback__note-comment {

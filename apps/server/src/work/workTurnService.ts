@@ -1,3 +1,4 @@
+import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurnPort";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import {
   coveredAgentResultDeliveryMembers,
@@ -322,6 +323,13 @@ export interface WorkTurnServiceDependencies {
     readonly modelId: WorkThread["modelId"];
   }) => boolean;
   readonly turnRuntime?: WorkTurnRuntimePort;
+  readonly prepareProductFeedbackForTurn?: (input: {
+    readonly windowId: WindowId;
+    readonly threadId: string;
+    readonly operationId: string;
+    readonly supportsImages: boolean;
+    readonly current: () => boolean;
+  }) => PreparedProductFeedbackTurn | undefined;
   /**
    * Records that the runtime's own web search, page fetch, or hosted tool put
    * outside content in front of the model. Without it such a call stops the
@@ -500,6 +508,7 @@ export class WorkTurnService {
   readonly #supportsModelSwitch: WorkTurnServiceDependencies["supportsModelSwitch"];
   readonly #selectConversationHandoffContext: WorkTurnServiceDependencies["selectConversationHandoff"];
   readonly #turnRuntime: WorkTurnRuntimePort;
+  readonly #prepareProductFeedbackForTurn: WorkTurnServiceDependencies["prepareProductFeedbackForTurn"];
   readonly #outsideContentMarks: RuntimeOutsideContentMarking | undefined;
   readonly #forgeChanges: RuntimeForgeChangeObserver | undefined;
   readonly #onRequestSettled: WorkTurnServiceDependencies["onRequestSettled"];
@@ -553,6 +562,7 @@ export class WorkTurnService {
     this.#supportsModelSwitch = dependencies.supportsModelSwitch;
     this.#selectConversationHandoffContext = dependencies.selectConversationHandoff;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
+    this.#prepareProductFeedbackForTurn = dependencies.prepareProductFeedbackForTurn;
     this.#outsideContentMarks = dependencies.outsideContentMarks;
     this.#forgeChanges = dependencies.forgeChanges;
     this.#onRequestSettled = dependencies.onRequestSettled;
@@ -1087,6 +1097,20 @@ export class WorkTurnService {
     // are still planned: the plan is what a requested compaction summarizes
     // from and what decides whether the conversation still fits. Only the
     // send leaves them out (see `sessionHolds`).
+    const preparedFeedback =
+      thread === undefined ||
+      server !== undefined ||
+      command.delivery !== undefined ||
+      options?.limitRecovery === true ||
+      options?.accessCeiling !== undefined
+        ? undefined
+        : this.#prepareProductFeedbackForTurn?.({
+            windowId: authenticatedWindowId,
+            threadId: String(command.threadId),
+            operationId: String(command.turnId),
+            supportsImages: this.#modelReadsImages(command.authority),
+            current: options?.admissionCurrent ?? (() => true),
+          });
     const priorTranscript = nativeConversation
       ? []
       : this.#priorTranscriptContributions(command.threadId);
@@ -1098,6 +1122,18 @@ export class WorkTurnService {
       createdAt: this.#clock(),
       safeInputBudget: this.#safeInputBudgetTokens,
       contributions: [
+        ...(preparedFeedback?.context === undefined
+          ? []
+          : [
+              {
+                text: preparedFeedback.context,
+                sourceKind: "message" as const,
+                referenceId: `product-feedback:${command.turnId}`,
+                category: "workspace-context" as const,
+                posture: "required" as const,
+                block: { kind: "user-message" as const, text: preparedFeedback.context },
+              },
+            ]),
         ...harnessContext.map(
           (block, index): WorkTurnContextContribution => ({
             text: block.text,
@@ -1295,6 +1331,7 @@ export class WorkTurnService {
       ...(server === undefined ? {} : { serverTools: server.tools }),
       driver,
       attachments: attachmentInputs,
+      ...(preparedFeedback === undefined ? {} : { preparedProductFeedback: preparedFeedback }),
       contextPlan: planned,
       sessionHolds,
       ...(options?.admissionCurrent === undefined
@@ -1651,6 +1688,7 @@ export class WorkTurnService {
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     readonly contextPlan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
+    readonly preparedProductFeedback?: PreparedProductFeedbackTurn;
     /**
      * Planned blocks a continued session already holds. They stay in the plan,
      * so the context meter, a requested compaction and the plan's own fit see
@@ -1764,6 +1802,28 @@ export class WorkTurnService {
     const providerContext = (published?.context ?? finalPlan.context).filter(
       (block) => !input.sessionHolds.has(block),
     );
+    if (
+      input.preparedProductFeedback?.context !== undefined &&
+      !providerContext.some((block) => block.text === input.preparedProductFeedback?.context)
+    ) {
+      observation?.finish();
+      await Effect.runPromise(
+        Effect.promise(async () => {
+          await appManagedTools?.close?.();
+        }).pipe(
+          Effect.timeout("2 seconds"),
+          Effect.catchAllCause(() =>
+            Effect.logWarning("Prepared Work feedback tool cleanup failed."),
+          ),
+        ),
+      );
+      this.#refuseTurn(input.command, {
+        category: "invalid",
+        message:
+          "Selected product notes could not fit this Work turn. Review the pending notes before sending again.",
+      });
+      return;
+    }
     const harnessScope: NativeHarnessTurnScope | undefined =
       input.thread === undefined
         ? undefined
@@ -1852,6 +1912,23 @@ export class WorkTurnService {
           : { modelOptionValues: input.thread.modelOptionValues }),
         ...(appManagedTools === undefined ? {} : { appManagedTools }),
         ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
+        ...(input.admissionCurrent === undefined
+          ? {}
+          : { admissionCurrent: input.admissionCurrent }),
+        ...(input.preparedProductFeedback === undefined
+          ? {}
+          : {
+              takeProductFeedback: () => {
+                const carried = input.preparedProductFeedback?.take();
+                if (
+                  carried === undefined ||
+                  carried.context !== input.preparedProductFeedback?.context
+                )
+                  throw new Error("Prepared product notes changed before delivery.");
+                // The exact context already passed the ordinary required-context plan.
+                return { attachments: carried.attachments };
+              },
+            }),
         ...(providerContext.length === 0 ? {} : { context: providerContext }),
         onDelta: (response) => {
           const projected = this.#projection.lookup(input.command.requestId);

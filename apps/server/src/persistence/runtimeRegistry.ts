@@ -157,6 +157,7 @@ import {
   ExtensionProjectPinChanged,
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
+  ProductFeedbackUpdated,
   PROJECT_TERMINAL_EVENT_NAMES,
   ProjectTerminalEnded,
   ProjectTerminalStarted,
@@ -318,6 +319,7 @@ import { RemoteAccessProjection } from "./remoteAccessProjection";
 import {
   PRODUCT_FEEDBACK_CAPTURED,
   PRODUCT_FEEDBACK_DELIVERED,
+  PRODUCT_FEEDBACK_UPDATED,
   PRODUCT_FEEDBACK_DISCARDED,
   ProductFeedbackProjection,
 } from "./productFeedbackProjection";
@@ -661,6 +663,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PRODUCT_FEEDBACK_CAPTURED, 1, ProductFeedbackCaptured)
     .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)
     .register(PRODUCT_FEEDBACK_DELIVERED, 1, ProductFeedbackDelivered)
+    .register(PRODUCT_FEEDBACK_UPDATED, 1, ProductFeedbackUpdated)
     .register(PROJECT_TERMINAL_EVENT_NAMES.started, 1, ProjectTerminalStarted)
     .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
     .register(BROWSER_PROFILE_EVENT_NAMES.cleared, 1, BrowserProfileCleared)

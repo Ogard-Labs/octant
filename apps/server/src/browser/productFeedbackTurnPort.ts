@@ -1,11 +1,16 @@
-import type { ProviderAttachmentInput } from "@octant/contracts";
+import type { ProviderAttachmentInput, ProductFeedbackNote, WindowId } from "@octant/contracts";
 import { planProductFeedbackDelivery } from "@octant/domain";
 import type { ProductFeedbackService } from "./productFeedbackService";
 
 const MAX_CROP_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 
 export interface ProductFeedbackTurnPortDeps {
-  readonly service: Pick<ProductFeedbackService, "deliver" | "readCrop">;
+  readonly service: Pick<ProductFeedbackService, "deliver" | "readCrop" | "pendingForTurn">;
+  /** Existing host task/window binding, retained before provider preparation. */
+  readonly resolveScope?: (
+    windowId: WindowId,
+    threadId: string,
+  ) => { readonly current: () => boolean } | undefined;
 }
 
 /**
@@ -16,54 +21,113 @@ export interface ProductFeedbackTurnPortDeps {
  * A note the journal refused is therefore never sent, which is the honest
  * direction to fail — a note that arrives twice reads as the user asking twice.
  */
-export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps) {
-  return (input: {
-    readonly threadId: string;
-    readonly operationId: string;
-    readonly supportsImages: boolean;
-  }): {
-    readonly context?: string;
-    readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-  } => {
-    const carried = deps.service.deliver({
-      threadId: String(input.threadId),
-      operationId: String(input.operationId),
-    });
-    if (carried.length === 0) return { attachments: [] };
+export interface ProductFeedbackTurnInput {
+  readonly threadId: string;
+  readonly operationId: string;
+  readonly supportsImages: boolean;
+}
 
+export interface ProductFeedbackTurnDelivery {
+  readonly context?: string;
+  readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
+}
+
+export interface PreparedProductFeedbackTurn extends ProductFeedbackTurnDelivery {
+  /** Claims only this exact prepared version; never a later edited note. */
+  readonly take: () => ProductFeedbackTurnDelivery;
+}
+
+export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps) {
+  const format = (
+    notes: ReadonlyArray<ProductFeedbackNote>,
+    supportsImages: boolean,
+  ): ProductFeedbackTurnDelivery => {
+    const images = new Map<string, ProviderAttachmentInput>();
+    for (const note of notes) {
+      if (!supportsImages || note.crop === undefined) continue;
+      let dataUrl: string | undefined;
+      try {
+        dataUrl = deps.service.readCrop(note);
+      } catch {
+        dataUrl = undefined;
+      }
+      const decoded = dataUrl === undefined ? undefined : decodeImageDataUrl(dataUrl);
+      if (decoded !== undefined)
+        images.set(String(note.id), {
+          attachmentId: String(note.id),
+          displayName: "Pointed-at element",
+          mediaType: decoded.mediaType,
+          bytes: decoded.bytes,
+        });
+    }
     const plan = planProductFeedbackDelivery({
-      notes: carried.map((note) => ({
+      notes: notes.map((note) => ({
         noteId: String(note.id),
         comment: note.comment,
         element: note.element,
-        ...(note.crop === undefined ? {} : { cropContentId: String(note.crop.contentId) }),
+        capturedAt: note.capturedAt,
+        ...(note.crop === undefined || !images.has(String(note.id))
+          ? {}
+          : { cropContentId: String(note.crop.contentId) }),
+        ...(note.crop === undefined
+          ? { cropOmission: "not-captured" as const }
+          : !supportsImages
+            ? { cropOmission: "unsupported-model" as const }
+            : !images.has(String(note.id))
+              ? { cropOmission: "unavailable" as const }
+              : {}),
       })),
-      supportsImages: input.supportsImages,
+      supportsImages,
     });
-
-    const attachments: ProviderAttachmentInput[] = [];
-    for (const crop of plan.crops) {
-      const note = carried.find((candidate) => String(candidate.id) === crop.noteId);
-      if (note === undefined) continue;
-      const dataUrl = deps.service.readCrop(note);
-      const decoded = dataUrl === undefined ? undefined : decodeImageDataUrl(dataUrl);
-      // A picture the store no longer holds costs this note its image only. The
-      // words already say a picture was meant to travel, so the model is not
-      // left believing it saw one.
-      if (decoded === undefined) continue;
-      attachments.push({
-        attachmentId: crop.noteId,
-        displayName: "Pointed-at element",
-        mediaType: decoded.mediaType,
-        bytes: decoded.bytes,
-      });
-    }
-
     return {
       ...(plan.context.length === 0 ? {} : { context: plan.context }),
-      attachments,
+      attachments: [...images.values()],
     };
   };
+  const take = (input: ProductFeedbackTurnInput): ProductFeedbackTurnDelivery =>
+    format(
+      deps.service.deliver({ threadId: input.threadId, operationId: input.operationId }),
+      input.supportsImages,
+    );
+  return Object.assign(take, {
+    prepare(
+      input: ProductFeedbackTurnInput & {
+        readonly windowId: WindowId;
+        readonly current: () => boolean;
+      },
+    ): PreparedProductFeedbackTurn {
+      const scope = deps.resolveScope?.(input.windowId, input.threadId);
+      const current = () => input.current() && scope?.current() !== false;
+      if ((deps.resolveScope !== undefined && scope === undefined) || !current())
+        throw new Error("Feedback turn admission is no longer current.");
+      const notes = deps.service.pendingForTurn(input.threadId);
+      const selected = notes.map((note) => ({ noteId: String(note.id), version: note.version }));
+      const delivery = format(notes, input.supportsImages);
+      if (!current()) throw new Error("Feedback turn admission is no longer current.");
+      let taken = false;
+      return {
+        ...delivery,
+        take: () => {
+          if (taken || !current()) throw new Error("Prepared feedback is no longer current.");
+          taken = true;
+          const carried = deps.service.deliver({
+            threadId: input.threadId,
+            operationId: input.operationId,
+            selected,
+          });
+          if (carried.length !== selected.length)
+            throw new Error("Selected feedback changed before delivery.");
+          // Publication can synchronously retire the original task/window.
+          // Preserve its durable claim, but expose no fresh evidence afterward.
+          if (!current())
+            throw new Error(
+              "Product-note delivery changed after its durable claim. Refresh notes before retrying.",
+            );
+          return delivery;
+        },
+      };
+    },
+  });
 }
 
 function decodeImageDataUrl(

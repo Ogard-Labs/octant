@@ -774,3 +774,68 @@ Several threads of one Project may each drive their own page at the same time.
   for an origin a replay opens, and refuses Plan mode and a paired device.
   `browserFlowService.test.ts` covers saving, replacing, listing, deleting,
   limits, replay of the journal, and erasing a Project.
+
+## Pointed-at product feedback
+
+A local person can choose an element in an exposed Code or Work Browser and
+inspect a static crop, bounded DOM neighborhood, computed style and capture
+time before adding a comment. The native surface consumes the selected click
+only while its explicit pointing mode is armed; a renderer overlay does not
+pretend to intercept a native page. Headless screenshot selection refers to the
+shown observation revision. Both paths use the same host-owned safe capture
+reader, current page/origin/credential checks and finite deadlines.
+
+Comments can be amended or removed while pending, and the person chooses which
+notes accompany an ordinary message. The original capture remains immutable.
+No note action sends, queues, steers, approves or resolves work. Automatic
+continuations leave chosen notes pending. Native Electron input acceptance is a
+separate runtime gate from controlled-port tests or real Chromium DOM tests.
+A note has split provenance: its comment is the person's request, while the
+selector, DOM, style and image are outside content that taints the destination
+thread and is framed as evidence, never instructions.
+
+- Pointing first prepares a static preview. The person inspects its crop and
+  bounded DOM/style context before committing a comment. Pending comments and
+  inclusion can be amended with a version check; element evidence, capture
+  time and crop association remain immutable. An excluded note stays pending.
+  Choosing, committing or editing a note never sends a message, queues a turn,
+  approves execution or resolves a finding.
+- Native selection uses an expiring host selection token bound to the original
+  window, context, tab, document, bounds and actual person input. A renderer
+  request ID correlates the panel's arm/cancel replies; it grants no capture
+  authority. Selection consumes only its pointing click, while ordinary input
+  retains its existing behavior. Selection expires after 60 seconds, and a
+  point read has a 10-second deadline. Navigation, replacement, credential
+  observation pause, Stop or revoked authority prevents late fresh evidence.
+- Native and headless point reads share one fixed top-frame reader and capture
+  sequence. It rechecks approved origin, frame/loader/node identity, viewport
+  and credential protection across DOM and screenshot waits. It never enters
+  a child frame to inspect an element. A crop overlapping editable content or
+  an uninspected iframe/embed region is withheld; safe bounded context and the
+  person's comment remain, with an explicit omission. Filtering DOM text does
+  not imply that arbitrary screenshots have their form values redacted.
+- Preview memory is host-owned and temporary: eight per window/task, 32 across
+  the host including in-flight reservations, 256 KiB crop characters and 16 KiB
+  serialized metadata per preview, and 8 MiB aggregate UTF-8 bytes. Reservations
+  count before capture starts; full capacity refuses rather than evicting a
+  live preview. Previews expire after ten minutes or release on cancel, window
+  revoke, task purge or host close. JavaScript strings and objects have bounded
+  additional overhead; this is not a process RSS limit. An expired or refused
+  preview preserves the local comment and offers explicit recapture.
+- Committing a preview checks its original local capability and current task
+  scope, then atomically stores crop, outside-content mark and note on the
+  existing SQLite connection. Failed commits roll back all three without
+  deleting a crop shared by another note. A response lost after a successful
+  commit asks the person to refresh before retrying; it does not imply that
+  nothing was saved.
+- Ordinary admission snapshots exact selected note IDs and versions. Claims
+  happen only at the existing current-authority delivery boundary; a changed
+  selection remains pending and requires refresh. Text-only models and missing
+  images receive honest omissions. Notes cannot expand Browser, child,
+  unattended, terminal or paired-device authority.
+
+A durable delivery claim identifies the admitted operation, not an SDK receipt.
+If synchronous publication retires the original authority, the host keeps that
+private consumed status and sends no fresh note evidence. A failed or lost
+acknowledgement does not automatically replay notes. The person refreshes notes
+and the turn result before deciding what to send again.

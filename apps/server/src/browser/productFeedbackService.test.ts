@@ -1,4 +1,8 @@
-import { decodeProductFeedbackNote, type ProductFeedbackNote } from "@octant/contracts";
+import {
+  decodeProductFeedbackNote,
+  decodeWindowId,
+  type ProductFeedbackNote,
+} from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   ProductFeedbackError,
@@ -75,16 +79,22 @@ function harness(
     readonly canAccess?: boolean;
     readonly cropThrows?: boolean;
     readonly recordExternalContentIngestion?: ProductFeedbackServiceOptions["recordExternalContentIngestion"];
+    readonly current?: () => boolean;
+    readonly mode?: "work" | "code";
   } = {},
 ) {
   const stored = new Map<string, ProductFeedbackNote>(
     (options.notes ?? []).map((note) => [String(note.id), note]),
   );
   const journal = { append: vi.fn() };
-  const describePoint = vi.fn(async () => options.observation ?? described);
+  const describePoint = vi.fn(
+    async (_input: Parameters<ProductFeedbackServiceOptions["browser"]["describePoint"]>[0]) =>
+      options.observation ?? described,
+  );
   const service = new ProductFeedbackService({
     journal,
-    browser: { describePoint: describePoint as never },
+    transaction: (body) => body(),
+    browser: { describePoint },
     crops: {
       put: vi.fn(() => {
         if (options.cropThrows === true) throw new Error("no room");
@@ -96,9 +106,16 @@ function harness(
     readNotes: (threadId) =>
       [...stored.values()].filter((note) => String(note.threadId) === String(threadId)),
     canAccessThread: async () => options.canAccess ?? true,
-    ...(options.recordExternalContentIngestion === undefined
-      ? {}
-      : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
+    resolveThread: async () => ({
+      mode: options.mode ?? "code",
+      current: options.current ?? (() => true),
+    }),
+    recordExternalContentIngestion:
+      options.recordExternalContentIngestion ??
+      (() => ({
+        kind: "recorded",
+        taint: { externalContentIngested: true, ingestedSources: ["browser-page"] },
+      })),
     uuid: () => ids.note,
     clock: () => now,
     actor: { kind: "local-user", actorId: ids.actor as never },
@@ -107,6 +124,83 @@ function harness(
 }
 
 describe("pointing at the running product", () => {
+  it("previews host evidence without persistence, then commits the immutable capture to the host-resolved Work task", async () => {
+    const fixture = harness({ mode: "work" });
+    const original = {
+      kind: "prepare-product-feedback",
+      threadId: ids.thread,
+      contextId: ids.context,
+      selectionId: ids.operation,
+      point: capture.point,
+    };
+    const execution = { admissionCurrent: () => true };
+    const prepared = await fixture.service.execute(windowId, original, execution);
+    expect(prepared.kind).toBe("feedback-prepared");
+    if (prepared.kind !== "feedback-prepared") throw Error("Preview unavailable");
+    expect(prepared.preview).toMatchObject({
+      mode: "work",
+      cropDataUrl: crop,
+      element: { selector: described.element.selector },
+    });
+    expect(fixture.journal.append).not.toHaveBeenCalled();
+    await expect(
+      fixture.service.execute(
+        windowId,
+        {
+          kind: "commit-product-feedback",
+          threadId: ids.thread,
+          previewId: prepared.preview.id,
+          comment: "Forged evidence",
+          element: { selector: "forged client element" },
+        },
+        execution,
+      ),
+    ).rejects.toThrow(ProductFeedbackError);
+    const foreign = await fixture.service.execute(
+      decodeWindowId(ids.actor),
+      {
+        kind: "commit-product-feedback",
+        threadId: ids.thread,
+        previewId: prepared.preview.id,
+        comment: "Wrong target",
+      },
+      execution,
+    );
+    expect(foreign.kind).toBe("feedback-refused");
+    const committed = await fixture.service.execute(
+      windowId,
+      {
+        kind: "commit-product-feedback",
+        threadId: ids.thread,
+        previewId: prepared.preview.id,
+        comment: "Align this button",
+      },
+      execution,
+    );
+    expect(committed).toMatchObject({
+      kind: "feedback-captured",
+      note: {
+        mode: "work",
+        comment: "Align this button",
+        element: { selector: described.element.selector },
+        provenance: { element: { origin: "external-content" } },
+      },
+    });
+    expect(fixture.describePoint).toHaveBeenCalledTimes(1);
+    expect(fixture.journal.append).toHaveBeenCalledTimes(1);
+    expect(
+      await fixture.service.execute(
+        windowId,
+        {
+          kind: "commit-product-feedback",
+          threadId: ids.thread,
+          previewId: prepared.preview.id,
+          comment: "Do not duplicate",
+        },
+        execution,
+      ),
+    ).toEqual({ kind: "feedback-refused", reason: "preview-expired" });
+  });
   it("resolves the element on the host and never takes one from the caller", async () => {
     const { service, describePoint } = harness();
 
@@ -117,6 +211,7 @@ describe("pointing at the running product", () => {
       threadId: ids.thread,
       contextId: ids.context,
       point: { x: 0.3, y: 0.52 },
+      current: expect.any(Function),
     });
     expect(result).toMatchObject({
       kind: "feedback-captured",

@@ -11,7 +11,6 @@
     "apps/server/src/apple/appleToolchainService.ts": 5,
     "apps/server/src/automation/automationDispatchService.ts": 1,
     "apps/server/src/automation/automationNotificationRoutes.ts": 3,
-    "apps/server/src/browser/playwrightBrowserRuntime.ts": 5,
     "apps/server/src/chat/chatService.ts": 5,
     "apps/server/src/chat/chatTurnRunner.ts": 4,
     "apps/server/src/chat/threadDialogueService.ts": 3,

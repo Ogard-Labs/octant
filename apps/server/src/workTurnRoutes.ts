@@ -28,10 +28,10 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
-import { WorkTurnServiceError } from "./work/workTurnService";
+import { WorkTurnServiceError, type WorkTurnStartOptions } from "./work/workTurnService";
 
 const JSON_BODY_LIMIT = 1_048_576;
 const METHODS = "GET, POST, PUT, DELETE, OPTIONS";
@@ -40,7 +40,11 @@ const HEADERS =
 const decodeWorkTurnFailure = Schema.decodeUnknownSync(WorkTurnFailureSchema);
 
 export interface WorkTurnRouteService {
-  readonly startFirstTurn: (windowId: WindowId, command: unknown) => Promise<WorkTurnLookupResult>;
+  readonly startFirstTurn: (
+    windowId: WindowId,
+    command: unknown,
+    options?: Pick<WorkTurnStartOptions, "admissionCurrent">,
+  ) => Promise<WorkTurnLookupResult>;
   readonly lookupFirstTurn: (
     windowId: WindowId,
     requestId: string,
@@ -182,14 +186,22 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
       return undefined;
 
     let authenticatedWindowId: WindowId;
+    let admissionCurrent: () => boolean;
     try {
       if (url.searchParams.has("windowId")) {
         throw new WorkTurnRouteRejected("Work turn requests cannot supply window identity.", 400);
       }
-      authenticatedWindowId = authenticateRouteWindowId({
+      const principalContext = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: now(),
+      });
+      authenticatedWindowId = principalContext.scopeId;
+      admissionCurrent = retainRouteAdmissionCurrent({
+        request,
+        context: principalContext,
+        store: dependencies.windowAuthorityStore,
+        now,
       });
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
@@ -312,7 +324,9 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
       }
       return jsonResponse(
         decodeWorkTurnLookupResult(
-          await dependencies.service.startFirstTurn(authenticatedWindowId, value),
+          await dependencies.service.startFirstTurn(authenticatedWindowId, value, {
+            admissionCurrent,
+          }),
         ),
         200,
         origin,

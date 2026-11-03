@@ -18,6 +18,7 @@ import {
 } from "@octant/contracts/browser-automation";
 import { decodeCodeEvidenceReference } from "@octant/contracts/code-operations";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
+import { createProductFeedbackThreadScope } from "../browser/productFeedbackThreadScope";
 import { isRoutineHostScope } from "../routineHostScope";
 import { BrowserExtensionService } from "../browser/browserExtensionService";
 import { BrowserProfileService } from "../browser/browserProfileService";
@@ -353,6 +354,16 @@ export function wireBrowser(deps: BrowserDependencies) {
     // authority check and resolves the element itself; the crop lives in the
     // same purgeable evidence store the rest of Code's bulk content uses, and
     // the journal keeps only the reference.
+    const resolveFeedbackThread = createProductFeedbackThreadScope({
+      readCodeThread: persistence.readCodeThread,
+      readWorkThread: persistence.readWorkThread,
+      readProject: persistence.readProject,
+      canUseWindow: (windowId) =>
+        windowAuthorityStore.listWindowIds().includes(windowId) &&
+        !browserToolApprovalService.isPairedDevice(windowId) &&
+        !isRoutineHostScope(windowId),
+      windowHoldsProject,
+    });
     const productFeedbackService = new ProductFeedbackService({
       journal: persistence.journal,
       browser: {
@@ -362,6 +373,12 @@ export function wireBrowser(deps: BrowserDependencies) {
             threadId: decodeBrowserThreadId(input.threadId),
             contextId: decodeBrowserContextId(input.contextId),
             point: input.point,
+            ...(input.selectionId === undefined ? {} : { selectionId: input.selectionId }),
+            ...(input.expectedObservationRevision === undefined
+              ? {}
+              : { expectedObservationRevision: input.expectedObservationRevision }),
+            ...(input.current === undefined ? {} : { current: input.current }),
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
           })) ?? { status: "unavailable" },
       },
       crops: {
@@ -389,16 +406,37 @@ export function wireBrowser(deps: BrowserDependencies) {
       },
       readNote: (noteId) => persistence.readProductFeedbackNote(noteId),
       readNotes: (threadId) => persistence.readProductFeedbackNotes(threadId),
-      canAccessThread: async (windowId, threadId) => {
-        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-        if (thread === undefined) return false;
-        return projectService.hasActiveProject(thread.projectId, "code");
+      canAccessThread: async (windowId, threadId) =>
+        resolveFeedbackThread(windowId, threadId) !== undefined,
+      resolveThread: async (windowId, threadId) => resolveFeedbackThread(windowId, threadId),
+      transaction: (body) => {
+        try {
+          return persistence.journal.transaction(body);
+        } catch (error) {
+          codeEvidence.reconcileCapacity();
+          throw error;
+        }
       },
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    onWindowRevoked((windowId) => productFeedbackService.revokeWindow(windowId));
+    const unsubscribeFeedbackAuthority = persistence.journal.subscribeCommitted((append) => {
+      if (
+        append.events.some((event) =>
+          /^(?:code\.thread-|work\.thread-|project\.|workspace\.)/.test(event.eventName),
+        )
+      )
+        productFeedbackService.revalidatePreviews();
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeFeedbackAuthority();
+        productFeedbackService.close();
+      }),
+    );
     const productFeedbackRoutes = createProductFeedbackRouteHandler({
       feedback: productFeedbackService,
       windowAuthorityStore,
@@ -413,6 +451,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       liveProjectBrowsers,
       productFeedbackRoutes,
       productFeedbackService,
+      resolveFeedbackThread,
       projectBrowserService,
       windowHoldsProject,
     };

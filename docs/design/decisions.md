@@ -1618,13 +1618,14 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Canvas
 
 ### Product feedback notes
 
-A product-feedback note is one comment the person pointed at an element of the running product, journaled on its own aggregate and sent with the next turn exactly once.
+A local person can point at an exposed Code or Work Browser element, inspect a bounded static crop and DOM/style context, then save a comment on that immutable capture.
 
-- The client sends only where it tapped and the text; the host resolves the element and cuts the crop after checking the caller may see the thread and the browsing context is the window's own. _Here only._
-- The comment is the person's words; the element description is outside content that taints the thread and is framed as content, never instructions. _Here only._
-- A picture travels only to a model that reads images; the crop lives in purgeable evidence storage referenced from the journal, and notes queue per thread up to a small bound. _Here only._
+- The host resolves the element under the original window/task/page authority. Renderer point/request correlation cannot supply authoritative element data or create a Browser grant.
+- Pending notes can be amended, removed or excluded. Only an explicit person message consumes exact selected versions once; automatic continuations leave them pending. Saving or choosing notes never sends, queues, steers or approves work.
+- Comments are person-authored; captured page material has outside-content provenance and taints the task. Missing or unsafe crops have explicit omissions and preserve the comment.
+- Preview count, memory and lifetime are bounded across the host. Crop, outside-content marking and committed note are atomic; late revoked reads never publish fresh evidence.
 
-Status: Built. Since: —. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
+Status: Partially built. Local Browser capture/preview/note delivery is implemented; native Electron runtime acceptance remains required. Detail: [Browser: Pointed-at product feedback](browser-agent-tool.md#pointed-at-product-feedback).
 
 ### Project actions
 

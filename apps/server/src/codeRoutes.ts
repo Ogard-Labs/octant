@@ -184,7 +184,7 @@ import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
 import type { PairedMergeUnlockPort } from "./hub/pairedMergeUnlock";
-import { authenticateRoutePrincipal } from "./principalRouteContext";
+import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -612,6 +612,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // route directly.
     let operationInitiator: "user" | "agent";
     let callerKind: "local-window" | "remote-device";
+    let admissionCurrent: () => boolean;
     try {
       if (url.searchParams.has("windowId")) {
         throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
@@ -624,6 +625,12 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
       authenticatedWindowId = principalContext.scopeId;
       callerKind = principalContext.principal.kind;
       operationInitiator = callerKind === "local-window" ? "user" : "agent";
+      admissionCurrent = retainRouteAdmissionCurrent({
+        request,
+        context: principalContext,
+        store: dependencies.windowAuthorityStore,
+        now,
+      });
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failureResponse(
@@ -768,6 +775,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           const operationResult = decodeCodeOperationResult(
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {
               initiator: operationInitiator,
+              ...(operation.kind === "start-provider-turn" ? { admissionCurrent } : {}),
             }),
           );
           if (operationResult.operationId !== operation.operationId) {

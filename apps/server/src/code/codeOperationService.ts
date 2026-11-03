@@ -1,3 +1,4 @@
+import type { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
@@ -1175,14 +1176,7 @@ export interface CodeOperationServiceOptions {
    * carried before launch, without yielding to a later admission revocation.
    * Absent on a host with no browser surface.
    */
-  readonly takeProductFeedbackForTurn?: (input: {
-    readonly threadId: CodeThreadId;
-    readonly operationId: CodeOperationId;
-    readonly supportsImages: boolean;
-  }) => {
-    readonly context?: string;
-    readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-  };
+  readonly takeProductFeedbackForTurn?: ReturnType<typeof createProductFeedbackTurnPort>;
   readonly takeIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly peekIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly consumeIssueContextFramed?: (threadId: string) => void;
@@ -1640,6 +1634,7 @@ export class CodeOperationService {
                         starting.attachments,
                         admissionCurrent,
                         initiator,
+                        initiator === "user" && options.limitRecovery !== true,
                       );
               } catch (error) {
                 const category =
@@ -2631,6 +2626,7 @@ export class CodeOperationService {
     attachments: ReadonlyArray<CodeAttachmentReference>,
     admissionCurrent?: () => boolean,
     initiator: CodeOperationInitiator = "agent",
+    includeProductFeedback = false,
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
     // A server thread's Git runs on its server; it never reaches this host's.
@@ -3187,6 +3183,7 @@ export class CodeOperationService {
           root.checkoutRoot,
           attachments,
           admissionCurrent,
+          includeProductFeedback,
         );
       case "answer-provider-input":
         return this.#providerInput(command, thread, root.checkoutRoot);
@@ -4434,6 +4431,7 @@ export class CodeOperationService {
     checkoutRoot: string,
     references: ReadonlyArray<CodeAttachmentReference>,
     admissionCurrent?: () => boolean,
+    includeProductFeedback = false,
   ): Promise<CodeOperationResult> {
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
@@ -4531,7 +4529,19 @@ export class CodeOperationService {
       this.#options.carryAgentMessages?.(String(thread.id)) ?? Promise.resolve([])
     ).catch(() => []);
     for (const message of agentMessages) context.push({ kind: "user-message", text: message.text });
-    const takeProductFeedback = this.#options.takeProductFeedbackForTurn;
+    // Only the host-vouched local person send carries their chosen notes.
+    // Child results, usage recovery, and replay recovery are not that intent.
+    const takeProductFeedback =
+      includeProductFeedback && !serverThread && command.delivery === undefined
+        ? this.#options.takeProductFeedbackForTurn
+        : undefined;
+    const preparedFeedback = takeProductFeedback?.prepare({
+      windowId,
+      threadId: command.threadId,
+      operationId: command.operationId,
+      supportsImages,
+      current: () => admissionCurrent?.() !== false,
+    });
     const turn = await this.#options.turns.start({
       windowId,
       thread,
@@ -4560,16 +4570,7 @@ export class CodeOperationService {
                 .catch(() => undefined);
             },
           }),
-      ...(takeProductFeedback === undefined
-        ? {}
-        : {
-            takeProductFeedback: () =>
-              takeProductFeedback({
-                threadId: command.threadId,
-                operationId: command.operationId,
-                supportsImages,
-              }),
-          }),
+      ...(preparedFeedback === undefined ? {} : { takeProductFeedback: preparedFeedback.take }),
     });
     if (turn.admission !== "refused") {
       this.#options.consumeIssueContextFramed?.(String(thread.id));

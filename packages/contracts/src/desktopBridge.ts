@@ -207,7 +207,18 @@ export interface BrowserSurfaceTabState {
   readonly title: string;
 }
 
+export type BrowserSurfacePointSelection =
+  | { readonly status: "armed"; readonly requestId: string; readonly selectionId: string }
+  | {
+      readonly status: "selected";
+      readonly requestId: string;
+      readonly selectionId: string;
+      readonly point: { readonly x: number; readonly y: number };
+    };
+
 export interface BrowserSurfaceState {
+  /** An explicit person's gesture, scoped to this surface owner. */
+  readonly pointSelection?: BrowserSurfacePointSelection;
   readonly contextId: string;
   readonly url: string;
   readonly title: string;

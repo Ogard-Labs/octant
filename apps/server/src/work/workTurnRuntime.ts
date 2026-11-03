@@ -92,6 +92,13 @@ export interface WorkTurnRuntimePort {
     readonly signal: AbortSignal;
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
+    /** Original host admission, checked after provider acquisition/session awaits. */
+    readonly admissionCurrent?: () => boolean;
+    /** Claims only the exact prepared notes after the final admission check. */
+    readonly takeProductFeedback?: () => {
+      readonly context?: string;
+      readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
+    };
     readonly modelOptionValues?: ProviderModelOptionValues;
     /** The thread's access; absent reads as ask-first, which Work always was. */
     readonly access?: WorkAccess;
@@ -575,31 +582,52 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               }),
             ),
           ),
-        send: Effect.sync(() => {
+        send: Effect.suspend(() => {
+          if (input.signal.aborted || input.admissionCurrent?.() === false)
+            return Effect.fail({
+              category: "unauthorized" as const,
+              message: "Work turn admission is no longer current.",
+            });
+          let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
+          try {
+            feedback = input.takeProductFeedback?.();
+          } catch {
+            return Effect.fail({
+              category: "provider-failed" as const,
+              message:
+                "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+            });
+          }
+          if (input.signal.aborted || input.admissionCurrent?.() === false)
+            return Effect.fail({
+              category: "unauthorized" as const,
+              message: "Work turn admission is no longer current.",
+            });
+          const context: ReadonlyArray<ProviderContextBlock> = [
+            ...(input.context ?? []),
+            ...(feedback?.context === undefined
+              ? []
+              : [{ kind: "user-message" as const, text: feedback.context }]),
+          ];
           meter.sent();
           input.onPromptSent?.();
-        }).pipe(
-          Effect.zipRight(
-            connection.send({
-              sessionId: input.providerSessionId,
-              prompt: input.command.prompt,
-              // A runtime that keeps its own conversation already holds the
-              // standing context an earlier completed turn of this session
-              // carried.
-              context: [
-                ...(input.driver.conversationOwnership === "provider"
-                  ? heldTurnContext.forTurn({
-                      sessionId: input.providerSessionId,
-                      resumed: input.resumeCursor !== undefined,
-                      context: input.context,
-                    }).context
-                  : (input.context ?? [])),
-              ],
-              attachments: [...(input.attachments ?? [])],
-              tools: [...(input.appManagedTools?.definitions ?? [])],
-            }),
-          ),
-        ),
+          return connection.send({
+            sessionId: input.providerSessionId,
+            prompt: input.command.prompt,
+            // Keep the existing standing-context hold. New note context remains
+            // a user-message block and is carried only by this admitted turn.
+            context:
+              input.driver.conversationOwnership === "provider"
+                ? heldTurnContext.forTurn({
+                    sessionId: input.providerSessionId,
+                    resumed: input.resumeCursor !== undefined,
+                    context,
+                  }).context
+                : context,
+            attachments: [...(input.attachments ?? []), ...(feedback?.attachments ?? [])],
+            tools: [...(input.appManagedTools?.definitions ?? [])],
+          });
+        }),
       });
       yield* Fiber.join(events);
       for (const requestId of pendingRequestHolds.keys()) {

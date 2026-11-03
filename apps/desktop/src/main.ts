@@ -3545,6 +3545,28 @@ function installIpcHandlers(): void {
     );
     return { windowId: context.windowId };
   });
+  ipcMain.handle(IPC_CHANNELS.browserSurfacePoint, (event, value: unknown) => {
+    const context = ownedTopLevelWindowContext(event);
+    if (
+      !isStrictRecord(value, ["contextId", "threadId", "enabled", "requestId"]) ||
+      typeof value.enabled !== "boolean" ||
+      typeof value.requestId !== "string" ||
+      !UUID_PATTERN.test(value.requestId)
+    ) {
+      throw new Error("Octant rejected an invalid Browser selection request.");
+    }
+    const request = validateBrowserSurfaceIdentity({
+      contextId: value.contextId,
+      threadId: value.threadId,
+    });
+    if (browserSurfaceHost === undefined) throw new Error("Octant live Browser is unavailable.");
+    return browserSurfaceHost.setPointSelection(
+      request.contextId,
+      { windowId: context.windowId, threadId: request.threadId },
+      value.enabled,
+      value.requestId,
+    );
+  });
   ipcMain.handle(IPC_CHANNELS.browserSurfaceTab, async (event, value: unknown) => {
     const context = ownedTopLevelWindowContext(event);
     const request = validateBrowserSurfaceTabCommand(value);

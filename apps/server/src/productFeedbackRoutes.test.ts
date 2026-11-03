@@ -1,6 +1,7 @@
-import { decodeWindowId } from "@octant/contracts";
+import { decodeEventActor, decodeWindowId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { ProductFeedbackError } from "./browser/productFeedbackService";
+import { ProductFeedbackError, ProductFeedbackService } from "./browser/productFeedbackService";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { createProductFeedbackRouteHandler } from "./productFeedbackRoutes";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -31,6 +32,7 @@ function handler(
   return {
     list,
     execute,
+    store,
     handle: createProductFeedbackRouteHandler({
       windowAuthorityStore: store,
       feedback: { list, execute } as never,
@@ -51,7 +53,11 @@ describe("pointed-at feedback routes", () => {
 
     expect(response?.status).toBe(200);
     expect(await response?.json()).toEqual({ notes: [] });
-    expect(list).toHaveBeenCalledWith(windowId, threadId);
+    expect(list).toHaveBeenCalledWith(
+      windowId,
+      threadId,
+      expect.objectContaining({ admissionCurrent: expect.any(Function) }),
+    );
   });
 
   it("refuses a capture that carries no window capability", async () => {
@@ -95,8 +101,99 @@ describe("pointed-at feedback routes", () => {
     );
 
     expect(response?.status).toBe(200);
-    expect(execute).toHaveBeenCalledWith(windowId, JSON.parse(captureBody));
+    expect(execute).toHaveBeenCalledWith(
+      windowId,
+      JSON.parse(captureBody),
+      expect.objectContaining({ admissionCurrent: expect.any(Function) }),
+    );
   });
+
+  it.each(["body", "native-read"] as const)(
+    "fences an actual feedback service when the bound original capability retires during %s",
+    async (phase) => {
+      const store = new WindowAuthorityStore();
+      store.register({ windowId, capability, now: 0 });
+      let observing = false;
+      let release: (() => void) | undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const describePoint = vi.fn(async () => {
+        observing = true;
+        if (phase === "native-read") await held;
+        return {
+          status: "described" as const,
+          element: { selector: "button", bounds: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 } },
+        };
+      });
+      const append = vi.fn();
+      const put = vi.fn(() => ({ contentId: contextId, digest: "a".repeat(64), byteLength: 1 }));
+      const service = new ProductFeedbackService({
+        journal: { append },
+        browser: { describePoint },
+        crops: { put, read: () => undefined },
+        readNote: () => undefined,
+        readNotes: () => [],
+        canAccessThread: async () => true,
+        resolveThread: async () => ({ mode: "code", current: () => true }),
+        uuid: () => contextId,
+        clock: () => "2026-11-03T10:00:00.000Z",
+        actor: decodeEventActor({
+          kind: "local-user",
+          actorId: "55555555-5555-4555-8555-555555555555",
+        }),
+      });
+      const handle = createProductFeedbackRouteHandler({
+        feedback: service,
+        windowAuthorityStore: store,
+        now: () => 0,
+      });
+      let body: ReadableStreamDefaultController<Uint8Array> | undefined;
+      const stream = new ReadableStream<Uint8Array>({
+        start: (controller) => {
+          body = controller;
+        },
+      });
+      const init: RequestInit & { duplex: "half" } = {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body: stream,
+        duplex: "half",
+      };
+      const request = new Request("http://127.0.0.1/api/feedback/commands", init);
+      bindPrincipalRouteContext(request, {
+        scopeId: windowId,
+        principal: { kind: "local-window", windowId, capabilityGeneration: 0 },
+      });
+      const encoded = new TextEncoder().encode(
+        JSON.stringify({
+          kind: "prepare-product-feedback",
+          threadId,
+          contextId,
+          expectedObservationRevision: 0,
+          point: { x: 0.2, y: 0.15 },
+        }),
+      );
+      try {
+        const response = handle(request);
+        if (phase === "body") store.revoke(windowId);
+        body?.enqueue(encoded);
+        body?.close();
+        if (phase === "native-read") {
+          await vi.waitFor(() => expect(observing).toBe(true));
+          store.revoke(windowId);
+          release?.();
+        }
+        expect((await response)?.status).toBe(401);
+        expect(describePoint).toHaveBeenCalledTimes(phase === "body" ? 0 : 1);
+        expect(put).not.toHaveBeenCalled();
+        expect(append).not.toHaveBeenCalled();
+      } finally {
+        release?.();
+        service.close();
+      }
+    },
+  );
 
   it("reports a note that moved under the caller as a conflict", async () => {
     const { handle } = handler({
