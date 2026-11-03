@@ -64,6 +64,26 @@ The data folder has one host, and it is Octant's.
 - The credential broker and Keychain items stay with the host's app, so a sign-in
   made from either window is stored once.
 
+## Embedded Browser
+
+Nightly presents the Browser inside its own window. A stable-owned companion
+window is not an accepted fallback. Octant remains the sole owner of persistent
+Browser profiles and their live sessions; Nightly must neither open those
+profiles concurrently nor copy them into another profile.
+
+The embedded display must preserve normal person-controlled browsing, including
+focus, keyboard and text input, IME composition, accessibility, and native
+popups. A bounded bitmap transport proves only frame delivery. It does not
+establish those capabilities or authorize reusing agent observations/actions
+as a credential-bearing human display/input channel. Local client/process
+attestation and the production transport still require their own implementation
+and authority checks.
+
+The current foundation remains publication-gated while the functional bridge
+and input, IME, accessibility, and native-popup parity need implementation and
+evidence. An isolated synthetic fixture is feasibility evidence only; it is not
+packaged coexistence, signed-in browsing, or native identity verification.
+
 ## Identity
 
 The apps differ only in what macOS and Linux need to keep two apps apart:
