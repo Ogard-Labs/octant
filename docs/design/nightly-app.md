@@ -86,27 +86,53 @@ packaged coexistence, signed-in browsing, or native identity verification.
 
 ## Fixed packaged entry
 
-A packaged macOS Nightly runs its bundled application entry from `app.asar`.
+Both packaged macOS desktop apps run their trusted application entry from `app.asar`.
 Packaging verifies the archive header against `ElectronAsarIntegrity` and checks
 its file bytes before signing. Application JavaScript stays inside the archive;
 only the listed native addons, adjacent libraries, PTY executable and language
 server are unpacked to physical paths and signed before the app seal.
 
-Nightly disables Electron's Node-mode, Node-options environment and Node
-inspection entry paths. It requires ASAR-only loading and embedded ASAR integrity
+Both desktop executables disable Electron's Node-mode, Node-options environment
+and Node inspection entry paths. It requires ASAR-only loading and embedded ASAR integrity
 validation, with fuse readback on the artifact before signing. Its application
 entry accepts a bounded set of launch arguments: ordinary startup, one macOS
 Launch Services process token, its own valid Code link, or the fixed scoped
-terminal role. It refuses unknown positional entries, loader options and
+terminal role. Stable also accepts its fixed Canvas prototype-host role. It
+refuses unknown positional entries, loader options and
 Chromium remote-debugging options before importing host or client-registration
 code. Refusal in JavaScript alone does not establish that Chromium exposed no
 debugging endpoint during startup; native startup checks cover that separately.
 
-The terminal's bundled `octant mcp` and help commands use that fixed role, without
-loading the host-owning GUI module or accepting a caller-selected script. This
-preserves the current terminal Browser-grant consumer, not the full planned
-`octant-nightly` command. Stable keeps its existing Node-mode host and terminal
-launcher.
+Nightly's bundled `octant mcp` and help entry remains a fixed role, without
+loading the host-owning GUI module or accepting a caller-selected script. It is
+not the full planned `octant-nightly` command or evidence of Code-terminal parity.
+Stable's public terminal command instead runs the existing standalone scoped CLI
+bundle through its separate Node runtime. A real Code-profile check showed that
+the sealed GUI role aborts during LaunchServices/WindowServer registration; the
+Node command preserves confinement without granting GUI services. Its script is
+an ordinary signed bundle resource, never trusted desktop code for peer admission.
+
+Stable retains a separate, same-version `Octant Runtime.app` inside its Frameworks
+folder for its host, managed tools and approved executable extensions. Its bundle
+id is `app.octant.desktop.runtime`, distinct from both desktop mains and their
+helpers, and it must never be admitted as a desktop peer. This runtime keeps
+standalone Node behavior and current stdin supervision and confinement contracts.
+Node consumers use the physical server/web payload under `Resources/app`, which
+contains no loose desktop module; trusted desktop code stays in ASAR. Development
+and Linux runtime routing keep their existing behavior.
+
+The worker runtime has independent Framework files and relative symlinks. Fuse
+writes must refuse escaped paths or shared Framework inodes. Packaging checks
+both identities and fuse policies; signing seals the nested runtime before the
+outer app. The duplicate pinned runtime costs about 279 MiB uncompressed. This
+preserves current executable and stdin contracts; replacing them with Electron's
+main-only utility-process API would also require a supervision and plugin-dispatch
+migration. No system Node or new runtime version is substituted.
+
+A production-packaging-helper fixture using the pinned runtime measured ZIP
+growth from 126,827,838 to 247,669,865 bytes: 120,842,027 bytes (about 115.24 MiB)
+added. This is the same-runtime primary/worker subset, not a full release artifact;
+the final signed distribution still needs its own size measurement.
 
 These restrictions are a prerequisite for native peer admission. A signature on
 an interpreter that also accepts arbitrary JavaScript would not identify trusted

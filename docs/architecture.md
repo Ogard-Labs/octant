@@ -245,11 +245,19 @@ entries are excluded.
 
 ## Process topology
 
+On macOS, both trusted desktop executables use sealed ASAR entries and fixed
+launch roles. Stable's separately identified, same-version bundled runtime runs
+its host, managed tools, scoped terminal CLI and executable extensions as Node. The worker runtime is
+not a trusted desktop peer, and Node consumers keep physical server files and
+stdin supervision. It has independent Framework/fuse bytes; no arbitrary script
+runs under the trusted desktop executable's identity. See the owning
+[fixed-entry rules](design/nightly-app.md#fixed-packaged-entry).
+
 ```mermaid
 flowchart LR
   subgraph mac["Host Mac"]
     desktop["apps/desktop<br/>Electron main process<br/>windows · Keychain · credential broker · browser broker"]
-    server["apps/server<br/>Bun HTTP server<br/>routes · services · journal · projections · providers"]
+    server["apps/server<br/>HTTP server<br/>Bun in dev · bundled Node in app<br/>routes · services · journal · projections · providers"]
     renderer["apps/web<br/>React renderer<br/>(BrowserWindow, Vite in dev)"]
     tools["Sandboxed children<br/>provider CLIs · git · terminals · tests · extension executables"]
     keychain[("macOS Keychain")]
@@ -12248,8 +12256,9 @@ macOS-only.
   credential services; it cannot start a host or migrate shared data.
   Packaged macOS Nightly additionally seals its JavaScript entry in ASAR and
   disables alternate Node/loader entry paths. Its existing scoped terminal MCP
-  command runs through a fixed bundled role, while Stable retains Node-mode
-  host and terminal behavior. This is a prerequisite for peer admission, not
+  command runs through a fixed bundled role. Stable uses a separately identified
+  Node worker for host/tool execution and its fixed physical scoped terminal CLI;
+  Code confinement does not acquire GUI-service permissions. This is a prerequisite for peer admission, not
   evidence that a signed Nightly peer or embedded Browser bridge is usable;
   the owning [fixed-entry rules](design/nightly-app.md#fixed-packaged-entry)
   preserve the functional launch and publication gates.

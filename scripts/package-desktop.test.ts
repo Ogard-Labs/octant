@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFile, mkdtemp, mkdir, writeFile, access, rm, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import {
   CANVAS_PROTOTYPE_PRELOAD_FILENAME,
   EXTENSION_BRIDGE_PRELOAD_FILENAME,
@@ -71,6 +71,7 @@ import {
   waitForChildExit,
   stageBundledLanguageServer,
   stageExternalRuntimePackages,
+  stageStableHostPayload,
 } from "./package-desktop";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -119,7 +120,8 @@ describe("desktop packaging boundary", () => {
       appBundleId: "app.octant.desktop",
       appVersion: "0.1.0",
       arch: "arm64",
-      asar: false,
+      asar: { unpack: expect.stringContaining("cua_driver_node_runtime.node") },
+      ignore: /^\/apps\/server(?:\/|$)/,
       dir: "/tmp/octant-stage",
       electronVersion: "43.7.11",
       extendInfo: {
@@ -158,7 +160,7 @@ describe("desktop packaging boundary", () => {
     });
   });
 
-  it("seals Nightly's application entry while preserving the stable host runtime layout", () => {
+  it("seals both desktop entries while keeping the Stable host physical", () => {
     const nightly = createPackagerOptions(
       "/tmp/stage",
       "/tmp/out",
@@ -172,7 +174,9 @@ describe("desktop packaging boundary", () => {
       ),
     });
     expect(nightly.asar).toEqual({ unpack: expect.not.stringContaining("*.js") });
-    expect(createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0").asar).toBe(false);
+    expect(createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0").asar).toEqual({
+      unpack: expect.stringContaining("cua_driver_node_runtime.node"),
+    });
   });
 
   it("resolves packaging targets from the host or an explicit override", () => {
@@ -1241,10 +1245,12 @@ describe("the terminal launcher the desktop app ships", () => {
       const root = await mkdtemp(resolve(tmpdir(), "octant-terminal-launcher-"));
       try {
         const repository = resolve(root, "repository");
+        await mkdir(resolve(repository, "apps/desktop/dist"), { recursive: true });
+        await writeFile(resolve(repository, "apps/desktop/dist/entry.mjs"), "// bundle\n");
         await mkdir(resolve(repository, "packages/cli/dist"), { recursive: true });
         await writeFile(
           resolve(repository, "packages/cli/dist/terminalLauncherMain.mjs"),
-          "// bundle\n",
+          "// scoped terminal bundle\n",
         );
         // An app moved to a path with a space, as a person's Applications folder can be.
         const contents = resolve(root, `Moved Apps/${productName}.app/Contents`);
@@ -1254,10 +1260,14 @@ describe("the terminal launcher the desktop app ships", () => {
           launcher,
           desktopIdentity(productName === "Octant" ? "stable" : "nightly"),
         );
-        await mkdir(resolve(contents, "MacOS"), { recursive: true });
+        const runtime =
+          productName === "Octant"
+            ? resolve(contents, "Frameworks/Octant Runtime.app/Contents/MacOS/Octant Runtime")
+            : resolve(contents, `MacOS/${productName}`);
+        await mkdir(dirname(runtime), { recursive: true });
         // Stands in for the app's executable: reports how it was started.
         await writeFile(
-          resolve(contents, `MacOS/${productName}`),
+          runtime,
           '#!/bin/sh\nprintf "%s\\n" "node-mode=$ELECTRON_RUN_AS_NODE" "$@"\n',
           { mode: 0o755 },
         );
@@ -1266,15 +1276,13 @@ describe("the terminal launcher the desktop app ships", () => {
           productName === "Octant" ? ["octant", "octant.mjs"] : ["octant"],
         );
         expect((await stat(resolve(launcher, "octant"))).mode & 0o777).toBe(0o755);
-        if (productName === "Octant")
-          expect((await stat(resolve(launcher, "octant.mjs"))).mode & 0o777).toBe(0o644);
         const output = execFileSync("/bin/sh", ["-c", "octant mcp --help"], {
           env: { PATH: `${launcher}:/usr/bin:/bin` },
           encoding: "utf8",
         });
         expect(output.split("\n")).toEqual([
           ...(productName === "Octant"
-            ? ["node-mode=1", `${launcher}/octant.mjs`]
+            ? ["node-mode=1", resolve(launcher, "octant.mjs")]
             : ["node-mode=", "--octant-terminal-cli"]),
           "mcp",
           "--help",
@@ -1285,4 +1293,29 @@ describe("the terminal launcher the desktop app ships", () => {
       }
     },
   );
+});
+
+it("keeps the worker server physical without copying a loose desktop entry", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "octant-host-payload-"));
+  try {
+    const stage = resolve(root, "stage");
+    const app = resolve(root, "Octant.app");
+    for (const name of ["server", "web", "desktop"]) {
+      await mkdir(resolve(stage, "apps", name, "dist"), { recursive: true });
+      await writeFile(resolve(stage, "apps", name, "dist/main.mjs"), name);
+    }
+    await writeFile(resolve(stage, "package.json"), "{}");
+    await stageStableHostPayload(stage, app);
+    expect(
+      await readFile(resolve(app, "Contents/Resources/app/apps/server/dist/main.mjs"), "utf8"),
+    ).toBe("server");
+    expect(
+      await readFile(resolve(app, "Contents/Resources/app/apps/web/dist/main.mjs"), "utf8"),
+    ).toBe("web");
+    await expect(access(resolve(app, "Contents/Resources/app/apps/desktop"))).rejects.toMatchObject(
+      { code: "ENOENT" },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

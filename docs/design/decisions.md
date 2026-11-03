@@ -2642,6 +2642,7 @@ Octant Nightly is a second desktop app that installs beside Octant, follows the 
 
 - Nightly connects to Octant's running host as a client and never runs a host of its own; it needs Octant installed.
 - Nightly has its own bundle id, link scheme, command-line tool and window storage, and holds no thread or Project data.
+- Both macOS desktop mains use sealed fixed entry roles. The same-version worker runtime keeps host/tool/extension Node execution under a distinct identity that native peer admission must refuse. Detail: [fixed entry](nightly-app.md#fixed-packaged-entry).
 - Octant installs Nightly only on the person's action, after verifying the signed feed, the artifact hash and a Nightly-specific code-signature requirement.
 - A build's flavor follows its ring, one app's update can never install the other, and Nightly is published only after a stable Octant exists.
 

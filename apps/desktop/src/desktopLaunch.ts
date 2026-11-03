@@ -20,22 +20,32 @@ export async function launchDesktopApplication(
   return { kind: "started" };
 }
 
-export const NIGHTLY_TERMINAL_SWITCH = "--octant-terminal-cli";
+export const DESKTOP_TERMINAL_SWITCH = "--octant-terminal-cli";
 
-export type NightlyLaunch =
+export type PackagedDesktopLaunch =
   | { readonly kind: "desktop" }
+  | { readonly kind: "canvas" }
   | { readonly kind: "terminal"; readonly args: ReadonlyArray<string> }
   | { readonly kind: "refused"; readonly message: string };
 
 /** Packaged Nightly never interprets a caller's script path or runtime options. */
-export function resolveNightlyLaunch(args: ReadonlyArray<string>): NightlyLaunch {
-  const refused: NightlyLaunch = {
+export function resolvePackagedDesktopLaunch(
+  identity: DesktopIdentity,
+  args: ReadonlyArray<string>,
+): PackagedDesktopLaunch {
+  const refused: PackagedDesktopLaunch = {
     kind: "refused",
-    message: "Octant Nightly refused unsupported launch arguments.",
+    message: `${identity.productName} refused unsupported launch arguments.`,
   };
   if (args.length > 64 || args.some((arg) => arg.length > 16_384 || arg.includes("\0")))
     return refused;
-  if (args[0] === NIGHTLY_TERMINAL_SWITCH) {
+  if (
+    identity.flavor === "stable" &&
+    args.length === 1 &&
+    args[0] === "--octant-canvas-prototype-host"
+  )
+    return { kind: "canvas" };
+  if (args[0] === DESKTOP_TERMINAL_SWITCH) {
     const terminalArgs = args.slice(1);
     if (
       (terminalArgs.length === 1 && terminalArgs[0] === "--help") ||
@@ -55,7 +65,7 @@ export function resolveNightlyLaunch(args: ReadonlyArray<string>): NightlyLaunch
     }
     if (deepLink) return refused;
     try {
-      parseCodeDeepLink(arg, "octant-nightly");
+      parseCodeDeepLink(arg, identity.scheme);
       deepLink = true;
     } catch {
       return refused;

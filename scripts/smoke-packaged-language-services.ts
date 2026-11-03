@@ -1,3 +1,4 @@
+import { resolveDesktopNodeRuntime } from "../apps/desktop/src/runtimePaths";
 import { execFileSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
@@ -91,7 +92,12 @@ export function packagedServerLaunch(
       ? join(packaged.root, "Contents", "MacOS", DESKTOP_PACKAGE_IDENTITY.productName)
       : join(packaged.root, DESKTOP_PACKAGE_IDENTITY.productName);
   return {
-    executable,
+    executable: resolveDesktopNodeRuntime({
+      packaged: true,
+      platform: packaged.platform,
+      resourcesPath: resources,
+      execPath: executable,
+    }),
     args: [join(resources, "app", "apps", "server", "dist", "main.mjs")],
     env: { ELECTRON_RUN_AS_NODE: "1" },
     languageServerPackage: join(resources, "app", "apps", "server", "node_modules", languageServer),

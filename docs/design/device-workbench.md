@@ -320,9 +320,11 @@ because notarization rejects the upstream ad-hoc signatures. Camera passthrough
 from the bundled helper is unsupported in a packaged app: it would need a camera
 entitlement and a camera usage description, and Octant declares neither, so the
 app never asks for the camera. Electron main owns the
-per-tool instances; tools launch under the desktop runtime
-(`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. Tools
-run unconfined under Octant's signed identity: no sandbox profile limits them,
+per-tool instances; packaged macOS tools launch under the separately identified
+bundled `Octant Runtime.app` in Node mode, never a system Node or trusted desktop
+main. Its version matches the desktop's Electron version. See the
+[fixed-entry boundary](nightly-app.md#fixed-packaged-entry). Tools run unconfined
+under that signed runtime identity: no sandbox profile limits them,
 and macOS may attribute their access to Octant's privacy (TCC) grants. They
 need `simctl`, the Simulator's frameworks, and the shared `adb` server, and
 Octant has no confinement profile for them yet. Octant narrows what they
