@@ -10952,6 +10952,11 @@ access` agree); a thread's own change is journaled as
       Current `gcloud` also supports a direct access-token environment value;
       this adapter does not use it. Installed SDK, OS confinement, and live
       account acceptance remain separate from fake-token protocol tests.
+    - The host-wide Octant credential guard includes `harness/cloud-cli`
+      beneath the data directory. Other confined processes cannot read its
+      running tokens through an ancestor grant; Octant's file tools refuse
+      reads, writes and searches there at every level. Only the owning
+      ordinary harness launch receives the narrow OS resource exception.
 - **Organization sign-in on a host without the desktop app.** An Azure AI
   Foundry endpoint that signs in with a directory account and opted in to it
   (`deviceCodeSignIn`) signs in with a device code from

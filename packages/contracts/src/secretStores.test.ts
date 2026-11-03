@@ -40,14 +40,16 @@ describe("explicit Google command-line account consent", () => {
       ).toThrow();
     }
   });
-  it.each([
-    [],
-    ["openid"],
+  it.each(
     [
-      "https://www.googleapis.com/auth/cloud-platform.read-only",
-      "https://www.googleapis.com/auth/cloud-platform.read-only",
-    ],
-  ])("refuses empty, unrelated or repeated scope selection %j", (scopes) => {
+      [],
+      ["openid"],
+      [
+        "https://www.googleapis.com/auth/cloud-platform.read-only",
+        "https://www.googleapis.com/auth/cloud-platform.read-only",
+      ],
+    ].map((scopes) => ({ scopes })),
+  )("refuses empty, unrelated or repeated scope selection $scopes", ({ scopes }) => {
     expect(() =>
       decodeSecretStoresCommand({
         kind: "point-google-cli-account",

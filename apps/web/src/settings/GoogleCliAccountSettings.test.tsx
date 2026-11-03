@@ -23,9 +23,7 @@ async function confirm() {
   await user.type(screen.getByLabelText("Service account email"), selection.serviceAccountEmail);
   await user.type(screen.getByLabelText("Service-account JSON item"), selection.reference);
   await user.click(screen.getByRole("button", { name: "Review Google Cloud account" }));
-  await user.click(
-    await screen.findByRole("button", { name: "Use this service account", exact: true }),
-  );
+  await user.click(await screen.findByRole("button", { name: "Use this service account" }));
 }
 describe("Google account consent is bound to its current host", () => {
   it("does not let an older initial account read erase a subsequently confirmed selection", async () => {

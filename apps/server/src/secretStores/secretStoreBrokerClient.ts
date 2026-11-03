@@ -11,6 +11,7 @@ import type {
   SecretStoreKind,
   SecretStoreToolState,
 } from "@octant/contracts/secret-stores";
+import { decodeUtcTimestamp, type UtcTimestamp } from "@octant/contracts";
 
 import {
   decodeGoogleCliAccountReference,
@@ -74,7 +75,7 @@ export type GoogleCliReferenceAnswer =
   | {
       readonly status: "linked";
       readonly pointer: GoogleCliAccountReference;
-      readonly sessionExpiresAt?: string;
+      readonly sessionExpiresAt?: UtcTimestamp;
     };
 export type GoogleCliPointStatus =
   | Exclude<StoreCheckStatus, "found">
@@ -274,13 +275,16 @@ export function makeSecretStoreBrokerClient(
     googleCliReference: async (signal) => {
       const answer = await post(`${GOOGLE}reference`, {}, signal);
       if (answer?.status === "none") return { status: "none" };
-      const pointer = answer?.status === "linked" ? googlePointer(answer) : undefined;
+      if (answer === undefined || answer.status !== "linked") return DOWN;
+      const pointer = googlePointer(answer);
       if (pointer === undefined) return DOWN;
-      const sessionExpiresAt =
-        typeof answer?.sessionExpiresAt === "string" &&
-        Number.isFinite(Date.parse(answer.sessionExpiresAt))
-          ? answer.sessionExpiresAt
-          : undefined;
+      let sessionExpiresAt: UtcTimestamp | undefined;
+      try {
+        if (answer.sessionExpiresAt !== undefined)
+          sessionExpiresAt = decodeUtcTimestamp(answer.sessionExpiresAt);
+      } catch {
+        return DOWN;
+      }
       return {
         status: "linked",
         pointer,
@@ -297,26 +301,26 @@ export function makeSecretStoreBrokerClient(
     },
     googleCliSession: async (signal) => {
       const answer = await post(`${GOOGLE}session`, {}, signal);
-      const status = answer?.status;
+      if (answer === undefined) return DOWN;
+      const status = answer.status;
       if (status === "issued") {
         try {
           const identity = decodeGoogleCliAccountIdentity({
             serviceAccountEmail: answer.serviceAccountEmail,
             scopes: answer.scopes,
           });
+          const expiration = decodeUtcTimestamp(answer.expiration);
           if (
             typeof answer.accessToken !== "string" ||
             answer.accessToken.length === 0 ||
             answer.accessToken.length > 16384 ||
-            !/^[A-Za-z0-9._~+/-]+=*$/.test(answer.accessToken) ||
-            typeof answer.expiration !== "string" ||
-            !Number.isFinite(Date.parse(answer.expiration))
+            !/^[A-Za-z0-9._~+/-]+=*$/.test(answer.accessToken)
           )
             return DOWN;
           return {
             status,
             accessToken: answer.accessToken,
-            expiration: answer.expiration,
+            expiration,
             ...identity,
           };
         } catch {

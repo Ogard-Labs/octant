@@ -80,14 +80,12 @@ describe("SecretStoresSettingsSection", () => {
       name: "Use this service account for commands?",
     });
     expect(dialog).toHaveTextContent(selection.serviceAccountEmail);
-    expect(dialog).toHaveTextContent(selection.scopes[0]);
+    expect(dialog).toHaveTextContent("https://www.googleapis.com/auth/cloud-platform.read-only");
     expect(commands).toEqual([]);
-    await user.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(commands).toEqual([]);
     await user.click(screen.getByRole("button", { name: "Review Google Cloud account" }));
-    await user.click(
-      await screen.findByRole("button", { name: "Use this service account", exact: true }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Use this service account" }));
     await waitFor(() =>
       expect(commands).toContainEqual({
         kind: "point-google-cli-account",

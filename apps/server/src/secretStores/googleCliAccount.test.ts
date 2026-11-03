@@ -34,6 +34,7 @@ import { createSecretStoresService } from "./secretStoresService";
 import { createSecretStoresRouteHandler } from "./secretStoresRoutes";
 import { bindPrincipalRouteContext, resolvePrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore, WINDOW_AUTHORITY_TTL_MS } from "../windowAuthorityStore";
+import { configureSecretGuardLocations } from "../process/secretGuard";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -102,6 +103,7 @@ function memoryStore(): CredentialStore {
 }
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "octant-google-account-"));
+  configureSecretGuardLocations({ dataDirectory: directory });
   const linked = makeLinkedSecretStores({
     statePath: join(directory, "linked.json"),
     adapters: [
@@ -233,6 +235,32 @@ const command = {
   ...selected,
 };
 describe("person-selected Google command-line account through actual host routes", () => {
+  it("refuses malformed broker timestamps instead of exposing a public report or token with a guessed expiry", async () => {
+    const reference = makeSecretStoreBrokerClient({
+      url: "http://127.0.0.1:13773",
+      token: "fixture-only-broker-token",
+      fetch: vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          Response.json({ status: "linked", ...selected, sessionExpiresAt: "November 3, 2026" }),
+        ),
+    });
+    expect(await reference.googleCliReference?.()).toEqual({ status: "broker-unavailable" });
+    const session = makeSecretStoreBrokerClient({
+      url: "http://127.0.0.1:13773",
+      token: "fixture-only-broker-token",
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({
+          status: "issued",
+          accessToken: "fixture-short-token",
+          expiration: "November 3, 2026",
+          serviceAccountEmail: selected.serviceAccountEmail,
+          scopes: selected.scopes,
+        }),
+      ),
+    });
+    expect(await session.googleCliSession?.()).toEqual({ status: "broker-unavailable" });
+  });
   it.each(["darwin", "linux"] as const)(
     "isolates sibling tokens in the actual %s confinement policy, not just the positive grant",
     async (platform) => {
@@ -294,10 +322,7 @@ describe("person-selected Google command-line account through actual host routes
           ).toBeGreaterThan(writeDeny);
           expect(profile).not.toContain(seatbeltAllowRule("file-write*", resource));
         } else {
-          const { args } = buildBubblewrapLaunch(
-            { ...input, homeDirectory: f.directory, usersDirectory: f.directory },
-            { bwrapPath: "/bin/true" },
-          );
+          const { args } = buildBubblewrapLaunch(input, { bwrapPath: "/bin/true" });
           expect(args.join("\n")).toContain(`--tmpfs\n${root}`);
           expect(args.join("\n")).toContain(`--ro-bind\n${resource}\n${resource}`);
           expect(args.join("\n")).toContain(
@@ -326,10 +351,7 @@ describe("person-selected Google command-line account through actual host routes
           expect(profile).not.toContain(seatbeltAllowRule("file-read*", resource));
         } else {
           expect(withoutAccount.additionalDenyReadPaths).toContain(root);
-          const { args } = buildBubblewrapLaunch(
-            { ...withoutAccount, homeDirectory: f.directory, usersDirectory: f.directory },
-            { bwrapPath: "/bin/true" },
-          );
+          const { args } = buildBubblewrapLaunch(withoutAccount, { bwrapPath: "/bin/true" });
           expect(args.join("\n")).not.toContain(`--ro-bind\n${resource}\n${resource}`);
           expect(args.join("\n")).not.toContain(`--bind\n${root}\n${root}`);
         }

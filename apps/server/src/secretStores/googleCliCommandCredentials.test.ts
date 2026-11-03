@@ -133,6 +133,7 @@ describe("Google token files belong to one command", () => {
     if (entry?.status !== "ready") throw new Error("Prepared command unavailable");
     const tokenFile = entry.environment.CLOUDSDK_AUTH_ACCESS_TOKEN_FILE;
     if (tokenFile === undefined) throw new Error("Token path missing");
+    if (entry.configurationDirectory === undefined) throw new Error("Configuration missing");
     expect(await readFile(tokenFile, "utf8")).toBe(issued.accessToken);
     expect((await stat(tokenFile)).mode & 0o777).toBe(0o600);
     expect((await stat(entry.configurationDirectory)).mode & 0o777).toBe(0o700);
