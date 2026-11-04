@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { constants as osConstants, homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -653,9 +653,12 @@ function spawnBunPty(shell: string, args: readonly string[], options: PtyForkOpt
     onExit: (_subprocess, exitCode, signalCode) => {
       const trailing = decoder.decode();
       if (trailing.length > 0) publishData(trailing);
+      // Bun reports the terminating signal by name; the port keeps node-pty's
+      // numeric form so both runtimes publish the same exit event.
+      const signal = typeof signalCode === "string" ? osConstants.signals[signalCode] : signalCode;
       exitEvent = {
         exitCode: exitCode ?? 1,
-        ...(signalCode === null ? {} : { signal: signalCode }),
+        ...(signal === null || signal === undefined ? {} : { signal }),
       };
       for (const listener of exitListeners) listener(exitEvent);
       terminal?.close();
