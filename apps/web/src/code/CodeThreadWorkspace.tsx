@@ -3,6 +3,7 @@ import { threadCompactionSubject } from "../context/CompactionDivider";
 import type { AutoReview } from "./autoReview";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import type { ProviderModelOptionValues, ThreadDocumentDelivery } from "@octant/contracts";
+import { ProviderCloudSessions } from "./ProviderCloudSessions";
 import {
   MAX_CODE_THREAD_TITLE_LENGTH,
   type CodeApprovalId,
@@ -1903,6 +1904,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       {liveTasks === undefined ? null : <ThreadTasksPanel tasks={liveTasks} />}
 
       <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
+      {!displayReady ||
+      props.pairedDevice === true ||
+      codeClient?.providerCloudSessions === undefined ? null : (
+        <div className="thread-column">
+          <ProviderCloudSessions client={codeClient.providerCloudSessions} threadId={thread.id} />
+        </div>
+      )}
 
       {!displayReady ||
       props.imageGenerationClient === undefined ||

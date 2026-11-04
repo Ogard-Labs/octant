@@ -83,6 +83,7 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/replica-membership",
   // Linking a store and pointing a key at it are acts at this machine.
   "/api/secret-stores",
+  "/api/provider-cloud",
   // Reviewing what a thread read and clearing its outside-content mark is a
   // person's act at this machine.
   "/api/thread-external-content",

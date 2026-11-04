@@ -1490,6 +1490,7 @@ export const ProviderCatalogUpdated = Schema.Struct({
 export type ProviderCatalogUpdated = typeof ProviderCatalogUpdated.Type;
 
 export const ProviderCapabilities = Schema.Struct({
+  cloudSessions: Schema.optional(ProviderCapabilitySupport),
   streaming: ProviderCapabilitySupport,
   resume: ProviderCapabilitySupport,
   interruption: ProviderCapabilitySupport,

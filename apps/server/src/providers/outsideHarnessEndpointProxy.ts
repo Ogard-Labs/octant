@@ -36,6 +36,13 @@ import type {
   HarnessEndpointUsage,
 } from "@octant/provider-sdk/harness-endpoint";
 import { Effect } from "effect";
+import { Schema } from "effect";
+import type { CloudSessionPorts } from "@octant/provider-sdk/cloud-sessions";
+import {
+  ProviderCloudCreateInput,
+  ProviderCloudObservation,
+  ProviderCloudCancelResult,
+} from "@octant/contracts/provider-cloud-sessions";
 import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./contextOverflowRefusal";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
@@ -204,6 +211,7 @@ interface PendingCall {
   readonly timer: ReturnType<typeof setTimeout>;
   /** The brokered calls made for this call, closed when the host settles it early. */
   readonly brokered: Set<AbortController>;
+  readonly cloudPorts: CloudSessionPorts | undefined;
 }
 
 type BrokeredRequest = (
@@ -259,11 +267,13 @@ class OutsideDriverLink {
     options: {
       readonly timeoutMs: number;
       readonly onEvent?: (event: OutsideDriverStreamEvent) => void;
+      readonly cloudPorts?: CloudSessionPorts;
     },
   ): { readonly id: number; readonly settled: Promise<unknown> } {
     const id = this.#nextId;
     this.#nextId += 1;
-    if (method === OUTSIDE_DRIVER_METHODS.sessionSend) this.#sends.add(id);
+    if (method === OUTSIDE_DRIVER_METHODS.sessionSend || method.startsWith("cloud/"))
+      this.#sends.add(id);
     const settled = new Promise<unknown>((resolve, reject) => {
       if (this.#stopped !== undefined) {
         reject(this.#stopped);
@@ -286,6 +296,7 @@ class OutsideDriverLink {
         onEvent: options.onEvent,
         timer,
         brokered: new Set(),
+        cloudPorts: options.cloudPorts,
       });
       this.#write({ jsonrpc: "2.0", id, method, params });
     });
@@ -387,10 +398,17 @@ class OutsideDriverLink {
       this.#refuseHttp(httpId, interrupted());
       return;
     }
+    if (isOpenAiAgentsRequest(params.url) && owner?.cloudPorts === undefined) {
+      this.#refuseHttp(
+        httpId,
+        failure("unauthorized", "Cloud requests require an owned cloud operation."),
+      );
+      return;
+    }
     const controller = new AbortController();
     this.#http.set(httpId, controller);
     owner?.brokered.add(controller);
-    void this.#relayHttp(httpId, params, controller).finally(() => {
+    void this.#relayHttp(httpId, params, controller, owner?.cloudPorts).finally(() => {
       if (this.#http.get(httpId) === controller) this.#http.delete(httpId);
       owner?.brokered.delete(controller);
     });
@@ -400,10 +418,30 @@ class OutsideDriverLink {
     httpId: OutsideDriverMessageId,
     params: OutsideDriverHttpRequestParams,
     controller: AbortController,
+    cloudPorts?: CloudSessionPorts,
   ): Promise<void> {
     let response: Response;
     try {
-      response = await this.#broker(params, controller.signal);
+      if (cloudPorts !== undefined) {
+        const url = new URL(params.url);
+        if (
+          url.origin !== "https://api.openai.com" ||
+          url.username !== "" ||
+          url.password !== "" ||
+          url.hash !== "" ||
+          (params.method !== "GET" && params.method !== "POST") ||
+          params.auth?.header.toLowerCase() !== "authorization" ||
+          params.auth.scheme !== "Bearer"
+        )
+          throw interrupted();
+        response = await cloudPorts.request({
+          path: url.pathname + url.search,
+          method: params.method,
+          ...(params.body === undefined ? {} : { body: params.body }),
+          ...(params.headers === undefined ? {} : { headers: Object.fromEntries(params.headers) }),
+          signal: controller.signal,
+        });
+      } else response = await this.#broker(params, controller.signal);
     } catch (error) {
       this.#refuseHttp(httpId, closed(error));
       return;
@@ -473,6 +511,25 @@ class OutsideDriverLink {
       id: httpId,
       error: { code: -32000, message: refusal.message, data: { category: refusal.category } },
     });
+  }
+}
+
+function isOpenAiAgentsRequest(value: string): boolean {
+  let official = false;
+  try {
+    const url = new URL(value);
+    if (url.origin !== "https://api.openai.com") return false;
+    official = true;
+    let path = url.pathname;
+    for (let count = 0; count < 4; count += 1) {
+      path = decodeURIComponent(path);
+      const canonical = new URL(path, url.origin).pathname.toLowerCase();
+      if (canonical === "/v1/agents" || canonical.startsWith("/v1/agents/")) return true;
+      if (!path.includes("%")) break;
+    }
+    return false;
+  } catch {
+    return official;
   }
 }
 
@@ -706,6 +763,7 @@ export function makeOutsideHarnessEndpointProxy(
   const listed = new Set(options.modelIds.map(String));
   let claims: OutsideDriverCapabilityClaims | undefined;
   let handshake: Promise<void> | undefined;
+  let cloudAvailable = false;
   let nextSession = 1;
 
   const link = new OutsideDriverLink({
@@ -755,6 +813,7 @@ export function makeOutsideHarnessEndpointProxy(
       { timeoutMs: limits.callTimeoutMs },
     );
     const agreed = read(decodeOutsideDriverInitializeResult(await settled));
+    cloudAvailable = agreed.cloudSessions === "openai-agents-v1";
     if (!HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS.includes(agreed.protocolVersion)) {
       link.stop(noAgreedProtocol());
       throw link.stopped ?? noAgreedProtocol();
@@ -790,6 +849,8 @@ export function makeOutsideHarnessEndpointProxy(
     );
     const result = read(decodeOutsideDriverProbeResult(await settled));
     claims = result.claims;
+    if (!cloudAvailable && claims?.cloudSessions === "supported")
+      claims = { ...claims, cloudSessions: "unsupported" };
     const prior = registry.observedState(instanceId);
     const seen = new Set<string>();
     // Only models the person listed: the id is then text the person wrote,
@@ -936,6 +997,60 @@ export function makeOutsideHarnessEndpointProxy(
 
   return {
     kind: "outside-harness-endpoint",
+    cloudSessions: {
+      protocol: "openai-agents-v1",
+      supports: (instance) =>
+        cloudAvailable &&
+        claims?.cloudSessions === "supported" &&
+        link.stopped === undefined &&
+        instance.driverKind === "outside-harness-endpoint" &&
+        instance.enabled &&
+        instance.configuration.baseUrl.replace(/\/+$/, "") === "https://api.openai.com/v1" &&
+        instance.configuration.key?.header.toLowerCase() === "authorization" &&
+        instance.configuration.key.scheme === "Bearer",
+      create: ({ ports }) => {
+        const call = async (method: string, params: unknown) => {
+          if (!ports.current()) throw interrupted();
+          await ensureInitialized();
+          if (!cloudAvailable || claims?.cloudSessions !== "supported" || !ports.current())
+            throw failure("unsupported", "Cloud sessions are unavailable.");
+          return link.call(method, params, { timeoutMs: limits.callTimeoutMs, cloudPorts: ports })
+            .settled;
+        };
+        return {
+          create: async ({ signal: _signal, ...params }) => {
+            try {
+              return Schema.decodeUnknownSync(ProviderCloudObservation)(
+                await call(
+                  OUTSIDE_DRIVER_METHODS.cloudCreate,
+                  Schema.decodeUnknownSync(ProviderCloudCreateInput)(params),
+                ),
+              );
+            } catch {
+              return { status: "uncertain" };
+            }
+          },
+          read: async (remoteId) => {
+            try {
+              return Schema.decodeUnknownSync(ProviderCloudObservation)(
+                await call(OUTSIDE_DRIVER_METHODS.cloudRead, { remoteId }),
+              );
+            } catch {
+              return { status: "unavailable" };
+            }
+          },
+          cancel: async (remoteId, jobId) => {
+            try {
+              return Schema.decodeUnknownSync(ProviderCloudCancelResult)(
+                await call(OUTSIDE_DRIVER_METHODS.cloudCancel, { remoteId, jobId }),
+              );
+            } catch {
+              return { status: "uncertain" };
+            }
+          },
+        };
+      },
+    },
     harnessEndpoint: {
       open: async (modelId) => {
         try {

@@ -73,6 +73,7 @@ export function clampOutsideDriverCapabilities(
   };
   return {
     ...lifted,
+    ...(claims?.cloudSessions === undefined ? {} : { cloudSessions: claims.cloudSessions }),
     streaming: lower(lifted.streaming, claims?.streaming),
     resume: lower(lifted.resume, claims?.resume),
     interruption: lower(lifted.interruption, claims?.interruption),

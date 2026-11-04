@@ -8,6 +8,22 @@ are built from and the provider card on Providers & Models;
 credential boundaries. Update this specification with an approved change,
 following the [design workflow](README.md#changing-the-design).
 
+## Provider cloud opt-in
+
+An eligible model endpoint's detail page includes **Provider cloud sessions**
+after its data settings. **Allow cloud sessions** is a separate host setting,
+off by default for each instance. Turning it on never starts a task or changes
+the endpoint used by an existing thread. Unsupported endpoints show an
+unavailable switch; an already-enabled endpoint can still be turned off after
+it becomes unsupported. Turning it off blocks new submissions and requests
+cancellation of known active jobs, without promising remote termination.
+
+The Code thread's separate disclosure reviews the exact text and asks for
+remote execution and cost consent per job. No key is entered in that review.
+Only a local window can change the setting or submit a job. Protocol and account
+eligibility follow [Provider cloud sessions](provider-runtimes.md#provider-cloud-sessions);
+this toggle is not evidence of API access or a successful billed call.
+
 ## Provider catalog
 
 Provider catalog, the section of Providers & Models under the providers this

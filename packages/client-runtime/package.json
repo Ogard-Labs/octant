@@ -105,7 +105,8 @@
     "./mobile-inbox-client": "./src/mobileInboxClient.ts",
     "./mobile-code-operations-client": "./src/mobileCodeOperationsClient.ts",
     "./mobile-push-token-client": "./src/mobilePushTokenClient.ts",
-    "./zen-client": "./src/zenClient.ts"
+    "./zen-client": "./src/zenClient.ts",
+    "./provider-cloud-session-client": "./src/providerCloudSessionClient.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

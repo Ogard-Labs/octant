@@ -974,6 +974,23 @@ Every provider reaches Octant through the provider SDK, and every driver reports
 
 Status: Built. Since: —. Detail: [Architecture: Providers](../architecture.md#providers).
 
+### Provider-hosted Code jobs
+
+A local Code thread can associate a separate immutable text-only remote job
+with an independently opted-in endpoint. Exact input and cost/execution consent
+are required for each submission; local checkout/tools and thread authority
+remain unchanged. The first public SDK and outside-driver protocol is the same
+closed OpenAI Agents codec. Unknown submissions are not automatically retried,
+known remote identities recover by read, cancellation is only requested, and
+every actual create records unknown usage. Required spend ceilings refuse.
+
+Status: Partly built. Since: 2026-11-04. Detail:
+[Architecture: Provider cloud jobs](../architecture.md#provider-cloud-jobs)
+and [Provider runtimes: Provider cloud sessions](provider-runtimes.md#provider-cloud-sessions).
+Local synthetic and rendered checks do not prove account eligibility, provider
+sandbox enforcement or billing. Other wire protocols and automatic file/patch
+transfer are not implemented.
+
 ### Provider instances and accounts
 
 Providers are multi-instance, and a thread stays on the instance it started with. There is no automatic failover, rotation or load-balancing between accounts.

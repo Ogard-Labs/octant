@@ -1136,6 +1136,11 @@ function ActiveSectionContent({
           {props.providerController === undefined ? null : (
             <ModelEndpointSettingsView
               {...providerSettingsViewProps(props.providerController, props.hostBridge)}
+              {...(props.codeController?.client.providerCloudSessions === undefined
+                ? {}
+                : {
+                    providerCloudSessionClient: props.codeController.client.providerCloudSessions,
+                  })}
               {...(props.discoveryController?.snapshot === undefined
                 ? {}
                 : { discoverySnapshot: props.discoveryController.snapshot })}

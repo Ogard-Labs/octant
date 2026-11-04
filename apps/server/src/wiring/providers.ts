@@ -47,6 +47,7 @@ import { GitMutationPort } from "../code/gitMutationPort";
 import { createAgentRunChildWorktreePort } from "../agentRun/agentRunChildWorktreePort";
 import { isRoutineHostScope } from "../routineHostScope";
 import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver";
+import { openAiCloudSessionDriver } from "../providers/openAiCloudSessions";
 import { makeAnthropicCompatibleDriver } from "../providers/anthropicCompatibleDriver";
 import { makeAzureFoundryDriver } from "../providers/azureFoundryDriver";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
@@ -403,6 +404,9 @@ export function makeConfiguredProviderDriver(
     });
   }
   const localUsageHistory = options.localUsageHistorySourceForInstance?.(instance);
+  if (openAiCloudSessionDriver.supports(instance)) {
+    driver = { ...driver, cloudSessions: openAiCloudSessionDriver };
+  }
   if (localUsageHistory !== undefined) {
     driver = { ...driver, localUsageHistory };
   }

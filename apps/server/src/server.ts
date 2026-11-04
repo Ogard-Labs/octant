@@ -64,6 +64,7 @@ import { wireContinuation } from "./wiring/continuation";
 import { wireZen } from "./wiring/zen";
 import { wireContext } from "./wiring/context";
 import { wireWorkFiles } from "./wiring/workFiles";
+import { wireProviderCloudSessions } from "./wiring/providerCloudSessions";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
 import { wireThreadNotifications } from "./wiring/notifications";
@@ -1165,7 +1166,21 @@ export function startOctantServer(
           windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
       }),
     );
+    const cloudSessions = wireProviderCloudSessions({
+      persistence,
+      credentialResolver,
+      codeProjectAccess,
+      codeSessionAuthority,
+      windowAuthorityStore,
+      spendCeilingService,
+      configuredDriverOptions,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+    });
+    yield* Effect.addFinalizer(() => Effect.promise(() => cloudSessions.service.close()));
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
+      providerCloudSessionRoutes: cloudSessions.routes,
       credentialRequestRoutes,
       agentMessageRoutes,
       agentProfileRoutes,

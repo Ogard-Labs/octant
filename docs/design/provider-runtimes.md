@@ -7,6 +7,49 @@ owns the driver interface, honest capability, credentials, and confinement
 ([Architecture: providers](../architecture.md#providers) and
 [security and authority](../architecture.md#security-and-authority)).
 
+## Provider cloud sessions
+
+The first remote-job adapter uses the official OpenAI Agents API beta protocol
+`openai-agents-v1`, independently of Codex subscription sessions. Eligibility
+requires an enabled bearer API-key endpoint at exactly
+`https://api.openai.com/v1`, without an OAuth identity, a configured model and
+separate cloud opt-in. Compatible gateways and subscription identities are not
+treated as that API. An outside driver may declare the same published codec;
+it must also pass activation and observed capability checks. Unsupported
+protocols remain unavailable, rather than receiving an arbitrary HTTP plan.
+
+The host seals each operation with the shared public SDK codec. Create is
+`POST /v1/agents/sessions` with `OpenAI-Beta: agents=v1`, the reviewed input
+string and exact model, `review:none`, `stream:false`, and a fresh small
+`openai_hosted` environment. Tools, multi-agent execution, desktop, network,
+initial files, environment additions, setup commands, plugins and capability
+directories are disabled or empty. No local tool callback is implemented.
+Read uses the owned session, latest turn and bounded item list. Idle is not
+terminal turn evidence. Unexpected required local actions are unsupported and
+cause a cancellation request. Cancel posts an
+`agent.session.input.cancel` event to the owned session with a stable job
+idempotency key; success means requested, not stopped. Initial create has no
+assumed idempotency or automatic retry.
+
+Each host request has an exact method/path/body permit, no redirect, a
+thirty-second transport deadline and a 2 MiB response limit. Create is one-use,
+including through outside RPC. The host records the actual response's remote
+ID before replying to the driver, so an outside lost reply cannot replace it
+with another job or discard known recovery authority. The driver sees bounded
+responses, never the credential. Normalized text is escaped, capped at 32,000
+characters and marked truncated when the bounded list or text is incomplete.
+
+Public documentation checked on 2026-11-04:
+[sessions](https://developers.openai.com/api/docs/guides/agents-api/sessions),
+[hosted environments](https://developers.openai.com/api/docs/guides/agents-api/environments/openai-hosted),
+and [create-session fields](https://developers.openai.com/api/reference/resources/beta/subresources/agents/subresources/sessions/methods/create).
+Account/model/API-key permissions, actual provider sandbox enforcement, billing
+and a live remote turn require a separately authorized provider check. Synthetic
+HTTP, outside RPC, journal, route, client and rendered tests establish local
+behavior only. No hard per-job spend enforcement is claimed; the
+[cloud-job authority rule](../architecture.md#provider-cloud-jobs) refuses any
+current thread or Project spend ceiling.
+
 ## Key providers
 
 Claude Code, Codex, Mistral Vibe, and OpenCode run as themselves inside

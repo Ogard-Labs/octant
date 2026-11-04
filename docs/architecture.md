@@ -3892,6 +3892,71 @@ or .zip>` write the same files, built by one host command
 
 ## Providers
 
+### Provider cloud jobs
+
+A person may separately opt an endpoint into provider-hosted execution and
+submit an immutable cloud job from an existing local Code thread. The thread,
+checkout and ordinary tools remain local; there is no automatic cloud routing.
+Only the exact bounded text reviewed for that job is sent. Octant attaches no
+files, conversation history, environment, host tools, MCP servers, Browser,
+credentials or approval callback. Text the person pastes may itself contain
+private information; path-based secret guards cannot inspect an arbitrary
+provider-native command. Explicit per-job consent authorizes execution inside
+the provider's sandbox without local command approval callbacks. It does not
+grant that sandbox any local authority. Plan refuses submission.
+
+The optional public `CloudSessionDriver` capability and equivalent outside-driver
+RPC normalize create/read/cancel. The first supported protocol is the published
+`openai-agents-v1` codec, also available to third-party drivers. Other protocols
+are unsupported. A host-owned operation intent seals the exact reviewed model,
+text and no-network/no-tool environment, method, path and body. An outside
+adapter cannot supply a broader request plan or access another remote job. The
+host retains the API credential and observes the actual created session ID
+before an outside RPC reply. No key or generic credential-return route is
+exposed. Runtime activation and observed capability requirements still apply.
+
+Opt-in defaults off independently for each provider instance. A local window
+must own the current Code Project/thread; paired clients, routines, subagents
+and headless callers receive no implicit authority. Submission rechecks current
+window, Project binding, checkout, effective posture, opt-in, instance version,
+key availability and spend policy after any credential unlock. The existing key
+pool chooses a current configured key; it exposes no generation receipt, so no
+atomic same-key-generation guarantee is made. The one-use create permit is
+consumed immediately before dispatch. That dispatch journals one unpriced usage
+fact attributed to the thread and Project, with no fabricated context plan or
+priced estimate. Reads and cancellation requests record no new inference usage.
+
+The official API has no enforced per-job total-charge ceiling in this slice.
+Any current thread or Project spend ceiling therefore refuses cloud creation;
+an unbudgeted task still requires explicit cost consent. The usage projection
+retains unknown cost rather than recording free work. The ten-minute host
+watchdog requests cancellation; it is neither a runtime nor a billing cap.
+
+Intent and immutable job/input identity enter the journal before create. An
+ambiguous create is never automatically retried. Known remote IDs recover by
+read after restart; a projection rebuild cannot submit. A new reviewed job may
+explicitly acknowledge exact prior same-thread/Project unknown job IDs and
+versions, leaving those receipts and unknown usage intact. This authorizes a
+distinct submission, not a retry, stop, deletion or waiver of future unknowns.
+At most sixteen unacknowledged unresolved jobs are admitted host-wide, one per
+thread. Input is bounded to 16,000 characters and returned text to 32,000;
+transport replies are separately bounded to 2 MiB and thirty seconds.
+
+Admission loss while create is in flight withholds output, keeps a host-observed
+remote ID and requests cancellation. After accepted handoff the job is
+host-owned through its watchdog, independently of an ordinary window close.
+Opt-out and host shutdown request cancellation of known active jobs. Requested,
+acknowledged, disconnected and timed-out are never proof of remote completion.
+Only normalized terminal turn evidence settles a job; session idle alone does
+not. Returned text is untrusted data and never executes or applies a local patch.
+Local thread purge removes the associated journal input/output/remote identity
+and de-links retained unknown usage under the existing retention rule. It does
+not delete provider-held data or guarantee remote cancellation; a late known ID
+is used only for cleanup, without restoring purged input.
+
+The exact API, account limitations and verification boundary are owned by
+[Provider runtimes: provider cloud sessions](design/provider-runtimes.md#provider-cloud-sessions).
+
 - **CLI turn results.** The one-shot and line-mode CLI report a send refusal
   even when it arrives during projection polling. An earlier completed turn
   never supplies the new prompt's reply or success status. Streaming may begin

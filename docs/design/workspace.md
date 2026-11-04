@@ -10,6 +10,26 @@ Historical links explain rationale; their old status or placement rules do not
 override this specification. The specification describes existing behavior.
 Unfinished plugin extraction and other proposals are separate from these rules.
 
+## Provider cloud jobs
+
+An existing local Code thread offers a separate **Provider cloud sessions**
+disclosure beside its plan. This is an explicit remote job, not a thread mode,
+checkout relocation or fallback for local tools. The person chooses an enabled
+endpoint/model, edits bounded task text, reviews it and approves sending that
+exact text for remote execution and possible model/sandbox charges. Changing
+the input, endpoint, model or thread clears review and consent. No files or
+history are attached automatically. The local thread remains usable normally.
+
+Saved receipts show last-observed status/time and escaped, bounded, untrusted
+provider text. **Refresh saved sessions** reads local state; **Check remote
+status** queries only that job; **Request cancellation** is explicitly a
+request, never a completion claim. An uncertain create is not automatically
+retried. Before a distinct reviewed submission the person can acknowledge exact
+prior unknown jobs, with a warning that earlier work may still run and bill.
+Unknown receipts and usage remain. Stale responses from another endpoint or
+thread cannot repopulate the new context. Account, spend and lifetime rules
+remain owned by [Architecture: provider cloud jobs](../architecture.md#provider-cloud-jobs).
+
 ## Continuing after a restart
 
 Status: Done (2026-10-28). Approved by a maintainer on 2026-10-28.

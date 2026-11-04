@@ -1,5 +1,12 @@
 import type { ProviderFailureCategory } from "@octant/contracts";
 import type {
+  ProviderCloudCreateInput,
+  ProviderCloudObservation,
+  ProviderCloudCancelResult,
+  ProviderCloudRemoteId,
+  ProviderCloudJobId,
+} from "@octant/contracts/provider-cloud-sessions";
+import type {
   OutsideDriverHttpRequestParams,
   OutsideDriverInitializeParams,
   OutsideDriverProbeResult,
@@ -67,6 +74,24 @@ export interface OutsideDriverTurn {
 type MaybePromise<A> = A | Promise<A>;
 
 export interface OutsideDriverImplementation {
+  readonly cloudSessions?: {
+    readonly protocol: "openai-agents-v1";
+    readonly create: (
+      input: typeof ProviderCloudCreateInput.Encoded,
+      host: OutsideDriverHost,
+    ) => Promise<typeof ProviderCloudObservation.Encoded>;
+    readonly read: (
+      input: { readonly remoteId: typeof ProviderCloudRemoteId.Encoded },
+      host: OutsideDriverHost,
+    ) => Promise<typeof ProviderCloudObservation.Encoded>;
+    readonly cancel: (
+      input: {
+        readonly remoteId: typeof ProviderCloudRemoteId.Encoded;
+        readonly jobId: typeof ProviderCloudJobId.Encoded;
+      },
+      host: OutsideDriverHost,
+    ) => Promise<typeof ProviderCloudCancelResult.Encoded>;
+  };
   readonly initialize?: (
     configuration: OutsideDriverConfiguration,
     host: OutsideDriverHost,

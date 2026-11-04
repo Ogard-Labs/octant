@@ -155,6 +155,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Image-seam conformance harness that image driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the image seam is retired.",
   ],
   [
+    "packages/provider-sdk/src/cloudSessionConformance.ts",
+    "Provider-cloud conformance harness that cloud driver tests run against synthetic HTTP; test scaffolding by intent, so reachable only from tests is its correct state. Remove once a product runner imports it or the cloud-session seam is retired.",
+  ],
+  [
     "packages/plugin-api/src/desktopProviderConformance.ts",
     "Desktop-provider seam conformance harness that desktop driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the desktop-provider seam is retired.",
   ],

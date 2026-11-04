@@ -2,6 +2,7 @@ import {
   registerThreadMessageQueueEvents,
   ThreadMessageQueueProjection,
 } from "../messageQueue/threadMessageQueuePersistence";
+import { registerProviderCloudSessionEvents } from "../cloud/providerCloudSessionStore";
 import {
   CONTEXT_COMPACTION_EVENT_NAMES,
   ContextCapacityReservationUpdated,
@@ -722,6 +723,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
+  registerProviderCloudSessionEvents(events);
   registerReplicaMembershipEvents(events);
   registerReplicaStoreSettingsEvents(events);
   registerDesktopLeaseEvents(events);
