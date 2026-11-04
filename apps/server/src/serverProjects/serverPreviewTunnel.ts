@@ -89,7 +89,8 @@ export class ServerPreviewTunnels {
     localPort: number,
     ownerCurrent: () => boolean = () => this.#options.ownerCurrent(owner),
   ): Promise<ServerPreviewResult> {
-    if (this.#closed || !this.#options.ownerCurrent(owner)) return refused("owner-revoked");
+    if (this.#closed || !this.#options.ownerCurrent(owner) || !ownerCurrent())
+      return refused("owner-revoked");
     const address = this.#options.address(projectId);
     if (address === undefined) return refused("project-unavailable");
     if (

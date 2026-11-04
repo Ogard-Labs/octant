@@ -48,6 +48,15 @@ describe("owned server previews", () => {
     expect(await tunnels.start("project", "window", 5173, 0)).toMatchObject({ kind: "refused" });
     expect(records).toEqual([]);
   });
+  it("refuses a stale capability before creating a listener or recording ownership", async () => {
+    const { tunnels, records } = fixture();
+    expect(await tunnels.start("project", "window", 5173, 0, () => false)).toEqual({
+      kind: "refused",
+      reason: "owner-revoked",
+    });
+    expect(records).toEqual([]);
+    expect(tunnels.read("project", "window")).toBeUndefined();
+  });
   it("reports a port collision without replacing the listener", async () => {
     const occupied = createServer();
     await new Promise<void>((resolve) => occupied.listen(0, "127.0.0.1", resolve));
