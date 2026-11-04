@@ -195,7 +195,11 @@ export class GitService {
         comparison.digest !== input.expectedDigest
       )
         return { status: "rejected", reason: "stale-state" };
-      const patch = selectedGitHunkPatch(comparison, input.selected);
+      const patch = selectedGitHunkPatch(
+        comparison,
+        input.selected,
+        input.action === "stage" ? "forward" : "reverse",
+      );
       if (patch === undefined) return { status: "rejected", reason: "invalid-hunks" };
       if (this.#mutation.applyHunks === undefined) return { status: "unavailable" };
       return this.#mutation.applyHunks(

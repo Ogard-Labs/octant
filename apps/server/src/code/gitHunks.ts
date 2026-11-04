@@ -144,10 +144,21 @@ export function prepareGitHunks(
   return { ...base, hunks, unavailable };
 }
 
-/** Selects only exact recorded identities in their native file/hunk order. */
+/**
+ * Selects only exact recorded identities in their native file/hunk order.
+ *
+ * Each recorded header counts every earlier hunk of the full comparison. Git
+ * checks a hunk at the target-side start and reports any drift as an offset,
+ * which the mutation port refuses, so an omitted earlier hunk that inserts or
+ * deletes lines must not move a selected one. A forward (`stage`) patch targets
+ * the old side, so its new start drops the omitted line delta; a reverse
+ * (`unstage`, `reverse`) patch targets the new side, so its old start gains it.
+ * Body bytes stay exactly the host's canonical comparison.
+ */
 export function selectedGitHunkPatch(
   comparison: GitHunkComparison,
   selected: readonly string[],
+  direction: "forward" | "reverse",
 ): string | undefined {
   const ids = new Set(selected);
   if (
@@ -159,13 +170,26 @@ export function selectedGitHunkPatch(
   let patch = "";
   for (const file of parseUnifiedDiff(comparison.diff.text, { retainSource: true })) {
     if (file.source === undefined) return undefined;
-    const chosen = comparison.hunks.filter((hunk) => hunk.path === file.path && ids.has(hunk.id));
-    if (chosen.length === 0) continue;
+    const recorded = comparison.hunks.filter((hunk) => hunk.path === file.path);
+    if (!recorded.some((hunk) => ids.has(hunk.id))) continue;
     patch += comparison.diff.text.slice(file.source.start, file.source.headerEnd);
-    for (const identity of chosen) {
+    let omittedDelta = 0;
+    for (const identity of recorded) {
+      if (!ids.has(identity.id)) {
+        omittedDelta += identity.newLines - identity.oldLines;
+        continue;
+      }
       const source = file.hunks[identity.index]?.source;
       if (source === undefined) return undefined;
-      patch += comparison.diff.text.slice(source.start, source.end);
+      const raw = comparison.diff.text.slice(source.start, source.end);
+      const header = /^@@ -\d+((?:,\d+)?) \+\d+((?:,\d+)?) @@/.exec(raw);
+      if (header === null) return undefined;
+      const oldStart = identity.oldStart + (direction === "reverse" ? omittedDelta : 0);
+      const newStart = identity.newStart - (direction === "forward" ? omittedDelta : 0);
+      if (oldStart < 0 || newStart < 0) return undefined;
+      patch +=
+        `@@ -${oldStart}${header[1] ?? ""} +${newStart}${header[2] ?? ""} @@` +
+        raw.slice(header[0].length);
     }
   }
   return patch === "" ? undefined : patch;

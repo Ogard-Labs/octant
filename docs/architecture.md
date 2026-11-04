@@ -1668,7 +1668,9 @@ revalidates the original live principal, Project binding, checkout and physical
 root, current posture, reviewed state and exact canonical bytes. It checks again
 after queued work and native preflight, with a final synchronous authority/root
 proof after launch preparation. Git receives a bounded patch on stdin with no
-three-way or whitespace fallback; a preflight that relocates a hunk is refused.
+three-way or whitespace fallback. The host recounts each selected hunk's
+header for omitted earlier hunks that change the line count, so a preflight that
+still relocates a hunk is genuine drift and is refused.
 A replaced physical root cannot adopt an old comparison even when its Git bytes
 match. A missing original witness requires a fresh comparison; the stable host
 witness remains usable after restart while the same root and authority remain.

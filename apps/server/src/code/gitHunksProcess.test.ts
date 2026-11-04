@@ -116,7 +116,7 @@ test("selected native hunks preserve mixed index/worktree state and refuse drift
       status: "rejected",
       reason: "stale-state",
     });
-    const patch = selectedGitHunkPatch(preview, [preview.hunks[0]!.id])!;
+    const patch = selectedGitHunkPatch(preview, [preview.hunks[0]!.id], "reverse")!;
     assert.ok(patch);
     writeFileSync(path, "external inserted line\n" + lines.join("\n") + "\n");
     assert.deepEqual(await apply(preview, "stage", [preview.hunks[0]!.id]), {
@@ -230,5 +230,104 @@ test("selected native hunks preserve mixed index/worktree state and refuse drift
         },
       }),
     );
+  }
+}, 60_000);
+
+test("selected native hunks apply cleanly when an earlier unselected hunk changes the line count", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-hunks-shifted-")));
+  const confinement = createFakeSandboxConfinement("octant-hunks-shifted-confinement-");
+  const executable = (process.env.PATH ?? "")
+    .split(delimiter)
+    .map((path) => join(path, "git"))
+    .find((path) => existsSync(path));
+  const git = (...args: string[]) => {
+    if (executable === undefined) throw Error("Configured Git unavailable");
+    return execFileSync(executable, ["-C", root, ...args], { encoding: "utf8" });
+  };
+  const { GitMutationPort } = await import("./gitMutationPort");
+  const { GitService } = await import("./gitService");
+  try {
+    if (executable === undefined) throw new Error("Configured Git unavailable.");
+    git("init", "-b", "main");
+    git("config", "user.name", "Hunk fixture");
+    git("config", "user.email", "hunks@example.invalid");
+    const original = Array.from({ length: 40 }, (_, index) => `original line ${index + 1}`);
+    const path = join(root, "shifted.txt");
+    const write = (lines: readonly string[]) => writeFileSync(path, lines.join("\n") + "\n");
+    write(original);
+    git("add", ".");
+    git("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", "commit", "-m", "baseline");
+    const options = {
+      confinement: confinement.confinement,
+      temporaryDirectory: confinement.temporaryDirectory,
+      gitExecutable: executable,
+    };
+    const service = new GitService(
+      new GitObservationPort(options),
+      new GitMutationPort(undefined, options),
+    );
+    const scope = (kind: "unstaged" | "staged") => ({
+      checkoutId: "fixture",
+      checkoutRoot: root,
+      scope: kind,
+      current: () => true,
+    });
+    const prepare = async (kind: "unstaged" | "staged") => {
+      const value = await service.prepareHunks(scope(kind));
+      if (value.status !== "ready") throw Error("Comparison unavailable");
+      return value;
+    };
+    const applyLater = async (
+      kind: "unstaged" | "staged",
+      action: "stage" | "unstage" | "reverse",
+    ) => {
+      const comparison = await prepare(kind);
+      assert.equal(comparison.hunks.length, 2);
+      const later = comparison.hunks.find((hunk) => hunk.oldStart > 20);
+      if (later === undefined) throw Error("Later hunk missing");
+      return service.applyHunks({
+        ...scope(kind),
+        action,
+        selected: [later.id],
+        expectedStateToken: comparison.stateToken,
+        expectedDigest: comparison.digest,
+        executionPolicy: "full-access",
+        current: () => true,
+      });
+    };
+    // An earlier three-line insertion stays unselected; only the later replacement moves.
+    const edited = [
+      ...original.slice(0, 2),
+      "inserted 1",
+      "inserted 2",
+      "inserted 3",
+      ...original.slice(2),
+    ];
+    edited[29] = "later replacement";
+    write(edited);
+    assert.deepEqual(await applyLater("unstaged", "stage"), { status: "applied" });
+    const staged = [...original];
+    staged[26] = "later replacement";
+    assert.equal(git("show", ":shifted.txt"), staged.join("\n") + "\n");
+    git("add", "shifted.txt");
+    assert.deepEqual(await applyLater("staged", "unstage"), { status: "applied" });
+    assert.equal(
+      git("show", ":shifted.txt"),
+      [
+        ...original.slice(0, 2),
+        "inserted 1",
+        "inserted 2",
+        "inserted 3",
+        ...original.slice(2),
+      ].join("\n") + "\n",
+    );
+    git("reset", "-q", "--", "shifted.txt");
+    assert.deepEqual(await applyLater("unstaged", "reverse"), { status: "applied" });
+    const reversed = [...edited];
+    reversed[29] = original[26]!;
+    assert.equal(readFileSync(path, "utf8"), reversed.join("\n") + "\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(confinement.root, { recursive: true, force: true });
   }
 }, 60_000);

@@ -83,11 +83,11 @@ describe("exact selected Git hunks", () => {
     const comparison = prepareGitHunks("unstaged", observed, scoped(text));
     expect(comparison.hunks).toHaveLength(1);
     expect(comparison.hunks[0]).toMatchObject({ path: "file.txt", oldStart: 1, newStart: 1 });
-    expect(selectedGitHunkPatch(comparison, [comparison.hunks[0]!.id])).toBe(text);
+    expect(selectedGitHunkPatch(comparison, [comparison.hunks[0]!.id], "forward")).toBe(text);
     expect(prepareGitHunks("staged", observed, scoped(text)).hunks[0]!.id).not.toBe(
       comparison.hunks[0]!.id,
     );
-    expect(selectedGitHunkPatch(comparison, ["0".repeat(64)])).toBeUndefined();
+    expect(selectedGitHunkPatch(comparison, ["0".repeat(64)], "forward")).toBeUndefined();
   });
   it("refuses nonregular modes, ambiguous paths and truncated bytes instead of inventing editable hunks", () => {
     expect(
