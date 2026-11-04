@@ -162,7 +162,7 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
  * never what the status is; the file itself is in the context beside it.
  */
 function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>): string {
-  const standing = `This Project keeps its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; it is in your context. Before you finish this task, update ${WORK_STATUS_FILE_NAME}: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today.`;
+  const standing = `This Project keeps its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; it is in your context. When this turn changes where the work stands, update ${WORK_STATUS_FILE_NAME} before you finish: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today. Leave it unchanged for questions and conversation.`;
   if (reasons.length === 0) return standing;
   const why = [
     reasons.includes("stale") ? "the status has not been updated for a while" : undefined,
@@ -171,7 +171,7 @@ function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>):
   ]
     .filter((part) => part !== undefined)
     .join(", and ");
-  return `${standing}\n\nTake stock first: ${why}. Before starting the request, briefly summarize where this work stands from ${WORK_STATUS_FILE_NAME} — current status, open follow-ups, and deadlines with their dates — then ask the person what has happened since and what they need to follow up on. Update ${WORK_STATUS_FILE_NAME} with their answer before continuing with the request.`;
+  return `${standing}\n\nTake stock first: ${why}. Before starting the request, briefly summarize where this work stands from ${WORK_STATUS_FILE_NAME} — current status, open follow-ups, and deadlines with their dates — then ask the person what has happened since and what they need to follow up on. Update ${WORK_STATUS_FILE_NAME} with their answer before continuing with the request. When the request is a greeting or unrelated to this work, answer it first and offer the update at the end instead.`;
 }
 
 /**
@@ -2188,7 +2188,7 @@ export class WorkTurnService {
    * re-explaining. A missing file is seeded here. When the status is stale or
    * a dated line is overdue or near, the turn is also told to take stock
    * first — summarize, ask what happened, update the file — before doing what
-   * it was asked.
+   * it was asked, unless the request is a greeting or unrelated to the work.
    */
   async #projectBriefContributions(
     project: Extract<Project, { readonly type: "work" }>,

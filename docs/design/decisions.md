@@ -614,6 +614,7 @@ Work never silently becomes Code. A promotion proposal is an offer, and only exp
 - A promotion moves focus and tooling, not authority; the new thread takes the level of its own Project, never one carried over from Work.
 - A thread never moves from Code to Work (maintainer decision, 2026-11-01): Code can do everything Work can, so a person forks the thread or starts a new one.
 - A Work Project may opt into a `STATUS.md` in its folder, off by default and refused for the default-folder Project.
+- A turn updates `STATUS.md` only when it changes where the work stands; a stale status makes a task take stock first unless its request is a greeting or unrelated to the work.
 - Octant never writes an agent brief into a user folder, and a Work turn does not read an existing one.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).

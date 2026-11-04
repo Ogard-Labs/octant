@@ -1440,10 +1440,15 @@ already holds a `STATUS.md`, starts off. The default-folder Project refuses it
 on the server: it holds what nobody gave a home, so there is no single piece of
 work for a status to describe. Enabling seeds `STATUS.md` if it is missing.
 While enabled, the file is read into every Work turn ahead of the thread's
-transcript with a standing instruction to keep it current; a completed turn
-that changed files without touching it gets a `Recent changes` line appended
-from the turn's observed-changes record; and a stale status or a near or passed date makes the next
-task open by taking stock and asking for an update. The Work Project page, the
+transcript with a standing instruction to update it when the turn changes where
+the work stands and to leave it unchanged for questions and conversation; a
+completed turn that changed files without touching it gets a `Recent changes`
+line appended from the turn's observed-changes record; and a stale status or a
+near or passed date makes the next task open by taking stock and asking for an
+update, unless its request is a greeting or unrelated to the work, which is
+answered first with the update offered at the end. An unconditional "update
+before you finish" rule asked the model to rewrite the file after a one-word
+greeting. The Work Project page, the
 Work board's follow-up mark, and the inbox's `follow-up-due` attention signal
 read the same file on demand; nothing about its content is journaled. While
 disabled, Octant reads nothing from the folder for this purpose, adds no

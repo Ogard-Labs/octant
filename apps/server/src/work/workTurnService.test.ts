@@ -2386,7 +2386,7 @@ describe("WorkTurnService", () => {
     await fixture.waitForIdle();
     expect(JSON.stringify(contexts.flat())).not.toContain("octant_browser");
   });
-  it("opens every task with the Project's status, and takes stock when the status is stale", async () => {
+  it("opens every task with the Project's status, and takes stock when the status is stale unless the request is unrelated", async () => {
     const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
     const disk = new Map<string, string>([
       [
@@ -2418,6 +2418,8 @@ describe("WorkTurnService", () => {
       (block) => block.kind === "instructions" && block.text.includes("Take stock first"),
     );
     expect(instruction?.text).toMatch(/not been updated for a while.*date has passed/);
+    expect(instruction?.text).toContain("When this turn changes where the work stands");
+    expect(instruction?.text).toContain("answer it first");
     expect(instruction?.text).not.toContain("AGENTS.md");
   });
 
@@ -2975,7 +2977,7 @@ describe("WorkTurnService", () => {
     expect(followUp.kind).toBe("accepted");
     await fixture.waitForIdle(decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac"));
     expect(sent[1]).toEqual([
-      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "instructions", text: expect.stringContaining("Octant Work task") },
       { kind: "user-message", text: "Summarize the brief" },
       { kind: "assistant-message", text: "Revised summary" },
     ]);
@@ -4523,7 +4525,7 @@ describe("WorkTurnService", () => {
     expect(run.mock.calls[1]?.[0]).toMatchObject({
       command: expect.objectContaining({ prompt: "Make that summary shorter" }),
       context: [
-        { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+        { kind: "instructions", text: expect.stringContaining("Octant Work task") },
         { kind: "user-message", text: "Summarize the brief" },
         { kind: "assistant-message", text: "Provider reply" },
       ],

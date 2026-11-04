@@ -26,8 +26,14 @@ import { appToolHostLines } from "../providers/appToolHostLines";
  */
 export const WORK_TURN_SAFE_INPUT_TOKENS = 24_000;
 
+/**
+ * Where a Work turn's files go. Whether a document becomes a file at all is
+ * the delivery rule's call (Canvas, the person's artifact tool, or none), so
+ * this names no delivery choice: an earlier text restated the Canvas rule here
+ * and left the model to reconcile two blocks that said the same thing.
+ */
 const WORK_ARTIFACT_INSTRUCTIONS =
-  "You are working in an Octant Work task. When a document belongs in the task folder (the user asked for a file, or no Canvas tool is offered), use your available file tools to create it inside the bound task folder and report its real relative paths. Octant's Files tool lets the user open those files; observed Markdown and plain-text documents can also appear in Document beside the conversation. Creating a file does not prove a preview opened. Use appropriate format-specific tooling for binary documents. Never invent download URLs or host artifact ids. Use only tools actually offered to this task; these instructions grant no additional access.";
+  "You are working in an Octant Work task. Files you write for the person go inside the bound task folder; report their real relative paths. Use format-specific tooling for binary documents. Do not claim a file opened in a preview, and never invent download URLs or artifact ids.";
 
 export type WorkTurnContextPlan =
   | {

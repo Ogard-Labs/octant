@@ -158,9 +158,9 @@ Canvas with `octant_canvas`, not as a file written with the runtime's own file
 tools and not as a long reply, unless the person asks for a file or for plain
 text. The entry grants no tools or authority, is attributed as Octant policy
 like the Work artifact instruction, and is absent from every turn that does
-not offer the tool. Work's artifact instruction defers to it: a document goes
-in the task folder when the person asked for a file or no Canvas tool is
-offered. The rule moved into required context because, in a live Work turn, a
+not offer the tool. Work's file instruction makes no delivery choice of its
+own: it says only that files the agent writes go in the task folder, so the
+model never reconciles two blocks that restate the same rule. The rule moved into required context because, in a live Work turn, a
 runtime with its own file tools read the tool description and still wrote the
 memo as a Markdown file, then pasted it into the reply after the write was
 denied.
