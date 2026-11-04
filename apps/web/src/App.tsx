@@ -476,6 +476,7 @@ import { usePendingRequests } from "./palette/usePendingRequests";
 import { usePendingRequests as usePendingRequestRead } from "./pendingRequests/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
 import { HostPlatformContext } from "./platform";
+import { CodeDebugWindowProvider } from "./debug/CodeDebugWindowProvider";
 
 export type { ShellLaunch } from "./shell/shellLaunch";
 export { launchFromLocation } from "./shell/shellLaunch";
@@ -7505,7 +7506,12 @@ function LaunchedShell(
                                         <ServerCodeProjectsContext.Provider
                                           value={serverCodeProjects}
                                         >
-                                          {shell}
+                                          <CodeDebugWindowProvider
+                                            origin={new URL(props.launch.serverUrl).origin}
+                                            windowId={String(props.launch.windowId)}
+                                          >
+                                            {shell}
+                                          </CodeDebugWindowProvider>
                                         </ServerCodeProjectsContext.Provider>
                                       </HostPlatformContext.Provider>
                                     </PlanUsageProvider>

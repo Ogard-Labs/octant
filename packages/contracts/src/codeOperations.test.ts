@@ -78,6 +78,21 @@ const definition = {
 } as const;
 
 describe("Code operation contracts", () => {
+  it.each(["stale-state", "unlisted-path", "untracked-path"] as const)(
+    "preserves a discard refusal for %s through the result contract",
+    (reason) => {
+      const result = {
+        kind: "git-mutation-state",
+        operationId: ids.operation,
+        gitOperationId: ids.git,
+        mutation: "discard",
+        state: "rejected",
+        reason,
+      };
+      expect(decodeCodeOperationResult(result)).toEqual(result);
+    },
+  );
+
   it("keeps evidence batches below the authenticated remote response budget", () => {
     expect(MAX_CODE_EVIDENCE_BATCH_ITEMS).toBe(64);
     expect(() =>

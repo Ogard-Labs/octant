@@ -1,80 +1,148 @@
-// What this host does to read and change a Code Project's or thread's posture
-// for an owner device. The owner routes decide whether the request may reach
-// here (owner list, Owners item, unlock class); the host decides whether the
-// change is allowed, by the same rules a local window meets: Full access on a
-// thread needs the Project to remember it, a thread on an SSH target keeps the
-// posture it was created under, and Plan stays read-only.
-
+import { createHash } from "node:crypto";
 import type {
   CodeThread,
+  CodeCheckoutIdentity,
   OwnerPosture,
   OwnerPostureChangeRequest,
   OwnerPostureSubject,
+  OwnerPostureTarget,
   Project,
 } from "@octant/contracts";
+import type { CodeService } from "../code/codeService";
+import type { ProjectService } from "../projectService";
 
 export type OwnerPostureRefusalKind =
   | "not-found"
   | "unsupported"
   | "project-default-not-enabled"
-  | "stale"
+  | "posture-stale"
   | "refused";
-
 export type OwnerPostureRead =
   | { readonly status: "read"; readonly posture: OwnerPosture }
   | { readonly status: "refused"; readonly kind: OwnerPostureRefusalKind };
-
 export type OwnerPostureChange =
   | { readonly status: "changed"; readonly posture: OwnerPosture }
   | { readonly status: "refused"; readonly kind: OwnerPostureRefusalKind };
-
+/** Host facts from the authenticated owner route, never decoded from the request body. */
+export interface OwnerPostureAuthority {
+  readonly ownerMemberId: string;
+  readonly freshFull: boolean;
+}
 export interface OwnerPostureHost {
+  readonly list?: () => Promise<ReadonlyArray<OwnerPostureTarget>>;
   readonly read: (subject: OwnerPostureSubject) => Promise<OwnerPostureRead>;
-  readonly change: (request: OwnerPostureChangeRequest) => Promise<OwnerPostureChange>;
+  readonly change: (
+    request: OwnerPostureChangeRequest,
+    authority: OwnerPostureAuthority,
+  ) => Promise<OwnerPostureChange>;
 }
 
-/**
- * The host as it runs today: it reads postures from its own records and
- * refuses every change as `unsupported`. Changing a Code posture goes through
- * the Code service, whose Full access check is bound to a local window's
- * native confirmation, and a window-free path for an owner device is not built.
- * Reading is still useful, because an owner device sees what a change would
- * start from.
- */
-export function createReadingPostureHost(options: {
-  readonly readCodeThread: (
-    threadId: CodeThread["id"],
-  ) => Pick<CodeThread, "executionPolicy" | "permissionPersistence"> | undefined;
+export function createOwnerPostureHost(options: {
+  readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
+  readonly readProjects: () => ReadonlyArray<Project>;
+  readonly readCodeThread: (threadId: CodeThread["id"]) => CodeThread | undefined;
   readonly readProject: (projectId: Project["id"]) => Project | undefined;
+  readonly readCheckout: (checkoutId: CodeThread["checkoutId"]) => CodeCheckoutIdentity | undefined;
+  readonly code: Pick<CodeService, "changeOwnerPosture"> | undefined;
+  readonly projects: Pick<ProjectService, "changeOwnerPosture">;
 }): OwnerPostureHost {
+  const snapshot = (subject: OwnerPostureSubject): OwnerPostureRead => {
+    const thread =
+      subject.kind === "code-thread" ? options.readCodeThread(subject.threadId) : undefined;
+    if (subject.kind === "code-thread" && thread === undefined)
+      return { status: "refused", kind: "not-found" };
+    const projectId =
+      thread?.projectId ?? (subject.kind === "project" ? subject.projectId : undefined);
+    if (projectId === undefined) return { status: "refused", kind: "not-found" };
+    const project = options.readProject(projectId);
+    if (
+      project?.type !== "code" ||
+      project.lifecycle !== "active" ||
+      (thread !== undefined && thread.lifecycle !== "active")
+    )
+      return { status: "refused", kind: "not-found" };
+    const checkout = thread === undefined ? undefined : options.readCheckout(thread.checkoutId);
+    if (
+      thread !== undefined &&
+      (checkout === undefined ||
+        checkout.availability !== "available" ||
+        String(checkout.repositoryId) !== String(thread.repositoryId) ||
+        String(project.bindingHistory.at(-1)?.revisionId) !== String(thread.bindingRevisionId))
+    )
+      return { status: "refused", kind: "posture-stale" };
+    // The signed request binds both aggregate heads and the exact checkout and
+    // Project binding. A changed target cannot reuse an earlier reading.
+    const version = createHash("sha256")
+      .update(JSON.stringify({ subject, thread, project, checkout }))
+      .digest("hex");
+    return {
+      status: "read",
+      posture: {
+        subject,
+        version,
+        ...(thread?.autoApprove === true ? { autoApprove: true } : {}),
+        posture:
+          thread?.executionPolicy ??
+          (project.codeAccessPersistence === "project-default" ? "full-access" : "approval-gated"),
+        persistence: thread?.permissionPersistence ?? project.codeAccessPersistence,
+      },
+    };
+  };
   return {
-    read: async (subject) => {
-      if (subject.kind === "code-thread") {
-        const thread = options.readCodeThread(subject.threadId);
-        return thread === undefined
-          ? { status: "refused", kind: "not-found" }
-          : {
-              status: "read",
-              posture: {
-                subject,
-                posture: thread.executionPolicy,
-                persistence: thread.permissionPersistence,
-              },
-            };
+    list: async () => {
+      const targets: Array<OwnerPostureTarget> = [];
+      for (const project of options.readProjects()) {
+        if (project.type !== "code") continue;
+        const result = snapshot({ kind: "project", projectId: project.id });
+        if (result.status === "read")
+          targets.push({ title: project.name, posture: result.posture });
       }
-      const project = options.readProject(subject.projectId);
-      if (project?.type !== "code") return { status: "refused", kind: "not-found" };
-      // A Code Project's posture is whether it remembers Full access for its threads.
-      return {
-        status: "read",
-        posture: {
-          subject,
-          posture:
-            project.codeAccessPersistence === "project-default" ? "full-access" : "approval-gated",
-          persistence: project.codeAccessPersistence,
-        },
-      };
+      for (const thread of options.readCodeThreads()) {
+        const result = snapshot({ kind: "code-thread", threadId: thread.id });
+        if (result.status === "read")
+          targets.push({ title: thread.title, posture: result.posture });
+      }
+      return targets;
     },
-    change: async () => ({ status: "refused", kind: "unsupported" }),
+    read: async (subject) => snapshot(subject),
+    change: async (request, authority) => {
+      const before = snapshot(request.subject);
+      if (before.status === "refused") return before;
+      if (before.posture.version !== request.expectedVersion)
+        return { status: "refused", kind: "posture-stale" };
+      if (request.posture === "full-access" && !authority.freshFull)
+        return { status: "refused", kind: "refused" };
+      try {
+        // No await between the authoritative snapshot and the synchronous
+        // service transaction: another command cannot change the target here.
+        if (request.subject.kind === "code-thread") {
+          if (options.code === undefined) return { status: "refused", kind: "unsupported" };
+          const current = options.readCodeThread(request.subject.threadId);
+          if (current === undefined) return { status: "refused", kind: "not-found" };
+          options.code.changeOwnerPosture({
+            threadId: current.id,
+            expectedVersion: current.version,
+            executionPolicy: request.posture,
+            permissionPersistence: request.persistence,
+            ...authority,
+          });
+        } else {
+          if (request.posture !== "full-access" && request.posture !== "approval-gated")
+            return { status: "refused", kind: "unsupported" };
+          const current = options.readProject(request.subject.projectId);
+          if (current === undefined) return { status: "refused", kind: "not-found" };
+          options.projects.changeOwnerPosture({
+            projectId: current.id,
+            expectedVersion: current.version,
+            persistence: request.posture === "full-access" ? "project-default" : "current-session",
+            ...authority,
+          });
+        }
+        const after = snapshot(request.subject);
+        return after.status === "read" ? { status: "changed", posture: after.posture } : after;
+      } catch {
+        return { status: "refused", kind: "refused" };
+      }
+    },
   };
 }

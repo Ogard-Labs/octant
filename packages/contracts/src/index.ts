@@ -12,6 +12,7 @@ export * from "./codeTestDefinitions";
 export * from "./context";
 export * from "./contextHandoff";
 export * from "./contextRpc";
+export * from "./taskAccess";
 export * from "./workArtifacts";
 export * from "./workFileListing";
 export * from "./workBoard";

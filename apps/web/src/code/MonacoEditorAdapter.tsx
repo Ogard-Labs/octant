@@ -52,6 +52,7 @@ export interface MonacoLanguageBridge {
  */
 export interface MonacoDebugDecorations {
   readonly breakpoints: ReadonlyArray<number>;
+  readonly unresolvedBreakpoints?: ReadonlyArray<number>;
   readonly stoppedLine?: number;
 }
 

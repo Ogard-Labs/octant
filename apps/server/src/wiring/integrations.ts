@@ -455,6 +455,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       githubReadToolService,
       githubRoutes,
       integrationRoutes,
+      credentialOperations: () => integrationService.credentialOperations?.() ?? [],
       linearIssueContextService,
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
