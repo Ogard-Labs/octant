@@ -1,3 +1,4 @@
+import { OwnerPosturePanel } from "./OwnerPosturePanel";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import {
@@ -127,6 +128,7 @@ export function OwnerAlertsPanel(props: OwnerAlertsPanelProps) {
 
   return (
     <View style={styles.panel} testID="mobile-owner-alerts">
+      <OwnerPosturePanel spokes={spokes} />
       <Text style={styles.title}>Owner alerts</Text>
       <Text style={styles.help}>
         A computer raises an alert when a newer roster adds a member. If you did not add it, tap
