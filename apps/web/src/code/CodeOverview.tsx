@@ -28,6 +28,8 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ThreadRenameField } from "../projects/ThreadRenameField";
 import { CodeComposerAdapter, type CodeComposerSubmitInput } from "./composer/CodeComposerAdapter";
 import { useWorktreeRemoteFacts } from "./composer/useWorktreeRemoteFacts";
+import { CodeProjectPlanner } from "./CodeProjectPlanner";
+import type { PlannerProposalReview } from "./plannerProposalCreation";
 
 export type CodeOverviewProps =
   | {
@@ -55,6 +57,7 @@ export type CodeOverviewProps =
       readonly onCreateThread?: (
         input: CodeComposerSubmitInput,
         projectId: ProjectId,
+        plannerReview?: PlannerProposalReview,
       ) => boolean | void | Promise<boolean | void>;
       /**
        * The Project's remembered habit for how new threads start,
@@ -376,6 +379,7 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
         onRetry={() => setReload((current) => current + 1)}
         {...(props.showQuickStart === undefined ? {} : { showQuickStart: props.showQuickStart })}
       />
+      <CodeProjectPlanner {...props} />
       {props.showQuickStart === false ? null : (
         <CodeProjectQuickStart
           controller={props.controller}

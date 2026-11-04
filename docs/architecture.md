@@ -2485,15 +2485,14 @@ enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
 until all three exist; a standing grant never substitutes for the per-act
 approval.
 
-**The Project planner thread is a server-only capability.** A Code Project may
+**The Project planner thread proposes work for a person to review.** A Code Project may
 designate one of its own Code threads as its planner, whose agent surveys the
 Project's board and proposes new Code threads for a person to accept. The
 server, contracts, domain policy (`@octant/domain/code-planner-policy`), and
-the client-runtime transport implement it; no renderer, phone, or CLI surface
-designates a planner, lists proposals, or resolves them, and the shell does not
-advertise it. Because nothing in the shell designates a planner, no thread
-receives the planner tools in ordinary use. Any later surface must keep the
-rules below:
+client-runtime transport implement it. The Code Project overview's **Project
+planner** section lets a person designate an existing same-Project thread,
+inspect proposals, remove the designation and approve or decline. Phone and CLI
+designation or resolution are not added. The rules are:
 
 - **Routes.** `GET /api/code/planner/:projectId` returns the designation, its
   version, and the proposals; it needs only the authenticated window's access
@@ -2518,6 +2517,41 @@ rules below:
 - **Resolution.** Only a person confirms or declines. A confirm creates its
   thread through the ordinary Code creation command, inside the proposal's own
   Project only; the planner has no creation authority of its own.
+- **Review and execution.** The overview shows the proposal's title, exact
+  intent, rationale and current status. **Review and approve** opens the ordinary
+  Code creation controls for provider/model, checkout and access, with the Project
+  and proposal text fixed. **Approve and start described task** sends the current
+  proposal version and ordinary creation command, then starts the exact intent
+  as the first message only after confirmed creation, through the normal thread
+  authority path. An unavailable selected provider prevents approval. Created
+  tasks remain reachable from the proposal; a failed first turn remains on its
+  created task with the prompt and refusal for explicit recovery.
+- **Freshness and uncertainty.** The overview refreshes proposals and designation
+  on entry, reconnect and after decisions; disconnected, failed or stale review
+  state cannot submit another decision. Commands use the displayed aggregate
+  version and never retry automatically. Before ordinary creation awaits, the
+  host journals a `creating` attempt with the exact submitted thread id on that
+  proposal's aggregate. This versioned admission belongs to one attempt across
+  windows and host restarts; a second confirm or decline cannot overtake it.
+  Reads and decision replies have a thirty-second wait bound; a timeout does not
+  prove cancellation. The renderer writes and verifies that attempt's id and
+  expected version in session storage before dispatch, retaining it across
+  review close, remount and reload. Missing storage makes approval unavailable.
+  A missing task, a fresh pending proposal or declined status never proves that
+  a previous creation ended, and never releases an unknown attempt.
+  The host may record `failed` only from a trusted built-in creation refusal
+  before its worktree-commit or plain-thread-journal boundary was entered. A
+  typed pre-boundary refusal permits an explicit repair retry after a newer
+  authoritative proposal version; generic, custom-service, post-boundary and
+  final-append failures retain `creating`. The observer is host-only, never a
+  wire assertion. Restart with no stored task remains uncertain. A stored
+  same-Project task may repair the proposal linkage, but that observation returns
+  no creation/first-turn permission. The renderer reads only the retained task
+  id and offers inspection; a refused or uncertain response never starts a
+  provider turn or submits a replacement. Only a matching confirmed response
+  enters the ordinary first-send path. Admission/failure facts carry bounded
+  metadata, not raw provider errors. The list bounds rendered history to fifty
+  proposals, pending first.
 
 **Routines (Automation Center).** A routine is a host-owned, Project-bound
 definition that starts an ordinary Work or Code thread with a fixed task prompt

@@ -1366,12 +1366,32 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       canAccessProject: canAccessCodeProject,
       createThread: async (windowId, creation, signal, executionContext) => {
         if (codeService instanceof CodeService) {
-          return codeService.execute(windowId, creation, signal, executionContext);
+          let creationStarted = false;
+          try {
+            return await codeService.execute(windowId, creation, signal, {
+              ...executionContext,
+              onCreationBoundary: () => {
+                creationStarted = true;
+              },
+            });
+          } catch (error) {
+            if (
+              !creationStarted &&
+              codeService.execute === CodeService.prototype.execute &&
+              error instanceof CodeServiceError
+            )
+              return { kind: "creation-not-started", failure: error.failure };
+            throw error;
+          }
         }
         if (executionContext.inheritedMark !== undefined) {
-          throw new CodeServiceError(
-            decodeCodeFailure({ category: "unavailable", message: INHERITED_MARK_REFUSAL }),
-          );
+          return {
+            kind: "creation-not-started",
+            failure: decodeCodeFailure({
+              category: "unavailable",
+              message: INHERITED_MARK_REFUSAL,
+            }),
+          };
         }
         return codeService.execute(windowId, creation, signal);
       },

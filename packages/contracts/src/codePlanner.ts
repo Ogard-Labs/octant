@@ -65,6 +65,15 @@ const CodePlannerProposalFields = {
     Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_CODE_PLANNER_PROPOSAL_RATIONALE_LENGTH)),
   ),
   proposedAt: UtcTimestamp,
+  /** Host-authored admission; a draft cannot assert that creation did not start. */
+  creationAttempt: Schema.optional(
+    Schema.Struct({
+      threadId: CodeThreadId,
+      status: Schema.Literal("creating", "failed"),
+      admittedAt: UtcTimestamp,
+      message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
+    }).annotations(strict),
+  ),
 } as const;
 
 /**
@@ -181,6 +190,7 @@ export const CodePlannerProposalRefusalReason = Schema.Literal(
   "proposal-not-pending",
   "creation-project-mismatch",
   "proposal-changed",
+  "creation-not-started",
 );
 export type CodePlannerProposalRefusalReason = typeof CodePlannerProposalRefusalReason.Type;
 
