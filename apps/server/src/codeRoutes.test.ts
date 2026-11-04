@@ -1,5 +1,7 @@
+import { codeLanguageReferencesFixture } from "./code/codeLanguageReferencesTestFixtures";
 import {
   decodeCodeCheckoutIdentity,
+  decodeCodeEvidenceContentId,
   decodeCodeThread,
   decodeCodeThreadId,
   decodeCodeOperationId,
@@ -9,9 +11,9 @@ import {
   type CodeOperationEventFrame,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { createRemoteDevicePrincipal, resolveLocalWindowPrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
-import { WindowAuthorityStore } from "./windowAuthorityStore";
+import { WindowAuthorityStore, WINDOW_AUTHORITY_TTL_MS } from "./windowAuthorityStore";
 import {
   MAX_CODE_FILE_BODY_SIZE,
   MAX_CODE_NDJSON_LINE_BYTES,
@@ -24,7 +26,7 @@ const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000902");
 const operationId = decodeCodeOperationId("00000000-0000-4000-8000-000000000909");
 const checkoutId = "00000000-0000-4000-8000-000000000903";
-const contentId = "00000000-0000-4000-8000-000000000904";
+const contentId = decodeCodeEvidenceContentId("00000000-0000-4000-8000-000000000904");
 const projectId = "00000000-0000-4000-8000-000000000906";
 const bindingRevisionId = "00000000-0000-4000-8000-000000000907";
 const providerInstanceId = "00000000-0000-4000-8000-000000000908";
@@ -568,6 +570,283 @@ describe("Code routes", () => {
       { scopeId: remoteDeviceId, principal: "remote-device" },
       diagnostics,
     );
+  });
+
+  it.each(["revoked", "expired", "rotated", "rotated-with-header"] as const)(
+    "revalidates bound local reference admission after a held Request body becomes %s",
+    async (change) => {
+      const store = new WindowAuthorityStore();
+      let clock = 0;
+      store.register({ windowId, capability, now: clock });
+      const fileId = "00000000-0000-4000-8000-000000000931";
+      const read = vi.fn(async () => ({
+        status: "references",
+        threadId,
+        checkoutId,
+        fileId,
+        documentVersion: 1,
+        documentRevision: "90000000-0000-4000-8000-000000000001",
+        targets: [],
+        truncated: false,
+      }));
+      const route = routeFixture(
+        {},
+        undefined,
+        undefined,
+        [],
+        { syncDocument: vi.fn(), read },
+        undefined,
+        { store, now: () => clock },
+      );
+      const payload = {
+        kind: "references",
+        threadId,
+        checkoutId,
+        fileId,
+        position: { line: 0, character: 0 },
+        includeDeclaration: true,
+        expectedVersion: 1,
+        expectedRevision: "90000000-0000-4000-8000-000000000001",
+      };
+      let finish: () => void = () => undefined;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          finish = () => {
+            controller.enqueue(new TextEncoder().encode(JSON.stringify(payload)));
+            controller.close();
+          };
+        },
+      });
+      const init: RequestInit & { duplex: "half" } = {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        duplex: "half",
+      };
+      const pendingRequest = request("/api/code/language/read", init);
+      bindPrincipalRouteContext(pendingRequest, {
+        principal: resolveLocalWindowPrincipal({ request: pendingRequest, store, now: clock }),
+        scopeId: windowId,
+      });
+      const answer = route(pendingRequest);
+      expect(read).not.toHaveBeenCalled();
+      if (change === "expired") clock = WINDOW_AUTHORITY_TTL_MS + 1;
+      else {
+        store.revoke(windowId);
+        if (change === "rotated" || change === "rotated-with-header")
+          store.register({ windowId, capability: "B".repeat(42) + "A", now: clock });
+        if (change === "rotated-with-header")
+          pendingRequest.headers.set("x-octant-window-capability", "B".repeat(42) + "A");
+      }
+      finish();
+      expect((await answer)?.status).toBe(401);
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["local", "local-expired", "local-rotated", "local-replaced-header", "remote"] as const)(
+    "answers current %s capability reads and suppresses a held answer after authority is lost",
+    async (kind) => {
+      const store = new WindowAuthorityStore();
+      let clock = 1;
+      store.register({ windowId, capability, now: 0 });
+      const local = kind !== "remote";
+      const fileId = "00000000-0000-4000-8000-000000000931";
+      const deviceId = decodeWindowId("00000000-0000-4000-8000-000000000932");
+      const scope = local ? windowId : deviceId;
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let block = false;
+      const read = vi.fn(async () => {
+        if (block) await held;
+        return { status: "capabilities", threadId, checkoutId, fileId, references: "supported" };
+      });
+      const route = routeFixture(
+        {},
+        undefined,
+        undefined,
+        [],
+        { syncDocument: vi.fn(), read },
+        undefined,
+        { store, now: () => clock },
+      );
+      const controller = new AbortController();
+      const build = () => {
+        const incoming = request("/api/code/language/read", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "capabilities", threadId, checkoutId, fileId }),
+        });
+        const principal = local
+          ? resolveLocalWindowPrincipal({ request: incoming, store, now: 1 })
+          : createRemoteDevicePrincipal({
+              hostId: "local" as never,
+              deviceId: deviceId as never,
+              credentialGeneration: 1,
+              origin: "https://octant.invalid",
+              protocolVersion: 1,
+              capabilityDigest: "b".repeat(64),
+              sessionId: "00000000-0000-4000-8000-000000000933" as never,
+            });
+        bindPrincipalRouteContext(incoming, {
+          principal,
+          scopeId: scope,
+          abortSignal: controller.signal,
+        });
+        return incoming;
+      };
+      const first = await route(build());
+      expect(first?.status).toBe(200);
+      await expect(first?.json()).resolves.toMatchObject({
+        status: "capabilities",
+        references: "supported",
+      });
+      expect(read).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          scopeId: scope,
+          principal: local ? "local-window" : "remote-device",
+          isCurrent: expect.any(Function),
+        }),
+        expect.objectContaining({ kind: "capabilities" }),
+      );
+      block = true;
+      const incoming = build();
+      const pending = route(incoming);
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+      if (!local) controller.abort();
+      else if (kind === "local-expired") clock = WINDOW_AUTHORITY_TTL_MS + 1;
+      else {
+        store.revoke(windowId);
+        if (kind !== "local") {
+          store.register({ windowId, capability: "B".repeat(42) + "A", now: clock });
+          if (kind === "local-replaced-header")
+            incoming.headers.set("x-octant-window-capability", "B".repeat(42) + "A");
+        }
+      }
+      release();
+      const denied = await pending;
+      expect(denied?.status).toBe(401);
+      const body = await denied?.text();
+      expect(body).toContain("unauthorized");
+      expect(body).not.toContain(fileId);
+      expect(body).not.toContain("supported");
+    },
+  );
+
+  it.each(["revoked", "expired", "replaced-header"] as const)(
+    "blocks the actual foreground sync before didChange after held root admission becomes %s",
+    async (change) => {
+      const f = codeLanguageReferencesFixture();
+      const opened = await f.open();
+      if (opened.status !== "synced" || opened.documentRevision === undefined)
+        throw new Error("No acknowledged document");
+      const store = new WindowAuthorityStore();
+      let clock = 0;
+      store.register({ windowId: f.caller.scopeId, capability, now: clock });
+      const route = routeFixture({}, undefined, undefined, [], f.service, undefined, {
+        store,
+        now: () => clock,
+      });
+      const incoming = request("/api/code/language/documents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "change",
+          threadId: f.state.thread.id,
+          checkoutId: f.state.checkout.id,
+          fileId: f.fileId,
+          text: "must not forward this draft",
+          expectedRevision: opened.documentRevision,
+        }),
+      });
+      bindPrincipalRouteContext(incoming, {
+        principal: resolveLocalWindowPrincipal({ request: incoming, store, now: clock }),
+        scopeId: f.caller.scopeId,
+      });
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let waiting = false;
+      f.state.controls.beforeRoot = async () => {
+        waiting = true;
+        await held;
+      };
+      const pending = route(incoming);
+      try {
+        await vi.waitFor(() => expect(waiting).toBe(true));
+        if (change === "expired") clock = WINDOW_AUTHORITY_TTL_MS + 1;
+        else {
+          store.revoke(f.caller.scopeId);
+          if (change === "replaced-header") {
+            store.register({
+              windowId: f.caller.scopeId,
+              capability: "B".repeat(42) + "A",
+              now: clock,
+            });
+            incoming.headers.set("x-octant-window-capability", "B".repeat(42) + "A");
+          }
+        }
+        release();
+        const answer = await pending;
+        expect(answer?.status).toBe(401);
+        expect(f.received.some((message) => message.method === "textDocument/didChange")).toBe(
+          false,
+        );
+        expect(f.launches).toEqual([f.checkout]);
+        const body = await answer?.text();
+        expect(body).not.toContain(f.fileId);
+        expect(body).not.toContain("must not forward");
+      } finally {
+        release();
+        await pending;
+      }
+    },
+  );
+  it("retires the host-owned foreground sync proof when its route has settled", async () => {
+    const f = codeLanguageReferencesFixture();
+    const opened = await f.open();
+    if (opened.status !== "synced" || opened.documentRevision === undefined)
+      throw new Error("No acknowledged document");
+    const store = new WindowAuthorityStore();
+    store.register({ windowId: f.caller.scopeId, capability, now: 0 });
+    const sync = vi.spyOn(f.service, "syncDocument");
+    const route = routeFixture({}, undefined, undefined, [], f.service, undefined, {
+      store,
+      now: () => 1,
+    });
+    const incoming = request("/api/code/language/documents", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "change",
+        threadId: f.state.thread.id,
+        checkoutId: f.state.checkout.id,
+        fileId: f.fileId,
+        text: "current draft",
+        expectedRevision: opened.documentRevision,
+      }),
+    });
+    const response = await route(incoming);
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({ status: "synced", documentVersion: 2 });
+    const caller = sync.mock.calls[0]?.[0];
+    expect(caller?.isCurrent?.()).toBe(false);
+    const result = await f.service.syncDocument(caller ?? f.caller, {
+      kind: "change",
+      threadId: f.state.thread.id,
+      checkoutId: f.state.checkout.id,
+      fileId: f.fileId,
+      text: "late draft",
+      expectedRevision: opened.documentRevision,
+    });
+    expect(result).toEqual({ status: "refused", reason: "no-reach" });
+    expect(
+      f.received.filter((message) => message.method === "textDocument/didChange"),
+    ).toHaveLength(1);
+    expect(f.launches).toEqual([f.checkout]);
   });
 
   it("carries a language server approval from a local window only, and refuses a paired device before the service", async () => {
@@ -1238,7 +1517,9 @@ describe("Code routes", () => {
 
   it("returns operation evidence only through its thread and operation authority scope", async () => {
     const bytes = new TextEncoder().encode("diff evidence");
-    const readOperationContent = vi.fn(() => ({
+    const readOperationContent = vi.fn<
+      NonNullable<Parameters<typeof createCodeRouteHandler>[0]["service"]["readOperationContent"]>
+    >(() => ({
       bytes,
       digest: "ccca685709aa9e68d44defdeaa97fcd6da17e124ec1b1e7e0e83e85b8b45cc9a",
       byteLength: bytes.byteLength,
@@ -1251,11 +1532,20 @@ describe("Code routes", () => {
 
     expect(response?.status).toBe(200);
     expect(new TextDecoder().decode(await response!.arrayBuffer())).toBe("diff evidence");
-    expect(readOperationContent).toHaveBeenCalledWith(windowId, threadId, operationId, contentId);
+    expect(readOperationContent).toHaveBeenCalledWith(
+      windowId,
+      threadId,
+      operationId,
+      contentId,
+      expect.any(Function),
+    );
+    expect(readOperationContent.mock.calls[0]?.[4]?.()).toBe(true);
   });
 
   it("hydrates one conversation page through a single authorized evidence batch", async () => {
-    const readOperationContents = vi.fn(async () => ({
+    const readOperationContents = vi.fn<
+      NonNullable<Parameters<typeof createCodeRouteHandler>[0]["service"]["readOperationContents"]>
+    >(async () => ({
       threadId,
       items: [{ operationId, contentId, text: "display text" }],
     }));
@@ -1274,10 +1564,15 @@ describe("Code routes", () => {
       threadId,
       items: [{ operationId, contentId, text: "display text" }],
     });
-    expect(readOperationContents).toHaveBeenCalledWith(windowId, {
-      threadId,
-      items: [{ operationId, contentId }],
-    });
+    expect(readOperationContents).toHaveBeenCalledWith(
+      windowId,
+      {
+        threadId,
+        items: [{ operationId, contentId }],
+      },
+      expect.any(Function),
+    );
+    expect(readOperationContents.mock.calls[0]?.[2]?.()).toBe(true);
   });
 
   it("accepts canonical raw UTF-8 save metadata without exposing a root path", async () => {
@@ -1636,6 +1931,39 @@ describe("Code board route", () => {
 });
 
 describe("Code planner routes", () => {
+  it("returns the authoritative stale refusal for the submitted proposal version", async () => {
+    const proposalId = "00000000-0000-4000-8000-000000000910";
+    const executePlannerProposal = vi.fn(async () => ({
+      status: "refused" as const,
+      reason: "proposal-changed" as const,
+      message: "The proposal changed; reload and retry.",
+    }));
+    const route = routeFixture({ executePlannerProposal });
+    const response = await route(
+      request("/api/code/planner/proposals/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "decline-planner-work-proposal",
+          proposalId,
+          expectedVersion: 7,
+        }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    const result = await response?.json();
+    expect(result).toEqual({
+      status: "refused",
+      reason: "proposal-changed",
+      message: "The proposal changed; reload and retry.",
+    });
+    expect(executePlannerProposal).toHaveBeenCalledExactlyOnceWith(
+      windowId,
+      { kind: "decline-planner-work-proposal", proposalId, expectedVersion: 7 },
+      expect.anything(),
+    );
+  });
+
   const plannerView = {
     designation: { kind: "none" as const, projectId, updatedAt: now },
     designationVersion: 0,
@@ -2608,9 +2936,10 @@ function routeFixture(
     readonly approve?: (...args: never[]) => unknown;
   },
   debug?: Readonly<Record<"configurations" | "approve" | "start" | "session", unknown>>,
+  authority?: { readonly store: WindowAuthorityStore; readonly now: () => number },
 ) {
-  const store = new WindowAuthorityStore();
-  store.register({ windowId, capability, now: 0 });
+  const store = authority?.store ?? new WindowAuthorityStore();
+  if (authority === undefined) store.register({ windowId, capability, now: 0 });
   for (const extra of extraWindows) {
     store.register({ windowId: extra.windowId, capability: extra.capability, now: 0 });
   }
@@ -2632,7 +2961,7 @@ function routeFixture(
   return createCodeRouteHandler({
     service: service as never,
     windowAuthorityStore: store,
-    now: () => 1,
+    now: authority?.now ?? (() => 1),
     ...(pairedMergeUnlock === undefined
       ? {}
       : { pairedMergeUnlock: () => pairedMergeUnlock as never }),

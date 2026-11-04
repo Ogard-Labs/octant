@@ -47,6 +47,7 @@ const LazySettingsView = lazy(async () => {
 });
 
 export interface ShellSettingsSurfaceProps {
+  readonly pickSkillFolder?: () => Promise<string | undefined>;
   readonly availableFonts?: ReadonlyArray<string>;
   readonly typography?: ThemeTypography;
   readonly theme?: ThemeController["draft"];
@@ -136,6 +137,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             codeController={props.codeController}
             discoveryController={props.discoveryController}
             extensionClient={props.extensionClient}
+            {...(props.pickSkillFolder === undefined
+              ? {}
+              : { pickSkillFolder: props.pickSkillFolder })}
             {...(props.projectNames === undefined ? {} : { projectNames: props.projectNames })}
             {...(props.pickLocalPluginFolder === undefined
               ? {}

@@ -62,6 +62,10 @@ import {
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
+import {
+  forgeShellChanges,
+  FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
+} from "@octant/domain/forge-shell-change-policy";
 import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
 import type { ShieldReviewPort } from "../shield/octantShield";
 import { Effect } from "effect";
@@ -316,6 +320,7 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
+    readonly currentProjectAccess?: CodeOperationAuthorityPort["currentProjectAccess"];
     /**
      * Runs `run` on the window's standing authority: its persisted binding,
      * judged when each check inside runs, never a request's admission.
@@ -402,7 +407,8 @@ export interface CodeOperationRuntimeOptions {
     | "snapshotWorkingTree"
     | "restoreWorkingTree"
     | "releaseCheckpoint"
-  >;
+  > &
+    Partial<Pick<GitMutationPort, "applyHunks">>;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   readonly supportsAcpClientCapabilities?: (thread: CodeThread) => boolean;
   /**
@@ -780,10 +786,12 @@ export interface CodeOperationRuntime {
     threadId: CodeThreadId,
     operationId: CodeOperationId,
     contentId: CodeEvidenceContentId,
+    admissionCurrent?: () => boolean,
   ): Promise<{ readonly bytes: Uint8Array; readonly digest: string; readonly byteLength: number }>;
   readEvidenceBatch?(
     windowId: WindowId,
     input: CodeEvidenceBatchRequest,
+    admissionCurrent?: () => boolean,
   ): Promise<CodeEvidenceBatchResponse>;
   prepareApproval(
     windowId: WindowId,
@@ -927,6 +935,9 @@ export function createCodeOperationRuntime(
       options.sessionAuthority?.effectiveThread(windowId, thread) ?? thread,
     readCheckout: (checkoutId) => options.persistence.readCodeCheckout(checkoutId),
     canAccessProject: options.windowAccess.canAccessProject,
+    ...(options.windowAccess.currentProjectAccess === undefined
+      ? {}
+      : { currentProjectAccess: options.windowAccess.currentProjectAccess }),
     ...(options.windowAccess.retainProjectAccess === undefined
       ? {}
       : { retainProjectAccess: options.windowAccess.retainProjectAccess }),
@@ -1387,7 +1398,51 @@ export function createCodeOperationRuntime(
       const command = approvalEffect.kind === "operation" ? approvalEffect.command : undefined;
       const context = await approvalContext(options, command, thread, checkout);
       if (context === undefined) return undefined;
-      const prompt = approvalPrompt(approvalEffect, thread, checkout, context.pullRequestTarget);
+      let hunkDetail: string | undefined;
+      if (
+        command?.kind === "stage-git-hunks" ||
+        command?.kind === "unstage-git-hunks" ||
+        command?.kind === "reverse-git-hunks"
+      ) {
+        const replay = events.replay({
+          threadId: thread.id,
+          operationId: command.comparisonOperationId,
+          afterCursor: 0,
+          limit: 16,
+        });
+        if (replay.status !== "ok") return undefined;
+        const comparison = replay.frames
+          .map((frame) =>
+            frame.event.kind === "operation-result" ? frame.event.result : undefined,
+          )
+          .find((result) => result?.kind === "git-hunks");
+        if (
+          comparison?.kind !== "git-hunks" ||
+          comparison.threadId !== thread.id ||
+          comparison.checkoutId !== checkout.id ||
+          comparison.scope !== (command.kind === "unstage-git-hunks" ? "staged" : "unstaged")
+        )
+          return undefined;
+        const hunks = command.selected.map((id) => comparison.hunks.find((hunk) => hunk.id === id));
+        if (hunks.some((hunk) => hunk === undefined)) return undefined;
+        hunkDetail = [
+          comparison.scope === "staged" ? "HEAD → Index" : "Index → Working tree",
+          ...hunks.flatMap((hunk) =>
+            hunk === undefined
+              ? []
+              : [
+                  `${hunk.path}: −${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines}`,
+                ],
+          ),
+        ].join("\n");
+      }
+      const prompt = approvalPrompt(
+        approvalEffect,
+        thread,
+        checkout,
+        context.pullRequestTarget,
+        hunkDetail,
+      );
       return approvalStore.prepare({
         windowId,
         effect: approvalEffect,
@@ -1782,9 +1837,15 @@ export function createCodeOperationRuntime(
         ? forkPointFrom(captured.snapshot)
         : { status: "refused", reason: "unavailable" };
     },
-    readEvidence: async (windowId, threadId, operationId, contentId) => {
+    readEvidence: async (windowId, threadId, operationId, contentId, admissionCurrent) => {
       try {
-        const evidence = await service.readEvidence(windowId, threadId, operationId, contentId);
+        const evidence = await service.readEvidence(
+          windowId,
+          threadId,
+          operationId,
+          contentId,
+          admissionCurrent,
+        );
         const bytes = new TextEncoder().encode(evidence.text);
         const digest = createHash("sha256").update(bytes).digest("hex");
         if (
@@ -1798,11 +1859,16 @@ export function createCodeOperationRuntime(
         throw codeEvidenceReadFailure(error);
       }
     },
-    readEvidenceBatch: async (windowId, input) => {
+    readEvidenceBatch: async (windowId, input, admissionCurrent) => {
       try {
         return decodeCodeEvidenceBatchResponse({
           threadId: input.threadId,
-          items: await service.readEvidenceBatch(windowId, input.threadId, input.items),
+          items: await service.readEvidenceBatch(
+            windowId,
+            input.threadId,
+            input.items,
+            admissionCurrent,
+          ),
         });
       } catch (error) {
         throw codeEvidenceReadFailure(error);
@@ -1952,6 +2018,7 @@ function approvalPrompt(
   thread: CodeThread,
   checkout: CodeCheckoutIdentity,
   pullRequestTarget: ApprovalContext["pullRequestTarget"],
+  hunkDetail?: string,
 ): { readonly message: string; readonly detail: string } {
   const head =
     checkout.head.kind === "branch"
@@ -2046,6 +2113,19 @@ function approvalPrompt(
       case "cancel-repository-test":
         message = "Allow repository test cancellation?";
         effectDetail = `Cancel test run ${command.testRunId}`;
+        break;
+      case "stage-git-hunks":
+      case "unstage-git-hunks":
+      case "reverse-git-hunks":
+        if (hunkDetail === undefined)
+          throw new TypeError("Selected Git comparison is unavailable.");
+        message =
+          command.kind === "reverse-git-hunks"
+            ? "Reverse these uncommitted hunks?"
+            : command.kind === "stage-git-hunks"
+              ? "Stage these selected hunks?"
+              : "Unstage these selected hunks?";
+        effectDetail = `${command.kind === "reverse-git-hunks" ? "Selected uncommitted changes are lost. Other hunks and the index are kept.\n" : "Working files are kept.\n"}${hunkDetail}`;
         break;
       case "stage-git":
         message = "Allow Code stage operation?";
@@ -2479,6 +2559,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   >();
   readonly #active: CodeActiveTurns;
   readonly #approvedBrowserContexts = new Set<string>();
+  // Full access may open without approval, but recovery still needs the
+  // original controller identity. Keeping this separate never manufactures a grant.
+  readonly #boundBrowserContexts = new Set<string>();
 
   readonly #spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
   /** Mints the one-use approval a device effect the person allowed in the thread carries. */
@@ -3379,8 +3462,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
-   * A provider's approval prompt, answered by Octant Shield when it reviews
-   * this thread. An allow or deny goes straight back to the provider for this
+   * A provider's pending approval prompt. Recognizable forge writes below
+   * Full access must use the scoped tools; only other calls reach Shield when
+   * it reviews this thread. An allow or deny goes back to the provider for this
    * one call and nobody is asked; an ask, or a thread Shield does not review,
    * becomes the ordinary approval for the person. Shield's decision is
    * journaled beside the tool rows either way. The pending call comes from the
@@ -3391,7 +3475,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   async #reviewProviderApproval(active: ActiveTurn, event: CodeTurnEvent): Promise<void> {
     const shield = this.#options.shield;
     const requestId = event.requestId;
-    if (shield === undefined || requestId === undefined || active.connection === undefined) {
+    if (requestId === undefined || active.connection === undefined) {
       this.#persistNormalized(active, event);
       return;
     }
@@ -3407,17 +3491,64 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     } catch {
       call = undefined;
     }
+    const pendingCall = shieldCallFromProviderRequest({
+      tool: call?.tool ?? "provider-action",
+      input: call?.input,
+      workingDirectory: call?.workingDirectory,
+      description: restore(summary) ?? summary,
+      boundRoot: active.checkoutRoot,
+    });
+    // Only a pending call supplied by the connection can be stopped here.
+    // A provider's own reviewer and tool-start observations never enter this path.
+    const posture = this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy;
+    if (
+      posture !== "full-access" &&
+      pendingCall.command !== undefined &&
+      forgeShellChanges(pendingCall.command).length > 0
+    ) {
+      const frame = this.#events.append({
+        threadId: active.thread.id,
+        operationId: active.operationId,
+        expectedCursor: active.cursor,
+        event: {
+          kind: "tool-activity",
+          toolCallId: `forge-refusal:${requestId}`,
+          toolName: pendingCall.tool,
+          state: "failed",
+          summary: FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
+        },
+      });
+      active.cursor = frame.cursor;
+      try {
+        await Effect.runPromise(
+          active.connection.answerApproval({
+            sessionId: active.sessionId as never,
+            requestId,
+            approved: false,
+            scope: "once",
+          }),
+        );
+      } catch {
+        // A denied forge call must never become an ordinary approvable prompt.
+        active.interruptMessage = FORGE_SHELL_TOOL_REQUIRED_MESSAGE;
+        active.abort.abort();
+        await Effect.runPromise(
+          active.connection
+            .interrupt(active.sessionId as never)
+            .pipe(Effect.catchAll(() => Effect.void)),
+        );
+      }
+      return;
+    }
+    if (shield === undefined) {
+      this.#persistNormalized(active, event);
+      return;
+    }
     let decision: ShieldDecision | undefined;
     try {
       decision = await shield.review({
         threadId: String(active.thread.id),
-        call: shieldCallFromProviderRequest({
-          tool: call?.tool ?? "provider-action",
-          input: call?.input,
-          workingDirectory: call?.workingDirectory,
-          description: restore(summary) ?? summary,
-          boundRoot: active.checkoutRoot,
-        }),
+        call: pendingCall,
         boundRoot: active.checkoutRoot,
         signal: active.abort.signal,
       });
@@ -4110,6 +4241,21 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             },
           },
           browserApproval: {
+            isBound: (contextId) => {
+              const key = this.#browserApprovalKey(active, contextId);
+              const bound = this.#boundBrowserContexts.has(key);
+              if (bound) active.browserGrantKeys.add(key);
+              return bound;
+            },
+            rememberBinding: (contextId) => {
+              const key = this.#browserApprovalKey(active, contextId);
+              if (!this.#boundBrowserContexts.has(key) && this.#boundBrowserContexts.size >= 256) {
+                const oldest = this.#boundBrowserContexts.values().next().value;
+                if (oldest !== undefined) this.#boundBrowserContexts.delete(oldest);
+              }
+              this.#boundBrowserContexts.add(key);
+              active.browserGrantKeys.add(key);
+            },
             isApproved: (contextId) => {
               const key = this.#browserApprovalKey(active, contextId);
               const approved = this.#approvedBrowserContexts.has(key);
@@ -4129,8 +4275,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               this.#approvedBrowserContexts.add(key);
               active.browserGrantKeys.add(key);
             },
-            forget: (contextId) =>
-              this.#approvedBrowserContexts.delete(this.#browserApprovalKey(active, contextId)),
+            forget: (contextId) => {
+              const key = this.#browserApprovalKey(active, contextId);
+              this.#approvedBrowserContexts.delete(key);
+              this.#boundBrowserContexts.delete(key);
+            },
           },
           ...(this.#options.browserSignIn === undefined
             ? {}
@@ -4547,7 +4696,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 : Promise.resolve(),
             ).pipe(
               Effect.andThen(
-                event.category === "approval" && this.#options.shield !== undefined
+                event.category === "approval"
                   ? Effect.promise(() => this.#reviewProviderApproval(active, event))
                   : Effect.sync(() => this.#persistNormalized(active, event)),
               ),
@@ -4804,7 +4953,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   #revokeBrowserGrants(active: ActiveTurn): void {
-    for (const key of active.browserGrantKeys) this.#approvedBrowserContexts.delete(key);
+    for (const key of active.browserGrantKeys) {
+      this.#approvedBrowserContexts.delete(key);
+      this.#boundBrowserContexts.delete(key);
+    }
     active.browserGrantKeys.clear();
   }
 
@@ -5261,6 +5413,8 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
             : { kind: "network" as const, url: remote.pushUrl },
       }));
     },
+    prepareHunks: (input) => git.prepareHunks(input),
+    applyHunks: (input) => git.applyHunks(input),
     stage: (input) => git.stage(input),
     discard: (input) => git.discard(input),
     commit: (input) =>

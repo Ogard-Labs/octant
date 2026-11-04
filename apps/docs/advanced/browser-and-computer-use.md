@@ -40,6 +40,33 @@ page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
 no observation or evidence.
 
+### Recovering the agent's page
+
+If the agent's Browser reaches a site the page has not approved, the tool's
+refusal explains how to recover: stop the page, then navigate to the intended
+site and request its approval. Keep the same Project or Personal profile when
+reopening if you need its sign-in. For an SSO redirect in the Octant app, the
+agent can use **sign-in** so you finish signing in yourself. If you press
+**Continue** while still on an unapproved site, the answer says so and the
+agent cannot read that page.
+
+An expired page reports **context-expired** with the profile it used. It never
+reopens on its own. The agent must navigate explicitly, naming the same profile
+again for Project or Personal. A new page with no profile argument still opens
+Private. The recovery hint contains no page text, picture, password, or account
+detail and is kept only temporarily in the host's bounded memory.
+
+The agent's page stays open while the agent or you use it, and closes after ten
+minutes without that activity. Watching the page or its preview does not keep
+it open. Sign-in or Take over keeps it open for eleven minutes from the handoff
+or your latest take-over input, then two minutes after Continue or Hand back,
+using whichever deadline is later than the ordinary idle deadline.
+
+A Work agent can request a Project or Personal profile. Code's separate agent
+adapter currently opens new pages Private and does not yet accept that profile
+argument; the profile controls for pages you open are available in both modes.
+Expiry recovery does not add Code agent profile selection.
+
 ### Browser profiles
 
 A Browser page is **Private** by default: its cookies and site data live in
@@ -85,7 +112,7 @@ parent domains', and leaves every other cookie unread.
 **Clear cookies…** removes a profile's cookies and keeps its other data.
 
 **What the agent may do on a signed-in page.** A Project or Personal page is
-treated as signed in, because Octant cannot tell. The agent can ask for one by
+treated as signed in, because Octant cannot tell. A Work agent can ask for one by
 passing `profile` (`project` or `personal`) when it opens a page. Octant asks
 you first, naming the site and the profile: "Let the agent use github.com in
 the Personal profile?" Choosing **Always allow** remembers that site for that

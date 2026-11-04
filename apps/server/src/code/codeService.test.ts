@@ -67,6 +67,43 @@ const ids = {
   content: decodeCodeEvidenceContentId("00000000-0000-4000-8000-000000001010"),
   profile: "00000000-0000-4000-8000-000000001011",
 } as const;
+
+describe("owner-device Code posture", () => {
+  it("journals the owner identity and refuses a stale version without an effect", () => {
+    const fixture = serviceFixture({
+      project: rememberedFullAccessProject,
+      threads: [thread({ executionPolicy: "approval-gated" })],
+    });
+    const request = {
+      threadId: ids.thread,
+      expectedVersion: thread().version,
+      executionPolicy: "full-access" as const,
+      permissionPersistence: "project-default" as const,
+      ownerMemberId: "00000000-0000-4000-8000-000000001099",
+      freshFull: true,
+    };
+    const changed = fixture.service.changeOwnerPosture(request);
+    expect(changed.executionPolicy).toBe("full-access");
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            actor: {
+              kind: "owner-unlock",
+              actorId: request.ownerMemberId,
+              memberId: request.ownerMemberId,
+            },
+          }),
+        ],
+      }),
+    );
+    fixture.persistence.journal.append.mockClear();
+    expect(() => fixture.service.changeOwnerPosture({ ...request, expectedVersion: 0 })).toThrow();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(() => fixture.service.changeOwnerPosture({ ...request, freshFull: false })).toThrow();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
 const testUuid = (sequence: number) =>
   `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`;
 const now = "2026-07-20T23:00:00.000Z";
@@ -955,6 +992,30 @@ describe("CodeService commands", () => {
         ],
       }),
     );
+  });
+
+  it("reports the host creation boundary before plain-checkout journaling and after every admission gate", async () => {
+    for (const stage of ["before", "journal"] as const) {
+      const boundary = vi.fn();
+      const fixture = serviceFixture({
+        threads: [],
+        ...(stage === "before" ? { isProviderModelAllowed: () => false } : {}),
+      });
+      if (stage === "journal")
+        vi.mocked(fixture.persistence.journal.append).mockImplementation(() => {
+          expect(boundary).toHaveBeenCalledTimes(1);
+          throw new Error("Journal failed after boundary");
+        });
+      await expect(
+        fixture.service.execute(
+          ids.window,
+          { kind: "create-code-thread", thread: thread({ executionPolicy: "approval-gated" }) },
+          undefined,
+          { onCreationBoundary: boundary },
+        ),
+      ).rejects.toBeInstanceOf(CodeServiceError);
+      expect(boundary).toHaveBeenCalledTimes(stage === "before" ? 0 : 1);
+    }
   });
 
   it("stores a declared reasoning choice without creating a provider handoff", async () => {
@@ -2836,6 +2897,29 @@ describe("CodeService managed thread creation", () => {
       cleanup: vi.fn(overrides.cleanup ?? (async () => ({ status: "removed" as const }))),
     };
   }
+
+  it("reports the host creation boundary before managed commit and after source validation", async () => {
+    for (const stage of ["prepare", "commit"] as const) {
+      const boundary = vi.fn();
+      const port = mockCreationPort(
+        stage === "prepare"
+          ? { prepare: async () => ({ status: "refused", reason: "ref-unavailable" }) }
+          : {
+              commit: async () => {
+                expect(boundary).toHaveBeenCalledTimes(1);
+                throw new Error("Commit outcome unknown");
+              },
+            },
+      );
+      const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+      await expect(
+        fixture.service.execute(ids.window, managedCommand, undefined, {
+          onCreationBoundary: boundary,
+        }),
+      ).rejects.toBeInstanceOf(CodeServiceError);
+      expect(boundary).toHaveBeenCalledTimes(stage === "prepare" ? 0 : 1);
+    }
+  });
 
   it("creates the managed worktree on the delivery branch, journals checkout + thread, and returns exact provenance", async () => {
     const port = mockCreationPort();

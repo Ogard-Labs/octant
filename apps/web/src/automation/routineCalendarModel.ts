@@ -150,6 +150,8 @@ function placeRoutine(
   readonly truncated: boolean;
 } {
   const trigger = routine.trigger;
+  // File observations have no promised future date to place on a calendar.
+  if (trigger.kind === "file-arrival") return { entries: [], truncated: false };
   if (isSubDaily(trigger)) {
     // Enumerating a fifteen-minute routine would bury the day it sits on. The
     // cadence is the useful sentence, and it is true on every day it runs.

@@ -644,3 +644,8 @@
   padding: 0.6rem 0 0.5rem;
   border-bottom: 1px solid var(--oct-hairline);
 }
+
+.automation-file-source code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}

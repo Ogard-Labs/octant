@@ -1,4 +1,5 @@
 import { ApprovalOutsideContent } from "./contentProvenance";
+import { SkillFolderPath } from "./shell";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { AggregateVersion, EventVersion, GlobalSequence, UtcTimestamp } from "./events";
@@ -455,11 +456,29 @@ export const ExtensionCommand = Schema.Union(
 );
 export type ExtensionCommand = typeof ExtensionCommand.Type;
 
+/** Host diagnostics for explicitly enabled provider/added skill roots; never a path or grant. */
+export const SkillRootStatus = Schema.Struct({
+  sourceRef: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(256),
+    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  ),
+  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  status: Schema.Literal("ready", "missing", "unreadable", "symlink", "not-directory"),
+  skillCount: Schema.Int.pipe(Schema.nonNegative()),
+  watching: Schema.Boolean,
+}).annotations(strict);
+export type SkillRootStatus = typeof SkillRootStatus.Type;
+export const SkillFolderSelection = Schema.Struct({ folderPath: SkillFolderPath }).annotations(
+  strict,
+);
+export type SkillFolderSelection = typeof SkillFolderSelection.Type;
+
 export const ExtensionSnapshot = Schema.Struct({
   sequence: GlobalSequence,
   snapshotAt: UtcTimestamp,
   packages: Schema.Array(ExtensionPackageState).pipe(Schema.maxItems(4096)),
   skills: Schema.optional(Schema.Array(StandaloneSkillRecord).pipe(Schema.maxItems(4096))),
+  skillRoots: Schema.optional(Schema.Array(SkillRootStatus).pipe(Schema.maxItems(34))),
   collisions: Schema.Array(ExtensionSkillCollision).pipe(Schema.maxItems(4096)),
 }).annotations(strict);
 export type ExtensionSnapshot = typeof ExtensionSnapshot.Type;

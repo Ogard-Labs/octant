@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   changeListeners: [] as Array<() => void>,
   changeDispose: vi.fn(),
+  cursorListeners: [] as Array<
+    (event: { position: { lineNumber: number; column: number } }) => void
+  >,
+  cursorDispose: vi.fn(),
+  referenceDispose: vi.fn(),
   createModel: vi.fn(),
   editorDispose: vi.fn(),
   editorCreate: vi.fn(),
@@ -85,13 +90,19 @@ vi.mock("monaco-editor", () => ({
     ) {}
   },
   MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
-  KeyCode: { F9: 67 },
+  KeyCode: { F9: 67, F12: 70 },
+  KeyMod: { CtrlCmd: 2048, Alt: 512 },
   editor: {
     MouseTargetType: { GUTTER_GLYPH_MARGIN: 2, CONTENT_TEXT: 6 },
     TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
     create: mocks.editorCreate.mockImplementation(() => {
       mocks.editor = {
         dispose: mocks.editorDispose,
+        getPosition: () => ({ lineNumber: 2, column: 8 }),
+        onDidChangeCursorPosition: (listener: (typeof mocks.cursorListeners)[number]) => {
+          mocks.cursorListeners.push(listener);
+          return { dispose: mocks.cursorDispose };
+        },
         focus: mocks.editorFocus,
         updateOptions: mocks.editorUpdateOptions,
         createDecorationsCollection: () => ({ set: mocks.decorationsSet, clear: vi.fn() }),
@@ -101,7 +112,12 @@ vi.mock("monaco-editor", () => ({
         },
         addAction: (action: (typeof mocks.actions)[number]) => {
           mocks.actions.push(action);
-          return { dispose: vi.fn() };
+          return {
+            dispose:
+              action.id === "octant.language.checkout-references"
+                ? mocks.referenceDispose
+                : vi.fn(),
+          };
         },
       };
       return mocks.editor;
@@ -167,6 +183,7 @@ describe("Monaco runtime", () => {
     mocks.changeListeners.length = 0;
     mocks.mouseDownListeners.length = 0;
     mocks.actions.length = 0;
+    mocks.cursorListeners.length = 0;
     mocks.value = "stale";
     mocks.modelGetValue.mockImplementation(() => mocks.value);
     mocks.modelSetValue.mockImplementation((value: string) => {
@@ -189,6 +206,28 @@ describe("Monaco runtime", () => {
     expect(mocks.modelSetValue).toHaveBeenCalledWith("latest");
     session.dispose();
     expect(mocks.modelDispose).not.toHaveBeenCalled();
+  });
+
+  it("owns a separate checkout references action and cursor subscription without replacing built-in shortcuts", () => {
+    const onReferences = vi.fn();
+    const onCursorPosition = vi.fn();
+    const session = mount(
+      document.createElement("div"),
+      options({ onReferences, onCursorPosition }),
+    );
+    expect(onCursorPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 8 });
+    mocks.cursorListeners[0]?.({ position: { lineNumber: 4, column: 12 } });
+    expect(onCursorPosition).toHaveBeenLastCalledWith({ lineNumber: 4, column: 12 });
+    expect(mocks.actions).toHaveLength(1);
+    const action = mocks.actions[0];
+    expect(action?.id).toBe("octant.language.checkout-references");
+    expect(action?.keybindings).toEqual([2048 | 512 | 70]);
+    action?.run({ getPosition: () => ({ lineNumber: 4, column: 12 }) });
+    expect(onReferences).toHaveBeenCalledExactlyOnceWith({ lineNumber: 4, column: 12 });
+    session.dispose();
+    session.dispose();
+    expect(mocks.cursorDispose).toHaveBeenCalledOnce();
+    expect(mocks.referenceDispose).toHaveBeenCalledOnce();
   });
 
   it("toggles a breakpoint from the glyph gutter or F9 only when the pane takes breakpoints, and draws them with the stopped line", () => {
@@ -226,6 +265,16 @@ describe("Monaco runtime", () => {
         options: expect.objectContaining({
           isWholeLine: true,
           className: "code-debug-stopped-line",
+        }),
+      }),
+    ]);
+    session.setDebugDecorations?.({ breakpoints: [], unresolvedBreakpoints: [4] });
+    expect(mocks.decorationsSet).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        range: expect.objectContaining({ startLineNumber: 4 }),
+        options: expect.objectContaining({
+          glyphMarginClassName: "code-debug-breakpoint-unresolved",
+          glyphMarginHoverMessage: { value: "Unresolved breakpoint; review in Run and debug" },
         }),
       }),
     ]);

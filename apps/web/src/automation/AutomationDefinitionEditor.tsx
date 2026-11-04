@@ -13,6 +13,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
+  AUTOMATION_RUN_LEVEL_OPTIONS as RUN_LEVEL_OPTIONS,
   automationAuthoritySummary,
   automationModeLabel,
   buildAutomationDraft,
@@ -55,16 +56,6 @@ export interface AutomationDefinitionEditorProps {
 
 const FULL_ACCESS_NOTE =
   "Full access profiles are not eligible for automations. Choose an approval-gated profile.";
-
-type RunLevelOption = "" | AutomationRunLevelChoice;
-
-const RUN_LEVEL_OPTIONS: ReadonlyArray<{ readonly id: RunLevelOption; readonly label: string }> = [
-  { id: "", label: "Ask first" },
-  { id: "auto-accept-edits", label: "Accept edits" },
-  { id: "auto", label: "Auto" },
-  { id: "full-access", label: "Full access" },
-  { id: "project", label: "The Project's mode" },
-];
 
 export { localInputFromUtcInstant, utcInstantFromLocalInput } from "./RoutineScheduleFields";
 
@@ -153,12 +144,8 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   const [mergesItsPullRequests, setMergesItsPullRequests] = useState(
     initial?.agentMerge === "allowed",
   );
-  const [runLevel, setRunLevel] = useState<RunLevelOption>(
-    initial?.projectLevel === "opted-in"
-      ? "project"
-      : initial?.runLevel === undefined || initial.runLevel === "ask-first"
-        ? ""
-        : initial.runLevel,
+  const [runLevel, setRunLevel] = useState<AutomationRunLevelChoice>(
+    initial?.projectLevel === "opted-in" ? "project" : (initial?.runLevel ?? "ask-first"),
   );
   const [issues, setIssues] = useState<readonly string[]>([]);
   const [serverMessage, setServerMessage] = useState<string | undefined>(undefined);
@@ -255,6 +242,8 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   function changeMode(nextMode: AutomationMode) {
     if (nextMode === mode) return;
     setMode(nextMode);
+    if (nextMode !== "work" && trigger.kind === "file-arrival")
+      setTrigger((previous) => ({ ...previous, kind: "once" }));
     setProjectId("");
     setExecutionProfileId("");
     setAuthorityProfileId("");
@@ -274,7 +263,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       missedRunPolicy,
       deliveryTargetSummary: targetSummary,
       deliveryTargetConfirmed: targetConfirmed,
-      ...(runLevel === "" ? {} : { runLevel }),
+      runLevel,
       mergesItsPullRequests,
       ...(initial === undefined
         ? {}
@@ -478,6 +467,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       </div>
 
       <RoutineScheduleFields
+        allowFileArrivals={mode === "work"}
         missedRunPolicy={missedRunPolicy}
         onMissedRunPolicyChange={setMissedRunPolicy}
         onTriggerChange={setTrigger}
@@ -513,7 +503,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           <OctantSelectField
             className="select"
             id={ids.runLevel}
-            onValueChange={(value) => setRunLevel(value as RunLevelOption)}
+            onValueChange={(value) => setRunLevel(value as AutomationRunLevelChoice)}
             options={RUN_LEVEL_OPTIONS}
             value={runLevel}
           />
@@ -549,7 +539,11 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           id={ids.confirm}
           onChange={(event) => setTargetConfirmed(event.target.checked)}
         />
-        <label htmlFor={ids.confirm}>I confirm this delivery target for every scheduled run</label>
+        <label htmlFor={ids.confirm}>
+          {trigger.kind === "file-arrival"
+            ? "I confirm this delivery target for every file-triggered run"
+            : "I confirm this delivery target for every scheduled run"}
+        </label>
       </div>
 
       <div className="automation-editor__actions">

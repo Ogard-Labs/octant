@@ -1,4 +1,9 @@
-import type { ProviderExecutionPolicy } from "@octant/contracts";
+import {
+  MAX_CODE_SELECTED_GIT_HUNKS,
+  type CodeGitHunkScope,
+  type ProviderExecutionPolicy,
+} from "@octant/contracts";
+import { prepareGitHunks, selectedGitHunkPatch, type GitHunkComparison } from "./gitHunks";
 import type { GitMutationPort, GitMutationResult, GitTreeSnapshot } from "./gitMutationPort";
 import type {
   GitBranchComparisonResult,
@@ -48,6 +53,7 @@ interface ObservationPort {
 }
 
 interface MutationPort {
+  applyHunks?: GitMutationPort["applyHunks"];
   stage(
     input: Parameters<GitMutationPort["stage"]>[0],
     signal?: AbortSignal,
@@ -147,6 +153,103 @@ export class GitService {
     signal?: AbortSignal,
   ): Promise<GitScopedDiffResult> {
     return (await this.#observation.readDiff?.(input, signal)) ?? { status: "unavailable" };
+  }
+
+  prepareHunks(
+    input: {
+      readonly checkoutId: string;
+      readonly checkoutRoot: string;
+      readonly scope: CodeGitHunkScope;
+      readonly current: () => boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<GitHunkComparison | { readonly status: "unavailable" }> {
+    return this.#serialized(input.checkoutId, () => this.#hunks(input, signal));
+  }
+
+  applyHunks(
+    input: {
+      readonly checkoutId: string;
+      readonly checkoutRoot: string;
+      readonly scope: CodeGitHunkScope;
+      readonly action: "stage" | "unstage" | "reverse";
+      readonly expectedStateToken: string;
+      readonly expectedDigest: string;
+      readonly selected: readonly string[];
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly current: () => boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<GitMutationResult | { readonly status: "unavailable" }> {
+    return this.#serialized(input.checkoutId, async () => {
+      if (input.executionPolicy === "plan") return { status: "rejected", reason: "read-only" };
+      if (
+        input.scope !== (input.action === "unstage" ? "staged" : "unstaged") ||
+        input.selected.length > MAX_CODE_SELECTED_GIT_HUNKS
+      )
+        return { status: "rejected", reason: "invalid-hunks" };
+      const comparison = await this.#hunks(input, signal);
+      if (
+        comparison.status !== "ready" ||
+        comparison.stateToken !== input.expectedStateToken ||
+        comparison.digest !== input.expectedDigest
+      )
+        return { status: "rejected", reason: "stale-state" };
+      const patch = selectedGitHunkPatch(
+        comparison,
+        input.selected,
+        input.action === "stage" ? "forward" : "reverse",
+      );
+      if (patch === undefined) return { status: "rejected", reason: "invalid-hunks" };
+      if (this.#mutation.applyHunks === undefined) return { status: "unavailable" };
+      return this.#mutation.applyHunks(
+        {
+          checkoutRoot: input.checkoutRoot,
+          action: input.action,
+          patch,
+          executionPolicy: input.executionPolicy,
+          current: input.current,
+          beforeApply: async () => {
+            const fresh = await this.#hunks(input, signal);
+            return (
+              fresh.status === "ready" &&
+              fresh.stateToken === comparison.stateToken &&
+              fresh.digest === comparison.digest
+            );
+          },
+        },
+        signal,
+      );
+    });
+  }
+
+  async #hunks(
+    input: {
+      readonly checkoutRoot: string;
+      readonly scope: CodeGitHunkScope;
+      readonly current: () => boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<GitHunkComparison | { readonly status: "unavailable" }> {
+    const current = () => {
+      try {
+        return signal?.aborted !== true && input.current();
+      } catch {
+        return false;
+      }
+    };
+    if (!current()) return { status: "unavailable" };
+    const before = await this.#ready(input.checkoutRoot, signal);
+    if (before === undefined || !current()) return { status: "unavailable" };
+    const diff = await this.#observation.readDiff?.(
+      { checkoutRoot: input.checkoutRoot, scope: { kind: input.scope }, canonicalHunks: true },
+      signal,
+    );
+    if (diff?.status !== "ready" || !current()) return { status: "unavailable" };
+    const after = await this.#ready(input.checkoutRoot, signal);
+    if (after === undefined || before.stateToken !== after.stateToken || !current())
+      return { status: "unavailable" };
+    return prepareGitHunks(input.scope, after, diff);
   }
 
   /** Measure one branch against another. Read-only, so unqueued. */

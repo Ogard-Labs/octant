@@ -104,7 +104,10 @@ const ExistingSessionResult = Schema.Struct({
   models: Schema.optional(SessionModelState),
 });
 
-const PromptResult = Schema.Struct({ stopReason: Schema.NonEmptyTrimmedString });
+const PromptResult = Schema.Struct({
+  stopReason: Schema.NonEmptyTrimmedString,
+  usage: Schema.optional(Schema.Unknown),
+});
 export type AcpPromptResult = typeof PromptResult.Type;
 
 const ConfigOptionsResult = Schema.Struct({

@@ -33,9 +33,12 @@ import {
   browserCaptureTaker,
   canRequestToolCancellation,
   browserProfileKey,
+  browserContextExpiresAt,
+  isContextExpired,
   evaluateBrowserAction,
   evaluateBrowserProfileUse,
   storedBrowserProfile,
+  originAllowed,
   type BrowserCaptureTaker,
   type BrowserPageSnapshotRef,
   type BrowserProfileCaller,
@@ -44,6 +47,7 @@ import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
+import { browserExpiryFailure, browserOriginRefusal } from "./browserRecoveryMessages";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
 import type { BrowserDownloadRecorder } from "./browserDownloadJournal";
@@ -111,6 +115,9 @@ export interface BrowserAutomationServiceOptions {
 
 /** How long a picture of a page stays current before a preview may ask for another. */
 const PEEK_INTERVAL_MS = 1_500;
+// Like the tool's model-binding cache, retain only a bounded recovery hint,
+// never the expired page's observations, content, pictures, or evidence.
+const MAX_BROWSER_EXPIRY_RECEIPTS = 256;
 /**
  * How long after its last action an agent still counts as driving a page. An
  * agent's turns pause between actions to think, so the mark would otherwise
@@ -133,6 +140,8 @@ interface OwnedContext {
   readonly abort: AbortController;
   actionTail: Promise<void>;
   cancelExpiry: (() => void) | undefined;
+  /** Last admitted Browser operation or meaningful person input, never a preview. */
+  lastActivityAt: number;
   record: BrowserContextRecord;
   status: BrowserWorkspaceStatus;
   observation: BrowserObservation | undefined;
@@ -272,6 +281,13 @@ export class BrowserAutomationService {
   readonly #now: () => number;
   readonly #schedule: (delayMs: number, callback: () => void) => () => void;
   readonly #contexts = new Map<BrowserContextId, OwnedContext>();
+  readonly #expiredContexts = new Map<
+    BrowserContextId,
+    {
+      readonly windowId: WindowId;
+      readonly context: BrowserContextRecord;
+    }
+  >();
   /** Each context's staged upload copies, deleted when the context closes. */
   readonly #stagedUploads = new Map<BrowserContextId, Array<() => Promise<void>>>();
   readonly #removeProcessExitListener: (() => void) | undefined;
@@ -376,6 +392,7 @@ export class BrowserAutomationService {
       }
       return snapshot(current);
     }
+    if (!dedicated) this.#forgetExpiry(input.windowId, input.threadId);
     const contextId = this.#uuid() as BrowserContextId;
     const record: BrowserContextRecord = {
       contextId,
@@ -395,6 +412,7 @@ export class BrowserAutomationService {
       abort: new AbortController(),
       actionTail: Promise.resolve(),
       cancelExpiry: undefined,
+      lastActivityAt: Date.parse(record.createdAt),
       record,
       status: "waiting",
       observation: undefined,
@@ -416,7 +434,8 @@ export class BrowserAutomationService {
       heldDownloads: new Map(),
     };
     this.#contexts.set(contextId, owned);
-    owned.creation = (async () => {
+    this.#scheduleExpiry(owned);
+    const creation = (async () => {
       try {
         if (!(await this.#runtime.available())) {
           owned.status = "unavailable";
@@ -429,6 +448,10 @@ export class BrowserAutomationService {
         }
         if (owned.abort.signal.aborted || owned.record.state !== "creating") {
           await this.#safeClose(contextId);
+          return;
+        }
+        if (this.#expired(owned)) {
+          await this.#expireContext(owned);
           return;
         }
         const refreshedDenial = this.#authorizeCreate(input.action, input.policy, input.threadId);
@@ -451,15 +474,18 @@ export class BrowserAutomationService {
           await this.#safeClose(contextId);
           return;
         }
+        if (this.#expired(owned)) {
+          await this.#expireContext(owned);
+          return;
+        }
         owned.record = {
           ...record,
           ...(presentation === undefined ? {} : { presentation }),
           state: "active",
         };
         owned.status = "running";
-        owned.cancelExpiry = this.#schedule(input.policy.sessionTimeoutMs, () => {
-          void this.#expireContext(owned);
-        });
+        owned.lastActivityAt = this.#now();
+        this.#scheduleExpiry(owned);
       } catch (error) {
         if (owned.record.state === "creating") {
           owned.status = owned.abort.signal.aborted ? "interrupted" : "failed";
@@ -480,9 +506,12 @@ export class BrowserAutomationService {
         await this.#safeClose(contextId);
       }
     })();
+    owned.creation = waitForBrowserRuntime(creation, owned.abort.signal).then(() => undefined);
     await owned.creation;
     const created = snapshot(owned);
     if (owned.record.state !== "active" && owned.record.state !== "creating") {
+      owned.cancelExpiry?.();
+      owned.cancelExpiry = undefined;
       this.#contexts.delete(contextId);
     }
     return created;
@@ -504,6 +533,8 @@ export class BrowserAutomationService {
      * names the agent tool or the person's pane; an unnamed caller keeps none.
      */
     readonly capturedBy?: BrowserCaptureTaker;
+    /** Trusted caller attribution for admission/idle only; never keeps a capture. */
+    readonly activityBy?: BrowserCaptureTaker;
     /**
      * For an upload: the absolute paths of the files the request names, as the
      * agent tool resolved them inside the thread's workspace after the person
@@ -555,7 +586,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    const byAgent = input.capturedBy === "agent";
+    const byAgent = (input.activityBy ?? input.capturedBy) === "agent";
     if (byAgent) owned.agentActions += 1;
     try {
       const answered = await this.#queueAction(owned, async () => {
@@ -614,11 +645,13 @@ export class BrowserAutomationService {
       readonly windowId: WindowId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
+      readonly activityBy?: BrowserCaptureTaker;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
     },
   ): Promise<BrowserAutomationSnapshot> {
+    const activityBy = input.activityBy ?? input.capturedBy;
     if (owned.abort.signal.aborted || owned.record.state !== "active") {
       return this.#failure(
         owned,
@@ -629,7 +662,7 @@ export class BrowserAutomationService {
     // The tool checked the hold before it queued this call, but the person may
     // have taken the page while it waited behind another action. Checked again
     // here, after dequeuing, so a queued agent call never runs under a hold.
-    if (input.capturedBy === "agent" && owned.waitingForPerson !== undefined) {
+    if (activityBy === "agent" && owned.waitingForPerson !== undefined) {
       return this.#failure(
         owned,
         {
@@ -672,12 +705,8 @@ export class BrowserAutomationService {
       );
     }
     if (this.#expired(owned)) {
-      await this.#destroy(owned, "timeout", "stale");
-      return this.#failure(
-        owned,
-        { category: "context-expired", message: "The browser context expired." },
-        "stale",
-      );
+      await this.#expireContext(owned);
+      return expiredSnapshot(owned.threadId, owned.record);
     }
     if (
       input.request.expectedObservationRevision !== undefined &&
@@ -701,7 +730,7 @@ export class BrowserAutomationService {
     // does not run until the agent has read the page again. After a hand-back
     // the agent is answered with that reading instead of an error.
     if (
-      input.capturedBy === "agent" &&
+      activityBy === "agent" &&
       PERSON_GUARDED_ACTIONS.has(input.request.kind) &&
       owned.personInputs > owned.snapshotPersonInputs
     ) {
@@ -734,7 +763,11 @@ export class BrowserAutomationService {
     if (decision.kind === "denied") {
       return this.#failure(
         owned,
-        { category: "policy-denied", message: decision.reason },
+        (input.request.kind === "navigate" || input.request.kind === "tab-open") &&
+          input.request.target !== undefined &&
+          !originAllowed(input.request.target, owned.record.policy.allowedOrigins)
+          ? browserOriginRefusal()
+          : { category: "policy-denied", message: decision.reason },
         "failed",
       );
     }
@@ -743,12 +776,24 @@ export class BrowserAutomationService {
       owned.record.policy.credentialFieldProtection
     ) {
       try {
-        const target = await this.#runtime.inspectTarget(
-          owned.record.contextId,
-          resolved.request.target ?? ":focus",
+        const inspected = await waitForBrowserRuntime(
+          this.#runtime.inspectTarget(
+            owned.record.contextId,
+            resolved.request.target ?? ":focus",
+            owned.abort.signal,
+          ),
           owned.abort.signal,
         );
-        if (target.sensitive) {
+        if (inspected.kind === "interrupted") return this.#interruptedAction(owned);
+        if (this.#expired(owned)) {
+          void this.#expireContext(owned);
+          return snapshot(owned);
+        }
+        if (!this.#authorityIsActive(owned)) {
+          this.#revokeAuthority(owned);
+          return snapshot(owned);
+        }
+        if (inspected.value.sensitive) {
           return this.#failure(
             owned,
             {
@@ -766,29 +811,40 @@ export class BrowserAutomationService {
         );
       }
     }
+    const meaningful = activityBy !== undefined || PERSON_PAGE_ACTIONS.has(input.request.kind);
+    if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
     try {
       const { files: _named, ...action } = resolved.request;
-      const observed = await this.#runtime.act(
-        owned.record.contextId,
-        {
-          ...action,
-          ...(resolved.expected === undefined ? {} : { expected: resolved.expected }),
-          ...(resolved.destinationExpected === undefined
-            ? {}
-            : { destinationExpected: resolved.destinationExpected }),
-          // Only the files the agent tool resolved and the person approved.
-          ...(input.request.kind === "upload" && input.uploadFiles !== undefined
-            ? { files: input.uploadFiles }
-            : {}),
-          // Only an agent action, only while the person's switch is on.
-          ...(input.holdDownloads === true &&
-          input.capturedBy === "agent" &&
-          this.#agentDownloadsEnabled()
-            ? { downloads: "hold" as const }
-            : {}),
-        },
+      const effect = await waitForBrowserRuntime(
+        this.#runtime.act(
+          owned.record.contextId,
+          {
+            ...action,
+            ...(resolved.expected === undefined ? {} : { expected: resolved.expected }),
+            ...(resolved.destinationExpected === undefined
+              ? {}
+              : { destinationExpected: resolved.destinationExpected }),
+            // Only the files the agent tool resolved and the person approved.
+            ...(input.request.kind === "upload" && input.uploadFiles !== undefined
+              ? { files: input.uploadFiles }
+              : {}),
+            // Only an agent action, only while the person's switch is on.
+            ...(input.holdDownloads === true &&
+            input.capturedBy === "agent" &&
+            this.#agentDownloadsEnabled()
+              ? { downloads: "hold" as const }
+              : {}),
+          },
+          owned.abort.signal,
+        ),
         owned.abort.signal,
       );
+      if (effect.kind === "interrupted") return this.#interruptedAction(owned);
+      const observed = effect.value;
+      if (owned.record.state === "active" && this.#expired(owned)) {
+        await this.#expireContext(owned);
+        return snapshot(owned);
+      }
       if (owned.abort.signal.aborted || owned.record.state !== "active") {
         return this.#failure(
           owned,
@@ -880,7 +936,25 @@ export class BrowserAutomationService {
       }
       // After the ingestion above: the thread's taint is recorded before any
       // picture of that page is kept.
-      const capture = await this.#keepCapture(owned, input, observed);
+      const kept = await waitForBrowserRuntime(
+        this.#keepCapture(owned, input, observed),
+        owned.abort.signal,
+      );
+      if (
+        kept.kind === "interrupted" ||
+        owned.abort.signal.aborted ||
+        owned.record.state !== "active"
+      )
+        return this.#interruptedAction(owned);
+      if (this.#expired(owned)) {
+        void this.#expireContext(owned);
+        return snapshot(owned);
+      }
+      if (!this.#authorityIsActive(owned)) {
+        this.#revokeAuthority(owned);
+        return snapshot(owned);
+      }
+      const capture = kept.value;
       owned.observation = capture === undefined ? observation : { ...observation, capture };
       if (observed.contentHash !== undefined) owned.contentHash = observed.contentHash;
       if (observed.snapshotRefs !== undefined) {
@@ -906,13 +980,14 @@ export class BrowserAutomationService {
         owned.snapshotPersonInputs = inputsAtStart;
         if (inputsAtStart === owned.personInputs) owned.handedBack = false;
       }
-      if (input.capturedBy !== "agent" && PERSON_PAGE_ACTIONS.has(input.request.kind)) {
+      if (activityBy !== "agent" && PERSON_PAGE_ACTIONS.has(input.request.kind)) {
         this.#notePersonInput(owned);
       }
       owned.evidence.push(evidence);
       if (owned.evidence.length > MAX_RETAINED_BROWSER_EVIDENCE) {
         owned.evidence.splice(0, owned.evidence.length - MAX_RETAINED_BROWSER_EVIDENCE);
       }
+      if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
       owned.failure = undefined;
       owned.status = "running";
       return snapshot(owned);
@@ -929,14 +1004,7 @@ export class BrowserAutomationService {
         return this.#failure(owned, staleRefFailure, "failed");
       }
       if (!interrupted && error instanceof BrowserNavigationBlockedError) {
-        return this.#failure(
-          owned,
-          {
-            category: "policy-denied",
-            message: `The page moved to ${new URL(error.url).origin}, which is outside this session's allowed origin. Open ${error.url} directly to browse it there.`,
-          },
-          "failed",
-        );
+        return this.#failure(owned, browserOriginRefusal(new URL(error.url).origin), "failed");
       }
       return this.#failure(
         owned,
@@ -1389,7 +1457,7 @@ export class BrowserAutomationService {
     }
     if (this.#expired(owned)) {
       this.#markExpired(owned);
-      const expired = snapshot(owned);
+      const expired = expiredSnapshot(owned.threadId, owned.record);
       void this.#safeClose(owned.record.contextId).finally(() => {
         this.#contexts.delete(owned.record.contextId);
       });
@@ -1439,8 +1507,32 @@ export class BrowserAutomationService {
     const describe = this.#runtime.describePoint;
     if (describe === undefined) return { status: "unavailable" };
     return this.#queueAction(owned, async () => {
+      if (
+        owned.record.state !== "active" ||
+        owned.abort.signal.aborted ||
+        !this.#authorityIsActive(owned)
+      )
+        return { status: "unavailable" as const };
+      if (this.#expired(owned)) {
+        void this.#expireContext(owned);
+        return { status: "unavailable" as const };
+      }
       try {
-        return await describe(input.contextId, input.point, owned.abort.signal);
+        const observed = await waitForBrowserRuntime(
+          describe(input.contextId, input.point, owned.abort.signal),
+          owned.abort.signal,
+        );
+        if (
+          observed.kind === "interrupted" ||
+          owned.record.state !== "active" ||
+          !this.#authorityIsActive(owned)
+        )
+          return { status: "unavailable" as const };
+        if (this.#expired(owned)) {
+          void this.#expireContext(owned);
+          return { status: "unavailable" as const };
+        }
+        return observed.value;
       } catch {
         return { status: "unavailable" as const };
       }
@@ -1481,7 +1573,26 @@ export class BrowserAutomationService {
           contextInspectWeight(right.record.state) - contextInspectWeight(left.record.state),
       )
       .slice(0, MAX_BROWSER_THREAD_CONTEXTS);
-    if (threadContexts.length === 0) return { status: "ready", threadId, evidence: [] };
+    if (threadContexts.length === 0) {
+      const expired = [...this.#expiredContexts.values()].find(
+        (receipt) => receipt.windowId === windowId && receipt.context.threadId === threadId,
+      );
+      if (expired === undefined) return { status: "ready", threadId, evidence: [] };
+      const granted = this.#authority.resolve(threadId, expired.context.authority.mode);
+      if (
+        !this.#authority.canAccessWindow(windowId, threadId, expired.context.authority.mode) ||
+        granted === undefined ||
+        !sameToolActionAuthority(expired.context.authority, granted)
+      ) {
+        this.#forgetExpiry(windowId, threadId);
+        return failedSnapshot(
+          threadId,
+          { category: "unauthorized", message: "Browser context authority is no longer active." },
+          "failed",
+        );
+      }
+      return expiredSnapshot(threadId, expired.context);
+    }
     if (threadContexts.length === 1) {
       const single = threadContexts[0];
       if (single === undefined) return { status: "ready", threadId, evidence: [] };
@@ -1616,6 +1727,16 @@ export class BrowserAutomationService {
   }
 
   async #refreshPicture(owned: OwnedContext, signal: AbortSignal | undefined): Promise<void> {
+    if (this.#expired(owned)) {
+      void this.#expireContext(owned);
+      return;
+    }
+    if (
+      owned.record.state !== "active" ||
+      owned.abort.signal.aborted ||
+      !this.#authorityIsActive(owned)
+    )
+      return;
     // Called on the runtime, never detached: a runtime's peek reaches for its
     // own state, and a bare reference to it arrived there with no `this`.
     const runtime = this.#runtime;
@@ -1628,10 +1749,23 @@ export class BrowserAutomationService {
     ) {
       owned.peekedAt = this.#now();
       try {
-        const observed = await runtime.peek(
-          owned.record.contextId,
-          signal ?? new AbortController().signal,
+        const readSignal =
+          signal === undefined ? owned.abort.signal : AbortSignal.any([owned.abort.signal, signal]);
+        const peeked = await waitForBrowserRuntime(
+          runtime.peek(owned.record.contextId, readSignal),
+          readSignal,
         );
+        if (
+          peeked.kind === "interrupted" ||
+          owned.record.state !== "active" ||
+          !this.#authorityIsActive(owned)
+        )
+          return;
+        if (this.#expired(owned)) {
+          void this.#expireContext(owned);
+          return;
+        }
+        const observed = peeked.value;
         // A fresh picture of the same page is not a new page: keeping the
         // revision lets an agent's next action, which names the revision its
         // last action returned, still run while a preview is open.
@@ -1690,6 +1824,7 @@ export class BrowserAutomationService {
     windowId: WindowId,
     threadId: BrowserThreadId,
   ): Promise<BrowserAutomationSnapshot> {
+    this.#forgetExpiry(windowId, threadId);
     const ownedContexts = [...this.#contexts.values()].filter(
       (owned) => owned.windowId === windowId && owned.threadId === threadId,
     );
@@ -1703,6 +1838,7 @@ export class BrowserAutomationService {
   }
 
   async revokeWindow(windowId: WindowId): Promise<void> {
+    this.#forgetExpiry(windowId);
     await Promise.all(
       [...this.#contexts.values()]
         .filter((owned) => owned.windowId === windowId)
@@ -1714,6 +1850,7 @@ export class BrowserAutomationService {
   }
 
   async close(): Promise<void> {
+    this.#expiredContexts.clear();
     this.#removeProcessExitListener?.();
     this.#removePersonInputListener?.();
     for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
@@ -1796,6 +1933,10 @@ export class BrowserAutomationService {
   ): (() => void) | undefined {
     const owned = this.#current(windowId, threadId);
     if (owned === undefined) return () => undefined;
+    if (this.#expired(owned)) {
+      void this.#expireContext(owned);
+      return undefined;
+    }
     // One hand-off at a time: a second would clear the first's mark early.
     if (owned.waitingForPerson !== undefined) return undefined;
     owned.waitingForPerson = kind;
@@ -1828,6 +1969,10 @@ export class BrowserAutomationService {
         { category: "unavailable", message: "There is no page to take over." },
         "failed",
       );
+    }
+    if (this.#expired(owned)) {
+      void this.#expireContext(owned);
+      return snapshot(owned);
     }
     if (!this.#authorityIsActive(owned)) {
       return failedSnapshot(
@@ -1870,6 +2015,10 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    if (this.#expired(owned)) {
+      void this.#expireContext(owned);
+      return snapshot(owned);
+    }
     if (!this.#authorityIsActive(owned) || this.#isUnattendedScope(windowId)) {
       return failedSnapshot(
         threadId,
@@ -1881,7 +2030,7 @@ export class BrowserAutomationService {
     if (owned.releaseTakeOver === undefined) return snapshot(owned);
     owned.releaseTakeOver();
     owned.handedBack = true;
-    this.#notePersonInput(owned);
+    this.#notePersonInput(owned, false);
     return snapshot(owned);
   }
 
@@ -1890,17 +2039,35 @@ export class BrowserAutomationService {
    * moved, so its refs are dropped as a navigation drops them, and its next
    * answer says so once. While they hold the page, using it keeps it open.
    */
-  #notePersonInput(owned: OwnedContext): void {
+  #notePersonInput(owned: OwnedContext, renewLifetime = true): void {
     if (owned.record.state !== "active") return;
+    if (renewLifetime && !this.#renewActivity(owned, true)) return;
     owned.personInputs += 1;
     owned.refs = undefined;
-    if (
+  }
+
+  #renewActivity(owned: OwnedContext, personInput = false): boolean {
+    if (owned.record.state !== "active" || owned.abort.signal.aborted) return false;
+    if (this.#expired(owned)) {
+      void this.#expireContext(owned);
+      return false;
+    }
+    if (!this.#authorityIsActive(owned)) {
+      this.#revokeAuthority(owned);
+      return false;
+    }
+    if (owned.waitingForPerson === undefined) {
+      owned.lastActivityAt = this.#now();
+      this.#scheduleExpiry(owned);
+    } else if (
+      personInput &&
       owned.waitingForPerson === "take-over" &&
       (owned.keptUntil ?? 0) < this.#now() + HAND_OFF_KEEP_MS - 60_000
     ) {
       owned.keptUntil = this.#now() + HAND_OFF_KEEP_MS;
       this.#scheduleExpiry(owned);
     }
+    return true;
   }
 
   /** Say once, on an agent action's answer, that the person used the page. */
@@ -1915,10 +2082,11 @@ export class BrowserAutomationService {
   }
 
   #scheduleExpiry(owned: OwnedContext): void {
-    const deadline = Math.max(
-      Date.parse(owned.record.createdAt) + owned.record.policy.sessionTimeoutMs,
-      owned.keptUntil ?? 0,
-    );
+    if (owned.record.state !== "active" && owned.record.state !== "creating") return;
+    const deadline = browserContextExpiresAt(owned.record, {
+      lastActivityAt: owned.lastActivityAt,
+      ...(owned.keptUntil === undefined ? {} : { keptUntil: owned.keptUntil }),
+    });
     owned.cancelExpiry?.();
     owned.cancelExpiry = this.#schedule(Math.max(0, deadline - this.#now()), () => {
       if (this.#expired(owned)) void this.#expireContext(owned);
@@ -1937,6 +2105,10 @@ export class BrowserAutomationService {
    */
   async closeProfile(profile: StoredBrowserProfile): Promise<void> {
     const key = browserProfileKey(profile);
+    for (const [id, receipt] of this.#expiredContexts) {
+      if (browserProfileKey(receipt.context.policy.profile) === key)
+        this.#expiredContexts.delete(id);
+    }
     const closing = [...this.#contexts.values()]
       .filter(
         (owned) =>
@@ -1963,9 +2135,10 @@ export class BrowserAutomationService {
   }
 
   #expired(owned: OwnedContext): boolean {
-    if (owned.record.state !== "active" && owned.record.state !== "creating") return false;
-    if (owned.keptUntil !== undefined && this.#now() < owned.keptUntil) return false;
-    return this.#now() - Date.parse(owned.record.createdAt) >= owned.record.policy.sessionTimeoutMs;
+    return isContextExpired(owned.record, this.#now(), {
+      lastActivityAt: owned.lastActivityAt,
+      ...(owned.keptUntil === undefined ? {} : { keptUntil: owned.keptUntil }),
+    });
   }
 
   async #destroy(
@@ -1973,10 +2146,13 @@ export class BrowserAutomationService {
     reason: BrowserContextRecord["stopReason"],
     status: BrowserWorkspaceStatus,
   ): Promise<void> {
+    const creating = owned.record.state === "creating";
     owned.abort.abort();
     owned.cancelExpiry?.();
     owned.cancelExpiry = undefined;
     owned.record = { ...owned.record, state: "stopping" };
+    // A creation wait is settled by abort before asynchronous teardown ends.
+    if (creating) owned.status = status;
     await this.#safeClose(owned.record.contextId);
     owned.record = stoppedRecord(
       owned.record,
@@ -2047,7 +2223,29 @@ export class BrowserAutomationService {
     owned.cancelExpiry = undefined;
     owned.record = stoppedRecord(owned.record, this.#clock(), "timeout", "expired");
     owned.status = "stale";
-    owned.failure = { category: "context-expired", message: "The browser context expired." };
+    owned.failure = browserExpiryFailure(owned.record.policy.profile);
+    if (!owned.dedicated) {
+      this.#forgetExpiry(owned.windowId, owned.threadId);
+      if (this.#expiredContexts.size >= MAX_BROWSER_EXPIRY_RECEIPTS) {
+        const oldest = this.#expiredContexts.keys().next().value;
+        if (oldest !== undefined) this.#expiredContexts.delete(oldest);
+      }
+      this.#expiredContexts.set(owned.record.contextId, {
+        windowId: owned.windowId,
+        context: owned.record,
+      });
+    }
+  }
+
+  #forgetExpiry(windowId: WindowId, threadId?: BrowserThreadId): void {
+    for (const [id, receipt] of this.#expiredContexts) {
+      if (
+        receipt.windowId === windowId &&
+        (threadId === undefined || receipt.context.threadId === threadId)
+      ) {
+        this.#expiredContexts.delete(id);
+      }
+    }
   }
 
   async #safeClose(contextId: BrowserContextId): Promise<void> {
@@ -2059,6 +2257,16 @@ export class BrowserAutomationService {
     }
   }
 
+  #interruptedAction(owned: OwnedContext): BrowserAutomationSnapshot {
+    return owned.record.state === "expired"
+      ? snapshot(owned)
+      : this.#failure(
+          owned,
+          { category: "interrupted", message: "The browser action was interrupted." },
+          "interrupted",
+        );
+  }
+
   #failure(
     owned: OwnedContext,
     failure: BrowserAutomationFailure,
@@ -2068,6 +2276,31 @@ export class BrowserAutomationService {
     owned.status = status;
     return snapshot(owned);
   }
+}
+
+/** The host's deadline settles callers even if a native port ignores abort. */
+function waitForBrowserRuntime<T>(
+  effect: Promise<T>,
+  signal: AbortSignal,
+): Promise<{ readonly kind: "completed"; readonly value: T } | { readonly kind: "interrupted" }> {
+  return new Promise((resolve, reject) => {
+    const interrupted = () => {
+      signal.removeEventListener("abort", interrupted);
+      resolve({ kind: "interrupted" });
+    };
+    if (signal.aborted) interrupted();
+    else signal.addEventListener("abort", interrupted, { once: true });
+    effect.then(
+      (value) => {
+        signal.removeEventListener("abort", interrupted);
+        resolve({ kind: "completed", value });
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", interrupted);
+        reject(error);
+      },
+    );
+  });
 }
 
 /**
@@ -2222,6 +2455,19 @@ function mapToolCallDenial(reason: string, request: ToolActionRequest): BrowserA
   return {
     category: "policy-denied",
     message: `Browser tool call denied (${reason}) for ${request.capability.id}.`,
+  };
+}
+
+function expiredSnapshot(
+  threadId: BrowserThreadId,
+  context: BrowserContextRecord,
+): BrowserAutomationSnapshot {
+  return {
+    status: "stale",
+    threadId,
+    context,
+    evidence: [],
+    failure: browserExpiryFailure(context.policy.profile),
   };
 }
 

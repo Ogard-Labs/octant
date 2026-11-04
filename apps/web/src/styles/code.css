@@ -587,6 +587,35 @@ html:not([data-octant-reduced-transparency="true"])
   margin: 0;
 }
 
+/* Reference results own their overflow; the editor and sibling panes keep their scrollers. */
+.code-editor-pane__references {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(40%, 24rem);
+  min-width: 0;
+  overflow: auto;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border);
+  font-size: var(--oct-text-xs);
+}
+.code-editor-pane__reference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+.code-editor-pane__references ul {
+  margin: var(--oct-space-2) 0;
+  padding: 0;
+  list-style: none;
+}
+.code-editor-pane__references button,
+.code-editor-pane__references p {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .code-editor-pane__warning,
 .code-diff-pane__warning {
   padding: var(--oct-space-3) var(--oct-space-4);
@@ -2637,4 +2666,32 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-2);
+}
+
+.code-diff-pane__hunk-selection {
+  min-width: 0;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-diff-pane__hunk-selection > summary {
+  cursor: pointer;
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-diff-pane__hunk-selection > section {
+  margin-block: var(--oct-space-4);
+}
+
+.code-diff-pane__hunk-selection .check {
+  display: flex;
+  gap: var(--oct-space-2);
+  align-items: center;
+  overflow-wrap: anywhere;
+  margin-bottom: var(--oct-space-2);
+}
+
+/* The owned references list shares the pane with the editor. */
+.code-editor-pane:has(> .code-editor-pane__references) > [aria-label^="Editor for"] {
+  min-height: 0;
 }

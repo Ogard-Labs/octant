@@ -84,7 +84,7 @@ preserve its data until cleanup is explicitly authorized.
 ## Requirements
 
 - **x64 Linux.** Ubuntu is the tested distribution.
-- **Bun 1.3.14 or later** and a source checkout of Octant.
+- **Bun 1.4.4 or later** and a source checkout of Octant.
 - **Bubblewrap** (`bwrap`). Code shell commands and terminals run inside it.
   Without it a provider reports **Incompatible**, and a task terminal says
   that bubblewrap is missing and how to install it

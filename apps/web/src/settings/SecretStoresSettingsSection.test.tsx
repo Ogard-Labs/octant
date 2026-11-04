@@ -42,7 +42,7 @@ function fakeClient(
     read: vi.fn(async () => initial),
     execute: vi.fn(async (command) => {
       // Reading the AWS command line's items is a read, kept out like `read`.
-      if (command.kind !== "read-aws-cli-key") commands.push(command);
+      if (!command.kind.startsWith("read-")) commands.push(command);
       return answer(command);
     }),
   };
@@ -50,6 +50,56 @@ function fakeClient(
 }
 
 describe("SecretStoresSettingsSection", () => {
+  it("requires explicit Google account/scope consent before configuring the command channel", async () => {
+    const selection = {
+      store: "onepassword" as const,
+      reference: "op://Private/Google/service account JSON",
+      serviceAccountEmail: "commands@example.iam.gserviceaccount.com",
+      scopes: ["https://www.googleapis.com/auth/cloud-platform.read-only"],
+    };
+    let configured: typeof selection | null = null;
+    const { client, commands } = fakeClient(viewOf(true), (command) => {
+      if (command.kind === "read-aws-cli-key")
+        return decodeSecretStoresResult({ kind: "secret-stores-aws-cli-key", reference: null });
+      if (command.kind === "point-google-cli-account") configured = selection;
+      if (command.kind === "clear-google-cli-account") configured = null;
+      return decodeSecretStoresResult({
+        kind: "secret-stores-google-cli-account",
+        reference: configured,
+      });
+    });
+    const user = userEvent.setup();
+    render(<SecretStoresSettingsSection client={client} />);
+    await user.type(
+      await screen.findByLabelText("Service account email"),
+      selection.serviceAccountEmail,
+    );
+    await user.type(screen.getByLabelText("Service-account JSON item"), selection.reference);
+    await user.click(screen.getByRole("button", { name: "Review Google Cloud account" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Use this service account for commands?",
+    });
+    expect(dialog).toHaveTextContent(selection.serviceAccountEmail);
+    expect(dialog).toHaveTextContent("https://www.googleapis.com/auth/cloud-platform.read-only");
+    expect(commands).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(commands).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Review Google Cloud account" }));
+    await user.click(await screen.findByRole("button", { name: "Use this service account" }));
+    await waitFor(() =>
+      expect(commands).toContainEqual({
+        kind: "point-google-cli-account",
+        confirmed: true,
+        ...selection,
+      }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Remove Google Cloud account" }),
+    ).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Remove Google Cloud account" }));
+    await waitFor(() => expect(commands).toContainEqual({ kind: "clear-google-cli-account" }));
+  });
+
   it("points the AWS command line at two items, shows where its key comes from, and removes it", async () => {
     const pointer = {
       store: "onepassword" as const,
@@ -90,13 +140,15 @@ describe("SecretStoresSettingsSection", () => {
 
   it("says why the AWS command line's items were refused", async () => {
     const { client } = fakeClient(viewOf(true), (command) =>
-      command.kind === "read-aws-cli-key"
-        ? decodeSecretStoresResult({ kind: "secret-stores-aws-cli-key", reference: null })
-        : decodeSecretStoresResult({
-            kind: "secret-stores-refused",
-            reason: "item-missing",
-            message: "No item with that reference was found in the secret store.",
-          }),
+      command.kind === "read-google-cli-account"
+        ? decodeSecretStoresResult({ kind: "secret-stores-google-cli-account", reference: null })
+        : command.kind === "read-aws-cli-key"
+          ? decodeSecretStoresResult({ kind: "secret-stores-aws-cli-key", reference: null })
+          : decodeSecretStoresResult({
+              kind: "secret-stores-refused",
+              reason: "item-missing",
+              message: "No item with that reference was found in the secret store.",
+            }),
     );
     const user = userEvent.setup();
     render(<SecretStoresSettingsSection client={client} />);

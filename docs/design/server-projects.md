@@ -17,8 +17,9 @@ on the server; a thread's own worktree on the server and its pull request
 sidebar, composer, and thread view that open them; and Work Projects there,
 whose Work threads run on the Octant Harness with file tools and commands on
 the server, with the Work sidebar, composer, and thread view that open them
-([Work Projects](#work-projects)). Not built yet: the
-items under [Not built yet](#not-built-yet).
+([Work Projects](#work-projects)); and person-operated loopback dev-server
+previews ([Previews](#person-operated-dev-server-previews)). Remaining items
+are under [Not built yet](#not-built-yet).
 
 ## Outcome
 
@@ -433,3 +434,53 @@ hands are on the server.
   file tools also ran against a throwaway Linux container's `sshd` with bash,
   dash, zsh, fish 3.6, tcsh, and csh as login shells. Linux hosts are likewise
   untested; the connection uses only `ssh` options both platforms share.
+
+## Person-operated dev-server previews
+
+A local person can open **Dev server preview** under a bound Project in Settings
+› Access › Servers. Choose the port of an already running HTTP dev server on
+that server's literal `127.0.0.1`, and a local port, or `0` to choose a free one.
+The effective local URL and remote port are visible. Where a paired Octant
+host already owns the dev server, use its existing paired-host preview. An SSH
+alias is not evidence of a paired-host identity.
+
+The plain SSH path owns a private loopback TCP listener and at most eight
+concurrent, dedicated `ssh -W` stdio streams. This carries HTTP and WebSocket
+upgrades unchanged. It uses no shared command socket, starts no remote program,
+forwards no agent, and retains `BatchMode=yes`, strict known-host checking and
+`ClearAllForwardings=yes`. Stdio forwarding does not enable configured local,
+remote or dynamic listeners. Ordinary command connections are unchanged.
+
+Only an authenticated local window can start, stop or reconnect its preview.
+Before listening and before each stream, the host checks the current Project,
+registered server, binding identity and owner. A one-second sweep closes the
+listener and its streams after removal or owner revocation, and after one hour,
+including a lost preview whose owner is gone. A revoked preview releases its
+ownership: any current local window may start a new preview for that Project.
+Stopping a preview leaves the remote program running. A port collision refuses
+without choosing another address. A failed SSH stream marks the preview lost
+and closes the listener. **Reconnect same endpoint** makes one explicit attempt
+with the same local port, remote port and current binding, without retrying a
+remote command or accepting a changed host key. Reusing the local port may fail
+if another process has taken it. Listening locally is not proof the remote app
+has answered; SSH connects when the preview is opened.
+
+Stop, restart, reconnect and host shutdown await the retained receipt for the
+actual listener and SSH child cleanup. A second stop joins the existing cleanup;
+a status change alone is not proof that the owned processes have exited.
+Shutdown also waits for a listen attempt that has not yet published its preview.
+Reconnect keeps the old ownership until cleanup settles, then rechecks the
+original binding and owner before reopening the same endpoint. Stop can cancel
+that pending reconnect.
+
+Cleanup sends SIGTERM and escalates to SIGKILL after one second. If settlement
+cannot be confirmed within three seconds, stop or reopen is refused as
+`cleanup-unsettled`, and host shutdown reports a failure while completing its
+other cleanup. The actual receipt stays retained after that deadline; a later
+attempt must still await it and cannot replace a live owned process. A completed
+stop outcome is journaled only after cleanup settles.
+
+The journal records Project, owner window, selected ports, effective local URL
+and lifecycle outcomes as `server-projects.preview-outcome@1`. It records no
+credentials, stderr, HTTP bodies or page contents. Active listeners are not
+restored on restart. Opening a new preview requires another person action.

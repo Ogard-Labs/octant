@@ -1275,6 +1275,82 @@ describe("notMeasuredProvider", () => {
     });
   }
 
+  it.each([
+    ["historical unreported", "tokens"],
+    ["historical unreported", "monetary"],
+    ["unpriced reported", "monetary"],
+  ] as const)(
+    "refuses %s Vibe usage under a %s ceiling after usage support is confirmed",
+    (quality, dimension) => {
+      const registry = new ProviderRuntimeRegistry();
+      const { connection, journal, service } = openService({
+        notMeasuredProvider: (id) =>
+          notMeasuredProvider(
+            {
+              readProviderInstances: () => readProviderInstances(connection),
+              observedState: registry.observedState.bind(registry),
+            },
+            id,
+          ),
+      });
+      const providerId = providerIds.measuredOut;
+      append(journal, providerId, 0, "provider.instance-created@1", {
+        instance: instance(providerId, {
+          displayName: "Mistral Vibe",
+          driverKind: "mistral-vibe",
+          configuration: {
+            kind: "mistral-vibe-acp",
+            binaryPath: "/usr/local/bin/vibe-acp",
+            authentication: "api-key",
+          },
+        }),
+      });
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: dimension === "tokens" ? { tokenBudget: 1_000 } : { costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      });
+      insertUsage(connection, {
+        id: "73000000-0000-4000-8000-000000000511",
+        subjectType: "chat-thread",
+        subjectId: ids.thread,
+        providerInstanceId: providerId,
+        tokens: { input: quality === "historical unreported" ? 0 : 100, output: 0 },
+        quality: quality === "historical unreported" ? "unavailable" : "exact",
+        sequence: 1,
+      });
+      if (quality === "historical unreported") {
+        observe(registry, providerId, "unsupported");
+        expect(
+          remainingOf(
+            service.snapshot({
+              principalKind: "local-window",
+              threadId: ids.thread,
+              threadType: "chat-thread",
+            }),
+            "thread",
+          ),
+        ).toMatchObject({
+          notMeasuredProviders: [{ providerInstanceId: providerId, displayName: "Mistral Vibe" }],
+        });
+      }
+      observe(registry, providerId, "supported");
+      expect(
+        service.admit({
+          reservationId: ids.reservationA,
+          threadId: ids.thread,
+          threadType: "chat-thread",
+          turnUpperBoundTokens: 100,
+        }),
+      ).toMatchObject({
+        status: "refused",
+        refusal: { kind: "unknown-spend", dimension },
+      });
+    },
+  );
+
   it("leaves out only an enabled instance whose runtime declares usage unsupported", () => {
     const { connection, journal } = openService();
     const registry = new ProviderRuntimeRegistry();

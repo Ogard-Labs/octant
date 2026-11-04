@@ -19,7 +19,8 @@ import {
   decodeSecretStoresCommand,
   type SecretStoresCommand,
 } from "@octant/contracts/secret-stores";
-import { authenticateRoutePrincipal } from "../principalRouteContext";
+import { resolveLocalWindowPrincipal } from "../clientPrincipal";
+import { authenticateRoutePrincipal, readPrincipalRouteContext } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import { secretStoresRefusal, type SecretStoresService } from "./secretStoresService";
@@ -30,7 +31,7 @@ const ROUTES = {
 } as const;
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
-const JSON_BODY_LIMIT = 4_096;
+const JSON_BODY_LIMIT = 8_192;
 
 export interface SecretStoresRouteDependencies {
   readonly service: SecretStoresService;
@@ -100,15 +101,59 @@ export function createSecretStoresRouteHandler(dependencies: SecretStoresRouteDe
       } catch {
         return json(secretStoresRefusal("malformed"), origin);
       }
-      return json(await run(dependencies.service, windowId, command), origin);
+      const google =
+        command.kind === "point-google-cli-account" ||
+        command.kind === "clear-google-cli-account" ||
+        command.kind === "read-google-cli-account";
+      const admit = () => {
+        try {
+          const current = resolveLocalWindowPrincipal({
+            request,
+            body,
+            store: dependencies.windowAuthorityStore,
+            now: now(),
+          });
+          return (
+            !request.signal.aborted &&
+            readPrincipalRouteContext(request)?.abortSignal?.aborted !== true &&
+            String(current.windowId) === String(windowId)
+          );
+        } catch {
+          return false;
+        }
+      };
+      if (google && !admit()) return failure("Secret stores are unauthorized.", 401, origin);
+      const result = await run(dependencies.service, windowId, command, google ? admit : undefined);
+      if (google && !admit()) return failure("Secret stores are unauthorized.", 401, origin);
+      return json(result, origin);
     } catch {
       return failure("Secret stores are unavailable.", 500, origin);
     }
   };
 }
 
-function run(service: SecretStoresService, windowId: WindowId, command: SecretStoresCommand) {
+function run(
+  service: SecretStoresService,
+  windowId: WindowId,
+  command: SecretStoresCommand,
+  admit?: () => boolean,
+) {
   switch (command.kind) {
+    case "point-google-cli-account":
+      return service.pointGoogleCliAccount(
+        windowId,
+        {
+          store: command.store,
+          reference: command.reference,
+          serviceAccountEmail: command.serviceAccountEmail,
+          scopes: command.scopes,
+        },
+        admit,
+      );
+    case "clear-google-cli-account":
+      return service.clearGoogleCliAccount(windowId, admit);
+    case "read-google-cli-account":
+      return service.readGoogleCliAccount();
     case "link-store":
       return service.linkStore(windowId, command.store);
     case "unlink-store":

@@ -7,8 +7,10 @@
  * remove it, and journals the change. It never receives a value: nothing it
  * calls returns one, so there is no value here to log, journal, or return.
  *
- * A change is made first and journaled after. When the journal refuses, the
- * change is undone where it can be, and the answer says which case it is.
+ * A confirmed change is journaled after. Google selection also records the
+ * person's intent before dispatch, without treating it as a broker receipt.
+ * When the journal refuses, the change is undone where it can be, and the
+ * answer says which case it is.
  */
 
 import type { ProviderInstance, ProviderInstanceId, WindowId } from "@octant/contracts";
@@ -16,6 +18,7 @@ import {
   decodeSecretStoresResult,
   SECRET_STORE_REFUSAL_MESSAGES,
   type AwsCliKeyReference,
+  type GoogleCliAccountReference,
   type SecretStoreJournalRecord,
   type SecretStoreKind,
   type SecretStoreRefusalReason,
@@ -29,12 +32,23 @@ export interface SecretStoresServiceOptions {
   /** Undefined on a host with no credential broker. */
   readonly broker: SecretStoreBrokerClient | undefined;
   readonly journal: SecretStoresJournal;
+  readonly beginGoogleCliChange?: () => () => void;
   readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
   /** Checks the provider again, so its card stops saying Needs key. */
   readonly reprobe?: (windowId: WindowId, instance: ProviderInstance) => Promise<void>;
 }
 
 export interface SecretStoresService {
+  readonly pointGoogleCliAccount: (
+    windowId: WindowId,
+    pointer: GoogleCliAccountReference,
+    admit?: () => boolean,
+  ) => Promise<SecretStoresResult>;
+  readonly clearGoogleCliAccount: (
+    windowId: WindowId,
+    admit?: () => boolean,
+  ) => Promise<SecretStoresResult>;
+  readonly readGoogleCliAccount: () => Promise<SecretStoresResult>;
   readonly view: () => Promise<SecretStoresResult>;
   readonly linkStore: (windowId: WindowId, store: SecretStoreKind) => Promise<SecretStoresResult>;
   readonly unlinkStore: (windowId: WindowId, store: SecretStoreKind) => Promise<SecretStoresResult>;
@@ -112,6 +126,11 @@ export function createSecretStoresService(
     return run;
   };
 
+  const changingGoogle = <T>(task: () => Promise<T>): Promise<T> => {
+    const finish = options.beginGoogleCliChange?.();
+    return serialized(task).finally(() => finish?.());
+  };
+
   const journaled = (
     record: SecretStoreJournalRecord | ReadonlyArray<SecretStoreJournalRecord>,
   ): boolean => {
@@ -167,7 +186,7 @@ export function createSecretStoresService(
       }),
 
     unlinkStore: (windowId, store) =>
-      serialized(async () => {
+      changingGoogle(async () => {
         if (broker === undefined) return secretStoresRefusal("broker-unavailable");
         const unlinked = await broker.unlink(store);
         if (unlinked.status === "broker-unavailable") {
@@ -289,6 +308,115 @@ export function createSecretStoresService(
           reference: null,
         };
       }),
+
+    pointGoogleCliAccount: (windowId, pointer, admit) =>
+      changingGoogle(async () => {
+        if (
+          broker?.googleCliReference === undefined ||
+          broker.pointGoogleCli === undefined ||
+          broker.clearGoogleCli === undefined ||
+          broker.restoreGoogleCli === undefined
+        )
+          return secretStoresRefusal("broker-unavailable");
+        const before = await broker.googleCliReference();
+        if (before.status === "broker-unavailable")
+          return secretStoresRefusal("broker-unavailable");
+        if (admit?.() === false) return secretStoresRefusal("selection-changed");
+        const target = {
+          kind: "google-cli-account" as const,
+          serviceAccountEmail: pointer.serviceAccountEmail,
+          scopes: pointer.scopes,
+        };
+        if (
+          !journaled({
+            name: "credential-reference.requested",
+            target,
+            store: pointer.store,
+            reference: pointer.reference,
+            replaced: before.status === "linked",
+            windowId,
+          })
+        )
+          return secretStoresRefusal("journal-unavailable");
+        const pointed = await broker.pointGoogleCli(pointer);
+        if (pointed.status === "broker-unavailable")
+          return secretStoresRefusal(
+            "broker-unavailable",
+            "The broker did not confirm the account change. Read its current account before trying again.",
+          );
+        if (pointed.status === "refused") return secretStoresRefusal("credential-refused");
+        if (pointed.status === "superseded") return secretStoresRefusal("selection-changed");
+        if (pointed.status !== "pointed") return secretStoresRefusal(CHECK_REFUSAL[pointed.status]);
+        if (
+          !journaled({
+            name: "credential-reference.set",
+            target,
+            store: pointer.store,
+            reference: pointer.reference,
+            replaced: before.status === "linked",
+            windowId,
+          })
+        ) {
+          const restored =
+            before.status === "linked"
+              ? await broker.restoreGoogleCli(before.pointer)
+              : await broker.clearGoogleCli();
+          if (
+            restored.status !== "pointed" &&
+            restored.status !== "cleared" &&
+            restored.status !== "none"
+          )
+            return secretStoresRefusal(
+              "journal-unavailable",
+              "The account change could not be recorded or undone. Remove the Google Cloud command line reference, then set it again.",
+            );
+          return secretStoresRefusal("journal-unavailable");
+        }
+        return { kind: "secret-stores-google-cli-account", reference: pointer };
+      }),
+    clearGoogleCliAccount: (windowId, admit) =>
+      changingGoogle(async () => {
+        if (broker?.clearGoogleCli === undefined) return secretStoresRefusal("broker-unavailable");
+        if (admit?.() === false) return secretStoresRefusal("selection-changed");
+        const answer = await broker.clearGoogleCli();
+        if (answer.status === "broker-unavailable")
+          return secretStoresRefusal(
+            "broker-unavailable",
+            "The broker did not confirm removal. Read the current account before trying again.",
+          );
+        if (
+          answer.status === "cleared" &&
+          !journaled({
+            name: "credential-reference.cleared",
+            target: {
+              kind: "google-cli-account",
+              serviceAccountEmail: answer.pointer.serviceAccountEmail,
+              scopes: answer.pointer.scopes,
+            },
+            store: answer.pointer.store,
+            reference: answer.pointer.reference,
+            windowId,
+          })
+        )
+          return secretStoresRefusal(
+            "journal-unavailable",
+            "The reference was removed, but the change could not be recorded. Tokens already given to running commands may remain valid until they expire.",
+          );
+        return { kind: "secret-stores-google-cli-account", reference: null };
+      }),
+    readGoogleCliAccount: async () => {
+      if (broker?.googleCliReference === undefined)
+        return secretStoresRefusal("broker-unavailable");
+      const answer = await broker.googleCliReference();
+      if (answer.status === "broker-unavailable") return secretStoresRefusal("broker-unavailable");
+      return {
+        kind: "secret-stores-google-cli-account",
+        reference: answer.status === "linked" ? answer.pointer : null,
+        ...(answer.status === "linked" && answer.sessionExpiresAt !== undefined
+          ? { sessionExpiresAt: answer.sessionExpiresAt }
+          : {}),
+      };
+    },
 
     pointAwsCliKey: (windowId, pointer) =>
       serialized(async () => {

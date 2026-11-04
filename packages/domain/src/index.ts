@@ -223,3 +223,4 @@ export * from "./hubWakePolicy";
 export * from "./hubGuestPolicy";
 
 export * from "./paperLocalSetup";
+export * from "./unifiedDiff";

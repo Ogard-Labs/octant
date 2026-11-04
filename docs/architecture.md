@@ -405,7 +405,12 @@ its digest, its languages, and its class, and it serves only once trusted and
 switched on, verified against that digest at every start. The Monaco editor
 calls those routes through the Code client: it shows the server's diagnostics
 as markers and opens a definition in another file through the ordinary
-file-open path, locally and from a paired device. A Settings › Code switch,
+file-open path, locally and from a paired device. Explicit checkout references
+consume the already-initialized server's actual capability and acknowledged
+current draft, return bounded snapshot locations, and reuse that file-open path;
+these reads never start or retarget a server. Unsupported or unknown support
+stays explicit, with no save, new agent tool or write authority
+([references rules](design/language-services.md#explicit-checkout-references)). A Settings › Code switch,
 stored in the journaled Code settings, turns the bundled server off, and the
 host then answers `turned-off`. A person can also add a `repo-tooling` server,
 which runs the repository's own tooling: it starts only after the person at a
@@ -437,7 +442,8 @@ the Project goes. The routes under `/api/code/debug/` are local-window only
 with no remote action, no agent tool reaches a session, and nothing a session
 shows is journaled. The Code dock's Run and debug tool calls them: it lists
 and confirms configurations, starts a session with the window's gutter
-breakpoints (held in the renderer, never persisted), and shows the stack,
+breakpoints (configuration saved locally per endpoint/window/thread/checkout,
+revalidated before use; no session state is restored), and shows the stack,
 variables, and a debug console, deciding no refusal itself
 ([Debugger session rules](design/language-services.md#debugger-session-rules),
 [Debugger panel rules](design/language-services.md#debugger-panel-rules)).
@@ -1645,7 +1651,48 @@ folder, or a recovered start that captures nothing, run on a half-restored
 tree. Restore from here and Fork from here create a thread on its own worktree
 and are not subject to the check. The files part of a rewind (below) is an
 in-place restore and takes the same check and the same serialization. Discard
-and revert also overwrite files and are not yet covered.
+uses the same live-writer check and root serialization, checked after approval
+and immediately before Git is called. A writing turn that starts during discard
+waits before capturing its checkpoint; another restore or discard is refused
+until the overwrite finishes, including when it fails. Discard also refuses
+while its own thread has a starting or live turn, as a rewind does: that turn
+could otherwise write the files being discarded. The existing reviewed-state
+token and tracked-path checks still apply. Stage and unstage do not discard
+files and keep their existing rules. Reversing selected unstaged hunks uses
+this same destructive-operation gate, own-turn refusal and root writer hold.
+It reverses only the selected patch; it never substitutes whole-file discard.
+No command here reaches commit revert.
+
+Current Review can select exact text hunks from **Index → Working tree** for
+stage or reversal, or **HEAD → Index** for unstage. A combined HEAD-to-working-tree
+view is not an unstaged comparison. The host retains the canonical comparison,
+its digest, hunk identities and an opaque digest of the original host root/binding
+witness; commands carry only its operation reference and
+selected identities, never renderer-supplied patches. Before applying, the host
+revalidates the original live principal, Project binding, checkout and physical
+root, current posture, reviewed state and exact canonical bytes. It checks again
+after queued work and native preflight, with a final synchronous authority/root
+proof after launch preparation. Git receives a bounded patch on stdin with no
+three-way or whitespace fallback. The host recounts each selected hunk's
+header for omitted earlier hunks that change the line count, so a preflight that
+still relocates a hunk is genuine drift and is refused.
+A replaced physical root cannot adopt an old comparison even when its Git bytes
+match. A missing original witness requires a fresh comparison; the stable host
+witness remains usable after restart while the same root and authority remain.
+The managed writer hold excludes competing Octant writes during reversal.
+Unmanaged external processes can still race after the last native preflight and
+state check; this is not a filesystem-wide atomic compare-and-swap.
+
+Binary, rename, conflict, nonregular-file/mode and ambiguous-path comparisons
+explain why selection is unavailable. Truncated or non-UTF-8 bytes cannot become
+an editable patch. Captured, historical and branch review views remain read-only.
+The person confirms reversal and ordinary approval policy still applies. After a
+write, Review rereads current state. If authority retires after a launched write,
+the private operation stream retains only its minimal mutation outcome, never
+fresh comparison or error bytes; the retired caller is told the checkout may
+have changed and must Refresh. An authorized replay reads that outcome instead
+of applying the same operation again; an uncertain native result stays failed
+rather than being presented as proof that nothing changed.
 
 **Rewind and fork instead of edit (maintainer decision, 2026-11-01).** Chat,
 Work and Code threads do not edit a sent message: editing rewrites what the
@@ -2178,8 +2225,17 @@ Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
 
 - **Guarded and Reviewed.** Pull-request changes go through the
-  pull-request tool, which is the only sanctioned path, and the shell's forge
-  access is a known follow-up (below).
+  pull-request tool, which is the only sanctioned path. Octant refuses a
+  recognizable push or pull-request write before its Harness shell runs it,
+  and before answering a provider approval request that includes the pending
+  command. A generic shell approval or a Judge allow cannot authorize that
+  write: the agent must use the structured tool, whose repository, branch,
+  revision, consent, required-check and live-authority checks still apply.
+  A refused provider approval is recorded as a failed tool row, not as a
+  Shield or provider-reviewer verdict. This refusal applies with or without
+  Shield. A provider reviewer that
+  answers internally never sends Octant that pending command; enforcement
+  on that path is unsupported, as detailed below.
 - **Full access.** The provider's own `git` and forge command-line tool
   are the person's choice, as they would be outside Octant. Octant journals
   each push or pull-request change it observes (a shell command whose
@@ -2202,8 +2258,10 @@ Which path reaches the forge depends on the thread's
   thread's branch in the same Project (`--all` and `--mirror` count when
   there is one) is refused as `forge-<line>` with a message that names the
   merge or push tool, which asks the person, and journaled `refused`; every
-  other one runs and is journaled `ran` with its exit code, at every level,
-  and a record that cannot be kept withholds its output. A provider runtime
+  other Full access command runs and is journaled `ran` with its exit code,
+  and a record that cannot be kept withholds its output. A Full access push
+  is also refused when the branches other threads own cannot be read;
+  unavailable authority never becomes an empty branch list. A provider runtime
   reports a command only as it starts, and only the first line its tool
   start names, so a change on a later line goes unseen; Octant journals it `seen-after-start` and, at Full access,
   names the hard line it crossed; it cannot stop it. A target behind an
@@ -2226,8 +2284,13 @@ root (so `~/.config/gh` and `~/.ssh` are out of reach); whether a
 Keychain-backed credential helper is reachable there has not been measured.
 A push or pull-request change made through that gap is journaled as a
 forge change where Octant sees the command (above), but none of the rules
-above applies to it. Closing the gap at
-Guarded and Reviewed is a known follow-up.
+above can be enforced after it starts. The pre-action refusals above cover
+only recognizable commands Octant executes or receives as pending approval
+calls. Provider-reviewer decisions and Full access tool-start observations
+are records, not consent or pre-action enforcement. Arbitrary scripts,
+aliases, expansions and commands that a runtime does not report cannot be
+classified reliably by this command reader. Complete confinement of those
+provider paths at Guarded and Reviewed remains unsupported.
 
 **Pull-request merge.** A person merges one open pull request from its review
 (`POST /api/code/project-pull-requests/merge`). Beside it, the person may turn
@@ -2455,15 +2518,14 @@ enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
 until all three exist; a standing grant never substitutes for the per-act
 approval.
 
-**The Project planner thread is a server-only capability.** A Code Project may
+**The Project planner thread proposes work for a person to review.** A Code Project may
 designate one of its own Code threads as its planner, whose agent surveys the
 Project's board and proposes new Code threads for a person to accept. The
 server, contracts, domain policy (`@octant/domain/code-planner-policy`), and
-the client-runtime transport implement it; no renderer, phone, or CLI surface
-designates a planner, lists proposals, or resolves them, and the shell does not
-advertise it. Because nothing in the shell designates a planner, no thread
-receives the planner tools in ordinary use. Any later surface must keep the
-rules below:
+client-runtime transport implement it. The Code Project overview's **Project
+planner** section lets a person designate an existing same-Project thread,
+inspect proposals, remove the designation and approve or decline. Phone and CLI
+designation or resolution are not added. The rules are:
 
 - **Routes.** `GET /api/code/planner/:projectId` returns the designation, its
   version, and the proposals; it needs only the authenticated window's access
@@ -2488,11 +2550,47 @@ rules below:
 - **Resolution.** Only a person confirms or declines. A confirm creates its
   thread through the ordinary Code creation command, inside the proposal's own
   Project only; the planner has no creation authority of its own.
+- **Review and execution.** The overview shows the proposal's title, exact
+  intent, rationale and current status. **Review and approve** opens the ordinary
+  Code creation controls for provider/model, checkout and access, with the Project
+  and proposal text fixed. **Approve and start described task** sends the current
+  proposal version and ordinary creation command, then starts the exact intent
+  as the first message only after confirmed creation, through the normal thread
+  authority path. An unavailable selected provider prevents approval. Created
+  tasks remain reachable from the proposal; a failed first turn remains on its
+  created task with the prompt and refusal for explicit recovery.
+- **Freshness and uncertainty.** The overview refreshes proposals and designation
+  on entry, reconnect and after decisions; disconnected, failed or stale review
+  state cannot submit another decision. Commands use the displayed aggregate
+  version and never retry automatically. Before ordinary creation awaits, the
+  host journals a `creating` attempt with the exact submitted thread id on that
+  proposal's aggregate. This versioned admission belongs to one attempt across
+  windows and host restarts; a second confirm or decline cannot overtake it.
+  Reads and decision replies have a thirty-second wait bound; a timeout does not
+  prove cancellation. The renderer writes and verifies that attempt's id and
+  expected version in session storage before dispatch, retaining it across
+  review close, remount and reload. Missing storage makes approval unavailable.
+  A missing task, a fresh pending proposal or declined status never proves that
+  a previous creation ended, and never releases an unknown attempt.
+  The host may record `failed` only from a trusted built-in creation refusal
+  before its worktree-commit or plain-thread-journal boundary was entered. A
+  typed pre-boundary refusal permits an explicit repair retry after a newer
+  authoritative proposal version; generic, custom-service, post-boundary and
+  final-append failures retain `creating`. The observer is host-only, never a
+  wire assertion. Restart with no stored task remains uncertain. A stored
+  same-Project task may repair the proposal linkage, but that observation returns
+  no creation/first-turn permission. The renderer reads only the retained task
+  id and offers inspection; a refused or uncertain response never starts a
+  provider turn or submits a replacement. Only a matching confirmed response
+  enters the ordinary first-send path. Admission/failure facts carry bounded
+  metadata, not raw provider errors. The list bounds rendered history to fifty
+  proposals, pending first.
 
 **Routines (Automation Center).** A routine is a host-owned, Project-bound
 definition that starts an ordinary Work or Code thread with a fixed task prompt
-on a trigger: once, every N minutes (15 minutes to 30 days), or weekly at a
-local time in an IANA time zone. A routine targets a Chat, Work, or Code
+on a trigger: once, every N minutes (15 minutes to 30 days), weekly at a
+local time in an IANA time zone, or matching file arrivals in a local Work
+Project (Work and `new-thread` only). A routine targets a Chat, Work, or Code
 Project. A **Chat routine** keeps Chat's authority, since a Chat thread has no
 file, shell, or Git authority for a routine to widen: its definition binds an
 active Chat Project (the receipt names the Project and its version, with no
@@ -2510,6 +2608,75 @@ thread it creates could not do. The one exception is a follow-up (target
 policy `same-thread`, below), which creates no thread and sends one turn into
 the thread it came from.
 
+- **File arrivals.** A person configures the existing main Work Project root,
+  a relative existing input directory, included suffixes, excluded directories,
+  a settling interval of 2–60 seconds and at most 1–32 automatic starts per
+  explicit arm (default 8). Configuration and reviewed re-arm are local-window
+  actions; ordinary pause, archive and thread cancellation keep their existing
+  authority. No thread agent proposes a file routine. The existing host scheduler
+  owns observation and dispatch; there is no second runner or hosted watcher.
+  Watch events are hints, never path authority or writer identity. Complete
+  confined content scans cover only permitted regular files: hidden entries,
+  symbolic links, excluded directories and the current Secret guard's protected
+  entries are excluded without reading or reporting them. Unsupported nonhidden
+  paths, replaced roots, unreadable input and scan limits block the observation;
+  a truncated scan never advances the baseline. One scan has at most 4,096
+  directory entries, 256 matching files, 16 MiB per file and 64 MiB of content.
+  Current host/Project/binding/profile/provider authority and cursor ownership
+  are rechecked after asynchronous work, before journal or dispatch admission.
+  The native resolver retains the exact canonical root and input-directory
+  device/inode identities. Its synchronous current proof is checked after all
+  awaited preparation at source/review commit and ordinary Work acceptance,
+  then again after provider session startup immediately before prompt send;
+  replacement paths are never silently adopted. A filesystem without that
+  native capability cannot authorize a new file admission. Run-input proof
+  acquisition has a 10-second stage bound and invalidates late results rather
+  than resubmitting a task; this is not an end-to-end task deadline.
+- **File baseline, recovery and feedback.** The first complete settled scan is
+  baseline only. A bounded source cursor lives in the routine's existing journal
+  and projection. A deterministic occurrence creates its run first, then commits
+  the source checkpoint and occurrence claim in one definition batch before
+  dispatch; crash repair keeps the same run and budget debit. Restart or watcher
+  loss records a coverage gap. Offline skip/run-once sees only net changed
+  surviving final-state files, at most one batch; files created and deleted while
+  unobserved cannot be reconstructed. Neither quiet time nor restart resets the
+  arm budget. Temporary source unavailability or a scan limit never waives a
+  required review after an edit, root/authority change or retained-activity
+  overflow. The same durable cursor keeps that review reason across failure and
+  restart; recovering availability cannot silently re-arm or dispatch a batch.
+  Any matching change observed while the routine, known managed
+  descendants or existing Project-root harness process receipts remain active,
+  through the first settled quiescent scan, is held for explicit Review/Re-arm.
+  Missing or uncertain ownership does not prove quiescence. It may be outside
+  input or routine output; filenames do not identify the writer. The finite
+  per-arm limit bounds automatic feedback even from writers not attributable
+  through those receipts. Preview discloses the limit and busy-input hold before
+  enable; status shows remaining starts and retained input. Re-arm binds the
+  exact current definition/source/observation/batch and current authority,
+  explicitly either runs the held surviving batch once or skips it. A blind
+  Resume never drops held input or resets the budget. An intentional pause of
+  a watching source requires a new settled baseline on ordinary Resume rather
+  than applying offline catch-up to paused-period changes; existing held or
+  unknown activity remains held. A review that loses its
+  response remains unconfirmed: refresh details and run history before another
+  explicit decision; the client never resends it automatically. Input paths are
+  delivered as bounded framed external data through the ordinary Work context
+  plan, separately from the person's fixed task, without copying file contents
+  into the routine journal or prompt. Current protected-read and authority rules
+  still govern the task's actual reads. Ordinary Work acceptance journals a
+  host-computed reference and digest of the exact framed input. Recovery requires
+  the original request, turn, thread, Project, binding, provider, model, fixed
+  task and input receipt; matching acceptance is recovered before reading or
+  marking the live source again. Missing legacy evidence or a mismatch remains
+  unconfirmed and never causes automatic resend or retroactive input adoption.
+  The receipt proves accepted input, not provider delivery or completion.
+  More than 64 retained unsettled owned
+  runs makes quiescence unknown rather than dropping older ownership: finish and
+  review the Project's tasks and cleanup, then archive that routine and explicitly
+  configure a new one; neither Resume nor Save clears this hold. Existing timed/manual
+  routines retain their behavior. Code input transfer is a separate remaining
+  implementation gate, since its managed checkout does not inherit uncommitted
+  Work input files.
 - **Authority ceiling.** A definition captures an execution profile (an existing
   agent profile: provider, model, policy, permission persistence) and an
   authority snapshot whose effective authority never widens the requested one
@@ -2518,8 +2685,10 @@ the thread it came from.
   captures the shell and Git, and one saved without them (every Work routine
   saved before Work had the shell) blocks at dispatch as `authority-mismatch`
   until a person saves it again under a profile that grants them, because a
-  Work turn cannot withhold them and a routine never runs above its snapshot. A
-  routine asks first by default: a Full access profile is not eligible,
+  Work turn cannot withhold them and a routine never runs above its snapshot.
+  The catalog offers an approval-gated Work-compatible profile with that same
+  filesystem, shell, and Git authority; it needs no additional Code-only
+  profile. A routine asks first by default: a Full access profile is not eligible,
   whether or not it was remembered elsewhere (the contract refuses it on the
   snapshot and dispatch blocks it as `full-access-ineligible`), Code runs are
   created approval-gated, and a Work run's unattended first turn runs
@@ -2544,7 +2713,11 @@ the thread it came from.
   lower a run below its Project's level and never raise it above what the
   person allowed there. Only a local window sets it, a paired device is
   refused at the route, a routine an agent proposes never has it, and a Chat
-  routine cannot carry it. _Rationale:_ the maintainer asked for a level "never
+  routine cannot carry it. The editor saves **Ask first** explicitly as
+  `runLevel: "ask-first"` for Work and Code, including when a person edits and
+  saves an older definition that omitted the field. Existing omitted values
+  retain their dispatch behavior until saved; Chat keeps omitting the field.
+  _Rationale:_ the maintainer asked for a level "never
   above what the person allowed"; the narrower reading, the Project's level
   as the ceiling, keeps Full access a choice made where the Project's level is
   set.
@@ -2692,6 +2865,16 @@ the thread it came from.
   claim commits the deterministic run before the occurrence ledger, so a crash
   repairs forward to the same run and never dispatches twice. Run-now and
   cancel are idempotent by request id.
+- **Work first-turn outcomes.** The existing scheduler observes the retained
+  Work turn request after acceptance, matching its runtime receipt, thread,
+  Project, host, binding, provider and model against the run's captured snapshot.
+  Only journaled terminal truth releases that run's active slot; missing or
+  mismatched evidence stays active, and a changed current definition never
+  replaces the captured owner. A cancelled/interrupted Work turn records an
+  interrupted run; a failed turn records runtime failure. The status commits
+  before another occurrence may be claimed. Replay and notification failure
+  never send the old provider call again. This observes first-turn completion,
+  not proof that delegated children or background processes are quiescent.
 - **Turning one off.** Pause stops future occurrences; Resume restarts from the
   next occurrence; Archive ends the routine and keeps its history (there is no
   delete). Cancel stops a run before its first turn starts; afterwards the
@@ -2888,9 +3071,30 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   the host keeps only the bodies of waiting messages. A message an earlier
   host journaled as delivered without a turn carrying it stays as journaled
   and is never offered.
-- **Not built.** Nothing journals `agent.message-acknowledged@1`, and a sender
-  has no tool to read what became of a message. The Chat mention path is
-  unchanged.
+- **Acknowledgement and sender read-back.** The host-authored envelope names
+  its immutable messageId. The existing `octant_agent_message` tool accepts
+  explicit `acknowledge` and `status` actions for up to 20 durable IDs per call,
+  while legacy send input remains supported. An acknowledgement is the current
+  recipient reporting receipt: the host checks the exact delivered record,
+  current sender and recipient Code authority and same-Project relationship.
+  A sender cannot acknowledge its outgoing message or name another recipient;
+  the caller thread comes from the running turn. Duplicate acknowledgements
+  and replay retain one fact. Neither prompt acceptance nor turn completion
+  automatically acknowledges a message. Acknowledgement proves no understanding
+  or action. Sender status reads only that thread's own queued, delivered,
+  acknowledged or refused metadata, never a body, target title or peer lookup.
+  The authenticated existing facts route lists bounded recent receipts and
+  refusals only for sender threads the window may open. Its provider-delivered
+  count includes acknowledged messages; acknowledgement is a later receipt,
+  not an additive delivery total. The tool remains omitted and all its actions
+  refused in Plan, on excluded profiles and cancelled turns; managed children,
+  Chat and Work gain no messaging rights. Sending again, including retrying a
+  send, creates a new durable message; receipt retries use the existing ID.
+- **Expiry not implemented.** Queued messages currently have no recorded
+  lifetime and can wait indefinitely for a recipient turn. No timestamp is
+  inferred to be expiry and no receipt claims Expired. A new expiry policy
+  requires an explicit deadline/authorizer and journal-before-cleanup rule.
+  The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
   the tool (a turn in Plan, a profile without the tool, a call with no
   message; a cancelled turn is not a refusal), and at delivery, with these
@@ -4746,10 +4950,12 @@ Octant sent inside the prompt is counted. Per runtime:
   output and reasoning tokens, plus `modelContextWindow`), OpenCode (per-step
   tokens and the model's `limit.context`) and Pi (assistant `message_end` usage;
   the occupancy is the last message's input, cache and output) report one
-  figure and no categories. The ACP driver reports no usage at all, so an ACP
-  thread shows no window, and its context meter says the runtime reports no
-  usage (from the runtime's integration `context.usage`) rather than that none
-  has arrived yet. That holds in every mode: a Work or Chat thread is planned by
+  figure and no categories. Verified Mistral Vibe 3.0.3 ACP updates also report
+  an independent context reading and per-turn token deltas, as specified in
+  [Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface). Other
+  ACP runtimes report no usage through the driver, so their context meters
+  say the runtime reports no usage (from integration `context.usage`) rather
+  than that none has arrived yet. That holds in every mode: a Work or Chat thread is planned by
   Octant, so its meter still shows Octant's own estimate, and the line stands
   where a window's share would be. Lists of tools, MCP servers, skills or instruction
   files exist in some runtimes but carry no token weight, so they are not parts.
@@ -4788,7 +4994,7 @@ the turn runner reports `compacted` for the rest of a turn once the adapter's
 | Codex app-server  | Each turn's input is a `userMessage` in the thread and is sent with every later request. Compaction rebuilds the thread from a summary and as many recent user messages as fit in 20,000 tokens, so what survives is Codex's choice. Octant sees compaction as the `contextCompaction` item.                                                                                                                               | `kept`, or `compacted` for the rest of a turn in which a `contextCompaction` item arrived | `build_compacted_history` and `COMPACT_USER_MESSAGE_MAX_TOKENS` in codex-rs `core/src/compact.rs`; the item in `codexProtocol.ts` |
 | OpenCode          | Each prompt is a user message sent again with every request. A completed compaction sends the summary and at most a recent tail of messages. Octant sees `session.compacted` (1.x), `session.next.compaction.ended` (2.x) and `session.compaction.ended` (2.0.22).                                                                                                                                                         | `kept`, or `compacted` for the rest of a prompt in which compaction ended                 | `filterCompacted` in opencode `packages/opencode/src/session/message-v2.ts`; the events in `@opencode-ai/sdk`                     |
 | Pi                | Each prompt is a session entry sent with every request. A compaction keeps a summary and the entries from `firstKeptEntryId` on. Octant sees `compaction_end`; one without `result` (aborted or failed) changed nothing.                                                                                                                                                                                                   | `kept`, or `compacted` when a `compaction_end` with a `result` arrived during the prompt  | Pi's JSON event stream docs (`packages/coding-agent/docs/json.md`, `compaction_start`/`compaction_end`)                           |
-| ACP agents        | Each agent manages its own history; the protocol says nothing about what it keeps or compacts, and the driver reports no usage.                                                                                                                                                                                                                                                                                            | absent                                                                                    | ACP driver (`acpDriver.ts`, usage `unsupported`)                                                                                  |
+| ACP agents        | Each agent manages its own history; Octant has no verified prompt-retention or compaction evidence. Vibe 3.0.3 reports usage and context without that breakdown; other ACP runtimes report no usage.                                                                                                                                                                                                                       | absent                                                                                    | ACP driver; verified Vibe usage in [Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)                          |
 | Any other adapter | Not determined.                                                                                                                                                                                                                                                                                                                                                                                                            | absent                                                                                    | —                                                                                                                                 |
 
 From that the turn runner builds the parts (`octantWindowBreakdown` in
@@ -5925,7 +6131,7 @@ reported one. The Claude mapper reports the turn so far after each model call,
 summed by message id. Every turn that reached the provider leaves exactly one
 ledger row however it ended — completed, failed, cancelled, or interrupted —
 and Work keeps usage the provider reports after a cancel. A turn that reached
-the provider and reported nothing (an ACP agent in Code reports no usage) is
+the provider and reported nothing (most ACP agents in Code report no usage) is
 recorded as unreported and unpriced; whether token and money ceilings refuse
 after it depends on its provider (below). A turn refused or failed before the
 provider leaves no row. A Code turn
@@ -7599,6 +7805,33 @@ same. This holds in Chat, Work, and Code.
 - Executable components are quarantined until explicitly reviewed and then run
   in supervised, sandboxed processes with a ready handshake, bounded output,
   durable process receipts, and drain-then-stop on disable.
+  Extension launches reuse the shared process identity and bounded TERM/KILL
+  termination rules; their schema-2 receipts retain package, component, version,
+  and digest identity. Repeated stop requests share one completion. A failure to
+  observe identity, denied group signal, malformed receipt, or exceeded receipt
+  bound is a cleanup failure, never evidence that the process is absent. The
+  receipt remains for recovery; a denied group signal never falls back to
+  signalling only its leader.
+
+  A live extension captures descendant identity witnesses while its launch
+  leader still matches, at launch, readiness, and stop. After the leader exits,
+  a signal requires a captured witness with the same start identity still in
+  that process group. Losing that evidence refuses cleanup and retains the
+  receipt. Witnesses are bounded to 256 members and stay in memory: startup
+  recovery cannot infer continuity from a persisted leaderless PGID, which could
+  have been reused after a reboot. A leaderless group with no live witness is
+  therefore ownership-uncertain, even when a zero signal says that group exists.
+  A proven absent group or a changed leader identity can release stale evidence.
+
+  Group observation requests only PID, PGID, and start identity, never commands
+  or environment: BSD `ps -g` on macOS (one second, 32 KiB) and `pgrep -g` plus
+  selected `/proc` start ticks and boot ID on Linux (one second, 4 KiB of PIDs).
+  `pgrep` is optional evidence, not an installation prerequisite: a missing,
+  failed, or overflowing observer adds no witness and cannot prevent signalling
+  a matching live leader. It cannot authorize a leaderless signal either.
+  A launch whose initial identity cannot be observed can stop only its direct
+  `ChildProcess` handle; it cannot claim process-group cleanup.
+
   On macOS the deny-default Seatbelt profile reads the system roots, the
   component's own roots, and its runtime's install: the executable's folder
   and, for a Homebrew runtime, `<prefix>/Cellar`, `<prefix>/opt`, and
@@ -7612,6 +7845,7 @@ same. This holds in Chat, Work, and Code.
   runtime, no fork, a read-only package, one temporary folder, of the system
   only what a runtime reads to start, and a fixed environment), and on any host but macOS its component is `host-prohibited`
   ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
+
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
   (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
@@ -7624,12 +7858,27 @@ same. This holds in Chat, Work, and Code.
   switched on. A folder is added by absolute path with no `..` segment, at most
   32; its `sourceRef` is `provider:<id>` or `folder:` and a digest of the path,
   never the path, and its skills are shared by every thread like the
-  user-global ones. A folder that is a symlink, is missing, or is the
-  user-global folder again is read once or not at all. Choices: the provider
+  user-global ones. Linked roots are ignored and a duplicate user-global root is
+  read once. Settings reports a chosen root as missing, unreadable, linked,
+  not a directory or readable, with its indexed package count; these diagnostics
+  are host-person metadata, never a path grant or skill activation. Choices: the provider
   list holds only the two providers whose folder this document already names,
-  and more join it when their home folder is verified; a folder is typed as a
-  path, not picked, so browser Settings can add one too, and it never reads
-  anything but `SKILL.md` files. Octant's Project walk still never reads the
+  and more join it when their home folder is verified. Manual paths remain
+  available in every client; desktop also offers the existing native folder picker.
+  Its window-owned one-use receipt is purpose-bound to skill-folder selection,
+  cannot install a plugin and is resolved only by a live local-window capability.
+  The existing settings CAS records the folder; cancellation or refusal does not
+  claim it was saved. Discovery never reads anything but `SKILL.md` files.
+  Chosen roots and eligible package directories are watched without recursive
+  content discovery, up to 512 native handles. A missing or unreadable chosen
+  root uses only necessary ancestor existence metadata, filtering unrelated
+  names; later creation or permission repair reconciles the same selected root.
+  Watch events are debounced/coalesced with at most one active refresh; host-scope
+  close prevents late awaited work from restarting watchers. A root that cannot
+  be watched names Refresh as the fallback. Committed skill-folder settings are
+  observed on the host, including another client's/direct writes while Settings
+  is unmounted; unrelated settings do not restart discovery. Root diagnostics and
+  picker receipt resolution add no paired-device rights. Octant's Project walk still never reads the
   home folder's own `.claude`, even when the host's Project-less fallback root
   is the home folder; only the provider switch above does. A discovered
   skills folder that is a symlink, or resolves outside the bound root, is
@@ -7897,6 +8146,25 @@ same. This holds in Chat, Work, and Code.
   they are refused by name; the working form is a virtual environment inside the
   plugin with its `.venv/bin/python` as the command. Extension processes have no Linux confinement, so no other host
   starts one in the first place.
+
+- **MCP HTTP session recovery.** A successful initialize and tool listing is a
+  connection observation, not permanent service or document readiness. An
+  unknown-session HTTP 404, failed network request or unreadable response
+  retires that transport and removes its tools immediately. The existing
+  transport-close path records the component unavailable without guessing a
+  vendor-specific cause. A normal JSON-RPC application refusal keeps the
+  healthy session. Cleanup is best effort, bounded and idempotent; a late call
+  from the old transport cannot evict a replacement session.
+
+  The failed call is never replayed: a response can disappear after the server
+  committed a write, so its outcome may be unknown. Only a later authoritative
+  task selection/reconciliation may initialize and list a replacement under
+  the current mode, Project, thread, trust and enablement; another explicit
+  invocation is needed to call a tool. Sibling sessions remain independent.
+  Reconnecting the same tool catalog changes no task, transcript, draft or
+  provider session. A changed tool catalog on a provider that fixes its tools
+  at session start still needs separate provider continuation support; this
+  transport recovery does not claim that support is built.
 
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
@@ -8717,6 +8985,34 @@ mechanisms are:
       else it reads as set on the thread. A thread keeps the level it started
       with, so a default changed later can make an older thread read as set on
       the thread.
+  - **Access details is a host report, not authority.** The existing Work and
+    Code level indicator opens a read of the task's selected and effective
+    posture, any narrower running-turn or window-session ceiling, current
+    default, reviewer route and reported account/model, and the selected
+    runtime's observed readiness and capabilities. The read uses the existing
+    authenticated Context inspect path and the same subject-read authority;
+    it needs no context plan and adds no remote rights. The host rechecks
+    current Project standing and the original request's live authority after
+    awaited admission. A server-backed Work thread uses the existing server
+    Project catalog's exact derived binding, not a manufactured local Project;
+    its current default is Work's global setting. Catalog removal or a changed
+    binding refuses private facts. Known turn refusals and Done remain readable
+    where ordinary thread reads allow them, without an executable-level claim.
+    It never probes a provider or makes a model call to paint the report, and includes no credentials or private diagnostics.
+    A current default match is stated as a match, never proof of a historical
+    origin. Unreported facts remain unknown, and an inactive or Done task is
+    not presented as executable. The chosen unavailable Shield account stays
+    named: the Judge asks the person rather than substituting another account.
+    Disabled accounts, unsupported capabilities, temporarily unavailable
+    runtimes and required person review have different wording. Recovery uses
+    existing provider/reviewer/protected-file Settings or asks the host owner;
+    it never elevates a level or suggests bypassing a protected-file refusal.
+    Reports are replaced on a task/client/version change and can be refreshed;
+    an old account report cannot survive a failed refresh as a current fact.
+    Every actual action still passes its own host admission. Routine-created
+    Work and Code tasks read these same host inputs and running ceilings.
+    The existing outside-content notice qualifies its prompt explanation to
+    levels below Full access; review/clear remains a separate person act.
   - **Older recorded levels replay as Full access.** A level journaled by
     the earlier design, which kept a sandboxed no-prompt level and a
     separate switch, replays as Full access; nothing recorded is dropped.
@@ -9700,7 +9996,7 @@ access` agree); a thread's own change is journaled as
   | `approvals`               | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `supported`                                                                                                        | `unsupported`; every Harness tool call passes the server instead                        | `unsupported`; every Harness tool call passes the server instead                  | `unsupported`; every Harness tool call passes the server instead | `unsupported`                         |
   | `userQuestions`           | `supported`                                                                                   | `unsupported`                                                                                | `supported`; `unsupported` on the 2.x route                                                              | `unsupported`                                                                                     | `varies`: `unsupported` on Mistral Vibe and fx                                                                     | `unsupported`                                                                           | `unsupported`                                                                     | `unsupported`                                                    | `unsupported`                         |
   | `reasoning`               | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `unavailable`; `supported` when the agent reports a reasoning option or model                                      | `varies`: from each model's reported thinking                                           | `unavailable` until a response carries reasoning                                  | `unavailable` until a response carries reasoning                 | `supported`                           |
-  | `usage`                   | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `unsupported`; turns are not measured                                                                              | `unavailable` until a reply reports counts                                              | `unavailable` until a response reports usage                                      | `unavailable` until a response reports usage                     | `unsupported`; turns are not measured |
+  | `usage`                   | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `varies`; verified Vibe 3.0.3 reports turn usage; other ACP runtimes are unsupported                               | `unavailable` until a reply reports counts                                              | `unavailable` until a response reports usage                                      | `unavailable` until a response reports usage                     | `unsupported`; turns are not measured |
   | `toolActivity`            | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `supported`                                                                                                        | `unsupported`                                                                           | `unsupported`                                                                     | `unsupported`                                                    | `unsupported`                         |
   | `fileChanges`             | `supported`                                                                                   | `supported`                                                                                  | `unsupported`; `supported` from 2.2.0                                                                    | `unavailable`                                                                                     | `unavailable`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                     | `unsupported`                                                    | `unavailable`                         |
   | `diffs`                   | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `unavailable`                                                                                     | `unavailable`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                     | `unsupported`                                                    | `unavailable`                         |
@@ -9771,11 +10067,14 @@ access` agree); a thread's own change is journaled as
     the one release that bridge was read against.
   - **Mistral Vibe** is first-class and runs through the ACP bridge, so every
     ACP gap below applies to it. Its `vibe-app-server` is not adopted
-    ([why](design/provider-runtimes.md#mistral-vibe-surface)); reading usage,
-    compaction, review, and questions from `vibe-acp`'s own ACP extensions is
-    allowed, not built yet.
-  - **ACP agents** do not report usage, so a spend ceiling leaves their turns
-    out and says so. They report no file changes or diffs, ask no user
+    ([why](design/provider-runtimes.md#mistral-vibe-surface)); usage and
+    context from verified `vibe-acp` 3.0.3 are read, and reading compaction,
+    review, and questions from its own ACP extensions is allowed, not built
+    yet.
+  - **ACP agents** report no usage except verified Mistral Vibe 3.0.3. Its
+    cumulative counters become per-turn deltas; provider cost stays absent
+    ([Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)).
+    A spend ceiling leaves other ACP turns out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
     resume, and offer Octant's tools only on macOS when the agent serves HTTP
     MCP. fx is also refused in Chat and Plan.
@@ -10137,8 +10436,10 @@ access` agree); a thread's own change is journaled as
   per browsing context) unless the person at a local window puts it in their
   Project's persistent profile or the host's Personal profile; a profile page
   opens only in the desktop app's native Browser, never headless. Octant never
-  opens another browser's profile in place. An agent reads or acts on an
-  origin in a profile page only after a site approval naming the profile;
+  opens another browser's profile in place. The Work agent adapter accepts a
+  stored profile request; Code's separate adapter still opens new pages
+  Private and rejects the profile argument, while its person-facing profile
+  controls are built. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
   paired devices, routines, subagents, and terminal Browser grants are refused
   on profile pages; a paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
@@ -10193,9 +10494,7 @@ access` agree); a thread's own change is journaled as
   worktree the run was admitted with; a child's worktree is never a journaled
   thread checkout, so none is required. A provider transport that cannot carry
   app-managed tools fails the start with a typed reason rather than dropping
-  the tool. Today each adapter turns its provider's own subagent feature off,
-  because a child the provider starts itself runs outside the journal and the
-  approval path. For the key providers the rule is that their native
+  the tool. For the key providers the rule is that their native
   subagents are on ([Key providers run as themselves](#providers)): Octant
   journals and shows each native child run the provider reports, its tool
   calls reach the same approval path as the parent's at the parent's level,
@@ -10242,6 +10541,25 @@ access` agree); a thread's own change is journaled as
   within the per-image and per-design budgets are returned, the renderer
   inlines them as `data:` images, and the journal holds references only
   ([Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md), F5).
+- **Product feedback notes.** A product-feedback note is the person's comment
+  on an element of the running product. It is journaled on its own aggregate
+  and carried with the next admitted turn exactly once. The client sends the
+  point and comment; after checking the caller can see the thread and the
+  context belongs to that window, the host resolves the element and crop.
+  The comment is the person's words. The page's element description is outside
+  content, marks the thread, and is framed as content rather than instructions.
+  Notes wait in a bounded per-thread queue. Crops live in purgeable evidence
+  storage, with references in the journal, and travel only to an image-capable
+  model. An unavailable crop does not discard the text note. Delivery is claimed
+  durably before the turn carries it, so a failed claim sends nothing and an
+  uncertain delivery is not repeated.
+
+  The pointed-element producer is built for the headless Playwright runtime.
+  The desktop native runtime and its routing runtime do not implement point
+  descriptions, so those surfaces currently refuse capture as unavailable.
+  Native element selection, screenshot/context preview and bounded DOM/style
+  evidence remain not built yet.
+
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
   Remote requests are classified fail-closed by an admission policy and route
@@ -10834,7 +11152,50 @@ access` agree); a thread's own change is journaled as
     an unreachable store leaves the request for the next start. The authority
     boundary above is unchanged: the new route sits behind the same bridge
     secret, window capability, no-`Origin`, and loopback checks.
-    <a id="linked-secret-stores"></a>
+
+- **One-use credential cards.** The app-managed `request_credential` tool can
+  ask a person at the owning local window to authorize one supported integration
+  operation. The first consumer is `linear-account-check`, a fixed read-only
+  `viewer { id }` request to `https://api.linear.app/graphql`. It is available
+  in Code when the provider carries app-managed tools, the profile allows the
+  tool, the thread is active and outside Plan, and the integration is effective.
+  The host supplies the label, purpose, destination and action text from the
+  registered consumer; agents cannot supply a URL, query, credential reference,
+  file destination or command. Consumer descriptors use the public
+  `@octant/plugin-api/credential-request` contract and register through
+  `IntegrationHostPort.registerCredentialOperation`. The host snapshots bounded
+  descriptors, rejects duplicate identifiers and unsafe destinations, and returns
+  an idempotent release function. The tool lists only the currently effective
+  registrations and rechecks that the same registration still exists at use.
+  The bundled consumer registers from its plugin factory through this same port;
+  server startup does not import its descriptor or name its operation.
+  - The card submits privately to `/api/credential-requests`, authenticated to
+    its originating window. Paired clients are refused. It neither submits a
+    chat message nor writes a credential to the journal. The host immediately
+    claims the request before asynchronous work, rechecks thread, Project,
+    checkout, provider, profile and window authority, and performs at most one
+    HTTPS request with redirects refused. The secret is transient request
+    material in the host process, not a saved Keychain item or a broker grant
+    reusable by another operation. No file, environment variable, persistent
+    token slot or shell receives it. This deliberate one-shot path avoids
+    creating stored material that needs later cleanup.
+  - Requests expire after ten minutes of process-monotonic time; expiry is
+    checked at submission. Cancellation, lost authority and tool-set teardown
+    abort pending use. A restart loses every request. One window/thread has at
+    most one outstanding request, and the host holds at most 128 records.
+    Network use has a 15-second deadline and a 16 KiB response bound. Only a
+    typed status returns to the model; response content and raw errors do not.
+    There is no automatic retry or saved sign-in. An already transmitted
+    credential cannot be recalled by cancellation.
+  - Consent is one explicit submission in the card. Host-generated privacy
+    text describes this specific consumer, not a general guarantee about every
+    tool. A future credential-bearing command needs a separate consumer and
+    its ordinary execution approval; it cannot reuse this card's grant.
+    Administrator passwords and arbitrary command/file delivery are not
+    supported. Linked-store selection is a separate follow-up; this card does
+    not widen the existing linked-store or provider-credential interfaces.
+
+<a id="linked-secret-stores"></a>
 
 - **Linked secret stores.** A person may link a secret store they already use
   and point a credential at an item in it. Octant never holds the value: the
@@ -10905,7 +11266,11 @@ access` agree); a thread's own change is journaled as
     `restore`, which writes the pointer without reading its item (the item may be
     gone or its store locked by then); if it cannot be put back, the new pointer
     is removed and the answer says so, so an unjournaled pointer never stays
-    active.
+    active. Google command-line selection additionally records
+    `credential-reference.requested` before dispatch, after fresh local-window
+    admission. This is the person's exact consent, not proof that the broker
+    committed a change. An unknown reply tells the person to read the current
+    account; it is never reported as an unchanged or confirmed selection.
   - **AWS command line.** Settings › Secret stores › AWS command line points
     the AWS command line at the two items that hold the person's access key
     pair (`point-aws-cli-key`; the broker proves both resolve now, as for a
@@ -10939,6 +11304,59 @@ access` agree); a thread's own change is journaled as
       for the person to set up and gives the same reach as the pair, never
       more. One hour so a long command does not lose its credentials midway;
       AWS's shortest, 15 minutes, would cut off a long sync.
+  - **Google Cloud command line.** Settings › Secret stores › Google Cloud
+    command line accepts a linked 1Password item containing service-account
+    JSON, the exact expected service-account email, and explicit Google OAuth
+    scopes. Review and confirmation are separate from entering the reference;
+    a read of Settings never issues a token. The public pointer and scopes
+    live in the existing `linked-secret-stores.json` sidecar; the key does not.
+    Only a live local host window can change this selection. The account's IAM
+    roles can reach several Google Cloud Projects: an Octant Project or a
+    default `gcloud` Project does not narrow those roles.
+    - The broker alone reads the JSON and signs an RS256 JWT with the selected
+      email as issuer, the exact selected scopes, and
+      `https://oauth2.googleapis.com/token` as both audience and exchange
+      endpoint. It ignores the item's `token_uri`; delegated subjects,
+      impersonation, and arbitrary endpoints are not supported. A JWT lasts
+      at most one hour. Store reads and token exchange each have a ten-second
+      bound. The broker caches only the resulting short-lived access token,
+      uses a conservative expiry, and refuses a different returned scope set.
+    - Each ordinary Octant Harness shell command receives only a token file
+      through `CLOUDSDK_AUTH_ACCESS_TOKEN_FILE` and a private `CLOUDSDK_CONFIG`.
+      The file is mode 0600 in a host-owned mode-0700 command resource directory;
+      confinement grants that resource read access and only its configuration
+      child write access. Confined harness launches deny the shared Google
+      resource root before reallowing their own resource, including launches
+      without a selected account; an overlapping writable binding is refused.
+      Full access retains its existing unconfined, soft boundary. No grant
+      widens the shared script directory. File
+      logging, usage reporting, and prompts are disabled. The broker's reusable
+      key, provider-native harnesses, worktree setup, ADC, `gsutil`, and `bq`
+      are outside this channel. A command receives no mid-command refresh.
+    - Selection changes and unlink invalidate pending issuance and prepared
+      launches, checked again synchronously at the actual spawn boundary.
+      A running command may retain its already-issued token until expiry;
+      Clear removes future use, not Google-wide revocation. Issued tokens are
+      registered for output redaction. An unavailable or expired configured
+      channel receives an empty token file and isolated configuration with a
+      recovery message, so it cannot fall back to the host's saved sign-in.
+    - Startup first reconciles the existing owned harness process receipts.
+      Each recovery stage has a ten-second bound. Only confirmed process
+      recovery permits removal of prior `google-*` resources beneath this
+      dedicated root. Failed or uncertain recovery leaves those files intact,
+      disables Google issuance, and keeps the rest of the host available.
+      An unrelated command can still run with the token-free configuration.
+      Normal command completion removes only its owned resource directory.
+    - _Rationale._ The selected token-file interface is supported by `gcloud`
+      and gives each command an explicit lifetime and isolated configuration.
+      Current `gcloud` also supports a direct access-token environment value;
+      this adapter does not use it. Installed SDK, OS confinement, and live
+      account acceptance remain separate from fake-token protocol tests.
+    - The host-wide Octant credential guard includes `harness/cloud-cli`
+      beneath the data directory. Other confined processes cannot read its
+      running tokens through an ancestor grant; Octant's file tools refuse
+      reads, writes and searches there at every level. Only the owning
+      ordinary harness launch receives the narrow OS resource exception.
 - **Organization sign-in on a host without the desktop app.** An Azure AI
   Foundry endpoint that signs in with a directory account and opted in to it
   (`deviceCodeSignIn`) signs in with a device code from
@@ -11028,7 +11446,11 @@ access` agree); a thread's own change is journaled as
   resolved to check where it points; the endpoint is whatever the person on
   the host typed, and only that person can set it.
 - **Hosts never trust each other.** Multi-host views merge read models
-  client-side; credentials and mutable authority never cross hosts. Completing
+  client-side without transferring authority. Federation shares no
+  credentials; the explicit
+  [Shared sign-ins](design/hub-and-spokes.md#shared-sign-ins) API-key copy
+  requires a fresh own-unlock on each host and a one-use receiving ticket.
+  Subscription sign-ins refuse copying. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client
   registry work, not a new trust boundary. Conflicting facts stay under their owning host;
   create and mutation routing name one destination and refuse when that host is
@@ -11372,7 +11794,8 @@ Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
 no prompts": a shell command there can read a protected file. Built, except
-short-lived credentials for the Google Cloud and Azure command lines.
+the Azure command line's general short-lived credential channel. The Google
+Cloud channel is the bounded `gcloud` service-account adapter below.
 
 - **One list, every runtime.** The list is
   `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
@@ -11443,13 +11866,17 @@ short-lived credentials for the Google Cloud and Azure command lines.
   the person keeps outside the list. The AWS command line in Octant's own
   shell gets a short-lived session from the broker once the person points its
   key pair at a linked store ([AWS command line](#linked-secret-stores)).
-  Allowed; not built yet: the Google Cloud and Azure command lines.
+  The Google Cloud `gcloud` command line in Octant's own shell receives a
+  command-owned access-token file and private configuration from the broker
+  after exact account/scopes consent ([linked secret stores](#linked-secret-stores)).
+  Allowed; not built yet: the Azure command line's general credential channel.
   - _Rationale._ AWS first because a session needs nothing on disk: the
     session's three values go in the command's environment, which the AWS
     command line and every AWS SDK read before any file. The Google Cloud
-    command line takes a token only from a file it names, and the Azure
-    command line takes none from its environment, so each needs more than an
-    environment and is left for its own change.
+    adapter uses its supported token-file interface and a private config
+    directory to bound each command's resources; it does not assume that
+    Google supports only file input. Azure needs its own consumer-specific
+    contract rather than an invented generic access-token environment variable.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
   read and write) and Claude Code's file tools, through Octant's tool gate,
@@ -12426,7 +12853,9 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with
   `out/Octant-linux-x64/` kept for inspection). Linux packages skip Darwin
-  helpers. A dogfood AppImage is not code-signed. Its launcher preserves
+  helpers. The macOS Keychain, Code-file, and device Swift helpers explicitly
+  target `arm64-apple-macos14.0`, so a newer compiler host cannot raise their
+  deployment target. A dogfood AppImage is not code-signed. Its launcher preserves
   Chromium's sandbox and lets Chromium refuse when the host cannot establish
   it; it never adds `--no-sandbox`. A separate `unshare` executable has a
   different AppArmor identity and is not a prerequisite probe for Octant.

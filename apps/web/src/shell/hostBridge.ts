@@ -478,6 +478,7 @@ export interface OctantHostBridge
   readonly resetBounds: () => Promise<void> | void;
   readonly selectProjectRoot: (projectType: BoundProjectType) => Promise<ProjectRootPickerResult>;
   readonly selectLocalPluginFolder?: () => Promise<LocalPluginFolderPickerResult>;
+  readonly selectSkillFolder?: () => Promise<LocalPluginFolderPickerResult>;
   /**
    * Native file picker for a runtime's executable. Answers an opaque receipt
    * the host later redeems for the chosen path; the renderer never sees it.

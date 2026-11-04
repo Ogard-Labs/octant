@@ -1,3 +1,4 @@
+import { automationDispatchPromptText } from "./automationFileContext";
 import {
   decodeChatThreadId,
   type AutomationBlockReason,
@@ -333,7 +334,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       firstTurnRequestId: run.firstTurnRequestId,
       threadId,
       authoritySnapshot: run.authoritySnapshot,
-      promptDigest: automationPromptDigest(run.definitionSnapshot.taskPrompt),
+      promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
       recordedAt: now,
     };
     const current = this.#projection.getRun(run.id);

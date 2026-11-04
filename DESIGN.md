@@ -1834,6 +1834,8 @@ numbered label when siblings are open. Files, Document, Review, Agents, Canvas,
 Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
 still appears in only one region at a time.
 
+Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
+
 A welcome, Project, or other pane with neither a bound thread nor a valid
 launchable tool keeps the dock closed and omits its toggle. The exception is a
 new Code task's pane before its thread exists: the dock keeps its place, its
@@ -2662,6 +2664,23 @@ composer. Reopening a thread reads the accepted queue from the host without
 resending it. Queue controls remain keyboard accessible and wrap at narrow
 widths. A running-turn steering control is separate and appears only where the
 runtime supports it.
+
+A one-use credential request appears inline at the end of the Code conversation.
+It uses a compact rounded card with a small lock mark, the credential label,
+visible destination and one-use scope, followed by one short explanation and a
+masked input. A keyboard-accessible reveal control returns to masked on submit.
+The footer has a quiet privacy disclosure and right-aligned Decline and primary
+action controls, using the shared native-density recipes. At narrow pane widths
+the actions wrap beneath the disclosure, even in a wide application window.
+Submitting once authorizes only the displayed operation; no second confirmation
+repeats it. There is no remember checkbox. Enter in the credential field submits
+this bounded integration request, except during text composition. The input
+clears on submission, decline or cancellation. Accepted submissions stay disabled
+until the host publishes an outcome; busy labels do not resize the action.
+An uncertain response never resends automatically. Host-settled requests collapse
+to a quiet status row; an unavailable status disables entry rather than trusting
+a stale card.
+The card is not an administrator-password dialog and is not a saved sign-in.
 
 Native Code approvals use a compact 216px surface above the composer, with a
 scrollable action and scope description, collapsible authority details, and a

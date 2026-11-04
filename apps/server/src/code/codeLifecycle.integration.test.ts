@@ -182,6 +182,40 @@ describe("Code execution lifecycle", () => {
       },
     });
 
+    writeFileSync(join(checkoutRoot, "README.md"), "discard this edit\n");
+    writeFileSync(join(checkoutRoot, "keep.txt"), "untracked work stays\n");
+    const beforeDiscard = await fixture.runtime.execute(windowId, observeCommand(50));
+    if (beforeDiscard.kind !== "git-observed") throw new Error("Git observation failed");
+    const discard = {
+      kind: "discard-git-changes",
+      threadId,
+      checkoutId,
+      paths: ["README.md"],
+      expectedStateToken: beforeDiscard.stateToken,
+    } as const;
+    writeFileSync(join(checkoutRoot, "README.md"), "a newer edit\n");
+    expect(
+      await fixture.runtime.execute(windowId, {
+        ...discard,
+        operationId: operationId(51),
+        gitOperationId: operationId(151),
+      }),
+    ).toMatchObject({ kind: "git-mutation-state", state: "rejected", reason: "stale-state" });
+    expect(readFileSync(join(checkoutRoot, "README.md"), "utf8")).toBe("a newer edit\n");
+    const freshDiscard = await fixture.runtime.execute(windowId, observeCommand(52));
+    if (freshDiscard.kind !== "git-observed") throw new Error("Git observation failed");
+    expect(
+      await fixture.runtime.execute(windowId, {
+        ...discard,
+        expectedStateToken: freshDiscard.stateToken,
+        operationId: operationId(53),
+        gitOperationId: operationId(153),
+      }),
+    ).toMatchObject({ kind: "git-mutation-state", mutation: "discard", state: "completed" });
+    expect(readFileSync(join(checkoutRoot, "README.md"), "utf8")).toBe("initial\n");
+    expect(readFileSync(join(checkoutRoot, "keep.txt"), "utf8")).toBe("untracked work stays\n");
+    rmSync(join(checkoutRoot, "keep.txt"));
+
     writeFileSync(join(checkoutRoot, "README.md"), "delivered\n");
     const observed = await fixture.runtime.execute(windowId, observeCommand(12));
     expect(observed).toMatchObject({ kind: "git-observed", changedPaths: ["README.md"] });

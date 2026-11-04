@@ -66,6 +66,28 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     editorBridges.set(editor, bridge);
     modelBridges.set(key, [...(modelBridges.get(key) ?? []), bridge]);
   }
+  const cursor =
+    options.onCursorPosition === undefined
+      ? undefined
+      : editor.onDidChangeCursorPosition((event) => options.onCursorPosition?.(event.position));
+  const initialPosition = options.onCursorPosition === undefined ? undefined : editor.getPosition();
+  if (initialPosition !== undefined && initialPosition !== null)
+    options.onCursorPosition?.(initialPosition);
+  // Keep Monaco's own single-file Shift+F12 references action untouched.
+  const references =
+    options.onReferences === undefined
+      ? undefined
+      : editor.addAction({
+          id: "octant.language.checkout-references",
+          label: "Find references in checkout",
+          keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.F12],
+          contextMenuGroupId: "navigation",
+          contextMenuOrder: 2,
+          run: (target) => {
+            const position = target.getPosition();
+            if (position !== null) options.onReferences?.(position);
+          },
+        });
   let disposed = false;
 
   return {
@@ -74,6 +96,8 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
       disposed = true;
       disposeMenu();
       disposeGutter?.();
+      cursor?.dispose();
+      references?.dispose();
       debugDecorations.clear();
       change.dispose();
       if (bridge !== undefined) {
@@ -142,6 +166,16 @@ function debugDecorationsFor(
       stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
     },
   }));
+  breakpoints.push(
+    ...(decorations.unresolvedBreakpoints ?? []).map((line) => ({
+      range: new monaco.Range(line, 1, line, 1),
+      options: {
+        glyphMarginClassName: "code-debug-breakpoint-unresolved",
+        glyphMarginHoverMessage: { value: "Unresolved breakpoint; review in Run and debug" },
+        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+      },
+    })),
+  );
   const stopped = decorations.stoppedLine;
   return stopped === undefined
     ? breakpoints

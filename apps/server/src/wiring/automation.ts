@@ -1,6 +1,25 @@
+import { secretGuardRefusal } from "../process/secretGuard";
+import { joinWorkPath } from "../work/workPathConfinement";
+import { revalidateAutomationAuthority } from "../automation/automationAuthorityRevalidation";
 import { randomUUID } from "node:crypto";
+import { Schema } from "effect";
+import { AutomationFileSources } from "../automation/automationFileSources";
 import {
+  prepareAutomationFileDefinition,
+  prepareAutomationFileRunAdmission,
+  resolveAutomationFileSourceAuthority,
+} from "../automation/automationFileSourceAuthority";
+import { captureAutomationDefinitionSnapshot } from "../automation/automationRunIdentity";
+import { readAutomationFileSourceActivity } from "../automation/automationFileSourceActivity";
+import { liveWorkFilesystem } from "../work/workFilesystemPort";
+import { liveWorkFileWatchPort } from "../work/workFileWatchPort";
+import type { HarnessWiring } from "./harness";
+import {
+  AutomationDefinitionSnapshot,
+  decodeAutomationRunId,
+  decodeAgentRunParentThreadId,
   type CapacityReservationId,
+  type AutomationRun,
   type CodeThreadId,
   decodeChatThreadId,
   decodeCodeThreadId,
@@ -28,7 +47,10 @@ import { AutomationSchedulerService } from "../automation/automationSchedulerSer
 import { createRoutineProposalTools } from "../automation/routineProposalTools";
 import { buildThreadRoutineDraft } from "../automation/threadRoutineDraft";
 import { isRoutineHostScope } from "../routineHostScope";
-import { resolveAutomationAuthorityLiveFacts } from "../automation/resolveAutomationAuthorityLiveFacts";
+import {
+  resolveAutomationAuthorityLiveFacts,
+  type ResolveAutomationAuthorityLiveFactsDeps,
+} from "../automation/resolveAutomationAuthorityLiveFacts";
 import { AutomationNotificationPreferencesStore } from "../automation/automationNotificationPreferencesStore";
 import { AutomationNotificationDeliveryStore } from "../automation/automationNotificationDeliveryStore";
 import { AutomationNotificationDeliveryService } from "../automation/automationNotificationDeliveryService";
@@ -47,7 +69,11 @@ import { createPushGatewaySetting } from "../remote/pushGatewaySetting";
 import type { HostSigningPort } from "../remote/remoteProtocolService";
 import { readDeviceRegistrations } from "../persistence/remoteAccessProjection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-import { defaultPermissionModeFor, defaultShellSettings } from "@octant/domain";
+import {
+  defaultPermissionModeFor,
+  defaultShellSettings,
+  isAutomationRunLifecycleActive,
+} from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -59,7 +85,11 @@ import type { WorkWiring } from "./work";
 
 export type AutomationDependencies = Pick<ServerStart, "persistence"> &
   Pick<AuthorityWiring, "liveTurns" | "routineProposalService" | "windowAuthorityStore"> &
-  Pick<AgentRunsWiring, "capacityScheduler"> &
+  Pick<
+    AgentRunsWiring,
+    "capacityScheduler" | "agentRunOrchestration" | "externalContentIngestionStore"
+  > &
+  Pick<HarnessWiring, "readHarnessProcessReceipts"> &
   Pick<WorkspaceWiring, "projectService"> &
   Pick<
     CodeRuntimeWiring,
@@ -67,11 +97,14 @@ export type AutomationDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<ChatWiring, "chatService"> &
   Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService"> &
-  Pick<FoundationsWiring, "workThreadProjection">;
+  Pick<FoundationsWiring, "workThreadProjection" | "workTurnProjection">;
 
 export function wireAutomation(deps: AutomationDependencies) {
   const {
     capacityScheduler,
+    agentRunOrchestration,
+    externalContentIngestionStore,
+    readHarnessProcessReceipts,
     chatService,
     codeCompletedThreadSource,
     contributeCodeTools,
@@ -82,6 +115,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     routineProposalService,
     windowAuthorityStore,
     workThreadProjection,
+    workTurnProjection,
     workThreadService,
     workThreadServiceWithWorkflows,
     workTurnService,
@@ -247,6 +281,37 @@ export function wireAutomation(deps: AutomationDependencies) {
     },
   });
   const automationWorkDispatch = createAutomationWorkDispatchPort({
+    readTurn: (requestId) => workTurnProjection.lookup(requestId),
+    prepareFileInput: async (run, signal) => {
+      const authority = resolveAutomationFileSourceAuthority(
+        automationAuthorityDeps,
+        run.definitionSnapshot,
+        new Date().toISOString() as UtcTimestamp,
+      );
+      if (authority === undefined) return undefined;
+      return prepareAutomationFileRunAdmission({
+        run,
+        filesystem: liveWorkFilesystem,
+        authority,
+        current: () => routineFileInputCurrent(run),
+        signal,
+      });
+    },
+    markFileInput: ({ run, threadId, contentReference }) => {
+      if (!routineFileInputCurrent(run)) return false;
+      try {
+        const marked = externalContentIngestionStore.record({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel: "file-arrival-routine" },
+          contentReference,
+          correlationId: randomUUID(),
+          authorized: true,
+        });
+        return marked.kind === "recorded" || marked.kind === "already-recorded";
+      } catch {
+        return false;
+      }
+    },
     threads: {
       execute: async (windowId, command) =>
         workThreadServiceWithWorkflows.execute(windowId, command as never) as Promise<{
@@ -277,6 +342,87 @@ export function wireAutomation(deps: AutomationDependencies) {
     },
     clock: () => new Date().toISOString() as UtcTimestamp,
   });
+  const observeRunStatusChanged = (input: {
+    readonly run: AutomationRun;
+    readonly previousLifecycle: AutomationRun["lifecycle"];
+  }) => {
+    try {
+      automationNotificationDelivery.observeRunStatusChanged(input);
+    } catch {
+      /* Notification failure never changes run lifecycle truth. */
+    }
+  };
+  const automationAuthorityDeps: ResolveAutomationAuthorityLiveFactsDeps = {
+    hostId: String(LOCAL_HOST_ID),
+    readProject: (projectId) => persistence.readProject(projectId as never),
+    readProviderInstance: (providerInstanceId) =>
+      persistence.readProviderInstance(providerInstanceId as never),
+    providerSupportsModel: (providerInstanceId, modelId) => {
+      const instance = persistence.readProviderInstance(providerInstanceId as never);
+      if (instance === undefined || !instance.enabled) return false;
+      const catalog = persistence.readProviderCatalog?.(providerInstanceId as never);
+      if (catalog === undefined) return true;
+      const models = (catalog as { readonly models?: ReadonlyArray<{ readonly id: string }> })
+        .models;
+      return models?.some((model) => model.id === modelId) ?? true;
+    },
+    readExecutionProfileVersion: (profileId) => {
+      const profile = persistence.readAgentProfile(profileId as never);
+      if (profile === undefined) return undefined;
+      return {
+        version: profile.version,
+        executionPolicy: profile.defaultExecutionPolicy,
+      };
+    },
+    readCodeCheckoutAvailable: (input) => {
+      const project = persistence.readProject(input.projectId as never);
+      if (project === undefined || project.type !== "code") return false;
+      const latest =
+        "bindingHistory" in project ? project.bindingHistory.at(-1)?.revisionId : undefined;
+      if (String(latest) !== input.bindingRevisionId) {
+        return false;
+      }
+      const checkout = persistence.readCodeCheckout(input.checkoutId as never);
+      return (
+        checkout !== undefined &&
+        checkout.availability === "available" &&
+        String(checkout.repositoryId) === input.repositoryId
+      );
+    },
+  };
+  function routineFileInputCurrent(captured: AutomationRun): boolean {
+    const definition = persistence.automationProjection.getDefinition(captured.automationId);
+    const run = persistence.automationProjection.getRun(captured.id);
+    if (
+      definition?.lifecycle !== "enabled" ||
+      run === undefined ||
+      run.cancellationTombstone !== undefined ||
+      !isAutomationRunLifecycleActive(run.lifecycle) ||
+      run.occurrence.kind !== "file-arrival" ||
+      run.definitionSnapshot.trigger.kind !== "file-arrival"
+    )
+      return false;
+    const source = persistence.automationProjection.getFileSource(definition.id);
+    if (
+      source?.sourceIdentity !== run.occurrence.source.checkpoint.sourceIdentity ||
+      source.armGeneration !== run.occurrence.source.checkpoint.armGeneration
+    )
+      return false;
+    const facts = resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, { definition, run });
+    if (
+      facts.project?.type !== "work" ||
+      revalidateAutomationAuthority({ definition, run, facts }).kind !== "ok"
+    )
+      return false;
+    const root = facts.project.binding.canonicalRoot;
+    const input =
+      run.definitionSnapshot.trigger.directory === "."
+        ? root
+        : joinWorkPath(root, run.definitionSnapshot.trigger.directory);
+    return run.occurrence.source.files.every(
+      (path) => secretGuardRefusal(joinWorkPath(input, path)) === undefined,
+    );
+  }
   const automationDispatch = new AutomationDispatchService({
     store: automationEventStore,
     projection: persistence.automationProjection,
@@ -372,58 +518,25 @@ export function wireAutomation(deps: AutomationDependencies) {
         executionPolicy: thread.executionPolicy,
       };
     },
-    resolveFacts: ({ definition, run }) =>
-      resolveAutomationAuthorityLiveFacts(
-        {
-          hostId: String(LOCAL_HOST_ID),
-          readProject: (projectId) => persistence.readProject(projectId as never),
-          readProviderInstance: (providerInstanceId) =>
-            persistence.readProviderInstance(providerInstanceId as never),
-          providerSupportsModel: (providerInstanceId, modelId) => {
-            const instance = persistence.readProviderInstance(providerInstanceId as never);
-            if (instance === undefined || !instance.enabled) return false;
-            const catalog = persistence.readProviderCatalog?.(providerInstanceId as never);
-            if (catalog === undefined) return true;
-            const models = (catalog as { readonly models?: ReadonlyArray<{ readonly id: string }> })
-              .models;
-            return models?.some((model) => model.id === modelId) ?? true;
-          },
-          readExecutionProfileVersion: (profileId) => {
-            const profile = persistence.readAgentProfile(profileId as never);
-            if (profile === undefined) return undefined;
-            return {
-              version: profile.version,
-              executionPolicy: profile.defaultExecutionPolicy,
-            };
-          },
-          readCodeCheckoutAvailable: (input) => {
-            const project = persistence.readProject(input.projectId as never);
-            if (project === undefined || project.type !== "code") return false;
-            const latest =
-              "bindingHistory" in project ? project.bindingHistory.at(-1)?.revisionId : undefined;
-            if (String(latest) !== input.bindingRevisionId) {
-              return false;
-            }
-            const checkout = persistence.readCodeCheckout(input.checkoutId as never);
-            return (
-              checkout !== undefined &&
-              checkout.availability === "available" &&
-              String(checkout.repositoryId) === input.repositoryId
-            );
-          },
-        },
-        { definition, run },
-      ),
+    resolveFacts: (input) => resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, input),
     now: () => new Date().toISOString() as UtcTimestamp,
-    onRunStatusChanged: (input) => {
-      try {
-        automationNotificationDelivery.observeRunStatusChanged(input);
-      } catch {
-        // Notification failure never changes run lifecycle truth.
-      }
-    },
+    onRunStatusChanged: observeRunStatusChanged,
   });
   const automationScheduler = new AutomationSchedulerService({
+    reconcileFileSources: () => {
+      void automationFileSources.reconcile().catch(() => undefined);
+      return persistence.automationProjection
+        .listDefinitions()
+        .some(
+          (definition) =>
+            definition.lifecycle === "enabled" && definition.trigger.kind === "file-arrival",
+        )
+        ? 2_000
+        : undefined;
+    },
+    stopFileSources: () => automationFileSources.close(),
+    readWorkTurn: (requestId) => workTurnProjection.lookup(requestId),
+    onRunStatusChanged: observeRunStatusChanged,
     store: automationEventStore,
     projection: persistence.automationProjection,
     dispatch: automationDispatch,
@@ -432,6 +545,33 @@ export function wireAutomation(deps: AutomationDependencies) {
       automationHistoryAvailable = false;
       void automationScheduler.stop();
     },
+  });
+  const automationFileSources = new AutomationFileSources({
+    projection: persistence.automationProjection,
+    scheduler: automationScheduler,
+    filesystem: liveWorkFilesystem,
+    watch: liveWorkFileWatchPort,
+    authority: (definition) =>
+      resolveAutomationFileSourceAuthority(
+        automationAuthorityDeps,
+        captureAutomationDefinitionSnapshot(definition),
+        new Date().toISOString() as UtcTimestamp,
+      ),
+    activity: ({ definition, canonicalRoot, checkpoint }) =>
+      readAutomationFileSourceActivity({
+        canonicalRoot,
+        activityWindow: checkpoint.activityWindow,
+        activeRun: persistence.automationProjection.activeRun(definition.id),
+        ports: {
+          readRun: (id) => persistence.automationProjection.getRun(decodeAutomationRunId(id)),
+          readChildren: (threadId) =>
+            agentRunOrchestration.parentSummary(decodeAgentRunParentThreadId(threadId)),
+          readProcessReceipts: readHarnessProcessReceipts,
+        },
+      }),
+    now: () => new Date().toISOString() as UtcTimestamp,
+    monotonic: () => performance.now(),
+    wake: () => automationScheduler.poke(),
   });
   if (automationHistoryAvailable) automationScheduler.start();
   // The host's own timer for completed threads, fed by every mode's service
@@ -474,8 +614,8 @@ export function wireAutomation(deps: AutomationDependencies) {
     commands: {
       // Every authenticated command wakes the scheduler so pause/resume/
       // run-now/cancel re-arm timers immediately instead of at the next poll.
-      execute: (command, provenance) => {
-        const result = automationCommandService.execute(command, provenance);
+      execute: (command, provenance, source) => {
+        const result = automationCommandService.execute(command, provenance, source);
         automationScheduler.poke();
         return result;
       },
@@ -484,6 +624,31 @@ export function wireAutomation(deps: AutomationDependencies) {
     projects: projectService,
     hostId: String(LOCAL_HOST_ID),
     historyAvailable: () => automationHistoryAvailable,
+    prepareFileRearm: (input) => automationFileSources.prepareRearm(input),
+    prepareFileSource: async ({ command, current, signal }) => {
+      const previous = persistence.automationProjection.getDefinition(command.automationId);
+      const snapshot = Schema.decodeUnknownSync(AutomationDefinitionSnapshot)({
+        ...command.definition,
+        automationId: command.automationId,
+        definitionRevision: previous === undefined ? 1 : previous.definitionRevision + 1,
+      });
+      const authority = resolveAutomationFileSourceAuthority(
+        automationAuthorityDeps,
+        snapshot,
+        new Date().toISOString() as UtcTimestamp,
+      );
+      if (authority === undefined) throw new Error("File source authority is unavailable.");
+      return prepareAutomationFileDefinition({
+        automationId: command.automationId,
+        expectedVersion: command.expectedVersion,
+        filesystem: liveWorkFilesystem,
+        authority,
+        definition: command.definition,
+        current,
+        signal,
+        now: () => new Date().toISOString() as UtcTimestamp,
+      });
+    },
     proposals: {
       service: routineProposalService,
       draft: (proposal) =>

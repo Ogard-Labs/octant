@@ -1,4 +1,4 @@
-import type { AutomationTrigger } from "@octant/contracts/automation";
+import type { AutomationScheduledTrigger } from "@octant/contracts/automation";
 
 /**
  * Reading a plain-English request into a routine draft.
@@ -20,7 +20,7 @@ export interface RoutineRequestDraft {
   /** What the routine should do, which is the request minus its schedule. */
   readonly prompt: string;
   /** Absent when the request named no schedule this could read. */
-  readonly trigger?: AutomationTrigger;
+  readonly trigger?: AutomationScheduledTrigger;
   /** What was read, in words, so the person can check it before confirming. */
   readonly scheduleSummary: string;
   /** True when the schedule still needs a person. */
@@ -91,7 +91,7 @@ function readTrigger(
   text: string,
   clock: { readonly hour: number; readonly minute: number } | undefined,
   context: RoutineRequestContext,
-): AutomationTrigger | undefined {
+): AutomationScheduledTrigger | undefined {
   const weekdays = readWeekdays(text);
   if (weekdays !== undefined && clock !== undefined) {
     return {
@@ -99,7 +99,7 @@ function readTrigger(
       weekdays,
       localTime: `${pad(clock.hour)}:${pad(clock.minute)}`,
       timeZone: context.timeZone,
-    } as AutomationTrigger;
+    } as AutomationScheduledTrigger;
   }
 
   const everyMinutes = readIntervalMinutes(text);
@@ -110,17 +110,24 @@ function readTrigger(
       everyMinutes % 1_440 === 0 && clock !== undefined
         ? nextLocalOccurrence(clock, context)
         : context.now;
-    return { kind: "interval", anchorAt, intervalMinutes: everyMinutes } as AutomationTrigger;
+    return {
+      kind: "interval",
+      anchorAt,
+      intervalMinutes: everyMinutes,
+    } as AutomationScheduledTrigger;
   }
 
   if (/\btomorrow\b/i.test(text) && clock !== undefined) {
     return {
       kind: "once",
       scheduledAt: nextLocalOccurrence(clock, context, 1),
-    } as AutomationTrigger;
+    } as AutomationScheduledTrigger;
   }
   if (/\btoday\b/i.test(text) && clock !== undefined) {
-    return { kind: "once", scheduledAt: nextLocalOccurrence(clock, context) } as AutomationTrigger;
+    return {
+      kind: "once",
+      scheduledAt: nextLocalOccurrence(clock, context),
+    } as AutomationScheduledTrigger;
   }
   return undefined;
 }
@@ -253,7 +260,7 @@ function nameFrom(prompt: string): string {
   return trimmed.length === 0 ? "New routine" : trimmed[0]?.toUpperCase() + trimmed.slice(1);
 }
 
-function describe(trigger: AutomationTrigger): string {
+function describe(trigger: AutomationScheduledTrigger): string {
   switch (trigger.kind) {
     case "once":
       return `Once, at ${trigger.scheduledAt}`;

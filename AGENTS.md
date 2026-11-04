@@ -246,6 +246,18 @@ not test count or coverage percentage, determines what to add.
   verification when applicable, and say why a new test was omitted.
 - Use repository scripts rather than substitutes (`bun run test`, not raw
   `bun test`). Always run `git diff --check`.
+- Track temporary servers, browser helpers and fixtures started for verification:
+  record their purpose, PIDs/start identity, children and listening ports. Reusing
+  an existing server does not transfer ownership of it to the test task.
+- Clean up owned test processes on completion or cancellation and verify their
+  children and listeners have exited. Verify process identity before stopping it;
+  do not use broad name-based kills of Bun, Node, browsers or other shared tools.
+  Hand off any intentionally retained preview with its owner, port and lifetime.
+- A persistent test helper must have an identifiable task owner, a finite maximum
+  lifetime, and shutdown on owner exit, browser disconnection/crash and
+  SIGTERM/SIGINT. Bound graceful cleanup and force-stop only its own children if
+  that deadline expires. Do not use an indefinitely pending Promise as a
+  keepalive or assume closing the test runner cleans up detached helpers.
 
 Before editing, identify acceptance criteria, the delivery requirement, and the
 smallest applicable checks in the issue or PR. The table scopes verification to
