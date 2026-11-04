@@ -37,8 +37,8 @@ describe("Google command resource recovery during host startup", () => {
             port: 0,
             extensionSkillRoots: { resolve: async () => [] },
             serve,
-          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-        ),
+          }),
+        ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       );
       try {
         await entered.promise;
