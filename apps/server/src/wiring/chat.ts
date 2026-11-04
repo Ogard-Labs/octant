@@ -51,6 +51,7 @@ import {
   createCodeThreadMentionDirectory,
   createWorkThreadMentionDirectory,
   threadMentionContextResolver,
+  sideChatReturnContextResolver,
   ThreadMentionService,
 } from "../chat/threadMentionService";
 import { ThreadDialogueService } from "../chat/threadDialogueService";
@@ -430,6 +431,9 @@ export function wireChat(deps: ChatDependencies) {
             findSidecar: (id) => sideChatSidecars.findBySidecarThread(decodeChatThreadId(id)),
             resolveSource: (sourceWindowId, sourceThreadId) =>
               threadMentionService.resolveSideChatSource(sourceWindowId, sourceThreadId),
+            readSourceVersion: async (windowId, sourceThreadId) =>
+              (await threadMentionService.openableThread(windowId, sourceThreadId))?.version,
+            clock: () => new Date().toISOString(),
             readState: sideChatSourceState,
             marks: threadOutsideContentMarks,
             uuid: randomUUID,
@@ -440,6 +444,10 @@ export function wireChat(deps: ChatDependencies) {
             readToolNames: readToolNames ?? [],
           },
         ),
+      resolveSideChatReturns: sideChatReturnContextResolver(
+        () => threadMentionService,
+        threadOutsideContentMarks,
+      ),
       resolveThreadMentionContext: threadMentionContextResolver(
         () => threadMentionService,
         threadOutsideContentMarks,
@@ -580,6 +588,13 @@ export function wireChat(deps: ChatDependencies) {
       projectLabel: projectMentionLabel,
     });
     const threadMentionService = new ThreadMentionService({
+      readSidecar: (threadId) => {
+        try {
+          return chatService.read(threadId);
+        } catch {
+          return undefined;
+        }
+      },
       // Every mode contributes its own already-authorized listing, because a
       // mention resolves exactly what the principal can Open —
       // Chat alone would make a Work or Code thread unmentionable from any

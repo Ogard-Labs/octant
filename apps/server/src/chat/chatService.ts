@@ -1,3 +1,5 @@
+import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "./sideChatReturn";
+import type { SideChatSourceReceipt, SideChatDraftReturnReference } from "@octant/contracts";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
@@ -553,6 +555,7 @@ interface ChatTurnContextPlan {
 }
 
 interface PreparedChatTurn {
+  readonly sideChatSourceReceipt?: SideChatSourceReceipt;
   readonly nativeSession?: ChatAttempt;
   /**
    * Set when the turn starts a new provider session with the thread's earlier
@@ -618,6 +621,7 @@ interface PreparedChatContent {
 }
 
 export interface ChatServiceOptions {
+  readonly resolveSideChatReturns?: SideChatReturnResolver;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
   /**
@@ -809,6 +813,7 @@ export type SideChatSourceContext =
       readonly kind: "resolved";
       /** Framed, bounded, read-only transcript of the source thread. */
       readonly text: string;
+      readonly receipt?: SideChatSourceReceipt;
     }
   | { readonly kind: "unreadable" };
 
@@ -999,6 +1004,7 @@ export class ChatService {
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
   readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
+  readonly #resolveSideChatReturns: SideChatReturnResolver | undefined;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
   /**
    * The Side Chat source snapshot each sidecar last prepared, by sidecar
@@ -1080,6 +1086,7 @@ export class ChatService {
     }
     this.#providerChangeProbeSettleMs = options.providerChangeProbeSettleMs ?? 1_500;
     this.#hiddenThreadIds = options.hiddenThreadIds ?? (() => EMPTY_HIDDEN_THREAD_IDS);
+    this.#resolveSideChatReturns = options.resolveSideChatReturns;
     if (options.resolveSideChatSourceContext !== undefined) {
       this.#resolveSideChatSourceContext = options.resolveSideChatSourceContext;
     }
@@ -2561,11 +2568,17 @@ export class ChatService {
           const content = this.#persistence.readChatContent(
             String(existing.userMessageRef.contentId),
           );
-          if (content === undefined || content.body !== command.prompt) {
+          if (
+            content === undefined ||
+            content.body !== command.prompt ||
+            JSON.stringify(existing.sideChatReturns ?? []) !==
+              JSON.stringify(command.sideChatReturns ?? [])
+          ) {
             throw new ChatServiceError(
               decodeChatFailure({
                 category: "invalid",
-                message: "Chat submission identity was reused for different message text.",
+                message:
+                  "Chat submission identity was reused for a different message or Side Chat reference.",
               }),
             );
           }
@@ -2622,6 +2635,7 @@ export class ChatService {
         "send",
         executionContext,
         resolvedExtensions,
+        command.sideChatReturns,
       );
       const attachmentIds = command.attachmentIds;
       const turn = beginChatTurn(prepared.executionThread, {
@@ -2635,7 +2649,13 @@ export class ChatService {
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
+        ...(prepared.sideChatSourceReceipt === undefined
+          ? {}
+          : { sideChatSourceReceipt: prepared.sideChatSourceReceipt }),
         userMessageRef,
+        ...(command.sideChatReturns === undefined
+          ? {}
+          : { sideChatReturns: command.sideChatReturns }),
         ...(attachmentIds !== undefined && attachmentIds.length > 0 ? { attachmentIds } : {}),
         ...(prepared.extensionSelections.length === 0
           ? {}
@@ -2830,6 +2850,9 @@ export class ChatService {
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
+        ...(prepared.sideChatSourceReceipt === undefined
+          ? {}
+          : { sideChatSourceReceipt: prepared.sideChatSourceReceipt }),
         userMessageRef,
         delivery: {
           kind: "agent-result",
@@ -3316,6 +3339,8 @@ export class ChatService {
         turn.extensionSelections,
         "replay",
         executionContext,
+        undefined,
+        turn.sideChatReturns,
       );
       const nextAttempt = retryChatTurn(thread, attempt, {
         turnId: command.turnId,
@@ -3328,6 +3353,9 @@ export class ChatService {
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
         newContextManifestId: prepared.context.snapshot.next.manifest.id,
+        ...(prepared.sideChatSourceReceipt === undefined
+          ? {}
+          : { sideChatSourceReceipt: prepared.sideChatSourceReceipt }),
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,
       });
@@ -3661,12 +3689,17 @@ export class ChatService {
         turn.extensionSelections,
         "resume",
         executionContext,
+        undefined,
+        turn.sideChatReturns,
       );
       const nextAttempt = resumeChatTurn(thread, attempt, {
         turnId: command.turnId,
         attemptId: command.attemptId,
         newAttemptId: this.#uuid() as ChatAttempt["id"],
         newContextManifestId: prepared.context.snapshot.next.manifest.id,
+        ...(prepared.sideChatSourceReceipt === undefined
+          ? {}
+          : { sideChatSourceReceipt: prepared.sideChatSourceReceipt }),
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,
       });
@@ -3938,6 +3971,7 @@ export class ChatService {
       readonly entries: ReadonlyArray<ResolvedChatExtensionContextEntry>;
       readonly toolSet?: AppManagedToolSet;
     },
+    sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>,
   ): Promise<PreparedChatTurn> {
     const settings = this.#requireChatSettings();
     const routed = await this.#resolveTurnProvider(requestedThread, settings, extensionPhase);
@@ -4100,13 +4134,14 @@ export class ChatService {
       probe,
       decodeProviderModelId(thread.modelId),
     );
-    const sideChatSource = await this.#resolveSideChatSource(
+    const sideChatSourceRead = await this.#resolveSideChatSource(
       thread,
       executionContext,
       (tools?.definitions ?? [])
         .map((definition) => definition.name)
         .filter((name) => SIDE_CHAT_READ_TOOL_NAMES.has(name)),
     );
+    const sideChatSource = sideChatSourceRead?.text;
     const sideChatSourceContext =
       sideChatSource === undefined
         ? undefined
@@ -4120,6 +4155,34 @@ export class ChatService {
             reusable: sessionDecision.kind === "continue-session" && extensionPhase === "send",
             previous,
           });
+    let returnedProvenance: string | undefined;
+    if ((sideChatReturns?.length ?? 0) > 0) {
+      if (this.#resolveSideChatReturns === undefined)
+        throw new ChatServiceError({
+          category: "unavailable",
+          message: SIDE_CHAT_RETURN_UNAVAILABLE,
+        });
+      try {
+        returnedProvenance = await this.#resolveSideChatReturns({
+          references: sideChatReturns ?? [],
+          readerThreadId: String(thread.id),
+          mode: "chat",
+          ...(executionContext?.windowId === undefined
+            ? {}
+            : { windowId: executionContext.windowId }),
+        });
+      } catch {
+        throw new ChatServiceError({
+          category: "unavailable",
+          message: SIDE_CHAT_RETURN_UNAVAILABLE,
+        });
+      }
+      if (returnedProvenance.trim().length === 0)
+        throw new ChatServiceError({
+          category: "unavailable",
+          message: SIDE_CHAT_RETURN_UNAVAILABLE,
+        });
+    }
     const threadMentionContexts = await this.#resolveThreadMentions(
       thread.id,
       threadMentionIds,
@@ -4148,7 +4211,9 @@ export class ChatService {
         providerFacts.serviceLimits,
         researchRoute,
         nativeConversation ? [] : undefined,
-        sideChatContext,
+        [sideChatContext, returnedProvenance]
+          .filter((text) => text !== undefined && text.length > 0)
+          .join("\n\n") || undefined,
         threadMentionContexts,
         handoff?.blocks,
         offersCanvasTool(tools?.definitions),
@@ -4185,6 +4250,9 @@ export class ChatService {
       serviceLimits: providerFacts.serviceLimits,
       ...(tools === undefined ? {} : { appManagedTools: tools }),
       extensionSelections: resolvedExtensions.selections,
+      ...(sideChatSourceRead?.receipt === undefined
+        ? {}
+        : { sideChatSourceReceipt: sideChatSourceRead.receipt }),
     };
   }
 
@@ -4363,7 +4431,7 @@ export class ChatService {
     thread: ChatThread,
     executionContext: ChatServiceExecutionContext | undefined,
     readToolNames: ReadonlyArray<string>,
-  ): Promise<string | undefined> {
+  ): Promise<Extract<SideChatSourceContext, { kind: "resolved" }> | undefined> {
     if (this.#resolveSideChatSourceContext === undefined) return undefined;
     let source: SideChatSourceContext | undefined;
     try {
@@ -4389,7 +4457,7 @@ export class ChatService {
         message: SIDE_CHAT_SOURCE_UNREADABLE,
       });
     }
-    return source.text;
+    return source;
   }
 
   /**

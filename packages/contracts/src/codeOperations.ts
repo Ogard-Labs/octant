@@ -1,3 +1,4 @@
+import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import {
   CodeGitHunk,
   CodeGitHunkScope,
@@ -889,6 +890,7 @@ const StartProviderTurn = Schema.Struct({
   attachmentIds: Schema.optional(
     Schema.Array(CodeAttachmentId).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),

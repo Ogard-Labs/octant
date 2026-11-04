@@ -49,7 +49,10 @@ import { GoalLoopScheduler } from "../goal/goalLoopScheduler";
 import { createGoalLoopWorkRoundRunner } from "../goal/goalLoopWorkRoundRunner";
 import { WorkTurnUsageStore } from "../work/workTurnUsageStore";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-import { threadMentionContextResolver } from "../chat/threadMentionService";
+import {
+  threadMentionContextResolver,
+  sideChatReturnContextResolver,
+} from "../chat/threadMentionService";
 import { createFileMentionRouteHandler } from "../fileMentionRoutes";
 import { pinFileMentionExtraRoots, pinFileMentionRoot } from "../fileMentionIo";
 import { fileMentionContextBlocks, FileMentionService } from "../fileMentionService";
@@ -573,6 +576,10 @@ export function wireWork(deps: WorkDependencies) {
             String(model.id) === String(thread.modelId) && model.inputModalities.includes("image"),
         );
       },
+      resolveSideChatReturns: sideChatReturnContextResolver(
+        () => threadMentionService,
+        threadOutsideContentMarks,
+      ),
       resolveThreadMentionContext: async ({ threadMentionIds, readerThreadId, windowId }) => {
         const resolved = await threadMentionContextResolver(
           () => threadMentionService,

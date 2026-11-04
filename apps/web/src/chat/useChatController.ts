@@ -20,6 +20,7 @@ import type {
   ChatTurnId,
 } from "@octant/contracts/chat";
 import { decodeChatSubmissionId } from "@octant/contracts/chat";
+import type { SideChatDraftReturnReference } from "@octant/contracts";
 import { decodeUtcTimestamp } from "@octant/contracts";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
@@ -117,6 +118,7 @@ function submissionIntentKey(
   canvasSelections: ReadonlyArray<CanvasContextSelection>,
   extensionSelections: ReadonlyArray<ExtensionSelection>,
   threadMentionIds: ReadonlyArray<MentionableThreadId>,
+  sideChatReturns: ReadonlyArray<SideChatDraftReturnReference>,
 ): string {
   return JSON.stringify([
     threadId,
@@ -126,6 +128,7 @@ function submissionIntentKey(
     canvasSelections.map((selection) => String(selection.id)),
     extensionSelections.map(extensionSelectionKey),
     threadMentionIds.map((id) => String(id)),
+    sideChatReturns,
   ]);
 }
 
@@ -1383,7 +1386,11 @@ export function useChatController(options: ChatControllerOptions) {
        * person's unsent text is neither cleared on success nor replaced by the
        * turn's own text on a refusal.
        */
-      sendOptions: { readonly composerDraft: "consume" | "keep" } = { composerDraft: "consume" },
+      sendOptions: {
+        readonly composerDraft: "consume" | "keep";
+        readonly draftRevision?: number;
+      } = { composerDraft: "consume" },
+      sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> = [],
     ): Promise<boolean> => {
       if (
         activeView === undefined ||
@@ -1403,12 +1410,16 @@ export function useChatController(options: ChatControllerOptions) {
         canvasSelections,
         extensionSelections,
         threadMentionIds,
+        sideChatReturns,
       );
       const submissionId =
         pendingSubmissionIds.current.get(submissionKey) ??
         decodeChatSubmissionId(globalThis.crypto.randomUUID());
       pendingSubmissionIds.current.set(submissionKey, submissionId);
-      const consumesDraft = sendOptions.composerDraft === "consume";
+      const consumesDraft =
+        sendOptions.composerDraft === "consume" &&
+        (sendOptions.draftRevision === undefined ||
+          composerDraftRef.current.revisionFor(sendingThreadId) === sendOptions.draftRevision);
       const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
       if (consumesDraft) composerDraftRef.current.clearFor(sendingThreadId);
       const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
@@ -1425,6 +1436,7 @@ export function useChatController(options: ChatControllerOptions) {
           ? {}
           : { extensionSelections: [...extensionSelections] }),
         ...(threadMentionIds.length === 0 ? {} : { threadMentionIds: [...threadMentionIds] }),
+        ...(sideChatReturns.length === 0 ? {} : { sideChatReturns: [...sideChatReturns] }),
       });
       if (
         consumesDraft &&
@@ -1432,6 +1444,7 @@ export function useChatController(options: ChatControllerOptions) {
         composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
       ) {
         composerDraftRef.current.restoreFor(sendingThreadId, {
+          ...previousDraft,
           text: prompt,
           caretIndex: previousDraft?.caretIndex ?? prompt.length,
           stagedDropped: previousDraft?.stagedDropped === true,
@@ -1454,6 +1467,17 @@ export function useChatController(options: ChatControllerOptions) {
   );
   // One identity while nothing in it moved, so the surfaces that take the
   // controller whole can bail out of a render that changed none of it.
+  const returnedDraftFacts: {
+    readonly draftSideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
+    readonly draftSideChatReturnsInvalid?: boolean;
+    readonly draftRevision?: number;
+    readonly readDraftRevision?: (threadId: string) => number;
+  } = {
+    draftSideChatReturns: composerDraft.sideChatReturns,
+    draftSideChatReturnsInvalid: composerDraft.sideChatReturnsInvalid,
+    draftRevision: composerDraft.revisionFor(String(options.activeThreadId ?? "")),
+    readDraftRevision: composerDraft.revisionFor,
+  };
   return useRetainedRecord({
     activeView: visibleActiveView,
     /** What else of the open thread is loaded or offered beside `activeView`'s newest turns. */
@@ -1479,6 +1503,7 @@ export function useChatController(options: ChatControllerOptions) {
     pendingDraft,
     pendingDraftCaret: composerDraft.caretIndex,
     draftStagedDropped: composerDraft.stagedDropped,
+    ...returnedDraftFacts,
     draftPersistError: composerDraft.persistError,
     markDraftStagedDropped: composerDraft.markStagedDropped,
     purgeThreadDraft: composerDraft.purge,

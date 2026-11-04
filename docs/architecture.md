@@ -1572,7 +1572,11 @@ names the source, so mentioning one source again journals nothing new until a
 person clears the reader. The sibling-thread `read` marks its caller on every
 call, whatever the target, because an agent chose to read; a mention or a
 Side Chat is the person's own choice of thread, so an unmarked or cleared
-source passes on nothing, as for a fork. Chat, Work, and Code mentions share
+source passes on nothing, as for a fork. A person-returned Side Chat reply inherits the sidecar’s mark under
+`side-chat-return`, after the exact selected reply and retained receipt are
+revalidated and before ordinary send, queued delivery, retry or resume reads it.
+An unreadable reference or a failed mark refuses admission; an edited excerpt
+never silently becomes trusted plain prose. Chat, Work, and Code mentions share
 one resolver, and a thread that mentions itself is not marked again. A Side
 Chat's state section also carries finished subagents' replies, and a reply
 marks its parent only when it is delivered, which waits while the parent's
@@ -2904,8 +2908,23 @@ row makes a structured selection chip that the host re-resolves at send; it
 never installs, trusts, enables, or elevates anything. `/` lists commands only,
 and `$skill` stays a typed alias. Side Chat is a Chat-mode sidecar about
 exactly one source thread: ordinary Chat with no inherited Work or Code
-authority and no path that messages, approves, steers, or appends to the
-source. Each turn the host re-resolves the source on the sender's window and
+authority and no agent path that messages, approves, steers, or appends to the
+source. A person may explicitly choose a finished reply’s **Use in source draft**
+action. The host resolves that exact reply and its linked, still-openable source;
+the client appends only that reply to the source’s editable unsent draft, keeping
+existing text and caret, including while the source runs. It neither sends nor
+queues, steers or approves anything. Other replies, attachments and tool output
+are omitted visibly, and an overlong answer says it was truncated. The draft
+retains a typed reference to the sidecar, turn, attempt and original answer
+digest even if the person edits its text. New replies retain a bounded receipt
+on their existing Chat attempt: versions observed at the host’s actual source
+reads, context digest, read range and omissions. Independent reads are not an
+atomic snapshot; older replies say their original source snapshot was not
+recorded. On ordinary send, queued delivery, retry and resume, the host checks
+the exact reference and receipt again, refuses missing/purged/unauthorized or
+wrong-destination references, and records inherited outside-content provenance
+before the provider reads. Choosing a reply grants no execution authority.
+Each turn the host re-resolves the source on the sender's window and
 frames it as the conversation's subject: the newest 40 messages within 32,000
 characters, with truncation stated, plus a current-state section capped at
 8,000 characters. For Code that section names the branch, clean or dirty with
@@ -4035,7 +4054,11 @@ or .zip>` write the same files, built by one host command
   Drafts are not journaled, not included in diagnostics, and not sent to a
   provider until the user sends the message. Mentions that live in the typed
   text persist with the draft; staged attachments and extra composer
-  selections do not, and the composer says so when a restored draft dropped
+  selections do not. The narrow exception is a person-returned Side Chat reply’s
+  typed provenance reference, which persists with its editable text and is
+  revalidated at ordinary admission. Corrupt references keep a visible blocked
+  draft; ordinary editing does not strip them. Clearing the entire draft is an
+  explicit recovery option. The composer says so when a restored draft dropped
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
 

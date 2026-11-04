@@ -1,3 +1,4 @@
+import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
@@ -288,6 +289,7 @@ export const WorkTurnState = Schema.Struct({
    */
   delivery: Schema.optional(AgentRunResultDeliveryMark),
   capabilities: WorkTurnCapabilityFacts,
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   version: AggregateVersion,
   acceptedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -319,6 +321,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    * alone and never enters the prompt the journal records as the user's
    * message.
    */
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
@@ -499,6 +502,7 @@ export const WorkTurnAccepted = Schema.Struct({
   resumeCursor: Schema.optional(ProviderResumeCursor),
   handoff: Schema.optional(WorkTurnHandoff),
   carriedFrom: Schema.optional(WorkTurnCarriedFrom),
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),

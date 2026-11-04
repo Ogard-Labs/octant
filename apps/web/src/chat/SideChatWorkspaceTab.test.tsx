@@ -1,10 +1,16 @@
+import userEvent from "@testing-library/user-event";
+import { decodeThreadMentionCommandResult } from "@octant/contracts";
+import {
+  composerThreadDrafts,
+  COMPOSER_THREAD_DRAFTS_STORAGE_KEY,
+} from "../composer/composerThreadDraftStore";
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import type { ThreadMentionClient } from "@octant/client-runtime";
 import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/chat";
 import type { ChatThreadView } from "@octant/contracts/chat";
 import type { SideChatSidecar } from "@octant/contracts";
 import { decodeWorkspaceTab } from "@octant/contracts/shell";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SideChatWorkspaceTab } from "./SideChatWorkspaceTab";
 import { createChatReadCursorStore } from "./useChatController";
@@ -244,4 +250,222 @@ describe("SideChatWorkspaceTab", () => {
 
     expect(screen.getByText("Side Chat is not available on this host.")).toBeVisible();
   });
+});
+
+it("returns one selected finished answer to the source's editable saved draft without sending or queuing", async () => {
+  const user = userEvent.setup();
+  const { answered, reference, turnId, attemptId } = answeredSidecar();
+  const chatClient = chatClientStub({ thread: vi.fn(async () => answered) });
+  const mentionClient = mentionClientStub();
+  const prepare = vi.fn(async () =>
+    decodeThreadMentionCommandResult({
+      kind: "side-chat-draft-prepared",
+      requestId: tabId,
+      reference,
+      destination: {
+        threadId: sourceThreadId,
+        mode: "work",
+        title: "Busy source",
+        version: 7,
+        busy: true,
+      },
+      text: "Chosen answer with visible original-source versions unrecorded; other replies omitted.",
+      omissions: ["Other replies omitted."],
+    }),
+  );
+  const returnClient = { ...mentionClient, execute: prepare };
+  composerThreadDrafts.clear("work", sourceThreadId);
+  composerThreadDrafts.write("work", sourceThreadId, {
+    text: "My existing busy-task draft",
+    caretIndex: 3,
+    stagedDropped: false,
+  });
+  const rendered = render(
+    <SideChatWorkspaceTab
+      chatClient={chatClient}
+      chatReadCursorStore={readCursorStore}
+      tab={sideChatTab()}
+      threadMentionClient={returnClient}
+    />,
+  );
+  await screen.findByText("Chosen answer");
+  await user.click(screen.getByRole("button", { name: "Reply actions" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Use in source draft" }));
+  await screen.findByText(/Added to the source’s saved draft/);
+  expect(prepare).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kind: "prepare-side-chat-return",
+      sidecarThreadId,
+      expectedSourceThreadId: sourceThreadId,
+      turnId,
+      attemptId,
+    }),
+    expect.any(AbortSignal),
+  );
+  expect(composerThreadDrafts.read("work", sourceThreadId)).toMatchObject({
+    text: expect.stringContaining("My existing busy-task draft\n\nChosen answer"),
+    caretIndex: 3,
+    sideChatReturns: [reference],
+  });
+  const stored = globalThis.localStorage.getItem(COMPOSER_THREAD_DRAFTS_STORAGE_KEY)!;
+  expect(JSON.parse(stored)[`work:${sourceThreadId}`].sideChatReturns).toEqual([reference]);
+  expect(chatClient.execute).not.toHaveBeenCalled();
+  rendered.unmount();
+  composerThreadDrafts.reloadFromStorage();
+  expect(composerThreadDrafts.read("work", sourceThreadId)?.sideChatReturns).toEqual([reference]);
+  composerThreadDrafts.clear("work", sourceThreadId);
+});
+
+function answeredSidecar() {
+  const turnId = "00000000-0000-4000-8000-000000000411";
+  const attemptId = "00000000-0000-4000-8000-000000000412";
+  const replyContent = "00000000-0000-4000-8000-000000000413";
+  const userContent = "00000000-0000-4000-8000-000000000414";
+  const reference = {
+    sidecarThreadId,
+    sourceThreadId,
+    sourceMode: "work",
+    turnId,
+    attemptId,
+    answerDigest: "b".repeat(64),
+  };
+  const view = sidecarView();
+  const answered = decodeChatThreadView({
+    ...view,
+    turns: [
+      {
+        id: turnId,
+        threadId: sidecarThreadId,
+        sequence: 1,
+        userMessageRef: { contentId: userContent, digest: "a".repeat(64), byteLength: 8 },
+        attachmentIds: [],
+        attempts: [
+          {
+            id: attemptId,
+            turnId,
+            threadId: sidecarThreadId,
+            providerInstanceId: providerId,
+            providerSessionId: tabId,
+            modelId: "model-a",
+            contextManifestId: tabId,
+            outcome: "completed",
+            responseRefs: [{ contentId: replyContent, digest: "b".repeat(64), byteLength: 6 }],
+            citationIds: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        createdAt: now,
+      },
+    ],
+    contents: [
+      {
+        contentId: userContent,
+        role: "user",
+        body: "Question",
+        digest: "a".repeat(64),
+        byteLength: 8,
+      },
+      {
+        contentId: replyContent,
+        role: "assistant",
+        body: "Chosen answer",
+        digest: "b".repeat(64),
+        byteLength: 13,
+      },
+    ],
+  });
+  return { answered, reference, turnId, attemptId };
+}
+
+it("ignores a prepared return arriving after the Side Chat tab unmounts", async () => {
+  const user = userEvent.setup();
+  const { answered, reference } = answeredSidecar();
+  const response = Promise.withResolvers<ReturnType<typeof decodeThreadMentionCommandResult>>();
+  const prepare = vi.fn((_command: unknown, _signal?: AbortSignal) => response.promise);
+  const rendered = render(
+    <SideChatWorkspaceTab
+      chatClient={chatClientStub({ thread: vi.fn(async () => answered) })}
+      chatReadCursorStore={readCursorStore}
+      tab={sideChatTab()}
+      threadMentionClient={{ ...mentionClientStub(), execute: prepare }}
+    />,
+  );
+  composerThreadDrafts.clear("work", sourceThreadId);
+  await screen.findByText("Chosen answer");
+  await user.click(screen.getByRole("button", { name: "Reply actions" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Use in source draft" }));
+  expect(prepare).toHaveBeenCalledOnce();
+  rendered.unmount();
+  expect(prepare.mock.calls[0]![1]!.aborted).toBe(true);
+  response.resolve(
+    decodeThreadMentionCommandResult({
+      kind: "side-chat-draft-prepared",
+      requestId: tabId,
+      reference,
+      destination: { threadId: sourceThreadId, mode: "work", title: "Source", version: 1 },
+      text: "Late answer",
+      omissions: [],
+    }),
+  );
+  await response.promise;
+  await Promise.resolve();
+  expect(composerThreadDrafts.read("work", sourceThreadId)).toBeUndefined();
+});
+
+it("bounds a held prepare read, permits explicit retry and suppresses its late answer", async () => {
+  const user = userEvent.setup();
+  const { answered, reference } = answeredSidecar();
+  const held = Promise.withResolvers<ReturnType<typeof decodeThreadMentionCommandResult>>();
+  const result = decodeThreadMentionCommandResult({
+    kind: "side-chat-draft-prepared",
+    requestId: tabId,
+    reference,
+    destination: { threadId: sourceThreadId, mode: "work", title: "Source", version: 1 },
+    text: "Chosen returned answer",
+    omissions: [],
+  });
+  const prepare = vi
+    .fn()
+    .mockImplementationOnce(() => held.promise)
+    .mockResolvedValueOnce(result);
+  const clock = vi.spyOn(globalThis, "setTimeout");
+  composerThreadDrafts.clear("work", sourceThreadId);
+  const rendered = render(
+    <SideChatWorkspaceTab
+      chatClient={chatClientStub({ thread: vi.fn(async () => answered) })}
+      chatReadCursorStore={readCursorStore}
+      tab={sideChatTab()}
+      threadMentionClient={{ ...mentionClientStub(), execute: prepare }}
+    />,
+  );
+  try {
+    await screen.findByText("Chosen answer");
+    await user.click(screen.getByRole("button", { name: "Reply actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Use in source draft" }));
+    const deadline = clock.mock.calls.find((call) => call[1] === 20_000)?.[0];
+    if (typeof deadline !== "function") throw new Error("missing bounded preparation wait");
+    await act(async () => {
+      deadline();
+    });
+    expect(prepare.mock.calls[0]![1].aborted).toBe(true);
+    expect(await screen.findByText(/This reply could not be added/)).toBeVisible();
+    expect(composerThreadDrafts.read("work", sourceThreadId)).toBeUndefined();
+    await act(async () => {
+      held.resolve(result);
+      await held.promise;
+    });
+    expect(composerThreadDrafts.read("work", sourceThreadId)).toBeUndefined();
+    await user.click(screen.getByRole("button", { name: "Reply actions" }));
+    const retry = await screen.findByRole("menuitem", { name: "Use in source draft" });
+    expect(retry).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(retry);
+    await screen.findByText(/Added to the source’s saved draft/);
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(composerThreadDrafts.read("work", sourceThreadId)?.text).toBe("Chosen returned answer");
+  } finally {
+    rendered.unmount();
+    clock.mockRestore();
+    composerThreadDrafts.clear("work", sourceThreadId);
+  }
 });

@@ -243,6 +243,8 @@ export interface BeginChatTurnInput {
   /** Set when this turn's new provider session starts with the conversation handed over. */
   readonly handoff?: ChatAttempt["handoff"];
   readonly contextManifestId: ContextManifestId;
+  readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
+  readonly sideChatReturns?: ChatTurn["sideChatReturns"];
   readonly userMessageRef: ChatContentReference;
   readonly attachmentIds?: ReadonlyArray<ChatAttachmentId>;
   readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
@@ -276,6 +278,9 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
     modelId: thread.modelId,
     contextManifestId: input.contextManifestId,
+    ...(input.sideChatSourceReceipt === undefined
+      ? {}
+      : { sideChatSourceReceipt: input.sideChatSourceReceipt }),
     outcome: "queued",
     responseRefs: [],
     citationIds: [],
@@ -296,6 +301,7 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     ...(input.supersedes === undefined ? {} : { supersedes: input.supersedes }),
     ...(input.delivery === undefined ? {} : { delivery: input.delivery }),
     attempts: [attempt],
+    ...(input.sideChatReturns === undefined ? {} : { sideChatReturns: input.sideChatReturns }),
     createdAt: input.createdAt,
   });
 }
@@ -415,6 +421,7 @@ export interface RetryChatTurnInput {
   /** Set when the retried attempt's new provider session starts with the conversation handed over. */
   readonly handoff?: ChatAttempt["handoff"];
   readonly newContextManifestId: ContextManifestId;
+  readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly expectedVersion: AggregateVersion;
   readonly createdAt: UtcTimestamp;
 }
@@ -466,6 +473,9 @@ export function retryChatTurn(
     ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
     modelId: attempt.modelId,
     contextManifestId: input.newContextManifestId,
+    ...(input.sideChatSourceReceipt === undefined
+      ? {}
+      : { sideChatSourceReceipt: input.sideChatSourceReceipt }),
     outcome: "queued",
     responseRefs: [],
     citationIds: [],
@@ -479,6 +489,7 @@ export interface ResumeChatTurnInput {
   readonly attemptId: ChatAttempt["id"];
   readonly newAttemptId: ChatAttempt["id"];
   readonly newContextManifestId: ContextManifestId;
+  readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly expectedVersion: AggregateVersion;
   readonly createdAt: UtcTimestamp;
 }
@@ -521,6 +532,9 @@ export function resumeChatTurn(
     providerSessionId: attempt.providerSessionId,
     modelId: attempt.modelId,
     contextManifestId: input.newContextManifestId,
+    ...(input.sideChatSourceReceipt === undefined
+      ? {}
+      : { sideChatSourceReceipt: input.sideChatSourceReceipt }),
     outcome: "queued",
     responseRefs: [],
     citationIds: [],

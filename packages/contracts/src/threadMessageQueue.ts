@@ -1,3 +1,4 @@
+import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { Schema } from "effect";
 import { SendChatTurnCommand } from "./chat";
 import { CodeAttachmentId, MAX_CODE_TURN_ATTACHMENTS } from "./code";
@@ -40,6 +41,7 @@ export const ThreadMessageQueuePayload = Schema.Union(
     canvasSelections: chat.canvasSelections,
     extensionSelections: chat.extensionSelections,
     threadMentionIds: chat.threadMentionIds,
+    sideChatReturns: chat.sideChatReturns,
   }).annotations(strict),
   Schema.Struct({
     mode: Schema.Literal("work"),
@@ -48,10 +50,12 @@ export const ThreadMessageQueuePayload = Schema.Union(
     extensionSelections: work.extensionSelections,
     computerUseSelection: work.computerUseSelection,
     threadMentionIds: work.threadMentionIds,
+    sideChatReturns: work.sideChatReturns,
     fileMentionPaths: work.fileMentionPaths,
   }).annotations(strict),
   Schema.Struct({
     mode: Schema.Literal("code"),
+    sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
     prompt: ThreadMessageQueuePrompt,
     attachmentIds: Schema.optional(
       Schema.Array(CodeAttachmentId).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
