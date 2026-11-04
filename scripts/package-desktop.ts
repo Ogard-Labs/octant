@@ -690,6 +690,14 @@ function escapeAppleScriptString(appPath: string): string {
   return escapedPath;
 }
 
+function flavorIconPath(path: string, identity: DesktopIdentity): string {
+  if (identity.flavor !== "nightly") return path;
+  if (path === "apps/desktop/resources/icon.png") return "apps/desktop/resources/icon-nightly.png";
+  if (path === "apps/desktop/resources/icon.icns")
+    return "apps/desktop/resources/icon-nightly.icns";
+  return path;
+}
+
 export function createPackagerOptions(
   dir: string,
   out: string,
@@ -719,8 +727,8 @@ export function createPackagerOptions(
       : {}),
     icon:
       target.platform === "darwin"
-        ? resolve(dir, "apps/desktop/resources/icon.icns")
-        : resolve(dir, "apps/desktop/resources/icon.png"),
+        ? resolve(dir, flavorIconPath("apps/desktop/resources/icon.icns", identity))
+        : resolve(dir, flavorIconPath("apps/desktop/resources/icon.png", identity)),
     name: identity.productName,
     out,
     overwrite: true,
@@ -869,10 +877,11 @@ export function createServerRuntimeManifest() {
 export function validatePackagedPayload(
   entries: ReadonlyArray<PackagedPayloadEntry>,
   target: DesktopPackageTarget = DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+  identity: DesktopIdentity = desktopIdentity("stable"),
 ): void {
   const paths = new Set(entries.map((entry) => entry.path));
   const required = [
-    ...REQUIRED_STAGED_PACKAGED_FILES,
+    ...REQUIRED_STAGED_PACKAGED_FILES.map((path) => flavorIconPath(path, identity)),
     ...(target.platform === "darwin" ? [REQUIRED_DARWIN_PTY_HELPER_FILE] : []),
     ...bundledLanguageServerPaths(target, "apps/server/node_modules"),
   ];
@@ -969,7 +978,17 @@ export async function stageDesktopRuntime(
   await cp(
     resolve(repositoryRoot, "apps/desktop/resources"),
     resolve(stageRoot, "apps/desktop/resources"),
-    { recursive: true },
+    {
+      recursive: true,
+      filter: (path) => {
+        const filename = relative(resolve(repositoryRoot, "apps/desktop/resources"), path);
+        const excluded =
+          identity.flavor === "nightly"
+            ? ["icon.png", "icon.icns"]
+            : ["icon-nightly.png", "icon-nightly.icns"];
+        return !excluded.includes(filename);
+      },
+    },
   );
   await copyBuiltDirectory(repositoryRoot, stageRoot, "apps/server/dist");
   await copyBuiltDirectory(repositoryRoot, stageRoot, "apps/web/dist");
@@ -999,7 +1018,7 @@ export async function stageDesktopRuntime(
     nativePayloadsToStrip(target.platform),
   );
 
-  validatePackagedPayload(await collectPayloadEntries(stageRoot), target);
+  validatePackagedPayload(await collectPayloadEntries(stageRoot), target, identity);
   await validatePackagedRuntimeImports(stageRoot);
   await validatePackagedRuntimeImports(stageRoot, ["effect"], "apps/desktop");
 }
@@ -1165,12 +1184,12 @@ async function packageDarwinDesktop(
   }
 
   const packagedPayload = join(finalApp, "Contents/Resources/app");
-  validatePackagedPayload(await collectPayloadEntries(packagedPayload), target);
+  validatePackagedPayload(await collectPayloadEntries(packagedPayload), target, identity);
   const bundleEntries = await collectPayloadEntries(outRoot);
   const bundlePaths = new Set(bundleEntries.map((entry) => entry.path));
   validateNativePayloadAllowlist(selectFinalBundlePaths([...bundlePaths], identity), identity);
   for (const requiredPath of REQUIRED_PACKAGED_FILES) {
-    if (!bundlePaths.has(packagedBundlePath(requiredPath, identity))) {
+    if (!bundlePaths.has(packagedBundlePath(flavorIconPath(requiredPath, identity), identity))) {
       throw new Error(`Packaged bundle is missing ${requiredPath}.`);
     }
   }
@@ -1237,13 +1256,13 @@ async function packageLinuxDesktop(
   }
 
   const packagedPayload = join(resourcesRoot, "app");
-  validatePackagedPayload(await collectPayloadEntries(packagedPayload), target);
+  validatePackagedPayload(await collectPayloadEntries(packagedPayload), target, identity);
   const packageEntries = await collectPayloadEntries(finalPackageDir);
   validateLinuxNativePayloadAllowlist(
     packageEntries.map((entry) => `${packageDirName}/${entry.path}`),
   );
   for (const requiredPath of REQUIRED_STAGED_PACKAGED_FILES) {
-    await access(join(packagedPayload, requiredPath));
+    await access(join(packagedPayload, flavorIconPath(requiredPath, identity)));
   }
   validatePackagedRendererPolicy(
     await readFile(join(packagedPayload, "apps/web/dist/index.html"), "utf8"),
@@ -1320,7 +1339,11 @@ export async function stageLinuxAppDir(input: {
     "utf8",
   );
   await cp(
-    join(input.packageDirectory, "resources/app/apps/desktop/resources/icon.png"),
+    join(
+      input.packageDirectory,
+      "resources/app",
+      flavorIconPath("apps/desktop/resources/icon.png", identity),
+    ),
     join(input.appDir, `${identity.scheme}.png`),
   );
 }

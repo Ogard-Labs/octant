@@ -8,16 +8,17 @@ one host per data folder, how updates are verified, and which rings exist
 [current release boundary](../architecture.md#current-release-boundary)).
 DESIGN.md owns Settings presentation.
 
-Status: identity, packaging and update-ring foundations are implemented. The
-functional stable-host desktop client bridge is not built. A packaged Nightly
-launch therefore refuses before importing the host-owning desktop module,
-which prevents credential initialization, host startup and migrations.
+Status: identity, packaging, inverted icons and update-ring foundations are
+implemented. The functional stable-host desktop client bridge is not built.
+A packaged Nightly launch therefore refuses before importing the host-owning
+desktop module, which prevents credential initialization, host startup and
+migrations.
 
 The remaining delivery includes the typed per-window native broker connection,
 stable host-only launch and retention, shared sign-in operations, the complete
-`octant-nightly` command, the installer and removal controls, inverted icon,
-Nightly labels, and the functional release preflight. Coexistence, reconnect
-and rollback still need their implementation and packaged evidence. The
+`octant-nightly` command, the installer and removal controls, Nightly labels,
+and the functional release preflight. Coexistence, reconnect and rollback
+still need their implementation and packaged evidence. The
 preview/candidate workflow now selects the Nightly flavor and matching artifact
 and payload-smoke paths, but an explicit early gate stops that workflow before
 build, signing or publication. The functional client change must replace the
@@ -166,7 +167,13 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 
 - The Nightly icon is the Octant icon with its colours inverted: the same
   silhouette and sizes, so the Dock and the app switcher tell the two apart at
-  a glance.
+  a glance. Packaging selects committed `icon-nightly.png` and
+  `icon-nightly.icns` assets; Stable continues to use its unchanged originals.
+  `bun scripts/generate-nightly-icons.ts --write` derives the Nightly assets on
+  macOS with ImageIO, inverting unassociated RGB while preserving every alpha
+  value, image size and density. `--check` verifies both the generated and
+  committed pixels, including every ICNS representation. Linux packaging uses
+  these committed assets without requiring a macOS generator.
 - A small "Nightly" pill sits beside the name in the sidebar header. When the
   sidebar is collapsed, it moves to the window's title bar. It is a quiet
   label at the meta step, not a warning colour.

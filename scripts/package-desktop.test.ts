@@ -71,6 +71,7 @@ import {
   waitForChildExit,
   stageBundledLanguageServer,
   stageExternalRuntimePackages,
+  stageLinuxAppDir,
 } from "./package-desktop";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -198,6 +199,7 @@ describe("desktop packaging boundary", () => {
       ),
     ).toMatchObject({
       appBundleId: "app.octant.desktop.nightly",
+      icon: "/tmp/stage/apps/desktop/resources/icon-nightly.icns",
       name: "Octant Nightly",
       protocols: [{ name: "Octant Nightly Code links", schemes: ["octant-nightly"] }],
     });
@@ -439,6 +441,66 @@ describe("desktop packaging boundary", () => {
     ).not.toThrow();
     expect(() => validatePackagedPayload(linuxPayload)).toThrow(/spawn-helper/);
   });
+
+  it("refuses Stable icons as substitutes for the Nightly package assets", () => {
+    const target = DESKTOP_PACKAGE_TARGETS["linux-x64"];
+    const identity = desktopIdentity("nightly");
+    const stable = [
+      ...REQUIRED_STAGED_PACKAGED_FILES,
+      ...bundledLanguageServerPaths(target, "apps/server/node_modules"),
+      "apps/web/dist/assets/MonacoEditorPane-a.js",
+      "apps/web/dist/assets/editor.api-b.js",
+      "apps/web/dist/assets/editor.worker-c.js",
+      "apps/web/dist/assets/xtermRuntime-d.js",
+      "apps/web/dist/assets/xtermRuntime-e.css",
+    ].map((path) => ({ path }));
+    expect(() => validatePackagedPayload(stable, target, identity)).toThrow("icon-nightly.icns");
+    const nightly = stable.map(({ path }) => ({
+      path: path.replace(/resources\/icon\.(png|icns)$/, "resources/icon-nightly.$1"),
+    }));
+    expect(() => validatePackagedPayload(nightly, target, identity)).not.toThrow();
+    for (const extension of ["png", "icns"]) {
+      const missing = `apps/desktop/resources/icon-nightly.${extension}`;
+      expect(() =>
+        validatePackagedPayload(
+          nightly.filter(({ path }) => path !== missing),
+          target,
+          identity,
+        ),
+      ).toThrow(`missing ${missing}`);
+    }
+    expect(
+      createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0-preview.20261104.1", target, identity)
+        .icon,
+    ).toBe("/tmp/stage/apps/desktop/resources/icon-nightly.png");
+  });
+
+  it.each(["stable", "nightly"] as const)(
+    "uses the %s icon for its Linux desktop launcher",
+    async (flavor) => {
+      const root = await mkdtemp(resolve(tmpdir(), "octant-icon-appdir-"));
+      try {
+        const packageDirectory = resolve(root, "package");
+        const resources = resolve(packageDirectory, "resources/app/apps/desktop/resources");
+        await mkdir(resources, { recursive: true });
+        await writeFile(resolve(resources, "icon.png"), "Stable pixels");
+        await writeFile(resolve(resources, "icon-nightly.png"), "Nightly pixels");
+        const identity = desktopIdentity(flavor);
+        const appDir = resolve(root, "appdir");
+        await stageLinuxAppDir({
+          packageDirectory,
+          appDir,
+          identity,
+          version: "0.1.0-preview.20261104.1",
+        });
+        expect(await readFile(resolve(appDir, `${identity.scheme}.png`), "utf8")).toBe(
+          flavor === "nightly" ? "Nightly pixels" : "Stable pixels",
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("refuses a package without the target's language server, its standard library, or its license notice", () => {
     const linux = DESKTOP_PACKAGE_TARGETS["linux-x64"];

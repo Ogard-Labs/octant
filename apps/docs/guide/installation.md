@@ -95,14 +95,16 @@ initializes credentials. Installation and publication remain pending.
 A local desktop package defaults to Octant. An explicitly selected
 `OCTANT_PACKAGE_FLAVOR=nightly` requires a matching dated preview or candidate
 `OCTANT_RELEASE_VERSION` for the repository's existing base version. Packaging
-stamps the flavor, product name, bundle id and link scheme. Nightly keeps its
+stamps the flavor, product name, bundle id and link scheme, and selects the
+inverted Nightly icon on macOS and for the Linux desktop launcher. Stable keeps
+its original icon. Nightly keeps its
 window storage under `Octant Nightly`, separate from Octant's shared host data.
 It cannot start or migrate that host data.
 
 Packaged Octant follows only the stable update ring. The Nightly identity
 follows preview or candidate and refuses a stable feed. Development runs keep
 their existing behavior. The stable-host connection, full Nightly command,
-installer, visual identity and coexistence remain required before Nightly can
+installer, Nightly labels and coexistence remain required before Nightly can
 be offered as a usable download. The preview/candidate release workflow has an
 explicit preflight stop until that functional client is implemented and
 verified. Stable releases and local packaging have no such temporary stop.
