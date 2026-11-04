@@ -29,6 +29,10 @@ asking the agent.
   answer the same way; they differ only in who approves and how a page opens.
 - The always-visible description tells the model to take a snapshot after it
   navigates and to act by ref. The full usage stays behind `help`.
+- Stored-profile selection through `navigate` is currently wired in Work's
+  adapter only. Code's separate adapter still rejects that argument and opens
+  new pages Private; the shared description is not proof that Code selection
+  is built. See [Browser profiles](browser-profiles.md#choosing-a-profile).
 - Every operation runs on the server's admission path: the thread's authority,
   the model binding, the origin approval, Plan mode, the stale check, and the
   credential check. No operation adds authority a page did not already have.
@@ -140,6 +144,32 @@ asking the agent.
   0.7 KB. A navigate, read, type, click, and verifying read cost the model
   15,903 bytes of tool results before; navigate, snapshot, type, and click,
   whose result says what changed, cost 4,538 bytes after.
+
+### Refusal and expiry recovery
+
+- An origin outside the page's approved origins stays refused as
+  `policy-denied` with reason `origin-not-approved`. The answer says to call
+  `stop`, then `navigate` to the intended URL and keep the same profile argument
+  if one was used, so the new site's approval is requested. For SSO in the
+  desktop app's Browser, it instead offers `sign-in` so the person can finish
+  the redirect chain. It reports only the refused origin, never that URL's
+  path, query, or fragment.
+- After a page expires, ordinary agent calls answer `context-expired` and name
+  its former Private, Project, or Personal profile, rather than claiming it
+  never opened. Reopening requires an explicit `navigate`; a stored profile
+  must be named again. Expiry never reopens a page, selects a profile, or grants
+  a site's approval.
+- The host keeps only a bounded, in-memory expiry receipt, without observations,
+  text, pictures, or evidence. It is scoped to the original window, thread, and
+  authority, and the agent receives the hint only under its original model
+  binding. A new page, explicit stop, window revocation, profile clear, or host
+  close clears the corresponding hint. Old hints may be evicted like the
+  tool's bounded model bindings; they are not persistent page history.
+- Session deadlines stay as built: the agent tool opens a page with a ten-minute
+  session from creation; ordinary agent activity does not extend it. A handoff
+  or take-over keeps it for eleven minutes from the hold, take-over input
+  renews that retention, and release keeps it for two minutes, always using
+  the later of that retention and the original session deadline.
 
 ## Actions
 
@@ -509,7 +539,9 @@ use`), a size still applies. The person sees the page at the emulated size
   password and fills none, and the agent never sees what they typed: a
   credential field never shows a value.
 - On **Continue** the agent gets a fresh snapshot of whatever page the person
-  left. **Cancel**, the card expiring, or the turn stopping ends the hand-off with
+  left. If that site is unapproved, the refusal says plainly that the person
+  left the page on an unapproved site after Continue; it reads nothing there
+  and does not widen the original origin approval. **Cancel**, the card expiring, or the turn stopping ends the hand-off with
   `browser-sign-in-denied`, `-expired`, or `-cancelled`, and the page is the
   agent's again.
 - Refused before anyone is asked on a routine's or a subagent's turn and for a

@@ -56,10 +56,11 @@ export interface AutomationDefinitionEditorProps {
 const FULL_ACCESS_NOTE =
   "Full access profiles are not eligible for automations. Choose an approval-gated profile.";
 
-type RunLevelOption = "" | AutomationRunLevelChoice;
-
-const RUN_LEVEL_OPTIONS: ReadonlyArray<{ readonly id: RunLevelOption; readonly label: string }> = [
-  { id: "", label: "Ask first" },
+const RUN_LEVEL_OPTIONS: ReadonlyArray<{
+  readonly id: AutomationRunLevelChoice;
+  readonly label: string;
+}> = [
+  { id: "ask-first", label: "Ask first" },
   { id: "auto-accept-edits", label: "Accept edits" },
   { id: "auto", label: "Auto" },
   { id: "full-access", label: "Full access" },
@@ -153,12 +154,8 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   const [mergesItsPullRequests, setMergesItsPullRequests] = useState(
     initial?.agentMerge === "allowed",
   );
-  const [runLevel, setRunLevel] = useState<RunLevelOption>(
-    initial?.projectLevel === "opted-in"
-      ? "project"
-      : initial?.runLevel === undefined || initial.runLevel === "ask-first"
-        ? ""
-        : initial.runLevel,
+  const [runLevel, setRunLevel] = useState<AutomationRunLevelChoice>(
+    initial?.projectLevel === "opted-in" ? "project" : (initial?.runLevel ?? "ask-first"),
   );
   const [issues, setIssues] = useState<readonly string[]>([]);
   const [serverMessage, setServerMessage] = useState<string | undefined>(undefined);
@@ -274,7 +271,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       missedRunPolicy,
       deliveryTargetSummary: targetSummary,
       deliveryTargetConfirmed: targetConfirmed,
-      ...(runLevel === "" ? {} : { runLevel }),
+      runLevel,
       mergesItsPullRequests,
       ...(initial === undefined
         ? {}
@@ -513,7 +510,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           <OctantSelectField
             className="select"
             id={ids.runLevel}
-            onValueChange={(value) => setRunLevel(value as RunLevelOption)}
+            onValueChange={(value) => setRunLevel(value as AutomationRunLevelChoice)}
             options={RUN_LEVEL_OPTIONS}
             value={runLevel}
           />

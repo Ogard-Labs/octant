@@ -40,6 +40,11 @@ export interface AgentMessageRecord {
   readonly occurredAt?: string;
 }
 
+export type AgentMessageReceiptRecord = Pick<
+  AgentMessageRecord,
+  "messageId" | "senderThreadId" | "recipientThreadId" | "state" | "refuseReason" | "occurredAt"
+>;
+
 /**
  * How many refusals made before admission the projection keeps for one
  * sender. Older ones are counted but no longer listed, so a thread that loops
@@ -169,6 +174,23 @@ export class AgentMessageProjection {
     return this.#byMessage.get(messageId);
   }
 
+  /** The sender's own metadata includes bounded refusals made before admission. */
+  receiptForSender(
+    senderThreadId: string,
+    messageId: string,
+  ): AgentMessageReceiptRecord | undefined {
+    const record = this.#byMessage.get(messageId);
+    if (
+      record !== undefined &&
+      String(record.senderThreadId) === senderThreadId &&
+      record.senderRunId === undefined &&
+      record.recipientRunId === undefined
+    )
+      return record;
+    const early = this.#refusedBeforeAdmission.get(senderThreadId)?.records.get(messageId);
+    return early === undefined ? undefined : { ...early, state: "refused" };
+  }
+
   countInFlightForSender(senderThreadId: string): number {
     return this.openForSender(senderThreadId).length;
   }
@@ -242,9 +264,7 @@ export class AgentMessageProjection {
       if (!visibleSender(String(record.senderThreadId))) continue;
       if (record.state === "in-flight") {
         openInFlight += 1;
-        continue;
-      }
-      if (record.state === "refused") refused += 1;
+      } else if (record.state === "refused") refused += 1;
       else delivered += 1;
       settled.push({
         messageId: String(record.messageId),
@@ -272,8 +292,8 @@ export class AgentMessageProjection {
         });
       }
     }
-    // In-flight messages carry no settled time of their own; the most recent
-    // settled statuses are what the bounds view can state. The sort is stable,
+    // Queued rows retain admission time; settled rows retain the last receipt.
+    // The most recent host facts are bounded for every sender. The sort is stable,
     // so messages that settled in the same instant keep their journal order.
     settled.sort((a, b) => (a.occurredAt ?? "").localeCompare(b.occurredAt ?? ""));
     return {

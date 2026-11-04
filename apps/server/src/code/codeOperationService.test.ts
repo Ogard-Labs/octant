@@ -25,6 +25,7 @@ import {
   CodeOperationServiceError,
   CodeOperationSnapshotRequiredError,
   type CodeOperationServiceOptions,
+  type CodeOperationGitPort,
 } from "./codeOperationService";
 import { requireLinuxConfinement } from "../process/linuxConfinement";
 import { ReviewFindingServiceError } from "./reviewFindingService";
@@ -1450,7 +1451,7 @@ describe("CodeOperationService", () => {
     });
   });
 
-  describe("restoring files in place", () => {
+  describe("overwriting files in place", () => {
     const restoredCheckpoint = { worktree: "c".repeat(40), index: "d".repeat(40) };
     const restoreCommand = {
       kind: "restore-git-checkpoint",
@@ -1459,6 +1460,15 @@ describe("CodeOperationService", () => {
       checkoutId: ids.checkout,
       gitOperationId: decodeCodeOperationId("53535353-5353-4535-8535-535353535353"),
       checkpoint: restoredCheckpoint,
+    } as const;
+    const discardCommand = {
+      operationId: ids.operation,
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      gitOperationId: restoreCommand.gitOperationId,
+      kind: "discard-git-changes",
+      paths: ["src/file.ts"],
+      expectedStateToken: "f".repeat(64),
     } as const;
     const writerProject = "66666666-6666-4666-8666-666666666666";
     const otherProject = "abababab-abab-4bab-8bab-abababababab";
@@ -1494,6 +1504,8 @@ describe("CodeOperationService", () => {
         status: "applied" as const,
         undo: { worktree: "e".repeat(40), index: "f".repeat(40) },
       }));
+      const discard = vi.fn<CodeOperationGitPort["discard"]>(async () => ({ status: "applied" }));
+      const validate = vi.fn(async () => true);
       const checkpoint = vi.fn(async () => ({ status: "unavailable" as const }));
       const start = vi.fn(async () => ({ state: "running" as const }));
       // The runtime has no live turn of its own to stop.
@@ -1527,10 +1539,10 @@ describe("CodeOperationService", () => {
             credentialReferences: [],
           })),
         } as never,
-        approvals: { validate: vi.fn(async () => true) },
+        approvals: { validate },
         terminals: {} as never,
         repositoryTests: {} as never,
-        git: { restoreCheckpoint, checkpoint } as never,
+        git: { restoreCheckpoint, checkpoint, discard } as never,
         pullRequests: {} as never,
         reviewFindings: {} as never,
         turns: {
@@ -1538,6 +1550,8 @@ describe("CodeOperationService", () => {
           answerInput: vi.fn(),
           answerApproval: vi.fn(),
           cancel,
+          holdsTurn: (threadId: string) =>
+            live.some((turn) => String(turn.thread.id) === threadId && turn.state !== "completed"),
           threadsWritingIn: (checkoutRoot: string, exceptThreadId: CodeThread["id"]) =>
             live
               .filter((turn) =>
@@ -1559,8 +1573,181 @@ describe("CodeOperationService", () => {
           append,
         } as never,
       });
-      return { service, restoreCheckpoint, checkpoint, start, cancel, append };
+      return { service, restoreCheckpoint, checkpoint, start, cancel, append, discard, validate };
     }
+
+    it.each(["stale-state", "unlisted-path", "untracked-path"] as const)(
+      "returns the tracked discard refusal %s instead of failing to decode its result",
+      async (reason) => {
+        const { service, discard } = restoreFixture([]);
+        discard.mockResolvedValueOnce({ status: "rejected", reason });
+        await expect(service.execute(ids.window, discardCommand)).resolves.toMatchObject({
+          kind: "git-mutation-state",
+          mutation: "discard",
+          state: "rejected",
+          reason,
+        });
+      },
+    );
+
+    it.each(["running", "waiting"] as const)(
+      "refuses discard while another thread is %s and names it",
+      async (state) => {
+        const { service, discard } = restoreFixture([liveTurn({ state })]);
+        await expect(service.execute(ids.window, discardCommand)).resolves.toMatchObject({
+          kind: "operation-failed",
+          failure: {
+            category: "conflict",
+            message:
+              'Another thread is writing in this checkout: "Rewrite the parser". Wait for its turn to finish or stop it, then discard.',
+          },
+        });
+        expect(discard).not.toHaveBeenCalled();
+      },
+    );
+
+    it("keeps another Project's writing thread title private when refusing discard", async () => {
+      const { service, discard } = restoreFixture([
+        liveTurn({ projectId: otherProject, title: "Private plans" }),
+      ]);
+      const result = await service.execute(ids.window, discardCommand);
+      expect(result).toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message:
+            "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then discard.",
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain("Private plans");
+      expect(discard).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { description: "a Plan turn", turn: liveTurn({ posture: "plan" }) },
+      {
+        description: "a turn in another checkout",
+        turn: liveTurn({ checkoutRoot: "/tmp/repo-worktree" }),
+      },
+      { description: "a completed turn", turn: liveTurn({ state: "completed" }) },
+    ])("allows discard beside $description", async ({ turn }) => {
+      const { service, discard } = restoreFixture([turn]);
+      await expect(service.execute(ids.window, discardCommand)).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        mutation: "discard",
+        state: "completed",
+      });
+      expect(discard).toHaveBeenCalledOnce();
+    });
+
+    it("refuses discard during the requesting thread's own turn", async () => {
+      const { service, discard } = restoreFixture([liveTurn({ threadId: ids.thread })]);
+      await expect(service.execute(ids.window, discardCommand)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message:
+            "A turn is running in this thread. Wait for it to finish or stop it, then discard.",
+        },
+      });
+      expect(discard).not.toHaveBeenCalled();
+    });
+
+    it("rechecks writers after a delayed discard approval and allows a fresh retry once they stop", async () => {
+      const live: ReturnType<typeof liveTurn>[] = [];
+      const { service, discard, validate } = restoreFixture(
+        live,
+        decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+      );
+      const entered = Promise.withResolvers<void>();
+      const approved = Promise.withResolvers<boolean>();
+      validate.mockImplementationOnce(() => {
+        entered.resolve();
+        return approved.promise;
+      });
+      const discarding = service.execute(ids.window, discardCommand);
+      await entered.promise;
+      live.push(liveTurn({}));
+      approved.resolve(true);
+      await expect(discarding).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "conflict" },
+      });
+      expect(discard).not.toHaveBeenCalled();
+      live.length = 0;
+      await expect(
+        service.execute(ids.window, {
+          ...discardCommand,
+          operationId: decodeCodeOperationId("54545454-5454-4545-8545-545454545454"),
+        }),
+      ).resolves.toMatchObject({ kind: "git-mutation-state", state: "completed" });
+      expect(discard).toHaveBeenCalledOnce();
+    });
+
+    it("releases the checkout after discard fails so a fresh retry can proceed", async () => {
+      const { service, discard } = restoreFixture([]);
+      discard.mockRejectedValueOnce(new Error("Git stopped before completion"));
+      await expect(service.execute(ids.window, discardCommand)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "failed" },
+      });
+      await expect(
+        service.execute(ids.window, {
+          ...discardCommand,
+          operationId: decodeCodeOperationId("54545454-5454-4545-8545-545454545454"),
+        }),
+      ).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        mutation: "discard",
+        state: "completed",
+      });
+      expect(discard).toHaveBeenCalledTimes(2);
+    });
+
+    it("makes a turn wait for discard before capturing files and refuses another overwrite", async () => {
+      const writer = liveTurn({}).thread;
+      const { service, discard, checkpoint, start, restoreCheckpoint } = restoreFixture(
+        [],
+        thread(),
+        [writer],
+      );
+      const entered = Promise.withResolvers<void>();
+      const overwrite = Promise.withResolvers<void>();
+      discard.mockImplementationOnce(async () => {
+        entered.resolve();
+        await overwrite.promise;
+        return { status: "applied" };
+      });
+      const discarding = service.execute(ids.window, discardCommand);
+      await entered.promise;
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message:
+            "Another operation is overwriting this checkout. Wait for it to finish, then restore.",
+        },
+      });
+      const starting = service.execute(ids.window, { ...startProviderTurn, threadId: writer.id });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(checkpoint).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "conflict" },
+      });
+      expect(restoreCheckpoint).not.toHaveBeenCalled();
+      overwrite.resolve();
+      await expect(discarding).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        state: "completed",
+      });
+      await expect(starting).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "running",
+      });
+      expect(checkpoint).toHaveBeenCalledOnce();
+    });
 
     it("refuses a restore while another Project's restore is overwriting the same folder", async () => {
       const otherRestorer = decodeCodeThread({
@@ -1590,7 +1777,7 @@ describe("CodeOperationService", () => {
         failure: {
           category: "conflict",
           message:
-            "Another restore is overwriting this checkout. Wait for it to finish, then restore.",
+            "Another operation is overwriting this checkout. Wait for it to finish, then restore.",
         },
       });
       expect(restoreCheckpoint).toHaveBeenCalledOnce();
@@ -1736,6 +1923,29 @@ describe("CodeOperationService", () => {
         expect(startResults()[0]?.[0].event.result).toMatchObject({ state: "interrupted" });
       },
     );
+
+    it("refuses discard from a thread whose turn is still capturing its checkpoint", async () => {
+      const { service, discard, checkpoint } = restoreFixture([]);
+      const entered = Promise.withResolvers<void>();
+      const capture = Promise.withResolvers<void>();
+      checkpoint.mockImplementationOnce(async () => {
+        entered.resolve();
+        await capture.promise;
+        return { status: "unavailable" };
+      });
+      const starting = service.execute(ids.window, startProviderTurn);
+      await entered.promise;
+      try {
+        await expect(service.execute(ids.window, discardCommand)).resolves.toMatchObject({
+          kind: "operation-failed",
+          failure: { category: "conflict" },
+        });
+        expect(discard).not.toHaveBeenCalled();
+      } finally {
+        capture.resolve();
+        await starting;
+      }
+    });
 
     it("refuses to restore while another thread is writing in the same checkout and names it", async () => {
       const { service, restoreCheckpoint } = restoreFixture([liveTurn({})]);

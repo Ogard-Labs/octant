@@ -4,6 +4,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readProcessGroupWitnesses } from "../process/nodeOwnedProcessReceipt";
 import { ExtensionSupervisor } from "./extensionSupervisor";
 import { createNodeExtensionProcessPort } from "./nodeExtensionProcessPort";
 
@@ -64,6 +65,132 @@ afterEach(async () => {
 });
 
 describe("node extension process port", () => {
+  it("preserves an owned receipt when process identity cannot be observed", async () => {
+    const receiptDirectory = await mkdtemp(join(tmpdir(), "octant-extension-receipts-"));
+    receiptDirectories.push(receiptDirectory);
+    const port = createNodeExtensionProcessPort({ receiptDirectory, shutdownTimeoutMs: 100 });
+    const child = await port.start(startInput);
+    try {
+      const fresh = createNodeExtensionProcessPort({
+        receiptDirectory,
+        processIdentity: async () => {
+          throw new Error("identity lookup unavailable");
+        },
+      });
+      await expect(fresh.receipts()).rejects.toThrow("identity lookup unavailable");
+      expect(await readdir(receiptDirectory)).toHaveLength(1);
+    } finally {
+      await child.stop();
+    }
+  });
+
+  it("shares one stop completion for repeated requests to a recovered owned group", async () => {
+    const receiptDirectory = await mkdtemp(join(tmpdir(), "octant-extension-receipts-"));
+    receiptDirectories.push(receiptDirectory);
+    const port = createNodeExtensionProcessPort({ receiptDirectory, shutdownTimeoutMs: 100 });
+    const child = await port.start(startInput);
+    try {
+      const [receipt] = await port.receipts();
+      if (receipt?.stop === undefined) throw new Error("Missing owned process receipt");
+      const stopped = receipt.stop();
+      expect(receipt.stop()).toBe(stopped);
+      await stopped;
+    } finally {
+      await child.stop();
+    }
+  });
+  macosOnly.each(["during TERM", "before stop"])(
+    "reaps verified surviving descendants when the launch leader exits %s",
+    async (when) => {
+      const receiptDirectory = await mkdtemp(join(tmpdir(), "octant-extension-receipts-"));
+      receiptDirectories.push(receiptDirectory);
+      const descendant =
+        "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000)";
+      const script = `const { spawn } = require('node:child_process'); const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { stdio: ['ignore', 'pipe', 'ignore'] }); child.stdout.once('data', () => process.stdout.write('OCTANT_EXTENSION_READY\\n')); process.stdin.once('data', () => process.exit(0)); setInterval(() => {}, 1000);`;
+      const port = createNodeExtensionProcessPort({ receiptDirectory, shutdownTimeoutMs: 100 });
+      const child = await port.start({ ...startInput, args: ["-e", script] });
+      try {
+        await child.ready;
+        const members = await readProcessGroupWitnesses(child.pid);
+        expect(members.filter((member) => member.pid !== child.pid)).toHaveLength(1);
+        if (when === "before stop") {
+          if (child.stdin === undefined) throw new Error("Missing fixture input");
+          child.stdin.write("exit");
+          await child.wait;
+          await expect(
+            createNodeExtensionProcessPort({ receiptDirectory }).receipts(),
+          ).rejects.toThrow("ownership is uncertain");
+          expect(await readdir(receiptDirectory)).toHaveLength(1);
+        }
+        const stopped = child.stop();
+        expect(child.stop()).toBe(stopped);
+        await stopped;
+        expect(await readProcessGroupWitnesses(child.pid)).toEqual([]);
+        expect(await readdir(receiptDirectory)).toHaveLength(0);
+      } finally {
+        await child.stop().catch(() => undefined);
+        // Only this disposable fixture's group, after its members were observed.
+        for (const member of await readProcessGroupWitnesses(child.pid)) {
+          try {
+            process.kill(member.pid, "SIGKILL");
+          } catch {
+            /* Already reaped. */
+          }
+        }
+      }
+    },
+  );
+
+  it("escalates a real owned leader that ignores TERM and removes its receipt only after exit", async () => {
+    const receiptDirectory = await mkdtemp(join(tmpdir(), "octant-extension-receipts-"));
+    receiptDirectories.push(receiptDirectory);
+    const port = createNodeExtensionProcessPort({ receiptDirectory, shutdownTimeoutMs: 30 });
+    const child = await port.start({
+      ...startInput,
+      args: [
+        "-e",
+        "process.on('SIGTERM', () => {}); process.stdout.write('OCTANT_EXTENSION_READY\\n'); setInterval(() => {}, 1000)",
+      ],
+    });
+    try {
+      await child.ready;
+      await child.stop();
+      await expect(child.wait).resolves.toMatchObject({ signal: "SIGKILL" });
+      expect(await readdir(receiptDirectory)).toHaveLength(0);
+    } finally {
+      await child.stop().catch(() => undefined);
+    }
+  });
+
+  it("cleans up only its direct launch when initial identity observation fails", async () => {
+    let launched: ReturnType<typeof nodeSpawn> | undefined;
+    const spawn = ((...args: Parameters<typeof nodeSpawn>) => {
+      launched = nodeSpawn(...args);
+      return launched;
+    }) as typeof nodeSpawn;
+    const port = createNodeExtensionProcessPort({
+      spawn,
+      shutdownTimeoutMs: 100,
+      processIdentity: async () => {
+        throw new Error("identity unavailable");
+      },
+    });
+    await expect(port.start(startInput)).rejects.toThrow("identity unavailable");
+    expect(launched?.signalCode).toBe("SIGKILL");
+  });
+
+  it("preserves malformed receipts and reports a receipt-directory failure", async () => {
+    const receiptDirectory = await mkdtemp(join(tmpdir(), "octant-extension-receipts-"));
+    receiptDirectories.push(receiptDirectory);
+    const file = join(receiptDirectory, `receipt-${"a".repeat(64)}.json`);
+    await writeFile(file, '{"truncated":');
+    await expect(createNodeExtensionProcessPort({ receiptDirectory }).receipts()).rejects.toThrow();
+    expect(await readdir(receiptDirectory)).toHaveLength(1);
+    await expect(
+      createNodeExtensionProcessPort({ receiptDirectory: file }).receipts(),
+    ).rejects.toMatchObject({ code: expect.stringMatching(/ENOTDIR|EISDIR/) });
+  });
+
   it("constructs a network-denied macOS sandbox launch", async () => {
     let observed: { command: string; args: ReadonlyArray<string> } | undefined;
     const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
