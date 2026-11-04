@@ -131,8 +131,7 @@ describe("DesktopDownloadHold", () => {
     }
     await hold.finish();
     expect(hold.claim("d1")).toBeUndefined();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(existsSync(paths[0] ?? "")).toBe(false);
+    await vi.waitFor(() => expect(existsSync(paths[0] ?? "")).toBe(false));
     for (const id of ["d2", "d3", "d4", "d5", "d6"]) expect(hold.claim(id)).toBeDefined();
     await hold.dispose();
     for (const path of paths) expect(existsSync(path)).toBe(false);
