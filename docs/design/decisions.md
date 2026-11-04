@@ -805,7 +805,8 @@ A routine runs at the guardrail level the person picks when creating it, Full ac
 - A Code routine may merge the pull requests it opens when the person allowed that at creation; an agent proposing a routine never picks either for the person.
 - Built: a person at a local window may pick a level on the routine itself (Ask first, Accept edits, Auto or Full access). It is the highest a run may use: a run takes the lower of the pick and its Project's level, so a pick lowers a run and never raises it above what the person allowed. A paired device and a routine an agent proposed cannot set it, and a Chat routine has none.
 - Built: a person at a local window may opt a routine into its Project's level, journaled on the definition and copied into each run; each run then takes the level the Project's new threads start at, Full access included. Without it a routine asks first, and a Full access profile stays ineligible.
-- A Work routine captures the shell and Git like a Code routine; one saved without them does not run until a person saves it again.
+- A Work routine captures the shell and Git like a Code routine; the catalog offers them with an ordinary approval-gated Work profile. One saved without them does not run until a person saves it again.
+- The editor saves Ask first explicitly for Work and Code. Existing definitions with no picked level retain their dispatch behavior until saved; Chat has no level.
 - Built: a person at a local window may let a Code routine merge the pull requests it opens (the routine's Merge the pull requests it opens choice); it reaches only the thread one of its runs created, while the routine is enabled, and a routine an agent proposed cannot set it.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).

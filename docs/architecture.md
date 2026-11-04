@@ -2518,8 +2518,10 @@ the thread it came from.
   captures the shell and Git, and one saved without them (every Work routine
   saved before Work had the shell) blocks at dispatch as `authority-mismatch`
   until a person saves it again under a profile that grants them, because a
-  Work turn cannot withhold them and a routine never runs above its snapshot. A
-  routine asks first by default: a Full access profile is not eligible,
+  Work turn cannot withhold them and a routine never runs above its snapshot.
+  The catalog offers an approval-gated Work-compatible profile with that same
+  filesystem, shell, and Git authority; it needs no additional Code-only
+  profile. A routine asks first by default: a Full access profile is not eligible,
   whether or not it was remembered elsewhere (the contract refuses it on the
   snapshot and dispatch blocks it as `full-access-ineligible`), Code runs are
   created approval-gated, and a Work run's unattended first turn runs
@@ -2544,7 +2546,11 @@ the thread it came from.
   lower a run below its Project's level and never raise it above what the
   person allowed there. Only a local window sets it, a paired device is
   refused at the route, a routine an agent proposes never has it, and a Chat
-  routine cannot carry it. _Rationale:_ the maintainer asked for a level "never
+  routine cannot carry it. The editor saves **Ask first** explicitly as
+  `runLevel: "ask-first"` for Work and Code, including when a person edits and
+  saves an older definition that omitted the field. Existing omitted values
+  retain their dispatch behavior until saved; Chat keeps omitting the field.
+  _Rationale:_ the maintainer asked for a level "never
   above what the person allowed"; the narrower reading, the Project's level
   as the ceiling, keeps Full access a choice made where the Project's level is
   set.
