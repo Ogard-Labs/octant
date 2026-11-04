@@ -197,3 +197,5 @@ export * from "./threadMessageQueue";
 export * from "./agentObservation";
 export * from "./hostAnswer";
 export * from "./terminalSessions";
+
+export * from "./gitHunks";

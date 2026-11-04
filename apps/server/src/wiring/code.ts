@@ -5,6 +5,7 @@ import {
 } from "../code/repositoryIdentity";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat } from "node:fs/promises";
+import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -103,6 +104,11 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
   readonly readProject: PersistenceService["readProject"];
   readonly repository: ManagedWorktreeRepositoryPort;
   readonly managedReceipts?: Pick<ManagedWorktreeReceiptStore, "load">;
+  readonly currentIdentity?: (
+    path: string,
+  ) =>
+    | { readonly canonicalPath: string; readonly device: string; readonly inode: string }
+    | undefined;
   readonly statIdentity: (
     path: string,
   ) => Promise<{ readonly device: string; readonly inode: string }>;
@@ -126,6 +132,33 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
         return undefined;
       }
       const repositoryRoot = project.binding.canonicalRoot;
+      const bindingCurrent = () => {
+        const current = options.readProject(thread.projectId);
+        const currentRevision =
+          current?.type === "code" ? current.bindingHistory.at(-1) : undefined;
+        return (
+          current?.type === "code" &&
+          current.lifecycle === "active" &&
+          current.binding.canonicalRoot === repositoryRoot &&
+          currentRevision?.revisionId === thread.bindingRevisionId &&
+          currentRevision.currentBinding.canonicalRoot === repositoryRoot
+        );
+      };
+      const currentProof =
+        (rootPath: string, identity: { readonly device: string; readonly inode: string }) => () => {
+          if (!bindingCurrent()) return false;
+          if (options.currentIdentity === undefined) return false;
+          try {
+            const current = options.currentIdentity(rootPath);
+            return (
+              current?.canonicalPath === rootPath &&
+              current.device === identity.device &&
+              current.inode === identity.inode
+            );
+          } catch {
+            return false;
+          }
+        };
       let rootPath: string;
       if (checkout.kind === "plain-folder") {
         // No repository to observe: the folder is the checkout. Its identity
@@ -144,10 +177,12 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
           return undefined;
         }
         const rootIdentity = await options.statIdentity(repositoryRoot);
+        if (!bindingCurrent()) return undefined;
         return {
           fileId: stableCodeFileId(thread.id, checkout.id, relativePath),
           rootPath: repositoryRoot,
           rootIdentity,
+          current: currentProof(repositoryRoot, rootIdentity),
         };
       }
       if (checkout.kind === "existing-worktree") {
@@ -207,10 +242,12 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
         return undefined;
       }
       const rootIdentity = await options.statIdentity(rootPath);
+      if (!bindingCurrent()) return undefined;
       return {
         fileId: stableCodeFileId(thread.id, checkout.id, relativePath),
         rootPath,
         rootIdentity,
+        current: currentProof(rootPath, rootIdentity),
       };
     },
   };
@@ -677,6 +714,15 @@ export function wireCode(deps: CodeDependencies) {
       readProject: persistence.readProject,
       repository,
       managedReceipts: managedWorktreeReceipts,
+      currentIdentity: (path) => {
+        const metadata = lstatSync(path, { bigint: true });
+        if (metadata.isSymbolicLink() || !metadata.isDirectory()) return undefined;
+        return {
+          canonicalPath: realpathSync.native(path),
+          device: metadata.dev.toString(10),
+          inode: metadata.ino.toString(10),
+        };
+      },
       statIdentity: async (path) => {
         const metadata = await lstat(path, { bigint: true });
         if (metadata.isSymbolicLink() || !metadata.isDirectory()) {

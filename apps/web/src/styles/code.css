@@ -2668,6 +2668,29 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   gap: var(--oct-space-2);
 }
 
+.code-diff-pane__hunk-selection {
+  min-width: 0;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-diff-pane__hunk-selection > summary {
+  cursor: pointer;
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-diff-pane__hunk-selection > section {
+  margin-block: var(--oct-space-4);
+}
+
+.code-diff-pane__hunk-selection .check {
+  display: flex;
+  gap: var(--oct-space-2);
+  align-items: center;
+  overflow-wrap: anywhere;
+  margin-bottom: var(--oct-space-2);
+}
+
 /* The owned references list shares the pane with the editor. */
 .code-editor-pane:has(> .code-editor-pane__references) > [aria-label^="Editor for"] {
   min-height: 0;

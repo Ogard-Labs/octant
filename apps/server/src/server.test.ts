@@ -1336,10 +1336,11 @@ describe("startOctantServer", () => {
             ).then(assertResponse),
           );
           expect(evidenceBatch.status).toBe(200);
-          expect(runtime.readEvidenceBatch).toHaveBeenCalledWith(windowId, {
-            threadId,
-            items: [],
-          });
+          expect(runtime.readEvidenceBatch).toHaveBeenCalledWith(
+            windowId,
+            { threadId, items: [] },
+            expect.any(Function),
+          );
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),
     );
