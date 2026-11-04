@@ -61,9 +61,12 @@ export interface LinkedSecretPointers {
     secretId: string,
     linked: { readonly store: string; readonly reference: string },
   ) => Promise<
-    { readonly status: "pointed" } | { readonly status: "refused"; readonly message: string }
+    | { readonly status: "pointed" }
+    | { readonly status: "refused" | "uncertain"; readonly message: string }
   >;
   readonly forget: (secretId: string) => Promise<void>;
+  /** A definitive reply distinguishes completed local deletion from an unknown outcome. */
+  readonly retire?: (secretId: string) => Promise<"cleared" | "uncertain">;
 }
 
 /**

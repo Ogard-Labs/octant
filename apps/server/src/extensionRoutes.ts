@@ -19,6 +19,7 @@ import {
   type DiscoveredAgentToolingListing,
   type ExtensionProjectPinListing,
   type McpServerSignInView,
+  type McpClientSetupInput,
   type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { isAbsolute } from "node:path";
@@ -62,6 +63,17 @@ export function createExtensionRouteHandler(options: {
   };
   /** Sign-in to a hosted server a person added, through the host OAuth runner. */
   readonly mcpServerSignIn?: {
+    prepareClient?(
+      extensionId: string,
+      componentId: string,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
+    saveClient?(
+      extensionId: string,
+      componentId: string,
+      setup: McpClientSetupInput,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
     configureClient(
       extensionId: string,
       componentId: string,
@@ -497,6 +509,36 @@ export function createExtensionRouteHandler(options: {
       const extensionId = String(signIn.extensionId);
       const componentId = String(signIn.componentId);
       try {
+        if (signIn.kind === "prepare-client" || signIn.kind === "save-client") {
+          if (principalKind !== "local-window")
+            return response(
+              failure("unauthorized", "Set up the client from the Octant window on this host."),
+              401,
+              origin,
+            );
+          const view =
+            signIn.kind === "prepare-client"
+              ? await options.mcpServerSignIn.prepareClient?.(
+                  extensionId,
+                  componentId,
+                  principalKind,
+                )
+              : await options.mcpServerSignIn.saveClient?.(
+                  extensionId,
+                  componentId,
+                  signIn.setup,
+                  principalKind,
+                );
+          return response(
+            view ?? {
+              kind: "refused",
+              reason: "unavailable",
+              message: "Client setup is unavailable on this host.",
+            },
+            200,
+            origin,
+          );
+        }
         if (signIn.kind === "configure-client") {
           if (principalKind !== "local-window")
             return response(

@@ -1012,6 +1012,9 @@ export function wireProviders(deps: ProvidersDependencies) {
       userAddedMcpServers: {
         owns: (sourceRef) => userAddedMcpServers.owns(sourceRef),
         localSetupId: (sourceRef) => userAddedMcpServers.localSetupId(sourceRef),
+        prepareRemoval: async (extensionId) =>
+          (await mcpServerSignInHolder.current?.preparePackageRemoval(extensionId)) ??
+          (() => undefined),
         remove: async (sourceRef, extensionId) => {
           await mcpServerSignInHolder.current?.forgetPackage(extensionId);
           await userAddedMcpServers.remove(sourceRef);
@@ -1119,6 +1122,14 @@ export function wireProviders(deps: ProvidersDependencies) {
         },
       },
       mcpServerSignIn: {
+        prepareClient: (extensionId, componentId, principalKind) =>
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.prepareClient(extensionId, componentId, principalKind),
+          ),
+        saveClient: (extensionId, componentId, setup, principalKind) =>
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.saveClient(extensionId, componentId, setup, principalKind),
+          ),
         configureClient: (extensionId, componentId, registration, principalKind) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.configureForServer(extensionId, componentId, registration, principalKind),
@@ -1396,6 +1407,22 @@ export function wireProviders(deps: ProvidersDependencies) {
         access: (credentialRef) => oauthBroker.access(credentialRef),
         actorId: OCTANT_LOCAL_ACTOR_ID,
         serverUrl: mcpServerSignInAddress,
+        ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+          ? {}
+          : {
+              linkedSecrets: makeConnectorLinkedSecrets({
+                broker: makeSecretStoreBrokerClient({
+                  url: options.credentialBrokerUrl,
+                  token: options.credentialBrokerToken,
+                }),
+                journal: secretStoresJournal({
+                  journal: persistence.journal,
+                  connection: persistence.connection,
+                  uuid: randomUUID,
+                  now: () => new Date().toISOString(),
+                }),
+              }),
+            }),
       });
     }
     const subscriptionOAuth =

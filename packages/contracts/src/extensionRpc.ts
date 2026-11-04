@@ -228,7 +228,32 @@ const signInTarget = {
   extensionId: ToolExtensionId,
   componentId: ExtensionComponentId,
 };
+/** A linked store item address, never the secret value or a caller-created broker id. */
+export const McpClientSetupInput = Schema.Struct({
+  binding: Schema.Struct({
+    resource: boundedText(2048),
+    issuer: boundedText(2048),
+    tokenEndpoint: boundedText(2048),
+    callback: boundedText(256),
+  }).annotations(strict),
+  kind: Schema.Literal("registered", "metadata-document"),
+  clientId: boundedText(2048),
+  authentication: Schema.Literal("none", "client_secret_post", "client_secret_basic"),
+  secret: Schema.optional(
+    Schema.Struct({ store: SecretStoreKind, reference: SecretStoreItemReference }).annotations(
+      strict,
+    ),
+  ),
+}).annotations(strict);
+export type McpClientSetupInput = typeof McpClientSetupInput.Type;
+
 export const McpServerSignInRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("prepare-client"), ...signInTarget }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("save-client"),
+    ...signInTarget,
+    setup: McpClientSetupInput,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("configure-client"),
     ...signInTarget,
@@ -246,9 +271,30 @@ export const McpServerSignInRequest = Schema.Union(
 export type McpServerSignInRequest = typeof McpServerSignInRequest.Type;
 export const decodeMcpServerSignInRequest = Schema.decodeUnknownSync(McpServerSignInRequest);
 export const McpServerSignInView = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("client-configured") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("client-setup"),
+    resource: boundedText(2048),
+    issuer: boundedText(2048),
+    tokenEndpoint: boundedText(2048),
+    callback: boundedText(256),
+    metadataClientSupported: Schema.Boolean,
+    authenticationMethods: Schema.Array(
+      Schema.Literal("none", "client_secret_post", "client_secret_basic"),
+    ),
+    secretStoreAvailable: Schema.Boolean,
+    registration: Schema.optional(McpOAuthClientRegistration),
+  }).annotations(strict),
   /** A server reached by a command, or one that answered without asking for a sign-in. */
   Schema.Struct({ kind: Schema.Literal("not-applicable") }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("signed-out") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("cancel-pending"), message: boundedText(512) }).annotations(
+    strict,
+  ),
+  Schema.Struct({
+    kind: Schema.Literal("status-unavailable"),
+    message: boundedText(512),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("awaiting-consent"),
     attemptId: Schema.UUID,
