@@ -131,8 +131,13 @@ describe("DesktopDownloadHold", () => {
     }
     await hold.finish();
     expect(hold.claim("d1")).toBeUndefined();
-    await vi.waitFor(() => expect(existsSync(paths[0] ?? "")).toBe(false));
-    for (const id of ["d2", "d3", "d4", "d5", "d6"]) expect(hold.claim(id)).toBeDefined();
+    // Each download is numbered when its own size check settles, and those
+    // checks run concurrently, so d1 is not always the first file written.
+    const kept = ["d2", "d3", "d4", "d5", "d6"].map((id) => hold.claim(id));
+    for (const path of kept) expect(path).toBeDefined();
+    const discarded = paths.filter((path) => !kept.includes(path));
+    expect(discarded).toHaveLength(1);
+    await vi.waitFor(() => expect(existsSync(discarded[0] ?? "")).toBe(false));
     await hold.dispose();
     for (const path of paths) expect(existsSync(path)).toBe(false);
   });
