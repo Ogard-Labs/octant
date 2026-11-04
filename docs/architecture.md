@@ -8687,6 +8687,26 @@ reported issuer remain bound to the attempt. Success, denial, timeout and host
 close release both listeners, including a bind completing after host close.
 Every other dialect keeps its existing loopback callback policy.
 
+A broker status read has a ten-second bound at the HTTP client and service
+boundary. Timeout or transport failure is unknown status, not proof that the
+consent/exchange ended; its owner must be retained for a later explicit status
+check or cancellation. A late response to the expired read does not become a
+new sign-in result.
+
+The authenticated broker also accepts cancellation of a retained MCP PKCE
+attempt only under the actor and descriptor recorded at Begin. It takes no
+caller-selected grant reference. Cancellation closes that attempt's listeners,
+prevents a late token response from creating a grant, and waits for any
+already-issued grant write before deleting that exact generated reference.
+The network caller and broker cleanup wait each have a ten-second bound;
+unavailable cleanup is not confirmed cancellation. Its retained attempt keeps
+ownership for an explicit retry rather than replaying an exchange or deleting
+before an original write finishes. This ownership is in broker memory, not a
+new durable recovery system: broker/process loss and native store failures
+still need honest recovery handling. The server's pending Sign out/uninstall
+consumers must use this result before dropping their pending owner; their
+integration reuses the existing application-setup operation queues.
+
 This supplies a callback contract and protected registration route, not an
 advertised Slack connection or a catalog entry. The reusable app-setup view
 must select and save this same hostname after checking its displayed callback;

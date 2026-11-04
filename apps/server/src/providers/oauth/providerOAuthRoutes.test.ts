@@ -406,6 +406,7 @@ function fixture(
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   const service: HostOAuthService = {
+    cancel: async () => ({ kind: "unavailable" }),
     offer: () => ({
       oauth: { available: true, termsRequired: false },
       apiKey: { available: true },

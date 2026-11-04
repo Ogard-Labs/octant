@@ -66,6 +66,11 @@ export interface HostOAuthBrokerPort {
     /** ChatGPT plan reauthorization: the instance's stored grant. Optional. */
     readonly credentialRef?: string;
   }) => Promise<unknown>;
+  readonly cancel?: (input: {
+    readonly attemptId: string;
+    readonly descriptorId: string;
+    readonly actorId: string;
+  }) => Promise<unknown>;
   readonly status: (attemptId: string) => Promise<unknown>;
   readonly refresh: (credentialRef: string) => Promise<unknown>;
   /**
@@ -91,7 +96,7 @@ export function makeHostOAuthBrokerClient(options: {
   readonly fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }): HostOAuthBrokerPort {
   const fetchImpl = options.fetch ?? globalThis.fetch;
-  const post = async (path: string, body: unknown): Promise<unknown> => {
+  const post = async (path: string, body: unknown, signal?: AbortSignal): Promise<unknown> => {
     const response = await fetchImpl(new URL(path, options.url), {
       method: "POST",
       redirect: "error",
@@ -100,6 +105,7 @@ export function makeHostOAuthBrokerClient(options: {
         "x-octant-credential-broker-token": options.token,
       },
       body: JSON.stringify(body),
+      ...(signal === undefined ? {} : { signal }),
     });
     if (!response.ok) throw new Error("Octant host OAuth broker refused the request.");
     const value: unknown = await response.json();
@@ -172,11 +178,24 @@ export function makeHostOAuthBrokerClient(options: {
         },
       });
     },
+    cancel: (input) => {
+      if (!UUID_PATTERN.test(input.attemptId) || !UUID_PATTERN.test(input.actorId))
+        return Promise.reject(new Error("Octant host OAuth broker refused the request."));
+      return post(
+        "/v1/oauth/cancel",
+        {
+          attemptId: input.attemptId,
+          descriptorId: input.descriptorId,
+          actorId: input.actorId,
+        },
+        AbortSignal.timeout(10_000),
+      );
+    },
     status: (attemptId) => {
       if (!UUID_PATTERN.test(attemptId)) {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
       }
-      return post("/v1/oauth/status", { attemptId });
+      return post("/v1/oauth/status", { attemptId }, AbortSignal.timeout(10_000));
     },
     refresh: (credentialRef) => {
       if (!UUID_PATTERN.test(credentialRef)) {
