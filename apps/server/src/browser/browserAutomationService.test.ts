@@ -1718,7 +1718,7 @@ describe("BrowserAutomationService", () => {
         if (gesture === "input") f.personTyped();
         else f.service.takeOver(windowId, threadOne);
         await vi.waitFor(() => expect(f.contexts.size).toBe(0));
-        expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+        expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("expired");
         await f.service.close();
       }
     });
@@ -1823,7 +1823,7 @@ describe("BrowserAutomationService", () => {
       expect(f.timers.at(-1)?.delay).toBe(policy.sessionTimeoutMs);
       f.advance(policy.sessionTimeoutMs);
       f.expire();
-      expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("expired");
       expect((await creation).context?.state).toBe("expired");
       finish();
       await vi.waitFor(() => expect(f.contexts.size).toBe(0));
@@ -1852,7 +1852,7 @@ describe("BrowserAutomationService", () => {
           policy,
         });
         expect(result.context?.state).toBe("expired");
-        expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+        expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("expired");
         await vi.waitFor(() => expect(f.contexts.size).toBe(0));
         if (phase === "availability") expect(f.runtime.createContext).not.toHaveBeenCalled();
         await f.service.close();
@@ -1875,7 +1875,7 @@ describe("BrowserAutomationService", () => {
       const result = await f.service.act({ windowId, capturedBy: "agent", request: request() });
       expect(result.failure?.category).toBe("context-expired");
       f.personTyped();
-      expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("expired");
       await f.service.close();
     });
 
@@ -1919,6 +1919,7 @@ describe("BrowserAutomationService", () => {
       policy: { ...policy, profile: { kind: "personal" } },
     });
     await fixture.service.act({ windowId, request: request() });
+    fixture.advance(policy.sessionTimeoutMs);
     fixture.expire();
     await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
     const expired = fixture.service.inspectThread(windowId, threadOne);
@@ -1933,6 +1934,7 @@ describe("BrowserAutomationService", () => {
     await fixture.service.releaseThread(windowId, threadOne);
     expect(fixture.service.inspectThread(windowId, threadOne).failure).toBeUndefined();
     await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    fixture.advance(policy.sessionTimeoutMs);
     fixture.expire();
     await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
     const reopened = await fixture.service.create({
@@ -1955,6 +1957,7 @@ describe("BrowserAutomationService", () => {
         action: action(),
         policy: { ...policy, profile: { kind: "personal" } },
       });
+      fixture.advance(policy.sessionTimeoutMs);
       fixture.expire();
       await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
       if (clear === "authority") fixture.revoke(threadOne);
@@ -1981,6 +1984,7 @@ describe("BrowserAutomationService", () => {
         action: action(),
         policy,
       });
+      fixture.advance(policy.sessionTimeoutMs);
       fixture.expire();
     }
     const first = windows[0];

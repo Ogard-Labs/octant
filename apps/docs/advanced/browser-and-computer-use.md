@@ -56,11 +56,11 @@ again for Project or Personal. A new page with no profile argument still opens
 Private. The recovery hint contains no page text, picture, password, or account
 detail and is kept only temporarily in the host's bounded memory.
 
-The agent's page still has a ten-minute session from opening; ordinary agent
-activity does not renew it. Sign-in or Take over keeps it open for eleven
-minutes from the handoff or your latest take-over input, then two minutes after
-Continue or Hand back, using whichever deadline is later than the original
-session.
+The agent's page stays open while the agent or you use it, and closes after ten
+minutes without that activity. Watching the page or its preview does not keep
+it open. Sign-in or Take over keeps it open for eleven minutes from the handoff
+or your latest take-over input, then two minutes after Continue or Hand back,
+using whichever deadline is later than the ordinary idle deadline.
 
 A Work agent can request a Project or Personal profile. Code's separate agent
 adapter currently opens new pages Private and does not yet accept that profile
