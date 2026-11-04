@@ -479,6 +479,7 @@ export function startOctantServer(
       shieldServerRoutes,
       shieldServerStore,
       serverProjectRoutes,
+      serverPreviewTunnels,
       nativeHarnessSessionRoutes,
       onHarnessPausedByPerson,
       onHarnessRecoveryLifted,
@@ -1505,6 +1506,7 @@ export function startOctantServer(
       (server) =>
         Effect.promise(async () => {
           let shutdownFailure: unknown;
+          await serverPreviewTunnels.close();
           let httpStop: void | Promise<void> = undefined;
           try {
             githubAuthenticationPort.close();

@@ -257,6 +257,12 @@ export class ServerProjectStore {
     return { kind: "changed" };
   }
 
+  recordPreview(
+    payload: import("./serverPreviewTunnel").ServerPreviewView & { readonly owner: string },
+  ): boolean {
+    return this.#append("server-projects.preview-outcome@1", payload);
+  }
+
   #apply(eventName: string, payload: unknown): void {
     if (eventName === SERVER_PROJECTS_EVENT_NAMES.bound) {
       const { project } = decodeServerProjectBoundPayload(payload);
