@@ -125,6 +125,17 @@ export function isStandingProviderContext(block: ProviderContextBlock): boolean 
   return STANDING_CONTEXT_KINDS.has(block.kind);
 }
 
+/**
+ * What a standing block is, as opposed to what it says: its key when it has
+ * one, so a newer version of a re-read file is the same block, and otherwise
+ * its text, so a changed instruction is a different block.
+ */
+export function providerContextIdentity(block: ProviderContextBlock): string {
+  return block.key === undefined
+    ? `${block.kind}\u0000text\u0000${block.text}`
+    : `${block.kind}\u0000key\u0000${block.key}`;
+}
+
 export const PROVIDER_CONTEXT_RESTATED =
   "Octant's standing context for this conversation changed. The Octant context in this message replaces all Octant context sent earlier in this conversation.";
 
@@ -151,28 +162,33 @@ export type ProviderTurnContextDelta =
  * instructions each turn added another copy to its window and its visible
  * history every turn, and made each turn's new input larger than the request.
  * Standing blocks the session holds are left out; per-turn blocks (messages,
- * summaries, mentions, handoffs) are always sent. When a standing block the
- * session holds is no longer in the turn's context (a deselected skill, say),
- * leaving the rest out would let the stale copy stand, so the whole context is
- * sent again behind a note that it replaces what came before.
+ * summaries, mentions, handoffs, one-turn instructions) are always sent. A
+ * keyed block whose text changed is sent as its newer version and appended
+ * after the old one, which stays in the runtime's history; the prompt prefix
+ * is untouched. When a standing block the session holds is no longer in the
+ * turn's context at all (a deselected skill, say), leaving the rest out would
+ * let the stale copy stand, so the whole context is sent again behind a note
+ * that it replaces what came before.
  */
 export function providerTurnContextDelta(input: {
   readonly context: ReadonlyArray<ProviderContextBlock>;
   /** Whether the session holds this exact block from an earlier turn. */
   readonly holds: (block: ProviderContextBlock) => boolean;
-  /** How many distinct standing blocks the session holds. */
-  readonly heldCount: number;
+  /** The identities, under `identify`, of the standing blocks the session holds. */
+  readonly heldIdentities: ReadonlySet<string>;
+  readonly identify: (block: ProviderContextBlock) => string;
 }): ProviderTurnContextDelta {
   const held: ProviderContextBlock[] = [];
   const context: ProviderContextBlock[] = [];
-  const stillHeld = new Set<string>();
+  const present = new Set<string>();
   for (const block of input.context) {
-    if (isStandingProviderContext(block) && input.holds(block)) {
-      held.push(block);
-      stillHeld.add(`${block.kind}\u0000${block.text}`);
-    } else context.push(block);
+    const standing = isStandingProviderContext(block);
+    if (standing) present.add(input.identify(block));
+    if (standing && input.holds(block)) held.push(block);
+    else context.push(block);
   }
-  if (stillHeld.size < input.heldCount) {
+  for (const identity of input.heldIdentities) {
+    if (present.has(identity)) continue;
     return {
       kind: "restated",
       context: [{ kind: "instructions", text: PROVIDER_CONTEXT_RESTATED }, ...input.context],

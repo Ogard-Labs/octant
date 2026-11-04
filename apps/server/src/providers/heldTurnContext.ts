@@ -8,22 +8,29 @@ import type {
 } from "@octant/contracts";
 import {
   isStandingProviderContext,
+  providerContextIdentity,
   providerTurnContextDelta,
   type ProviderTurnContextDelta,
 } from "@octant/provider-sdk/chat-conformance";
 
+/** Standing blocks by identity digest, each with the digest of the version held. */
+type Holding = ReadonlyMap<string, string>;
+
 interface SessionHold {
-  /** Digests of the standing blocks the native session provably holds. */
-  readonly held: ReadonlySet<string>;
-  /** Digests of the standing context the running turn carries, held once it completes. */
-  readonly sending?: ReadonlySet<string>;
+  /** The standing blocks the native session provably holds. */
+  readonly held: Holding;
+  /** The standing context the running turn carries, held once it completes. */
+  readonly sending?: Holding;
   /** Whether the running turn's adapter said the runtime keeps its prompts. */
   readonly keeps?: boolean;
   /** Whether the running turn restates the whole context, superseding what was held. */
   readonly restates?: boolean;
 }
 
-/** One session's held digests, as a store keeps them. */
+/**
+ * One session's holding, as a store keeps it: a block's digest alone when its
+ * identity is its text, or `identity:version` digests for a keyed block.
+ */
 export interface HeldSessionRecord {
   readonly sessionId: string;
   readonly held: ReadonlyArray<string>;
@@ -39,18 +46,50 @@ export interface HeldTurnContextStore {
 const MAX_STORED_SESSIONS = 256;
 /** A standing context of more blocks than this is sent again after a restart. */
 const MAX_STORED_DIGESTS = 64;
-const STORE_VERSION = 1;
-const DIGEST = /^[0-9a-f]{64}$/;
+/** Version 1 files predate keyed blocks; they read as holding nothing, which costs one copy. */
+const STORE_VERSION = 2;
+const ENTRY = /^[0-9a-f]{64}(?::[0-9a-f]{64})?$/;
 
-function blockDigest(block: ProviderContextBlock): string {
-  return createHash("sha256").update(block.kind).update("\u0000").update(block.text).digest("hex");
+function digest(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function versionDigest(block: ProviderContextBlock): string {
+  return digest(`${block.kind}\u0000${block.text}`);
+}
+
+function identityDigest(block: ProviderContextBlock): string {
+  return block.key === undefined ? versionDigest(block) : digest(providerContextIdentity(block));
+}
+
+function holdingOf(blocks: ReadonlyArray<ProviderContextBlock>): Holding {
+  return new Map(
+    blocks
+      .filter(isStandingProviderContext)
+      .map((block) => [identityDigest(block), versionDigest(block)]),
+  );
+}
+
+function storedEntries(held: Holding): ReadonlyArray<string> {
+  return [...held].map(([identity, version]) =>
+    identity === version ? version : `${identity}:${version}`,
+  );
+}
+
+function holdingFromEntries(entries: ReadonlyArray<string>): Holding {
+  return new Map(
+    entries.map((entry) => {
+      const [identity = entry, version = identity] = entry.split(":");
+      return [identity, version];
+    }),
+  );
 }
 
 /**
  * The record kept in Octant's host data directory, so the first turn on a
  * resumed session after a restart sends only what is new, as every later turn
  * does. The file holds provider session ids and SHA-256 digests of standing
- * blocks, never their text, and only its owner may read it. It is a
+ * blocks and their keys, never their text, and only its owner may read it. It is a
  * rebuildable view: a missing, unreadable, or malformed file holds nothing,
  * which costs one copy of the standing context, never a missing one.
  *
@@ -81,7 +120,7 @@ export class HeldTurnContextFile implements HeldTurnContextStore {
       if (typeof entry.sessionId !== "string" || entry.sessionId.length === 0) return [];
       if (!Array.isArray(entry.held) || entry.held.length > MAX_STORED_DIGESTS) return [];
       const held = entry.held.filter(
-        (digest: unknown): digest is string => typeof digest === "string" && DIGEST.test(digest),
+        (stored: unknown): stored is string => typeof stored === "string" && ENTRY.test(stored),
       );
       return held.length > 0 && held.length === entry.held.length
         ? [{ sessionId: entry.sessionId, held }]
@@ -149,7 +188,7 @@ export class HeldTurnContext {
     this.#store = store;
     for (const record of [...store.load()].reverse()) {
       if (this.#sessions.has(record.sessionId)) continue;
-      this.#sessions.set(record.sessionId, { held: new Set(record.held) });
+      this.#sessions.set(record.sessionId, { held: holdingFromEntries(record.held) });
     }
   }
 
@@ -165,15 +204,16 @@ export class HeldTurnContext {
     const key = String(input.sessionId);
     const context = input.context ?? [];
     const previous = this.#sessions.get(key)?.held;
-    const held = (input.resumed ? previous : undefined) ?? new Set<string>();
+    const held: Holding = (input.resumed ? previous : undefined) ?? new Map();
     const delta = providerTurnContextDelta({
       context,
-      holds: (block) => held.has(blockDigest(block)),
-      heldCount: held.size,
+      holds: (block) => held.get(identityDigest(block)) === versionDigest(block),
+      heldIdentities: new Set(held.keys()),
+      identify: identityDigest,
     });
     this.#touch(key, {
       held,
-      sending: new Set(context.filter(isStandingProviderContext).map(blockDigest)),
+      sending: holdingOf(context),
       restates: delta.kind === "restated",
     });
     if (previous !== undefined && previous.size > 0 && held !== previous) this.#persist();
@@ -198,14 +238,14 @@ export class HeldTurnContext {
     } else if (event.kind === "completed" && session.sending !== undefined) {
       const held = session.keeps === true ? session.sending : session.held;
       this.#touch(key, { held });
-      if (!sameDigests(session.held, held)) this.#persist();
+      if (!sameHolding(session.held, held)) this.#persist();
     } else if (event.kind === "failed" || event.kind === "interrupted") {
       // A failed restatement may still be in the runtime's history (Claude
       // reports usage before its failed result), where it supersedes blocks the
       // record would otherwise call held; holding nothing forces a full send.
       if (session.restates !== true) this.#sessions.set(key, { held: session.held });
       else {
-        this.#sessions.set(key, { held: new Set() });
+        this.#sessions.set(key, { held: new Map() });
         if (session.held.size > 0) this.#persist();
       }
     }
@@ -231,16 +271,16 @@ export class HeldTurnContext {
     const records: HeldSessionRecord[] = [];
     for (const [sessionId, session] of [...this.#sessions].reverse()) {
       if (session.held.size === 0 || session.held.size > MAX_STORED_DIGESTS) continue;
-      records.push({ sessionId, held: [...session.held] });
+      records.push({ sessionId, held: storedEntries(session.held) });
       if (records.length === MAX_STORED_SESSIONS) break;
     }
     this.#store.save(records);
   }
 }
 
-function sameDigests(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+function sameHolding(left: Holding, right: Holding): boolean {
   if (left.size !== right.size) return false;
-  for (const digest of left) if (!right.has(digest)) return false;
+  for (const [identity, version] of left) if (right.get(identity) !== version) return false;
   return true;
 }
 

@@ -155,6 +155,24 @@ describe("HeldTurnContext kept on disk", () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
+  it("sends only the newer status file after a restart, keeping its key and never its text on disk", () => {
+    const path = storePath();
+    const status = { kind: "project-memory", key: "work-status", text: "Draft sent." } as const;
+    const revised = { ...status, text: "Draft signed." } as const;
+    completeTurn(restarted(path), false, [instructions, status]);
+
+    const after = restarted(path);
+    expect(completeTurn(after, true, [instructions, revised, mention])).toEqual({
+      kind: "appended",
+      context: [revised, mention],
+      held: [instructions],
+    });
+    expect(completeTurn(after, true, [instructions, revised]).context).toEqual([]);
+    const file = readFileSync(path, "utf8");
+    expect(file).not.toContain(status.text);
+    expect(file).not.toContain(status.key);
+  });
+
   it("sends standing context again after a restart that followed a compaction", () => {
     const path = storePath();
     const before = restarted(path);
