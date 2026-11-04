@@ -9,7 +9,11 @@ import {
   type ContextInspectorSnapshot,
   type ContextSubjectRef,
   type WindowId,
+  decodeTaskAccessQuery,
+  decodeTaskAccessSnapshot,
+  type TaskAccessSnapshot,
 } from "@octant/contracts";
+import { resolveLocalWindowPrincipal } from "./clientPrincipal";
 import { ContextHarnessError } from "./context/contextHarnessService";
 import type { ContextCompactionRefusal } from "./context/sessionCompaction";
 import { readPrincipalRouteContext } from "./principalRouteContext";
@@ -25,6 +29,11 @@ const HEADERS = "content-type, x-octant-window-capability";
 export type ContextRoutePrincipal = "local-window" | "remote-device";
 
 export interface ContextRouteService {
+  readonly taskAccess?: (
+    subject: ContextSubjectRef,
+    principal: ContextRoutePrincipal,
+    windowId: WindowId,
+  ) => TaskAccessSnapshot | undefined;
   readonly inspect: (
     subject: ContextSubjectRef,
     afterSequence: number | undefined,
@@ -198,6 +207,49 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
 
     try {
       if (isInspect) {
+        if (
+          typeof decoded.value === "object" &&
+          decoded.value !== null &&
+          "view" in decoded.value &&
+          decoded.value.view === "task-access"
+        ) {
+          const input = decodeTaskAccessQuery(decoded.value);
+          if (!(await windowCanInspectSubject(windowId, input.subject)))
+            return failure(
+              "unauthorized",
+              "Context subject is not available to this window.",
+              403,
+              origin,
+            );
+          // This read may wait on Project admission. A prior bound transport
+          // context does not keep a revoked local capability alive afterward.
+          if (principal === "local-window") {
+            try {
+              const fresh = resolveLocalWindowPrincipal({
+                request,
+                store: dependencies.windowAuthorityStore,
+                now: now(),
+                body: decoded.value,
+              });
+              if (fresh.windowId !== windowId) throw new Error("changed");
+            } catch {
+              return failure("unauthorized", "Context request is unauthorized.", 401, origin);
+            }
+          }
+          if (readPrincipalRouteContext(request)?.abortSignal?.aborted || request.signal.aborted)
+            return failure("unauthorized", "Context request is unauthorized.", 401, origin);
+          const facts = dependencies.service.taskAccess?.(input.subject, principal, windowId);
+          if (facts === undefined)
+            return failure("unavailable", "Task access facts are unavailable.", 503, origin);
+          if (
+            facts.subject.aggregateType !== input.subject.aggregateType ||
+            String(facts.subject.aggregateId) !== String(input.subject.aggregateId)
+          )
+            return failure("unavailable", "Task access facts are unavailable.", 503, origin);
+          const answer = response(decodeTaskAccessSnapshot(facts), 200, origin);
+          answer.headers.set("cache-control", "no-store");
+          return answer;
+        }
         const input = decodeContextInspectorRequest(decoded.value);
         // Refused in the same words whether the subject is unknown or only
         // out of reach, so a refusal says nothing about what exists.

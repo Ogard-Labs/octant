@@ -58,6 +58,9 @@ import { ChatService } from "./chat/chatService";
 import { WorkThreadService } from "./work/workThreadService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
+import * as contextWiring from "./wiring/context";
+import { ServerProjectStore } from "./serverProjects/serverProjectStore";
+import { CodeSessionAuthorityStore } from "./code/codeSessionAuthorityStore";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
 
 const directories: Array<string> = [];
@@ -110,6 +113,33 @@ describe("startOctantServer", () => {
       expect(Array.from(Cause.failures(exit.cause))).toMatchObject([
         { category: "server-unavailable" },
       ]);
+    }
+  });
+
+  it("composes task-access reads with real session authority and the host reviewer before serving", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-task-access-"));
+    directories.push(directory);
+    const wire = vi.spyOn(contextWiring, "wireContext");
+    const serve = vi.fn(() => ({ url: new URL("http://127.0.0.1:13773"), stop: () => undefined }));
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            extensionSkillRoots: { resolve: async () => [] },
+            serve,
+          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+        ),
+      );
+      expect(serve).toHaveBeenCalledOnce();
+      expect(wire).toHaveBeenCalledOnce();
+      const dependencies = wire.mock.calls[0]?.[0];
+      expect(dependencies?.codeSessionAuthority).toBeInstanceOf(CodeSessionAuthorityStore);
+      expect(dependencies?.hostShield.describe).toBeTypeOf("function");
+      expect(dependencies?.serverProjectStore).toBeInstanceOf(ServerProjectStore);
+    } finally {
+      wire.mockRestore();
     }
   });
 

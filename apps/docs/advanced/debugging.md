@@ -17,10 +17,22 @@ Click in the gutter to the left of a line number to set a breakpoint, or press
 **F9** on the line the cursor is on. Click or press again to clear it. A red
 dot marks each breakpoint.
 
-Breakpoints belong to this window and this thread. They go to the program
-when you press **Start**, and a breakpoint you set or clear while a session
-runs reaches it at once. Octant does not keep them: reloading the window
-clears them.
+Breakpoints are saved on this device for this window, server address, thread
+and checkout. Reloading restores only that configuration: it never starts or
+attaches to a program. The **Breakpoints** list checks the current files before
+using saved locations. Changed, missing, unreadable or unsaved files show
+unresolved locations as hollow gutter markers where the line still exists;
+line numbers never move automatically. Save or discard unsaved edits, then
+choose **Use current locations** after reviewing a changed clean file, or
+**Remove** a location. **Recheck breakpoint files** retries reads.
+
+**Start** rechecks saved files and refuses to start while any location is
+unresolved. Verified breakpoints go to the program when you press **Start**;
+changes while a session runs update it. A storage warning means the changes
+may not survive reload. Thread purge also removes that thread's saved
+breakpoints from this browser's server-address namespaces; local cleanup
+failures offer a retry. Another browser or offline device is not erased.
+Changing the server address does not migrate saved breakpoints.
 
 A session takes at most 256 breakpoints in a file and breakpoints in at most
 64 files. Past either, the editor sets nothing and says which limit you
@@ -106,8 +118,10 @@ this thread is:
   when the thread stops being active, moves to Plan, or its access changes
   across Full access.
 
-Octant keeps no variable value, expression, output, or breakpoint: they live
-in memory for the session and are gone when it ends. The Project's record
+Octant keeps no variable value, expression, output, stopped frame or active
+session in device storage: those live in memory for the session. Only breakpoint
+configuration and its file identity are saved locally; they are not part of
+host backup, export or sync. The Project's record
 holds what you confirmed and when each session started and ended. A
 diagnostics export counts the sessions started, and ended for each reason,
 over the last 14 days, and names none of them.

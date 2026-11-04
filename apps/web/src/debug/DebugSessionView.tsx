@@ -24,10 +24,11 @@ import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
   codeDebugThreadKey,
-  codeDebugWindowState,
+  activeBreakpoints,
   type CodeDebugThreadState,
   type CodeDebugWindowState,
 } from "./codeDebugWindowState";
+import { useCodeDebugWindowStore } from "./CodeDebugWindowProvider";
 import {
   useCodeDebugSession,
   type DebugConsoleItem,
@@ -58,7 +59,8 @@ export interface DebugSessionViewProps {
  * keeps nothing once the session ends.
  */
 export function DebugSessionView(props: DebugSessionViewProps) {
-  const store = props.store ?? codeDebugWindowState;
+  const windowStore = useCodeDebugWindowStore();
+  const store = props.store ?? windowStore;
   const key = codeDebugThreadKey(String(props.threadId), String(props.checkoutId));
   const { onShowLocation } = props;
   const [child, setChild] = useState<CodeDebugChildId>();
@@ -279,13 +281,13 @@ function useBreakpointSync(
   key: string,
   controls: DebugSessionControls,
 ): void {
-  const sent = useRef<CodeDebugThreadState["breakpoints"]>(store.read(key).breakpoints);
+  const sent = useRef<CodeDebugThreadState["breakpoints"]>(activeBreakpoints(store.read(key)));
   const ask = useRef(controls.ask);
   ask.current = controls.ask;
   useEffect(
     () =>
       store.subscribe(() => {
-        const next = store.read(key).breakpoints;
+        const next = activeBreakpoints(store.read(key));
         const previous = sent.current;
         if (next === previous) return;
         sent.current = next;

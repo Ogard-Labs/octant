@@ -1320,6 +1320,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           the composer's tray. The one line it keeps is the guardrail level in
           force and the scope it came from. */}
       <ThreadGuardrailLevel
+        factsVersion={thread.version}
+        factsActivity={`${providerTurnOperationId ?? ""}:${props.controller.turnStatus}`}
         autoSupported={
           props.autoReview === undefined
             ? props.harnessAutoReviewSupported === true

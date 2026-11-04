@@ -228,7 +228,10 @@ A routine made this way belongs to the thread's Project. Each run starts a new
 thread there that asks before it runs a command or changes anything, whatever
 the proposal said. A Work routine saved before Work threads had the shell
 does not run until you edit it in Automation Center and save it with a
-profile that includes the shell and Git; its run history says why.
+profile that includes the shell and Git; its run history says why. An ordinary
+approval-gated Work profile includes both in Automation Center; you do not need
+a separate Code profile. Choosing **Ask first** there saves that choice for
+each run, including after you edit an older routine.
 
 To let a routine run in a mode other than asking first, open it in Automation
 Center and choose **Mode for each run**: **The Project's mode** uses the mode

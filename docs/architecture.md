@@ -437,7 +437,8 @@ the Project goes. The routes under `/api/code/debug/` are local-window only
 with no remote action, no agent tool reaches a session, and nothing a session
 shows is journaled. The Code dock's Run and debug tool calls them: it lists
 and confirms configurations, starts a session with the window's gutter
-breakpoints (held in the renderer, never persisted), and shows the stack,
+breakpoints (configuration saved locally per endpoint/window/thread/checkout,
+revalidated before use; no session state is restored), and shows the stack,
 variables, and a debug console, deciding no refusal itself
 ([Debugger session rules](design/language-services.md#debugger-session-rules),
 [Debugger panel rules](design/language-services.md#debugger-panel-rules)).
@@ -1645,7 +1646,15 @@ folder, or a recovered start that captures nothing, run on a half-restored
 tree. Restore from here and Fork from here create a thread on its own worktree
 and are not subject to the check. The files part of a rewind (below) is an
 in-place restore and takes the same check and the same serialization. Discard
-and revert also overwrite files and are not yet covered.
+uses the same live-writer check and root serialization, checked after approval
+and immediately before Git is called. A writing turn that starts during discard
+waits before capturing its checkpoint; another restore or discard is refused
+until the overwrite finishes, including when it fails. Discard also refuses
+while its own thread has a starting or live turn, as a rewind does: that turn
+could otherwise write the files being discarded. The existing reviewed-state
+token and tracked-path checks still apply. Stage and unstage do not discard
+files and keep their existing rules. No command currently reaches commit revert;
+a future destructive reversal must reuse this protection.
 
 **Rewind and fork instead of edit (maintainer decision, 2026-11-01).** Chat,
 Work and Code threads do not edit a sent message: editing rewrites what the
@@ -2518,8 +2527,10 @@ the thread it came from.
   captures the shell and Git, and one saved without them (every Work routine
   saved before Work had the shell) blocks at dispatch as `authority-mismatch`
   until a person saves it again under a profile that grants them, because a
-  Work turn cannot withhold them and a routine never runs above its snapshot. A
-  routine asks first by default: a Full access profile is not eligible,
+  Work turn cannot withhold them and a routine never runs above its snapshot.
+  The catalog offers an approval-gated Work-compatible profile with that same
+  filesystem, shell, and Git authority; it needs no additional Code-only
+  profile. A routine asks first by default: a Full access profile is not eligible,
   whether or not it was remembered elsewhere (the contract refuses it on the
   snapshot and dispatch blocks it as `full-access-ineligible`), Code runs are
   created approval-gated, and a Work run's unattended first turn runs
@@ -2544,7 +2555,11 @@ the thread it came from.
   lower a run below its Project's level and never raise it above what the
   person allowed there. Only a local window sets it, a paired device is
   refused at the route, a routine an agent proposes never has it, and a Chat
-  routine cannot carry it. _Rationale:_ the maintainer asked for a level "never
+  routine cannot carry it. The editor saves **Ask first** explicitly as
+  `runLevel: "ask-first"` for Work and Code, including when a person edits and
+  saves an older definition that omitted the field. Existing omitted values
+  retain their dispatch behavior until saved; Chat keeps omitting the field.
+  _Rationale:_ the maintainer asked for a level "never
   above what the person allowed"; the narrower reading, the Project's level
   as the ceiling, keeps Full access a choice made where the Project's level is
   set.
@@ -2888,9 +2903,30 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   the host keeps only the bodies of waiting messages. A message an earlier
   host journaled as delivered without a turn carrying it stays as journaled
   and is never offered.
-- **Not built.** Nothing journals `agent.message-acknowledged@1`, and a sender
-  has no tool to read what became of a message. The Chat mention path is
-  unchanged.
+- **Acknowledgement and sender read-back.** The host-authored envelope names
+  its immutable messageId. The existing `octant_agent_message` tool accepts
+  explicit `acknowledge` and `status` actions for up to 20 durable IDs per call,
+  while legacy send input remains supported. An acknowledgement is the current
+  recipient reporting receipt: the host checks the exact delivered record,
+  current sender and recipient Code authority and same-Project relationship.
+  A sender cannot acknowledge its outgoing message or name another recipient;
+  the caller thread comes from the running turn. Duplicate acknowledgements
+  and replay retain one fact. Neither prompt acceptance nor turn completion
+  automatically acknowledges a message. Acknowledgement proves no understanding
+  or action. Sender status reads only that thread's own queued, delivered,
+  acknowledged or refused metadata, never a body, target title or peer lookup.
+  The authenticated existing facts route lists bounded recent receipts and
+  refusals only for sender threads the window may open. Its provider-delivered
+  count includes acknowledged messages; acknowledgement is a later receipt,
+  not an additive delivery total. The tool remains omitted and all its actions
+  refused in Plan, on excluded profiles and cancelled turns; managed children,
+  Chat and Work gain no messaging rights. Sending again, including retrying a
+  send, creates a new durable message; receipt retries use the existing ID.
+- **Expiry not implemented.** Queued messages currently have no recorded
+  lifetime and can wait indefinitely for a recipient turn. No timestamp is
+  inferred to be expiry and no receipt claims Expired. A new expiry policy
+  requires an explicit deadline/authorizer and journal-before-cleanup rule.
+  The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
   the tool (a turn in Plan, a profile without the tool, a call with no
   message; a cancelled turn is not a refusal), and at delivery, with these
@@ -7667,6 +7703,33 @@ same. This holds in Chat, Work, and Code.
 - Executable components are quarantined until explicitly reviewed and then run
   in supervised, sandboxed processes with a ready handshake, bounded output,
   durable process receipts, and drain-then-stop on disable.
+  Extension launches reuse the shared process identity and bounded TERM/KILL
+  termination rules; their schema-2 receipts retain package, component, version,
+  and digest identity. Repeated stop requests share one completion. A failure to
+  observe identity, denied group signal, malformed receipt, or exceeded receipt
+  bound is a cleanup failure, never evidence that the process is absent. The
+  receipt remains for recovery; a denied group signal never falls back to
+  signalling only its leader.
+
+  A live extension captures descendant identity witnesses while its launch
+  leader still matches, at launch, readiness, and stop. After the leader exits,
+  a signal requires a captured witness with the same start identity still in
+  that process group. Losing that evidence refuses cleanup and retains the
+  receipt. Witnesses are bounded to 256 members and stay in memory: startup
+  recovery cannot infer continuity from a persisted leaderless PGID, which could
+  have been reused after a reboot. A leaderless group with no live witness is
+  therefore ownership-uncertain, even when a zero signal says that group exists.
+  A proven absent group or a changed leader identity can release stale evidence.
+
+  Group observation requests only PID, PGID, and start identity, never commands
+  or environment: BSD `ps -g` on macOS (one second, 32 KiB) and `pgrep -g` plus
+  selected `/proc` start ticks and boot ID on Linux (one second, 4 KiB of PIDs).
+  `pgrep` is optional evidence, not an installation prerequisite: a missing,
+  failed, or overflowing observer adds no witness and cannot prevent signalling
+  a matching live leader. It cannot authorize a leaderless signal either.
+  A launch whose initial identity cannot be observed can stop only its direct
+  `ChildProcess` handle; it cannot claim process-group cleanup.
+
   On macOS the deny-default Seatbelt profile reads the system roots, the
   component's own roots, and its runtime's install: the executable's folder
   and, for a Homebrew runtime, `<prefix>/Cellar`, `<prefix>/opt`, and
@@ -7680,6 +7743,7 @@ same. This holds in Chat, Work, and Code.
   runtime, no fork, a read-only package, one temporary folder, of the system
   only what a runtime reads to start, and a fixed environment), and on any host but macOS its component is `host-prohibited`
   ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
+
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
   (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
@@ -7965,6 +8029,25 @@ same. This holds in Chat, Work, and Code.
   they are refused by name; the working form is a virtual environment inside the
   plugin with its `.venv/bin/python` as the command. Extension processes have no Linux confinement, so no other host
   starts one in the first place.
+
+- **MCP HTTP session recovery.** A successful initialize and tool listing is a
+  connection observation, not permanent service or document readiness. An
+  unknown-session HTTP 404, failed network request or unreadable response
+  retires that transport and removes its tools immediately. The existing
+  transport-close path records the component unavailable without guessing a
+  vendor-specific cause. A normal JSON-RPC application refusal keeps the
+  healthy session. Cleanup is best effort, bounded and idempotent; a late call
+  from the old transport cannot evict a replacement session.
+
+  The failed call is never replayed: a response can disappear after the server
+  committed a write, so its outcome may be unknown. Only a later authoritative
+  task selection/reconciliation may initialize and list a replacement under
+  the current mode, Project, thread, trust and enablement; another explicit
+  invocation is needed to call a tool. Sibling sessions remain independent.
+  Reconnecting the same tool catalog changes no task, transcript, draft or
+  provider session. A changed tool catalog on a provider that fixes its tools
+  at session start still needs separate provider continuation support; this
+  transport recovery does not claim that support is built.
 
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
@@ -8746,6 +8829,34 @@ mechanisms are:
       else it reads as set on the thread. A thread keeps the level it started
       with, so a default changed later can make an older thread read as set on
       the thread.
+  - **Access details is a host report, not authority.** The existing Work and
+    Code level indicator opens a read of the task's selected and effective
+    posture, any narrower running-turn or window-session ceiling, current
+    default, reviewer route and reported account/model, and the selected
+    runtime's observed readiness and capabilities. The read uses the existing
+    authenticated Context inspect path and the same subject-read authority;
+    it needs no context plan and adds no remote rights. The host rechecks
+    current Project standing and the original request's live authority after
+    awaited admission. A server-backed Work thread uses the existing server
+    Project catalog's exact derived binding, not a manufactured local Project;
+    its current default is Work's global setting. Catalog removal or a changed
+    binding refuses private facts. Known turn refusals and Done remain readable
+    where ordinary thread reads allow them, without an executable-level claim.
+    It never probes a provider or makes a model call to paint the report, and includes no credentials or private diagnostics.
+    A current default match is stated as a match, never proof of a historical
+    origin. Unreported facts remain unknown, and an inactive or Done task is
+    not presented as executable. The chosen unavailable Shield account stays
+    named: the Judge asks the person rather than substituting another account.
+    Disabled accounts, unsupported capabilities, temporarily unavailable
+    runtimes and required person review have different wording. Recovery uses
+    existing provider/reviewer/protected-file Settings or asks the host owner;
+    it never elevates a level or suggests bypassing a protected-file refusal.
+    Reports are replaced on a task/client/version change and can be refreshed;
+    an old account report cannot survive a failed refresh as a current fact.
+    Every actual action still passes its own host admission. Routine-created
+    Work and Code tasks read these same host inputs and running ceilings.
+    The existing outside-content notice qualifies its prompt explanation to
+    levels below Full access; review/clear remains a separate person act.
   - **Older recorded levels replay as Full access.** A level journaled by
     the earlier design, which kept a sandboxed no-prompt level and a
     separate switch, replays as Full access; nothing recorded is dropped.
@@ -10167,8 +10278,10 @@ access` agree); a thread's own change is journaled as
   per browsing context) unless the person at a local window puts it in their
   Project's persistent profile or the host's Personal profile; a profile page
   opens only in the desktop app's native Browser, never headless. Octant never
-  opens another browser's profile in place. An agent reads or acts on an
-  origin in a profile page only after a site approval naming the profile;
+  opens another browser's profile in place. The Work agent adapter accepts a
+  stored profile request; Code's separate adapter still opens new pages
+  Private and rejects the profile argument, while its person-facing profile
+  controls are built. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
   paired devices, routines, subagents, and terminal Browser grants are refused
   on profile pages; a paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
@@ -12499,7 +12612,9 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with
   `out/Octant-linux-x64/` kept for inspection). Linux packages skip Darwin
-  helpers. A dogfood AppImage is not code-signed. Its launcher preserves
+  helpers. The macOS Keychain, Code-file, and device Swift helpers explicitly
+  target `arm64-apple-macos14.0`, so a newer compiler host cannot raise their
+  deployment target. A dogfood AppImage is not code-signed. Its launcher preserves
   Chromium's sandbox and lets Chromium refuse when the host cannot establish
   it; it never adds `--no-sandbox`. A separate `unshare` executable has a
   different AppArmor identity and is not a prerequisite probe for Octant.

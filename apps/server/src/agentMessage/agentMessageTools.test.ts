@@ -1,4 +1,4 @@
-import type { ProviderExecutionPolicy } from "@octant/contracts";
+import { decodeAgentMessageStatusSummary, type ProviderExecutionPolicy } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentMessageService } from "./agentMessageService";
 import {
@@ -30,8 +30,14 @@ function fixture(
     })),
   );
   const recordRefusedSend = vi.fn<AgentMessageService["recordRefusedSend"]>(async () => undefined);
+  const acknowledge = vi.fn<AgentMessageService["acknowledge"]>(async () => ({
+    status: "refused",
+    reason: "unauthorized",
+    message: "Unavailable",
+  }));
+  const statusForSender = vi.fn<AgentMessageService["statusForSender"]>(() => []);
   const tools = createAgentMessageTools({
-    service: { send, recordRefusedSend },
+    service: { send, recordRefusedSend, acknowledge, statusForSender },
     senderThreadId,
     toolConstraints: options.toolConstraints ?? [],
     profileDisplayName: "Reviewer",
@@ -41,6 +47,8 @@ function fixture(
     tools,
     send,
     recordRefusedSend,
+    acknowledge,
+    statusForSender,
     setPosture: (next: ProviderExecutionPolicy) => {
       posture = next;
     },
@@ -48,6 +56,113 @@ function fixture(
 }
 
 describe("the agent message tool", () => {
+  it.each(["posture", "cancel", "journal"])(
+    "preserves partial receipt facts and rechecks authority after %s changes",
+    async (change) => {
+      const { tools, acknowledge, setPosture } = fixture();
+      const ids = ["10000000-0000-4000-8000-000000000001", "10000000-0000-4000-8000-000000000002"];
+      const abort = new AbortController();
+      acknowledge.mockImplementationOnce(async () => {
+        if (change === "posture") setPosture("plan");
+        if (change === "cancel") abort.abort();
+        return {
+          status: "ok",
+          receipt: decodeAgentMessageStatusSummary({
+            messageId: ids[0],
+            senderThreadId: recipientThreadId,
+            recipientThreadId: senderThreadId,
+            state: "acknowledged",
+            occurredAt: "2026-11-02T10:00:00.000Z",
+          }),
+        };
+      });
+      if (change === "journal") acknowledge.mockRejectedValueOnce(new Error("journal unavailable"));
+      const result = await tools.execute({
+        name: AGENT_MESSAGE_TOOL_NAME,
+        inputJson: JSON.stringify({ action: "acknowledge", messageIds: ids }),
+        signal: abort.signal,
+      });
+      expect(result).toMatchObject({
+        isError: true,
+        result: [
+          { status: "ok", receipt: { state: "acknowledged" } },
+          { status: change === "journal" ? "unavailable" : "refused" },
+        ],
+      });
+      expect(acknowledge).toHaveBeenCalledTimes(change === "journal" ? 2 : 1);
+    },
+  );
+
+  it("reports unavailable instead of an invented receipt when the host read fails", async () => {
+    const { tools, statusForSender } = fixture();
+    statusForSender.mockImplementation(() => {
+      throw new Error("database unavailable");
+    });
+    expect(
+      await tools.execute({
+        name: AGENT_MESSAGE_TOOL_NAME,
+        inputJson: JSON.stringify({
+          action: "status",
+          messageIds: ["10000000-0000-4000-8000-000000000001"],
+        }),
+      }),
+    ).toMatchObject({ isError: true, result: [{ status: "unavailable" }] });
+  });
+
+  it.each(["acknowledge", "status"])(
+    "binds %s to the actual current thread rather than a model-supplied actor",
+    async (action) => {
+      const { tools, acknowledge, statusForSender } = fixture();
+      const messageIds = ["10000000-0000-4000-8000-000000000001"];
+      await tools.execute({
+        name: AGENT_MESSAGE_TOOL_NAME,
+        inputJson: JSON.stringify({ action, messageIds }),
+      });
+      if (action === "acknowledge")
+        expect(acknowledge).toHaveBeenCalledExactlyOnceWith({
+          messageId: messageIds[0],
+          recipientThreadId: senderThreadId,
+        });
+      else expect(statusForSender).toHaveBeenCalledExactlyOnceWith({ senderThreadId, messageIds });
+      acknowledge.mockClear();
+      statusForSender.mockClear();
+      expect(
+        await tools.execute({
+          name: AGENT_MESSAGE_TOOL_NAME,
+          inputJson: JSON.stringify({ action, messageIds, recipientThreadId }),
+        }),
+      ).toMatchObject({ isError: true });
+      expect(acknowledge).not.toHaveBeenCalled();
+      expect(statusForSender).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["acknowledge", "status"])(
+    "preserves Plan, profile and cancellation refusal for %s",
+    async (action) => {
+      const inputJson = JSON.stringify({
+        action,
+        messageIds: ["10000000-0000-4000-8000-000000000001"],
+      });
+      for (const options of [{ posture: "plan" as const }, { toolConstraints: ["read"] }]) {
+        const { tools, acknowledge, statusForSender } = fixture(options);
+        expect(tools.definitions).toEqual([]);
+        expect(await tools.execute({ name: AGENT_MESSAGE_TOOL_NAME, inputJson })).toMatchObject({
+          isError: true,
+        });
+        expect(acknowledge).not.toHaveBeenCalled();
+        expect(statusForSender).not.toHaveBeenCalled();
+      }
+      const { tools, acknowledge, statusForSender } = fixture();
+      const abort = new AbortController();
+      abort.abort();
+      expect(
+        await tools.execute({ name: AGENT_MESSAGE_TOOL_NAME, inputJson, signal: abort.signal }),
+      ).toMatchObject({ isError: true });
+      expect(acknowledge).not.toHaveBeenCalled();
+      expect(statusForSender).not.toHaveBeenCalled();
+    },
+  );
+
   it("petitions the host for the sender's own thread and returns each recipient's outcome", async () => {
     const { tools, send } = fixture();
 

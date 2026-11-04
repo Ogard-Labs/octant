@@ -150,6 +150,32 @@ Grants are scoped and recorded. Child agents can never exceed their parent's
 policy. A remote principal can never convert to a local principal or mint
 native receipts; desktop admin routes are loopback-only.
 
+### Understand a task's access
+
+In a Work or Code task, open **Access details** beside the level indicator.
+It reads the host's selected level, effective level, any narrower limit on the
+current turn or window session, current default, reviewer and account/model,
+and the selected runtime's readiness and reported capabilities. An inactive
+or Done task must be restored or reopened before another turn. A current
+default match does not establish which setting originally created an older task.
+
+**Unsupported** means the runtime does not offer a capability; **unavailable**
+means it cannot be used now. A turned-off account needs enabling or another
+eligible choice, and an unavailable reviewer may require your answer. If the
+chosen Shield account is unavailable, Octant asks you instead of moving the
+review to another account. Follow **Open provider settings** or **Open reviewer
+settings** when offered. A remote view keeps the host's read-only facts and
+asks the host owner to make a local change. Missing observations say **Not
+reported**. **Refresh access report** reads again without granting permission.
+
+These reports are snapshots, including the runtime observation time. Every
+operation is checked again on the host. Full access removes the command
+sandbox; Octant's direct file tools still refuse protected files. **Protected
+file guidance** opens the existing list and authorized credential channels.
+A refused direct read is not a reason to try another tool or copy a sign-in
+file into the task. The existing outside-content Review/Clear action remains
+a separate choice when the task is idle.
+
 ### Outside content
 
 When a thread reads content from outside, such as a web page, a tool's result,

@@ -2,11 +2,163 @@ import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { persistProcessReceipt, reconcileProcessReceipts } from "./nodeOwnedProcessReceipt";
+import {
+  ownsProcessGroup,
+  persistProcessReceipt,
+  reconcileProcessReceipts,
+  terminateOwnedProcess,
+} from "./nodeOwnedProcessReceipt";
 
 const identity = `sha256:${"a".repeat(64)}`;
 
 describe("durable owned-process receipts", () => {
+  it("does not escalate against a reused process group after the original identity changes during TERM", async () => {
+    let observed = identity;
+    const kill = vi.fn((_pid: number, signal: NodeJS.Signals) => {
+      if (signal === "SIGTERM") observed = `sha256:${"b".repeat(64)}`;
+    });
+    await expect(
+      terminateOwnedProcess(
+        4321,
+        identity,
+        5,
+        async () => observed,
+        kill,
+        () => true,
+      ),
+    ).resolves.toBeUndefined();
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(4321, "SIGTERM");
+  });
+  it("does not trust a persisted receipt for a leaderless group after PID reuse or reboot", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-process-receipt-"));
+    const kill = vi.fn();
+    try {
+      const receipt = await persistProcessReceipt(
+        {
+          supervisor: "terminal",
+          receiptDirectory: directory,
+          processIdentity: async () => identity,
+        },
+        "old-session",
+        4321,
+      );
+      await receipt.ready;
+      await expect(
+        reconcileProcessReceipts({
+          supervisor: "terminal",
+          receiptDirectory: directory,
+          processIdentity: async () => undefined,
+          processGroupExists: () => true,
+          killProcessGroup: kill,
+        }),
+      ).rejects.toThrow("ownership is uncertain");
+      expect(kill).not.toHaveBeenCalled();
+      expect(await readdir(directory)).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["changed identity", "moved group", "observation failure"])(
+    "refuses escalation when a captured descendant has %s",
+    async (failure) => {
+      let leader: string | undefined = identity;
+      const witness = { pid: 4322, processIdentity: `sha256:${"c".repeat(64)}` };
+      const kill = vi.fn(() => {
+        leader = undefined;
+      });
+      const observe = async () => {
+        if (leader !== undefined) return [witness];
+        if (failure === "observation failure") throw new Error("membership unavailable");
+        return failure === "moved group"
+          ? []
+          : [{ ...witness, processIdentity: `sha256:${"d".repeat(64)}` }];
+      };
+      await expect(
+        terminateOwnedProcess(
+          4321,
+          identity,
+          5,
+          async () => leader,
+          kill,
+          () => true,
+          [],
+          observe,
+        ),
+      ).rejects.toThrow(
+        failure === "observation failure" ? "membership unavailable" : "ownership is uncertain",
+      );
+      expect(kill).toHaveBeenCalledTimes(1);
+      expect(kill).toHaveBeenCalledWith(4321, "SIGTERM");
+    },
+  );
+
+  it("checks that a surviving witness still belongs to the same group", async () => {
+    const witness = { pid: 4322, processIdentity: identity };
+    await expect(
+      ownsProcessGroup(
+        4321,
+        identity,
+        async () => undefined,
+        () => true,
+        [witness],
+        async () => [witness],
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      ownsProcessGroup(
+        4321,
+        identity,
+        async () => undefined,
+        () => true,
+        [witness],
+        async () => [],
+      ),
+    ).rejects.toThrow("ownership is uncertain");
+  });
+
+  it("does not fall back to a leader-only signal when group signalling is denied", async () => {
+    const kill = vi.fn(() => {
+      throw Object.assign(new Error("permission denied"), { code: "EPERM" });
+    });
+    await expect(
+      terminateOwnedProcess(
+        4321,
+        identity,
+        5,
+        async () => identity,
+        kill,
+        () => true,
+        [],
+        async () => [],
+      ),
+    ).rejects.toMatchObject({ code: "EPERM" });
+    expect(kill).toHaveBeenCalledTimes(1);
+  });
+
+  it("can terminate a matching live leader when optional descendant observation is unavailable", async () => {
+    let observed: string | undefined = identity;
+    const kill = vi.fn(() => {
+      observed = undefined;
+    });
+    await expect(
+      terminateOwnedProcess(
+        4321,
+        identity,
+        5,
+        async () => observed,
+        kill,
+        () => false,
+        [],
+        async () => {
+          throw Object.assign(new Error("pgrep unavailable"), { code: "ENOENT" });
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect(kill).toHaveBeenCalledWith(4321, "SIGTERM");
+  });
+
   it.each([
     "provider",
     "terminal",
@@ -233,7 +385,7 @@ describe("durable owned-process receipts", () => {
     }
   });
 
-  it("escalates when the leader exits but its owned process group survives", async () => {
+  it("preserves a receipt when the leader exits without a surviving ownership witness", async () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-process-receipt-"));
     let leader: string | undefined = identity;
     let groupAlive = true;
@@ -252,17 +404,19 @@ describe("durable owned-process receipts", () => {
         4321,
       );
       await receipt.ready;
-      await reconcileProcessReceipts({
-        supervisor: "terminal",
-        receiptDirectory: directory,
-        processIdentity: async () => leader,
-        processGroupExists: () => groupAlive,
-        killProcessGroup: kill,
-        shutdownTimeoutMs: 20,
-      });
-      expect(kill).toHaveBeenNthCalledWith(1, 4321, "SIGTERM");
-      expect(kill).toHaveBeenNthCalledWith(2, 4321, "SIGKILL");
-      expect(await readdir(directory)).toHaveLength(0);
+      await expect(
+        reconcileProcessReceipts({
+          supervisor: "terminal",
+          receiptDirectory: directory,
+          processIdentity: async () => leader,
+          processGroupExists: () => groupAlive,
+          killProcessGroup: kill,
+          shutdownTimeoutMs: 20,
+        }),
+      ).rejects.toThrow("ownership is uncertain");
+      expect(kill).toHaveBeenCalledTimes(1);
+      expect(kill).toHaveBeenCalledWith(4321, "SIGTERM");
+      expect(await readdir(directory)).toHaveLength(1);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

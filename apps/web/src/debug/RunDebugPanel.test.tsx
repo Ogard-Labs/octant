@@ -1,16 +1,23 @@
+import { decodeProjectId } from "@octant/contracts/projects";
 import {
   CodeDebugClientFailure,
   type CodeDebugClient,
 } from "@octant/client-runtime/code-debug-client";
-import { decodeCodeCheckoutId, decodeCodeThreadId } from "@octant/contracts/code";
 import {
+  decodeCodeCheckoutId,
+  decodeCodeThreadId,
+  decodeCodeFileId,
+  decodeCodeFileMetadata,
+} from "@octant/contracts/code";
+import {
+  decodeCodeDebugSessionId,
   decodeCodeDebugConfiguration,
   decodeCodeDebugConfigurationsResult,
   decodeCodeDebugSessionResult,
   type CodeDebugSessionCall,
   type CodeDebugSessionResult,
 } from "@octant/contracts/code-debug";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { codeDebugThreadKey, CodeDebugWindowState } from "./codeDebugWindowState";
@@ -224,6 +231,89 @@ function sent(session: ReturnType<typeof fakeHost>["session"], kind: string) {
 }
 
 describe("Run and debug panel", () => {
+  it("does not send a clean pane's new breakpoint while another editor owns a dirty draft", async () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+      key: (index: number) => [...values.keys()][index] ?? null,
+      get length() {
+        return values.size;
+      },
+    };
+    const store = new CodeDebugWindowState({
+      origin: "http://localhost:13773",
+      windowId: "dirty-toggle",
+      storage,
+    });
+    const path = "src/main.js" as const;
+    const observation = {
+      projectId: decodeProjectId("50000000-0000-4000-8000-000000000001"),
+      fileId: decodeCodeFileId("60000000-0000-4000-8000-000000000001"),
+      metadata: decodeCodeFileMetadata({
+        identity: { device: "1", inode: "2" },
+        digest: "a".repeat(64),
+        byteLength: 30,
+        modifiedNanoseconds: "1",
+      }),
+      lineCount: 8,
+      clean: true,
+    };
+    let dirty = false;
+    store.trackEditor(key, path as never, {}, () => dirty);
+    store.trackEditor(key, path as never, {}, () => false);
+    store.toggleBreakpoint(key, path as never, 3, observation);
+    store.setSession(key, { sessionId: decodeCodeDebugSessionId(sessionId), name: "Fixture" });
+    const { client, session } = fakeHost();
+    const view = render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        threadId={threadId}
+        store={store}
+        client={client}
+        pollMs={fast}
+      />,
+    );
+    await screen.findByText("Paused · breakpoint");
+    act(() => {
+      dirty = true;
+      store.observeFile(key, path as never, { ...observation, clean: false });
+    });
+    await waitFor(() =>
+      expect(sent(session, "set-breakpoints")).toContainEqual({
+        kind: "set-breakpoints",
+        file: { path, breakpoints: [] },
+      }),
+    );
+    session.mockClear();
+    act(() => store.toggleBreakpoint(key, path as never, 5, observation));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
+    expect(
+      sent(session, "set-breakpoints").filter(
+        (request) => request.kind === "set-breakpoints" && request.file.breakpoints.length > 0,
+      ),
+    ).toEqual([]);
+    expect(store.read(key).breakpointFiles?.get(path as never)?.reason).toBe("unsaved");
+    act(() => {
+      dirty = false;
+      store.observeFile(key, path as never, observation);
+      expect(store.reacceptFile(key, path as never)).toBe(true);
+    });
+    await waitFor(() =>
+      expect(sent(session, "set-breakpoints")).toContainEqual({
+        kind: "set-breakpoints",
+        file: { path, breakpoints: [{ line: 3 }, { line: 5 }] },
+      }),
+    );
+    expect(client.start).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it("confirms an imported configuration, starts it, stops at a breakpoint, shows a variable, steps, evaluates, and stops", async () => {
     const user = userEvent.setup();
     const store = new CodeDebugWindowState();
@@ -268,7 +358,9 @@ describe("Run and debug panel", () => {
 
     // Stopped at the breakpoint: the editor is asked to show the line.
     expect(await screen.findByText("Paused · breakpoint")).toBeVisible();
-    expect(await screen.findByText("src/main.js:3")).toBeVisible();
+    expect(
+      await within(screen.getByRole("region", { name: "Call stack" })).findByText("src/main.js:3"),
+    ).toBeVisible();
     expect(screen.getByText("Outside the checkout")).toBeVisible();
     await waitFor(() => expect(store.read(key).stopped).toEqual({ path: "src/main.js", line: 3 }));
     expect(onOpenFile).toHaveBeenCalledWith("src/main.js");
