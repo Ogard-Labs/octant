@@ -37,8 +37,6 @@ import {
   installPrivateListenerIpcHandlers,
   installRemoteDeviceIpcHandlers,
   installHostIdentityIpcHandlers,
-  shutdownManagedServerResources,
-  startManagedServerResources,
   createMainBrowserWindowOptions,
   createProjectWindowAuthorityRefresh,
   createTrustedRendererRequestRegistry,
@@ -473,13 +471,13 @@ describe("Project window authority production lifecycle", () => {
       restartDesktopHostAndRefreshWindowAuthorities({
         restart: async () => {
           order.push("restart");
-          return host;
+          return { status: "running", host };
         },
         refreshWindowAuthorities: async (replacement) => {
           order.push(`refresh:${replacement.instanceId}`);
         },
       }),
-    ).resolves.toEqual({ host, windowAuthorities: "ready" });
+    ).resolves.toEqual({ status: "running", host, windowAuthorities: "ready" });
     expect(order).toEqual(["restart", "refresh:replacement-instance"]);
   });
 
@@ -492,10 +490,21 @@ describe("Project window authority production lifecycle", () => {
 
     await expect(
       restartDesktopHostAndRefreshWindowAuthorities({
-        restart: vi.fn().mockResolvedValue(host),
+        restart: vi.fn().mockResolvedValue({ status: "running", host }),
         refreshWindowAuthorities: vi.fn().mockRejectedValue(new Error("window closed")),
       }),
-    ).resolves.toEqual({ host, windowAuthorities: "attention-required" });
+    ).resolves.toEqual({ status: "running", host, windowAuthorities: "attention-required" });
+  });
+
+  it("refreshes no window authority when quit refused the restart", async () => {
+    const refreshWindowAuthorities = vi.fn(async () => undefined);
+    await expect(
+      restartDesktopHostAndRefreshWindowAuthorities({
+        restart: async () => ({ status: "closing" }),
+        refreshWindowAuthorities,
+      }),
+    ).resolves.toEqual({ status: "closing" });
+    expect(refreshWindowAuthorities).not.toHaveBeenCalled();
   });
 
   it("awaits registration before construction and renderer load", async () => {
@@ -919,86 +928,6 @@ describe("renderer exit window recovery", () => {
     for (const reason of ["clean-exit", "killed"]) {
       expect(shouldRecoverWindowAfterRendererExit(reason)).toBe(false);
     }
-  });
-});
-
-describe("managed server credential broker lifecycle", () => {
-  it("sanitizes broker startup failure without attempting server startup", async () => {
-    const privateFailure = "listen EADDRINUSE with private runtime path";
-    const startServer = vi.fn();
-
-    const failure = await startManagedServerResources({
-      startBroker: vi.fn().mockRejectedValue(new Error(privateFailure)),
-      startServer,
-    }).catch((error: unknown) => error);
-
-    expect(startServer).not.toHaveBeenCalled();
-    expect(failure).toBeInstanceOf(Error);
-    expect(String(failure)).not.toContain(privateFailure);
-  });
-
-  it("starts the broker before the managed server", async () => {
-    const order: string[] = [];
-    const broker = {
-      url: "http://127.0.0.1:41000/",
-      token: "broker-token",
-      close: vi.fn(),
-    };
-    const child = { id: "server" };
-
-    const resources = await startManagedServerResources({
-      startBroker: async () => {
-        order.push("broker");
-        return broker;
-      },
-      startServer: (startedBroker) => {
-        if (startedBroker === undefined) throw new Error("expected broker");
-        order.push(`server:${startedBroker.url}`);
-        return child;
-      },
-    });
-
-    expect(order).toEqual(["broker", "server:http://127.0.0.1:41000/"]);
-    expect(resources).toEqual({ broker, server: child });
-  });
-
-  it("closes the broker when managed server startup fails", async () => {
-    const privateFailure = "spawn command leaked a private path";
-    const broker = {
-      url: "http://127.0.0.1:41000/",
-      token: "broker-token",
-      close: vi.fn().mockResolvedValue(undefined),
-    };
-
-    const failure = await startManagedServerResources({
-      startBroker: vi.fn().mockResolvedValue(broker),
-      startServer: () => {
-        throw new Error(privateFailure);
-      },
-    }).catch((error: unknown) => error);
-
-    expect(broker.close).toHaveBeenCalledOnce();
-    expect(failure).toBeInstanceOf(Error);
-    expect(String(failure)).not.toContain(privateFailure);
-  });
-
-  it("closes the server before the broker and still closes the broker after server cleanup fails", async () => {
-    const order: string[] = [];
-    const broker = {
-      url: "http://127.0.0.1:41000/",
-      token: "broker-token",
-      close: vi.fn(async () => void order.push("broker")),
-    };
-    const server = { id: "server" };
-    const shutdownServer = vi.fn(async () => {
-      order.push("server");
-      throw new Error("private shutdown diagnostic");
-    });
-
-    await expect(
-      shutdownManagedServerResources({ broker, server, shutdownServer }),
-    ).rejects.toThrow("Octant could not stop its managed server resources.");
-    expect(order).toEqual(["server", "broker"]);
   });
 });
 

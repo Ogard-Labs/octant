@@ -5,7 +5,8 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as updateModule from "./managedToolUpdates";
 import { createManagedToolService } from "./managedToolService";
 import {
   BUNDLED_MANAGED_TOOL_RELEASES,
@@ -94,6 +95,32 @@ describe("managed tool service", () => {
       ...(fetchBytes === undefined ? {} : { fetchBytes }),
     });
   }
+
+  it("closes every updater once when one updater rejects", async () => {
+    const create = updateModule.createManagedToolUpdates;
+    const closes: Array<ReturnType<typeof vi.fn>> = [];
+    const spy = vi.spyOn(updateModule, "createManagedToolUpdates").mockImplementation((options) => {
+      const updates = create(options);
+      const actualClose = updates.close;
+      const first = closes.length === 0;
+      const close = vi.fn(async () => {
+        await actualClose();
+        if (first) throw new Error("private updater failure");
+      });
+      closes.push(close);
+      return { ...updates, close };
+    });
+    try {
+      const service = makeService();
+      const completion = service.close();
+      await expect(completion).rejects.toThrow();
+      expect(closes.length).toBeGreaterThan(1);
+      for (const close of closes) expect(close).toHaveBeenCalledOnce();
+      expect(service.close()).toBe(completion);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 
   it("reports every platform tool as available from the bundled copy", async () => {
     const service = makeService();

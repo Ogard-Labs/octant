@@ -1,3 +1,4 @@
+import { createDesktopHostLaunch } from "./desktopHostLaunch";
 import { resolveUpdateInstallReadiness } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -21,6 +22,148 @@ const managedHost: LocalHostDescriptor = {
 };
 
 describe("desktop host lifecycle", () => {
+  it.each(["start", "restart"] as const)(
+    "retains a late owned launch when quit was accepted during %s and cleanup fails",
+    async (action) => {
+      let finishStart: ((host: LocalHostDescriptor) => void) | undefined;
+      let started: (() => void) | undefined;
+      const starting = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const server = { exitCode: null, signalCode: null, kill: vi.fn(() => true) };
+      const launch = createDesktopHostLaunch({
+        shutdownServer: async () => {
+          throw new Error("not stopped");
+        },
+      });
+      const stop = vi.fn(async () => {
+        const result = await launch.close();
+        if (result.status === "failed") throw new Error("owned cleanup failed");
+      });
+      const lifecycle = createHostLifecycleController({
+        attach: async () => undefined,
+        start: () => {
+          started?.();
+          return new Promise<LocalHostDescriptor>((resolve) => {
+            finishStart = resolve;
+          });
+        },
+        stop,
+      });
+      const opening = action === "start" ? lifecycle.ensureRunning() : lifecycle.restart();
+      const rejected = expect(opening).rejects.toThrow("owned cleanup failed");
+      await starting;
+      lifecycle.acceptQuit();
+      launch.acquired({ server });
+      finishStart?.(desktopHost);
+      await rejected;
+      expect(stop).toHaveBeenCalledOnce();
+      expect(lifecycle.snapshot().ownership).toBeUndefined();
+      expect(launch.server).toBe(server);
+      launch.forceStop();
+      expect(server.kill).toHaveBeenCalledWith("SIGKILL");
+      await expect(lifecycle.ensureRunning()).resolves.toEqual({ status: "closing" });
+    },
+  );
+
+  it("does not launch a replacement when quit is accepted while restart is stopping the old host", async () => {
+    let finishStop: (() => void) | undefined;
+    let stopping: (() => void) | undefined;
+    const stopped = new Promise<void>((resolve) => {
+      stopping = resolve;
+    });
+    const start = vi.fn(async () => desktopHost);
+    const lifecycle = createHostLifecycleController({
+      attach: async () => undefined,
+      start,
+      stop: () => {
+        stopping?.();
+        return new Promise<void>((resolve) => {
+          finishStop = resolve;
+        });
+      },
+    });
+    await lifecycle.ensureRunning();
+    const restarting = lifecycle.restart();
+    const refused = expect(restarting).resolves.toEqual({ status: "closing" });
+    await stopped;
+    lifecycle.acceptQuit();
+    finishStop?.();
+    await refused;
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("never stops a borrowed host whose attachment finishes after accepted quit", async () => {
+    let finishAttach: ((host: LocalHostDescriptor) => void) | undefined;
+    let started: (() => void) | undefined;
+    const attaching = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const stop = vi.fn(async () => undefined);
+    const start = vi.fn(async () => desktopHost);
+    const lifecycle = createHostLifecycleController({
+      attach: () => {
+        started?.();
+        return new Promise<LocalHostDescriptor>((resolve) => {
+          finishAttach = resolve;
+        });
+      },
+      start,
+      stop,
+    });
+    const opening = lifecycle.ensureRunning();
+    const rejected = expect(opening).resolves.toEqual({ status: "closing" });
+    await attaching;
+    lifecycle.acceptQuit();
+    finishAttach?.(managedHost);
+    await rejected;
+    await expect(lifecycle.prepareQuit(() => true)).resolves.toBe("stopped");
+    expect(stop).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("refuses queued starts and restarts after an accepted quit", async () => {
+    let finishStop: (() => void) | undefined;
+    let stopped: (() => void) | undefined;
+    const stopStarted = new Promise<void>((resolve) => {
+      stopped = resolve;
+    });
+    const start = vi.fn(async () => desktopHost);
+    const lifecycle = createHostLifecycleController({
+      attach: async () => undefined,
+      start,
+      stop: () => {
+        stopped?.();
+        return new Promise<void>((resolve) => {
+          finishStop = resolve;
+        });
+      },
+    });
+    await lifecycle.ensureRunning();
+    const quitting = lifecycle.prepareQuit(() => true);
+    await stopStarted;
+    const lateStart = lifecycle.ensureRunning();
+    const lateRestart = lifecycle.restart();
+    const startResult = expect(lateStart).resolves.toEqual({ status: "closing" });
+    const restartResult = expect(lateRestart).resolves.toEqual({ status: "closing" });
+    finishStop?.();
+    await expect(quitting).resolves.toBe("stopped");
+    await Promise.all([startResult, restartResult]);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps start admission closed when an already accepted quit has no host yet", async () => {
+    const start = vi.fn(async () => desktopHost);
+    const lifecycle = createHostLifecycleController({
+      attach: async () => undefined,
+      start,
+      stop: async () => undefined,
+    });
+    await expect(lifecycle.prepareQuit(() => true)).resolves.toBe("stopped");
+    await expect(lifecycle.ensureRunning()).resolves.toEqual({ status: "closing" });
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it("keeps an Electron-owned host alive when the last window closes", async () => {
     const stop = vi.fn().mockResolvedValue(undefined);
     const lifecycle = createHostLifecycleController({
@@ -74,7 +217,10 @@ describe("desktop host lifecycle", () => {
     const attach = vi.fn().mockResolvedValue(managedHost);
     const lifecycle = createHostLifecycleController({ attach, start, stop });
 
-    await expect(lifecycle.ensureRunning()).resolves.toMatchObject(managedHost);
+    await expect(lifecycle.ensureRunning()).resolves.toEqual({
+      status: "running",
+      host: managedHost,
+    });
     await expect(lifecycle.prepareQuit(() => true)).resolves.toBe("attached");
 
     expect(attach).toHaveBeenCalledOnce();
