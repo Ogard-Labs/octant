@@ -437,7 +437,8 @@ the Project goes. The routes under `/api/code/debug/` are local-window only
 with no remote action, no agent tool reaches a session, and nothing a session
 shows is journaled. The Code dock's Run and debug tool calls them: it lists
 and confirms configurations, starts a session with the window's gutter
-breakpoints (held in the renderer, never persisted), and shows the stack,
+breakpoints (configuration saved locally per endpoint/window/thread/checkout,
+revalidated before use; no session state is restored), and shows the stack,
 variables, and a debug console, deciding no refusal itself
 ([Debugger session rules](design/language-services.md#debugger-session-rules),
 [Debugger panel rules](design/language-services.md#debugger-panel-rules)).
