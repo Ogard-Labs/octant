@@ -53,6 +53,7 @@ const duplicateFamilySnapshot = {
 function makeFakeWindowAuthorityStore(): WindowAuthorityStore {
   return {
     authenticate: () => "test-window-id",
+    authenticateAuthority: () => ({ windowId: "test-window-id" }),
   } as unknown as WindowAuthorityStore;
 }
 
@@ -369,6 +370,9 @@ describe("locate binary", () => {
       windowAuthorityStore: {
         authenticate: (capability: string) =>
           capability === "other-window-capability" ? "other-window-id" : windowId,
+        authenticateAuthority: (capability: string) => ({
+          windowId: capability === "other-window-capability" ? "other-window-id" : windowId,
+        }),
       } as unknown as WindowAuthorityStore,
       desktopBridgeSecret: desktopSecret,
       binaryReceipts: new LocalPluginImportReceiptStore(),
