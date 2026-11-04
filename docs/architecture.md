@@ -10209,10 +10209,9 @@ access` agree); a thread's own change is journaled as
   per browsing context) unless the person at a local window puts it in their
   Project's persistent profile or the host's Personal profile; a profile page
   opens only in the desktop app's native Browser, never headless. Octant never
-  opens another browser's profile in place. The Work agent adapter accepts a
-  stored profile request; Code's separate adapter still opens new pages
-  Private and rejects the profile argument, while its person-facing profile
-  controls are built. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
+  opens another browser's profile in place. The Work and Code agent adapters
+  accept a stored profile request and the task's journaled default profile;
+  neither grants access by itself. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
   paired devices, routines, subagents, and terminal Browser grants are refused
   on profile pages; a paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a

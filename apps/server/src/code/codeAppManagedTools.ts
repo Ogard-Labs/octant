@@ -1,5 +1,5 @@
 import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
-import { sameToolActionAuthority, type StoredBrowserProfile } from "@octant/contracts";
+import type { StoredBrowserProfile } from "@octant/contracts";
 import type {
   BrowserAppManagedToolsOptions,
   BrowserModelBinding,
