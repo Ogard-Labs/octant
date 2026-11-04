@@ -4266,6 +4266,15 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   list-style: none;
 }
 
+/* Proposal titles sit below the section's own heading, so they never outrank it. */
+.code-project-planner__proposals h3 {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: 0;
+}
+
 .code-project-planner__intent {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -4275,4 +4284,11 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   width: min(760px, calc(100vw - 32px));
   max-height: calc(100dvh - 32px);
   overflow: auto;
+}
+
+.code-project-planner__review h2 {
+  margin: 0;
+  font-size: var(--oct-text-base);
+  font-weight: 600;
+  letter-spacing: var(--oct-tracking-tight);
 }
