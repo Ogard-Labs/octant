@@ -100,7 +100,8 @@ Native close reports failure while an OS launch completion is still outstanding.
 
 Unsigned native refusal and a synthetic host startup fixture do not establish
 signed installed-app launch, complete host payload, simultaneous-start races or
-coexistence. Retention, quit-one/quit-last and reconnect remain separate work.
+coexistence. Full signed quit-one/quit-last acceptance and reconnect remain
+separate work.
 
 ## Keeping the host for current clients
 
