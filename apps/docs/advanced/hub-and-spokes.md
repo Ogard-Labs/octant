@@ -714,3 +714,22 @@ working on its own. Join the computers to a new hub from each one.
 
 - [Remote Access](/advanced/remote-access) for the listener and pairing
 - [Privacy and security](/advanced/privacy-and-security) for the broader security model
+
+## Recover a Code level from an owner device
+
+An enrolled owner can change a Code thread's level or a Code Project's remembered
+Full access from **Settings → Remote access → Owner Code recovery**, or the phone's
+owner controls. Choose the computer, refresh its Code levels, and select the
+named thread or Project. Compare the current and requested levels, then choose
+**Apply Code level**. Full access asks for a fresh unlock for that choice.
+
+A Project change affects its default for future threads. A thread change affects
+subsequent launches; it does not restart a running turn or answer its waiting
+approval. After any apply, refresh to read the current host state before another
+change. If the target, checkout or Project changed, Octant refuses the old reading
+and asks you to refresh and unlock again. A lost reply is not retried automatically.
+
+A browser uses the passkey for that computer's own origin. If the computer is
+listed with an Open link, open it there to act. Ordinary paired devices and hub
+services gain no owner powers. This control adds no Work-level, approval-answer,
+restore, saved-action, browser take-over, profile or transfer grant.

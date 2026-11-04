@@ -1,3 +1,4 @@
+import { linearCredentialOperation } from "./linearCredentialOperation";
 import type {
   IntegrationAccount,
   IntegrationAuthenticationSnapshot,
@@ -47,6 +48,7 @@ export function createLinearIntegration(
   hostPort: IntegrationHostPort,
   config: LinearIntegrationConfig,
 ): IntegrationRuntime {
+  const credentialOperation = hostPort.registerCredentialOperation?.(linearCredentialOperation);
   const snapshot = async (signal?: AbortSignal): Promise<IntegrationObservation> => ({
     kind: "authentication",
     snapshot: await observeAuthentication(hostPort, config, signal),
@@ -86,7 +88,9 @@ export function createLinearIntegration(
         snapshot: await executeAuthentication(hostPort, config, command.command.kind, signal),
       };
     },
-    close: async () => {},
+    close: async () => {
+      if (credentialOperation?.kind === "registered") credentialOperation.release();
+    },
   };
 }
 

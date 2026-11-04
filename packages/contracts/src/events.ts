@@ -60,13 +60,20 @@ const actorStrict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Versioned journal actor attribution. Additive: persisted `system` /
- * `local-user` envelopes keep decoding. `remote-device` and `agent` carry the
+ * `local-user` envelopes keep decoding. `owner-unlock` names a hub member,
+ * whose identity is distinct from a local window or a paired device record.
+ * `remote-device` and `agent` carry the
  * identity fields required so a remote approval is never indistinguishable from
  * a local one and agent petitions name their provider instance + thread.
  */
 export const EventActor = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("system"), actorId: ActorId }).annotations(actorStrict),
   Schema.Struct({ kind: Schema.Literal("local-user"), actorId: ActorId }).annotations(actorStrict),
+  Schema.Struct({
+    kind: Schema.Literal("owner-unlock"),
+    actorId: ActorId,
+    memberId: Schema.UUID,
+  }).annotations(actorStrict),
   Schema.Struct({
     kind: Schema.Literal("remote-device"),
     actorId: ActorId,
