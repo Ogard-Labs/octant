@@ -40,9 +40,11 @@ import {
   DESKTOP_NODE_RUNTIME_NAME,
   DESKTOP_NODE_RUNTIME_BUNDLE_ID,
   DESKTOP_PEER_STATUS_FILENAME,
+  NIGHTLY_INSTALLATION_FILENAME,
 } from "../apps/desktop/src/runtimePaths";
 import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildDeviceHelper } from "./build-device-helper";
+import { buildNightlyInstallation } from "./build-nightly-installation";
 import { buildDesktopPeerStatus } from "./build-desktop-peer-status";
 import { buildKeychainHelper } from "./build-keychain-helper";
 import { prepareComputerUseDriver } from "./prepare-computer-use-driver";
@@ -329,6 +331,7 @@ export const REQUIRED_DARWIN_HELPER_FILES = [
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
   "Octant.app/Contents/Resources/native/octant-device-helper",
   "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
+  "Octant.app/Contents/Resources/native/octant-nightly-installation.node",
   "Octant.app/Contents/Resources/native/cua-driver",
   "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
   "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
@@ -425,6 +428,7 @@ export async function installTerminalLauncher(
 export const PACKAGED_LINUX_EXECUTABLE_FILES = [LINUX_LANGUAGE_SERVER_BINARY] as const;
 export const PACKAGED_ARM64_FILES = [
   "native/octant-desktop-peer-status.node",
+  "native/octant-nightly-installation.node",
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
   "native/octant-device-helper",
@@ -445,6 +449,7 @@ export const FORBIDDEN_PACKAGED_FILES = [
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-code-file-helper",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-device-helper",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-desktop-peer-status.node",
+  "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-nightly-installation.node",
 ] as const;
 /** Darwin helpers must never appear inside a Linux portable tree or AppDir. */
 export const FORBIDDEN_LINUX_HELPER_PATTERNS = [
@@ -452,6 +457,7 @@ export const FORBIDDEN_LINUX_HELPER_PATTERNS = [
   /(?:^|\/)octant-code-file-helper$/,
   /(?:^|\/)octant-device-helper$/,
   /(?:^|\/)octant-desktop-peer-status\.node$/,
+  /(?:^|\/)octant-nightly-installation\.node$/,
 ] as const;
 export const FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS = [
   /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk-[^/]+\//,
@@ -477,6 +483,7 @@ const ALLOWED_DARWIN_NATIVE_PAYLOADS = new Set([
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
   "Octant.app/Contents/Resources/native/octant-device-helper",
   "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
+  "Octant.app/Contents/Resources/native/octant-nightly-installation.node",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
@@ -1179,6 +1186,7 @@ async function packageDarwinDesktop(
   const nativeResources = join(finalApp, "Contents/Resources/native");
   await mkdir(nativeResources, { recursive: true });
   await buildDesktopPeerStatus(join(nativeResources, DESKTOP_PEER_STATUS_FILENAME));
+  await buildNightlyInstallation(join(nativeResources, NIGHTLY_INSTALLATION_FILENAME));
   await prepareComputerUseDriver(repositoryRoot, join(nativeResources, "cua-driver"));
   await prepareManagedTools(
     repositoryRoot,

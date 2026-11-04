@@ -88,6 +88,7 @@ describe("desktop packaging boundary", () => {
     expect(() =>
       validateNativePayloadAllowlist([
         "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
+        "Octant.app/Contents/Resources/native/octant-nightly-installation.node",
       ]),
     ).not.toThrow();
   });
@@ -391,6 +392,7 @@ describe("desktop packaging boundary", () => {
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
       "Octant.app/Contents/Resources/native/octant-device-helper",
       "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
+      "Octant.app/Contents/Resources/native/octant-nightly-installation.node",
       "Octant.app/Contents/Resources/native/cua-driver",
       "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
       "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
@@ -434,6 +436,7 @@ describe("desktop packaging boundary", () => {
     ]);
     expect(PACKAGED_ARM64_FILES).toEqual([
       "native/octant-desktop-peer-status.node",
+      "native/octant-nightly-installation.node",
       "native/octant-keychain-helper",
       "native/octant-code-file-helper",
       "native/octant-device-helper",
@@ -453,7 +456,12 @@ describe("desktop packaging boundary", () => {
     expect(FORBIDDEN_PACKAGED_FILES).toContain(
       "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-device-helper",
     );
-    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(4);
+    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(5);
+    expect(
+      FORBIDDEN_LINUX_HELPER_PATTERNS.some((pattern) =>
+        pattern.test("native/octant-nightly-installation.node"),
+      ),
+    ).toBe(true);
     expect(FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS).toEqual([
       /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk-[^/]+\//,
       /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk\/(?:vendor\/)?claude(?:\.exe)?$/,
@@ -679,6 +687,7 @@ describe("desktop packaging boundary", () => {
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
       "Octant.app/Contents/Resources/native/octant-device-helper",
       "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
+      "Octant.app/Contents/Resources/native/octant-nightly-installation.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",

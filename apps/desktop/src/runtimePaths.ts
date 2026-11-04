@@ -91,3 +91,4 @@ export function resolveDesktopHostRoot(options: {
 }
 
 export const DESKTOP_PEER_STATUS_FILENAME = "octant-desktop-peer-status.node";
+export const NIGHTLY_INSTALLATION_FILENAME = "octant-nightly-installation.node";

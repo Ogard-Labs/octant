@@ -43,7 +43,12 @@ export async function buildDesktopPeerStatus(
     resolve(moduleRoot, "package.json"),
     JSON.stringify({ name: moduleName, version: "0.0.0", gypfile: true }),
   );
-  for (const source of ["desktopPeerStatus.mm", "desktopPeerPolicy.h", "desktopPeerWindows.h"])
+  for (const source of [
+    "desktopPeerStatus.mm",
+    "desktopPeerPolicy.h",
+    "desktopPeerWindows.h",
+    "desktopApplicationIdentity.h",
+  ])
     await cp(
       resolve(repositoryRoot, "apps/desktop/src/native", source),
       resolve(moduleRoot, source),

@@ -30,6 +30,7 @@ export const SIGNING_ORDER = [
   "Contents/Resources/native/octant-code-file-helper",
   "Contents/Resources/native/octant-device-helper",
   "Contents/Resources/native/octant-desktop-peer-status.node",
+  "Contents/Resources/native/octant-nightly-installation.node",
   "Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
   "Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
   "Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",

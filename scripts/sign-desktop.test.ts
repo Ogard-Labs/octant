@@ -203,6 +203,7 @@ describe("signAndNotarizeDesktop", () => {
       "Contents/Resources/native/octant-keychain-helper",
       "Contents/Resources/native/octant-code-file-helper",
       "Contents/Resources/native/octant-desktop-peer-status.node",
+      "Contents/Resources/native/octant-nightly-installation.node",
       "Contents/Resources/native/octant-device-helper",
       "Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
     ]) {
