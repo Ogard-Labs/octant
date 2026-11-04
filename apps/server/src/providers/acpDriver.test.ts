@@ -6,7 +6,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderToolDefinition,
 } from "@octant/contracts";
-import { cacheHitRate, deriveTurnMetrics } from "@octant/domain";
+import { cacheHitRate, deriveTurnMetrics, foldCodeTurnUsage } from "@octant/domain";
 import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -305,6 +305,198 @@ async function collectTerminal(
     ).pipe(Effect.map((items) => Array.from(items) as ProviderRuntimeEvent[])),
   );
 }
+
+describe("verified ACP usage", () => {
+  it.each([
+    ["start", "end_turn"],
+    ["resume", "end_turn"],
+    ["start", "cancelled"],
+  ] as const)(
+    "counts only new tokens after %s with %s and leaves cumulative cost out",
+    async (operation, stopReason) => {
+      const { driver, client } = fixture(vibe, { runtimeVersion: "3.0.3" });
+      const usage = (input: number, output: number) =>
+        client.emit({
+          kind: "notification",
+          method: "session/update",
+          params: {
+            sessionId: "agent-session-1",
+            update: {
+              sessionUpdate: "usage_update",
+              used: 600,
+              size: 200_000,
+              cost: { amount: 12, currency: "USD" },
+              _meta: { promptTokens: input, completionTokens: output, cachedTokens: 0 },
+            },
+          },
+        });
+      client.prompt.mockImplementationOnce(async () => {
+        usage(10_200, 2_050);
+        usage(10_400, 2_100);
+        return {
+          stopReason,
+          usage: {
+            inputTokens: 10_400,
+            outputTokens: 2_100,
+            totalTokens: 12_500,
+            cachedReadTokens: 0,
+          },
+        };
+      });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const probe = yield* driver.probe({ instanceId });
+            expect(probe.capabilities.usage).toBe("supported");
+            const initial = async () => {
+              usage(10_000, 2_000);
+              return { sessionId: "agent-session-1", configOptions: client.configOptions };
+            };
+            if (operation === "resume") client.loadSession.mockImplementationOnce(initial);
+            else client.newSession.mockImplementationOnce(initial);
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            if (operation === "resume") {
+              yield* connection.resume({
+                sessionId,
+                modelId,
+                executionPolicy: "full-access",
+                resumeCursor: {
+                  driverKind: "mistral-vibe",
+                  value: "agent-session-1",
+                  binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
+                },
+              });
+            } else yield* connection.start({ sessionId, modelId, executionPolicy: "full-access" });
+            const stream = yield* connection.subscribe;
+            const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+            yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+            const events = yield* Fiber.join(collected);
+            expect(events.at(-1)?.kind).toBe(
+              stopReason === "cancelled" ? "interrupted" : "completed",
+            );
+            expect(
+              events
+                .filter((event) => event.kind === "usage")
+                .map(({ inputTokens, outputTokens, contextWindow, contextTokens, costUsd }) => ({
+                  inputTokens,
+                  outputTokens,
+                  contextWindow,
+                  contextTokens,
+                  costUsd,
+                })),
+            ).toEqual([
+              {
+                inputTokens: 400,
+                outputTokens: 100,
+                contextWindow: 200_000,
+                contextTokens: 600,
+                costUsd: undefined,
+              },
+            ]);
+            usage(10_400, 2_100);
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+    },
+  );
+
+  it.each([
+    "partial",
+    "regressing",
+    "missing receipt",
+    "malformed receipt",
+    "older receipt",
+    "newer receipt",
+    "wrong initial identity",
+    "mixed initial identity",
+  ])("settles %s accounting without retaining an earlier partial total", async (scenario) => {
+    const { driver, client } = fixture(vibe, { runtimeVersion: "3.0.3" });
+    const update = (inputTokens: number, outputTokens: number) => ({
+      sessionUpdate: "usage_update",
+      used: 600,
+      size: 200_000,
+      _meta: { promptTokens: inputTokens, completionTokens: outputTokens, cachedTokens: 0 },
+    });
+    const emit = (value: Readonly<Record<string, unknown>>, source = "agent-session-1") =>
+      client.emit({
+        kind: "notification",
+        method: "session/update",
+        params: { sessionId: source, update: value },
+      });
+    client.newSession.mockImplementationOnce(async () => {
+      emit(
+        update(1_000, 200),
+        scenario === "wrong initial identity" ? "other-session" : "agent-session-1",
+      );
+      if (scenario === "mixed initial identity") emit(update(1_000, 200), "other-session");
+      return { sessionId: "agent-session-1", configOptions: client.configOptions };
+    });
+    client.prompt.mockImplementationOnce(async () => {
+      emit(update(1_200, 250));
+      if (scenario === "partial") emit({ sessionUpdate: "usage_update", used: 600, size: 200_000 });
+      if (scenario === "regressing") emit(update(1_100, 240));
+      emit(update(1_400, 300));
+      const inputTokens =
+        scenario === "older receipt" ? 1_300 : scenario === "newer receipt" ? 1_500 : 1_400;
+      const receipt = {
+        inputTokens,
+        outputTokens: 300,
+        totalTokens: inputTokens + 300,
+        cachedReadTokens: 0,
+      };
+      return {
+        stopReason: "end_turn",
+        usage:
+          scenario === "missing receipt"
+            ? undefined
+            : scenario === "malformed receipt"
+              ? { inputTokens: "bad" }
+              : receipt,
+      };
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "full-access" });
+          const stream = yield* connection.subscribe;
+          const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          const events = yield* Fiber.join(collected);
+          const settlement = deriveTurnMetrics({
+            events,
+            startedAt: "2026-07-17T10:00:00.000Z",
+            endedAt: "2026-07-17T10:00:01.000Z",
+          });
+          const total = foldCodeTurnUsage(
+            undefined,
+            settlement.usage === undefined ? [] : [settlement.usage],
+          );
+          if (scenario === "newer receipt") {
+            expect(events.filter((event) => event.kind === "usage")).toHaveLength(1);
+            expect(total).toMatchObject({ reportedTurns: 1, inputTokens: 500, outputTokens: 100 });
+            expect(total).not.toHaveProperty("contextTokens");
+          } else {
+            expect(events.filter((event) => event.kind === "usage")).toEqual([]);
+            expect(settlement.usage).toBeUndefined();
+            expect(total).toBeUndefined();
+          }
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  });
+
+  it.each(["3.0.2", "3.0.4"])(
+    "leaves usage unsupported on the unverified release %s",
+    async (runtimeVersion) => {
+      const { driver } = fixture(vibe, { runtimeVersion });
+      const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+      expect(probe.capabilities.usage).toBe("unsupported");
+    },
+  );
+});
 
 describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
   it("delivers immediate prompt output to every established subscriber", async () => {

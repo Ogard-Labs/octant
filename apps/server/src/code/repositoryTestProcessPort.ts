@@ -1,7 +1,7 @@
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { constants } from "node:fs";
 import { access, lstat, open, realpath, stat } from "node:fs/promises";
-import { basename, delimiter, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   MAX_REPOSITORY_TEST_ARTIFACT_BYTES,
   MAX_REPOSITORY_TEST_OUTPUT_BYTES,
@@ -20,6 +20,8 @@ import {
   seatbeltAllowLiteralReadRule,
   seatbeltAllowMachLookupRule,
   seatbeltAllowRegexReadWriteRule,
+  seatbeltAllowRule,
+  seatbeltDenyRule,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
@@ -115,6 +117,8 @@ interface RepositoryTestProcessPortOptions {
  */
 export interface HarnessShellScriptInput {
   readonly script: string;
+  readonly beforeLaunch?: () => boolean;
+  readonly cloudCliConfigurationDirectory?: string;
   readonly cwd: string;
   /**
    * The Project's extra folders: the command reads and writes each as it does
@@ -152,6 +156,7 @@ export interface HarnessShellScriptInput {
 }
 
 export interface RepositoryTestProcessInput {
+  readonly beforeLaunch?: () => boolean;
   readonly argv: readonly string[];
   readonly cwd: string;
   readonly environment: Readonly<Record<string, string>>;
@@ -358,23 +363,75 @@ export class RepositoryTestProcessPort {
       return unavailable(false);
     if (signal?.aborted) return cancelledBeforeSpawn();
     let launchInput: RepositoryTestProcessInput;
+    let cloudCli: {
+      readonly root: string;
+      readonly owned?: { readonly resource: string; readonly configuration: string };
+    };
     try {
       validateLaunchInput({ ...input, argv: [HARNESS_SHELL, input.script] }, this.#maxOutputBytes);
-      const script = await resolveHarnessScript(scriptDirectory, input.script, [
+      const writableRoots = [
         input.cwd,
         ...(input.extraRoots ?? []),
         this.#temporaryDirectory,
         ...this.#additionalWritePaths,
-      ]);
+      ];
+      const script = await resolveHarnessScript(scriptDirectory, input.script, writableRoots);
+      const resourceRoot = join(dirname(await realpath(scriptDirectory)), "cloud-cli");
+      for (const writable of writableRoots) {
+        const canonical = await realpath(writable);
+        if (contained(canonical, resourceRoot) || contained(resourceRoot, canonical))
+          return unavailable(false);
+      }
+      cloudCli = { root: resourceRoot };
+      const configurationDirectory = input.cloudCliConfigurationDirectory;
+      if (configurationDirectory !== undefined) {
+        const configurationRootPath = join(dirname(scriptDirectory), "cloud-cli");
+        const rootMetadata = await lstat(configurationRootPath);
+        if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) return unavailable(false);
+        const configurationRoot = await realpath(configurationRootPath);
+        const scriptRoot = await realpath(scriptDirectory);
+        if (contained(configurationRoot, scriptRoot) || contained(scriptRoot, configurationRoot))
+          return unavailable(false);
+        const resource = dirname(configurationDirectory);
+        const resourceMetadata = await lstat(resource);
+        const resourceRoot = await realpath(resource);
+        const metadata = await lstat(configurationDirectory);
+        const configured = await realpath(configurationDirectory);
+        if (
+          !resourceMetadata.isDirectory() ||
+          resourceMetadata.isSymbolicLink() ||
+          dirname(resourceRoot) !== configurationRoot ||
+          !basename(resourceRoot).startsWith(`google-${basename(dirname(script))}-`) ||
+          !metadata.isDirectory() ||
+          metadata.isSymbolicLink() ||
+          dirname(configured) !== resourceRoot ||
+          basename(configured) !== "configuration"
+        )
+          return unavailable(false);
+        cloudCli = {
+          root: configurationRoot,
+          owned: { resource: resourceRoot, configuration: configured },
+        };
+      }
       launchInput = {
+        ...(input.beforeLaunch === undefined ? {} : { beforeLaunch: input.beforeLaunch }),
         argv: [HARNESS_SHELL, script],
         cwd: input.cwd,
         environment: input.environment,
         timeoutMs: input.timeoutMs,
-        additionalReadRoots: [dirname(script), ...(input.extraRoots ?? [])],
-        ...(input.extraRoots === undefined || input.extraRoots.length === 0
+        additionalReadRoots: [
+          dirname(script),
+          ...(input.extraRoots ?? []),
+          ...(configurationDirectory === undefined ? [] : [dirname(configurationDirectory)]),
+        ],
+        ...((input.extraRoots?.length ?? 0) === 0 && configurationDirectory === undefined
           ? {}
-          : { additionalWriteRoots: input.extraRoots }),
+          : {
+              additionalWriteRoots: [
+                ...(input.extraRoots ?? []),
+                ...(configurationDirectory === undefined ? [] : [configurationDirectory]),
+              ],
+            }),
       };
       validateLaunchInput(launchInput, this.#maxOutputBytes);
     } catch {
@@ -465,6 +522,7 @@ export class RepositoryTestProcessPort {
                     ],
                   }),
           },
+      cloudCli,
     );
   }
 
@@ -479,6 +537,10 @@ export class RepositoryTestProcessPort {
       readonly extraRules?: ReadonlyArray<string>;
       /** The Linux forwarder's relays to a harness command's registered servers. */
       readonly serverRelays?: ReadonlyArray<{ readonly port: number; readonly socketPath: string }>;
+    },
+    cloudCli?: {
+      readonly root: string;
+      readonly owned?: { readonly resource: string; readonly configuration: string };
     },
   ): Promise<RepositoryTestProcessResult> {
     let launch: { readonly command: string; readonly args: readonly string[] };
@@ -519,6 +581,21 @@ export class RepositoryTestProcessPort {
           launchReadRules.push("(allow signal)");
         }
         launchReadRules.push(...(proxied?.extraRules ?? []));
+        if (cloudCli !== undefined) {
+          // Broad reads and ancestor grants must not expose another command's
+          // token, or make this command's read-only token writable.
+          launchReadRules.push(
+            seatbeltDenyRule("file-read*", cloudCli.root),
+            seatbeltDenyRule("file-write*", cloudCli.root),
+            seatbeltAllowLiteralMetadataRule(cloudCli.root),
+            ...(cloudCli.owned === undefined
+              ? []
+              : [
+                  seatbeltAllowRule("file-read*", cloudCli.owned.resource),
+                  seatbeltAllowRule("file-write*", cloudCli.owned.configuration),
+                ]),
+          );
+        }
       }
       const additionalWriteRoots = [
         ...this.#additionalWritePaths,
@@ -543,6 +620,12 @@ export class RepositoryTestProcessPort {
         ],
         ...(additionalWriteRoots.length === 0 ? {} : { additionalWriteRoots }),
         ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
+        ...(cloudCli === undefined || this.#platform !== "linux"
+          ? {}
+          : {
+              additionalDenyReadPaths: [cloudCli.root],
+              additionalDenyWritePaths: [cloudCli.root],
+            }),
         ...(proxied?.serverRelays === undefined || proxied.serverRelays.length === 0
           ? {}
           : { serverRelays: proxied.serverRelays }),
@@ -556,6 +639,8 @@ export class RepositoryTestProcessPort {
     }
 
     if (signal?.aborted) return cancelledBeforeSpawn();
+
+    if (input.beforeLaunch !== undefined && !input.beforeLaunch()) return unavailable(false);
 
     let child: SpawnedProcess;
     try {

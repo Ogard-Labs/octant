@@ -40,8 +40,8 @@ export function createRuntimeForgeChangeObserver(input: {
       try {
         const changes = forgeShellChanges(command);
         if (changes.length === 0) return;
-        // Below Full access the runtime asked first, and Shield or the person
-        // answered, so the act was not one nobody asked for.
+        // Below Full access the runtime may have asked its own reviewer.
+        // This observation is never evidence of the person's consent.
         const hardLine = fullAccess
           ? forgeShellHardLine(changes, input.branches(threadId))
           : undefined;

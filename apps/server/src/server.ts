@@ -468,6 +468,8 @@ export function startOctantServer(
     });
     const {
       readHarnessProcessReceipts,
+      beginGoogleCliChange,
+      recoverGoogleCliCommands,
       personMemorySweep,
       runtimeForgeChanges,
       followUpCreation,
@@ -533,6 +535,7 @@ export function startOctantServer(
       workThreadProjection,
       workTurnProjection,
     });
+    yield* Effect.promise(recoverGoogleCliCommands);
     const {
       agentProfileRoutes,
       buildCodeService,
@@ -1285,6 +1288,7 @@ export function startOctantServer(
       secretStoresRoutes,
       remoteHost,
     } = wireRemote({
+      beginGoogleCliChange,
       codeService,
       projectService,
       browserExtensionService,

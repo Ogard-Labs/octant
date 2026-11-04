@@ -291,6 +291,11 @@ keeps working:
 - **The AWS command line** in Octant's own shell gets a session that lasts one
   hour once you point its key pair at items in a linked password manager
   ([Use API keys from a secret store](../guide/secret-stores.md)).
+- **Google Cloud `gcloud`** in Octant's own shell gets a temporary token file
+  and private configuration after you confirm the linked service account and
+  OAuth scopes. The reusable key stays in the broker. Cloud IAM roles can
+  reach several Projects. Removing the reference blocks pending and future
+  commands; tokens already received by running commands may last until expiry.
 
 When an agent asks for a protected file, the refusal says which group refused
 it and which channel to use. You see that message in the tool row.

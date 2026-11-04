@@ -62,6 +62,10 @@ import {
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
+import {
+  forgeShellChanges,
+  FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
+} from "@octant/domain/forge-shell-change-policy";
 import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
 import type { ShieldReviewPort } from "../shield/octantShield";
 import { Effect } from "effect";
@@ -3382,8 +3386,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
-   * A provider's approval prompt, answered by Octant Shield when it reviews
-   * this thread. An allow or deny goes straight back to the provider for this
+   * A provider's pending approval prompt. Recognizable forge writes below
+   * Full access must use the scoped tools; only other calls reach Shield when
+   * it reviews this thread. An allow or deny goes back to the provider for this
    * one call and nobody is asked; an ask, or a thread Shield does not review,
    * becomes the ordinary approval for the person. Shield's decision is
    * journaled beside the tool rows either way. The pending call comes from the
@@ -3394,7 +3399,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   async #reviewProviderApproval(active: ActiveTurn, event: CodeTurnEvent): Promise<void> {
     const shield = this.#options.shield;
     const requestId = event.requestId;
-    if (shield === undefined || requestId === undefined || active.connection === undefined) {
+    if (requestId === undefined || active.connection === undefined) {
       this.#persistNormalized(active, event);
       return;
     }
@@ -3410,17 +3415,64 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     } catch {
       call = undefined;
     }
+    const pendingCall = shieldCallFromProviderRequest({
+      tool: call?.tool ?? "provider-action",
+      input: call?.input,
+      workingDirectory: call?.workingDirectory,
+      description: restore(summary) ?? summary,
+      boundRoot: active.checkoutRoot,
+    });
+    // Only a pending call supplied by the connection can be stopped here.
+    // A provider's own reviewer and tool-start observations never enter this path.
+    const posture = this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy;
+    if (
+      posture !== "full-access" &&
+      pendingCall.command !== undefined &&
+      forgeShellChanges(pendingCall.command).length > 0
+    ) {
+      const frame = this.#events.append({
+        threadId: active.thread.id,
+        operationId: active.operationId,
+        expectedCursor: active.cursor,
+        event: {
+          kind: "tool-activity",
+          toolCallId: `forge-refusal:${requestId}`,
+          toolName: pendingCall.tool,
+          state: "failed",
+          summary: FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
+        },
+      });
+      active.cursor = frame.cursor;
+      try {
+        await Effect.runPromise(
+          active.connection.answerApproval({
+            sessionId: active.sessionId as never,
+            requestId,
+            approved: false,
+            scope: "once",
+          }),
+        );
+      } catch {
+        // A denied forge call must never become an ordinary approvable prompt.
+        active.interruptMessage = FORGE_SHELL_TOOL_REQUIRED_MESSAGE;
+        active.abort.abort();
+        await Effect.runPromise(
+          active.connection
+            .interrupt(active.sessionId as never)
+            .pipe(Effect.catchAll(() => Effect.void)),
+        );
+      }
+      return;
+    }
+    if (shield === undefined) {
+      this.#persistNormalized(active, event);
+      return;
+    }
     let decision: ShieldDecision | undefined;
     try {
       decision = await shield.review({
         threadId: String(active.thread.id),
-        call: shieldCallFromProviderRequest({
-          tool: call?.tool ?? "provider-action",
-          input: call?.input,
-          workingDirectory: call?.workingDirectory,
-          description: restore(summary) ?? summary,
-          boundRoot: active.checkoutRoot,
-        }),
+        call: pendingCall,
         boundRoot: active.checkoutRoot,
         signal: active.abort.signal,
       });
@@ -4568,7 +4620,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 : Promise.resolve(),
             ).pipe(
               Effect.andThen(
-                event.category === "approval" && this.#options.shield !== undefined
+                event.category === "approval"
                   ? Effect.promise(() => this.#reviewProviderApproval(active, event))
                   : Effect.sync(() => this.#persistNormalized(active, event)),
               ),
