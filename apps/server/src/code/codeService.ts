@@ -84,6 +84,7 @@ import {
   decodeCodeOperationEventFrame,
   type Project,
   type EventEnvelope,
+  type EventActor,
   type PermissionPersistence,
   type ProjectId,
   type TerminalSessionImportRequest,
@@ -1259,6 +1260,75 @@ export class CodeService {
       ...view,
       thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, view.thread),
     };
+  }
+
+  /** Called only by the host's owner route after verifying its action-bound unlock. */
+  changeOwnerPosture(input: {
+    readonly threadId: CodeThreadId;
+    readonly expectedVersion: number;
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly permissionPersistence: PermissionPersistence;
+    readonly ownerMemberId: string;
+    readonly freshFull: boolean;
+  }): CodeThread {
+    const current = this.#persistence.readCodeThread(input.threadId);
+    if (current === undefined) throw this.#failure("invalid", "Code thread was not found.");
+    if (current.version !== input.expectedVersion) {
+      throw this.#failure("stale", "Code state changed; reload and unlock again.");
+    }
+    if (input.executionPolicy === "full-access" && !input.freshFull) {
+      throw this.#failure(
+        "unauthorized",
+        "Full access needs a fresh owner unlock for this change.",
+      );
+    }
+    const project = this.#persistence.readProject?.(current.projectId);
+    if (
+      project?.type !== "code" ||
+      project.lifecycle !== "active" ||
+      current.lifecycle !== "active"
+    ) {
+      throw this.#failure("unauthorized", "The Code thread or Project is unavailable.");
+    }
+    const next = this.#withGuardrailStamp(
+      decodeCodeThread({
+        ...current,
+        executionPolicy: input.executionPolicy,
+        permissionPersistence: input.permissionPersistence,
+        version: current.version + 1,
+        updatedAt: decodeTimestamp(this.#clock()),
+      }),
+    );
+    const actor: EventActor = {
+      kind: "owner-unlock",
+      actorId: decodeActorId(input.ownerMemberId),
+      memberId: input.ownerMemberId,
+    };
+    this.#inUnit(() => {
+      this.#append(
+        "code-thread",
+        current.id,
+        current.version,
+        "code.thread-updated@1",
+        {
+          kind: "thread-updated",
+          thread: next,
+        },
+        actor,
+      );
+      this.#journalLowering(
+        {
+          scope: "thread",
+          from: permissionModeOf(current),
+          to: permissionModeOf(next),
+          projectId: current.projectId,
+          threadId: String(current.id),
+        },
+        actor,
+      );
+    });
+    this.#sessionAuthority.revokeThreadEverywhere(current.id);
+    return next;
   }
 
   async execute(
@@ -3376,7 +3446,7 @@ export class CodeService {
     payload: unknown,
     // Everything a person asks for is theirs; only the host's own timer
     // writes as the system, so a journal reader can tell the two apart.
-    actorKind: "local-user" | "system" = "local-user",
+    actorKind: "local-user" | "system" | EventActor = "local-user",
   ): void {
     this.#persistence.journal.append({
       aggregate: { aggregateType, aggregateId },
@@ -3387,7 +3457,10 @@ export class CodeService {
           eventName,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: { kind: actorKind, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          actor:
+            typeof actorKind === "string"
+              ? { kind: actorKind, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) }
+              : actorKind,
           occurredAt: decodeTimestamp(this.#clock()),
           payload,
         },
@@ -3408,13 +3481,16 @@ export class CodeService {
    * the time; the payload names the scope and both levels. A change that does
    * not lower the guardrail records nothing.
    */
-  #journalLowering(change: {
-    readonly scope: "global" | "project" | "thread";
-    readonly from: PermissionMode;
-    readonly to: PermissionMode;
-    readonly projectId?: ProjectId;
-    readonly threadId?: string;
-  }): void {
+  #journalLowering(
+    change: {
+      readonly scope: "global" | "project" | "thread";
+      readonly from: PermissionMode;
+      readonly to: PermissionMode;
+      readonly projectId?: ProjectId;
+      readonly threadId?: string;
+    },
+    actor?: EventActor,
+  ): void {
     if (!guardrailLowered(change.from, change.to)) return;
     this.#append(
       "guardrail-change",
@@ -3422,6 +3498,7 @@ export class CodeService {
       0,
       GUARDRAIL_LEVEL_LOWERED,
       decodeGuardrailLevelLowered({ surface: "code", ...change }),
+      actor,
     );
   }
 

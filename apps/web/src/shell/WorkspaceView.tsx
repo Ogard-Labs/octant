@@ -15,6 +15,8 @@ import {
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
 import { OutsideContentContext, type OutsideContentThread } from "../composer/OutsideContentNotice";
+import { TaskAccessContext, type TaskAccessContextValue } from "../code/TaskAccessDetails";
+import { decodeContextSubjectRef } from "@octant/contracts";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import {
   FollowUpSuggestionContext,
@@ -579,6 +581,8 @@ export interface WorkspaceViewProps {
   readonly onOpenDraftThread?: (mode: "work" | "code") => void;
   readonly onOpenCodeSettings?: () => void;
   readonly onOpenProviderSettings?: () => void;
+  readonly onOpenReviewerSettings?: () => void;
+  readonly onOpenProtectedFilesSettings?: () => void;
   /** Opens Settings at Image generation, where a thread's Create image action points. */
   readonly onOpenImageSettings?: () => void;
   readonly onOpenSettings?: () => void;
@@ -826,15 +830,17 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                       paneId={paneId}
                       surface={surface}
                     >
-                      <OutsideContentContext
-                        value={outsideContentFor(surface, props.contextClient)}
-                      >
-                        {onWelcomeGround(
-                          surface,
-                          props.welcomeBackdrop,
-                          renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
-                        )}
-                      </OutsideContentContext>
+                      <TaskAccessContext value={taskAccessFor(surface, props)}>
+                        <OutsideContentContext
+                          value={outsideContentFor(surface, props.contextClient)}
+                        >
+                          {onWelcomeGround(
+                            surface,
+                            props.welcomeBackdrop,
+                            renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
+                          )}
+                        </OutsideContentContext>
+                      </TaskAccessContext>
                     </SurfaceLinkActionsProvider>
                   </ComposerContextMeterGate>
                 </ComposerNoticeProvider>
@@ -981,6 +987,34 @@ function outsideContentFor(
   if ("hostId" in surface && surface.hostId !== undefined) return undefined;
   if (!("threadId" in surface)) return undefined;
   return { client, mode: surface.mode, threadId: String(surface.threadId) };
+}
+
+function taskAccessFor(
+  surface: WorkspaceTab,
+  props: WorkspaceViewProps,
+): TaskAccessContextValue | undefined {
+  const thread = outsideContentFor(surface, props.contextClient);
+  if (thread === undefined || thread.mode === "chat") return undefined;
+  try {
+    return {
+      client: thread.client,
+      subject: decodeContextSubjectRef({
+        aggregateType: `${thread.mode}-thread`,
+        aggregateId: thread.threadId,
+      }),
+      ...(props.onOpenProviderSettings === undefined
+        ? {}
+        : { onOpenProviders: props.onOpenProviderSettings }),
+      ...(props.onOpenReviewerSettings === undefined
+        ? {}
+        : { onOpenAccess: props.onOpenReviewerSettings }),
+      ...(props.onOpenProtectedFilesSettings === undefined
+        ? {}
+        : { onOpenProtectedFiles: props.onOpenProtectedFilesSettings }),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

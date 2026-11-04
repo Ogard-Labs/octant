@@ -1,3 +1,4 @@
+import { CodeService } from "../code/codeService";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import {
@@ -72,7 +73,7 @@ import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
 import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
-import { createReadingPostureHost } from "../hub/ownerPostureHost";
+import { createOwnerPostureHost } from "../hub/ownerPostureHost";
 import { createPeerCredentialRouteHandler } from "../hub/peerCredentialRoutes";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { PairedMergeUnlockService } from "../hub/pairedMergeUnlock";
@@ -165,7 +166,7 @@ export type RemoteDependencies = Pick<
     | "providerDataDirectory"
     | "providerService"
   > &
-  Pick<WorkspaceWiring, "shellService"> &
+  Pick<WorkspaceWiring, "shellService" | "projectService"> &
   Pick<BrowserWiring, "browserExtensionService" | "browserFlowService" | "browserProfileService"> &
   Pick<
     CodeToolingWiring,
@@ -195,7 +196,7 @@ export type RemoteDependencies = Pick<
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime">;
+  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService">;
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
 
@@ -898,7 +899,12 @@ export function wireRemote(deps: RemoteDependencies) {
     hub: hubService,
     spoke: spokeLinkService,
     unlock: ownerUnlock,
-    postures: createReadingPostureHost({
+    postures: createOwnerPostureHost({
+      readCodeThreads: () => persistence.readCodeThreads(),
+      readProjects: () => persistence.readProjects(),
+      readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      code: deps.codeService instanceof CodeService ? deps.codeService : undefined,
+      projects: deps.projectService,
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       readProject: (projectId) => persistence.readProject(projectId),
     }),

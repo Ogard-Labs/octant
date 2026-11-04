@@ -59,6 +59,9 @@ export function classifyProductAction(request: Request): string | undefined {
   const method = request.method.toUpperCase();
   const path = url.pathname;
 
+  // Private credential entry is host-local and is never a forwarded product action.
+  if (path === "/api/credential-requests") return undefined;
+
   if (path.startsWith("/api/chat/")) {
     if (method === "POST" && (path.endsWith("/commands") || path === "/api/chat/attachments")) {
       return "chat.send-turn";

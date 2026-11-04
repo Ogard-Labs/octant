@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentMessagingFactsRow } from "./AgentMessagingFactsRow";
 import type { AgentMessageMessagingFacts } from "@octant/contracts";
@@ -21,11 +21,46 @@ const facts: AgentMessageMessagingFacts = {
 };
 
 describe("AgentMessagingFactsRow", () => {
+  it("distinguishes queued, provider delivery and explicit recipient receipt without claiming action", () => {
+    const first = facts.recent[0];
+    if (first === undefined) throw new Error("Missing receipt fixture");
+    const { refuseReason: _reason, ...base } = first;
+    render(
+      <AgentMessagingFactsRow
+        client={undefined}
+        facts={{
+          ...facts,
+          recent: [
+            {
+              ...base,
+              messageId: "10000000-0000-4000-8000-000000000011" as never,
+              state: "in-flight",
+            },
+            {
+              ...base,
+              messageId: "10000000-0000-4000-8000-000000000012" as never,
+              state: "delivered",
+            },
+            {
+              ...base,
+              messageId: "10000000-0000-4000-8000-000000000013" as never,
+              state: "acknowledged",
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText("Queued")).toBeVisible();
+    expect(screen.getByText("Delivered to provider")).toBeVisible();
+    expect(screen.getByText("Acknowledged by recipient")).toBeVisible();
+    expect(screen.getByText(/understanding and action are separate/)).toBeVisible();
+  });
+
   it("states the open in-flight count against the cap and the settled counts", () => {
     render(<AgentMessagingFactsRow client={undefined} facts={facts} />);
     const row = screen.getByLabelText("Agent messaging bounds");
-    expect(row.textContent).toContain("2 of 8 open messages per sender");
-    expect(row.textContent).toContain("11 delivered");
+    expect(row.textContent).toContain("2 queued across visible threads · Limit 8 per sender");
+    expect(row.textContent).toContain("11 provider-delivered");
     expect(row.textContent).toContain("3 refused");
   });
 
@@ -96,6 +131,32 @@ describe("AgentMessagingFactsRow", () => {
   it("says nothing while it has no facts and no client to read them from", () => {
     const { container } = render(<AgentMessagingFactsRow client={undefined} />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("labels retained receipt facts when a later host read fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = {
+        facts: vi.fn().mockResolvedValueOnce(facts).mockRejectedValue(new Error("offline")),
+      };
+      render(<AgentMessagingFactsRow client={client} />);
+      for (
+        let count = 0;
+        count < 20 && screen.queryByLabelText("Agent messaging bounds") === null;
+        count += 1
+      )
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(50);
+        });
+      expect(screen.getByLabelText("Agent messaging bounds")).toBeVisible();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(client.facts).toHaveBeenCalledTimes(2);
+      expect(screen.getByText(/Showing the last host report/)).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reads the facts from the client and refreshes on an interval", async () => {

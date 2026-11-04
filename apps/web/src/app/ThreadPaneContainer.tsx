@@ -908,6 +908,12 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   })
                 }
                 onOpenProviderSettings={() => void openSettings({ section: "providers" })}
+                onOpenReviewerSettings={() =>
+                  void openSettings({ section: "code", setting: "code-auto-reviewer" })
+                }
+                onOpenProtectedFilesSettings={() =>
+                  void openSettings({ section: "permissions", setting: "protected-files" })
+                }
                 onOpenImageSettings={() =>
                   void openSettings({ section: "voice", setting: "custom-image-sources" })
                 }

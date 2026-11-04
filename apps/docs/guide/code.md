@@ -553,6 +553,23 @@ with Octant's isolated configuration, Pi, and direct endpoints for models
 you verified for tools. A profile whose tool list leaves out `octant_threads`
 does not offer them.
 
+## Message receipts
+
+An agent can send a bounded message to another Code thread in the same Project.
+Sending queues it for that thread's next turn; it starts no turn there. The
+agent gets a durable message ID and can ask for its status later.
+
+**Queued** means the host admitted the message. **Delivered to provider** means
+the recipient's provider accepted the turn carrying it. **Acknowledged by
+recipient** means that recipient explicitly reported receipt; understanding and
+action are separate. Agents shows the recent receipt states and refusals.
+An acknowledgement is never inferred from delivery or completion.
+
+Only the actual recipient can acknowledge a delivered message. Receipt reads
+and retries use the same ID; retrying a send creates a new message. The
+messaging tool stays unavailable in Plan and where the profile excludes it.
+Queued messages currently have no expiry deadline.
+
 ## Next steps
 
 - [Promotions](/guide/promotions) for creating Code threads from Work work
