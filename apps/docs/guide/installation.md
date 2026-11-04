@@ -15,13 +15,13 @@ relay is included in this preview.
 
 - Apple Silicon Mac (M1 or later)
 - macOS Sequoia or later
-- Bun 1.3.14 (required for development and local iteration)
+- Bun 1.4.4 (required for development and local iteration)
 - Node 26 only when running the Node SQLite portability smoke
 
 ### Linux x64 (Ubuntu dogfood)
 
 - x64 Linux host (Ubuntu is the dogfood target)
-- Bun 1.3.14 (required for development and local iteration)
+- Bun 1.4.4 (required for development and local iteration)
 - Bubblewrap for Work and Code, `lsof` so Running services can find local servers, and a live Secret Service session to store provider credentials ([Linux Host](./linux-host))
 - Node 26 only when running the Node SQLite portability smoke
 
@@ -117,7 +117,7 @@ The foreground command drains on SIGINT/SIGTERM and reports an existing owner in
 
 ### Headless Linux for ADE testing
 
-Prefer the Linux AppImage dogfood path above when you want the Electron Machine on Ubuntu. A Linux host can also run the same server and browser client without Electron to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the system requirements above), then:
+Prefer the Linux AppImage dogfood path above when you want the Electron Machine on Ubuntu. A Linux host can also run the same server and browser client without Electron to exercise Chat, Work, and Code. Install Bun 1.4.4 or later first (same requirement as the system requirements above), then:
 
 ```sh
 bash scripts/ade/install-linux-host-deps.sh
@@ -148,7 +148,7 @@ If that Saved environment runs `start` in a separate process from `server run`, 
 
 ### Install a headless artifact
 
-A headless artifact runs the host without a repository checkout. It contains the CLI, the server, the web app, and every runtime dependency, including the native `node-pty` and `better-sqlite3` modules. Bun 1.3.14 or later must be on `PATH`. On Linux the host also needs `bubblewrap` and `lsof`, which a stock Ubuntu install lacks: `sudo apt-get install -y bubblewrap lsof`. Without Bubblewrap, Work and Code terminals fail to start; without `lsof`, Running services cannot check for local servers. `octant server install`, `start`, `restart`, and `enable` print what is missing on Linux but never install it. Build the artifact on the platform and architecture it is for, because the native modules come from that machine's install:
+A headless artifact runs the host without a repository checkout. It contains the CLI, the server, the web app, and every runtime dependency, including the native `node-pty` and `better-sqlite3` modules. Bun 1.4.4 or later must be on `PATH`. On Linux the host also needs `bubblewrap` and `lsof`, which a stock Ubuntu install lacks: `sudo apt-get install -y bubblewrap lsof`. Without Bubblewrap, Work and Code terminals fail to start; without `lsof`, Running services cannot check for local servers. `octant server install`, `start`, `restart`, and `enable` print what is missing on Linux but never install it. Build the artifact on the platform and architecture it is for, because the native modules come from that machine's install:
 
 ```sh
 bun install --frozen-lockfile

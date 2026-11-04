@@ -7,8 +7,15 @@
 
 import type {
   AwsCliKeyReference,
+  GoogleCliAccountReference,
   SecretStoreKind,
   SecretStoreToolState,
+} from "@octant/contracts/secret-stores";
+import { decodeUtcTimestamp, type UtcTimestamp } from "@octant/contracts";
+
+import {
+  decodeGoogleCliAccountReference,
+  decodeGoogleCliAccountIdentity,
 } from "@octant/contracts/secret-stores";
 
 export type SecretStoreNamespace = "provider" | "mcp-server";
@@ -63,7 +70,45 @@ export type AwsCliSessionAnswer =
         | "refused";
     };
 
+export type GoogleCliReferenceAnswer =
+  | { readonly status: "none" }
+  | {
+      readonly status: "linked";
+      readonly pointer: GoogleCliAccountReference;
+      readonly sessionExpiresAt?: UtcTimestamp;
+    };
+export type GoogleCliPointStatus =
+  | Exclude<StoreCheckStatus, "found">
+  | "pointed"
+  | "refused"
+  | "superseded";
+export type GoogleCliSessionAnswer =
+  | {
+      readonly status: "issued";
+      readonly accessToken: string;
+      readonly expiration: string;
+      readonly serviceAccountEmail: string;
+      readonly scopes: ReadonlyArray<string>;
+    }
+  | { readonly status: "none" | "refused" | Exclude<StoreCheckStatus, "found"> };
 export interface SecretStoreBrokerClient {
+  readonly googleCliReference?: (
+    signal?: AbortSignal,
+  ) => Promise<GoogleCliReferenceAnswer | SecretStoreBrokerDown>;
+  readonly pointGoogleCli?: (
+    pointer: GoogleCliAccountReference,
+  ) => Promise<{ readonly status: GoogleCliPointStatus } | SecretStoreBrokerDown>;
+  readonly restoreGoogleCli?: (
+    pointer: GoogleCliAccountReference,
+  ) => Promise<{ readonly status: GoogleCliPointStatus } | SecretStoreBrokerDown>;
+  readonly clearGoogleCli?: () => Promise<
+    | { readonly status: "none" }
+    | { readonly status: "cleared"; readonly pointer: GoogleCliAccountReference }
+    | SecretStoreBrokerDown
+  >;
+  readonly googleCliSession?: (
+    signal?: AbortSignal,
+  ) => Promise<GoogleCliSessionAnswer | SecretStoreBrokerDown>;
   readonly awsCliReference: () => Promise<AwsCliReferenceAnswer | SecretStoreBrokerDown>;
   /** Points the AWS command line at two items, after the broker proved both resolve now. */
   readonly pointAwsCli: (
@@ -152,6 +197,7 @@ export function makeSecretStoreBrokerClient(
   const post = async (
     operation: string,
     body: object,
+    signal?: AbortSignal,
   ): Promise<Record<string, unknown> | undefined> => {
     try {
       const response = await fetchPort(
@@ -162,6 +208,7 @@ export function makeSecretStoreBrokerClient(
         {
           method: "POST",
           redirect: "error",
+          ...(signal === undefined ? {} : { signal }),
           headers: {
             "content-type": "application/json",
             "x-octant-credential-broker-token": options.token,
@@ -191,7 +238,105 @@ export function makeSecretStoreBrokerClient(
       : undefined;
   const AWS = "/v1/cloud-cli/aws/";
 
+  const GOOGLE = "/v1/cloud-cli/google/";
+  const googlePointer = (
+    answer: Record<string, unknown>,
+  ): GoogleCliAccountReference | undefined => {
+    try {
+      return decodeGoogleCliAccountReference({
+        store: answer.store,
+        reference: answer.reference,
+        serviceAccountEmail: answer.serviceAccountEmail,
+        scopes: answer.scopes,
+      });
+    } catch {
+      return undefined;
+    }
+  };
+  const pointGoogle = async (
+    operation: "point" | "restore",
+    pointer: GoogleCliAccountReference,
+  ): Promise<{ readonly status: GoogleCliPointStatus } | SecretStoreBrokerDown> => {
+    const status = (await post(`${GOOGLE}${operation}`, pointer))?.status;
+    if (
+      status === "pointed" ||
+      status === "refused" ||
+      status === "superseded" ||
+      status === "locked" ||
+      status === "missing" ||
+      status === "unavailable" ||
+      status === "not-linked" ||
+      status === "invalid-reference"
+    )
+      return { status };
+    return DOWN;
+  };
   return {
+    googleCliReference: async (signal) => {
+      const answer = await post(`${GOOGLE}reference`, {}, signal);
+      if (answer?.status === "none") return { status: "none" };
+      if (answer === undefined || answer.status !== "linked") return DOWN;
+      const pointer = googlePointer(answer);
+      if (pointer === undefined) return DOWN;
+      let sessionExpiresAt: UtcTimestamp | undefined;
+      try {
+        if (answer.sessionExpiresAt !== undefined)
+          sessionExpiresAt = decodeUtcTimestamp(answer.sessionExpiresAt);
+      } catch {
+        return DOWN;
+      }
+      return {
+        status: "linked",
+        pointer,
+        ...(sessionExpiresAt === undefined ? {} : { sessionExpiresAt }),
+      };
+    },
+    pointGoogleCli: (pointer) => pointGoogle("point", pointer),
+    restoreGoogleCli: (pointer) => pointGoogle("restore", pointer),
+    clearGoogleCli: async () => {
+      const answer = await post(`${GOOGLE}clear`, {});
+      if (answer?.status === "none") return { status: "none" };
+      const pointer = answer?.status === "cleared" ? googlePointer(answer) : undefined;
+      return pointer === undefined ? DOWN : { status: "cleared", pointer };
+    },
+    googleCliSession: async (signal) => {
+      const answer = await post(`${GOOGLE}session`, {}, signal);
+      if (answer === undefined) return DOWN;
+      const status = answer.status;
+      if (status === "issued") {
+        try {
+          const identity = decodeGoogleCliAccountIdentity({
+            serviceAccountEmail: answer.serviceAccountEmail,
+            scopes: answer.scopes,
+          });
+          const expiration = decodeUtcTimestamp(answer.expiration);
+          if (
+            typeof answer.accessToken !== "string" ||
+            answer.accessToken.length === 0 ||
+            answer.accessToken.length > 16384 ||
+            !/^[A-Za-z0-9._~+/-]+=*$/.test(answer.accessToken)
+          )
+            return DOWN;
+          return {
+            status,
+            accessToken: answer.accessToken,
+            expiration,
+            ...identity,
+          };
+        } catch {
+          return DOWN;
+        }
+      }
+      return status === "none" ||
+        status === "refused" ||
+        status === "locked" ||
+        status === "missing" ||
+        status === "unavailable" ||
+        status === "not-linked" ||
+        status === "invalid-reference"
+        ? { status }
+        : DOWN;
+    },
     awsCliReference: async () => {
       const answer = await post(`${AWS}reference`, {});
       if (answer?.status === "none") return { status: "none" };

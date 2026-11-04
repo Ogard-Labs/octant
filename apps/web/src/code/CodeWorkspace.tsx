@@ -324,6 +324,13 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         <MonacoEditorPane
           debugProjectId={view.thread.projectId}
           client={props.client}
+          checkoutLabel={
+            view.checkout.head.kind === "branch"
+              ? view.checkout.head.name
+              : view.checkout.head.kind === "detached"
+                ? "Detached checkout"
+                : "Project folder"
+          }
           draftStore={props.controller.editorDrafts}
           file={props.projections.file}
           {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}

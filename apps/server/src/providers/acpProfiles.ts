@@ -142,6 +142,8 @@ export interface AcpSessionMetaReasoning {
 }
 
 export interface AcpProviderProfile {
+  /** Exact releases whose cumulative usage/context update semantics were verified. */
+  readonly usageVersions?: ReadonlyArray<string>;
   /** Exact releases whose native session lifecycle has passed warm-reuse evidence. */
   readonly retainedSessionVersions?: ReadonlyArray<string>;
   /** Verified HTTP MCP implementations that omit, rather than deny, negotiation. */
@@ -557,6 +559,7 @@ const devinProfile: AcpProviderProfile = {
 
 const vibeProfile: AcpProviderProfile = {
   kind: "mistral-vibe",
+  usageVersions: ["3.0.3"],
   retainedSessionVersions: ["2.25.0"],
   // This release handles HTTP MCP but omits it from initialize. Native evidence
   // covers tool calls across warm turns and a cold native-session resume.

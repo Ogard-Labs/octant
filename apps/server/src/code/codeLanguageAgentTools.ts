@@ -220,6 +220,10 @@ function unanswered(answer: CodeLanguageAgentReadResult): ToolOutcome {
   switch (answer.status) {
     case "diagnostics":
     case "definition":
+    case "references":
+    case "capabilities":
+    case "unsupported":
+    case "stale":
       return refused("tool-execution-failed", "The language server answered another read.");
     case "too-large":
       return refused("too-large", "The file is too large for the language server.");

@@ -1,5 +1,6 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { PreparedGoogleCliCredentials } from "../secretStores/googleCliCommandCredentials";
 import type { AggregateId, ToolEgressLaunch, ToolEgressLaunchId } from "@octant/contracts";
 import type { HarnessShellScriptInput } from "../code/repositoryTestProcessPort";
 import type { RepositoryTestProcessResult } from "../code/repositoryTestRunner";
@@ -42,6 +43,10 @@ export interface NativeHarnessShellOptions {
    * credential files the secret guard keeps out of reach.
    */
   readonly cloudCliEnvironment?: () => Promise<Readonly<Record<string, string>>>;
+  readonly googleCliCredentials?: (
+    commandDirectory: string,
+    signal?: AbortSignal,
+  ) => Promise<PreparedGoogleCliCredentials | undefined>;
   /**
    * Opens a command's way to the registered servers it names, in its own
    * script folder, for a command on `proxied` network. Undefined when the
@@ -130,15 +135,30 @@ async function runScript(
     egressProxy === undefined
       ? undefined
       : await options.serverAccess?.(input.command, directory).catch(() => undefined);
+  let google: PreparedGoogleCliCredentials | undefined;
   try {
+    google = await options.googleCliCredentials?.(directory, input.signal);
+    if (google?.status === "refused")
+      return { status: "unavailable", output: google.message, truncated: false };
+    const credentials = google;
     await writeFile(script, `${input.command}\n`, { mode: 0o600 });
     const result = await options.process.executeShellScript(
       {
         script,
         cwd: input.cwd,
         ...(input.extraRoots === undefined ? {} : { extraRoots: input.extraRoots }),
+        ...(credentials?.configurationDirectory === undefined
+          ? {}
+          : { cloudCliConfigurationDirectory: credentials.configurationDirectory }),
+        ...(input.beforeLaunch === undefined && credentials === undefined
+          ? {}
+          : {
+              beforeLaunch: () =>
+                (input.beforeLaunch?.() ?? true) && (credentials?.beforeLaunch() ?? true),
+            }),
         environment: {
           ...(await options.cloudCliEnvironment?.().catch(() => ({}))),
+          ...credentials?.environment,
           ...commandEnvironment(options.sshAgentSocket?.()),
         },
         timeoutMs: input.timeoutMs,
@@ -160,10 +180,20 @@ async function runScript(
       },
       input.signal,
     );
-    return shellRunOf(result);
+    const run = shellRunOf(result);
+    return credentials?.warning === undefined
+      ? run
+      : { ...run, output: `${credentials.warning}\n${run.output}` };
   } finally {
-    if (servers !== undefined) await servers.close();
-    await rm(directory, { recursive: true, force: true });
+    try {
+      if (google?.status === "ready") await google.close();
+    } finally {
+      try {
+        if (servers !== undefined) await servers.close();
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
   }
 }
 

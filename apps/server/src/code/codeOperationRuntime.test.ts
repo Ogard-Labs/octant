@@ -2558,20 +2558,31 @@ describe("CodeOperationRuntime", () => {
       latencyMs: 5,
       decidedAt: now as never,
     });
-    const runWith = async (verdict: "allow" | "ask" | "deny" | undefined) => {
+    const runWith = async (
+      verdict: "allow" | "ask" | "deny" | undefined,
+      command = "git status",
+      withoutShield = false,
+      rejectAnswer = false,
+    ) => {
       const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
       // The pending call comes from the connection, never from the event.
       const approvalCall = vi.fn(() => ({
         tool: "Bash",
-        input: JSON.stringify({ command: "git status", cwd: "/Users/dev/app/src" }),
+        input: JSON.stringify({ command, cwd: "/Users/dev/app/src" }),
       }));
-      const connection = { ...providerConnection(queue), approvalCall };
+      const connection = {
+        ...providerConnection(queue),
+        approvalCall,
+        answerApproval: vi.fn(() =>
+          rejectAnswer ? Effect.die(new Error("Pending call cannot be denied")) : Effect.void,
+        ),
+      };
       const review = vi.fn(async () => (verdict === undefined ? undefined : decision(verdict)));
       const fixture = runtimeFixture({
         provider: providerDriver(connection),
         approvalValidator: false,
         checkoutRoot: "/Users/dev/app",
-        shield: { review },
+        ...(withoutShield ? {} : { shield: { review } }),
       });
       const startOperation = operationId(40);
       await fixture.runtime.execute(windowId, {
@@ -2600,6 +2611,44 @@ describe("CodeOperationRuntime", () => {
         );
       return { connection, review, fixture, frames, approvalCall };
     };
+
+    it.each([false, true])(
+      "refuses a native forge write before generic approval, with Shield absent %s",
+      async (withoutShield) => {
+        const { connection, review, fixture, frames } = await runWith(
+          "allow",
+          "gh -R other/repository pr merge 7 --squash",
+          withoutShield,
+        );
+        await vi.waitFor(() =>
+          expect(connection.answerApproval).toHaveBeenCalledWith({
+            sessionId,
+            requestId: "provider-approval-9",
+            approved: false,
+            scope: "once",
+          }),
+        );
+        expect(review).not.toHaveBeenCalled();
+        expect(await frames()).toContainEqual(
+          expect.objectContaining({
+            kind: "tool-activity",
+            state: "failed",
+            summary: expect.stringContaining("repository, branch, revision"),
+          }),
+        );
+        expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(false);
+        await fixture.runtime.close();
+        fixture.close();
+      },
+    );
+
+    it("interrupts a provider that cannot take a native forge refusal without offering generic consent", async () => {
+      const { connection, fixture, frames } = await runWith("allow", "gh pr merge 7", false, true);
+      await vi.waitFor(() => expect(connection.interrupt).toHaveBeenCalled());
+      expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(false);
+      await fixture.runtime.close();
+      fixture.close();
+    });
 
     it("answers the provider itself when Shield allows, journals Shield's decision, and asks nobody", async () => {
       const { connection, review, fixture, frames, approvalCall } = await runWith("allow");
@@ -5238,6 +5287,10 @@ describe("CodeOperationRuntime", () => {
       overrides: Partial<CodeOperationPullRequestActions> & {
         readonly approved?: boolean;
         readonly standing?: ReadonlyArray<"project" | "routine">;
+        readonly nativeApproval?: boolean;
+        readonly resolvePullRequestTarget?: Parameters<
+          typeof createCodeOperationRuntime
+        >[0]["resolvePullRequestTarget"];
       },
     ) {
       const done = { status: "done" as const };
@@ -5269,7 +5322,10 @@ describe("CodeOperationRuntime", () => {
       const fixture = runtimeFixture({
         pullRequestTarget: true,
         gitRemotes: remotes,
-        approvalValidator: () => overrides.approved ?? true,
+        ...(overrides.resolvePullRequestTarget === undefined
+          ? {}
+          : { resolvePullRequestTarget: overrides.resolvePullRequestTarget }),
+        approvalValidator: overrides.nativeApproval ? false : () => overrides.approved ?? true,
         ...(overrides.standing === undefined ? {} : { standingMergeAllowance: overrides.standing }),
         pullRequestPort: {
           ensure: async () => ({ status: "unavailable" }),
@@ -5480,6 +5536,63 @@ describe("CodeOperationRuntime", () => {
       });
       for (const each of [refusedFixture, failing, unknown, merged]) each.fixture.close();
     });
+
+    it.each(["repository", "head", "Plan", "revoked approval"] as const)(
+      "refuses the scoped merge after its %s changes despite a real per-act approval",
+      async (changed) => {
+        let repository = "octant/octant";
+        const { fixture, actions } = actionFixture({
+          nativeApproval: true,
+          resolvePullRequestTarget: async () => ({
+            authorization: "confirmed-delivery-target",
+            baseRepository: repository,
+            baseBranch: "development",
+            head: "octant:feature/runtime",
+          }),
+        });
+        const command = {
+          kind: "merge-pull-request" as const,
+          ...scope(230),
+          method: "squash" as const,
+          headSha: head,
+          authorization: { kind: "full-access" as const },
+        };
+        try {
+          const challenge = await fixture.runtime.prepareApproval(windowId, {
+            effect: { kind: "operation", command },
+          });
+          expect(challenge).toBeDefined();
+          if (challenge === undefined) throw new Error("Expected a merge challenge");
+          const receipt = await fixture.runtime.confirmApproval(windowId, {
+            challengeId: challenge.challengeId,
+          });
+          expect(receipt).toBeDefined();
+          if (receipt === undefined) throw new Error("Expected a merge approval");
+          if (changed === "repository") repository = "other/repository";
+          if (changed === "head")
+            actions.summary.mockResolvedValue({
+              status: "read",
+              state: "open",
+              headBranch: "feature/runtime",
+              baseBranch: "development",
+              headSha: "d".repeat(40),
+            });
+          if (changed === "Plan")
+            fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+          if (changed === "revoked approval") fixture.runtime.revokeApprovals(windowId);
+          const result = await fixture.runtime.execute(windowId, {
+            ...command,
+            authorization: { kind: "approved", approvalId: receipt.approvalId },
+          });
+          expect(["operation-failed", "pull-request-state"]).toContain(result.kind);
+          expect(result).not.toMatchObject({ kind: "pull-request-state", state: "merged" });
+          expect(actions.merge).not.toHaveBeenCalled();
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
 
     it("merges without a per-act approval only while a stored choice still allows it", async () => {
       const base = {
@@ -7334,6 +7447,9 @@ function runtimeFixture(options: {
   terminalExit?: { readonly exitCode: number };
   pullRequestPort?: Parameters<typeof createCodeOperationRuntime>[0]["pullRequestPort"];
   pullRequestTarget?: boolean;
+  resolvePullRequestTarget?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolvePullRequestTarget"];
   /** The standing merge permissions the stored choices give the thread. */
   standingMergeAllowance?: ReadonlyArray<"project" | "routine">;
   repositoryTestDiscovery?: Parameters<
@@ -7707,15 +7823,17 @@ function runtimeFixture(options: {
     ...(options.standingMergeAllowance === undefined
       ? {}
       : { standingMergeAllowance: () => options.standingMergeAllowance ?? [] }),
-    resolvePullRequestTarget: async () =>
-      options.pullRequestTarget === true
-        ? {
-            authorization: "confirmed-delivery-target" as const,
-            baseRepository: "octant/octant",
-            baseBranch: "development",
-            head: "octant:feature/runtime",
-          }
-        : undefined,
+    resolvePullRequestTarget:
+      options.resolvePullRequestTarget ??
+      (async () =>
+        options.pullRequestTarget === true
+          ? {
+              authorization: "confirmed-delivery-target" as const,
+              baseRepository: "octant/octant",
+              baseBranch: "development",
+              head: "octant:feature/runtime",
+            }
+          : undefined),
     reviewFiles: { resolve: () => undefined },
     evidence: {
       put: (content, metadata) => {

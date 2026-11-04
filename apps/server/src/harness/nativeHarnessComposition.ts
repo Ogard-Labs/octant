@@ -20,6 +20,7 @@ import {
   type ForgeShellChange,
   type ForgeShellHardLine,
   forgeShellChanges,
+  FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
   forgeShellHardLine,
   forgeShellHardLineMessage,
 } from "@octant/domain/forge-shell-change-policy";
@@ -122,8 +123,8 @@ export interface NativeHarnessCompositionOptions {
   }) => "recorded" | "not-remote" | "unavailable";
   /**
    * Pushes and pull-request changes a command makes. Every one the shell
-   * runs is journaled under the thread; at Full access, where nothing else
-   * reviews a command, one that crosses a hard line (a merge or a plain
+   * runs is journaled under the thread. Below Full access recognizable
+   * writes use the structured tools; at Full access a hard line (a merge or a plain
    * force-push the person did not ask for, a push to another thread's
    * branch) is refused before it runs and journaled as refused. `record`
    * answering `unavailable` withholds the output, as an unmarked result is.
@@ -754,8 +755,8 @@ export function createNativeHarnessComposition(
     };
   };
   /**
-   * The shell with each push and pull-request change journaled, and at Full
-   * access the ones that cross a hard line refused before they run.
+   * Recognizable forge writes use the scoped tools below Full access.
+   * Full access keeps its hard lines; every observed change is journaled.
    */
   const guardingForgeChanges = (
     threadId: string,
@@ -763,25 +764,34 @@ export function createNativeHarnessComposition(
     atFullAccess: () => boolean,
   ): NativeHarnessShellPort | undefined => {
     const forge = options.forgeChanges;
-    if (shell === undefined || forge === undefined) return shell;
+    if (shell === undefined) return shell;
     const withheld = { status: "unavailable", output: "", truncated: false } as const;
     return {
       run: async (input) => {
         const changes = forgeShellChanges(input.command);
         if (changes.length === 0) return shell.run(input);
+        const fullAccess = atFullAccess();
         let hardLine: ForgeShellHardLine | undefined;
-        try {
-          hardLine = atFullAccess()
-            ? forgeShellHardLine(changes, forge.branches(threadId))
-            : undefined;
-        } catch {
-          // Branches that cannot be read leave the push and merge lines,
-          // which need none, and lose only the other-thread line.
-          hardLine = forgeShellHardLine(changes, { otherThreadBranches: [] });
-        }
-        if (hardLine !== undefined) {
+        let branchUnavailable = false;
+        if (fullAccess) {
           try {
-            forge.record({
+            if (forge === undefined) branchUnavailable = true;
+            hardLine = forgeShellHardLine(
+              changes,
+              forge?.branches(threadId) ?? { otherThreadBranches: [] },
+            );
+          } catch {
+            branchUnavailable = true;
+            hardLine = forgeShellHardLine(changes, { otherThreadBranches: [] });
+          }
+        }
+        if (
+          !fullAccess ||
+          hardLine !== undefined ||
+          (branchUnavailable && changes.some((change) => change.kind === "push"))
+        ) {
+          try {
+            forge?.record({
               threadId,
               changes,
               outcome: "refused",
@@ -794,14 +804,24 @@ export function createNativeHarnessComposition(
           return {
             ...withheld,
             refusal: {
-              reason: `forge-${hardLine}`,
-              message: forgeShellHardLineMessage(hardLine),
+              reason:
+                hardLine !== undefined
+                  ? `forge-${hardLine}`
+                  : fullAccess
+                    ? "forge-authority-unavailable"
+                    : "forge-tool-required",
+              message:
+                hardLine !== undefined
+                  ? forgeShellHardLineMessage(hardLine)
+                  : fullAccess
+                    ? "Octant could not verify which branches other threads own, so this push was refused. Retry when repository authority is available."
+                    : FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
             },
           };
         }
-        const recordRan = (exitCode: number | undefined): ReturnType<typeof forge.record> => {
+        const recordRan = (exitCode: number | undefined) => {
           try {
-            return forge.record({
+            return forge?.record({
               threadId,
               changes,
               outcome: "ran",
