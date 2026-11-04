@@ -9734,9 +9734,10 @@ access` agree); a thread's own change is journaled as
     the one release that bridge was read against.
   - **Mistral Vibe** is first-class and runs through the ACP bridge, so every
     ACP gap below applies to it. Its `vibe-app-server` is not adopted
-    ([why](design/provider-runtimes.md#mistral-vibe-surface)); reading usage,
-    compaction, review, and questions from `vibe-acp`'s own ACP extensions is
-    allowed, not built yet.
+    ([why](design/provider-runtimes.md#mistral-vibe-surface)); usage and
+    context from verified `vibe-acp` 3.0.3 are read, and reading compaction,
+    review, and questions from its own ACP extensions is allowed, not built
+    yet.
   - **ACP agents** report no usage except verified Mistral Vibe 3.0.3. Its
     cumulative counters become per-turn deltas; provider cost stays absent
     ([Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)).
