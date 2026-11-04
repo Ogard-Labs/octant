@@ -11032,7 +11032,11 @@ access` agree); a thread's own change is journaled as
     `restore`, which writes the pointer without reading its item (the item may be
     gone or its store locked by then); if it cannot be put back, the new pointer
     is removed and the answer says so, so an unjournaled pointer never stays
-    active.
+    active. Google command-line selection additionally records
+    `credential-reference.requested` before dispatch, after fresh local-window
+    admission. This is the person's exact consent, not proof that the broker
+    committed a change. An unknown reply tells the person to read the current
+    account; it is never reported as an unchanged or confirmed selection.
   - **AWS command line.** Settings › Secret stores › AWS command line points
     the AWS command line at the two items that hold the person's access key
     pair (`point-aws-cli-key`; the broker proves both resolve now, as for a
@@ -11066,6 +11070,59 @@ access` agree); a thread's own change is journaled as
       for the person to set up and gives the same reach as the pair, never
       more. One hour so a long command does not lose its credentials midway;
       AWS's shortest, 15 minutes, would cut off a long sync.
+  - **Google Cloud command line.** Settings › Secret stores › Google Cloud
+    command line accepts a linked 1Password item containing service-account
+    JSON, the exact expected service-account email, and explicit Google OAuth
+    scopes. Review and confirmation are separate from entering the reference;
+    a read of Settings never issues a token. The public pointer and scopes
+    live in the existing `linked-secret-stores.json` sidecar; the key does not.
+    Only a live local host window can change this selection. The account's IAM
+    roles can reach several Google Cloud Projects: an Octant Project or a
+    default `gcloud` Project does not narrow those roles.
+    - The broker alone reads the JSON and signs an RS256 JWT with the selected
+      email as issuer, the exact selected scopes, and
+      `https://oauth2.googleapis.com/token` as both audience and exchange
+      endpoint. It ignores the item's `token_uri`; delegated subjects,
+      impersonation, and arbitrary endpoints are not supported. A JWT lasts
+      at most one hour. Store reads and token exchange each have a ten-second
+      bound. The broker caches only the resulting short-lived access token,
+      uses a conservative expiry, and refuses a different returned scope set.
+    - Each ordinary Octant Harness shell command receives only a token file
+      through `CLOUDSDK_AUTH_ACCESS_TOKEN_FILE` and a private `CLOUDSDK_CONFIG`.
+      The file is mode 0600 in a host-owned mode-0700 command resource directory;
+      confinement grants that resource read access and only its configuration
+      child write access. Confined harness launches deny the shared Google
+      resource root before reallowing their own resource, including launches
+      without a selected account; an overlapping writable binding is refused.
+      Full access retains its existing unconfined, soft boundary. No grant
+      widens the shared script directory. File
+      logging, usage reporting, and prompts are disabled. The broker's reusable
+      key, provider-native harnesses, worktree setup, ADC, `gsutil`, and `bq`
+      are outside this channel. A command receives no mid-command refresh.
+    - Selection changes and unlink invalidate pending issuance and prepared
+      launches, checked again synchronously at the actual spawn boundary.
+      A running command may retain its already-issued token until expiry;
+      Clear removes future use, not Google-wide revocation. Issued tokens are
+      registered for output redaction. An unavailable or expired configured
+      channel receives an empty token file and isolated configuration with a
+      recovery message, so it cannot fall back to the host's saved sign-in.
+    - Startup first reconciles the existing owned harness process receipts.
+      Each recovery stage has a ten-second bound. Only confirmed process
+      recovery permits removal of prior `google-*` resources beneath this
+      dedicated root. Failed or uncertain recovery leaves those files intact,
+      disables Google issuance, and keeps the rest of the host available.
+      An unrelated command can still run with the token-free configuration.
+      Normal command completion removes only its owned resource directory.
+    - _Rationale._ The selected token-file interface is supported by `gcloud`
+      and gives each command an explicit lifetime and isolated configuration.
+      Current `gcloud` also supports a direct access-token environment value;
+      this adapter does not use it. Installed SDK, OS confinement, and live
+      account acceptance remain separate from fake-token protocol tests.
+    - The host-wide Octant credential guard includes `harness/cloud-cli`
+      beneath the data directory. Other confined processes cannot read its
+      running tokens through an ancestor grant; Octant's file tools refuse
+      reads, writes and searches there at every level. Only the owning
+      ordinary harness launch receives the narrow OS resource exception.
 - **Organization sign-in on a host without the desktop app.** An Azure AI
   Foundry endpoint that signs in with a directory account and opted in to it
   (`deviceCodeSignIn`) signs in with a device code from
@@ -11499,7 +11556,8 @@ Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
 no prompts": a shell command there can read a protected file. Built, except
-short-lived credentials for the Google Cloud and Azure command lines.
+the Azure command line's general short-lived credential channel. The Google
+Cloud channel is the bounded `gcloud` service-account adapter below.
 
 - **One list, every runtime.** The list is
   `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
@@ -11570,13 +11628,17 @@ short-lived credentials for the Google Cloud and Azure command lines.
   the person keeps outside the list. The AWS command line in Octant's own
   shell gets a short-lived session from the broker once the person points its
   key pair at a linked store ([AWS command line](#linked-secret-stores)).
-  Allowed; not built yet: the Google Cloud and Azure command lines.
+  The Google Cloud `gcloud` command line in Octant's own shell receives a
+  command-owned access-token file and private configuration from the broker
+  after exact account/scopes consent ([linked secret stores](#linked-secret-stores)).
+  Allowed; not built yet: the Azure command line's general credential channel.
   - _Rationale._ AWS first because a session needs nothing on disk: the
     session's three values go in the command's environment, which the AWS
     command line and every AWS SDK read before any file. The Google Cloud
-    command line takes a token only from a file it names, and the Azure
-    command line takes none from its environment, so each needs more than an
-    environment and is left for its own change.
+    adapter uses its supported token-file interface and a private config
+    directory to bound each command's resources; it does not assume that
+    Google supports only file input. Azure needs its own consumer-specific
+    contract rather than an invented generic access-token environment variable.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
   read and write) and Claude Code's file tools, through Octant's tool gate,
