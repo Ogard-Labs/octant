@@ -467,6 +467,7 @@ export function startOctantServer(
       workThreadProjection,
     });
     const {
+      readHarnessProcessReceipts,
       beginGoogleCliChange,
       recoverGoogleCliCommands,
       personMemorySweep,
@@ -1075,6 +1076,9 @@ export function startOctantServer(
       pushGatewaySetting,
       pushNotificationTokenStore,
     } = wireAutomation({
+      agentRunOrchestration,
+      externalContentIngestionStore,
+      readHarnessProcessReceipts,
       capacityScheduler,
       chatService,
       codeCompletedThreadSource,
@@ -1086,6 +1090,7 @@ export function startOctantServer(
       routineProposalService,
       windowAuthorityStore,
       workThreadProjection,
+      workTurnProjection,
       workThreadService,
       workThreadServiceWithWorkflows,
       workTurnService,

@@ -40,7 +40,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
-| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 4       | 0            | 0                   |
+| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 9       | 1            | 0                   |
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
@@ -800,9 +800,19 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
 - An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile.
 - The scheduler is an in-process timer; nothing runs in a cloud, and a self-hosted wake service on a person's hub can wake a spoke for a routine (built; run only between hosts on loopback with a fake socket).
+- A Work run observes the exact retained first-turn request and captured receipt/thread/Project/host/binding/provider/model. Proven terminal status is journaled before the active slot is reused; missing/mismatched evidence stays active, edits do not replace the run snapshot, and replay or notification failure never redelivers the provider call. First-turn completion does not prove child/process quiescence.
 - A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
 
-Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+- A new file trigger is Work/new-thread only, under the main local Project root, using the existing Secret guard and confined reads. The existing journal owns its baseline, deterministic batch and finite automatic-start budget (default 8, selectable 1–32); no restart or quiet reset. Hidden/linked/protected input is excluded, unsupported or incomplete scans block, and filesystem hints never identify writers.
+- File changes during the known routine/child/process activity window are held for explicit current-authority Review/Re-arm, with the held batch preserved. Offline recovery sees net surviving final-state changes only. The run-first source/claim ledger repairs without a second run or budget debit.
+- A transient unavailable/oversized source preserves an existing required review in the same durable cursor. After recovery or restart, neither missed-run policy may silently re-arm or dispatch input that still requires the person's decision.
+- Native canonical root/directory identities remain bound through the final synchronous journal and provider-send fences, including awaits for provider session startup. Missing native-current evidence refuses new file admission; a timed-out run-input proof is invalidated and never automatically resubmitted.
+- The local-window file editor discloses the finite allowance, ignored baseline, busy-input review and offline limits before enable. Status separates saved/arming/watching/held/unavailable. Review binds the displayed definition/source/observation/batch; a lost response requires explicit refresh, without an automatic resend. Input paths use bounded framed external data in the ordinary Work context plan; the person's task stays fixed and file contents are read only under normal task authority.
+- Work file-input recovery requires the original exact turn/authority and host-journaled framed-input reference/digest before any fresh source read or mark. Missing legacy or mismatched evidence stays unconfirmed without automatic resend; the receipt records acceptance, not provider delivery/completion.
+- The retained activity window is bounded at 64 owned runs. Overflow remains unknown across replay; finish and review Project tasks/cleanup, archive the old routine and explicitly configure a new one. Quiet, Resume and Save do not discard that ownership.
+- **Remaining:** Code input-transfer support and native/filesystem/provider acceptance evidence. Controlled fixtures prove Work source/journal/normal-dispatch and protected review composition; they do not establish native watcher behavior or a live provider workflow.
+
+Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Routine authority level
 

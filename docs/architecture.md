@@ -2588,8 +2588,9 @@ designation or resolution are not added. The rules are:
 
 **Routines (Automation Center).** A routine is a host-owned, Project-bound
 definition that starts an ordinary Work or Code thread with a fixed task prompt
-on a trigger: once, every N minutes (15 minutes to 30 days), or weekly at a
-local time in an IANA time zone. A routine targets a Chat, Work, or Code
+on a trigger: once, every N minutes (15 minutes to 30 days), weekly at a
+local time in an IANA time zone, or matching file arrivals in a local Work
+Project (Work and `new-thread` only). A routine targets a Chat, Work, or Code
 Project. A **Chat routine** keeps Chat's authority, since a Chat thread has no
 file, shell, or Git authority for a routine to widen: its definition binds an
 active Chat Project (the receipt names the Project and its version, with no
@@ -2607,6 +2608,75 @@ thread it creates could not do. The one exception is a follow-up (target
 policy `same-thread`, below), which creates no thread and sends one turn into
 the thread it came from.
 
+- **File arrivals.** A person configures the existing main Work Project root,
+  a relative existing input directory, included suffixes, excluded directories,
+  a settling interval of 2–60 seconds and at most 1–32 automatic starts per
+  explicit arm (default 8). Configuration and reviewed re-arm are local-window
+  actions; ordinary pause, archive and thread cancellation keep their existing
+  authority. No thread agent proposes a file routine. The existing host scheduler
+  owns observation and dispatch; there is no second runner or hosted watcher.
+  Watch events are hints, never path authority or writer identity. Complete
+  confined content scans cover only permitted regular files: hidden entries,
+  symbolic links, excluded directories and the current Secret guard's protected
+  entries are excluded without reading or reporting them. Unsupported nonhidden
+  paths, replaced roots, unreadable input and scan limits block the observation;
+  a truncated scan never advances the baseline. One scan has at most 4,096
+  directory entries, 256 matching files, 16 MiB per file and 64 MiB of content.
+  Current host/Project/binding/profile/provider authority and cursor ownership
+  are rechecked after asynchronous work, before journal or dispatch admission.
+  The native resolver retains the exact canonical root and input-directory
+  device/inode identities. Its synchronous current proof is checked after all
+  awaited preparation at source/review commit and ordinary Work acceptance,
+  then again after provider session startup immediately before prompt send;
+  replacement paths are never silently adopted. A filesystem without that
+  native capability cannot authorize a new file admission. Run-input proof
+  acquisition has a 10-second stage bound and invalidates late results rather
+  than resubmitting a task; this is not an end-to-end task deadline.
+- **File baseline, recovery and feedback.** The first complete settled scan is
+  baseline only. A bounded source cursor lives in the routine's existing journal
+  and projection. A deterministic occurrence creates its run first, then commits
+  the source checkpoint and occurrence claim in one definition batch before
+  dispatch; crash repair keeps the same run and budget debit. Restart or watcher
+  loss records a coverage gap. Offline skip/run-once sees only net changed
+  surviving final-state files, at most one batch; files created and deleted while
+  unobserved cannot be reconstructed. Neither quiet time nor restart resets the
+  arm budget. Temporary source unavailability or a scan limit never waives a
+  required review after an edit, root/authority change or retained-activity
+  overflow. The same durable cursor keeps that review reason across failure and
+  restart; recovering availability cannot silently re-arm or dispatch a batch.
+  Any matching change observed while the routine, known managed
+  descendants or existing Project-root harness process receipts remain active,
+  through the first settled quiescent scan, is held for explicit Review/Re-arm.
+  Missing or uncertain ownership does not prove quiescence. It may be outside
+  input or routine output; filenames do not identify the writer. The finite
+  per-arm limit bounds automatic feedback even from writers not attributable
+  through those receipts. Preview discloses the limit and busy-input hold before
+  enable; status shows remaining starts and retained input. Re-arm binds the
+  exact current definition/source/observation/batch and current authority,
+  explicitly either runs the held surviving batch once or skips it. A blind
+  Resume never drops held input or resets the budget. An intentional pause of
+  a watching source requires a new settled baseline on ordinary Resume rather
+  than applying offline catch-up to paused-period changes; existing held or
+  unknown activity remains held. A review that loses its
+  response remains unconfirmed: refresh details and run history before another
+  explicit decision; the client never resends it automatically. Input paths are
+  delivered as bounded framed external data through the ordinary Work context
+  plan, separately from the person's fixed task, without copying file contents
+  into the routine journal or prompt. Current protected-read and authority rules
+  still govern the task's actual reads. Ordinary Work acceptance journals a
+  host-computed reference and digest of the exact framed input. Recovery requires
+  the original request, turn, thread, Project, binding, provider, model, fixed
+  task and input receipt; matching acceptance is recovered before reading or
+  marking the live source again. Missing legacy evidence or a mismatch remains
+  unconfirmed and never causes automatic resend or retroactive input adoption.
+  The receipt proves accepted input, not provider delivery or completion.
+  More than 64 retained unsettled owned
+  runs makes quiescence unknown rather than dropping older ownership: finish and
+  review the Project's tasks and cleanup, then archive that routine and explicitly
+  configure a new one; neither Resume nor Save clears this hold. Existing timed/manual
+  routines retain their behavior. Code input transfer is a separate remaining
+  implementation gate, since its managed checkout does not inherit uncommitted
+  Work input files.
 - **Authority ceiling.** A definition captures an execution profile (an existing
   agent profile: provider, model, policy, permission persistence) and an
   authority snapshot whose effective authority never widens the requested one
@@ -2795,6 +2865,16 @@ the thread it came from.
   claim commits the deterministic run before the occurrence ledger, so a crash
   repairs forward to the same run and never dispatches twice. Run-now and
   cancel are idempotent by request id.
+- **Work first-turn outcomes.** The existing scheduler observes the retained
+  Work turn request after acceptance, matching its runtime receipt, thread,
+  Project, host, binding, provider and model against the run's captured snapshot.
+  Only journaled terminal truth releases that run's active slot; missing or
+  mismatched evidence stays active, and a changed current definition never
+  replaces the captured owner. A cancelled/interrupted Work turn records an
+  interrupted run; a failed turn records runtime failure. The status commits
+  before another occurrence may be claimed. Replay and notification failure
+  never send the old provider call again. This observes first-turn completion,
+  not proof that delegated children or background processes are quiescent.
 - **Turning one off.** Pause stops future occurrences; Resume restarts from the
   next occurrence; Archive ends the routine and keeps its history (there is no
   delete). Cancel stops a run before its first turn starts; afterwards the

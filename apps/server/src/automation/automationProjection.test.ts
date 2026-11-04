@@ -34,6 +34,11 @@ import {
   registerAutomationEvents,
 } from "./automationEventStore";
 import { AutomationProjection } from "./automationProjection";
+import {
+  automationSourceSnapshotDigest,
+  initialAutomationFileCheckpoint,
+} from "./automationFileSourceState";
+import { buildAutomationRunForOccurrence } from "./automationRunIdentity";
 import { automationRunIdForOccurrence } from "./automationRunIdentity";
 import {
   AUTOMATION_TEST_IDS,
@@ -108,6 +113,174 @@ function runId(suffix: string): AutomationRunId {
 }
 
 describe("automation projection", () => {
+  it("retains an explicit unknown-activity hold when manual starts exceed the owned window bound, including replay", () => {
+    const { store, projection } = createHarness();
+    const definition = automationDefinitionFixture({
+      trigger: {
+        kind: "file-arrival",
+        directory: "Inbox",
+        includeExtensions: ["txt"],
+        excludeDirectories: [],
+        settleSeconds: 2,
+        automaticStartLimit: 8,
+      },
+      nextDueAt: null,
+    });
+    store.appendDefinitionCreated({
+      automation: definition,
+      fileSource: initialAutomationFileCheckpoint("a".repeat(64), now),
+    });
+    for (let index = 0; index < 65; index++) {
+      const suffix = String(3000 + index);
+      const run = automationRunForDefinition(definition, {
+        id: runId(suffix),
+        runNowRequestId: `ad000000-0000-4000-8000-00000000${suffix}`,
+      });
+      store.appendRunCreated({ run });
+      store.appendRunStatusChanged({
+        automationId: run.automationId,
+        runId: run.id,
+        previousLifecycle: "queued",
+        lifecycle: "cancelled",
+        version: 2,
+        expectedVersion: 1,
+        updatedAt: now,
+      });
+    }
+    const source = projection.getFileSource(definition.id);
+    expect(source).toMatchObject({
+      phase: "needs-rearm",
+      reason: "activity-history-limit",
+      automaticStarts: 0,
+    });
+    expect(source?.activityWindow).toHaveLength(64);
+    const rebuilt = new AutomationProjection();
+    store.replayEach((frame) => rebuilt.applyEnvelope(frame));
+    expect(rebuilt.getFileSource(definition.id)).toEqual(source);
+  });
+
+  it("atomically retains a complete file observation and one debit with its deterministic run through replay", () => {
+    const { store, projection } = createHarness();
+    const definition = automationDefinitionFixture({
+      trigger: {
+        kind: "file-arrival",
+        directory: "Inbox",
+        includeExtensions: ["txt"],
+        excludeDirectories: [],
+        settleSeconds: 2,
+        automaticStartLimit: 8,
+      },
+      nextDueAt: null,
+    });
+    const initial = initialAutomationFileCheckpoint("a".repeat(64), now);
+    store.appendDefinitionCreated({ automation: definition, fileSource: initial });
+    const baseline = {
+      ...initial,
+      observationRevision: 2,
+      baselineReady: true,
+      phase: "watching" as const,
+    };
+    store.appendOccurrenceLedger({
+      automationId: definition.id,
+      expectedVersion: 1,
+      events: [
+        { kind: "file-source-observed", definitionRevision: 1, checkpoint: baseline, at: now },
+      ],
+    });
+    const snapshot = [{ path: "new.txt", digest: "b".repeat(64), size: 2 }];
+    const checkpoint = {
+      ...baseline,
+      observationRevision: 3,
+      automaticStarts: 1,
+      baseline: snapshot,
+      baselineDigest: automationSourceSnapshotDigest(snapshot),
+    };
+    const occurrence: AutomationOccurrence = {
+      kind: "file-arrival",
+      automationId: definition.id,
+      definitionRevision: definition.definitionRevision,
+      source: { checkpoint, files: ["new.txt"], automaticStartOrdinal: 1 },
+    };
+    const run = buildAutomationRunForOccurrence({ definition, occurrence, now });
+    store.appendRunCreated({ run });
+    // A crash at this boundary leaves a run, but no authoritative occurrence debit/dispatch.
+    expect(projection.getFileSource(definition.id)?.automaticStarts).toBe(0);
+    const frames = store.appendOccurrenceLedger({
+      automationId: definition.id,
+      expectedVersion: 2,
+      events: [
+        { kind: "file-source-observed", definitionRevision: 1, checkpoint, at: now },
+        { kind: "occurrence-claimed", occurrence, runId: run.id, at: now },
+      ],
+    });
+    expect(projection.getFileSource(definition.id)).toMatchObject({
+      automaticStarts: 1,
+      activityWindow: [run.id],
+      baseline: snapshot,
+    });
+    expect(projection.isOccurrenceConsumed(definition.id, run.occurrenceKey)).toBe(true);
+    expect(() =>
+      store.appendOccurrenceLedger({
+        automationId: definition.id,
+        expectedVersion: 2,
+        events: [{ kind: "file-source-observed", definitionRevision: 1, checkpoint, at: now }],
+      }),
+    ).toThrow();
+    for (const frame of frames) projection.applyEnvelope(frame);
+    expect(projection.getFileSource(definition.id)?.automaticStarts).toBe(1);
+    projection.clear();
+    store.replayEach((frame) => projection.applyEnvelope(frame));
+    expect(projection.getFileSource(definition.id)).toMatchObject({
+      automaticStarts: 1,
+      observationRevision: 3,
+      activityWindow: [run.id],
+    });
+    expect(projection.listRuns({ automationId: definition.id, limit: 10 }).runs).toHaveLength(1);
+    const summary = decodeSummary(
+      projection.listSummaries({ hostId: definition.hostId, mode: "all", limit: 10 }).items[0],
+    );
+    expect(summary.fileSource).toMatchObject({ phase: "watching", remainingStarts: 7 });
+    expect(JSON.stringify(summary)).not.toContain("new.txt");
+  });
+
+  it("does not persist a partial observation or mismatched content digest", () => {
+    const { store, projection } = createHarness();
+    const definition = automationDefinitionFixture({
+      trigger: {
+        kind: "file-arrival",
+        directory: "Inbox",
+        includeExtensions: [],
+        excludeDirectories: [],
+        settleSeconds: 2,
+        automaticStartLimit: 8,
+      },
+      nextDueAt: null,
+    });
+    const initial = initialAutomationFileCheckpoint("a".repeat(64), now);
+    store.appendDefinitionCreated({ automation: definition, fileSource: initial });
+    expect(() =>
+      store.appendOccurrenceLedger({
+        automationId: definition.id,
+        expectedVersion: 1,
+        events: [
+          {
+            kind: "file-source-observed",
+            definitionRevision: 1,
+            checkpoint: {
+              ...initial,
+              observationRevision: 2,
+              baseline: [{ path: "secret.txt", size: 1, digest: "b".repeat(64) }],
+              baselineReady: true,
+            },
+            at: now,
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(projection.getDefinition(definition.id)?.version).toBe(1);
+    expect(projection.getFileSource(definition.id)).toEqual(initial);
+  });
+
   it("projects bounded sanitized summaries with next due and latest run state", () => {
     const { store, projection } = createHarness();
     const work = automationDefinitionFixture({ id: automationId("1001") as never });

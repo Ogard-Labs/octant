@@ -14,6 +14,28 @@ function entriesOn(month: ReturnType<typeof buildRoutineCalendarMonth>, date: st
 }
 
 describe("a month of a routine's future", () => {
+  it("does not invent future dates for a file-arrival routine", () => {
+    const month = buildRoutineCalendarMonth({
+      routines: [
+        automationSummaryFixture({
+          trigger: decodeAutomationTrigger({
+            kind: "file-arrival",
+            directory: "Inbox",
+            includeExtensions: [],
+            excludeDirectories: [],
+            settleSeconds: 2,
+            automaticStartLimit: 8,
+          }),
+          nextDueAt: null,
+        }),
+      ],
+      month: AUGUST,
+      now: AUGUST,
+      timeZone: "UTC",
+    });
+    expect(days(month).every((day) => day.entries.length === 0)).toBe(true);
+    expect(month.truncated).toBe(false);
+  });
   it("lands a weekly routine on each of its weekdays at its local time", () => {
     const month = buildRoutineCalendarMonth({
       routines: [
