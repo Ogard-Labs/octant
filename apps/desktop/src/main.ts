@@ -3794,6 +3794,9 @@ function installIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.selectLocalPluginFolder, async (event) => {
     return await ownedWindowContext(event).localPluginFolderPicker(event);
   });
+  ipcMain.handle(IPC_CHANNELS.selectSkillFolder, async (event) => {
+    return await ownedWindowContext(event).localPluginFolderPicker(event, "skill-folder");
+  });
   // Window capture for the composer. Each step re-checks that the caller is
   // this app's own top-level window; the renderer never names a screen or a
   // file, only a window id the list just returned.

@@ -59,6 +59,7 @@ function handle(message: Record<string, unknown>): void {
             textDocumentSync: 1,
             diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false },
             definitionProvider: true,
+            ...(mode === "references" ? { referencesProvider: true } : {}),
           },
         },
       });
@@ -105,6 +106,22 @@ function handle(message: Record<string, unknown>): void {
             },
           ],
         },
+      });
+      return;
+    case "textDocument/references":
+      send({
+        id: message.id,
+        result: [
+          {
+            uri: inCheckout("a.ts"),
+            range: { start: { line: 0, character: 16 }, end: { line: 0, character: 21 } },
+          },
+          {
+            uri: inCheckout("b.ts"),
+            range: { start: { line: 1, character: 29 }, end: { line: 1, character: 34 } },
+          },
+          { uri: inCheckout("escape.ts"), range: zeroRange() },
+        ],
       });
       return;
     case "textDocument/definition":

@@ -9,12 +9,13 @@ import type {
 } from "@octant/contracts/code";
 import type { CodeEvidenceReference } from "@octant/contracts/code-operations";
 import type { ProjectId } from "@octant/contracts/projects";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   MonacoEditorAdapter,
   type MonacoAdapterRuntime,
   type MonacoEditorRange,
+  type MonacoEditorPosition,
   type MonacoLanguageBridge,
 } from "./MonacoEditorAdapter";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -31,7 +32,11 @@ import {
   toDefinitionLinks,
   toEditorMarkers,
   toLanguagePosition,
+  toEditorRange,
 } from "./codeLanguageEditor";
+import { CodeReferences } from "./CodeReferences";
+import type { CodeLanguageDefinitionTarget } from "@octant/contracts/code-language";
+import type { CodeLanguageReferencesOutcome } from "./useCodeLanguageServices";
 import { useCodeLanguageServices } from "./useCodeLanguageServices";
 import {
   MAX_CODE_DEBUG_BREAKPOINT_FILES,
@@ -70,6 +75,7 @@ export type CodeEditorFileProjection = CodeEditorFileFields &
   );
 
 export interface MonacoEditorPaneProps {
+  readonly checkoutLabel?: string;
   readonly debugProjectId?: ProjectId;
   /**
    * The language methods are optional: without them the editor keeps
@@ -275,6 +281,7 @@ function AvailableEditor(
   }, [draftKey, props.draftStore, props.onRequestRefresh]);
 
   const { checkoutId, path, threadId } = props.file;
+  const onOpenFile = props.onOpenFile;
   const language = useCodeLanguageServices({
     client: props.client,
     enabled: loadState.kind === "ready",
@@ -286,13 +293,100 @@ function AvailableEditor(
   });
   const [languageNotice, setLanguageNotice] = useState<string>();
   const [reveal, setReveal] = useState<{ readonly range: MonacoEditorRange }>();
+  const cursor = useRef<MonacoEditorPosition>({ lineNumber: 1, column: 1 });
+  const referenceSequence = useRef(0);
+  const referenceTrigger = useRef<HTMLButtonElement>(null);
+  const restoreReferenceFocus = useRef(false);
+  const referenceKey = JSON.stringify([
+    threadId,
+    checkoutId,
+    props.file.fileId,
+    path,
+    props.file.content.contentId,
+  ]);
+  const currentReferenceKey = useRef(referenceKey);
+  currentReferenceKey.current = referenceKey;
+  const [referenceView, setReferenceView] = useState<{
+    readonly key: string;
+    readonly text: string;
+    readonly client: MonacoEditorPaneProps["client"];
+    readonly position: MonacoEditorPosition;
+    readonly busy: boolean;
+    readonly result?: CodeLanguageReferencesOutcome;
+  }>();
+  const { references: readReferences, cancelReferences } = language;
+  const findReferences = useCallback(
+    async (position: MonacoEditorPosition) => {
+      const sequence = ++referenceSequence.current;
+      const currentText = draftRef.current;
+      setReferenceView({
+        key: referenceKey,
+        text: currentText,
+        client: props.client,
+        position,
+        busy: true,
+      });
+      const result = await readReferences(toLanguagePosition(position));
+      if (
+        !mounted.current ||
+        sequence !== referenceSequence.current ||
+        currentReferenceKey.current !== referenceKey ||
+        draftRef.current !== currentText
+      )
+        return;
+      setReferenceView(
+        result === undefined
+          ? undefined
+          : {
+              key: referenceKey,
+              text: currentText,
+              client: props.client,
+              position,
+              busy: false,
+              result,
+            },
+      );
+    },
+    [props.client, readReferences, referenceKey],
+  );
+  const visibleReferences =
+    referenceView?.key === referenceKey &&
+    referenceView.text === draft &&
+    referenceView.client === props.client
+      ? referenceView
+      : undefined;
+  const closeReferences = useCallback(() => {
+    referenceSequence.current += 1;
+    cancelReferences();
+    restoreReferenceFocus.current = true;
+    setReferenceView(undefined);
+  }, [cancelReferences]);
+  useLayoutEffect(() => {
+    if (visibleReferences === undefined && restoreReferenceFocus.current) {
+      restoreReferenceFocus.current = false;
+      referenceTrigger.current?.focus();
+    }
+  }, [visibleReferences]);
+  const chooseReference = useCallback(
+    (target: Extract<CodeLanguageDefinitionTarget, { readonly kind: "checkout-location" }>) => {
+      const range = toEditorRange(target.range);
+      if (target.path === path) setReveal({ range });
+      else if (onOpenFile !== undefined) {
+        requestCodeEditorReveal(
+          codeEditorRevealKey(String(threadId), String(checkoutId), target.path),
+          range,
+        );
+        onOpenFile(target.path);
+      }
+    },
+    [checkoutId, onOpenFile, path, threadId],
+  );
   const languageMarkers = useMemo(
     () =>
       language.diagnostics === undefined ? undefined : toEditorMarkers(language.diagnostics, path),
     [language.diagnostics, path],
   );
   const { definition, refresh: refreshLanguage, retry: retryLanguage } = language;
-  const onOpenFile = props.onOpenFile;
   const languageBridge = useMemo<MonacoLanguageBridge>(
     () => ({
       definitions: async (position) => {
@@ -542,6 +636,47 @@ function AvailableEditor(
         </div>
       )}
 
+      {props.client.readLanguage === undefined ||
+      props.client.syncLanguageDocument === undefined ? null : (
+        <div className="code-editor-pane__language">
+          <OctantButton
+            ref={referenceTrigger}
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={loadState.kind !== "ready" || visibleReferences?.busy === true}
+            onClick={() => void findReferences(cursor.current)}
+          >
+            Find references in checkout
+          </OctantButton>
+        </div>
+      )}
+      {visibleReferences === undefined ? null : (
+        <CodeReferences
+          onReloadLanguage={() => {
+            closeReferences();
+            retryLanguage();
+          }}
+          checkout={props.checkoutLabel ?? String(checkoutId).slice(0, 8)}
+          busy={visibleReferences.busy}
+          {...(visibleReferences.result === undefined ? {} : { result: visibleReferences.result })}
+          onChoose={chooseReference}
+          canOpen={(target) => target === path || onOpenFile !== undefined}
+          onRecheck={() => void findReferences(visibleReferences.position)}
+          onClose={closeReferences}
+          {...(props.onOpenExternalEditor === undefined
+            ? {}
+            : {
+                onOpenExternal: () => {
+                  void props
+                    .onOpenExternalEditor?.()
+                    .catch(() =>
+                      setMessage("Octant could not open the configured external editor."),
+                    );
+                },
+              })}
+        />
+      )}
       {breakpointNotice === undefined ? null : <p role="status">{breakpointNotice}</p>}
 
       {loadState.kind === "loading" ? <p role="status">Loading file…</p> : null}
@@ -557,6 +692,15 @@ function AvailableEditor(
           reveal={reveal}
           {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
           modelUri={modelUri(props.file.checkoutId, props.file.fileId)}
+          {...(props.client.readLanguage === undefined ||
+          props.client.syncLanguageDocument === undefined
+            ? {}
+            : {
+                onCursorPosition: (position: MonacoEditorPosition) => {
+                  cursor.current = position;
+                },
+                onReferences: (position: MonacoEditorPosition) => void findReferences(position),
+              })}
           onChange={(value) => {
             setDraft(value);
             draftRef.current = value;

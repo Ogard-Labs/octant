@@ -7,6 +7,37 @@ import { listAvailableSections, resolveDeepLink, searchSettings } from "./regist
 const capabilities = { nativeBoundsAvailable: true, sidebarVibrancySupported: true };
 
 describe("octantSettingsRegistry", () => {
+  it.each([
+    ["gcloud", "secret-store-google-cli"],
+    ["service account email", "secret-store-google-cli-email"],
+    ["service account JSON item", "secret-store-google-cli-reference"],
+    ["Google OAuth scopes", "secret-store-google-cli-scopes"],
+  ] as const)(
+    "finds the Google command-line control for %s and resolves its exact host row",
+    (query, setting) => {
+      expect(
+        searchSettings(
+          listAvailableSections(octantSettingsRegistry, capabilities),
+          capabilities,
+          query,
+        ),
+      ).toContainEqual(
+        expect.objectContaining({
+          kind: "setting",
+          sectionId: "secret-stores",
+          settingId: setting,
+          scope: "host",
+        }),
+      );
+      const resolved = resolveDeepLink(octantSettingsRegistry, capabilities, {
+        section: "secret-stores",
+        setting,
+      });
+      expect(resolved?.section.id).toBe("secret-stores");
+      expect(resolved?.settingId).toBe(setting);
+    },
+  );
+
   it("registers only sections with working content, in navigation order", () => {
     expect(octantSettingsRegistry.sections.map((s) => s.id)).toEqual([
       "general",
@@ -99,6 +130,10 @@ describe("octantSettingsRegistry", () => {
       "secret-store-aws-cli",
       "secret-store-aws-cli-key-id",
       "secret-store-aws-cli-secret",
+      "secret-store-google-cli",
+      "secret-store-google-cli-email",
+      "secret-store-google-cli-reference",
+      "secret-store-google-cli-scopes",
     ]);
     expect(section("data")?.label).toBe("Data & storage");
     expect(section("data")?.scope).toBe("host");

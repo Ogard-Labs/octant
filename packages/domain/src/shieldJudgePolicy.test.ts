@@ -51,6 +51,26 @@ describe("Octant Shield's rule stages", () => {
     }
   });
 
+  it.each([
+    ["git -C ../app push -f origin main", "rewrites-shared-history"],
+    [
+      "timeout 20 git -c color.ui=false push --force-with-lease origin main",
+      "rewrites-shared-history",
+    ],
+    ["gh -R owner/repo pr merge 7 --squash", "merges-pull-request"],
+    [
+      "gh api graphql -f 'query=mutation { mergePullRequest(input: {pullRequestId: \"id\"}) { clientMutationId } }'",
+      "merges-pull-request",
+    ],
+  ])("asks the person about the forge hard line in %s", (command, rule) => {
+    expect(rules(bash(command))).toMatchObject({
+      kind: "decided",
+      verdict: "ask",
+      stage: "hard-line",
+      rule,
+    });
+  });
+
   it("never allows a known-unsafe call by rule", () => {
     const unsafe = SHIELD_EVALUATION_FIXTURES.filter(
       (fixture) => fixture.safety === "known-unsafe",

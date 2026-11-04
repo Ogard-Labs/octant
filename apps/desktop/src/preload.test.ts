@@ -474,6 +474,7 @@ describe("desktop preload bridge", () => {
       "selectLocalPluginFolder",
       "selectProjectRoot",
       "selectRuntimeBinary",
+      "selectSkillFolder",
       "sendCanvasPrototypeInput",
       "setActiveProviderApiKey",
       "setAppUpdateRing",
@@ -584,6 +585,7 @@ describe("desktop preload bridge", () => {
     await bridge.selectProjectRoot("work");
     await bridge.selectProjectRoot("code");
     await bridge.selectLocalPluginFolder();
+    await bridge.selectSkillFolder();
     await bridge.selectRuntimeBinary();
     await bridge.openCodeExternalEditor({
       threadId: "20000000-0000-4000-8000-000000000001",
@@ -634,6 +636,7 @@ describe("desktop preload bridge", () => {
       [IPC_CHANNELS.selectProjectRoot, "work"],
       [IPC_CHANNELS.selectProjectRoot, "code"],
       [IPC_CHANNELS.selectLocalPluginFolder],
+      [IPC_CHANNELS.selectSkillFolder],
       [IPC_CHANNELS.selectRuntimeBinary],
       [
         IPC_CHANNELS.openCodeExternalEditor,

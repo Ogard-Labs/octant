@@ -405,7 +405,12 @@ its digest, its languages, and its class, and it serves only once trusted and
 switched on, verified against that digest at every start. The Monaco editor
 calls those routes through the Code client: it shows the server's diagnostics
 as markers and opens a definition in another file through the ordinary
-file-open path, locally and from a paired device. A Settings › Code switch,
+file-open path, locally and from a paired device. Explicit checkout references
+consume the already-initialized server's actual capability and acknowledged
+current draft, return bounded snapshot locations, and reuse that file-open path;
+these reads never start or retarget a server. Unsupported or unknown support
+stays explicit, with no save, new agent tool or write authority
+([references rules](design/language-services.md#explicit-checkout-references)). A Settings › Code switch,
 stored in the journaled Code settings, turns the bundled server off, and the
 host then answers `turned-off`. A person can also add a `repo-tooling` server,
 which runs the repository's own tooling: it starts only after the person at a
@@ -2187,8 +2192,17 @@ Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
 
 - **Guarded and Reviewed.** Pull-request changes go through the
-  pull-request tool, which is the only sanctioned path, and the shell's forge
-  access is a known follow-up (below).
+  pull-request tool, which is the only sanctioned path. Octant refuses a
+  recognizable push or pull-request write before its Harness shell runs it,
+  and before answering a provider approval request that includes the pending
+  command. A generic shell approval or a Judge allow cannot authorize that
+  write: the agent must use the structured tool, whose repository, branch,
+  revision, consent, required-check and live-authority checks still apply.
+  A refused provider approval is recorded as a failed tool row, not as a
+  Shield or provider-reviewer verdict. This refusal applies with or without
+  Shield. A provider reviewer that
+  answers internally never sends Octant that pending command; enforcement
+  on that path is unsupported, as detailed below.
 - **Full access.** The provider's own `git` and forge command-line tool
   are the person's choice, as they would be outside Octant. Octant journals
   each push or pull-request change it observes (a shell command whose
@@ -2211,8 +2225,10 @@ Which path reaches the forge depends on the thread's
   thread's branch in the same Project (`--all` and `--mirror` count when
   there is one) is refused as `forge-<line>` with a message that names the
   merge or push tool, which asks the person, and journaled `refused`; every
-  other one runs and is journaled `ran` with its exit code, at every level,
-  and a record that cannot be kept withholds its output. A provider runtime
+  other Full access command runs and is journaled `ran` with its exit code,
+  and a record that cannot be kept withholds its output. A Full access push
+  is also refused when the branches other threads own cannot be read;
+  unavailable authority never becomes an empty branch list. A provider runtime
   reports a command only as it starts, and only the first line its tool
   start names, so a change on a later line goes unseen; Octant journals it `seen-after-start` and, at Full access,
   names the hard line it crossed; it cannot stop it. A target behind an
@@ -2235,8 +2251,13 @@ root (so `~/.config/gh` and `~/.ssh` are out of reach); whether a
 Keychain-backed credential helper is reachable there has not been measured.
 A push or pull-request change made through that gap is journaled as a
 forge change where Octant sees the command (above), but none of the rules
-above applies to it. Closing the gap at
-Guarded and Reviewed is a known follow-up.
+above can be enforced after it starts. The pre-action refusals above cover
+only recognizable commands Octant executes or receives as pending approval
+calls. Provider-reviewer decisions and Full access tool-start observations
+are records, not consent or pre-action enforcement. Arbitrary scripts,
+aliases, expansions and commands that a runtime does not report cannot be
+classified reliably by this command reader. Complete confinement of those
+provider paths at Guarded and Reviewed remains unsupported.
 
 **Pull-request merge.** A person merges one open pull request from its review
 (`POST /api/code/project-pull-requests/merge`). Beside it, the person may turn
@@ -4850,10 +4871,12 @@ Octant sent inside the prompt is counted. Per runtime:
   output and reasoning tokens, plus `modelContextWindow`), OpenCode (per-step
   tokens and the model's `limit.context`) and Pi (assistant `message_end` usage;
   the occupancy is the last message's input, cache and output) report one
-  figure and no categories. The ACP driver reports no usage at all, so an ACP
-  thread shows no window, and its context meter says the runtime reports no
-  usage (from the runtime's integration `context.usage`) rather than that none
-  has arrived yet. That holds in every mode: a Work or Chat thread is planned by
+  figure and no categories. Verified Mistral Vibe 3.0.3 ACP updates also report
+  an independent context reading and per-turn token deltas, as specified in
+  [Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface). Other
+  ACP runtimes report no usage through the driver, so their context meters
+  say the runtime reports no usage (from integration `context.usage`) rather
+  than that none has arrived yet. That holds in every mode: a Work or Chat thread is planned by
   Octant, so its meter still shows Octant's own estimate, and the line stands
   where a window's share would be. Lists of tools, MCP servers, skills or instruction
   files exist in some runtimes but carry no token weight, so they are not parts.
@@ -4892,7 +4915,7 @@ the turn runner reports `compacted` for the rest of a turn once the adapter's
 | Codex app-server  | Each turn's input is a `userMessage` in the thread and is sent with every later request. Compaction rebuilds the thread from a summary and as many recent user messages as fit in 20,000 tokens, so what survives is Codex's choice. Octant sees compaction as the `contextCompaction` item.                                                                                                                               | `kept`, or `compacted` for the rest of a turn in which a `contextCompaction` item arrived | `build_compacted_history` and `COMPACT_USER_MESSAGE_MAX_TOKENS` in codex-rs `core/src/compact.rs`; the item in `codexProtocol.ts` |
 | OpenCode          | Each prompt is a user message sent again with every request. A completed compaction sends the summary and at most a recent tail of messages. Octant sees `session.compacted` (1.x), `session.next.compaction.ended` (2.x) and `session.compaction.ended` (2.0.22).                                                                                                                                                         | `kept`, or `compacted` for the rest of a prompt in which compaction ended                 | `filterCompacted` in opencode `packages/opencode/src/session/message-v2.ts`; the events in `@opencode-ai/sdk`                     |
 | Pi                | Each prompt is a session entry sent with every request. A compaction keeps a summary and the entries from `firstKeptEntryId` on. Octant sees `compaction_end`; one without `result` (aborted or failed) changed nothing.                                                                                                                                                                                                   | `kept`, or `compacted` when a `compaction_end` with a `result` arrived during the prompt  | Pi's JSON event stream docs (`packages/coding-agent/docs/json.md`, `compaction_start`/`compaction_end`)                           |
-| ACP agents        | Each agent manages its own history; the protocol says nothing about what it keeps or compacts, and the driver reports no usage.                                                                                                                                                                                                                                                                                            | absent                                                                                    | ACP driver (`acpDriver.ts`, usage `unsupported`)                                                                                  |
+| ACP agents        | Each agent manages its own history; Octant has no verified prompt-retention or compaction evidence. Vibe 3.0.3 reports usage and context without that breakdown; other ACP runtimes report no usage.                                                                                                                                                                                                                       | absent                                                                                    | ACP driver; verified Vibe usage in [Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)                          |
 | Any other adapter | Not determined.                                                                                                                                                                                                                                                                                                                                                                                                            | absent                                                                                    | —                                                                                                                                 |
 
 From that the turn runner builds the parts (`octantWindowBreakdown` in
@@ -6029,7 +6052,7 @@ reported one. The Claude mapper reports the turn so far after each model call,
 summed by message id. Every turn that reached the provider leaves exactly one
 ledger row however it ended — completed, failed, cancelled, or interrupted —
 and Work keeps usage the provider reports after a cancel. A turn that reached
-the provider and reported nothing (an ACP agent in Code reports no usage) is
+the provider and reported nothing (most ACP agents in Code report no usage) is
 recorded as unreported and unpriced; whether token and money ceilings refuse
 after it depends on its provider (below). A turn refused or failed before the
 provider leaves no row. A Code turn
@@ -7756,12 +7779,27 @@ same. This holds in Chat, Work, and Code.
   switched on. A folder is added by absolute path with no `..` segment, at most
   32; its `sourceRef` is `provider:<id>` or `folder:` and a digest of the path,
   never the path, and its skills are shared by every thread like the
-  user-global ones. A folder that is a symlink, is missing, or is the
-  user-global folder again is read once or not at all. Choices: the provider
+  user-global ones. Linked roots are ignored and a duplicate user-global root is
+  read once. Settings reports a chosen root as missing, unreadable, linked,
+  not a directory or readable, with its indexed package count; these diagnostics
+  are host-person metadata, never a path grant or skill activation. Choices: the provider
   list holds only the two providers whose folder this document already names,
-  and more join it when their home folder is verified; a folder is typed as a
-  path, not picked, so browser Settings can add one too, and it never reads
-  anything but `SKILL.md` files. Octant's Project walk still never reads the
+  and more join it when their home folder is verified. Manual paths remain
+  available in every client; desktop also offers the existing native folder picker.
+  Its window-owned one-use receipt is purpose-bound to skill-folder selection,
+  cannot install a plugin and is resolved only by a live local-window capability.
+  The existing settings CAS records the folder; cancellation or refusal does not
+  claim it was saved. Discovery never reads anything but `SKILL.md` files.
+  Chosen roots and eligible package directories are watched without recursive
+  content discovery, up to 512 native handles. A missing or unreadable chosen
+  root uses only necessary ancestor existence metadata, filtering unrelated
+  names; later creation or permission repair reconciles the same selected root.
+  Watch events are debounced/coalesced with at most one active refresh; host-scope
+  close prevents late awaited work from restarting watchers. A root that cannot
+  be watched names Refresh as the fallback. Committed skill-folder settings are
+  observed on the host, including another client's/direct writes while Settings
+  is unmounted; unrelated settings do not restart discovery. Root diagnostics and
+  picker receipt resolution add no paired-device rights. Octant's Project walk still never reads the
   home folder's own `.claude`, even when the host's Project-less fallback root
   is the home folder; only the provider switch above does. A discovered
   skills folder that is a symlink, or resolves outside the bound root, is
@@ -9840,7 +9878,7 @@ access` agree); a thread's own change is journaled as
   | `approvals`               | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `supported`                                                                                                        | `unsupported`; every Harness tool call passes the server instead                        | `unsupported`; every Harness tool call passes the server instead                                          | `unsupported`; every Harness tool call passes the server instead                             | `unsupported`                         |
   | `userQuestions`           | `supported`                                                                                   | `unsupported`                                                                                | `supported`; `unsupported` on the 2.x route                                                              | `unsupported`                                                                                     | `varies`: `unsupported` on Mistral Vibe and fx                                                                     | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
   | `reasoning`               | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `unavailable`; `supported` when the agent reports a reasoning option or model                                      | `varies`: from each model's reported thinking                                           | `unavailable` until a response carries reasoning                                                          | `unavailable` until a response carries reasoning                                             | `supported`                           |
-  | `usage`                   | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `unsupported`; turns are not measured                                                                              | `unavailable` until a reply reports counts                                              | `unavailable` until a response reports usage                                                              | `unavailable` until a response reports usage                                                 | `unsupported`; turns are not measured |
+  | `usage`                   | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `varies`; verified Vibe 3.0.3 reports turn usage; other ACP runtimes are unsupported                               | `unavailable` until a reply reports counts                                              | `unavailable` until a response reports usage                                                              | `unavailable` until a response reports usage                                                 | `unsupported`; turns are not measured |
   | `toolActivity`            | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `supported`                                                                                       | `supported`                                                                                                        | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
   | `cloudSessions`           | `absent`                                                                                      | `absent`                                                                                     | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                                           | `absent`                                                                                | `absent`; eligible official API endpoints offer separate Code cloud jobs through the optional driver seam | `absent`; a matching observed outside protocol may report `supported` for separate Code jobs | `absent`                              |
   | `fileChanges`             | `supported`                                                                                   | `supported`                                                                                  | `unsupported`; `supported` from 2.2.0                                                                    | `unavailable`                                                                                     | `unavailable`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
@@ -9912,11 +9950,14 @@ access` agree); a thread's own change is journaled as
     the one release that bridge was read against.
   - **Mistral Vibe** is first-class and runs through the ACP bridge, so every
     ACP gap below applies to it. Its `vibe-app-server` is not adopted
-    ([why](design/provider-runtimes.md#mistral-vibe-surface)); reading usage,
-    compaction, review, and questions from `vibe-acp`'s own ACP extensions is
-    allowed, not built yet.
-  - **ACP agents** do not report usage, so a spend ceiling leaves their turns
-    out and says so. They report no file changes or diffs, ask no user
+    ([why](design/provider-runtimes.md#mistral-vibe-surface)); usage and
+    context from verified `vibe-acp` 3.0.3 are read, and reading compaction,
+    review, and questions from its own ACP extensions is allowed, not built
+    yet.
+  - **ACP agents** report no usage except verified Mistral Vibe 3.0.3. Its
+    cumulative counters become per-turn deltas; provider cost stays absent
+    ([Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)).
+    A spend ceiling leaves other ACP turns out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
     resume, and offer Octant's tools only on macOS when the agent serves HTTP
     MCP. fx is also refused in Chat and Plan.
@@ -10336,9 +10377,7 @@ access` agree); a thread's own change is journaled as
   worktree the run was admitted with; a child's worktree is never a journaled
   thread checkout, so none is required. A provider transport that cannot carry
   app-managed tools fails the start with a typed reason rather than dropping
-  the tool. Today each adapter turns its provider's own subagent feature off,
-  because a child the provider starts itself runs outside the journal and the
-  approval path. For the key providers the rule is that their native
+  the tool. For the key providers the rule is that their native
   subagents are on ([Key providers run as themselves](#providers)): Octant
   journals and shows each native child run the provider reports, its tool
   calls reach the same approval path as the parent's at the parent's level,
@@ -10385,6 +10424,25 @@ access` agree); a thread's own change is journaled as
   within the per-image and per-design budgets are returned, the renderer
   inlines them as `data:` images, and the journal holds references only
   ([Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md), F5).
+- **Product feedback notes.** A product-feedback note is the person's comment
+  on an element of the running product. It is journaled on its own aggregate
+  and carried with the next admitted turn exactly once. The client sends the
+  point and comment; after checking the caller can see the thread and the
+  context belongs to that window, the host resolves the element and crop.
+  The comment is the person's words. The page's element description is outside
+  content, marks the thread, and is framed as content rather than instructions.
+  Notes wait in a bounded per-thread queue. Crops live in purgeable evidence
+  storage, with references in the journal, and travel only to an image-capable
+  model. An unavailable crop does not discard the text note. Delivery is claimed
+  durably before the turn carries it, so a failed claim sends nothing and an
+  uncertain delivery is not repeated.
+
+  The pointed-element producer is built for the headless Playwright runtime.
+  The desktop native runtime and its routing runtime do not implement point
+  descriptions, so those surfaces currently refuse capture as unavailable.
+  Native element selection, screenshot/context preview and bounded DOM/style
+  evidence remain not built yet.
+
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
   Remote requests are classified fail-closed by an admission policy and route
@@ -11091,7 +11149,11 @@ access` agree); a thread's own change is journaled as
     `restore`, which writes the pointer without reading its item (the item may be
     gone or its store locked by then); if it cannot be put back, the new pointer
     is removed and the answer says so, so an unjournaled pointer never stays
-    active.
+    active. Google command-line selection additionally records
+    `credential-reference.requested` before dispatch, after fresh local-window
+    admission. This is the person's exact consent, not proof that the broker
+    committed a change. An unknown reply tells the person to read the current
+    account; it is never reported as an unchanged or confirmed selection.
   - **AWS command line.** Settings › Secret stores › AWS command line points
     the AWS command line at the two items that hold the person's access key
     pair (`point-aws-cli-key`; the broker proves both resolve now, as for a
@@ -11125,6 +11187,59 @@ access` agree); a thread's own change is journaled as
       for the person to set up and gives the same reach as the pair, never
       more. One hour so a long command does not lose its credentials midway;
       AWS's shortest, 15 minutes, would cut off a long sync.
+  - **Google Cloud command line.** Settings › Secret stores › Google Cloud
+    command line accepts a linked 1Password item containing service-account
+    JSON, the exact expected service-account email, and explicit Google OAuth
+    scopes. Review and confirmation are separate from entering the reference;
+    a read of Settings never issues a token. The public pointer and scopes
+    live in the existing `linked-secret-stores.json` sidecar; the key does not.
+    Only a live local host window can change this selection. The account's IAM
+    roles can reach several Google Cloud Projects: an Octant Project or a
+    default `gcloud` Project does not narrow those roles.
+    - The broker alone reads the JSON and signs an RS256 JWT with the selected
+      email as issuer, the exact selected scopes, and
+      `https://oauth2.googleapis.com/token` as both audience and exchange
+      endpoint. It ignores the item's `token_uri`; delegated subjects,
+      impersonation, and arbitrary endpoints are not supported. A JWT lasts
+      at most one hour. Store reads and token exchange each have a ten-second
+      bound. The broker caches only the resulting short-lived access token,
+      uses a conservative expiry, and refuses a different returned scope set.
+    - Each ordinary Octant Harness shell command receives only a token file
+      through `CLOUDSDK_AUTH_ACCESS_TOKEN_FILE` and a private `CLOUDSDK_CONFIG`.
+      The file is mode 0600 in a host-owned mode-0700 command resource directory;
+      confinement grants that resource read access and only its configuration
+      child write access. Confined harness launches deny the shared Google
+      resource root before reallowing their own resource, including launches
+      without a selected account; an overlapping writable binding is refused.
+      Full access retains its existing unconfined, soft boundary. No grant
+      widens the shared script directory. File
+      logging, usage reporting, and prompts are disabled. The broker's reusable
+      key, provider-native harnesses, worktree setup, ADC, `gsutil`, and `bq`
+      are outside this channel. A command receives no mid-command refresh.
+    - Selection changes and unlink invalidate pending issuance and prepared
+      launches, checked again synchronously at the actual spawn boundary.
+      A running command may retain its already-issued token until expiry;
+      Clear removes future use, not Google-wide revocation. Issued tokens are
+      registered for output redaction. An unavailable or expired configured
+      channel receives an empty token file and isolated configuration with a
+      recovery message, so it cannot fall back to the host's saved sign-in.
+    - Startup first reconciles the existing owned harness process receipts.
+      Each recovery stage has a ten-second bound. Only confirmed process
+      recovery permits removal of prior `google-*` resources beneath this
+      dedicated root. Failed or uncertain recovery leaves those files intact,
+      disables Google issuance, and keeps the rest of the host available.
+      An unrelated command can still run with the token-free configuration.
+      Normal command completion removes only its owned resource directory.
+    - _Rationale._ The selected token-file interface is supported by `gcloud`
+      and gives each command an explicit lifetime and isolated configuration.
+      Current `gcloud` also supports a direct access-token environment value;
+      this adapter does not use it. Installed SDK, OS confinement, and live
+      account acceptance remain separate from fake-token protocol tests.
+    - The host-wide Octant credential guard includes `harness/cloud-cli`
+      beneath the data directory. Other confined processes cannot read its
+      running tokens through an ancestor grant; Octant's file tools refuse
+      reads, writes and searches there at every level. Only the owning
+      ordinary harness launch receives the narrow OS resource exception.
 - **Organization sign-in on a host without the desktop app.** An Azure AI
   Foundry endpoint that signs in with a directory account and opted in to it
   (`deviceCodeSignIn`) signs in with a device code from
@@ -11214,7 +11329,11 @@ access` agree); a thread's own change is journaled as
   resolved to check where it points; the endpoint is whatever the person on
   the host typed, and only that person can set it.
 - **Hosts never trust each other.** Multi-host views merge read models
-  client-side; credentials and mutable authority never cross hosts. Completing
+  client-side without transferring authority. Federation shares no
+  credentials; the explicit
+  [Shared sign-ins](design/hub-and-spokes.md#shared-sign-ins) API-key copy
+  requires a fresh own-unlock on each host and a one-use receiving ticket.
+  Subscription sign-ins refuse copying. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client
   registry work, not a new trust boundary. Conflicting facts stay under their owning host;
   create and mutation routing name one destination and refuse when that host is
@@ -11558,7 +11677,8 @@ Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
 no prompts": a shell command there can read a protected file. Built, except
-short-lived credentials for the Google Cloud and Azure command lines.
+the Azure command line's general short-lived credential channel. The Google
+Cloud channel is the bounded `gcloud` service-account adapter below.
 
 - **One list, every runtime.** The list is
   `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
@@ -11629,13 +11749,17 @@ short-lived credentials for the Google Cloud and Azure command lines.
   the person keeps outside the list. The AWS command line in Octant's own
   shell gets a short-lived session from the broker once the person points its
   key pair at a linked store ([AWS command line](#linked-secret-stores)).
-  Allowed; not built yet: the Google Cloud and Azure command lines.
+  The Google Cloud `gcloud` command line in Octant's own shell receives a
+  command-owned access-token file and private configuration from the broker
+  after exact account/scopes consent ([linked secret stores](#linked-secret-stores)).
+  Allowed; not built yet: the Azure command line's general credential channel.
   - _Rationale._ AWS first because a session needs nothing on disk: the
     session's three values go in the command's environment, which the AWS
     command line and every AWS SDK read before any file. The Google Cloud
-    command line takes a token only from a file it names, and the Azure
-    command line takes none from its environment, so each needs more than an
-    environment and is left for its own change.
+    adapter uses its supported token-file interface and a private config
+    directory to bound each command's resources; it does not assume that
+    Google supports only file input. Azure needs its own consumer-specific
+    contract rather than an invented generic access-token environment variable.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
   read and write) and Claude Code's file tools, through Octant's tool gate,

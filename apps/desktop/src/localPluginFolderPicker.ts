@@ -36,15 +36,23 @@ interface LocalPluginFolderPickerOptions<TWindow extends OwnedWindowPort> {
 }
 
 /**
- * Native directory picker for Agent Plugins local import.
+ * Native directory picker for Agent Plugins import or an explicit skill-folder purpose.
  * Exchanges the native filesystem selection for a short-lived server receipt.
- * The renderer receives only the opaque window-bound receipt and display name.
+ * The renderer receives only the opaque window-bound receipt and display name;
+ * selecting a skill folder cannot authorize plugin inspection or installation.
  */
 export function createLocalPluginFolderPicker<TWindow extends OwnedWindowPort>(
   options: LocalPluginFolderPickerOptions<TWindow>,
 ) {
   const fetch = options.fetch ?? globalThis.fetch;
-  return async (event: PickerEventPort): Promise<LocalPluginFolderPickerResult> => {
+  return async (
+    event: PickerEventPort,
+    purpose: "plugin-import" | "skill-folder" = "plugin-import",
+  ): Promise<LocalPluginFolderPickerResult> => {
+    if (purpose !== "plugin-import" && purpose !== "skill-folder")
+      throw new LocalPluginFolderPickerError(
+        "Octant rejected an invalid folder selection purpose.",
+      );
     const window = options.resolveOwnedWindow(event.sender);
     if (window === undefined || window.isDestroyed()) {
       throw new LocalPluginFolderPickerError(
@@ -63,6 +71,10 @@ export function createLocalPluginFolderPicker<TWindow extends OwnedWindowPort>(
       );
     }
     if (selection.canceled) return Object.freeze({ kind: "cancelled" });
+    if (window.isDestroyed() || options.resolveOwnedWindow(event.sender) !== window)
+      throw new LocalPluginFolderPickerError(
+        "The window that opened the folder picker is no longer available.",
+      );
     const path = selection.filePaths.length === 1 ? selection.filePaths[0] : undefined;
     if (path === undefined || path.length === 0) {
       throw new LocalPluginFolderPickerError(
@@ -79,7 +91,11 @@ export function createLocalPluginFolderPicker<TWindow extends OwnedWindowPort>(
             "content-type": "application/json",
             "x-octant-desktop-secret": options.desktopBridgeSecret,
           },
-          body: JSON.stringify({ windowId: options.windowId, absolutePath: path }),
+          body: JSON.stringify({
+            windowId: options.windowId,
+            absolutePath: path,
+            ...(purpose === "skill-folder" ? { purpose } : {}),
+          }),
         },
       );
     } catch {
@@ -92,7 +108,15 @@ export function createLocalPluginFolderPicker<TWindow extends OwnedWindowPort>(
         "Octant could not authorize the selected local plugin folder.",
       );
     }
+    if (window.isDestroyed() || options.resolveOwnedWindow(event.sender) !== window)
+      throw new LocalPluginFolderPickerError(
+        "The window that opened the folder picker is no longer available.",
+      );
     const receiptId = await decodeReceiptId(response);
+    if (window.isDestroyed() || options.resolveOwnedWindow(event.sender) !== window)
+      throw new LocalPluginFolderPickerError(
+        "The window that opened the folder picker is no longer available.",
+      );
     return Object.freeze({ kind: "selected", receiptId, displayName: basename(path) });
   };
 }

@@ -111,6 +111,8 @@ interface HarnessOptions {
 }
 
 function harness(options: HarnessOptions = {}) {
+  let instant = Date.parse(now);
+  const clock = () => new Date(instant).toISOString();
   const directory = mkdtempSync(join(tmpdir(), "octant-terminal-browser-grant-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "octant.sqlite3"));
@@ -120,7 +122,7 @@ function harness(options: HarnessOptions = {}) {
     connection,
     registry: runtimeRegistries.events,
     projections: runtimeRegistries.projections,
-    clock: () => now,
+    clock,
   });
   const threads = new Map<string, CodeThread>(
     (options.threads ?? [codeThread(ids.threadA)]).map((thread) => [String(thread.id), thread]),
@@ -165,13 +167,13 @@ function harness(options: HarnessOptions = {}) {
     recordExternalContentIngestion,
     captures,
     uuid,
-    clock: () => now,
-    now: () => Date.parse(now),
+    clock,
+    now: () => instant,
     schedule: () => () => undefined,
   });
   const approvals = new BrowserToolApprovalService({
     uuid,
-    now: () => Date.parse(now),
+    now: () => instant,
     authorityIsCurrent: () => true,
   });
   const createSpy = vi.spyOn(browser, "create");
@@ -199,7 +201,7 @@ function harness(options: HarnessOptions = {}) {
     personActor,
     hostActor,
     uuid,
-    clock: () => now,
+    clock,
   };
   const service = new TerminalBrowserGrantService(serviceOptions);
   cleanups.push(() => service.close());
@@ -219,6 +221,9 @@ function harness(options: HarnessOptions = {}) {
     recordExternalContentIngestion,
     grantEvents,
     journal,
+    advance: (milliseconds: number) => {
+      instant += milliseconds;
+    },
   };
 }
 
@@ -513,6 +518,26 @@ describe("terminal Browser grant", () => {
     expect(fixture.createSpy).not.toHaveBeenCalled();
   });
 
+  it("keeps a granted terminal page alive through explicit reads beyond its original idle deadline", async (context) => {
+    const fixture = harness();
+    const opening = await open(fixture);
+    if (opening.kind === "refused")
+      return void context.skip("loopback listeners are not permitted");
+    const { url, token } = environmentOf(fixture, opening);
+    const session = await connect(url, token);
+    const navigating = session.call({ operation: "navigate", url: "https://example.com/" });
+    await approveNext(fixture);
+    expect((await navigating).isError).toBe(false);
+    for (const operation of ["snapshot", "read-page", "screenshot", "diagnostics"] as const) {
+      fixture.advance(540_000);
+      expect((await session.call({ operation })).isError).toBe(false);
+    }
+    expect(fixture.actSpy).toHaveBeenCalledWith(expect.objectContaining({ activityBy: "agent" }));
+    expect(fixture.captures.keep).not.toHaveBeenCalled();
+    fixture.advance(600_000);
+    expect((await session.call({ operation: "read-page" })).isError).toBe(true);
+  });
+
   it("does not keep a screenshot taken through the endpoint as a thread capture", async (context) => {
     const fixture = harness();
     const opening = await open(fixture);
@@ -528,6 +553,7 @@ describe("terminal Browser grant", () => {
     expect(fixture.actSpy).toHaveBeenCalledWith(
       expect.not.objectContaining({ capturedBy: expect.anything() }),
     );
+    expect(fixture.actSpy).toHaveBeenCalledWith(expect.objectContaining({ activityBy: "agent" }));
     expect(fixture.captures.keep).not.toHaveBeenCalled();
   });
 

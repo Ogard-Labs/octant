@@ -19,6 +19,7 @@ import {
 } from "./shieldServerPolicy";
 import { safeNetworkPlaceAllows } from "./safeNetworkPolicy";
 import { commandPathWords } from "./secretGuardPolicy";
+import { forgeShellChanges } from "./forgeShellChangePolicy";
 
 /**
  * Octant Shield's Judge, the deterministic part: the rules that decide a
@@ -243,16 +244,8 @@ const COMMAND_RULES: ReadonlyArray<CommandRule> = [
     rule: "rewrites-shared-history",
     verdict: "ask",
     stage: "hard-line",
-    pattern:
-      /\bgit\s+push\b[^;&|]*(?:\s--force(?:-with-lease)?\b|\s-[a-zA-Z]*f\b|\s\+\S+|\s--mirror\b|\s--delete\b|\s-d\b)|\bgit\s+(?:filter-branch|filter-repo)\b|\bgit\s+update-ref\s+-d\b/i,
+    pattern: /\bgit\s+(?:filter-branch|filter-repo)\b|\bgit\s+update-ref\s+-d\b/i,
     reason: "Force-pushing or rewriting a branch happens only when the person asks.",
-  },
-  {
-    rule: "merges-pull-request",
-    verdict: "ask",
-    stage: "hard-line",
-    pattern: /\bgh\s+pr\s+merge\b|\bgh\s+api\b[^;&|]*\/merge\b/i,
-    reason: "A pull request is merged only when the person asks.",
   },
   {
     rule: "raises-privilege",
@@ -339,6 +332,32 @@ function listedSecretPath(
   return protectedSecretPath(asked);
 }
 
+/** Forge hard lines apply before either local or SSH commands reach a model or fast allow. */
+function judgeForgeCommand(command: string): ShieldRuleOutcome | undefined {
+  for (const change of forgeShellChanges(command)) {
+    if (change.kind === "merge") {
+      return decided(
+        "ask",
+        "hard-line",
+        "merges-pull-request",
+        "A pull request is merged only when the person asks.",
+      );
+    }
+    if (
+      change.kind === "push" &&
+      (change.force !== "none" || change.deletes || change.allBranches)
+    ) {
+      return decided(
+        "ask",
+        "hard-line",
+        "rewrites-shared-history",
+        "Force-pushing or rewriting a branch happens only when the person asks.",
+      );
+    }
+  }
+  return undefined;
+}
+
 /**
  * Applies the rule stages in order. `needs-model` means no rule decided and
  * the model judges; a rule that decided is final.
@@ -376,6 +395,8 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
         return decided(entry.verdict, entry.stage, entry.rule, entry.reason);
       }
     }
+    const forge = judgeForgeCommand(command);
+    if (forge !== undefined) return forge;
     // A copy to or from a registered server is judged by its profile, after
     // the hard lines above.
     const copy = ssh.kind === "not-ssh" ? parseFileCopyInvocation(command) : undefined;
@@ -599,6 +620,8 @@ function judgeSshCall(
       return decided(entry.verdict, entry.stage, entry.rule, entry.reason);
     }
   }
+  const forge = judgeForgeCommand(remote);
+  if (forge !== undefined) return forge;
   const { tier, words } = classifyRemoteCommand(remote, server.deployCommands);
   if (tier === "lockout") {
     return decided(

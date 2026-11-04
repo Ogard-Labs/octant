@@ -170,6 +170,7 @@ import {
   SkillDiscoveryService,
 } from "../extensions/skillDiscoveryService";
 import { extraSkillRootsFromSettings } from "../extensions/skillFolderRoots";
+import { observeSkillFolderSettings } from "../extensions/skillFolderSettingsReconciliation";
 import { createThreadSkillDiscoveryRootProvider } from "../extensions/threadSkillDiscoveryRootProvider";
 import { StandaloneSkillService } from "../extensions/standaloneSkillService";
 import { ShellSettingsStandaloneSkillActivationStore } from "../extensions/standaloneSkillActivationStore";
@@ -749,8 +750,21 @@ export function wireProviders(deps: ProvidersDependencies) {
       activationStore: new ShellSettingsStandaloneSkillActivationStore({ persistence }),
     });
     const refreshStandaloneSkills: () => Promise<void> = async () => {
+      skillDiscoveryService.stopWatching();
       await standaloneSkillService.reconcile();
     };
+    const stopSkillFolderSettings = observeSkillFolderSettings({
+      journal: persistence.journal,
+      read: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).skillFolders,
+      reconcile: refreshStandaloneSkills,
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        stopSkillFolderSettings();
+        skillDiscoveryService.close();
+      }),
+    );
     yield* Effect.tryPromise({
       try: async () => {
         await extensionPackageStore.initialize();

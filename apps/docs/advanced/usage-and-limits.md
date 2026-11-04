@@ -244,7 +244,7 @@ price.
 
 ### Providers that report no usage
 
-Some providers never report usage at all: every ACP agent, and Oh My Pi.
+Some providers report no usage through Octant: most ACP agents, and Oh My Pi.
 Settings shows their **Usage** capability as unsupported. Their turns are not
 measured: they add nothing to a ceiling's token or money figure, and they do
 not refuse later turns for lack of a figure. The thread's Usage panel and the
@@ -252,6 +252,17 @@ Project overview name each such provider under the ceiling with **Not
 measured**, so you do not read the ceiling as covering it. Its turns still
 count toward the turn and hours budgets, and every other provider's spend in
 the same thread or Project is counted and enforced as usual.
+
+Mistral Vibe 3.0.3 is an exception. Octant counts the tokens added since the
+runtime's pre-prompt session snapshot after receiving the final turn receipt.
+It includes context occupancy only when a matching runtime reading is available.
+An absent or invalid baseline or receipt leaves usage unavailable for that turn. Vibe's cumulative
+cost is not a turn-cost receipt, so provider cost stays absent and the ordinary
+token-based estimate or unknown-spend rules apply. Checking this supported
+release also makes older unreported Vibe turns count as unknown spend within an
+existing budget window. Token and money ceilings can therefore refuse the next turn
+until those records leave its window. This uses the existing budget policy;
+older missing usage is not reconstructed or counted as free.
 
 This is decided by what the provider can report, not turn by turn. A provider
 that normally reports usage keeps counting: if one of its turns fails or is
