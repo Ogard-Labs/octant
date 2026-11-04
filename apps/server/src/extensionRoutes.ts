@@ -1,3 +1,4 @@
+import type { McpOAuthClientRegistration } from "@octant/contracts/host-oauth";
 import type {
   ExtensionCommand,
   ExtensionCommandResult,
@@ -61,6 +62,12 @@ export function createExtensionRouteHandler(options: {
   };
   /** Sign-in to a hosted server a person added, through the host OAuth runner. */
   readonly mcpServerSignIn?: {
+    configureClient(
+      extensionId: string,
+      componentId: string,
+      registration: McpOAuthClientRegistration,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
     status(
       extensionId: string,
       componentId: string,
@@ -490,6 +497,24 @@ export function createExtensionRouteHandler(options: {
       const extensionId = String(signIn.extensionId);
       const componentId = String(signIn.componentId);
       try {
+        if (signIn.kind === "configure-client") {
+          if (principalKind !== "local-window")
+            return response(
+              failure("unauthorized", "Set up the client from the Octant window on this host."),
+              401,
+              origin,
+            );
+          return response(
+            await options.mcpServerSignIn.configureClient(
+              extensionId,
+              componentId,
+              signIn.registration,
+              principalKind,
+            ),
+            200,
+            origin,
+          );
+        }
         if (signIn.kind === "status") {
           return response(
             await options.mcpServerSignIn.status(extensionId, componentId, principalKind),

@@ -212,6 +212,20 @@ export async function startCredentialBroker(
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
     store,
+    ...(mcpServerCredentials === undefined
+      ? {}
+      : {
+          resolveClientSecret: async (secretRef: string) => {
+            const material = await mcpServerCredentials.resolve(secretRef);
+            if (!isLinkedSecretMaterial(material)) return material;
+            const pointer = decodeLinkedSecretPointer(material);
+            if (pointer === undefined || linkedSecretStores === undefined)
+              throw new CredentialStoreFailure("unavailable");
+            const result = await linkedSecretStores.read(pointer.store, pointer.reference);
+            if (result.status !== "read") throw new CredentialStoreFailure("unavailable");
+            return result.value;
+          },
+        }),
     ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
     ...(oauth?.now === undefined ? {} : { now: oauth.now }),
     ...(oauth?.timeoutMs === undefined ? {} : { timeoutMs: oauth.timeoutMs }),

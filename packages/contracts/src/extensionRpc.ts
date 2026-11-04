@@ -1,3 +1,4 @@
+import { McpOAuthClientRegistration } from "./hostOAuth";
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { SkillFolderPath } from "./shell";
 import { personDecides } from "./hostAnswer";
@@ -228,6 +229,11 @@ const signInTarget = {
   componentId: ExtensionComponentId,
 };
 export const McpServerSignInRequest = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("configure-client"),
+    ...signInTarget,
+    registration: McpOAuthClientRegistration,
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("status"), ...signInTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("begin"), ...signInTarget }).annotations(strict),
   Schema.Struct({

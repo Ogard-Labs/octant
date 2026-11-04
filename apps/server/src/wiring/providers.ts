@@ -1119,6 +1119,10 @@ export function wireProviders(deps: ProvidersDependencies) {
         },
       },
       mcpServerSignIn: {
+        configureClient: (extensionId, componentId, registration, principalKind) =>
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.configureForServer(extensionId, componentId, registration, principalKind),
+          ),
         status: (extensionId, componentId, principalKind) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.status(extensionId, componentId, principalKind),

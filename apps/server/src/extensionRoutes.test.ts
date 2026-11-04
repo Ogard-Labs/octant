@@ -1412,6 +1412,7 @@ describe("servers and plugins found on this computer", () => {
 describe("signing in to a hosted server from Settings", () => {
   const target = { extensionId, componentId: "mcp-docs" };
   const signIn = {
+    configureClient: vi.fn(async () => ({ kind: "signed-out" })),
     status: vi.fn(async () => ({ kind: "signed-out" })),
     begin: vi.fn(async (_e: string, _c: string, principal: string) =>
       principal === "local-window"
@@ -1463,6 +1464,48 @@ describe("signing in to a hosted server from Settings", () => {
     expect(remote?.status).toBe(200);
     expect(await remote?.json()).toMatchObject({ kind: "refused", reason: "local-host-required" });
     expect(signIn.begin).toHaveBeenLastCalledWith(extensionId, "mcp-docs", "remote-device");
+  });
+
+  it("accepts safe registered-client setup only from an authorized local window", async () => {
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerSignIn: signIn as never,
+      now: () => now,
+    });
+    const setup = {
+      kind: "configure-client",
+      ...target,
+      registration: {
+        kind: "registered",
+        clientId: "owned-client",
+        issuer: "https://auth.example",
+        resource: "https://mcp.example/mcp",
+        redirectPort: 43126,
+      },
+    };
+    expect((await handler(request("/api/extensions/sign-in", setup)))?.status).toBe(200);
+    expect(signIn.configureClient).toHaveBeenCalledWith(
+      extensionId,
+      "mcp-docs",
+      setup.registration,
+      "local-window",
+    );
+    const calls = signIn.configureClient.mock.calls.length;
+    expect((await handler(pairedDeviceRequest("/api/extensions/sign-in", setup)))?.status).toBe(
+      401,
+    );
+    expect(
+      (
+        await handler(
+          request("/api/extensions/sign-in", {
+            ...setup,
+            registration: { ...setup.registration, clientSecret: "must-not-accept" },
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(signIn.configureClient).toHaveBeenCalledTimes(calls);
   });
 
   it("answers 503 on a host without the sign-in service and 400 for a malformed request", async () => {

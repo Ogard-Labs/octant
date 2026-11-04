@@ -3,7 +3,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname } from "node:path";
 import type { McpServerSignInView } from "@octant/contracts/extension-rpc";
+import { decodeMcpOAuthClientRegistration } from "@octant/contracts/host-oauth";
 import type {
+  McpOAuthClientRegistration,
   HostOAuthDescriptor,
   HostOAuthSignInAgainReason,
   HostOAuthSignInState,
@@ -33,6 +35,7 @@ type AwaitingConsent = Extract<McpServerSignInView, { kind: "awaiting-consent" }
 interface PersistedSignIns {
   readonly schemaVersion: 1;
   readonly signIns: Readonly<Record<string, McpServerSignInRecord>>;
+  readonly registrations?: Readonly<Record<string, McpOAuthClientRegistration>>;
 }
 
 export interface McpServerSignInOptions {
@@ -57,6 +60,9 @@ type Discovered =
       readonly authorizationEndpoint: string;
       readonly tokenEndpoint: string;
       readonly registrationEndpoint: string | undefined;
+      readonly issuerUrl: string;
+      readonly metadataClientSupported: boolean;
+      readonly tokenAuthenticationMethods: ReadonlyArray<string>;
       readonly scopes: ReadonlyArray<string>;
     }
   | { readonly kind: "no-sign-in-offered" }
@@ -67,8 +73,8 @@ type Discovered =
  * Sign-in to a hosted MCP server, the way the MCP authorization flow lays it
  * out: the server answers a bare request with 401 and names its protected
  * resource metadata; that names the authorization server; the server's
- * metadata names the endpoints; Octant registers itself as a public client
- * there (RFC 7591), then runs the host's own PKCE flow with the server's
+ * metadata names the endpoints; Octant uses a configured application client
+ * or registers a public client there (RFC 7591), then runs the host's own PKCE flow with the server's
  * canonical address as the `resource`. The grant lives in the credential
  * broker; this service keeps only its reference, the descriptor that made it
  * and the issuer's name, so a refresh and a sign-out can find it again.
@@ -77,6 +83,7 @@ export class McpServerSignIn {
   readonly #options: McpServerSignInOptions;
   readonly #fetch: typeof fetch;
   #signIns = new Map<string, McpServerSignInRecord>();
+  readonly #registrations = new Map<string, McpOAuthClientRegistration>();
   readonly #attempts = new Map<
     string,
     {
@@ -92,6 +99,61 @@ export class McpServerSignIn {
   constructor(options: McpServerSignInOptions) {
     this.#options = options;
     this.#fetch = options.fetch ?? globalThis.fetch;
+  }
+
+  async configureForServer(
+    extensionId: string,
+    componentId: string,
+    registration: McpOAuthClientRegistration,
+    principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
+    if (principalKind !== "local-window")
+      return refused("local-host-required", "Set up the client on this host.");
+    const url = await this.#options.serverUrl(extensionId, componentId);
+    if (url === undefined) return { kind: "not-applicable" };
+    if (canonicalResource(registration.resource) !== canonicalResource(url)) {
+      return refused("invalid", "This client setup names a different MCP server.");
+    }
+    const result = await this.configureClient(registration, principalKind);
+    if (result.kind !== "configured") return result;
+    const key = signInKey(extensionId, componentId);
+    const pending = this.#attempts.get(key);
+    if (pending !== undefined) return pending.view;
+    const record = this.#signIns.get(key);
+    return record === undefined ? { kind: "signed-out" } : recordView(record);
+  }
+
+  /** Saves application setup only; consent and account grants remain separate host actions. */
+  async configureClient(
+    input: unknown,
+    principalKind: PrincipalKind,
+  ): Promise<{ readonly kind: "configured" } | Extract<McpServerSignInView, { kind: "refused" }>> {
+    if (principalKind !== "local-window")
+      return {
+        kind: "refused",
+        reason: "local-host-required",
+        message: "Set up the client on this host.",
+      };
+    let registration: McpOAuthClientRegistration;
+    try {
+      registration = decodeMcpOAuthClientRegistration(input);
+    } catch {
+      return {
+        kind: "refused",
+        reason: "issuer-unsupported",
+        message: "The client setup is invalid.",
+      };
+    }
+    if (!isHttps(registration.issuer) || !isHttps(registration.resource))
+      return {
+        kind: "refused",
+        reason: "issuer-unsupported",
+        message: "The client setup needs https issuer and resource addresses.",
+      };
+    await this.#load();
+    this.#registrations.set(canonicalResource(registration.resource), registration);
+    await this.#persist();
+    return { kind: "configured" };
   }
 
   /**
@@ -140,24 +202,41 @@ export class McpServerSignIn {
       return refused("issuer-unsupported", discovered.message);
     }
     if (discovered.kind === "unavailable") return refused("unavailable", discovered.message);
-    if (discovered.registrationEndpoint === undefined) {
+    const setup = this.#registrations.get(discovered.resource);
+    if (
+      setup !== undefined &&
+      (setup.issuer !== discovered.issuerUrl ||
+        (setup.kind === "metadata-document" && !discovered.metadataClientSupported) ||
+        (setup.clientAuthentication !== undefined &&
+          (!discovered.tokenAuthenticationMethods.includes(setup.clientAuthentication.method) ||
+            setup.clientAuthentication.tokenEndpoint !== discovered.tokenEndpoint)))
+    ) {
+      return refused(
+        "issuer-unsupported",
+        "The authorization server does not support this client setup or its issuer binding.",
+      );
+    }
+    if (setup === undefined && discovered.registrationEndpoint === undefined) {
       return refused(
         "client-registration-unavailable",
-        "This server's sign-in needs a client id Octant cannot register for itself.",
+        "Set up a registered OAuth client for this server before signing in.",
       );
     }
     let port: number;
     try {
-      port = await (this.#options.pickPort ?? pickFreePort)();
+      port = setup?.redirectPort ?? (await (this.#options.pickPort ?? pickFreePort)());
     } catch {
       return refused("unavailable", "No loopback port was free for the sign-in callback.");
     }
     const redirectUri = `http://127.0.0.1:${port}/oauth/callback`;
-    const registered = await this.#register(
-      discovered.registrationEndpoint,
-      redirectUri,
-      discovered.scopes,
-    );
+    const registered =
+      setup === undefined
+        ? await this.#register(
+            discovered.registrationEndpoint ?? "",
+            redirectUri,
+            discovered.scopes,
+          )
+        : { kind: "registered" as const, clientId: setup.clientId };
     if (registered.kind !== "registered") return refused("issuer-unsupported", registered.message);
     const descriptor: HostOAuthDescriptor = {
       descriptorId: `mcp-${digest(key)}` as HostOAuthDescriptor["descriptorId"],
@@ -171,6 +250,9 @@ export class McpServerSignIn {
       termsId: TERMS_ID as HostOAuthDescriptor["termsId"],
       resource: discovered.resource as HostOAuthDescriptor["resource"],
       redirectPort: port,
+      ...(setup?.clientAuthentication === undefined
+        ? {}
+        : { clientAuthentication: setup.clientAuthentication }),
     };
     // The person's click is the acknowledgment: there is no vendor terms text
     // for a server they added themselves, only the host's own notice.
@@ -450,6 +532,15 @@ export class McpServerSignIn {
       kind: "discovered",
       resource,
       issuer: issuerUrl.host,
+      issuerUrl: issuer,
+      metadataClientSupported: issuerMetadata.client_id_metadata_document_supported === true,
+      tokenAuthenticationMethods: Array.isArray(
+        issuerMetadata.token_endpoint_auth_methods_supported,
+      )
+        ? issuerMetadata.token_endpoint_auth_methods_supported.filter(
+            (entry): entry is string => typeof entry === "string",
+          )
+        : ["client_secret_basic"],
       authorizationEndpoint,
       tokenEndpoint,
       registrationEndpoint:
@@ -531,6 +622,13 @@ export class McpServerSignIn {
     try {
       const parsed = JSON.parse(raw) as PersistedSignIns;
       if (parsed.schemaVersion !== 1 || !isRecord(parsed.signIns)) return;
+      for (const [key, registration] of Object.entries(parsed.registrations ?? {})) {
+        try {
+          this.#registrations.set(key, decodeMcpOAuthClientRegistration(registration));
+        } catch {
+          /* Invalid setup cannot start consent. */
+        }
+      }
       for (const [key, record] of Object.entries(parsed.signIns)) {
         if (isRecord(record) && typeof record.credentialRef === "string") {
           this.#signIns.set(key, record as McpServerSignInRecord);
@@ -545,6 +643,7 @@ export class McpServerSignIn {
     const payload: PersistedSignIns = {
       schemaVersion: 1,
       signIns: Object.fromEntries(this.#signIns),
+      registrations: Object.fromEntries(this.#registrations),
     };
     await mkdir(dirname(this.#options.statePath), { recursive: true, mode: 0o700 });
     await writeFile(this.#options.statePath, JSON.stringify(payload), { mode: 0o600 });
