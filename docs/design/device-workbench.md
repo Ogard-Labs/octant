@@ -112,6 +112,20 @@ drag is one swipe sent when it ends, keys typed on the focused screen go to
 the device as one text per pause, Home and Lock are buttons, and what a person
 does while an action runs is kept and sent in order.
 
+The desktop owns one native helper per Simulator while it is in use. A
+request cancellation, timeout, idle expiry, or desktop shutdown closes stdin
+and sends SIGTERM, then SIGKILL after two seconds if needed. Shutdown waits up
+to two more seconds for observed exit and returns an explicit failure if exit
+cannot be confirmed. Repeated shutdown shares that completion. A stopping
+child stays owned and refuses new requests or replacement until it exits.
+Pending requests and viewers settle once when stopping begins; late replies
+and frames are ignored. Reply and frame listeners are removed after exit,
+while stream error guards remain until channel close to absorb late EPIPE.
+The broker closes its HTTP listener even when shutdown fails and preserves
+the native completion through the managed-stream adapter. This guarantee is
+for native helper children; managed serve-sim process teardown has its own
+lifecycle.
+
 ## Swipes
 
 A swipe reaches the device as a finger that moves: it goes down at the start,

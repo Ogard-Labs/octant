@@ -2135,11 +2135,20 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
     server: child,
     shutdownServer: shutdownManagedServer,
   });
-  await browserBroker?.close();
-  await computerBroker?.close();
-  await deviceBroker?.close();
-  await avdBroker?.close();
-  await managedTools?.close();
+  // The references above are already cleared, so a failed close (an
+  // unconfirmed Simulator helper exit) must not skip the brokers after it:
+  // nothing else would close them before a restart. Report the first failure
+  // once every resource has had its close attempt.
+  const closes = [browserBroker, computerBroker, deviceBroker, avdBroker, managedTools];
+  let firstFailure: { readonly error: unknown } | undefined;
+  for (const resource of closes) {
+    try {
+      await resource?.close();
+    } catch (error) {
+      firstFailure ??= { error };
+    }
+  }
+  if (firstFailure !== undefined) throw firstFailure.error;
 }
 
 const hostLifecycle = createHostLifecycleController({
@@ -4498,11 +4507,20 @@ function forceExitAfterStalledQuit(owned: {
 }
 
 async function stopHostForQuit(): Promise<void> {
-  await shutdownSecondaryProjectWindows();
-  await projectWindowLifecycle.shutdown(async () => {
-    const result = await hostLifecycle.prepareQuit(() => true);
-    if (result === "cancelled") throw new Error("Octant quit was cancelled.");
-  });
+  const prototypesStopped = canvasPrototypeSurface?.stop();
+  const hostStopped = (async () => {
+    await shutdownSecondaryProjectWindows();
+    await projectWindowLifecycle.shutdown(async () => {
+      const result = await hostLifecycle.prepareQuit(() => true);
+      if (result === "cancelled") throw new Error("Octant quit was cancelled.");
+    });
+  })();
+  const [hostResult, prototypeResult] = await Promise.allSettled([hostStopped, prototypesStopped]);
+  if (hostResult.status === "rejected") throw hostResult.reason;
+  if (prototypeResult.status === "rejected") throw prototypeResult.reason;
+  if (prototypeResult.value?.status === "failed") {
+    throw new Error(`Canvas prototype shutdown failed: ${prototypeResult.value.reason}.`);
+  }
 }
 
 function finishQuit(): void {

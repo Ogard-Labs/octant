@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SimulatorDeviceInput } from "@octant/contracts/simulator-device";
 import {
+  startSimulatorDeviceBroker,
   createSimulatorInputDelivery,
   createSimulatorScreenStream,
   simulatorDeviceBrokerHandler,
@@ -33,7 +34,7 @@ function helpers(answer: (request: DeviceHelperRequest) => DeviceHelperReply) {
       async (): Promise<DeviceWatch> => ({ status: "unavailable", message: "not under test" }),
     ),
     busy: () => false,
-    dispose: vi.fn(),
+    dispose: vi.fn(async () => ({ status: "stopped" }) as const),
   };
   return { fake, send };
 }
@@ -542,7 +543,7 @@ describe("the Simulator screen stream", () => {
       ),
       watch,
       busy: () => false,
-      dispose: vi.fn(),
+      dispose: vi.fn(async () => ({ status: "stopped" }) as const),
     };
     const url = await serve(slow);
     const abort = new AbortController();
@@ -626,5 +627,55 @@ describe("the Simulator screen stream", () => {
 
     expect(response.status).toBe(400);
     expect(watching.watch).not.toHaveBeenCalled();
+  });
+});
+
+describe("Simulator broker shutdown", () => {
+  it("waits for helper exit before reporting that it closed", async () => {
+    const { fake } = helpers(() => ({ status: "delivered" }));
+    let finish = () => {};
+    const dispose = vi.fn(
+      () =>
+        new Promise<{ readonly status: "stopped" }>((resolve) => {
+          finish = () => resolve({ status: "stopped" });
+        }),
+    );
+    const broker = await startSimulatorDeviceBroker({ ...fake, dispose });
+    const closing = broker.close();
+    let completed = false;
+    void closing.then(() => {
+      completed = true;
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(completed).toBe(false);
+      expect(broker.close()).toBe(closing);
+    } finally {
+      finish();
+      await closing;
+    }
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("closes its HTTP listener even when starting helper cleanup throws", async () => {
+    const { fake } = helpers(() => ({ status: "delivered" }));
+    const broker = await startSimulatorDeviceBroker({
+      ...fake,
+      dispose: () => {
+        throw new Error("cleanup failed");
+      },
+    });
+    await expect(broker.close()).rejects.toThrow("cleanup failed");
+    await expect(fetch(broker.url)).rejects.toThrow();
+  });
+
+  it("closes its HTTP listener even when helper exit cannot be confirmed", async () => {
+    const { fake } = helpers(() => ({ status: "delivered" }));
+    const broker = await startSimulatorDeviceBroker({
+      ...fake,
+      dispose: vi.fn(async () => ({ status: "failed", reason: "exit-not-confirmed" }) as const),
+    });
+    await expect(broker.close()).rejects.toThrow("exit-not-confirmed");
+    await expect(fetch(broker.url)).rejects.toThrow();
   });
 });
