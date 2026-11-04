@@ -1,3 +1,4 @@
+import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 import { DesktopBrowserOwnerUnavailable } from "./desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "./routingBrowserRuntime";
@@ -36,6 +37,45 @@ function runtime(presentation: "native-live" | "headless" = "native-live") {
 }
 
 describe("RoutingBrowserRuntime", () => {
+  it("presents only the recorded native owner and suppresses a result after owner closure", async () => {
+    let finish: (() => void) | undefined;
+    const held = new Promise<void>((done) => {
+      finish = done;
+    });
+    const humanPresentation = vi.fn(async () => {
+      await held;
+      return { status: "idle" as const };
+    });
+    const native = { ...runtime(), humanPresentation };
+    const headless = {
+      ...runtime("headless"),
+      humanPresentation: vi.fn(async () => ({ status: "idle" as const })),
+    };
+    const router = new RoutingBrowserRuntime({ native, headless });
+    const request = decodeHumanBrowserRequest({
+      kind: "attach",
+      contextId,
+      threadId: owner.threadId,
+    });
+    const signal = new AbortController().signal;
+    expect(await router.humanPresentation(request, owner.windowId, signal)).toEqual({
+      status: "refused",
+    });
+    native.available.mockResolvedValueOnce(false);
+    await router.createContext(contextId, policy, signal, owner);
+    expect(await router.humanPresentation(request, owner.windowId, signal)).toEqual({
+      status: "refused",
+    });
+    expect(headless.humanPresentation).not.toHaveBeenCalled();
+    await router.closeContext(contextId);
+    await router.createContext(contextId, policy, signal, owner);
+    const pending = router.humanPresentation(request, owner.windowId, signal);
+    await router.closeContext(contextId);
+    finish?.();
+    expect(await pending).toEqual({ status: "refused" });
+    expect(humanPresentation).toHaveBeenCalledOnce();
+  });
+
   it("uses the native page for a verified Electron owner", async () => {
     const native = runtime();
     const headless = runtime("headless");

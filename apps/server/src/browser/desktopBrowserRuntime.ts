@@ -1,3 +1,7 @@
+import {
+  decodeHumanBrowserResult,
+  type HumanBrowserRequest,
+} from "@octant/contracts/browser-presentation";
 import { storedBrowserProfile } from "@octant/domain";
 import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import type {
@@ -69,6 +73,12 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#eventPollIntervalMs = options.eventPollIntervalMs ?? 250;
     this.#extensionsFor = options.extensionsFor;
+  }
+
+  async humanPresentation(request: HumanBrowserRequest, windowId: WindowId, signal: AbortSignal) {
+    return decodeHumanBrowserResult(
+      await this.#request("/v1/contexts/human-presentation", { request, windowId }, signal),
+    );
   }
 
   async available(): Promise<boolean> {

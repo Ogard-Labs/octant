@@ -1,3 +1,4 @@
+import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 import {
   BrowserTargetStaleError,
@@ -61,6 +62,76 @@ function view(): BrowserSurfaceViewPort {
 }
 
 describe("BrowserSurfaceHost", () => {
+  it("hides expired embedded profiles and isolates listeners while closing owned views", async () => {
+    let available = true;
+    const base = view();
+    const created = { ...base, webContents: { ...base.webContents, id: 701 } };
+    const input = vi.fn();
+    const visible = vi.fn();
+    const close = vi.fn();
+    const source = { input, visible, bounds: vi.fn(), frames: () => () => {} };
+    const host = createBrowserSurfaceHost({
+      createView: () => ({ ...created, human: source, close }),
+      isOwnerWindowAvailable: () => available,
+      isEmbeddedOwner: () => available,
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    await host.humanPresentation(
+      request({
+        kind: "layout",
+        presentationId: attached.presentationId,
+        layout: { width: 800, height: 600, visible: true },
+      }),
+      "window-a",
+    );
+    expect(host.profileTabs({ kind: "personal" }, "window-a")).toHaveLength(1);
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(
+      await host.humanPresentation(
+        request({ kind: "command", presentationId: attached.presentationId, command: "reload" }),
+        "window-a",
+        aborted.signal,
+      ),
+    ).toEqual({ status: "refused" });
+    expect(created.webContents.reload).not.toHaveBeenCalled();
+    available = false;
+    expect(host.profileTabs({ kind: "personal" }, "window-a")).toMatchObject([{ active: false }]);
+    expect(
+      await host.openProfileTab({ kind: "personal" }, "window-a", "https://example.com/"),
+    ).toEqual({ status: "no-page" });
+    expect(
+      await host.humanPresentation(
+        request({ kind: "frame", presentationId: attached.presentationId, acknowledgement: 0 }),
+        "window-a",
+      ),
+    ).toEqual({ status: "refused" });
+    const sibling = vi.fn();
+    host.onContextGone(() => {
+      throw new Error("observer failed");
+    });
+    host.onContextGone(sibling);
+    await host.closeOwnerContexts("window-a");
+    expect(visible).toHaveBeenLastCalledWith(false);
+    expect(close).toHaveBeenCalledOnce();
+    expect(sibling).toHaveBeenCalledWith(contextId);
+  });
+
   it("refuses certificate acceptance it cannot bind to this surface's one origin", async () => {
     // Local-certificate acceptance is bounded to the exact origin this tab was
     // opened for.
@@ -107,6 +178,7 @@ describe("BrowserSurfaceHost", () => {
     });
 
     expect(createView).toHaveBeenCalledWith({
+      owner: { windowId: "window-a", threadId },
       partition: `octant-browser-${contextId}`,
       webPreferences: {
         allowRunningInsecureContent: false,

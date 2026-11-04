@@ -21,7 +21,11 @@ export function decorateTrustedRendererHeaders(input: {
 }): Record<string, string> {
   const requestHeaders = { ...input.requestHeaders };
   for (const name of Object.keys(requestHeaders)) {
-    if (name.toLowerCase() === RENDERER_IDENTITY_HEADER) delete requestHeaders[name];
+    if (
+      name.toLowerCase() === RENDERER_IDENTITY_HEADER ||
+      name.toLowerCase() === "x-octant-human-presentation"
+    )
+      delete requestHeaders[name];
   }
   if (
     input.context !== undefined &&

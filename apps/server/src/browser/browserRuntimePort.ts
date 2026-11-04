@@ -1,4 +1,8 @@
 import type {
+  HumanBrowserRequest,
+  HumanBrowserResult,
+} from "@octant/contracts/browser-presentation";
+import type {
   BrowserProfileClearScope,
   ImportedCookie,
   StoredBrowserProfile,
@@ -232,6 +236,11 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
   };
 
 export interface BrowserRuntimePort {
+  readonly humanPresentation?: (
+    request: HumanBrowserRequest,
+    windowId: WindowId,
+    signal: AbortSignal,
+  ) => Promise<HumanBrowserResult>;
   readonly available: () => Promise<boolean>;
   /**
    * Whether the desktop app's own Browser can hold a page right now. Absent on a

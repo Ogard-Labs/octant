@@ -70,7 +70,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     | "providerRoutes"
     | "providerUsageLimitsRoutes"
   > &
-  Pick<BrowserWiring, "productFeedbackRoutes"> &
+  Pick<BrowserWiring, "productFeedbackRoutes" | "nativeBrowserPresentationRoutes"> &
   Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes"> &
   Pick<
     CodeToolingWiring,
@@ -197,6 +197,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     previewHandoffBridgeRoutes,
     previewRoutes,
     productFeedbackRoutes,
+    nativeBrowserPresentationRoutes,
     projectBindingRoutes,
     projectRoutes,
     personMemoryRoutes,
@@ -253,6 +254,7 @@ export function wireRoutes(deps: RoutesDependencies) {
   // gives this chain a loopback-shaped internal request; individual handlers
   // resolve the bound context through principalRouteContext before effects.
   const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
+    (await nativeBrowserPresentationRoutes(request)) ??
     (await hostResourceRoutes(request)) ??
     (await replicaSyncStatusRoutes(request)) ??
     (await projectBindingRoutes(request)) ??

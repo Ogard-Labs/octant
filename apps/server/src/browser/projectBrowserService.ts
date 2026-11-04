@@ -82,6 +82,7 @@ interface OwnedPage {
   readonly profile: BrowserProfile;
   readonly abort: AbortController;
   state: BrowserContextState;
+  sessionDeadline: number | undefined;
   presentation: BrowserPresentationKind | undefined;
   page: ProjectBrowserPage | undefined;
   peekedAt: number | undefined;
@@ -146,6 +147,32 @@ export class ProjectBrowserService {
         this.#forget(owned, "failed");
       }
     });
+  }
+
+  ownsHumanPresentation(
+    windowId: WindowId,
+    contextId: BrowserContextId,
+    threadId: BrowserThreadId,
+  ): boolean {
+    for (const owned of this.#pages.values()) {
+      if (
+        String(owned.windowId) !== String(windowId) ||
+        String(owned.contextId) !== String(contextId) ||
+        String(owned.subjectId) !== String(threadId) ||
+        owned.state !== "active" ||
+        owned.abort.signal.aborted ||
+        owned.presentation !== "native-live" ||
+        owned.sessionDeadline === undefined ||
+        this.#options.now() >= owned.sessionDeadline
+      )
+        continue;
+      const authority = this.#authority(windowId, owned.projectId);
+      return (
+        authority.kind === "allowed" &&
+        String(authority.bindingRevisionId) === String(owned.bindingRevisionId)
+      );
+    }
+    return false;
   }
 
   async execute(
@@ -298,6 +325,7 @@ export class ProjectBrowserService {
       profile,
       abort: new AbortController(),
       state: "creating",
+      sessionDeadline: undefined,
       presentation: undefined,
       page: undefined,
       peekedAt: undefined,
@@ -336,6 +364,7 @@ export class ProjectBrowserService {
       return refused("unavailable", "The page closed while it was opening.");
     }
     owned.state = "active";
+    owned.sessionDeadline = this.#options.now() + PROJECT_BROWSER_SESSION_MS;
     owned.cancelExpiry = this.#schedule(PROJECT_BROWSER_SESSION_MS, () => {
       void this.#close(owned, "expired");
     });

@@ -1,3 +1,8 @@
+import type {
+  HumanBrowserRequest,
+  HumanBrowserResult,
+} from "@octant/contracts/browser-presentation";
+import type { WindowId } from "@octant/contracts/shell";
 import type { BrowserContextId } from "@octant/contracts/browser-automation";
 import { BrowserProfileUnavailableError, type BrowserRuntimePort } from "./browserRuntimePort";
 import { DesktopBrowserOwnerUnavailable } from "./desktopBrowserRuntime";
@@ -13,6 +18,20 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
   }) {
     this.#native = options.native;
     this.#headless = options.headless;
+  }
+
+  async humanPresentation(
+    request: HumanBrowserRequest,
+    windowId: WindowId,
+    signal: AbortSignal,
+  ): Promise<HumanBrowserResult> {
+    const backend = this.#backend.get(request.contextId);
+    if (backend !== this.#native || backend.humanPresentation === undefined || signal.aborted)
+      return { status: "refused" };
+    const result = await backend.humanPresentation(request, windowId, signal);
+    return !signal.aborted && this.#backend.get(request.contextId) === backend
+      ? result
+      : { status: "refused" };
   }
 
   async available(): Promise<boolean> {

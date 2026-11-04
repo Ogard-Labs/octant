@@ -1398,6 +1398,25 @@ export class BrowserAutomationService {
     return snapshot(owned);
   }
 
+  ownsHumanPresentation(
+    windowId: WindowId,
+    contextId: BrowserContextId,
+    threadId: BrowserThreadId,
+  ): boolean {
+    const owned = this.#contexts.get(contextId);
+    return (
+      owned !== undefined &&
+      String(owned.windowId) === String(windowId) &&
+      String(owned.threadId) === String(threadId) &&
+      !owned.abort.signal.aborted &&
+      owned.record.state === "active" &&
+      owned.record.presentation === "native-live" &&
+      !this.#expired(owned) &&
+      !this.#isUnattendedScope(windowId) &&
+      this.#authorityIsActive(owned)
+    );
+  }
+
   /**
    * Name the element under one point in a context this window owns.
    *
@@ -1408,6 +1427,7 @@ export class BrowserAutomationService {
    * what these checks exist to prevent. A runtime that cannot read its own page
    * reports the surface unavailable rather than guessing at an element.
    */
+
   async describePoint(input: {
     readonly windowId: WindowId;
     readonly threadId: BrowserThreadId;

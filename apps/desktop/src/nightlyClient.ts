@@ -1,3 +1,5 @@
+import { createBrowserPresentationClient } from "@octant/client-runtime";
+import { NightlyBrowserPresentation } from "./nightlyBrowserPresentation";
 import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,10 +76,31 @@ export async function runNightlyClient(
   register(DESKTOP_IPC_CHANNELS.close, (event) => owns(event).close());
   register(DESKTOP_IPC_CHANNELS.hostCapabilities, () => ({
     sidebarVibrancySupported: false,
-    liveBrowserSupported: false,
+    liveBrowserSupported: true,
+    embeddedBrowserSupported: true,
     liveSimulatorFrameSupported: false,
     liveAndroidFrameSupported: false,
   }));
+  const presentations = new Map<number, NightlyBrowserPresentation>();
+  const closingPresentations = new Set<Promise<void>>();
+  supported.add(DESKTOP_IPC_CHANNELS.browserHumanPresentation);
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserHumanPresentation, (event, request: unknown) => {
+    owns(event);
+    return presentations.get(event.sender.id)?.invoke(request) ?? { status: "refused" };
+  });
+  for (const [channel, kind] of [
+    [DESKTOP_IPC_CHANNELS.browserSurfaceCommand, "command"],
+    [DESKTOP_IPC_CHANNELS.browserSurfaceTab, "tab"],
+  ] as const) {
+    supported.add(channel);
+    ipcMain.handle(channel, async (event, request: unknown) => {
+      owns(event);
+      const result = await presentations.get(event.sender.id)?.surfaceCommand(request, kind);
+      if (result?.status !== "state")
+        throw new Error("Octant refused this Browser presentation command.");
+      return result.state;
+    });
+  }
   const capabilities = new Map<number, string>();
   register(DESKTOP_IPC_CHANNELS.projectWindowCapability, (event) =>
     capabilities.get(event.sender.id),
@@ -109,6 +132,10 @@ export async function runNightlyClient(
           identity.productName,
           "Octant Nightly closed its window, but could not confirm immediate lease cleanup. The host expires the short lease automatically.",
         );
+      await Promise.allSettled([
+        ...closingPresentations,
+        ...[...presentations.values()].map((presentation) => presentation.close()),
+      ]);
       acceptedQuit = true;
       app.quit();
     })();
@@ -129,6 +156,33 @@ export async function runNightlyClient(
         }),
       );
       const id = window.webContents.id;
+      const browserClient = createBrowserPresentationClient({
+        baseUrl: bootstrap.hostOrigin,
+        windowCapability: bootstrap.capability,
+        rendererIdentity: bootstrap.rendererIdentity,
+        fetch: globalThis.fetch,
+      });
+      const presentation = new NightlyBrowserPresentation({
+        current: () => windows.get(id) === window && !window.isDestroyed(),
+        visible: () => !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
+        focused: () => !window.isDestroyed() && window.isFocused(),
+        execute: browserClient.execute,
+      });
+      presentations.set(id, presentation);
+      window.on("blur", () => {
+        void presentation.releaseInputs();
+      });
+      window.on("focus", () => {
+        void presentation.releaseInputs();
+      });
+      window.on("show", () => presentation.show());
+      window.on("restore", () => presentation.show());
+      window.on("hide", () => {
+        void presentation.hide();
+      });
+      window.on("minimize", () => {
+        void presentation.hide();
+      });
       windows.set(id, window);
       capabilities.set(id, bootstrap.capability);
       trusted.set(id, {
@@ -146,6 +200,10 @@ export async function runNightlyClient(
       });
       window.once("closed", () => {
         windows.delete(id);
+        presentations.delete(id);
+        const closing = presentation.close();
+        closingPresentations.add(closing);
+        void closing.finally(() => closingPresentations.delete(closing));
         capabilities.delete(id);
         trusted.remove(id);
       });

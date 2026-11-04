@@ -1,3 +1,8 @@
+import { BrowserPresentation, type HumanBrowserSource } from "./browserPresentation";
+import {
+  type HumanBrowserRequest,
+  type HumanBrowserResult,
+} from "@octant/contracts/browser-presentation";
 import { createHash } from "node:crypto";
 import {
   browserProfileKey,
@@ -171,6 +176,8 @@ export interface BrowserSurfaceImage {
 }
 
 export interface BrowserSurfaceViewPort {
+  readonly human?: HumanBrowserSource;
+  readonly close?: () => void;
   setBounds(bounds: BrowserSurfaceBounds): void;
   setVisible(visible: boolean): void;
   readonly webContents: {
@@ -241,6 +248,7 @@ export interface BrowserSurfaceHostOptions {
    */
   readonly downloadRoot?: string;
   readonly createView: (options: {
+    readonly owner: BrowserSurfaceOwner;
     readonly partition: string;
     readonly webPreferences: {
       readonly allowRunningInsecureContent: false;
@@ -250,6 +258,7 @@ export interface BrowserSurfaceHostOptions {
       readonly webSecurity: true;
     };
   }) => BrowserSurfaceViewPort;
+  readonly isEmbeddedOwner?: (windowId: string) => boolean;
   readonly stateChannel?: string;
   readonly isOwnerWindowAvailable?: (windowId: string) => boolean;
 }
@@ -261,6 +270,7 @@ interface OwnedTab {
 }
 
 interface OwnedSurface {
+  readonly presentation: BrowserPresentation;
   readonly owner: BrowserSurfaceOwner;
   readonly policy: BrowserContextPolicy;
   /** Every open tab, in the order the person opened them. */
@@ -510,6 +520,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const markGone = (contextId: string, owned: OwnedSurface): void => {
     if (surfaces.get(contextId) !== owned) return;
     surfaces.delete(contextId);
+    owned.presentation.close();
     // Emptied before anything is closed: closing a page can report the page
     // gone, and a report that arrives while this list is still being walked
     // would take a tab out from under the walk.
@@ -519,11 +530,17 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tab.view.setVisible(false);
       owned.shellWindow?.contentView.removeChildView(tab.view);
       forgetWebContents(tab);
-      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+      closeSurfaceView(tab.view);
     }
     owned.shellWindow = undefined;
     void owned.downloads.dispose();
-    for (const listener of goneListeners) listener(contextId);
+    for (const listener of goneListeners) {
+      try {
+        listener(contextId);
+      } catch {
+        /* Cleanup must reach every owner. */
+      }
+    }
   };
 
   /**
@@ -541,6 +558,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tab.view.setVisible(false);
       owned.shellWindow?.contentView.removeChildView(tab.view);
     }
+    owned.presentation.close();
     owned.activeTabId = incoming.tabId;
     if (owned.shellWindow === undefined || owned.shellWindow.isDestroyed()) return;
     owned.shellWindow.contentView.addChildView(incoming.view);
@@ -565,7 +583,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     tab.view.setVisible(false);
     owned.shellWindow?.contentView.removeChildView(tab.view);
     forgetWebContents(tab);
-    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+    closeSurfaceView(tab.view);
     if (owned.tabs.length === 0) return markGone(contextId, owned);
     const successor = owned.tabs[Math.min(index, owned.tabs.length - 1)];
     if (owned.activeTabId === tab.tabId && successor !== undefined) showTab(owned, successor);
@@ -586,6 +604,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     tabId: string,
   ): OwnedTab => {
     const view = options.createView({
+      owner: owned.owner,
       // A Private page keeps a partition of its own context; a stored profile
       // keeps one persistent partition that every page of the profile shares,
       // which is what makes a sign-in carry from one page to the next.
@@ -635,7 +654,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       "did-navigate-in-page",
       "page-title-updated",
     ]) {
-      view.webContents.on(event, () => publish(contextId, owned));
+      view.webContents.on(event, () => {
+        // A displayed frame belongs to this document, not its navigation successor.
+        if (event === "did-start-loading") owned.presentation.close();
+        publish(contextId, owned);
+      });
     }
     const guardNavigation = (event: unknown, ...details: readonly unknown[]) => {
       const target = navigationUrl(event, details);
@@ -697,7 +720,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     const gateUserInput = (_event: unknown, input?: unknown) => {
       if (isPersonInput(input)) {
         owned.personInputs += 1;
-        for (const listener of personInputListeners) listener(contextId);
+        for (const listener of personInputListeners) {
+          try {
+            listener(contextId);
+          } catch {
+            /* Input remains recorded if one observer fails. */
+          }
+        }
       }
       // An action in flight keeps the surface until it ends; its end hands it back.
       if (owned.control === "agent") return;
@@ -747,6 +776,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       }
       const firstTabId = `${String(input.contextId)}:1`;
       const owned: OwnedSurface = {
+        presentation: new BrowserPresentation(),
         owner: input.owner,
         policy: input.policy,
         tabs: [],
@@ -772,6 +802,103 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       openTabView(input.contextId, owned, firstTabId);
       surfaces.set(input.contextId, owned);
     },
+    humanPresentation: async (
+      request: HumanBrowserRequest,
+      windowId: string,
+      signal?: AbortSignal,
+    ): Promise<HumanBrowserResult> => {
+      const owned = surfaces.get(request.contextId);
+      const current = () =>
+        owned !== undefined &&
+        surfaces.get(request.contextId) === owned &&
+        owned.owner.windowId === windowId &&
+        String(owned.owner.threadId) === String(request.threadId) &&
+        options.isEmbeddedOwner?.(windowId) === true;
+      if (owned === undefined || !current() || signal?.aborted) return { status: "refused" };
+      const view = contentsView(owned);
+      const human = view.human;
+      if (human === undefined) return { status: "refused" };
+      if (request.kind === "attach") {
+        const presentationId = owned.presentation.attach(
+          {
+            ...human,
+            input: (input) => {
+              if (isPersonInput(input)) {
+                owned.personInputs += 1;
+                for (const listener of personInputListeners) {
+                  try {
+                    listener(request.contextId);
+                  } catch {
+                    /* Isolate observers. */
+                  }
+                }
+              }
+              owned.control = "user";
+              human.input(input);
+            },
+          },
+          () => current() && contentsView(owned) === view && !view.webContents.isDestroyed(),
+        );
+        return { status: "attached", presentationId };
+      }
+      if (request.kind === "detach")
+        return {
+          status: owned.presentation.detach(request.presentationId) ? "accepted" : "refused",
+        };
+      if (!owned.presentation.current(request.presentationId)) return { status: "refused" };
+      if (request.kind === "layout")
+        return {
+          status: owned.presentation.layout(request.presentationId, request.layout)
+            ? "accepted"
+            : "refused",
+        };
+      if (request.kind === "frame")
+        return owned.presentation.frame(request.presentationId, request.acknowledgement);
+      if (request.kind === "input")
+        return {
+          status:
+            owned.control !== "agent" &&
+            owned.presentation.input(request.presentationId, request.input, request.frameSequence)
+              ? "accepted"
+              : "refused",
+        };
+      if (request.kind === "command" || request.kind === "tab") {
+        const applied = await queueSurfaceAction(owned, async () => {
+          if (signal?.aborted || !current() || !owned.presentation.current(request.presentationId))
+            return false;
+          owned.control = "user";
+          const contents = contentsView(owned).webContents;
+          if (request.kind === "command") {
+            if (request.command === "back" && contents.navigationHistory.canGoBack())
+              contents.navigationHistory.goBack();
+            else if (request.command === "forward" && contents.navigationHistory.canGoForward())
+              contents.navigationHistory.goForward();
+            else if (request.command === "reload") contents.reload();
+            else if (request.command === "stop") contents.stop();
+          } else {
+            const command = request.command;
+            if (command.kind === "open") {
+              if (owned.tabs.length >= owned.policy.maxConcurrentTabs) return false;
+              const tabId = `${String(request.contextId)}:${owned.nextTabOrdinal++}`;
+              const opened = openTabView(request.contextId, owned, tabId);
+              await opened.view.webContents.loadURL("about:blank");
+              if (!current()) return false;
+              showTab(owned, opened);
+            } else {
+              const tab = owned.tabs.find((item) => item.tabId === command.tabId);
+              if (tab === undefined) return false;
+              if (command.kind === "select") showTab(owned, tab);
+              else if (owned.tabs.length > 1) forgetTab(String(request.contextId), owned, tab);
+            }
+          }
+          return true;
+        });
+        if (!applied) return { status: "refused" };
+      }
+      return !signal?.aborted && current()
+        ? { status: "state", state: readState(request.contextId, owned) }
+        : { status: "refused" };
+    },
     attach: (
       contextId: BrowserContextId | string,
       owner: BrowserSurfaceOwner,
@@ -779,6 +906,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       bounds: BrowserSurfaceBounds,
     ): BrowserSurfaceState => {
       const owned = surface(contextId);
+      if (contentsView(owned).human !== undefined)
+        throw new Error("Octant Browser requires embedded presentation.");
       if (owned.owner.windowId !== owner.windowId || owned.owner.threadId !== owner.threadId) {
         throw new Error("Octant Browser can attach only to its owning Project window.");
       }
@@ -1315,7 +1444,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       await Promise.all(
         ownedIds.map(async (contextId) => {
           await closeContext(contextId);
-          for (const listener of goneListeners) listener(contextId);
+          for (const listener of goneListeners) {
+            try {
+              listener(contextId);
+            } catch {
+              /* Cleanup must reach every owner. */
+            }
+          }
         }),
       );
     },
@@ -1335,7 +1470,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       await Promise.all(
         ownedIds.map(async (contextId) => {
           await closeContext(contextId);
-          for (const listener of goneListeners) listener(contextId);
+          for (const listener of goneListeners) {
+            try {
+              listener(contextId);
+            } catch {
+              /* Cleanup must reach every owner. */
+            }
+          }
         }),
       );
     },
@@ -1350,7 +1491,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     for (const [contextId, owned] of surfaces) {
       if (owned.owner.windowId !== windowId) continue;
       if (browserProfileKey(owned.policy.profile) !== key) continue;
-      if (owned.shellWindow === undefined || owned.shellWindow.isDestroyed()) continue;
+      if (
+        (owned.shellWindow === undefined || owned.shellWindow.isDestroyed()) &&
+        !(options.isEmbeddedOwner?.(windowId) === true && owned.presentation.visible)
+      )
+        continue;
       return [contextId, owned];
     }
     return undefined;
@@ -1365,7 +1510,9 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     for (const [contextId, owned] of surfaces) {
       if (owned.owner.windowId !== windowId) continue;
       if (browserProfileKey(owned.policy.profile) !== key) continue;
-      const shown = owned.shellWindow !== undefined && !owned.shellWindow.isDestroyed();
+      const shown =
+        (owned.shellWindow !== undefined && !owned.shellWindow.isDestroyed()) ||
+        (options.isEmbeddedOwner?.(windowId) === true && owned.presentation.visible);
       for (const tab of owned.tabs) {
         const id = tab.view.webContents.id;
         if (id === undefined) continue;
@@ -1386,13 +1533,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     const owned = surfaces.get(contextId);
     if (owned === undefined) return;
     surfaces.delete(contextId);
+    owned.presentation.close();
     const closing = owned.tabs;
     owned.tabs = [];
     for (const tab of closing) {
       tab.view.setVisible(false);
       owned.shellWindow?.contentView.removeChildView(tab.view);
       forgetWebContents(tab);
-      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+      closeSurfaceView(tab.view);
     }
     await owned.downloads.dispose();
   }
@@ -2818,4 +2966,9 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
   } finally {
     if (!ours && client.isAttached()) client.detach();
   }
+}
+
+function closeSurfaceView(view: BrowserSurfaceViewPort): void {
+  if (view.close !== undefined) view.close();
+  else if (!view.webContents.isDestroyed()) view.webContents.close();
 }

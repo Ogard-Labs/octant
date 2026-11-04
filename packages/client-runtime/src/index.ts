@@ -112,3 +112,4 @@ export * from "./workspacePresetClient";
 export * from "./providerUsageHistoryClient";
 
 export { createGitHistoryClient, type GitHistoryClient } from "./gitHistoryClient";
+export { createBrowserPresentationClient } from "./browserPresentationClient";

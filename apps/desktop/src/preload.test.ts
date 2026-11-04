@@ -449,6 +449,7 @@ describe("desktop preload bridge", () => {
       "pairWithPairingCode",
       "popupNativeMenu",
       "prepareCanvasPrototypeSurface",
+      "presentBrowser",
       "previewHandoff",
       "projectWindowCapability",
       "providerCredentialStatus",

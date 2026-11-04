@@ -1,3 +1,4 @@
+import { createNativeBrowserPresentationRoutes } from "../browser/nativeBrowserPresentationRoutes";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -403,7 +404,20 @@ export function wireBrowser(deps: BrowserDependencies) {
       feedback: productFeedbackService,
       windowAuthorityStore,
     });
+    const nativeBrowserPresentationRoutes = createNativeBrowserPresentationRoutes({
+      store: windowAuthorityStore,
+      runtime: browserRuntime,
+      owns: (windowId, request) =>
+        browserAutomationService.ownsHumanPresentation(
+          windowId,
+          request.contextId,
+          request.threadId,
+        ) ||
+        projectBrowserService.ownsHumanPresentation(windowId, request.contextId, request.threadId),
+      now: Date.now,
+    });
     return {
+      nativeBrowserPresentationRoutes,
       browserAutomationService,
       browserExtensionService,
       browserFlowService,

@@ -17,6 +17,7 @@ export const DESKTOP_IPC_CHANNELS = {
   menuBarTask: "octant:menu:task",
   attentionBadge: "octant:attention:badge",
   attentionNotify: "octant:attention:notify",
+  browserHumanPresentation: "octant:browser:human-presentation",
   browserSurfaceAttach: "octant:browser-surface:attach",
   browserSurfaceBounds: "octant:browser-surface:bounds",
   browserSurfaceCommand: "octant:browser-surface:command",
