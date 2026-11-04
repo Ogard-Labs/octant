@@ -7898,6 +7898,25 @@ same. This holds in Chat, Work, and Code.
   plugin with its `.venv/bin/python` as the command. Extension processes have no Linux confinement, so no other host
   starts one in the first place.
 
+- **MCP HTTP session recovery.** A successful initialize and tool listing is a
+  connection observation, not permanent service or document readiness. An
+  unknown-session HTTP 404, failed network request or unreadable response
+  retires that transport and removes its tools immediately. The existing
+  transport-close path records the component unavailable without guessing a
+  vendor-specific cause. A normal JSON-RPC application refusal keeps the
+  healthy session. Cleanup is best effort, bounded and idempotent; a late call
+  from the old transport cannot evict a replacement session.
+
+  The failed call is never replayed: a response can disappear after the server
+  committed a write, so its outcome may be unknown. Only a later authoritative
+  task selection/reconciliation may initialize and list a replacement under
+  the current mode, Project, thread, trust and enablement; another explicit
+  invocation is needed to call a tool. Sibling sessions remain independent.
+  Reconnecting the same tool catalog changes no task, transcript, draft or
+  provider session. A changed tool catalog on a provider that fixes its tools
+  at session start still needs separate provider continuation support; this
+  transport recovery does not claim that support is built.
+
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
   that one Project (`extension.tool-grant-recorded@1` on the Project's

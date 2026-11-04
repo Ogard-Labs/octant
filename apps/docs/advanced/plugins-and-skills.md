@@ -363,6 +363,23 @@ package and its secrets. Adding a server works only from the Octant window on
 this host, not from a paired device, and a browser-hosted Settings cannot keep
 secrets.
 
+### Recover a server connection
+
+If an HTTP MCP server forgets its session or the connection/response is lost,
+Octant removes the stale tools. The failed action is not repeated automatically:
+it may already have changed something even though its answer did not arrive.
+Check the result before you explicitly repeat an action.
+
+On your next authorized task invocation, Octant can initialize the server and
+read its tool list again under the current trust and task permissions. A normal
+application refusal, such as invalid tool arguments, does not discard a healthy
+connection. Other servers remain independent, and reconnecting the same tool
+set keeps your task, transcript and unsent draft. Installation and a tool list
+alone do not establish that a service or its current document is usable.
+Providers that fix their tool list when a session starts still need separate
+continuation support if that list changes; transport recovery does not silently
+start another task or claim to refresh that provider's tools.
+
 ### Connectors
 
 **Settings → Skills & Extensions → Connectors** lists hosted services an
