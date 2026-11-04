@@ -468,6 +468,39 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 - Nightly then updates itself on its own rings. Octant's updater only ever
   checks `stable`.
 
+## Nightly's own updates
+
+The authenticated Nightly main owns its update checks, downloads, apply and
+bundled What's new operations. These use the existing signed-feed verifier,
+artifact hash check and platform updater requirement for the running app.
+Unsigned or incompatible packaged clients cannot acquire the native window
+authority needed to reach these operations. Being packaged alone grants no
+update authority, and Nightly never asks Stable to replace either application.
+
+Nightly persists its ring and automatic-check choice in its own window-storage
+directory. Its bundled preload marks these preferences as local: the renderer
+neither synchronizes shared host update settings into Nightly nor writes a
+Nightly choice back to those shared settings. Only preview and candidate are
+offered; Stable's running identity still permits only stable. Automatic checks
+start off until Nightly's own stored choice is read. Invalid or redirected
+preference files leave them off. What's new and its acknowledgement also stay
+in Nightly's own bundled resources and window storage.
+
+An explicit apply uses fresh bounded host activity for the exact native-bootstrap
+host instance. Missing or mismatched activity waits, as does active work. The
+request must still belong to the same current top-level window after that
+await. Only then does Nightly close its own lease and Browser presentations.
+Failed or rejected cleanup refuses the apply request and restores a fresh
+authenticated window; it cannot latch accepted quit. A previous unconfirmed
+cleanup remains visible until Nightly is closed and reopened. A concurrent
+person quit supersedes apply. A platform apply failure likewise leaves ordinary
+reopen and retry available. Stable's host and its shutdown inventory are never
+owned by this path.
+
+Synthetic updater/feed tests establish ordering and preference separation, not
+a signed installed update, OS replacement, rollback or publication. Those
+remain separate packaged acceptance.
+
 ## Which build is which
 
 - A build's flavor follows its ring: a `stable` release packages as Octant; a

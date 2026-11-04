@@ -1,9 +1,19 @@
 import { createBrowserPresentationClient } from "@octant/client-runtime";
 import { NightlyBrowserPresentation } from "./nightlyBrowserPresentation";
-import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
+import {
+  app,
+  autoUpdater as electronAutoUpdater,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  session,
+} from "electron";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DesktopIdentity } from "@octant/host-runtime";
+import { decodeAppVersion } from "@octant/contracts/app-updates";
+import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
   createMainBrowserWindowOptions,
@@ -13,6 +23,14 @@ import {
 import { createRendererNavigationPolicy } from "./rendererNavigationPolicy";
 import { openNightlyClientWindow } from "./nightlyClientWindow";
 import { createNightlyClientRecovery } from "./nightlyClientRecovery";
+import { createNightlyAppUpdates } from "./nightlyAppUpdates";
+import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
+import {
+  acknowledgeWhatsNew,
+  loadBundledWhatsNew,
+  resolveBundledWhatsNewPath,
+  resolveWhatsNewStatePath,
+} from "./bundledWhatsNew";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
 
@@ -103,9 +121,62 @@ export async function runNightlyClient(
     });
   }
   const capabilities = new Map<number, string>();
+  const bootstraps = new Map<number, NightlyWindowBootstrap>();
+  let updates: Awaited<ReturnType<typeof createNightlyAppUpdates>> | undefined;
+  const appUpdates = () => {
+    if (updates === undefined) throw new Error("Nightly updates are not ready.");
+    return updates;
+  };
   register(DESKTOP_IPC_CHANNELS.projectWindowCapability, (event) =>
     capabilities.get(event.sender.id),
   );
+  for (const [channel, run] of [
+    [DESKTOP_IPC_CHANNELS.appUpdateState, async () => appUpdates().state()],
+    [DESKTOP_IPC_CHANNELS.appUpdateCheck, async () => appUpdates().check()],
+    [DESKTOP_IPC_CHANNELS.appUpdateDownload, async () => appUpdates().download()],
+  ] as const)
+    register(channel, run);
+  supported.add(DESKTOP_IPC_CHANNELS.appUpdateAutomatic);
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.appUpdateAutomatic, (event, value: unknown) => {
+    owns(event);
+    return appUpdates().setAutomatic(value);
+  });
+  supported.add(DESKTOP_IPC_CHANNELS.appUpdateRing);
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.appUpdateRing, (event, value: unknown) => {
+    owns(event);
+    return appUpdates().setRing(value);
+  });
+  register(DESKTOP_IPC_CHANNELS.appUpdateInstall, (event) => {
+    const window = owns(event);
+    const bootstrap = bootstraps.get(event.sender.id);
+    if (bootstrap === undefined) return { kind: "not-ready" };
+    return appUpdates().install({
+      bootstrap,
+      current: () => {
+        try {
+          return owns(event) === window;
+        } catch {
+          return false;
+        }
+      },
+    });
+  });
+  const notesOptions = () => ({
+    currentVersion: app.getVersion(),
+    notesPath: resolveBundledWhatsNewPath({
+      packaged: app.isPackaged,
+      appPath: app.getAppPath(),
+      moduleUrl: import.meta.url,
+    }),
+    statePath: resolveWhatsNewStatePath(app.getPath("userData")),
+    readFile: (path: string) => readFile(path, "utf8"),
+    writeFile: async (path: string, contents: string) => {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, contents, "utf8");
+    },
+  });
+  register(DESKTOP_IPC_CHANNELS.appUpdateWhatsNew, () => loadBundledWhatsNew(notesOptions()));
+  register(DESKTOP_IPC_CHANNELS.appUpdateWhatsNewAck, () => acknowledgeWhatsNew(notesOptions()));
   // The shared renderer's other native contributions are still awaiting their
   // typed owning broker. Refusal is explicit; no arbitrary channel is proxied.
   for (const channel of Object.values(DESKTOP_IPC_CHANNELS)) {
@@ -119,128 +190,234 @@ export async function runNightlyClient(
   }
   let acceptedQuit = false;
   let quitRequested = false;
+  let updating = false;
+  let cleanupFailed = false;
+  let opening = true;
+  const closeClientResources = async () => {
+    const closing = [
+      ...closingPresentations,
+      ...[...presentations.values()].map((presentation) => presentation.close()),
+    ];
+    const observed = Promise.allSettled(closing);
+    const nativeClosed = recovery.stop().then(
+      (result) => result.kind === "closed",
+      () => false,
+    );
+    const outcomes = await observed;
+    const closed = await nativeClosed;
+    cleanupFailed ||= !closed || outcomes.some((outcome) => outcome.status === "rejected");
+    return { kind: cleanupFailed ? ("failed" as const) : ("closed" as const) };
+  };
   app.on("before-quit", (event) => {
     if (acceptedQuit) return;
     event.preventDefault();
     if (quitRequested) return;
     quitRequested = true;
+    updates?.dispose();
     void (async () => {
-      const result = await recovery.stop();
+      const result = await closeClientResources();
       if (result.kind !== "closed")
         dialog.showErrorBox(
           identity.productName,
           "Octant Nightly closed its window, but could not confirm immediate lease cleanup. The host expires the short lease automatically.",
         );
-      await Promise.allSettled([
-        ...closingPresentations,
-        ...[...presentations.values()].map((presentation) => presentation.close()),
-      ]);
       acceptedQuit = true;
       app.quit();
     })();
   });
   app.on("window-all-closed", () => {
-    if (!recovery.recovering()) app.quit();
+    if (!recovery.recovering() && !updating) app.quit();
   });
   let bounds = { x: 100, y: 100, width: 1200, height: 800 };
-  const recovery = createNightlyClientRecovery({
-    exhausted: () => {
-      dialog.showErrorBox(
-        identity.productName,
-        "Octant Nightly could not reconnect to its matching signed Octant host. Reopen Nightly after Octant is available. Unsaved window layout and drafts were not transferred.",
-      );
-      app.quit();
-    },
-    open: (signal, onLeaseLost) =>
-      openNightlyClientWindow({
-        native: protocol,
-        signal,
-        onLeaseLost,
-        isClosing: () => quitRequested,
-        createWindow: (bootstrap) => {
-          const window = new BrowserWindow(
-            createMainBrowserWindowOptions({
-              bounds,
-              productName: identity.productName,
-              capability: bootstrap.capability,
-              windowId: bootstrap.windowId,
-              preloadPath: resolve(
-                dirname(fileURLToPath(import.meta.url)),
-                DESKTOP_PRELOAD_FILENAME,
-              ),
-              browserWindow: { backgroundColor: "#101013", frame: true },
-            }),
-          );
-          const id = window.webContents.id;
-          const rememberBounds = () => {
-            if (!window.isDestroyed()) bounds = window.getNormalBounds();
-          };
-          window.on("resize", rememberBounds);
-          window.on("move", rememberBounds);
-          const browserClient = createBrowserPresentationClient({
-            baseUrl: bootstrap.hostOrigin,
-            windowCapability: bootstrap.capability,
-            rendererIdentity: bootstrap.rendererIdentity,
-            fetch: globalThis.fetch,
-          });
-          const presentation = new NightlyBrowserPresentation({
-            current: () => windows.get(id) === window && !window.isDestroyed(),
-            visible: () => !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
-            focused: () => !window.isDestroyed() && window.isFocused(),
-            execute: browserClient.execute,
-          });
-          presentations.set(id, presentation);
-          window.on("blur", () => {
-            void presentation.releaseInputs();
-          });
-          window.on("focus", () => {
-            void presentation.releaseInputs();
-          });
-          window.on("show", () => presentation.show());
-          window.on("restore", () => presentation.show());
-          window.on("hide", () => {
-            void presentation.hide();
-          });
-          window.on("minimize", () => {
-            void presentation.hide();
-          });
-          windows.set(id, window);
-          capabilities.set(id, bootstrap.capability);
-          trusted.set(id, {
-            serverOrigin: bootstrap.hostOrigin,
-            rendererIdentity: bootstrap.rendererIdentity,
-          });
-          const guard = (event: { preventDefault(): void }, url: string) => {
-            if (!allowed.allows(url)) event.preventDefault();
-          };
-          window.webContents.on("will-navigate", (event, url) => guard(event, url));
-          window.webContents.on("will-redirect", (event, url) => guard(event, url));
-          window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-          window.webContents.once("render-process-gone", () => {
-            if (!window.isDestroyed()) window.destroy();
-          });
-          window.once("closed", () => {
-            windows.delete(id);
-            presentations.delete(id);
-            const closing = presentation.close();
-            closingPresentations.add(closing);
-            void closing.finally(() => closingPresentations.delete(closing));
-            capabilities.delete(id);
-            trusted.remove(id);
-          });
-          return {
-            load: async () => {
-              await window.loadFile(rendererPath, { query: { serverUrl: bootstrap.hostOrigin } });
-            },
-            show: () => window.show(),
-            destroy: () => window.destroy(),
-            isDestroyed: () => window.isDestroyed(),
-            onClosed: (listener) => window.once("closed", listener),
-          };
+  const createRecovery = () =>
+    createNightlyClientRecovery({
+      exhausted: () => {
+        dialog.showErrorBox(
+          identity.productName,
+          "Octant Nightly could not reconnect to its matching signed Octant host. Reopen Nightly after Octant is available. Unsaved window layout and drafts were not transferred.",
+        );
+        app.quit();
+      },
+      open: (signal, onLeaseLost) =>
+        openNightlyClientWindow({
+          native: protocol,
+          signal,
+          onLeaseLost,
+          isClosing: () => quitRequested,
+          createWindow: (bootstrap) => {
+            const window = new BrowserWindow(
+              createMainBrowserWindowOptions({
+                bounds,
+                localUpdatePreferences: true,
+                productName: identity.productName,
+                capability: bootstrap.capability,
+                windowId: bootstrap.windowId,
+                preloadPath: resolve(
+                  dirname(fileURLToPath(import.meta.url)),
+                  DESKTOP_PRELOAD_FILENAME,
+                ),
+                browserWindow: { backgroundColor: "#101013", frame: true },
+              }),
+            );
+            const id = window.webContents.id;
+            const rememberBounds = () => {
+              if (!window.isDestroyed()) bounds = window.getNormalBounds();
+            };
+            window.on("resize", rememberBounds);
+            window.on("move", rememberBounds);
+            const browserClient = createBrowserPresentationClient({
+              baseUrl: bootstrap.hostOrigin,
+              windowCapability: bootstrap.capability,
+              rendererIdentity: bootstrap.rendererIdentity,
+              fetch: globalThis.fetch,
+            });
+            const presentation = new NightlyBrowserPresentation({
+              current: () => windows.get(id) === window && !window.isDestroyed(),
+              visible: () => !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
+              focused: () => !window.isDestroyed() && window.isFocused(),
+              execute: browserClient.execute,
+            });
+            presentations.set(id, presentation);
+            window.on("blur", () => {
+              void presentation.releaseInputs();
+            });
+            window.on("focus", () => {
+              void presentation.releaseInputs();
+            });
+            window.on("show", () => presentation.show());
+            window.on("restore", () => presentation.show());
+            window.on("hide", () => {
+              void presentation.hide();
+            });
+            window.on("minimize", () => {
+              void presentation.hide();
+            });
+            windows.set(id, window);
+            capabilities.set(id, bootstrap.capability);
+            bootstraps.set(id, bootstrap);
+            trusted.set(id, {
+              serverOrigin: bootstrap.hostOrigin,
+              rendererIdentity: bootstrap.rendererIdentity,
+            });
+            const guard = (event: { preventDefault(): void }, url: string) => {
+              if (!allowed.allows(url)) event.preventDefault();
+            };
+            window.webContents.on("will-navigate", (event, url) => guard(event, url));
+            window.webContents.on("will-redirect", (event, url) => guard(event, url));
+            window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+            window.webContents.once("render-process-gone", () => {
+              if (!window.isDestroyed()) window.destroy();
+            });
+            window.once("closed", () => {
+              windows.delete(id);
+              presentations.delete(id);
+              const closing = presentation.close();
+              closingPresentations.add(closing);
+              void closing.then(
+                () => closingPresentations.delete(closing),
+                () => {
+                  cleanupFailed = true;
+                  closingPresentations.delete(closing);
+                },
+              );
+              capabilities.delete(id);
+              bootstraps.delete(id);
+              trusted.remove(id);
+            });
+            return {
+              load: async () => {
+                await window.loadFile(rendererPath, { query: { serverUrl: bootstrap.hostOrigin } });
+              },
+              show: () => window.show(),
+              destroy: () => window.destroy(),
+              isDestroyed: () => window.isDestroyed(),
+              onClosed: (listener) => window.once("closed", listener),
+            };
+          },
+        }),
+    });
+  let recovery = createRecovery();
+  const reopenClient = async () => {
+    try {
+      const closed = await recovery.stop();
+      cleanupFailed ||= closed.kind !== "closed";
+    } catch {
+      cleanupFailed = true;
+    }
+    if (quitRequested) return;
+    recovery = createRecovery();
+    await recovery.start();
+  };
+  updates = await createNightlyAppUpdates({
+    userDataDirectory: app.getPath("userData"),
+    service: {
+      updater: {
+        setFeedURL: (options) => electronAutoUpdater.setFeedURL(options),
+        checkForUpdates: () => electronAutoUpdater.checkForUpdates(),
+        on: (event, listener) => {
+          if (event === "error") electronAutoUpdater.on("error", listener);
+          else if (event === "update-downloaded")
+            electronAutoUpdater.on("update-downloaded", listener);
+          else electronAutoUpdater.on("update-not-available", listener);
         },
-      }),
+        quitAndInstall: () => {
+          if (quitRequested || !updating)
+            throw new Error("The Nightly update request is no longer current.");
+          acceptedQuit = true;
+          try {
+            electronAutoUpdater.quitAndInstall();
+            updates?.dispose();
+          } catch (error) {
+            acceptedQuit = false;
+            throw error;
+          }
+        },
+      },
+      feedBaseUrl: resolveUpdateFeedBaseUrl(process.env),
+      app: {
+        version: decodeAppVersion(app.getVersion()),
+        platform: process.platform,
+        arch: process.arch,
+      },
+      onState: (state) => {
+        for (const window of windows.values())
+          if (!window.isDestroyed())
+            window.webContents.send(DESKTOP_IPC_CHANNELS.appUpdateState, state);
+      },
+    },
+    prepare: async () => {
+      updating = true;
+      return closeClientResources();
+    },
+    canApply: () => updating && !quitRequested,
+    recover: async (message) => {
+      if (quitRequested) return;
+      acceptedQuit = false;
+      if (updating) {
+        opening = true;
+        try {
+          await reopenClient();
+        } finally {
+          opening = false;
+          updating = false;
+        }
+      }
+      dialog.showErrorBox(identity.productName, message);
+    },
   });
+  app.on("activate", () => {
+    if (quitRequested || updating || opening || windows.size !== 0 || recovery.recovering()) return;
+    opening = true;
+    void reopenClient().finally(() => {
+      opening = false;
+    });
+  });
+  if (quitRequested) {
+    updates.dispose();
+    return { kind: "refused", message: "Nightly startup was cancelled." };
+  }
   const client = await recovery.start();
+  opening = false;
   if (client.kind !== "opened")
     return {
       kind: "refused",

@@ -423,6 +423,8 @@ export interface OctantHostBridge
    * served by a host it does not update.
    */
   readonly checkForAppUpdate?: () => Promise<AppUpdateState>;
+  /** This application's native process persists its own update preferences. */
+  readonly appUpdatePreferenceScope?: "local";
   readonly downloadAppUpdate?: () => Promise<AppUpdateState>;
   readonly installAppUpdate?: () => Promise<AppUpdateInstallOutcome>;
   readonly setAutomaticAppUpdateChecks?: (enabled: boolean) => Promise<AppUpdateState>;

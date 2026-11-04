@@ -128,6 +128,15 @@ An already retained current Nightly client receives bounded recovery grace durin
 an app-managed host restart. This does not yet prove full signed coexistence or
 reconnect acceptance.
 
+Nightly's update controls follow only Nightly and Preview, with automatic checks
+and the chosen channel saved separately from Octant. Changing them does not
+change Octant's stable channel. An update relaunch waits while host work is active
+or cannot be confirmed, and closes Nightly's own window resources before asking
+the platform updater to apply it. Failed cleanup or apply leaves a fresh Nightly
+window available; an unconfirmed cleanup requires quitting and reopening Nightly
+before retrying. This client wiring does not establish signed installed-update
+or rollback acceptance.
+
 A local desktop package defaults to Octant. An explicitly selected
 `OCTANT_PACKAGE_FLAVOR=nightly` requires a matching dated preview or candidate
 `OCTANT_RELEASE_VERSION` for the repository's existing base version. Packaging

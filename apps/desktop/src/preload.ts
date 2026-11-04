@@ -258,6 +258,7 @@ export interface OctantHostBridge {
   readonly installAppUpdate: () => Promise<AppUpdateInstallOutcome>;
   readonly setAutomaticAppUpdateChecks: (enabled: boolean) => Promise<AppUpdateState>;
   readonly subscribeAppUpdateState: (listener: (state: AppUpdateState) => void) => () => void;
+  readonly appUpdatePreferenceScope?: "local";
   readonly readBundledWhatsNew: () => Promise<BundledWhatsNew>;
   readonly acknowledgeWhatsNew: () => Promise<void>;
   readonly openBrowserExternal: (url: string) => Promise<void>;
@@ -441,6 +442,7 @@ export function createHostBridge(
   initialProjectTarget?: ProjectWindowTarget,
   platform: NodeJS.Platform = process.platform,
   windowId?: string,
+  localUpdatePreferences = false,
 ): OctantHostBridge {
   const invoke = async (channel: string, ...args: readonly unknown[]): Promise<void> =>
     void (await ipc.invoke(channel, ...args));
@@ -754,6 +756,7 @@ export function createHostBridge(
       return invoke(IPC_CHANNELS.updateCodeOperationApprovalAnchor, anchor);
     },
     cancelCodeOperationApproval: () => invoke(IPC_CHANNELS.cancelCodeOperationApproval),
+    ...(localUpdatePreferences ? { appUpdatePreferenceScope: "local" as const } : {}),
     projectWindowCapability,
     subscribeProjectWindowCapability: (listener: (capability: string) => void) => {
       let active = true;
@@ -2142,6 +2145,15 @@ function decodeAppUpdateState(value: unknown): AppUpdateState {
   ) {
     throw new TypeError("Invalid update state.");
   }
+  const allowedRings: Array<"stable" | "preview" | "candidate"> = [];
+  if (value.allowedRings !== undefined) {
+    if (!Array.isArray(value.allowedRings) || value.allowedRings.length > 3)
+      throw new TypeError("Invalid update ring choices.");
+    for (const ring of value.allowedRings) {
+      if (!isReleaseRing(ring)) throw new TypeError("Invalid update ring choices.");
+      allowedRings.push(ring);
+    }
+  }
   return Object.freeze({
     // The guards above already proved the literals; the brands are what the
     // strict contract type carries and no runtime can check here.
@@ -2149,6 +2161,7 @@ function decodeAppUpdateState(value: unknown): AppUpdateState {
     currentVersion: value.currentVersion as AppVersion,
     automaticChecks: value.automaticChecks,
     ring: value.ring,
+    ...(value.allowedRings === undefined ? {} : { allowedRings: Object.freeze(allowedRings) }),
     ...(value.available === undefined
       ? {}
       : { available: decodeAppUpdateRelease(value.available) }),
@@ -2516,10 +2529,18 @@ export function installHostBridge(
   initialProjectTarget = decodeInitialProjectTarget(process.argv),
   platform: NodeJS.Platform = process.platform,
   windowId?: string,
+  localUpdatePreferences = process.argv.includes("--octant-local-update-preferences"),
 ): void {
   context.exposeInMainWorld(
     HOST_BRIDGE_KEY,
-    createHostBridge(ipc, projectWindowCapability, initialProjectTarget, platform, windowId),
+    createHostBridge(
+      ipc,
+      projectWindowCapability,
+      initialProjectTarget,
+      platform,
+      windowId,
+      localUpdatePreferences,
+    ),
   );
 }
 

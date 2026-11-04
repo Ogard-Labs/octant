@@ -36,6 +36,8 @@ export interface AppUpdateSettingsProps {
  */
 export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   const bridge = props.hostBridge;
+  const localPreferences = bridge?.appUpdatePreferenceScope === "local";
+  const productName = localPreferences ? "Octant Nightly" : "Octant";
   const [state, setState] = useState<AppUpdateState>();
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState<Extract<AppUpdateInstallOutcome, { kind: "wait" }>>();
@@ -90,6 +92,8 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   }
 
   const status = state?.status ?? "idle";
+  const allowedRings =
+    state?.allowedRings ?? (localPreferences ? ["preview", "candidate"] : undefined);
   const offeredNotes =
     status === "available" && state?.available?.notes !== undefined && state.available.notes !== ""
       ? state.available.notes
@@ -111,9 +115,9 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
 
   const notice =
     status === "downloading"
-      ? "Downloading. Octant will not replace itself until you relaunch it."
+      ? `Downloading. ${productName} will not replace itself until you relaunch it.`
       : status === "ready"
-        ? "An update is ready and applies the next time you relaunch Octant."
+        ? `An update is ready and applies the next time you relaunch ${productName}.`
         : undefined;
   const alert = waiting === undefined ? (failure ?? state?.message) : describeWaiting(waiting);
   return (
@@ -121,7 +125,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
       <SettingRow
         description={
           <>
-            {state === undefined ? "Octant" : `Octant ${state.currentVersion}`}
+            {state === undefined ? productName : `${productName} ${state.currentVersion}`}
             {status === "up-to-date" ? " · Up to date" : null}
           </>
         }
@@ -196,7 +200,13 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
       )}
 
       <SettingRow
-        description="Stable is the released build; Preview is a one-off build run by hand; Nightly is a scheduled build of what has been merged. Switching takes effect at the next check."
+        description={
+          localPreferences
+            ? "Nightly follows scheduled builds; Preview is a one-off build. These choices only affect Octant Nightly."
+            : allowedRings?.length === 1
+              ? "Octant follows stable releases. Octant Nightly updates separately."
+              : "Stable is the released build; Preview is a one-off build run by hand; Nightly is a scheduled build of what has been merged. Switching takes effect at the next check."
+        }
         label="Release ring"
         scope="app"
         settingId="app-update-ring"
@@ -206,33 +216,39 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
           onValueChange={(value) => {
             const selected = value[0];
             if (selected === undefined) return;
-            props.onReleaseRingChange(selected);
-            void setRing?.(selected);
+            if (!localPreferences) props.onReleaseRingChange(selected);
+            if (setRing !== undefined) void run(() => setRing(selected));
           }}
           value={[state?.ring ?? "stable"]}
         >
-          <OctantToggleGroupItem value="stable">Stable</OctantToggleGroupItem>
+          {allowedRings?.includes("stable") !== false ? (
+            <OctantToggleGroupItem value="stable">Stable</OctantToggleGroupItem>
+          ) : null}
           {/* The labels are not the ring ids: the scheduled `preview` ring reads
               as Nightly and the hand-run `candidate` ring as Preview. The ids
               stay, because they name the update feed paths and version tags
               that installed builds already follow. */}
-          <OctantToggleGroupItem value="candidate">Preview</OctantToggleGroupItem>
-          <OctantToggleGroupItem value="preview">Nightly</OctantToggleGroupItem>
+          {allowedRings?.includes("candidate") !== false ? (
+            <OctantToggleGroupItem value="candidate">Preview</OctantToggleGroupItem>
+          ) : null}
+          {allowedRings?.includes("preview") !== false ? (
+            <OctantToggleGroupItem value="preview">Nightly</OctantToggleGroupItem>
+          ) : null}
         </OctantToggleGroup>
       </SettingRow>
 
       <SettingRow
-        description="Turning this off stops Octant contacting the update service; you can still check by hand."
+        description={`Turning this off stops ${productName} contacting the update service; you can still check by hand.`}
         label="Automatic checks"
         scope="app"
         settingId="app-update-automatic-checks"
       >
         <OctantSwitch
-          checked={props.automaticChecks}
+          checked={localPreferences ? (state?.automaticChecks ?? false) : props.automaticChecks}
           label="Check for updates automatically"
           onCheckedChange={(checked) => {
-            props.onAutomaticChecksChange(checked);
-            void setAutomatic?.(checked);
+            if (!localPreferences) props.onAutomaticChecksChange(checked);
+            if (setAutomatic !== undefined) void run(() => setAutomatic(checked));
           }}
         />
       </SettingRow>
