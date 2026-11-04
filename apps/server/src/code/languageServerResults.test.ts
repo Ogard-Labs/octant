@@ -10,6 +10,7 @@ import {
   OUTSIDE_CHECKOUT_TEXT,
   rewriteHostPaths,
   toDefinitionTargets,
+  toReferenceTargets,
   toDiagnostics,
 } from "./languageServerResults";
 
@@ -132,5 +133,39 @@ describe("language server results", () => {
       { kind: "outside-checkout", label: "elsewhere" },
       { kind: "outside-checkout", label: "elsewhere" },
     ]);
+  });
+  it("bounds reference work and distinct checkout files, with explicit truncation and exact duplicate removal", async () => {
+    const map = (result: unknown) =>
+      toReferenceTargets({
+        result,
+        roots: { checkoutRoot, installRoot: "/install" },
+        realpath: async (path) => path,
+        current: () => true,
+      });
+    const location = (index: number) => ({
+      uri: pathToFileURL(`${checkoutRoot}/file-${index}.ts`).href,
+      range,
+    });
+    const files = await map(Array.from({ length: 65 }, (_, index) => location(index)));
+    expect(files.targets).toHaveLength(64);
+    expect(files.truncated).toBe(true);
+    const many = await map(
+      Array.from({ length: 1001 }, (_, index) => ({
+        uri: location(0).uri,
+        range: { start: { line: index, character: 0 }, end: { line: index, character: 1 } },
+      })),
+    );
+    expect(many.targets).toHaveLength(1000);
+    expect(many.truncated).toBe(true);
+    expect(await map([location(0), location(0)])).toMatchObject({
+      targets: [{ kind: "checkout-location", path: "file-0.ts" }],
+      truncated: false,
+    });
+    expect(
+      await map([
+        { targetUri: location(0).uri, targetRange: range },
+        { uri: location(0).uri, range: { start: range.end, end: range.start } },
+      ]),
+    ).toEqual({ targets: [], truncated: false });
   });
 });

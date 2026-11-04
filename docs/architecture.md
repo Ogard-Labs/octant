@@ -405,7 +405,12 @@ its digest, its languages, and its class, and it serves only once trusted and
 switched on, verified against that digest at every start. The Monaco editor
 calls those routes through the Code client: it shows the server's diagnostics
 as markers and opens a definition in another file through the ordinary
-file-open path, locally and from a paired device. A Settings › Code switch,
+file-open path, locally and from a paired device. Explicit checkout references
+consume the already-initialized server's actual capability and acknowledged
+current draft, return bounded snapshot locations, and reuse that file-open path;
+these reads never start or retarget a server. Unsupported or unknown support
+stays explicit, with no save, new agent tool or write authority
+([references rules](design/language-services.md#explicit-checkout-references)). A Settings › Code switch,
 stored in the journaled Code settings, turns the bundled server off, and the
 host then answers `turned-off`. A person can also add a `repo-tooling` server,
 which runs the repository's own tooling: it starts only after the person at a

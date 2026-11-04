@@ -26,6 +26,7 @@ import {
   type CodeThread,
   type WindowId,
 } from "@octant/contracts";
+import { decodeCodeLanguageReadRequest } from "@octant/contracts/code-language";
 import type {
   CodeLanguageDocumentResult,
   CodeLanguageReadResult,
@@ -328,6 +329,58 @@ const confinementRuntime =
   process.platform === "linux"
     ? existsSync("/usr/bin/bwrap")
     : process.platform === "darwin" && existsSync("/usr/bin/sandbox-exec");
+
+describe("project-wide references through the existing companion", () => {
+  it("returns references from the initialized supported server while preserving outside-root redaction", async () => {
+    const paths = workspace();
+    const log = join(paths.root, "references.jsonl");
+    const test = harness({
+      ...paths,
+      receipts: paths.receipts,
+      component: fakeComponent("references", log),
+      confinement: passthrough,
+    });
+    const opened = await test.open("b.ts");
+    const fileId = syncedFileId(opened);
+    if (
+      opened.status !== "synced" ||
+      opened.documentVersion === undefined ||
+      opened.documentRevision === undefined
+    )
+      throw new Error("Current host did not acknowledge document revision");
+    const answer = await test.service.read(
+      { scopeId, principal: "local-window" },
+      decodeCodeLanguageReadRequest({
+        kind: "references",
+        threadId: test.state.thread.id,
+        checkoutId: test.state.checkout.id,
+        fileId,
+        position: { line: 1, character: 30 },
+        includeDeclaration: true,
+        expectedVersion: opened.documentVersion,
+        expectedRevision: opened.documentRevision,
+      }),
+    );
+    expect(answer).toMatchObject({
+      status: "references",
+      truncated: false,
+      targets: [
+        {
+          kind: "checkout-location",
+          path: "a.ts",
+          range: { start: { line: 0, character: 16 }, end: { line: 0, character: 21 } },
+        },
+        {
+          kind: "checkout-location",
+          path: "b.ts",
+          range: { start: { line: 1, character: 29 }, end: { line: 1, character: 34 } },
+        },
+        { kind: "outside-checkout", label: "elsewhere" },
+      ],
+    });
+    expect(logged(log).some((entry) => entry.method === "textDocument/references")).toBe(true);
+  });
+});
 
 describe("Code language service with the bundled TypeScript server", () => {
   it.runIf(typeScriptBinary !== undefined && confinementRuntime)(
