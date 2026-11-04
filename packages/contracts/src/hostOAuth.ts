@@ -120,6 +120,7 @@ export const HostOAuthDialect = Schema.Literal(
   "openrouter-pkce",
   "chatgpt-plan-siwc",
   "mcp-authorization",
+  "slack-mcp-user",
   "directory-oidc",
   "issuer-oidc",
 );
@@ -181,6 +182,9 @@ export const HostOAuthDescriptor = Schema.Struct({
    * the token is for, sent as `resource` on authorize, exchange and refresh.
    */
   resource: Schema.optional(Endpoint),
+  /** Closed Slack user-token dialect: transport and issuer are distinct from OAuth resource. */
+  mcpTransportUrl: Schema.optional(Endpoint),
+  mcpIssuer: Schema.optional(Endpoint),
   /**
    * MCP authorization dialect only: the loopback port the callback listens
    * on, chosen before the flow so the client registration could name it.
@@ -200,8 +204,18 @@ export const HostOAuthDescriptor = Schema.Struct({
       (descriptor) => {
         if (
           descriptor.dialect !== "mcp-authorization" &&
+          descriptor.dialect !== "slack-mcp-user" &&
           (descriptor.clientAuthentication !== undefined ||
             (descriptor.clientId !== undefined && !Schema.is(ClientId)(descriptor.clientId)))
+        )
+          return false;
+        if (
+          descriptor.dialect !== "slack-mcp-user" &&
+          (descriptor.mcpTransportUrl !== undefined ||
+            descriptor.mcpIssuer !== undefined ||
+            descriptor.resource === "https://mcp.slack.com" ||
+            descriptor.authorizationEndpoint === "https://slack.com/oauth/v2_user/authorize" ||
+            descriptor.tokenEndpoint === "https://slack.com/api/oauth.v2.user.access")
         )
           return false;
         // The directory dialect speaks standard device authorization against
@@ -270,7 +284,19 @@ export const HostOAuthDescriptor = Schema.Struct({
         }
         // The MCP authorization dialect registers its client before the flow,
         // so it names a client id; a server may grant without any scope.
-        if (descriptor.dialect === "mcp-authorization") {
+        if (descriptor.dialect === "mcp-authorization" || descriptor.dialect === "slack-mcp-user") {
+          if (
+            descriptor.dialect === "slack-mcp-user" &&
+            (descriptor.resource !== "https://mcp.slack.com" ||
+              descriptor.mcpIssuer !== "https://mcp.slack.com" ||
+              descriptor.mcpTransportUrl !== "https://mcp.slack.com/mcp" ||
+              descriptor.authorizationEndpoint !== "https://slack.com/oauth/v2_user/authorize" ||
+              descriptor.tokenEndpoint !== "https://slack.com/api/oauth.v2.user.access" ||
+              descriptor.clientAuthentication?.method !== "client_secret_post" ||
+              descriptor.scopes.length !== 1 ||
+              descriptor.scopes[0] !== "search:read.public")
+          )
+            return false;
           return (
             descriptor.clientId !== undefined &&
             descriptor.resource !== undefined &&
