@@ -21,8 +21,9 @@ second app.
 The remaining delivery includes complete embedded browsing parity,
 full lifecycle acceptance, shared sign-in operations, the complete
 `octant-nightly` command, the installer and removal controls, inverted icon,
-Nightly labels, and the functional release preflight. Coexistence, reconnect
-and rollback still need their implementation and packaged evidence. The
+Nightly labels, and the functional release preflight. Coexistence and rollback
+still need their remaining implementation and packaged evidence. Bounded native
+lease reconnect is implemented; full signed lifecycle acceptance remains separate. The
 preview/candidate workflow now selects the Nightly flavor and matching artifact
 and payload-smoke paths, but an explicit early gate stops that workflow before
 build, signing or publication. The functional client change must replace the
@@ -391,7 +392,9 @@ settles, and cleans only its host-issued server ID and generation. A failed
 registration does not establish ownership of Browser contexts. Close waits for
 pending acquisition and attempts server revocation and owned-context cleanup;
 failure remains observable. Current acknowledged leases feed the retained-client
-lifetime above. Reconnect after a host replacement remains unfinished.
+lifetime above. Host replacement uses the bounded fresh-registration
+[reconnect rules](#reconnecting-after-host-loss); full signed acceptance remains
+unrun.
 
 Nightly sets its separate window storage before Electron is ready, loads its
 own existing renderer/preload and installs the trusted renderer-header registry
