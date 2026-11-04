@@ -9,6 +9,7 @@ import type {
   ExtensionEffectiveSnapshot,
   ExtensionSnapshot,
   SkillMarketplaceEntry,
+  SkillRootStatus,
   SkillPackagePreview,
 } from "@octant/contracts/extension-rpc";
 import type {
@@ -392,6 +393,7 @@ export interface ExtensionsSettingsViewProps {
   readonly accountTools?: ReactNode;
   /** Changes when the skill folders in Settings change, so discovery runs again. */
   readonly skillFoldersKey?: string;
+  readonly onSkillRootsChanged?: (statuses: ReadonlyArray<SkillRootStatus>) => void;
   /**
    * Scope used to project the authoritative effective state. Settings is a
    * host-scoped surface with no active thread, so a neutral Project-less scope
@@ -548,13 +550,20 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     };
   }, [props.client, discoveredRevision]);
 
+  const reloadEpoch = useRef(0);
+  const rootStatusCallback = useRef(props.onSkillRootsChanged);
+  rootStatusCallback.current = props.onSkillRootsChanged;
   const reload = useCallback(async () => {
+    const epoch = ++reloadEpoch.current;
+    rootStatusCallback.current?.([]);
     setStatus("loading");
     setFailure(undefined);
     try {
       let next = await props.client.snapshot();
+      if (epoch !== reloadEpoch.current) return;
       try {
         const reconciled = await props.client.execute({ kind: "reconcile-skills" });
+        if (epoch !== reloadEpoch.current) return;
         if (reconciled.kind === "extension-state-updated") {
           next = reconciled.snapshot;
         } else if (reconciled.kind === "extension-command-failed") {
@@ -564,12 +573,14 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           });
         }
       } catch {
+        if (epoch !== reloadEpoch.current) return;
         setFailure({
           category: "unavailable" as never,
           message: "Standalone skill discovery could not be refreshed.",
         });
       }
       const scoped = await props.client.effectiveState({ scope });
+      if (epoch !== reloadEpoch.current) return;
       if (scoped.catalogStatus === "offline") {
         setMarketplaceEntries([]);
         setPreview(undefined);
@@ -577,9 +588,11 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         setMarketplaceStatus("offline");
       }
       setSnapshot(next);
+      rootStatusCallback.current?.(next.skillRoots ?? []);
       setEffective(scoped);
       setStatus("ready");
     } catch {
+      if (epoch !== reloadEpoch.current) return;
       setStatus("unavailable");
       setFailure({
         category: "unavailable",
@@ -593,6 +606,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     setSnapshot(undefined);
     setEffective(undefined);
     void reload();
+    return () => {
+      reloadEpoch.current += 1;
+    };
   }, [reload]);
 
   // Settings added or removed a skill folder: discover again without clearing the list.

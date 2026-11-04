@@ -1540,13 +1540,83 @@ describe("SettingsView", () => {
     expect(diagnosticsExportClient.exportSupportBundle).not.toHaveBeenCalled();
   });
 
+  it("refreshes selected-root status through the actual Skills Settings view without changing settings or skill authority", async () => {
+    let readable = false;
+    const snapshot = () => ({
+      sequence: 1,
+      snapshotAt: now,
+      packages: [],
+      collisions: [],
+      skillRoots: [
+        {
+          sourceRef: "folder:opaque",
+          displayName: "future-skills",
+          status: readable ? "ready" : "missing",
+          skillCount: readable ? 1 : 0,
+          watching: true,
+        },
+      ],
+    });
+    const execute = vi.fn(async (_command: { readonly kind: string }) => ({
+      kind: "extension-state-updated",
+      snapshot: snapshot(),
+    }));
+    const onSettingsChange = vi.fn();
+    renderSettings({
+      initialDeepLink: { section: "skills" },
+      onSettingsChange,
+      extensionClient: {
+        snapshot: async () => snapshot(),
+        listDiscoveredTooling: async () => ({ servers: [], plugins: [], notes: [] }),
+        execute,
+        effectiveState: async () => ({
+          sequence: 1,
+          snapshotAt: now,
+          scope: {
+            hostId: "local",
+            mode: "code",
+            projectId: null,
+            threadId: null,
+            providerFamily: "openai-compatible",
+          },
+          catalogEpoch: `sha256:${"a".repeat(64)}`,
+          catalogStatus: "available",
+          stale: false,
+          packages: [],
+          collisions: [],
+        }),
+      } as never,
+    });
+    expect(await screen.findByText(/future-skills: Folder does not exist yet/)).toBeVisible();
+    const before = execute.mock.calls.length;
+    readable = true;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh folder status" }));
+    expect(await screen.findByText(/future-skills: Folder is readable/)).toHaveTextContent(
+      "1 skill entry indexed",
+    );
+    expect(execute.mock.calls.length).toBeGreaterThan(before);
+    expect(execute.mock.calls.every(([command]) => command.kind === "reconcile-skills")).toBe(true);
+    expect(onSettingsChange).not.toHaveBeenCalled();
+  });
+
   it("mounts the Skills & Extensions settings view when an extension client is provided", async () => {
+    const onSettingsChange = vi.fn(async () => true);
+    const pickSkillFolder = vi.fn(async () => "/tmp/selected-skills");
     const extensionClient = {
       snapshot: vi.fn(async () => ({
         sequence: 1,
         snapshotAt: now,
         packages: [],
         collisions: [],
+        skillRoots: [
+          {
+            sourceRef: "folder:opaque",
+            displayName: "missing-skills",
+            status: "missing",
+            skillCount: 0,
+            watching: true,
+          },
+        ],
       })),
       effectiveState: vi.fn(async () => ({
         sequence: 1,
@@ -1572,7 +1642,11 @@ describe("SettingsView", () => {
       projectPins: vi.fn() as never,
       applyDiscoveredTooling: vi.fn() as never,
     };
-    renderSettings({ extensionClient: extensionClient as never });
+    renderSettings({
+      extensionClient: extensionClient as never,
+      onSettingsChange,
+      pickSkillFolder,
+    });
     navigateTo("Skills & Extensions");
     expect(await screen.findAllByRole("heading", { name: "Skills & Extensions" })).toHaveLength(1);
     expect(
@@ -1580,6 +1654,14 @@ describe("SettingsView", () => {
         name: /installed/i,
       }),
     ).toBeVisible();
+    expect(await screen.findByText(/missing-skills: Folder does not exist yet/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
+    await waitFor(() =>
+      expect(onSettingsChange).toHaveBeenCalledWith({
+        skillFolders: { providers: [], folders: ["/tmp/selected-skills"] },
+      }),
+    );
+    expect(pickSkillFolder).toHaveBeenCalledTimes(1);
   });
 
   it("mounts the Host section when a host control client is provided", async () => {

@@ -7711,12 +7711,27 @@ same. This holds in Chat, Work, and Code.
   switched on. A folder is added by absolute path with no `..` segment, at most
   32; its `sourceRef` is `provider:<id>` or `folder:` and a digest of the path,
   never the path, and its skills are shared by every thread like the
-  user-global ones. A folder that is a symlink, is missing, or is the
-  user-global folder again is read once or not at all. Choices: the provider
+  user-global ones. Linked roots are ignored and a duplicate user-global root is
+  read once. Settings reports a chosen root as missing, unreadable, linked,
+  not a directory or readable, with its indexed package count; these diagnostics
+  are host-person metadata, never a path grant or skill activation. Choices: the provider
   list holds only the two providers whose folder this document already names,
-  and more join it when their home folder is verified; a folder is typed as a
-  path, not picked, so browser Settings can add one too, and it never reads
-  anything but `SKILL.md` files. Octant's Project walk still never reads the
+  and more join it when their home folder is verified. Manual paths remain
+  available in every client; desktop also offers the existing native folder picker.
+  Its window-owned one-use receipt is purpose-bound to skill-folder selection,
+  cannot install a plugin and is resolved only by a live local-window capability.
+  The existing settings CAS records the folder; cancellation or refusal does not
+  claim it was saved. Discovery never reads anything but `SKILL.md` files.
+  Chosen roots and eligible package directories are watched without recursive
+  content discovery, up to 512 native handles. A missing or unreadable chosen
+  root uses only necessary ancestor existence metadata, filtering unrelated
+  names; later creation or permission repair reconciles the same selected root.
+  Watch events are debounced/coalesced with at most one active refresh; host-scope
+  close prevents late awaited work from restarting watchers. A root that cannot
+  be watched names Refresh as the fallback. Committed skill-folder settings are
+  observed on the host, including another client's/direct writes while Settings
+  is unmounted; unrelated settings do not restart discovery. Root diagnostics and
+  picker receipt resolution add no paired-device rights. Octant's Project walk still never reads the
   home folder's own `.claude`, even when the host's Project-less fallback root
   is the home folder; only the provider switch above does. A discovered
   skills folder that is a symlink, or resolves outside the bound root, is
