@@ -449,6 +449,15 @@ function connectorSlug(request: UserAddedMcpServerRequest): string | undefined {
   if (request.server.type !== "streamable-http" || request.server.url !== entry.url) {
     throw new UserAddedMcpServerError("invalid", "This address is not the connector's own.");
   }
+  if (
+    entry.auth.kind === "sign-in" &&
+    entry.auth.clientSetup === "registered" &&
+    request.server.headers.length !== 0
+  )
+    throw new UserAddedMcpServerError(
+      "invalid",
+      "This connector uses registered client setup, not inline headers.",
+    );
   return connectorPackageName(entry.id);
 }
 

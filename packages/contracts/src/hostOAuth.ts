@@ -361,6 +361,8 @@ export const HostOAuthSignInAgainReason = Schema.Literal(
   "expired",
   "refresh-reused",
   "interaction-required",
+  "account-changed",
+  "permission-missing",
 );
 export type HostOAuthSignInAgainReason = typeof HostOAuthSignInAgainReason.Type;
 

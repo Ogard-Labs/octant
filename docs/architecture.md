@@ -8882,14 +8882,33 @@ finally. Pending cancellation failure leaves the package installed with an
 actionable retry; folders/secrets and already-established grants are not removed
 until lifecycle removal actually succeeds.
 
-This supplies a callback contract and protected registration route, not an
-advertised Slack connection or a catalog entry. The reusable app-setup view selects and displays this host-owned callback,
+The non-featured Slack catalog entry uses this protected registration route.
+An explicit Connect opens the shared app-setup view before account consent;
+ordinary Library/Connectors list and status reads do not discover endpoints or
+probe MCP tools. Only the exact host-owned catalog URL is accepted, without
+inline authorization headers. The reusable app-setup view selects and displays this host-owned callback,
 then Save retains the same hostname only after rechecking the shown binding.
 A secret-only issuer selects its advertised confidential method rather than
 pretending public authentication is available. Save remains separate from
 account consent, and cancellation/sign-out retain the application identity. Eligible app registration, consent and a permitted tool read
-require separate live verification. No app is registered or shared secret
-shipped by this dialect. Scopes
+require separate live verification. This catalog entry is a registration-first
+setup path, not proof of live service eligibility or tool readiness. No app is
+registered or shared secret shipped by this dialect.
+
+The closed Slack token profile may retain bounded endpoint-reported workspace
+and user IDs and granted permissions from `team.id`, `authed_user.id` and
+`authed_user.scope` in the existing broker grant and sign-in record. It does not
+decode identity tokens or infer account names. Missing values are Not reported;
+omission during refresh retains prior values only as last-reported facts.
+A newly reported change to a known ID, or an explicitly reported permission set
+missing `search:read.public`, refuses the token and durably requires explicit
+reconnection without an old-bearer fallback. Malformed present metadata also
+fails closed. A bounded broker read after consent first persists grant ownership;
+ordinary Settings status reads only retained facts. Actual tools and capabilities
+are discovered and approved through the normal authorized task lifecycle, never
+a Settings probe.
+
+Scopes
 follow the RFC 6749 scope-token grammar, so a URL-shaped scope survives. An
 issuer may grant an access token without a refresh token; such a grant lasts
 as long as the access token and then asks for a new sign-in. Every issuer

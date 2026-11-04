@@ -6,8 +6,13 @@
  * authorization sign-in or takes a key the vendor issues.
  */
 export type ConnectorAuth =
-  /** The server runs the MCP authorization flow and registers clients itself. */
-  | { readonly kind: "sign-in" }
+  /** Account consent uses MCP OAuth; a closed catalog policy may first require an owned app. */
+  | {
+      readonly kind: "sign-in";
+      readonly clientSetup?: "registered";
+      readonly setupGuide?: string;
+      readonly requestedScopes?: readonly string[];
+    }
   /** The server takes a token the person creates with the vendor, sent in one header. */
   | {
       readonly kind: "key";
@@ -42,9 +47,24 @@ export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string
  * metadata with PKCE S256 and dynamic client registration; each key server
  * answered 401 without registration; each open server answered without a
  * credential. An address that stops behaving that way belongs out, not fixed
- * up in the UI.
+ * up in the UI. Slack is separately documented on 2026-11-02: its exact dedicated
+ * metadata requires a person-owned registered confidential client and a single
+ * public-search scope; no live registration/consent/tool acceptance is claimed.
  */
 const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
+  {
+    id: "slack",
+    displayName: "Slack",
+    description: "Search public Slack content with an eligible app you register.",
+    category: "business",
+    url: "https://mcp.slack.com/mcp",
+    auth: {
+      kind: "sign-in",
+      clientSetup: "registered",
+      setupGuide: "https://docs.slack.dev/ai/slack-mcp-server/",
+      requestedScopes: ["search:read.public"],
+    },
+  },
   {
     id: "linear",
     displayName: "Linear",

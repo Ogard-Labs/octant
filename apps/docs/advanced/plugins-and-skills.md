@@ -484,7 +484,10 @@ store is unavailable, restore it before retrying. Application setup never
 replaces your account consent or expands what a task may do. GitHub continues
 to accept personal access tokens.
 
-Slack connection setup is still being completed and has no Library entry.
+Choose **Slack** in Library or Connectors to add its local setup entry.
+**Connect** opens client setup first; saving your app identity does not start
+account consent. Follow the linked Slack setup guide with an eligible app you
+register, save its client ID and linked secret item, then choose **Sign in**.
 Its registered app must name exactly `http://localhost:<saved-port>/oauth/callback`.
 An earlier setup using `127.0.0.1` must be updated explicitly before sign-in.
 The callback must be available on both local IP families at that saved port;
@@ -492,7 +495,7 @@ the host refuses if another app uses it. Its dedicated metadata advertises a
 registered client with a secret sent by POST; general public-PKCE guidance is
 not proof that a public client works through this endpoint. The closed wire
 support selects only `search:read.public`, and refuses when it is not
-advertised. It requests no write permission and adds no Slack Library entry.
+advertised. It requests no write permission.
 Client setup shows this exact callback and saves it separately from consent.
 While a browser sign-in is pending, **Cancel sign-in** closes that attempt. If
 cancellation cannot be confirmed, restore the credential broker and use that
@@ -503,8 +506,16 @@ lost host reply stops waiting after thirty seconds and keeps these recovery
 actions; it does not start consent again. If a setup save reply is lost, reopen
 **Client setup** to check the saved identity before saving again. Removing a server
 waits for pending cancellation before removing your local retry access.
-Application setup remains after cancellation or sign-out. Real app eligibility,
-consent and tool access still need verification.
+Application setup remains after cancellation or sign-out.
+
+After sign-in, the detail shows workspace and user IDs only when Slack reports
+them, and **Not reported** otherwise. Permissions are the last reported values,
+not a guarantee that a tool is available now. Tools are checked when selected
+for an authorized task. If a refresh reports a different known account or omits
+the required public-search permission from its reported permissions, reconnect
+explicitly; Octant does not keep using the old bearer. Missing metadata stays
+unknown. Real app eligibility, consent, refresh and tool access still need live
+verification with your app and account.
 
 ### Recover retired client-secret references
 

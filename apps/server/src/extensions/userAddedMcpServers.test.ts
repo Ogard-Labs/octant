@@ -138,6 +138,27 @@ describe("MCP servers added by hand", () => {
     ).rejects.toMatchObject({ category: "invalid" });
   });
 
+  it("adds the exact registered Slack connector without inline credentials and refuses catalog binding forgeries", async () => {
+    const { store: servers, registry } = await store();
+    const { source } = await servers.add({
+      name: "Slack",
+      connectorId: "slack",
+      server: { type: "streamable-http", url: "https://mcp.slack.com/mcp", headers: [] },
+    });
+    expect(registry.get(source.sourceRef)).toBeDefined();
+    for (const server of [
+      { type: "streamable-http", url: "https://mcp.slack.com/other", headers: [] },
+      {
+        type: "streamable-http",
+        url: "https://mcp.slack.com/mcp",
+        headers: [{ name: "Authorization", value: "synthetic-key", secret: false }],
+      },
+    ] as const)
+      await expect(
+        servers.add({ name: "Other Slack", connectorId: "slack", server }),
+      ).rejects.toMatchObject({ category: "invalid" });
+  });
+
   it("writes a package whose secret value is only a reference, and fills it in at launch", async () => {
     const secrets = secretsStore();
     const { store: servers, registry } = await store({ secrets });

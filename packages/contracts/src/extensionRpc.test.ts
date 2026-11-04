@@ -6,6 +6,7 @@ import {
   decodeUserAddedMcpServerRequest,
   decodeExtensionSnapshot,
   decodeMcpServerSignInView,
+  decodeMcpReportedAccount,
 } from "./extensionRpc";
 import { ExtensionProvenance } from "./extensions";
 import { Schema } from "effect";
@@ -64,6 +65,31 @@ describe("extension RPC contracts", () => {
     expect(() =>
       decodeUserAddedMcpServerRequest({ ...request, executableTrusted: true }),
     ).toThrow();
+  });
+
+  it("keeps reported MCP account facts bounded and separate from secret or identity-token fields", () => {
+    const account = {
+      workspaceId: "TTEST001",
+      userId: "UTEST001",
+      grantedScopes: ["search:read.public"],
+    };
+    expect(
+      decodeMcpServerSignInView({ kind: "signed-in", issuer: "https://mcp.slack.com", account }),
+    ).toMatchObject({ account });
+    expect(
+      decodeMcpServerSignInView({
+        kind: "client-setup-required",
+        message: "Set up your app first.",
+      }),
+    ).toMatchObject({ kind: "client-setup-required" });
+    for (const value of [
+      { ...account, accessToken: "synthetic-token" },
+      { ...account, id_token: "unverified" },
+      { workspaceId: "https://not-an-id.example" },
+      { userId: "x".repeat(129) },
+      { grantedScopes: ["bad scope"] },
+    ])
+      expect(() => decodeMcpReportedAccount(value)).toThrow();
   });
 
   it("keeps completed sign-out recovery bounded and free of credential fields", () => {

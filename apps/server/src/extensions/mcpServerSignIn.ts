@@ -2,7 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname } from "node:path";
-import type { McpClientSetupInput, McpServerSignInView } from "@octant/contracts/extension-rpc";
+import {
+  decodeMcpReportedAccount,
+  type McpReportedAccount,
+  type McpClientSetupInput,
+  type McpServerSignInView,
+} from "@octant/contracts/extension-rpc";
 import { decodeMcpOAuthClientRegistration } from "@octant/contracts/host-oauth";
 import type {
   McpOAuthClientRegistration,
@@ -42,6 +47,7 @@ export interface McpServerSignInRecord {
   readonly signInAgain?: McpSignInAgainReason;
   readonly signOutPending?: boolean;
   readonly refreshRequired?: boolean;
+  readonly account?: McpReportedAccount;
 }
 
 type AwaitingConsent = Extract<McpServerSignInView, { kind: "awaiting-consent" }>;
@@ -770,6 +776,14 @@ export class McpServerSignIn {
     if (record !== undefined) return recordView(record);
     const url = await this.#options.serverUrl(extensionId, componentId);
     if (url === undefined) return { kind: "not-applicable" };
+    if (
+      canonicalResource(url) === SLACK_MCP_USER_OAUTH.transportUrl &&
+      !slackRegistrationReady(this.#registrations.get(SLACK_MCP_USER_OAUTH.resource))
+    )
+      return {
+        kind: "client-setup-required",
+        message: "Set up your registered app before signing in.",
+      };
     return { kind: "signed-out" };
   }
 
@@ -1020,8 +1034,30 @@ export class McpServerSignIn {
         key.slice(0, key.indexOf(":")),
         key.slice(key.indexOf(":") + 1),
       );
+      const record = this.#signIns.get(key);
+      if (record?.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect) {
+        try {
+          const answer = await this.#credentialStage(() =>
+            this.#options.access(record.credentialRef),
+          );
+          if (isRecord(answer) && answer.kind === "granted") {
+            const observed = await this.#observeAccount(key, record, answer);
+            if (isRecord(observed) && observed.kind === "sign-in-again")
+              await this.#markSignInAgain(
+                key,
+                record,
+                observed.reason,
+                key.slice(0, key.indexOf(":")),
+                key.slice(key.indexOf(":") + 1),
+              );
+          }
+        } catch {
+          /* Account details remain explicitly unreported; the grant already has a durable owner. */
+        }
+      }
       await this.#retireUnusedSecret(previousRef);
-      return { kind: "signed-in", issuer: pending.discovered.issuer };
+      const current = this.#signIns.get(key);
+      return current === undefined ? { kind: "signed-out" } : recordView(current);
     }
     if (state.kind === "refused") {
       let removed = false;
@@ -1289,6 +1325,8 @@ export class McpServerSignIn {
       let answer = await this.#credentialStage(() => this.#options.access(record.credentialRef));
       if (!this.#currentGrant(key, record)) return { kind: "unavailable" };
       if (!isRecord(answer) || answer.kind !== "granted") return answer;
+      answer = await this.#observeAccount(key, record, answer);
+      if (!isRecord(answer) || answer.kind !== "granted") return answer;
       const expiry = accessExpiry(answer);
       if (expiry === "invalid") return { kind: "unavailable" };
       if (
@@ -1302,6 +1340,8 @@ export class McpServerSignIn {
         if (!isRecord(refreshed) || refreshed.kind !== "refreshed") return refreshed;
         answer = await this.#credentialStage(() => this.#options.access(record.credentialRef));
         if (!this.#currentGrant(key, record)) return { kind: "unavailable" };
+        if (!isRecord(answer) || answer.kind !== "granted") return answer;
+        answer = await this.#observeAccount(key, record, answer);
         if (!isRecord(answer) || answer.kind !== "granted") return answer;
         const currentExpiry = accessExpiry(answer);
         if (
@@ -1330,6 +1370,45 @@ export class McpServerSignIn {
     }
   }
 
+  async #observeAccount(
+    key: string,
+    record: McpServerSignInRecord,
+    answer: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (
+      record.descriptor.dialect !== SLACK_MCP_USER_OAUTH.dialect ||
+      answer.mcpAccount === undefined
+    )
+      return answer;
+    const current = this.#signIns.get(key);
+    if (!this.#currentGrant(key, record) || current === undefined) return { kind: "unavailable" };
+    const initial = inspectReportedAccount(current.account, answer.mcpAccount);
+    if (initial.kind !== "valid")
+      return initial.kind === "invalid"
+        ? { kind: "unavailable" }
+        : { kind: "sign-in-again", reason: initial.kind };
+    if (JSON.stringify(initial.account) === JSON.stringify(current.account)) return answer;
+    return this.#commit(async () => {
+      if (!this.#currentGrant(key, record)) return { kind: "unavailable" };
+      const owner = this.#signIns.get(key);
+      if (owner === undefined) return { kind: "unavailable" };
+      const observed = inspectReportedAccount(owner.account, answer.mcpAccount);
+      if (observed.kind !== "valid")
+        return observed.kind === "invalid"
+          ? { kind: "unavailable" }
+          : { kind: "sign-in-again", reason: observed.kind };
+      const updated = { ...owner, account: observed.account };
+      this.#signIns.set(key, updated);
+      try {
+        await this.#persist();
+      } catch (error) {
+        this.#signIns.set(key, owner);
+        throw error;
+      }
+      return answer;
+    });
+  }
+
   async #markSignInAgain(
     key: string,
     record: McpServerSignInRecord,
@@ -1343,7 +1422,9 @@ export class McpServerSignIn {
     try {
       await this.#commit(async () => {
         if (!this.#currentGrant(key, record)) return;
-        this.#signIns.set(key, { ...record, signInAgain: reason });
+        const owner = this.#signIns.get(key);
+        if (owner === undefined) return;
+        this.#signIns.set(key, { ...owner, signInAgain: reason });
         changed = true;
         await this.#persist();
       });
@@ -1649,7 +1730,26 @@ export class McpServerSignIn {
       }
       for (const [key, record] of Object.entries(parsed.signIns)) {
         if (isRecord(record) && typeof record.credentialRef === "string") {
-          this.#signIns.set(key, record as McpServerSignInRecord);
+          const stored = record as McpServerSignInRecord;
+          const { account: supplied, ...owner } = stored;
+          if (
+            stored.descriptor?.dialect === SLACK_MCP_USER_OAUTH.dialect &&
+            supplied !== undefined
+          ) {
+            try {
+              const account = decodeMcpReportedAccount(supplied);
+              this.#signIns.set(key, {
+                ...owner,
+                account,
+                ...(account.grantedScopes !== undefined &&
+                !account.grantedScopes.includes(SLACK_MCP_USER_OAUTH.readScope)
+                  ? { signInAgain: "permission-missing" as const }
+                  : {}),
+              });
+            } catch {
+              this.#signIns.set(key, { ...owner, signInAgain: "account-changed" });
+            }
+          } else this.#signIns.set(key, owner);
         }
       }
     } catch {
@@ -1695,7 +1795,11 @@ function refused(
 function recordView(record: McpServerSignInRecord): McpServerSignInView {
   if (record.signOutPending) return signOutPending();
   return record.signInAgain === undefined
-    ? { kind: "signed-in", issuer: record.issuer }
+    ? {
+        kind: "signed-in",
+        issuer: record.issuer,
+        ...(record.account === undefined ? {} : { account: record.account }),
+      }
     : { kind: "sign-in-again", reason: record.signInAgain };
 }
 
@@ -1706,7 +1810,11 @@ function recordView(record: McpServerSignInRecord): McpServerSignInView {
 type McpSignInAgainReason = Exclude<HostOAuthSignInAgainReason, "interaction-required">;
 
 function signInAgainReason(value: unknown): McpSignInAgainReason | undefined {
-  return value === "revoked" || value === "expired" || value === "refresh-reused"
+  return value === "revoked" ||
+    value === "expired" ||
+    value === "refresh-reused" ||
+    value === "account-changed" ||
+    value === "permission-missing"
     ? value
     : undefined;
 }
@@ -1868,4 +1976,43 @@ function recordAdmitsTransport(record: McpServerSignInRecord, url: string): bool
         transportUrl === SLACK_MCP_USER_OAUTH.transportUrl
     : record.descriptor.resource === transportUrl &&
         transportUrl !== SLACK_MCP_USER_OAUTH.transportUrl;
+}
+
+function slackRegistrationReady(registration: McpOAuthClientRegistration | undefined): boolean {
+  return (
+    registration?.kind === "registered" &&
+    registration.resource === SLACK_MCP_USER_OAUTH.resource &&
+    registration.issuer === SLACK_MCP_USER_OAUTH.issuer &&
+    registration.redirectHostname === "localhost" &&
+    registration.clientAuthentication?.method === "client_secret_post" &&
+    registration.clientAuthentication.tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint
+  );
+}
+function inspectReportedAccount(
+  previous: McpReportedAccount | undefined,
+  value: unknown,
+):
+  | { readonly kind: "valid"; readonly account: McpReportedAccount }
+  | { readonly kind: "invalid" | "account-changed" | "permission-missing" } {
+  let reported: McpReportedAccount;
+  try {
+    reported = decodeMcpReportedAccount(value);
+  } catch {
+    return { kind: "invalid" };
+  }
+  if (
+    (previous?.workspaceId !== undefined &&
+      reported.workspaceId !== undefined &&
+      previous.workspaceId !== reported.workspaceId) ||
+    (previous?.userId !== undefined &&
+      reported.userId !== undefined &&
+      previous.userId !== reported.userId)
+  )
+    return { kind: "account-changed" };
+  if (
+    reported.grantedScopes !== undefined &&
+    !reported.grantedScopes.includes(SLACK_MCP_USER_OAUTH.readScope)
+  )
+    return { kind: "permission-missing" };
+  return { kind: "valid", account: { ...previous, ...reported } };
 }

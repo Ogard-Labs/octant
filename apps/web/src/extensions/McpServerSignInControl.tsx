@@ -13,6 +13,12 @@ export interface McpServerSignInControlProps {
   readonly pollIntervalMs?: number;
   /** Start the sign-in as soon as the host says the server is signed out; the person just asked to connect. */
   readonly autoBegin?: boolean;
+  readonly autoSetup?: boolean;
+  readonly onAutoSetup?: () => void;
+  readonly registration?: {
+    readonly guideUrl: string;
+    readonly requestedScopes: readonly string[];
+  };
 }
 
 /**
@@ -132,14 +138,38 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
     <McpClientSetupControl
       key={`${extensionId}:${componentId}`}
       client={client}
+      autoOpen={props.autoSetup === true && view.kind === "client-setup-required"}
+      {...(props.onAutoSetup === undefined ? {} : { onAutoOpen: props.onAutoSetup })}
       extensionId={extensionId}
       componentId={componentId}
       disabled={props.disabled || busy}
       onSaved={() => {
-        setView((current) => (current?.kind === "refused" ? { kind: "signed-out" } : current));
+        void ask({ kind: "status", ...target });
       }}
     />
   );
+  const registration =
+    props.registration === undefined ? null : (
+      <span className="mcp-sign-in__account mcp-sign-in__state">
+        <span>
+          Use an eligible app you register with this service. Save client setup before signing in.
+        </span>
+        <a href={props.registration.guideUrl} target="_blank" rel="noreferrer">
+          App registration guide
+        </a>
+        <span>Requested permission: {props.registration.requestedScopes.join(", ")}</span>
+      </span>
+    );
+  if (view.kind === "client-setup-required")
+    return (
+      <div className="mcp-sign-in">
+        <span className="mcp-sign-in__state" role="status">
+          {view.message}
+        </span>
+        {registration}
+        {setup}
+      </div>
+    );
   const signIn = (
     <OctantButton
       disabled={props.disabled || busy}
@@ -155,6 +185,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
     return (
       <div className="mcp-sign-in">
         <span className="mcp-sign-in__state">Not signed in</span>
+        {registration}
         {signIn}
         {setup}
       </div>
@@ -164,8 +195,15 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
     return (
       <div className="mcp-sign-in">
         <span className="mcp-sign-in__state" role="status">
-          {view.reason === "revoked" ? "Access was revoked" : "The sign-in expired"}
+          {view.reason === "account-changed"
+            ? "Check the connected account and sign in again"
+            : view.reason === "permission-missing"
+              ? "The account did not grant the required permission"
+              : view.reason === "revoked"
+                ? "Access was revoked"
+                : "The sign-in expired"}
         </span>
+        {registration}
         {signIn}
         {setup}
       </div>
@@ -236,6 +274,16 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
         <span className="mcp-sign-in__state" role="status">
           Signed in through {view.issuer}
         </span>
+        {props.registration !== undefined || view.account !== undefined ? (
+          <span className="mcp-sign-in__account mcp-sign-in__state">
+            <span>Reported workspace ID: {view.account?.workspaceId ?? "Not reported"}</span>
+            <span>Reported user ID: {view.account?.userId ?? "Not reported"}</span>
+            <span>
+              Last reported permissions: {view.account?.grantedScopes?.join(", ") ?? "Not reported"}
+            </span>
+            <span>Tools are checked when selected for an authorized task.</span>
+          </span>
+        ) : null}
         <OctantButton
           disabled={props.disabled || busy}
           onClick={() => void ask({ kind: "sign-out", ...target })}
