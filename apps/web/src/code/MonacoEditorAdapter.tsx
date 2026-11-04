@@ -52,6 +52,7 @@ export interface MonacoLanguageBridge {
  */
 export interface MonacoDebugDecorations {
   readonly breakpoints: ReadonlyArray<number>;
+  readonly unresolvedBreakpoints?: ReadonlyArray<number>;
   readonly stoppedLine?: number;
 }
 
@@ -84,6 +85,8 @@ export interface MonacoAdapterRuntime {
       readonly languageBridge?: MonacoLanguageBridge;
       readonly modelUri: string;
       readonly onChange: (value: string) => void;
+      readonly onCursorPosition?: (position: MonacoEditorPosition) => void;
+      readonly onReferences?: (position: MonacoEditorPosition) => void;
       /**
        * A click in the gutter, or F9, on a line: the editor shows a gutter
        * for breakpoints only when this is given.
@@ -130,6 +133,8 @@ export interface MonacoEditorAdapterProps {
   readonly loadRuntime?: () => Promise<MonacoAdapterRuntime>;
   readonly modelUri: string;
   readonly onChange: (value: string) => void;
+  readonly onCursorPosition?: (position: MonacoEditorPosition) => void;
+  readonly onReferences?: (position: MonacoEditorPosition) => void;
   readonly onSave?: () => void;
   readonly debugDecorations?: MonacoDebugDecorations;
   readonly onToggleBreakpoint?: (lineNumber: number) => void;
@@ -185,6 +190,12 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
               }),
           modelUri: props.modelUri,
           onChange: (nextValue) => latestProps.current.onChange(nextValue),
+          ...(latestProps.current.onCursorPosition === undefined
+            ? {}
+            : { onCursorPosition: (position) => latestProps.current.onCursorPosition?.(position) }),
+          ...(latestProps.current.onReferences === undefined
+            ? {}
+            : { onReferences: (position) => latestProps.current.onReferences?.(position) }),
           ...(latestProps.current.onToggleBreakpoint === undefined
             ? {}
             : {

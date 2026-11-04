@@ -467,6 +467,9 @@ export function startOctantServer(
       workThreadProjection,
     });
     const {
+      readHarnessProcessReceipts,
+      beginGoogleCliChange,
+      recoverGoogleCliCommands,
       personMemorySweep,
       runtimeForgeChanges,
       followUpCreation,
@@ -533,6 +536,7 @@ export function startOctantServer(
       workThreadProjection,
       workTurnProjection,
     });
+    yield* Effect.promise(recoverGoogleCliCommands);
     const {
       agentProfileRoutes,
       buildCodeService,
@@ -1015,8 +1019,10 @@ export function startOctantServer(
         capacityScheduler,
         chatService,
         codeOperationRuntime,
+        codeSessionAuthority,
         configuredDriverOptions,
         contextHarness,
+        hostShield,
         liveProjectBrowsers,
         nativeHarnessHooks,
         persistence,
@@ -1024,6 +1030,7 @@ export function startOctantServer(
         providerRuntimeRegistry,
         browserToolApprovalService,
         routeCodeService,
+        serverProjectStore,
         spendCeilingService,
         windowAuthorityStore,
         workThreadProjection,
@@ -1070,6 +1077,9 @@ export function startOctantServer(
       pushGatewaySetting,
       pushNotificationTokenStore,
     } = wireAutomation({
+      agentRunOrchestration,
+      externalContentIngestionStore,
+      readHarnessProcessReceipts,
       capacityScheduler,
       chatService,
       codeCompletedThreadSource,
@@ -1081,6 +1091,7 @@ export function startOctantServer(
       routineProposalService,
       windowAuthorityStore,
       workThreadProjection,
+      workTurnProjection,
       workThreadService,
       workThreadServiceWithWorkflows,
       workTurnService,
@@ -1278,6 +1289,7 @@ export function startOctantServer(
       secretStoresRoutes,
       remoteHost,
     } = wireRemote({
+      beginGoogleCliChange,
       codeService,
       projectService,
       browserExtensionService,

@@ -1,5 +1,5 @@
 ---
-description: Project-wide type errors and go to definition in the Code editor, from a confined language server, and how to turn them off.
+description: Project-wide type errors, go to definition, and capability-aware references in the Code editor, from a confined language server, and how to turn them off.
 ---
 
 # Language Services
@@ -34,6 +34,34 @@ check reads one file alone and would report imports it cannot see as errors.
 Plan threads are served too: the server reads the checkout and cannot change
 it. A paired device that can reach the thread gets the same problems and
 definitions.
+
+## Find references in the checkout
+
+Place the cursor on a name and choose **Find references in checkout** in the
+editor toolbar or context menu, or press **⌘+Alt+F12** on macOS or
+**Ctrl+Alt+F12** elsewhere. The host first checks whether the running server
+supports references for this file, then confirms the current text in memory.
+It does not save the file or start a server for this action.
+
+The list names the checkout and shows a snapshot of up to 1,000 locations in
+64 files, with a notice if results were omitted. Choose a location to open it;
+a location outside this checkout shows only a notice. **Recheck references**
+queries again explicitly. **Close references** or **Escape** closes the list.
+Changing the source text or switching files hides old results.
+
+Closing a query may happen after the host accepted its in-memory text sync.
+If that acknowledgement arrives safely, the next query uses it. If the reply
+is lost, choose **Reload language document**, then **Find references in
+checkout** again. Reload explicitly reconnects this file under the current
+language-server permissions; **Recheck references** alone never opens or
+starts a server. It does not save your file or silently retry the old query.
+
+Unsupported, unknown, unavailable, stale, or timed-out support stays visible.
+Where configured, **Open externally** uses your existing editor handoff. An
+older host that cannot acknowledge the current text cannot supply this query;
+reconnect or use the external editor. Monaco's built-in single-file references
+remain available separately. Rename and reviewed quick fixes are not part of
+this references action.
 
 ## What the server can do
 

@@ -15,7 +15,12 @@ import {
   type ThreadExternalContentRequest,
   ThreadExternalContentState,
 } from "@octant/contracts/content-provenance";
-import { decodeHostAnswer } from "@octant/contracts";
+import {
+  decodeHostAnswer,
+  decodeTaskAccessQuery,
+  TaskAccessSnapshot,
+  type ContextSubjectRef,
+} from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ContextClientOptions {
@@ -25,6 +30,8 @@ export interface ContextClientOptions {
 }
 
 export interface ContextClient {
+  /** Current host facts through the existing subject-read admission; never changes access. */
+  taskAccess?(subject: ContextSubjectRef, signal?: AbortSignal): Promise<TaskAccessSnapshot>;
   inspect(
     request: ContextInspectorRequest,
     signal?: AbortSignal,
@@ -105,6 +112,20 @@ export function createContextClient(options: ContextClientOptions): ContextClien
   const externalContentAvailable = isLoopbackHttp(options.baseUrl);
   return {
     externalContentAvailable,
+    async taskAccess(subject, signal) {
+      const query = decodeTaskAccessQuery({ subject, view: "task-access" });
+      const facts = await post(
+        resolved,
+        "/api/context/inspect",
+        query,
+        signal,
+        decodeHostAnswer(TaskAccessSnapshot),
+        headers,
+      );
+      if (!sameSubject(facts.subject, query.subject))
+        throw protocol("Task access service returned a different task.");
+      return facts;
+    },
     async inspect(input, signal) {
       let request: ContextInspectorRequest;
       try {

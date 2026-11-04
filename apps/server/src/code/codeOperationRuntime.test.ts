@@ -22,6 +22,7 @@ import {
   decodeCodeEvidenceReference,
   decodeCodeOperationEvent,
   decodeCodeOperationId,
+  decodeCodeOperationCommand,
   decodeCodeThread,
   decodeCodeTerminalId,
   decodeCodeThreadId,
@@ -58,6 +59,8 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+import { createCodeRouteHandler } from "../codeRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { codeTurnExecutionPolicyReader } from "./codeTurnExecutionPolicy";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -529,62 +532,94 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("refuses another thread's in-place restore while a writing turn is live and allows it once the turn is cancelled", async () => {
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const connection = providerConnection(queue);
-    const fixture = runtimeFixture({ provider: providerDriver(connection) });
-    const restoringThread = decodeCodeThread({
-      ...thread(),
-      id: decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1"),
-      title: "Restoring thread",
-    });
-    fixture.setOtherThread(restoringThread);
-    const restore = (id: number) =>
-      fixture.runtime.execute(windowId, {
-        kind: "restore-git-checkpoint",
-        operationId: operationId(id),
-        gitOperationId: operationId(id + 1) as never,
-        threadId: restoringThread.id,
-        checkoutId,
-        checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) } as never,
+  it.each(["restore", "discard"] as const)(
+    "refuses another thread's %s while a writing turn is live and allows it once the turn is cancelled",
+    async (action) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const fixture = runtimeFixture({ provider: providerDriver(connection) });
+      const restoringThread = decodeCodeThread({
+        ...thread(),
+        id: decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1"),
+        title: "Restoring thread",
+      });
+      fixture.setOtherThread(restoringThread);
+      const capability = "A".repeat(43);
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId, capability, now: 0 });
+      const route = createCodeRouteHandler({
+        service: { executeOperation: fixture.runtime.execute } as never,
+        windowAuthorityStore,
+        now: () => 1,
+      });
+      const restore = async (id: number, authenticated = true) => {
+        const command = {
+          operationId: operationId(id),
+          gitOperationId: operationId(id + 1),
+          threadId: restoringThread.id,
+          checkoutId,
+          ...(action === "restore"
+            ? {
+                kind: "restore-git-checkpoint",
+                checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) },
+              }
+            : {
+                kind: "discard-git-changes",
+                paths: ["file.txt"],
+                expectedStateToken: "f".repeat(64),
+              }),
+        };
+        const response = await route(
+          new Request("http://127.0.0.1/api/code/commands", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(authenticated ? { "x-octant-window-capability": capability } : {}),
+            },
+            body: JSON.stringify(command),
+          }),
+        );
+        expect(response?.status).toBe(authenticated ? 200 : 401);
+        return response?.json();
+      };
+      await restore(30, false);
+
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(31),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+      await expect(restore(32)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message: `Another thread is writing in this checkout: "Runtime". Wait for its turn to finish or stop it, then ${action}.`,
+        },
       });
 
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "start-provider-turn",
-        operationId: operationId(31),
+      await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(34),
         threadId,
         checkoutId,
-        sessionId,
-        prompt: fixture.prompt,
-      }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      });
 
-    await expect(restore(32)).resolves.toMatchObject({
-      kind: "operation-failed",
-      failure: {
-        category: "conflict",
-        message:
-          'Another thread is writing in this checkout: "Runtime". Wait for its turn to finish or stop it, then restore.',
-      },
-    });
-
-    await fixture.runtime.execute(windowId, {
-      kind: "cancel-provider-turn",
-      operationId: operationId(34),
-      threadId,
-      checkoutId,
-    });
-
-    const afterCancel = await restore(35);
-    // The fixture's checkout cannot be observed, so the restore reaches Git and
-    // finds it unavailable: the settled turn no longer holds it back.
-    expect(afterCancel).toMatchObject({
-      kind: "operation-failed",
-      failure: { category: "unavailable", message: "Git mutation is unavailable." },
-    });
-    fixture.close();
-  });
+      const afterCancel = await restore(35);
+      // The fixture's checkout cannot be observed, so the restore reaches Git and
+      // finds it unavailable: the settled turn no longer holds it back.
+      expect(afterCancel).toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "unavailable", message: "Git mutation is unavailable." },
+      });
+      fixture.close();
+    },
+  );
 
   describe("an in-place restore beside a turn that is still preparing to start", () => {
     const restoringThreadId = decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1");
@@ -2523,20 +2558,31 @@ describe("CodeOperationRuntime", () => {
       latencyMs: 5,
       decidedAt: now as never,
     });
-    const runWith = async (verdict: "allow" | "ask" | "deny" | undefined) => {
+    const runWith = async (
+      verdict: "allow" | "ask" | "deny" | undefined,
+      command = "git status",
+      withoutShield = false,
+      rejectAnswer = false,
+    ) => {
       const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
       // The pending call comes from the connection, never from the event.
       const approvalCall = vi.fn(() => ({
         tool: "Bash",
-        input: JSON.stringify({ command: "git status", cwd: "/Users/dev/app/src" }),
+        input: JSON.stringify({ command, cwd: "/Users/dev/app/src" }),
       }));
-      const connection = { ...providerConnection(queue), approvalCall };
+      const connection = {
+        ...providerConnection(queue),
+        approvalCall,
+        answerApproval: vi.fn(() =>
+          rejectAnswer ? Effect.die(new Error("Pending call cannot be denied")) : Effect.void,
+        ),
+      };
       const review = vi.fn(async () => (verdict === undefined ? undefined : decision(verdict)));
       const fixture = runtimeFixture({
         provider: providerDriver(connection),
         approvalValidator: false,
         checkoutRoot: "/Users/dev/app",
-        shield: { review },
+        ...(withoutShield ? {} : { shield: { review } }),
       });
       const startOperation = operationId(40);
       await fixture.runtime.execute(windowId, {
@@ -2565,6 +2611,44 @@ describe("CodeOperationRuntime", () => {
         );
       return { connection, review, fixture, frames, approvalCall };
     };
+
+    it.each([false, true])(
+      "refuses a native forge write before generic approval, with Shield absent %s",
+      async (withoutShield) => {
+        const { connection, review, fixture, frames } = await runWith(
+          "allow",
+          "gh -R other/repository pr merge 7 --squash",
+          withoutShield,
+        );
+        await vi.waitFor(() =>
+          expect(connection.answerApproval).toHaveBeenCalledWith({
+            sessionId,
+            requestId: "provider-approval-9",
+            approved: false,
+            scope: "once",
+          }),
+        );
+        expect(review).not.toHaveBeenCalled();
+        expect(await frames()).toContainEqual(
+          expect.objectContaining({
+            kind: "tool-activity",
+            state: "failed",
+            summary: expect.stringContaining("repository, branch, revision"),
+          }),
+        );
+        expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(false);
+        await fixture.runtime.close();
+        fixture.close();
+      },
+    );
+
+    it("interrupts a provider that cannot take a native forge refusal without offering generic consent", async () => {
+      const { connection, fixture, frames } = await runWith("allow", "gh pr merge 7", false, true);
+      await vi.waitFor(() => expect(connection.interrupt).toHaveBeenCalled());
+      expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(false);
+      await fixture.runtime.close();
+      fixture.close();
+    });
 
     it("answers the provider itself when Shield allows, journals Shield's decision, and asks nobody", async () => {
       const { connection, review, fixture, frames, approvalCall } = await runWith("allow");
@@ -5203,6 +5287,10 @@ describe("CodeOperationRuntime", () => {
       overrides: Partial<CodeOperationPullRequestActions> & {
         readonly approved?: boolean;
         readonly standing?: ReadonlyArray<"project" | "routine">;
+        readonly nativeApproval?: boolean;
+        readonly resolvePullRequestTarget?: Parameters<
+          typeof createCodeOperationRuntime
+        >[0]["resolvePullRequestTarget"];
       },
     ) {
       const done = { status: "done" as const };
@@ -5234,7 +5322,10 @@ describe("CodeOperationRuntime", () => {
       const fixture = runtimeFixture({
         pullRequestTarget: true,
         gitRemotes: remotes,
-        approvalValidator: () => overrides.approved ?? true,
+        ...(overrides.resolvePullRequestTarget === undefined
+          ? {}
+          : { resolvePullRequestTarget: overrides.resolvePullRequestTarget }),
+        approvalValidator: overrides.nativeApproval ? false : () => overrides.approved ?? true,
         ...(overrides.standing === undefined ? {} : { standingMergeAllowance: overrides.standing }),
         pullRequestPort: {
           ensure: async () => ({ status: "unavailable" }),
@@ -5445,6 +5536,63 @@ describe("CodeOperationRuntime", () => {
       });
       for (const each of [refusedFixture, failing, unknown, merged]) each.fixture.close();
     });
+
+    it.each(["repository", "head", "Plan", "revoked approval"] as const)(
+      "refuses the scoped merge after its %s changes despite a real per-act approval",
+      async (changed) => {
+        let repository = "octant/octant";
+        const { fixture, actions } = actionFixture({
+          nativeApproval: true,
+          resolvePullRequestTarget: async () => ({
+            authorization: "confirmed-delivery-target",
+            baseRepository: repository,
+            baseBranch: "development",
+            head: "octant:feature/runtime",
+          }),
+        });
+        const command = {
+          kind: "merge-pull-request" as const,
+          ...scope(230),
+          method: "squash" as const,
+          headSha: head,
+          authorization: { kind: "full-access" as const },
+        };
+        try {
+          const challenge = await fixture.runtime.prepareApproval(windowId, {
+            effect: { kind: "operation", command },
+          });
+          expect(challenge).toBeDefined();
+          if (challenge === undefined) throw new Error("Expected a merge challenge");
+          const receipt = await fixture.runtime.confirmApproval(windowId, {
+            challengeId: challenge.challengeId,
+          });
+          expect(receipt).toBeDefined();
+          if (receipt === undefined) throw new Error("Expected a merge approval");
+          if (changed === "repository") repository = "other/repository";
+          if (changed === "head")
+            actions.summary.mockResolvedValue({
+              status: "read",
+              state: "open",
+              headBranch: "feature/runtime",
+              baseBranch: "development",
+              headSha: "d".repeat(40),
+            });
+          if (changed === "Plan")
+            fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+          if (changed === "revoked approval") fixture.runtime.revokeApprovals(windowId);
+          const result = await fixture.runtime.execute(windowId, {
+            ...command,
+            authorization: { kind: "approved", approvalId: receipt.approvalId },
+          });
+          expect(["operation-failed", "pull-request-state"]).toContain(result.kind);
+          expect(result).not.toMatchObject({ kind: "pull-request-state", state: "merged" });
+          expect(actions.merge).not.toHaveBeenCalled();
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
 
     it("merges without a per-act approval only while a stored choice still allows it", async () => {
       const base = {
@@ -7299,6 +7447,9 @@ function runtimeFixture(options: {
   terminalExit?: { readonly exitCode: number };
   pullRequestPort?: Parameters<typeof createCodeOperationRuntime>[0]["pullRequestPort"];
   pullRequestTarget?: boolean;
+  resolvePullRequestTarget?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolvePullRequestTarget"];
   /** The standing merge permissions the stored choices give the thread. */
   standingMergeAllowance?: ReadonlyArray<"project" | "routine">;
   repositoryTestDiscovery?: Parameters<
@@ -7311,6 +7462,10 @@ function runtimeFixture(options: {
   credentialResolver?: Parameters<typeof createCodeOperationRuntime>[0]["credentialResolver"];
   credentialReferences?: readonly { environmentName: string; reference: string }[];
   gitObservation?: GitObservationResult;
+  hunkCurrent?: () => boolean;
+  hunkApply?: NonNullable<
+    NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["applyHunks"]
+  >;
   gitRemotes?: ReadonlyArray<{
     readonly name: string;
     readonly fetchUrl: string;
@@ -7570,6 +7725,7 @@ function runtimeFixture(options: {
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
     windowAccess: {
       canAccessProject: access,
+      ...(options.hunkCurrent === undefined ? {} : { currentProjectAccess: options.hunkCurrent }),
       standingAuthority: (run) =>
         hostAccess === undefined ? run() : hostAccess.standingAuthority(run),
     },
@@ -7578,6 +7734,9 @@ function runtimeFixture(options: {
       : { acpTerminalConfinement: options.acpTerminalConfinement }),
     resolveCheckoutRoot: async () => ({
       checkoutRoot: options.checkoutRoot ?? "/private/exact",
+      ...(options.hunkCurrent === undefined
+        ? {}
+        : { rootCurrent: options.hunkCurrent, rootIdentity: { device: "1", inode: "1" } }),
       shell: "/bin/zsh",
       credentialReferences: options.credentialReferences ?? [],
       environment: {},
@@ -7664,15 +7823,17 @@ function runtimeFixture(options: {
     ...(options.standingMergeAllowance === undefined
       ? {}
       : { standingMergeAllowance: () => options.standingMergeAllowance ?? [] }),
-    resolvePullRequestTarget: async () =>
-      options.pullRequestTarget === true
-        ? {
-            authorization: "confirmed-delivery-target" as const,
-            baseRepository: "octant/octant",
-            baseBranch: "development",
-            head: "octant:feature/runtime",
-          }
-        : undefined,
+    resolvePullRequestTarget:
+      options.resolvePullRequestTarget ??
+      (async () =>
+        options.pullRequestTarget === true
+          ? {
+              authorization: "confirmed-delivery-target" as const,
+              baseRepository: "octant/octant",
+              baseBranch: "development",
+              head: "octant:feature/runtime",
+            }
+          : undefined),
     reviewFiles: { resolve: () => undefined },
     evidence: {
       put: (content, metadata) => {
@@ -7768,6 +7929,7 @@ function runtimeFixture(options: {
           }),
     },
     gitMutationPort: {
+      ...(options.hunkApply === undefined ? {} : { applyHunks: options.hunkApply }),
       stage: async () => ({ status: "failed" as const }),
       unstage: async () => ({ status: "failed" as const }),
       commit: async () => ({ status: "failed" as const }),
@@ -10051,3 +10213,122 @@ async function functionCallingEndpoint(
   };
   return { driver, bodies, answers };
 }
+
+it.each(["stage-git-hunks", "unstage-git-hunks", "reverse-git-hunks"] as const)(
+  "prepares exact retained %s approval and applies it through the production runtime adapter",
+  async (kind) => {
+    const patch =
+      "diff --git a/src/main.ts b/src/main.ts\n--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    const base = readyGitObservation([]);
+    if (base.status !== "ready") throw new Error("Invalid observation fixture");
+    let live = true;
+    const apply = vi.fn(
+      async (
+        input: Parameters<
+          NonNullable<
+            NonNullable<
+              Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]
+            >["applyHunks"]
+          >
+        >[0],
+      ) => {
+        expect(input.current()).toBe(true);
+        expect(await input.beforeApply()).toBe(true);
+        expect(input.patch).toBe(patch);
+        return { status: "applied" as const };
+      },
+    );
+    const fixture = runtimeFixture({
+      approvalValidator: false,
+      hunkCurrent: () => live,
+      hunkApply: apply,
+      gitObservation: {
+        ...base,
+        statusEntries: [{ path: "src/main.ts", index: "M", worktree: "M" }],
+        changedPaths: ["src/main.ts"],
+      },
+      gitReadDiff: async () => ({
+        status: "ready",
+        paths: ["src/main.ts"],
+        diff: { text: patch, byteLength: Buffer.byteLength(patch), truncated: false },
+      }),
+    });
+    try {
+      const scope = kind === "unstage-git-hunks" ? "staged" : "unstaged";
+      const prepared = await fixture.runtime.execute(
+        windowId,
+        decodeCodeOperationCommand({
+          kind: "prepare-git-hunks",
+          threadId,
+          checkoutId,
+          operationId: operationId(1970),
+          gitOperationId: operationId(1971),
+          scope,
+        }),
+        { initiator: "user", admissionCurrent: () => live },
+      );
+      expect(prepared.kind).toBe("git-hunks");
+      if (prepared.kind !== "git-hunks") throw new Error("Comparison missing");
+      const bytes = await fixture.runtime.readEvidence(
+        windowId,
+        threadId,
+        prepared.operationId,
+        prepared.diff.contentId,
+        () => live,
+      );
+      expect(new TextDecoder().decode(bytes.bytes)).toBe(patch);
+      const command = decodeCodeOperationCommand({
+        kind,
+        threadId,
+        checkoutId,
+        operationId: operationId(1972),
+        gitOperationId: operationId(1973),
+        comparisonOperationId: prepared.operationId,
+        selected: [prepared.hunks[0]!.id],
+      });
+      const challenge = await fixture.runtime.prepareApproval(windowId, {
+        effect: { kind: "operation", command },
+      });
+      expect(challenge?.detail).toContain("src/main.ts: −1,1 +1,1");
+      expect(challenge?.detail).toContain(
+        scope === "staged" ? "HEAD → Index" : "Index → Working tree",
+      );
+      expect(challenge?.detail).not.toContain(prepared.hunks[0]!.id);
+      const receipt = await fixture.runtime.confirmApproval(windowId, {
+        challengeId: challenge!.challengeId,
+      });
+      expect(receipt).toBeDefined();
+      const result = await fixture.runtime.execute(windowId, command, {
+        initiator: "user",
+        admissionCurrent: () => live,
+      });
+      expect(result).toMatchObject({ kind: "git-mutation-state", state: "completed" });
+      expect(apply).toHaveBeenCalledTimes(1);
+      const second = decodeCodeOperationCommand({ ...command, operationId: operationId(1974) });
+      live = false;
+      const refused = await fixture.runtime.execute(windowId, second, {
+        initiator: "user",
+        admissionCurrent: () => live,
+      });
+      expect(refused).toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "unauthorized" },
+      });
+      expect(apply).toHaveBeenCalledTimes(1);
+      expect(
+        await fixture.runtime.prepareApproval(windowId, {
+          effect: {
+            kind: "operation",
+            command: decodeCodeOperationCommand({
+              ...command,
+              comparisonOperationId: operationId(1975),
+            }),
+          },
+        }),
+      ).toBeUndefined();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  },
+);

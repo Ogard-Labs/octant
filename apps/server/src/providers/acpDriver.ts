@@ -22,6 +22,12 @@ import {
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { outputStopReason } from "./outputStopReason";
+import {
+  beginAcpUsageTurn,
+  finishAcpUsageTurn,
+  observeAcpUsage,
+  type AcpUsageState,
+} from "./acpUsage";
 import { ACP_CLIENT_TERMINAL_TOOL_NAMES, ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import {
   rejectUnsupportedChatTurn,
@@ -147,6 +153,7 @@ interface PendingQuestion {
 }
 
 interface AcpRetainedRuntime {
+  readonly usage?: AcpUsageState;
   readonly source: AcpNewSessionResult;
   readonly scope: Scope.CloseableScope;
   readonly client: AcpClientPort;
@@ -205,6 +212,7 @@ interface Factories {
 function baseCapabilities(
   profile: AcpProviderProfile,
   appManagedTools: ProviderCapabilitySupport = "unsupported",
+  version?: string,
 ) {
   return {
     streaming: "supported",
@@ -213,11 +221,10 @@ function baseCapabilities(
     approvals: "supported",
     userQuestions: profile.userQuestions,
     reasoning: "unavailable",
-    // The mapper reads a prompt result only for its stop reason and never
-    // emits usage, so no ACP agent's turn is measured. Declared unsupported,
-    // a spend ceiling leaves these turns out and says so instead of refusing
-    // every turn after the first as unknown spend.
-    usage: "unsupported",
+    usage:
+      version !== undefined && profile.usageVersions?.includes(version) === true
+        ? "supported"
+        : "unsupported",
     toolActivity: "supported",
     fileChanges: "unavailable",
     diffs: "unavailable",
@@ -475,7 +482,11 @@ function normalizeProbe(
     ...(credentialStatus === undefined ? {} : { credentialStatus }),
     models,
     capabilities: {
-      ...baseCapabilities(profile, negotiatedAppManagedTools(initialized, profile, version)),
+      ...baseCapabilities(
+        profile,
+        negotiatedAppManagedTools(initialized, profile, version),
+        version,
+      ),
       resume,
       reasoning,
     },
@@ -984,6 +995,14 @@ function makeConnection(
     };
 
     const handleNotification = (state: SessionState, notification: AcpServerNotification) => {
+      if (
+        state.runtime.usage !== undefined &&
+        notification.params.sessionId === state.sourceSessionId &&
+        notification.params.update.sessionUpdate === "usage_update"
+      ) {
+        observeAcpUsage(state.runtime.usage, notification.params.update);
+        return;
+      }
       for (const mapped of mapAcpNotification(state.context, notification)) {
         if (mapped.kind === "event") offer(mapped.event);
         else if (mapped.kind === "protocol-failure") {
@@ -1246,6 +1265,7 @@ function makeConnection(
           let scope: Scope.CloseableScope | undefined;
           let managedTools: AcpManagedToolsLease | undefined;
           let registered: SessionState | undefined;
+          let removeUsage = () => {};
           let runtime: AcpRetainedRuntime | undefined;
           const compatibility = JSON.stringify([
             profile.kind,
@@ -1357,6 +1377,23 @@ function makeConnection(
                     level: requestedLevel,
                   });
             const sourceSessionId = input.sourceSessionId;
+            // new/load can send their baseline before replying. Listen before
+            // opening the session, then keep only its exact native identity.
+            const initialUsage: AcpUsageState | undefined =
+              profile.usageVersions?.includes(connection.version) === true ? {} : undefined;
+            let usageSessionId = sourceSessionId;
+            let usageMismatch = false;
+            if (initialUsage !== undefined) {
+              removeUsage = client.onNotification((message) => {
+                if (message.params.update.sessionUpdate !== "usage_update") return;
+                usageSessionId ??= message.params.sessionId;
+                if (usageSessionId !== message.params.sessionId) {
+                  usageMismatch = true;
+                  return;
+                }
+                observeAcpUsage(initialUsage, message.params.update);
+              });
+            }
             // Native resume keeps agent context without replaying its growing
             // transcript. Retain profile compatibility for older runtimes that
             // implement resume but do not advertise the optional capability.
@@ -1519,6 +1556,11 @@ function makeConnection(
               return closing;
             };
             runtime = {
+              ...(initialUsage === undefined
+                ? {}
+                : {
+                    usage: usageMismatch || usageSessionId !== source.sessionId ? {} : initialUsage,
+                  }),
               source,
               scope: runtimeScope,
               client,
@@ -1573,6 +1615,7 @@ function makeConnection(
             releaseOwnership();
             throw error;
           } finally {
+            removeUsage();
             finishStartup();
           }
         })();
@@ -1693,6 +1736,7 @@ function makeConnection(
                     ),
                   );
                 }
+                if (state.runtime.usage !== undefined) beginAcpUsageTurn(state.runtime.usage);
                 state.promptActive = true;
                 void state.client
                   .prompt(state.sourceSessionId, prompt)
@@ -1700,6 +1744,10 @@ function makeConnection(
                     state.promptActive = false;
                     if (result.stopReason === "cancelled") cancelPendingTools(state);
                     if (state.closed || state.context.terminal) return;
+                    if (state.runtime.usage !== undefined) {
+                      const usage = finishAcpUsageTurn(state.runtime.usage, result.usage);
+                      if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
+                    }
                     state.context.terminal = true;
                     if (result.stopReason === "cancelled") {
                       offer(

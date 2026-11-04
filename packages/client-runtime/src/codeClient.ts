@@ -322,9 +322,15 @@ export interface CodeClient {
    * Optional like `listTests`: an editor without it shows no language state
    * and keeps Monaco's own single-file services.
    */
-  syncLanguageDocument?(request: CodeLanguageDocumentRequest): Promise<CodeLanguageDocumentResult>;
-  /** Diagnostics or a definition for a document this thread has open. */
-  readLanguage?(request: CodeLanguageReadRequest): Promise<CodeLanguageReadResult>;
+  syncLanguageDocument?(
+    request: CodeLanguageDocumentRequest,
+    signal?: AbortSignal,
+  ): Promise<CodeLanguageDocumentResult>;
+  /** Bounded language reads for a document this thread has open. */
+  readLanguage?(
+    request: CodeLanguageReadRequest,
+    signal?: AbortSignal,
+  ): Promise<CodeLanguageReadResult>;
   /**
    * The person at a local window approves the server that would read this
    * file to run the repository's tooling, after the host answered
@@ -1092,7 +1098,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeHostAnswer(CodeRepositoryTestListing),
       );
     },
-    async syncLanguageDocument(input) {
+    async syncLanguageDocument(input, signal) {
       let validated: CodeLanguageDocumentRequest;
       try {
         validated = decodeCodeLanguageDocumentRequest(input);
@@ -1106,6 +1112,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
+          ...(signal === undefined ? {} : { signal }),
         },
         decodeHostAnswer(CodeLanguageDocumentResult),
       );
@@ -1128,7 +1135,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeHostAnswer(CodeLanguageApprovalResult),
       );
     },
-    async readLanguage(input) {
+    async readLanguage(input, signal) {
       let validated: CodeLanguageReadRequest;
       try {
         validated = decodeCodeLanguageReadRequest(input);
@@ -1142,6 +1149,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
+          ...(signal === undefined ? {} : { signal }),
         },
         decodeHostAnswer(CodeLanguageReadResult),
       );

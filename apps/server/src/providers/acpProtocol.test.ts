@@ -504,6 +504,20 @@ describe("ACP protocol boundary", () => {
     await client.close();
   });
 
+  it.each([
+    undefined,
+    { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+    { inputTokens: "malformed" },
+  ])("preserves an optional usage receipt for runtime-specific validation", async (usage) => {
+    const { client, stdout } = transport();
+    const observed = client.prompt("session-1", "hello");
+    stdout.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn", ...(usage === undefined ? {} : { usage }) } })}\n`,
+    );
+    expect((await observed).usage).toEqual(usage);
+    await client.close();
+  });
+
   it("gives a working turn the turn budget rather than the request budget", async () => {
     // A turn is not a request: the agent may still be generating long after the
     // budget that protects a handshake has passed.

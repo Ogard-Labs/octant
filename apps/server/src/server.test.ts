@@ -59,7 +59,16 @@ import { ChatService } from "./chat/chatService";
 import { WorkThreadService } from "./work/workThreadService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
+import * as contextWiring from "./wiring/context";
+import { ServerProjectStore } from "./serverProjects/serverProjectStore";
+import { CodeSessionAuthorityStore } from "./code/codeSessionAuthorityStore";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
+
+import * as foundationsWiringModule from "./wiring/foundations";
+import * as automationWiringModule from "./wiring/automation";
+import * as agentRunsWiringModule from "./wiring/agentRuns";
+import * as harnessWiringModule from "./wiring/harness";
+import { readAutomationFileSourceActivity } from "./automation/automationFileSourceActivity";
 
 const directories: Array<string> = [];
 
@@ -70,6 +79,112 @@ afterEach(() => {
 });
 
 describe("startOctantServer", () => {
+  it("composes file-routine activity and external-data ownership from the actual earlier startup owners", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-routine-source-composition-"));
+    directories.push(directory);
+    const originalFoundations = foundationsWiringModule.wireFoundations;
+    let foundations: ReturnType<typeof originalFoundations> | undefined;
+    const foundationsSpy = vi
+      .spyOn(foundationsWiringModule, "wireFoundations")
+      .mockImplementation((input) => {
+        foundations = originalFoundations(input);
+        return foundations;
+      });
+    const originalAgentRuns = agentRunsWiringModule.wireAgentRuns;
+    const originalHarness = harnessWiringModule.wireHarness;
+    const originalAutomation = automationWiringModule.wireAutomation;
+    let agents: ReturnType<typeof originalAgentRuns> | undefined;
+    let harness: ReturnType<typeof originalHarness> | undefined;
+    let activity: Promise<"quiet" | "busy" | "unknown"> | undefined;
+    const agentSpy = vi
+      .spyOn(agentRunsWiringModule, "wireAgentRuns")
+      .mockImplementation((input) => {
+        agents = originalAgentRuns(input);
+        return agents;
+      });
+    const harnessSpy = vi.spyOn(harnessWiringModule, "wireHarness").mockImplementation((input) => {
+      harness = originalHarness(input);
+      return harness;
+    });
+    const automationSpy = vi
+      .spyOn(automationWiringModule, "wireAutomation")
+      .mockImplementation((input) => {
+        expect(foundations).toBeDefined();
+        expect(input.workTurnProjection).toBeDefined();
+        expect(input.workTurnProjection).toBe(foundations?.workTurnProjection);
+        expect(agents).toBeDefined();
+        expect(harness).toBeDefined();
+        expect(input.agentRunOrchestration).toBeDefined();
+        expect(input.agentRunOrchestration).toBe(agents?.agentRunOrchestration);
+        expect(input.externalContentIngestionStore).toBeDefined();
+        expect(input.externalContentIngestionStore).toBe(agents?.externalContentIngestionStore);
+        expect(input.readHarnessProcessReceipts).toBeDefined();
+        expect(input.readHarnessProcessReceipts).toBe(harness?.readHarnessProcessReceipts);
+        const result = originalAutomation(input);
+        activity = readAutomationFileSourceActivity({
+          canonicalRoot: directory,
+          activityWindow: [],
+          activeRun: undefined,
+          ports: {
+            readRun: () => undefined,
+            readChildren: () => [],
+            readProcessReceipts: input.readHarnessProcessReceipts,
+          },
+        });
+        return result;
+      });
+    let serving = false;
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            serve: () => {
+              serving = true;
+              return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+            },
+          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+        ),
+      );
+      expect(serving).toBe(true);
+      expect(automationSpy).toHaveBeenCalledOnce();
+      expect(await activity).toBe("quiet");
+    } finally {
+      automationSpy.mockRestore();
+      harnessSpy.mockRestore();
+      agentSpy.mockRestore();
+      foundationsSpy.mockRestore();
+    }
+  });
+
+  it("composes task-access reads with real session authority and the host reviewer before serving", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-task-access-"));
+    directories.push(directory);
+    const wire = vi.spyOn(contextWiring, "wireContext");
+    const serve = vi.fn(() => ({ url: new URL("http://127.0.0.1:13773"), stop: () => undefined }));
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            extensionSkillRoots: { resolve: async () => [] },
+            serve,
+          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+        ),
+      );
+      expect(serve).toHaveBeenCalledOnce();
+      expect(wire).toHaveBeenCalledOnce();
+      const dependencies = wire.mock.calls[0]?.[0];
+      expect(dependencies?.codeSessionAuthority).toBeInstanceOf(CodeSessionAuthorityStore);
+      expect(dependencies?.hostShield.describe).toBeTypeOf("function");
+      expect(dependencies?.serverProjectStore).toBeInstanceOf(ServerProjectStore);
+    } finally {
+      wire.mockRestore();
+    }
+  });
+
   it("recovers Chat sessions, attachments, and pending deletions before accepting requests", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-chat-recovery-"));
     directories.push(directory);
@@ -1307,10 +1422,11 @@ describe("startOctantServer", () => {
             ).then(assertResponse),
           );
           expect(evidenceBatch.status).toBe(200);
-          expect(runtime.readEvidenceBatch).toHaveBeenCalledWith(windowId, {
-            threadId,
-            items: [],
-          });
+          expect(runtime.readEvidenceBatch).toHaveBeenCalledWith(
+            windowId,
+            { threadId, items: [] },
+            expect.any(Function),
+          );
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),
     );

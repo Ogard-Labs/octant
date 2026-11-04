@@ -207,6 +207,46 @@ citation, child-run, recovery, and delivery evidence. A thread is Done when
 you mark it Done; no evidence text is needed. Opening a card activates
 that Project and thread. Chat has no board.
 
+## Routines for arriving files
+
+From **Automation Center** on this computer, create a Work routine and choose
+**When files arrive or change**. Select an existing input folder relative to the Project's
+main folder, optional file suffixes and excluded subfolders, and a settling
+interval. The preview shows the task, profile, authority, delivery target and
+maximum automatic starts per arm: 8 by default, adjustable from 1 to 32.
+Saving starts observation; it does not mean the input is ready yet. The first
+complete settled scan is a baseline, so existing files do not start a task.
+
+Only permitted regular files count. Hidden entries, symbolic links, excluded
+folders and protected files are ignored. An unreadable or replaced folder,
+unsupported path or scan limit blocks observation; choose a smaller folder or
+narrower filters when needed. The host must remain running. After a gap, the
+missed-run choice covers only net changed files that still exist, not every
+filesystem event that happened offline.
+
+A matching change while the routine or known Project activity is busy is held
+for review. It might be new input or task output; Octant cannot identify its
+writer. Open the routine and **Check input status**, then **Review and re-arm**.
+Review the held files, task, profile, level ceiling and delivery target. **Run
+once and re-arm** starts one task for that batch and counts it against the new
+allowance. **Skip these changes and re-arm** records the current baseline
+without a task. Pausing, restarting, quiet time and **Run now** do not reset the
+allowance or discard held input. After intentionally pausing a watching source,
+Resume establishes a fresh settled baseline without starting a task for changes
+made while paused; already-held or unknown activity still needs review.
+
+If a review response is unconfirmed, refresh details and history before
+choosing again. Octant does not automatically resend that decision; closing
+the dialog does not cancel a task already admitted. Finish known tasks and
+cleanup before re-arming. If the status says unsettled activity history was
+exceeded, review and finish the Project's tasks and cleanup, archive that
+routine, then explicitly create a new one; its old source cannot prove it is
+quiet.
+
+File-trigger setup and re-arm require a window on this host. File input is not
+available for Code routines yet, and a thread agent cannot propose a file
+trigger. Timed routines and follow-ups keep their existing behavior.
+
 ## Routines from a thread
 
 Ask the agent to do something later or on a schedule ("every Monday at 9,
@@ -228,7 +268,10 @@ A routine made this way belongs to the thread's Project. Each run starts a new
 thread there that asks before it runs a command or changes anything, whatever
 the proposal said. A Work routine saved before Work threads had the shell
 does not run until you edit it in Automation Center and save it with a
-profile that includes the shell and Git; its run history says why.
+profile that includes the shell and Git; its run history says why. An ordinary
+approval-gated Work profile includes both in Automation Center; you do not need
+a separate Code profile. Choosing **Ask first** there saves that choice for
+each run, including after you edit an older routine.
 
 To let a routine run in a mode other than asking first, open it in Automation
 Center and choose **Mode for each run**: **The Project's mode** uses the mode

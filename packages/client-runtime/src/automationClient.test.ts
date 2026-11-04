@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { createAutomationClient } from "./automationClient";
+import {
+  createAutomationClient,
+  FILE_ROUTINE_REQUEST_TIMEOUT_MS,
+  type AutomationClientCommand,
+} from "./automationClient";
+import { AggregateVersion, decodeAutomationId } from "@octant/contracts";
+import { Schema } from "effect";
 
 const automationId = "aa000000-0000-4000-8000-000000000001";
 const projectId = "aa000000-0000-4000-8000-000000000020";
@@ -100,6 +106,113 @@ function client(fetchImpl: typeof globalThis.fetch, maxAttempts?: number) {
 }
 
 describe("createAutomationClient", () => {
+  it.each(["fetch", "body"])(
+    "bounds a file re-arm's noncooperative %s without automatic resend",
+    async (stage) => {
+      vi.useFakeTimers();
+      let count = 0;
+      let release: ((response: Response) => void) | undefined;
+      let body: ReadableStreamDefaultController<Uint8Array> | undefined;
+      const port = new Proxy(globalThis.fetch, {
+        apply: () => {
+          count += 1;
+          if (stage === "fetch")
+            return new Promise<Response>((resolve) => {
+              release = resolve;
+            });
+          return Promise.resolve(
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  body = controller;
+                },
+              }),
+            ),
+          );
+        },
+      });
+      const command: AutomationClientCommand = {
+        kind: "rearm-file-automation",
+        automationId: decodeAutomationId(automationId),
+        expectedVersion: Schema.decodeUnknownSync(AggregateVersion)(1),
+        sourceIdentity: "a".repeat(64),
+        observationRevision: 1,
+        batchDigest: "b".repeat(64),
+        disposition: "skip",
+      };
+      try {
+        const pending = client(port, 5)
+          .execute(command)
+          .catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(FILE_ROUTINE_REQUEST_TIMEOUT_MS + 1);
+        expect(await pending).toMatchObject({
+          category: "timeout",
+          message: expect.stringContaining("has not confirmed"),
+        });
+        expect(count).toBe(1);
+        release?.(
+          jsonResponse({
+            kind: "automation-command-failed",
+            reason: "blocked",
+            message: "Late result",
+          }),
+        );
+        body?.enqueue(
+          new TextEncoder().encode(
+            JSON.stringify({
+              kind: "automation-command-failed",
+              reason: "blocked",
+              message: "Late result",
+            }),
+          ),
+        );
+        body?.close();
+        await Promise.resolve();
+        expect(count).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("cancels a held file review promptly even when the adapter ignores its abort signal", async () => {
+    const controller = new AbortController();
+    const port = new Proxy(globalThis.fetch, {
+      apply: () => new Promise<Response>(() => undefined),
+    });
+    const pending = client(port)
+      .get(decodeAutomationId(automationId), controller.signal, { fileSourceReview: true })
+      .catch((error: unknown) => error);
+    controller.abort();
+    expect(await pending).toMatchObject({ category: "aborted" });
+  });
+
+  it("binds a refreshed file review and mutation answer to the requested routine", async () => {
+    const other = { ...definition, id: "aa000000-0000-4000-8000-000000000099" };
+    const port = new Proxy(globalThis.fetch, {
+      apply: (_target, _receiver, args) =>
+        Promise.resolve(
+          jsonResponse(
+            String(args[0]).includes("/get")
+              ? { kind: "automation-detail", automation: other, runs: [] }
+              : { kind: "automation-resumed", automation: other },
+          ),
+        ),
+    });
+    await expect(
+      client(port).get(decodeAutomationId(automationId), undefined, { fileSourceReview: true }),
+    ).rejects.toMatchObject({ category: "contract" });
+    const command: AutomationClientCommand = {
+      kind: "rearm-file-automation",
+      automationId: decodeAutomationId(automationId),
+      expectedVersion: Schema.decodeUnknownSync(AggregateVersion)(1),
+      sourceIdentity: "a".repeat(64),
+      observationRevision: 1,
+      batchDigest: "b".repeat(64),
+      disposition: "skip",
+    };
+    await expect(client(port).execute(command)).rejects.toMatchObject({ category: "contract" });
+  });
   it("lists automations with bounded query parameters and strict decoding", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({ kind: "automation-list", items: [summary], nextCursor: "cursor-1" }),

@@ -91,6 +91,37 @@ describe("remote command tiers", () => {
     });
   });
 
+  it.each([
+    ["git push --force origin main", "rewrites-shared-history"],
+    ["git -C /srv/app push -f origin main", "rewrites-shared-history"],
+    ["gh pr merge 7 --squash", "merges-pull-request"],
+    ["gh -R owner/repo pr merge 7 --squash", "merges-pull-request"],
+    [
+      'gh api graphql -f "query=mutation { mergePullRequest(input: {}) { clientMutationId } }"',
+      "merges-pull-request",
+    ],
+  ])(
+    "keeps the forge hard line on an SSH command even when a server profile describes %s as a deploy",
+    (command, rule) => {
+      for (const profile of ["operate", "admin"] as const) {
+        expect(
+          judge(`ssh web1 '${command}'`, [{ ...web, profile, deployCommands: [command] }]),
+        ).toMatchObject({
+          kind: "decided",
+          verdict: "ask",
+          stage: "hard-line",
+          rule,
+        });
+        expect(judge(`ssh web1 '${command}'`, [{ ...web, profile }])).toMatchObject({
+          kind: "decided",
+          verdict: "ask",
+          stage: "hard-line",
+          rule,
+        });
+      }
+    },
+  );
+
   it("still sends a described deploy that deletes data to the person", () => {
     const deploy = "rm -rf /srv/app/current && ./release.sh";
     expect(classifyRemoteCommand(deploy, [deploy]).tier).toBe("lockout");

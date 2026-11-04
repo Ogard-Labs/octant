@@ -34,6 +34,34 @@ the same sandbox and approvals as anything else you type there. If the terminal
 is already running a program, the command goes to that program, so stop it
 first. Actions are set from this computer's window, not from a paired device.
 
+## Project planner
+
+Open a Code Project overview and find **Project planner**. Choose an existing
+thread in that Project and select **Designate planner**. Open that thread to ask
+it to survey the Project and propose work. Designation does not let it start
+tasks by itself; you can remove the designation at any time.
+
+The overview lists each proposal's exact task, explanation and status. Choose
+**Decline proposal**, or **Review and approve** to choose the provider/model,
+checkout and access for the described work. The task text and Project stay fixed.
+**Approve and start described task** creates its ordinary Code thread and sends
+that exact first message only after the host confirms creation. **Open created
+task** returns to its work. If its first turn fails, the task retains the prompt
+and refusal so you can recover there.
+
+Reconnect or refresh before making another decision when the host is unavailable
+or a proposal changed. A lost reply can mean a task was already created: Octant
+retains its submitted identity and reports uncertainty instead of creating a
+second copy or sending a first message. **Inspect submitted task** opens that
+identity; it may still be starting or unavailable. Approval stays blocked through
+closing and reopening the review, reloading the window, or using another window
+while the host has an unresolved attempt. A missing task or a still-pending
+proposal does not mean the first attempt ended. When the host proves creation
+did not start, refresh the proposal and explicitly review its repaired settings
+before approving again. Planner
+designation and decisions use this computer's local window; no phone or CLI
+planner controls are added.
+
 ## Quick tools on the start screen
 
 Once you choose a Project on a Code start screen, **Terminal** and **Browser**
@@ -142,6 +170,15 @@ in the composer changes it in one click, for new and existing threads alike:
   agent read is tagged on the tool row and the thread card, never blocked.
   The first time this computer or a Project picks Full access, Octant shows
   that warning once.
+
+Below Full access, a push or pull-request change recognized in Octant's own
+shell, or in a provider approval request Octant receives, is refused and sent
+to Octant's Git and pull-request tools. Those tools check the repository,
+branch, revision, required checks and your consent. A general shell approval
+does not replace them. A provider's own reviewer can answer commands without
+sending Octant an approval request; Octant cannot enforce this route on
+those commands. A command reported only after it starts is a record of what
+happened. Scripts and hidden targets can also escape command recognition.
 
 Each thread shows its mode and where it came from in one line at the top,
 such as "Auto · set by this Project". Octant records every time a mode is

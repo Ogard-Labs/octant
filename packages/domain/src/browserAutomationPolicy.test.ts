@@ -3,6 +3,7 @@ import {
   evaluateBrowserAction,
   canRecordBrowserObservation,
   isContextExpired,
+  browserContextExpiresAt,
   shouldProtectCredentialField,
   originAllowed,
   parseBrowserKeyChord,
@@ -196,6 +197,26 @@ describe("canRecordBrowserObservation", () => {
 });
 
 describe("isContextExpired", () => {
+  it("uses host-observed activity and the current handoff deadline without an absolute active cap", () => {
+    const created = Date.parse(activeContext.createdAt);
+    const activity = { lastActivityAt: created + 1_080_000, keptUntil: created + 1_200_000 };
+    expect(browserContextExpiresAt(activeContext, activity)).toBe(created + 1_380_000);
+    expect(isContextExpired(activeContext, created + 1_379_999, activity)).toBe(false);
+    expect(isContextExpired(activeContext, created + 1_380_000, activity)).toBe(true);
+    expect(
+      browserContextExpiresAt(activeContext, {
+        lastActivityAt: created,
+        keptUntil: created + 660_000,
+      }),
+    ).toBe(created + 660_000);
+    expect(
+      browserContextExpiresAt(activeContext, {
+        lastActivityAt: created,
+        keptUntil: created + 120_000,
+      }),
+    ).toBe(created + 300_000);
+  });
+
   it("returns false within timeout", () => {
     const createdAt = new Date("2026-07-24T12:00:00.000Z").getTime();
     expect(isContextExpired(activeContext, createdAt + 60_000)).toBe(false);

@@ -207,6 +207,29 @@ describe("Octant Shield on the host", () => {
     ).toMatchObject({ verdict: "ask", rule: "unregistered-server" });
   });
 
+  it.each([
+    ["git push --force origin main", "rewrites-shared-history"],
+    ["gh -R owner/repo pr merge 7 --squash", "merges-pull-request"],
+  ])(
+    "asks the person about the forge hard line over SSH before a model or described deploy can allow %s",
+    async (command, rule) => {
+      const { port } = fakeModel({ status: "answered", text: '{"verdict":"allow","reason":"ok"}' });
+      const shield = shieldWith(port, {
+        servers: () => [
+          { alias: "web1", user: "deploy", profile: "operate", deployCommands: [command] },
+        ],
+      });
+      expect(
+        await shield.review({
+          threadId: "t",
+          call: bash(`ssh web1 '${command}'`),
+          boundRoot: root,
+        }),
+      ).toMatchObject({ verdict: "ask", stage: "hard-line", rule });
+      expect(port.complete).not.toHaveBeenCalled();
+    },
+  );
+
   it("allows a status read on a registered server by its profile, and asks for any other host", async () => {
     const { port } = fakeModel({ status: "answered", text: "{}" });
     const shield = shieldWith(port, {

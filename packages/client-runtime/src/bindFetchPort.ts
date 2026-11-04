@@ -18,7 +18,11 @@ export function bindFetchPort(fetch: typeof globalThis.fetch): typeof globalThis
   if (fetch !== globalThis.fetch) {
     return fetch;
   }
-  return (input, init) => globalThis.fetch(input, withCapabilityRedirect(init));
+  return new Proxy(fetch, {
+    apply(_target, _receiver, [input, init]: Parameters<typeof globalThis.fetch>) {
+      return globalThis.fetch(input, withCapabilityRedirect(init));
+    },
+  });
 }
 
 function withCapabilityRedirect(init?: RequestInit): RequestInit {

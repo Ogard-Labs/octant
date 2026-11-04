@@ -11,6 +11,40 @@ function response(body: unknown, status = 200): Response {
 }
 
 describe("extension client", () => {
+  it("resolves only an opaque local native skill receipt without installing or changing settings", async () => {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      calls.push({ url: String(input), init });
+      return response({ folderPath: "/tmp/skills" });
+    };
+    const client = createExtensionClient({
+      baseUrl: "http://127.0.0.1",
+      fetch,
+      windowCapability: capability,
+    });
+    const abort = new AbortController();
+    expect(await client.resolveSkillFolder?.("R".repeat(43), abort.signal)).toBe("/tmp/skills");
+    expect(calls).toEqual([
+      {
+        url: "http://127.0.0.1/api/extensions/skill-folder-selection",
+        init: {
+          method: "POST",
+          headers: { "x-octant-window-capability": capability, "content-type": "application/json" },
+          body: JSON.stringify({ receiptId: "R".repeat(43) }),
+          signal: abort.signal,
+        },
+      },
+    ]);
+    const remote = createExtensionClient({
+      baseUrl: "https://remote.example",
+      fetch,
+      windowCapability: capability,
+    });
+    await expect(remote.resolveSkillFolder?.("R".repeat(43))).rejects.toBeInstanceOf(
+      ExtensionClientFailure,
+    );
+    expect(calls).toHaveLength(1);
+  });
   it("routes catalog, preview, inspect, lifecycle, and snapshot requests through the typed API", async () => {
     const urls: Array<string> = [];
     const fetch: typeof globalThis.fetch = async (input, init) => {

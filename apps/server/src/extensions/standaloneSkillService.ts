@@ -70,7 +70,7 @@ type SkillCommand = Extract<
 
 export class StandaloneSkillService {
   readonly #discovery: Pick<SkillDiscoveryService, "snapshot" | "reconcile"> &
-    Partial<Pick<SkillDiscoveryService, "startWatching">>;
+    Partial<Pick<SkillDiscoveryService, "startWatching" | "rootStatuses">>;
   readonly #marketplace: SkillMarketplacePort | undefined;
   readonly #lifecycle: Pick<
     ExtensionLifecycleService,
@@ -82,7 +82,7 @@ export class StandaloneSkillService {
 
   constructor(options: {
     readonly discovery: Pick<SkillDiscoveryService, "snapshot" | "reconcile"> &
-      Partial<Pick<SkillDiscoveryService, "startWatching">>;
+      Partial<Pick<SkillDiscoveryService, "startWatching" | "rootStatuses">>;
     readonly marketplace?: SkillMarketplacePort;
     readonly lifecycle: Pick<
       ExtensionLifecycleService,
@@ -157,6 +157,9 @@ export class StandaloneSkillService {
     const catalog = resolveStandaloneSkillCatalog(activated);
     return {
       ...base,
+      ...(this.#discovery.rootStatuses === undefined
+        ? {}
+        : { skillRoots: this.#discovery.rootStatuses() }),
       skills: [...catalog.skills, ...installed],
       collisions: [...base.collisions, ...catalog.collisions],
     };
