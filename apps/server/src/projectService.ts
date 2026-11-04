@@ -30,6 +30,8 @@ import {
   type ProjectMemoryView,
   type ProjectSummary,
   type ProjectType,
+  type EventActor,
+  type PermissionPersistence,
   type WindowId,
 } from "@octant/contracts";
 import {
@@ -498,6 +500,75 @@ export class ProjectService implements ProjectServiceApi {
     } catch (error) {
       throw this.#mapFailure(error);
     }
+  }
+
+  /** The owner route supplies verified host facts; this path needs no window. */
+  changeOwnerPosture(input: {
+    readonly projectId: ProjectId;
+    readonly expectedVersion: number;
+    readonly persistence: PermissionPersistence;
+    readonly ownerMemberId: string;
+    readonly freshFull: boolean;
+  }): Project {
+    this.#assertReady();
+    this.#assertModeEnabled("code");
+    const current = this.#persistence.readProject(input.projectId);
+    this.#assertExpectedVersion(current, input.expectedVersion);
+    if (
+      current?.type !== "code" ||
+      current.lifecycle !== "active" ||
+      (input.persistence === "project-default" && !input.freshFull)
+    ) {
+      throw new ProjectServiceError({
+        category: "unauthorized",
+        message: "A fresh owner unlock and an active Code Project are required.",
+      });
+    }
+    const project = changeCodeProjectAccess(
+      current,
+      input.persistence,
+      decodeTimestamp(this.#clock()),
+    );
+    const actor: EventActor = {
+      kind: "owner-unlock",
+      actorId: decodeActorId(input.ownerMemberId),
+      memberId: input.ownerMemberId,
+    };
+    this.#persistence.journal.transaction(() => {
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "project", aggregateId: project.id },
+        expectedVersion: input.expectedVersion,
+        events: [{ ...this.#pendingEvent("project.code-access-changed@1", { project }), actor }],
+      });
+      const from =
+        current.defaultPermissionMode ??
+        (current.codeAccessPersistence === "project-default" ? "full-access" : "ask-first");
+      const to = input.persistence === "project-default" ? "full-access" : "ask-first";
+      if (guardrailLowered(from, to))
+        this.#persistence.journal.append({
+          aggregate: { aggregateType: "guardrail-change", aggregateId: this.#uuid() },
+          expectedVersion: 0,
+          events: [
+            {
+              ...this.#pendingEvent(
+                GUARDRAIL_LEVEL_LOWERED,
+                decodeGuardrailLevelLowered({
+                  scope: "project",
+                  surface: "code",
+                  from,
+                  to,
+                  projectId: current.id,
+                }),
+              ),
+              actor,
+            },
+          ],
+        });
+    });
+    this.#bootstrapMemo = undefined;
+    const authoritative = this.#persistence.readProject(project.id);
+    if (authoritative?.version !== project.version) throw this.#unavailable();
+    return authoritative;
   }
 
   async executeProject(

@@ -60,6 +60,7 @@ export async function connectAgentPluginMcpSession(
     options.fetch ?? globalThis.fetch,
     options.signal,
     options.cleanupTimeoutMs,
+    options.onTransportClosed,
   );
 }
 
@@ -93,6 +94,7 @@ async function connectStreamableHttp(
   fetchImpl: typeof globalThis.fetch,
   signal?: AbortSignal,
   cleanupTimeoutMs?: number,
+  onTransportClosed?: () => void,
 ): Promise<AgentPluginMcpSession> {
   if (launch.transport === "sse") {
     throw new Error("Legacy HTTP+SSE MCP transport is not enabled.");
@@ -102,6 +104,7 @@ async function connectStreamableHttp(
     launch.headers,
     fetchImpl,
     cleanupTimeoutMs,
+    onTransportClosed,
   );
   try {
     const tools = await initializeAndListTools(transport, signal);
@@ -322,6 +325,7 @@ class StreamableHttpJsonRpcTransport implements JsonRpcTransport {
   readonly #headers: Readonly<Record<string, string>>;
   readonly #fetch: typeof globalThis.fetch;
   readonly #cleanupTimeoutMs: number;
+  readonly #onTransportClosed: (() => void) | undefined;
   #sessionId: string | undefined;
   #nextId = 1;
   #closed = false;
@@ -332,11 +336,13 @@ class StreamableHttpJsonRpcTransport implements JsonRpcTransport {
     headers: Readonly<Record<string, string>>,
     fetchImpl: typeof fetch,
     cleanupTimeoutMs = 1_000,
+    onTransportClosed?: () => void,
   ) {
     this.#url = url;
     this.#headers = headers;
     this.#fetch = fetchImpl;
     this.#cleanupTimeoutMs = cleanupTimeoutMs;
+    this.#onTransportClosed = onTransportClosed;
   }
 
   setProtocolVersion(protocolVersion: string): void {
@@ -355,76 +361,83 @@ class StreamableHttpJsonRpcTransport implements JsonRpcTransport {
   }
 
   async request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
-    if (this.#closed) throw new Error("MCP HTTP session is closed.");
     const id = this.#nextId++;
-    const response = await this.#fetch(this.#url, {
-      method: "POST",
-      headers: {
-        ...this.#requestHeaders({
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-        }),
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-      ...(signal === undefined ? {} : { signal }),
-    });
-    const sessionId = response.headers.get("mcp-session-id");
-    if (sessionId) this.#sessionId = sessionId;
-    if (!response.ok) {
-      throw new Error(`MCP HTTP request failed with status ${response.status}.`);
+    const response = await this.#post({ jsonrpc: "2.0", id, method, params }, signal);
+    let payload: { readonly result?: unknown; readonly error?: { readonly message?: string } };
+    try {
+      const contentType = response.headers.get("content-type") ?? "";
+      payload = contentType.includes("text/event-stream")
+        ? await readMatchingSseResponse(response, id, signal)
+        : JSON.parse(
+            new TextDecoder().decode(
+              await readBoundedResponseBody(
+                response,
+                MAX_STDIO_MCP_MESSAGE_BYTES,
+                "MCP HTTP JSON response exceeds the message limit.",
+              ),
+            ),
+          );
+    } catch (error) {
+      this.#fail();
+      throw error;
     }
-    const contentType = response.headers.get("content-type") ?? "";
-    if (contentType.includes("text/event-stream")) {
-      const payload = await readMatchingSseResponse(response, id, signal);
-      if (payload.error) throw new Error(payload.error.message ?? "MCP request failed.");
-      return payload.result;
-    }
-    const payload = JSON.parse(
-      new TextDecoder().decode(
-        await readBoundedResponseBody(
-          response,
-          MAX_STDIO_MCP_MESSAGE_BYTES,
-          "MCP HTTP JSON response exceeds the message limit.",
-        ),
-      ),
-    ) as {
-      result?: unknown;
-      error?: { message?: string };
-    };
+    // An application-level refusal does not invalidate a healthy MCP session.
     if (payload.error) throw new Error(payload.error.message ?? "MCP request failed.");
     return payload.result;
   }
 
   async notify(method: string, params: unknown, signal?: AbortSignal): Promise<void> {
+    await this.#post({ jsonrpc: "2.0", method, params }, signal);
+  }
+
+  async #post(message: Readonly<Record<string, unknown>>, signal?: AbortSignal): Promise<Response> {
     if (this.#closed) throw new Error("MCP HTTP session is closed.");
-    const response = await this.#fetch(this.#url, {
-      method: "POST",
-      headers: {
-        ...this.#requestHeaders({
+    let response: Response;
+    try {
+      response = await this.#fetch(this.#url, {
+        method: "POST",
+        headers: this.#requestHeaders({
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
         }),
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", method, params }),
-      ...(signal === undefined ? {} : { signal }),
-    });
+        body: JSON.stringify(message),
+        ...(signal === undefined ? {} : { signal }),
+      });
+    } catch (error) {
+      this.#fail();
+      throw error;
+    }
+    if (this.#closed) throw new Error("MCP HTTP session is closed.");
     const sessionId = response.headers.get("mcp-session-id");
     if (sessionId) this.#sessionId = sessionId;
     if (!response.ok) {
-      throw new Error(`MCP HTTP notification failed with status ${response.status}.`);
+      if (response.status === 404) this.#fail();
+      throw new Error(`MCP HTTP request failed with status ${response.status}.`);
     }
+    return response;
+  }
+
+  #fail(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#onTransportClosed?.();
+    // A lost response may follow a committed side effect. Retire this session,
+    // never replay the request; later authority reconciliation may discover a new one.
+    void this.close();
   }
 
   async close(): Promise<void> {
     this.#closed = true;
     if (this.#sessionId === undefined) return;
+    const headers = this.#requestHeaders();
+    this.#sessionId = undefined;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#cleanupTimeoutMs);
     timeout.unref?.();
     try {
       await this.#fetch(this.#url, {
         method: "DELETE",
-        headers: this.#requestHeaders(),
+        headers,
         signal: controller.signal,
       });
     } catch {
