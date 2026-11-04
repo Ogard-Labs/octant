@@ -12,13 +12,14 @@ Status: identity, packaging, update-ring and authenticated window-bootstrap
 foundations are implemented. A compatible authenticated Stable app can register
 an ordinary Nightly window and give its own bundled renderer a short-lived host
 capability. Development, ad-hoc and incompatible builds refuse. Nightly never
-imports the host-owning desktop module, initializes host credentials, starts a
-host or migrates shared data. The bounded embedded Browser frame/input path is implemented. Complete Browser
+imports the host-owning desktop module, initializes host credentials, owns a
+host or migrates shared data. When Stable is closed, Nightly can ask a validated
+installed Stable to start its host without opening a Stable window. The bounded embedded Browser frame/input path is implemented. Complete Browser
 and other native broker parity remain unfinished; this is not yet a usable
 second app.
 
 The remaining delivery includes complete embedded browsing parity,
-stable host-only launch and retention, shared sign-in operations, the complete
+host retention, shared sign-in operations, the complete
 `octant-nightly` command, the installer and removal controls, inverted icon,
 Nightly labels, and the functional release preflight. Coexistence, reconnect
 and rollback still need their implementation and packaged evidence. The
@@ -67,6 +68,39 @@ The data folder has one host, and it is Octant's.
   Updating Octant restarts the host, and Nightly reconnects when it is back.
 - The credential broker and Keychain items stay with the host's app, so a sign-in
   made from either window is stored once.
+
+## Starting a closed Stable host
+
+On packaged macOS, a native `not-running` status can trigger one launch of the
+installed Stable app. Launch Services locates the candidate; its registration
+and path grant no trust. Before launch, Nightly validates its own primary-app
+identity and the candidate's same-Team Developer ID signature, hardened runtime,
+retained library validation, strict nested-resource seal, local volume, fixed
+entry, ASAR integrity metadata and fuses. The signed `host-only-v1` capability
+marker additionally proves that Stable recognizes this role. Missing, older,
+unsigned or invalid artifacts refuse. Ambiguous or invalid status never launches
+a replacement, and no shell command or caller-selected executable is accepted.
+
+The native launcher opens only that validated bundle URL without activation,
+recent-item changes, prompts, a forced new instance or substitution of an app
+at another URL. Stable accepts the exact `--octant-host-only` role and uses its
+existing single-instance lock and host lifecycle. It starts or attaches the host
+before advertising native status and opens no workspace window. A repeated
+host-only process entry leaves the existing shell alone; an ordinary launch can
+still open it. Nightly never starts a second host or opens shared Browser profiles.
+
+A launch receipt grants no connection authority. Nightly retries authenticated
+status for at most 15 seconds after launch, with every native operation separately
+bounded; a status call already in flight may take up to its own three-second
+bound. Only a fresh valid response can proceed to the existing authenticated
+window protocol. Failure keeps the renderer closed. No installer or persistent
+service is involved. Security validation is not an atomic filesystem snapshot,
+and a native launch deadline cannot cancel an OS launch already submitted.
+Native close reports failure while an OS launch completion is still outstanding.
+
+Unsigned native refusal and a synthetic host startup fixture do not establish
+signed installed-app launch, complete host payload, simultaneous-start races or
+coexistence. Retention, quit-one/quit-last and reconnect remain separate work.
 
 ## Embedded Browser
 
@@ -137,7 +171,8 @@ and Node inspection entry paths. It requires ASAR-only loading and embedded ASAR
 validation, with fuse readback on the artifact before signing. Its application
 entry accepts a bounded set of launch arguments: ordinary startup, one macOS
 Launch Services process token, its own valid Code link, or the fixed scoped
-terminal role. Stable also accepts its fixed Canvas prototype-host role. It
+terminal role. Stable also accepts its fixed Canvas prototype-host and host-only roles.
+The host-only role cannot be combined with a Code link or another role. It
 refuses unknown positional entries, loader options and
 Chromium remote-debugging options before importing host or client-registration
 code. Refusal in JavaScript alone does not establish that Chromium exposed no
@@ -215,7 +250,9 @@ this endpoint, so startup says so. An authenticated status response alone cannot
 window protocol below must succeed before Nightly opens its renderer. Neither
 result establishes usable Nightly, shared native surfaces or Browser parity.
 
-The status operations are `start`, `status` and `close`. A separate closed
+The status operations are `start`, `status` and `close`. The local-only
+`launchStableHost` function performs the validated installed-app launch above;
+it adds no Mach request or registration authority. A separate closed
 window protocol shares the binding; neither offers an arbitrary Mach operation
 or renderer access to the native binding. Queue and message sizes are fixed, send/receive and
 validation decisions have deadlines, and expensive Security/filesystem work

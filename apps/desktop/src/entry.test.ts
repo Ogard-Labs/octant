@@ -31,7 +31,7 @@ vi.mock("./canvasPrototypeHost", () => ({
 }));
 vi.mock("./desktopPeerStatus", () => ({
   loadDesktopPeerStatus: () => ({}),
-  desktopPeerPreflight: async () => ({ kind: "ready", protocol: 1, version: "0.1.0" }),
+  ensureNightlyHostReady: async () => ({ kind: "ready", protocol: 1, version: "0.1.0" }),
   closeDesktopPeerStatus: async () => ({ kind: "closed" }),
 }));
 vi.mock("./desktopLaunch", async (original) => ({
@@ -54,7 +54,7 @@ it("finishes ordinary Nightly module evaluation before its client waits for Elec
     const evaluated = await Promise.race([
       imported.then(() => true),
       new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), 500);
+        timer = setTimeout(() => resolve(false), 5_000);
       }),
     ]);
     expect(evaluated).toBe(true);

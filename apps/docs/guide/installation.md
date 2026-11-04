@@ -99,7 +99,11 @@ Nightly's separate application identity and packaging foundation are available
 for development. It is not yet a usable second app. On macOS, ordinary Nightly
 startup first authenticates a status check with a compatible signed Octant in
 the same login session. Development/ad-hoc builds refuse this connection; a
-missing response can mean Octant is closed or too old. A successful status check
+missing response can mean Octant is closed or too old. If it is closed, Nightly
+can start the installed compatible signed Octant without opening an Octant
+window, then authenticate it again. An older installation that lacks this launch
+capability refuses. Nightly reports a missing installation and never starts its
+own host. A successful status check
 is followed by separate authenticated window registration. A compatible host
 issues only that window's short-lived capability; Nightly loads its own screens
 without owning host data or credentials. Its renderer closes when it cannot

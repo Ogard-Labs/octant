@@ -16,6 +16,22 @@ int main(int argc, char **argv) {
               << '\n';
     return 0;
   }
+  const std::array<std::string_view, 1> host_only = {"--octant-host-only"};
+  const std::array<std::string_view, 2> mixed = {"--octant-host-only",
+                                                 "octant://code/project/test"};
+  const std::array<std::string_view, 2> duplicate_role = {"--octant-host-only",
+                                                          "--octant-host-only"};
+  const std::array<std::string_view, 2> runtime = {"--octant-host-only",
+                                                   "--inspect"};
+  const std::array<std::string_view, 2> terminal = {"--octant-terminal-cli",
+                                                    "--help"};
+  if (!octant::desktop_peer::ordinary_desktop_arguments(true, host_only) ||
+      octant::desktop_peer::ordinary_desktop_arguments(false, host_only) ||
+      octant::desktop_peer::ordinary_desktop_arguments(true, mixed) ||
+      octant::desktop_peer::ordinary_desktop_arguments(true, duplicate_role) ||
+      octant::desktop_peer::ordinary_desktop_arguments(true, runtime) ||
+      octant::desktop_peer::ordinary_desktop_arguments(true, terminal))
+    return 10;
   const std::string sentinel = "dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX";
   std::vector<uint8_t> bytes(sentinel.begin(), sentinel.end());
   bytes.push_back(1);

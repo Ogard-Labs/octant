@@ -1,3 +1,4 @@
+import { resolvePackagedDesktopLaunch } from "./desktopLaunch";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
@@ -4602,7 +4603,13 @@ function startDesktopInstance(): void {
     acceptCodeDeepLink(url);
     requestActiveWindow();
   });
+  const hostOnly = (args: ReadonlyArray<string>) =>
+    app.isPackaged &&
+    process.platform === "darwin" &&
+    resolvePackagedDesktopLaunch(applicationIdentity, args).kind === "host-only";
   app.on("second-instance", (_event, commandLine) => {
+    // A concurrent Nightly launch joins this owner without opening its shell.
+    if (hostOnly(commandLine.slice(1))) return;
     for (const argument of commandLine)
       if (argument.startsWith(`${applicationIdentity.scheme}://`)) acceptCodeDeepLink(argument);
     requestActiveWindow();
@@ -4611,7 +4618,9 @@ function startDesktopInstance(): void {
     if (argument.startsWith(`${applicationIdentity.scheme}://`)) acceptCodeDeepLink(argument);
   void app
     .whenReady()
-    .then(() => {
+    .then(async () => {
+      const withoutWindow = hostOnly(process.argv.slice(1));
+      if (withoutWindow) await startHostFromMenu();
       if (!preparingQuit && !quitPrepared && applicationIdentity.flavor === "stable") {
         const native = loadDesktopPeerStatus({
           packaged: app.isPackaged,
@@ -4639,7 +4648,7 @@ function startDesktopInstance(): void {
         }
       }
       installApplicationMenu();
-      return requestActiveWindow();
+      if (!withoutWindow) await requestActiveWindow();
     })
     .catch(handleFatalStartup);
 }

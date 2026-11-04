@@ -261,7 +261,11 @@ closed window protocol issues a fresh server window identity and short native
 lease to an authenticated Nightly main. The lease is enforced on window and
 renderer requests and held responses; administrative bridge secrets remain in
 Stable. A separate closed human presentation route carries bounded frames and
-input for the existing native Browser owner. Agent observations remain separate;
+input for the existing native Browser owner. A closed Stable app can start in
+its fixed host-only role after installed-artifact validation; fresh authenticated
+status still precedes window registration. See the owning
+[host-only launch rules](design/nightly-app.md#starting-a-closed-stable-host).
+Agent observations remain separate;
 IME, accessibility, native popups and retained-host parity remain unfinished. See
 [native client window leases](design/nightly-app.md#native-client-window-leases) and
 [desktop status preflight](design/nightly-app.md#authenticated-desktop-status-preflight).
@@ -12266,7 +12270,8 @@ macOS-only.
   now stamp separate app flavors and restrict each packaged updater to its
   identity's rings. A separate authenticated native window bootstrap can load
   Nightly's own renderer with a short server-enforced lease. It never loads
-  the host-owning module, starts a host or migrates shared data; incompatible
+  the host-owning module, owns a host or migrates shared data; it can ask a
+  validated installed Stable to start without a window. Incompatible
   or unsigned builds refuse. Bounded embedded frames and human input use the
   existing native Browser owner; complete Browser parity, other native brokers
   and retained-host behavior remain unfinished.

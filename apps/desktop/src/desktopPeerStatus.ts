@@ -8,6 +8,7 @@ export type DesktopPeerRefusal =
   | "invalid-scope"
   | "unsupported-platform"
   | "not-running"
+  | "not-installed"
   | "incompatible-host"
   | "deadline-exceeded"
   | "native-unavailable"
@@ -28,6 +29,7 @@ export type DesktopPeerClose =
 export interface NativeDesktopPeerStatus {
   readonly start: () => Promise<unknown>;
   readonly status: () => Promise<unknown>;
+  readonly launchStableHost?: () => Promise<unknown>;
   readonly close: () => Promise<unknown>;
 }
 
@@ -38,6 +40,7 @@ function refusal(value: unknown): DesktopPeerRefusal | undefined {
     case "invalid-scope":
     case "unsupported-platform":
     case "not-running":
+    case "not-installed":
     case "incompatible-host":
     case "deadline-exceeded":
     case "native-unavailable":
@@ -98,6 +101,34 @@ export async function desktopPeerPreflight(
   return refused(undefined);
 }
 
+/** A launch receipt never replaces mutual authentication of the running host. */
+export async function ensureNightlyHostReady(
+  native: Pick<NativeDesktopPeerStatus, "status" | "launchStableHost">,
+): Promise<DesktopPeerPreflight> {
+  const initial = await desktopPeerPreflight(native);
+  if (initial.kind !== "refused" || initial.reason !== "not-running") return initial;
+  const launch = native.launchStableHost;
+  if (launch === undefined) return { kind: "refused", reason: "incompatible-host" };
+  const launched = await boundedDesktopPeerOperation(() => launch.call(native));
+  if (
+    typeof launched !== "object" ||
+    launched === null ||
+    !("kind" in launched) ||
+    launched.kind !== "started"
+  )
+    return refused(launched);
+  const deadline = performance.now() + 15_000;
+  while (performance.now() < deadline) {
+    const current = await desktopPeerPreflight(native);
+    if (performance.now() >= deadline) break;
+    if (current.kind !== "refused" || current.reason !== "not-running") return current;
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, Math.min(250, Math.max(0, deadline - performance.now()))),
+    );
+  }
+  return { kind: "refused", reason: "deadline-exceeded" };
+}
+
 export function ownDesktopPeerStatus(native: Pick<NativeDesktopPeerStatus, "start" | "close">): {
   readonly ready: Promise<DesktopPeerStart>;
   readonly close: () => Promise<DesktopPeerClose>;
@@ -153,6 +184,7 @@ export function loadDesktopPeerStatus(input: {
       typeof candidate.start !== "function" ||
       !("status" in candidate) ||
       typeof candidate.status !== "function" ||
+      ("launchStableHost" in candidate && typeof candidate.launchStableHost !== "function") ||
       !("close" in candidate) ||
       typeof candidate.close !== "function"
     )

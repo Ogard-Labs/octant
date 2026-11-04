@@ -10,7 +10,7 @@ import {
 import { launchDesktopApplication, resolvePackagedDesktopLaunch } from "./desktopLaunch";
 import {
   closeDesktopPeerStatus,
-  desktopPeerPreflight,
+  ensureNightlyHostReady,
   loadDesktopPeerStatus,
 } from "./desktopPeerStatus";
 
@@ -79,7 +79,7 @@ async function launchDesktop(): Promise<void> {
     () => import(new URL("./main.mjs", import.meta.url).href),
     async () => {
       if (native === undefined) return { kind: "refused", reason: "native-unavailable" };
-      const status = await desktopPeerPreflight(native);
+      const status = await ensureNightlyHostReady(native);
       const closed = await closeDesktopPeerStatus(native);
       return closed.kind === "closed" ? status : { kind: "refused", reason: closed.reason };
     },
