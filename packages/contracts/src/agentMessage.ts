@@ -120,6 +120,20 @@ export const decodeAgentMessageRefused = Schema.decodeUnknownSync(AgentMessageRe
 export const decodeAgentMessageAcknowledged = Schema.decodeUnknownSync(AgentMessageAcknowledged);
 export const decodeAgentMessageEndpointId = Schema.decodeUnknownSync(AgentMessageEndpointId);
 
+/** One bounded receipt petition; caller identity is supplied only by the host. */
+export const MAX_AGENT_MESSAGE_RECEIPT_IDS = 20;
+export const AgentMessageReceiptRequest = Schema.Struct({
+  action: Schema.Literal("acknowledge", "status"),
+  messageIds: Schema.Array(AgentMessageId).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_AGENT_MESSAGE_RECEIPT_IDS),
+  ),
+}).annotations(strict);
+export type AgentMessageReceiptRequest = typeof AgentMessageReceiptRequest.Type;
+export const decodeAgentMessageReceiptRequest = Schema.decodeUnknownSync(
+  AgentMessageReceiptRequest,
+);
+
 const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
 
 /** One message in the messaging bounds view: a status, never a body. */
@@ -132,6 +146,7 @@ export const AgentMessageStatusSummary = Schema.Struct({
   occurredAt: UtcTimestamp,
 }).annotations(strict);
 export type AgentMessageStatusSummary = typeof AgentMessageStatusSummary.Type;
+export const decodeAgentMessageStatusSummary = Schema.decodeUnknownSync(AgentMessageStatusSummary);
 
 export const MAX_AGENT_MESSAGE_STATUS_SUMMARIES = 20;
 

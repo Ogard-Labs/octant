@@ -322,6 +322,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     case "code-file":
       return props.projections?.file?.path === props.tab.relativePath ? (
         <MonacoEditorPane
+          debugProjectId={view.thread.projectId}
           client={props.client}
           checkoutLabel={
             view.checkout.head.kind === "branch"

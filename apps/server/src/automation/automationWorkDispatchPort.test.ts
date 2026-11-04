@@ -190,7 +190,7 @@ describe("createAutomationWorkDispatchPort", () => {
     );
   });
 
-  it("holds an unattended first turn ask-first unless the routine captured auto-accept-edits", async () => {
+  it("preserves omitted-level defaults and holds an explicit Ask first below captured auto-accept-edits", async () => {
     const turns = createTurns();
     const port = createAutomationWorkDispatchPort({
       threads: createThreads(),
@@ -207,7 +207,11 @@ describe("createAutomationWorkDispatchPort", () => {
       },
     };
 
-    for (const run of [gated, autoAccept]) {
+    const explicitAsk: AutomationRun = {
+      ...autoAccept,
+      definitionSnapshot: { ...autoAccept.definitionSnapshot, runLevel: "ask-first" },
+    };
+    for (const run of [gated, autoAccept, explicitAsk]) {
       await port.startOrRecoverFirstTurn({
         run,
         threadId,
@@ -218,7 +222,7 @@ describe("createAutomationWorkDispatchPort", () => {
     }
 
     const holds = vi.mocked(turns.startFirstTurn).mock.calls.map((call) => call[2]?.accessCeiling);
-    expect(holds).toEqual(["ask-first", "auto-accept-edits"]);
+    expect(holds).toEqual(["ask-first", "auto-accept-edits", "ask-first"]);
   });
 
   it("runs a routine the person opted into its Project's level at the thread's own level, Full access included", async () => {

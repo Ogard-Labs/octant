@@ -178,6 +178,7 @@ export interface OwnerAdministrationClient {
   /** Whether a session this device opened is still inside its five minutes. */
   readonly hasSession: () => boolean;
   /** A Code Project's or thread's posture on this host. Covered by a session. */
+  readonly listPostures: () => Promise<OwnerActionResult>;
   readonly readPosture: (subject: OwnerPostureSubject) => Promise<OwnerActionResult>;
   /** Changes a posture. Full access asks for its own unlock; any other posture is covered by a session. */
   readonly changePosture: (request: OwnerPostureChangeRequest) => Promise<OwnerActionResult>;
@@ -456,6 +457,7 @@ export function createOwnerClient(
       session = undefined;
     },
     hasSession: sessionLive,
+    listPostures: () => administration(OWNER_ROUTES.postureRead, "{}"),
     readPosture: (subject) => administration(OWNER_ROUTES.postureRead, JSON.stringify({ subject })),
     changePosture: (request) => {
       const body = JSON.stringify(request);
@@ -620,6 +622,10 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "not-a-spoke": "This computer has not joined a hub.",
   "hub-revoked": "The hub removed this computer.",
   "too-many-challenges": "This computer is busy with other unlocks. Try again in a moment.",
+  "posture-stale":
+    "The Code target changed. Refresh its level, then unlock again to apply your choice.",
+  unsupported: "This Code target does not support that change on this host.",
+  "not-found": "That Code thread or Project is no longer active. Refresh the list.",
   "device-revoked": "This computer revoked this device.",
   stale: "This phone's clock is too far from the computer's. Check the time.",
   replayed: "That request was already seen. Try again.",

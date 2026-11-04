@@ -268,6 +268,16 @@ describe("Monaco runtime", () => {
         }),
       }),
     ]);
+    session.setDebugDecorations?.({ breakpoints: [], unresolvedBreakpoints: [4] });
+    expect(mocks.decorationsSet).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        range: expect.objectContaining({ startLineNumber: 4 }),
+        options: expect.objectContaining({
+          glyphMarginClassName: "code-debug-breakpoint-unresolved",
+          glyphMarginHoverMessage: { value: "Unresolved breakpoint; review in Run and debug" },
+        }),
+      }),
+    ]);
     session.dispose();
   });
 

@@ -57,7 +57,7 @@ and service workers in. There are three kinds:
 - Tabs a page opens stay in its profile.
 - The control remembers the person's last choice per Project for new pages they
   open. It never changes the profile of a page the agent opens.
-- An agent's own new page is Private. The agent may ask to open a page in the
+- An agent's own new page is Private. A Work agent may ask to open a page in the
   Project or Personal profile (a `profile` argument on the Browser tool's
   `navigate` operation, honoured only when no page is open). The host decides,
   not the tool argument: the request raises a site approval naming the profile
@@ -65,6 +65,11 @@ and service workers in. There are three kinds:
   rebinding a page to a different model or authority still asks (see below). A
   page keeps the profile it opened in; the agent changes it only by stopping its
   Browser and opening again, which asks again.
+- The separate Code agent adapter does not yet accept `profile` on `navigate`;
+  its new pages are Private. The person's Code Browser toolbar can select a
+  stored profile, but this is not evidence that Code agent profile selection
+  and per-profile approval are wired. That task/profile foundation remains to
+  be implemented; no new Code profile selection is implied by expiry recovery.
 - The thread-less Project Browser (the person's own browser for a Project) uses
   the same control. It has no agent, so no approval applies there.
 

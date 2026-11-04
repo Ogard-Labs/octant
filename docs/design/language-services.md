@@ -1187,7 +1187,7 @@ Rejected: a read-only agent tool for the stopped state now.
 ### Debugger data and privacy
 
 - **Never journaled or exported:** variable values, `evaluate` expressions and
-  results, stack frames, program output, breakpoints, and fetched sources. They
+  results, stack frames, program output, session breakpoint responses, and fetched sources. They
   live in the host's memory for the session (output in a 1 MiB ring, as a
   Project terminal's transcript is) and are gone when it ends. Diagnostics
   exports carry session counts and end reasons only.
@@ -1199,8 +1199,18 @@ Rejected: a read-only agent tool for the stopped state now.
   Project, thread, configuration digest, and end reason. A thread purge removes
   the session records; a Project erase removes those, the approvals, and the
   egress records, and ends running sessions at once.
-- **Breakpoints** are the window's state for the thread, sent at each start,
-  and are not kept by the host after the session.
+- **Breakpoint configuration** is saved only in this device's renderer storage,
+  separately from session state, under the canonical server origin, launch
+  window ID, thread and checkout. It stores selected paths and lines plus the
+  Project/file identity and content digest needed to check them; never source
+  text, variables, output, expressions, stopped frames or a session ID. It is
+  not journaled, backed up, exported or replicated by the host. The host receives
+  verified locations at Start and keeps none after the session. A successful person-triggered thread
+  purge result received by this browser clears that origin's exact Code thread configuration across its window
+  and checkout namespaces; another mode with the same ID is unaffected. A local
+  storage failure is reported and cleanup can be retried without another host
+  purge. A renderer that was offline during the purge cannot claim remote device
+  erasure. Browser storage may be cleared independently.
 - **No memory views.** Memory, disassembly, and register views are not offered.
 
 ### Debugger threat model
@@ -1405,13 +1415,28 @@ the addendum left a choice open.
   offers nothing to start or confirm.
 - **Breakpoints.** A line breakpoint is set from the editor's glyph gutter
   or with F9 on the cursor's line, so the pointer is never the only way.
-  They are held in the renderer's memory for the thread on its checkout,
-  shared by the editor and the panel and never persisted, so a reload
-  starts with none. A toggle past 256 lines in a file or 64 files takes
-  none, since the host would refuse the Start, and the editor says which
-  bound it reached until the next toggle it takes. Start sends them all;
-  while a session runs, each file whose lines change is sent at once with
-  `set-breakpoints`. The panel offers no conditions, exception filters,
+  They are shared by the editor and panel and saved as configuration only.
+  Reload or host restart never starts or attaches a debug session. Restored
+  entries begin unresolved until ordinary authorized reads confirm the current
+  Project, checkout, file ID, device/inode and digest. The content client verifies
+  length and SHA-256 for the host's immutable content reference; a metadata
+  digest by itself is not proof of returned bytes. Reads are bounded to selected
+  files, four at once, 5 MiB each and an absolute 15-second validation deadline.
+  Missing, unreadable, changed, dirty or out-of-range locations remain listed and
+  are not sent to the adapter; line numbers are never silently moved or clamped.
+  A fresh clean read allows explicit **Use current locations** to accept a changed
+  file. The person's unsaved draft, including a draft retained across pane
+  remounts, blocks acceptance until saved or discarded; an unrelated clean
+  reader cannot clear it. A toggle past 256 lines in a file or 64 files takes
+  none and says which bound it reached. The list can remove a location without
+  opening its file. Start rechecks every selected file and refuses to start while
+  any remains unresolved. While a session runs, only verified lines are sent by
+  `set-breakpoints`; invalidation clears that file's active lines.
+  The canonical origin identifies an endpoint, not physical-host continuity:
+  moving to another origin does not migrate settings, and reusing an origin for
+  another host still requires the exact authorized file match. No new host ID or
+  debug authority is introduced. Storage failures warn that changes may be held
+  only in memory, and corrupt records are refused rather than silently replaced. The panel offers no conditions, exception filters,
   watches, or hover evaluation yet: the adapter's default exception filters
   apply, as the host sends them.
 - **The current file.** A launch file's current-file variables are filled

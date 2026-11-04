@@ -9,6 +9,7 @@ import {
   type GuardrailLevelScope,
 } from "@octant/domain/guardrail-policy";
 import { PERMISSION_MODE_LABEL } from "./PermissionModePicker";
+import { TaskAccessDetails, useTaskAccessFacts } from "./TaskAccessDetails";
 
 /**
  * The defaults a thread's level can come from, so a thread can say whether
@@ -86,22 +87,59 @@ export function ThreadGuardrailLevel(props: {
    * Ask first rather than claim a reviewer is in force.
    */
   readonly autoSupported: boolean;
+  readonly factsVersion?: number;
+  readonly factsActivity?: string;
 }) {
   const scope = useGuardrailScope(props);
-  const inForce = props.mode === "auto" && !props.autoSupported ? "ask-first" : props.mode;
-  return <GuardrailLevelIndicator mode={inForce} scope={scope} />;
+  const read = useTaskAccessFacts(props.mode, props.factsVersion, props.factsActivity);
+  const selectedOnly = read.context !== undefined && read.facts?.effectiveMode === undefined;
+  const inForce =
+    read.facts?.effectiveMode ??
+    (selectedOnly
+      ? props.mode
+      : props.mode === "auto" && !props.autoSupported
+        ? "ask-first"
+        : props.mode);
+  const currentDefault = read.facts?.default;
+  const scopeText =
+    currentDefault?.status === "known"
+      ? currentDefault.matchesSelected
+        ? `selected level matches the current ${currentDefault.scope === "project" ? "Project" : "global"} default`
+        : "selected level differs from the current default"
+      : read.facts === undefined
+        ? selectedOnly
+          ? "effective level not reported"
+          : undefined
+        : "default not reported";
+  return (
+    <>
+      <GuardrailLevelIndicator
+        mode={inForce}
+        scope={scope}
+        scopeText={scopeText}
+        selectedOnly={selectedOnly}
+      />
+      <TaskAccessDetails read={read} />
+    </>
+  );
 }
 
 /** The level in force on a thread and the scope it came from, in the thread's header. */
 export function GuardrailLevelIndicator(props: {
   readonly mode: PermissionMode;
   readonly scope?: GuardrailLevelScope | undefined;
+  readonly scopeText?: string | undefined;
+  readonly selectedOnly?: boolean;
 }) {
   const label = PERMISSION_MODE_LABEL[props.mode];
   return (
     <p className="guardrail-level thread-column" data-mode={props.mode}>
-      <span className="guardrail-level__mode">{label}</span>
-      {props.scope === undefined ? null : (
+      <span className="guardrail-level__mode">
+        {props.selectedOnly ? `Selected ${label}` : label}
+      </span>
+      {props.scopeText !== undefined ? (
+        <span className="guardrail-level__scope"> · {props.scopeText}</span>
+      ) : props.scope === undefined ? null : (
         <span className="guardrail-level__scope"> · set by {SCOPE_WORDS[props.scope]}</span>
       )}
     </p>

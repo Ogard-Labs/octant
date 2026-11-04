@@ -2023,6 +2023,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       <h1 className="sr-only">{props.title}</h1>
       {thread === undefined ? null : (
         <ThreadGuardrailLevel
+          factsVersion={thread.version}
+          factsActivity={`${runningTurn?.requestId ?? ""}:${latestStatus ?? "idle"}`}
           autoSupported={autoSupported}
           mode={workModeOf(thread.access)}
           projectId={String(thread.projectId)}
