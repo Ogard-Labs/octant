@@ -1714,6 +1714,38 @@ describe("CodeOperationRuntime", () => {
         expect(create).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
         expect(act).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
         if (decision === "approved") {
+          currentSnapshot = decodeBrowserAutomationSnapshot({
+            ...snapshot,
+            status: "stale",
+            context: { ...snapshot.context, state: "expired" },
+            failure: {
+              category: "context-expired",
+              message: "The Browser page expired. It used the Private profile.",
+            },
+          });
+          await Effect.runPromise(
+            Queue.offer(
+              queue,
+              providerEvent({
+                kind: "tool-request",
+                requestId: "browser-expired",
+                toolName: "octant_browser",
+                inputJson: '{"operation":"snapshot"}',
+              }),
+            ),
+          );
+          await vi.waitFor(() => {
+            const answer = vi
+              .mocked(provider.answerTool)
+              .mock.calls.find(([reply]) => reply.requestId === "browser-expired")?.[0];
+            expect(answer?.isError).toBe(true);
+            expect(JSON.parse(answer?.resultJson ?? "null")).toMatchObject({
+              failure: { category: "context-expired" },
+            });
+          });
+          expect(create).toHaveBeenCalledTimes(1);
+          expect(act).toHaveBeenCalledTimes(1);
+          currentSnapshot = snapshot;
           await fixture.runtime.execute(windowId, {
             kind: "cancel-provider-turn",
             operationId: operationId(72),
@@ -1731,6 +1763,34 @@ describe("CodeOperationRuntime", () => {
             prompt: fixture.prompt,
           });
           await vi.waitFor(() => expect(provider.send).toHaveBeenCalledTimes(2));
+          currentSnapshot = decodeBrowserAutomationSnapshot({
+            ...snapshot,
+            status: "stale",
+            context: { ...snapshot.context, state: "expired" },
+            failure: { category: "context-expired", message: "Expired Private page." },
+          });
+          await Effect.runPromise(
+            Queue.offer(
+              queue,
+              providerEvent({
+                kind: "tool-request",
+                requestId: "browser-expired-after-cancel",
+                toolName: "octant_browser",
+                inputJson: '{"operation":"snapshot"}',
+              }),
+            ),
+          );
+          await vi.waitFor(() => {
+            const reply = vi
+              .mocked(provider.answerTool)
+              .mock.calls.find(
+                ([answer]) => answer.requestId === "browser-expired-after-cancel",
+              )?.[0];
+            expect(JSON.parse(reply?.resultJson ?? "null")).toMatchObject({
+              error: "browser-navigation-required",
+            });
+          });
+          currentSnapshot = snapshot;
           await Effect.runPromise(
             Queue.offer(
               queue,
