@@ -1,6 +1,7 @@
 import {
   decodeContextSubjectRef,
   decodeWindowId,
+  decodeTaskAccessSnapshot,
   type ContextSubjectRef,
   type WindowId,
 } from "@octant/contracts";
@@ -38,6 +39,50 @@ const commandsFor = (commandSubject: ContextSubjectRef) =>
   ] as const;
 
 describe("context routes", () => {
+  it("reads task access facts before any context plan through the existing authenticated inspect path", async () => {
+    const task = subjectOf("code-thread");
+    const facts = decodeTaskAccessSnapshot({
+      kind: "task-access",
+      standing: "active",
+      subject: task,
+      observedAt: "2026-11-02T21:00:00.000Z",
+      selectedMode: "auto",
+      effectiveContext: "unknown",
+      default: { status: "unknown" },
+      reviewer: { kind: "unknown", availability: "unknown" },
+      runtime: {
+        accountId: "82000000-0000-4000-8000-000000000010",
+        modelId: "model",
+        capabilities: [],
+      },
+      outsideContent: { read: false, effect: "unknown" },
+      limitations: [],
+    });
+    const taskAccess = vi.fn(() => facts);
+    const route = handler({ taskAccess });
+    const answer = await route(
+      request("/api/context/inspect", { subject: task, view: "task-access" }),
+    );
+    expect(answer?.status).toBe(200);
+    expect(taskAccess).toHaveBeenCalledWith(task, "local-window", windowId);
+    await expect(answer?.json()).resolves.toEqual(facts);
+    expect(answer?.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("does not return facts for a different task from a stale upstream cache", async () => {
+    const target = subjectOf("code-thread");
+    const other = decodeContextSubjectRef({
+      ...target,
+      aggregateId: "82000000-0000-4000-8000-000000000009",
+    });
+    const route = handler({ taskAccess: () => ({ subject: other }) as never });
+    const answer = await route(
+      request("/api/context/inspect", { subject: target, view: "task-access" }),
+    );
+    expect(answer?.status).toBe(503);
+    expect(await answer?.text()).not.toContain(String(other.aggregateId));
+  });
+
   it("authenticates strict inspect and command bodies without accepting supplied window identity", async () => {
     const inspect = vi.fn(() => ({ subject, sequence: 4 }) as never);
     const execute = vi.fn(() => ({ kind: "context-rebuilt", snapshot: { subject } }) as never);
@@ -490,6 +535,7 @@ function handler(
       window: WindowId,
     ) => ReturnType<ContextRouteService["execute"]>;
     compactionState: ContextRouteService["compactionState"];
+    taskAccess: NonNullable<ContextRouteService["taskAccess"]>;
   }> = {},
   windowCanOpenThread: (
     windowId: WindowId,
@@ -503,6 +549,7 @@ function handler(
   store.register({ windowId, capability, now: 1 });
   return createContextRouteHandler({
     service: {
+      ...(service.taskAccess === undefined ? {} : { taskAccess: service.taskAccess }),
       inspect: service.inspect ?? (() => ({ subject, sequence: 1 }) as never),
       execute:
         service.execute ?? (() => ({ kind: "context-rebuilt", snapshot: { subject } }) as never),

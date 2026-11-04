@@ -350,12 +350,12 @@ function authorityOptionFromProfile(
 }
 
 function authorityFromProfile(profile: AgentProfile, mode: AutomationMode): AgentRunAuthority {
-  // Approval-gated only. Work never carries shell/Git; Code may. Chat has no
-  // folder, shell, or Git at all.
+  // Work and Code turns share filesystem, shell, and Git authority. Chat
+  // grants none of those capabilities; every routine profile asks first.
   return {
     filesystem: mode !== "chat",
-    shell: mode === "code",
-    git: mode === "code",
+    shell: mode !== "chat",
+    git: mode !== "chat",
     network: false,
     tools: true,
     subagents: false,

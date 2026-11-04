@@ -36,6 +36,7 @@ import {
   evaluateBrowserAction,
   evaluateBrowserProfileUse,
   storedBrowserProfile,
+  originAllowed,
   type BrowserCaptureTaker,
   type BrowserPageSnapshotRef,
   type BrowserProfileCaller,
@@ -44,6 +45,7 @@ import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
+import { browserExpiryFailure, browserOriginRefusal } from "./browserRecoveryMessages";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
 import type { BrowserDownloadRecorder } from "./browserDownloadJournal";
@@ -111,6 +113,9 @@ export interface BrowserAutomationServiceOptions {
 
 /** How long a picture of a page stays current before a preview may ask for another. */
 const PEEK_INTERVAL_MS = 1_500;
+// Like the tool's model-binding cache, retain only a bounded recovery hint,
+// never the expired page's observations, content, pictures, or evidence.
+const MAX_BROWSER_EXPIRY_RECEIPTS = 256;
 /**
  * How long after its last action an agent still counts as driving a page. An
  * agent's turns pause between actions to think, so the mark would otherwise
@@ -272,6 +277,13 @@ export class BrowserAutomationService {
   readonly #now: () => number;
   readonly #schedule: (delayMs: number, callback: () => void) => () => void;
   readonly #contexts = new Map<BrowserContextId, OwnedContext>();
+  readonly #expiredContexts = new Map<
+    BrowserContextId,
+    {
+      readonly windowId: WindowId;
+      readonly context: BrowserContextRecord;
+    }
+  >();
   /** Each context's staged upload copies, deleted when the context closes. */
   readonly #stagedUploads = new Map<BrowserContextId, Array<() => Promise<void>>>();
   readonly #removeProcessExitListener: (() => void) | undefined;
@@ -376,6 +388,7 @@ export class BrowserAutomationService {
       }
       return snapshot(current);
     }
+    if (!dedicated) this.#forgetExpiry(input.windowId, input.threadId);
     const contextId = this.#uuid() as BrowserContextId;
     const record: BrowserContextRecord = {
       contextId,
@@ -672,12 +685,8 @@ export class BrowserAutomationService {
       );
     }
     if (this.#expired(owned)) {
-      await this.#destroy(owned, "timeout", "stale");
-      return this.#failure(
-        owned,
-        { category: "context-expired", message: "The browser context expired." },
-        "stale",
-      );
+      await this.#expireContext(owned);
+      return expiredSnapshot(owned.threadId, owned.record);
     }
     if (
       input.request.expectedObservationRevision !== undefined &&
@@ -734,7 +743,11 @@ export class BrowserAutomationService {
     if (decision.kind === "denied") {
       return this.#failure(
         owned,
-        { category: "policy-denied", message: decision.reason },
+        (input.request.kind === "navigate" || input.request.kind === "tab-open") &&
+          input.request.target !== undefined &&
+          !originAllowed(input.request.target, owned.record.policy.allowedOrigins)
+          ? browserOriginRefusal()
+          : { category: "policy-denied", message: decision.reason },
         "failed",
       );
     }
@@ -929,14 +942,7 @@ export class BrowserAutomationService {
         return this.#failure(owned, staleRefFailure, "failed");
       }
       if (!interrupted && error instanceof BrowserNavigationBlockedError) {
-        return this.#failure(
-          owned,
-          {
-            category: "policy-denied",
-            message: `The page moved to ${new URL(error.url).origin}, which is outside this session's allowed origin. Open ${error.url} directly to browse it there.`,
-          },
-          "failed",
-        );
+        return this.#failure(owned, browserOriginRefusal(new URL(error.url).origin), "failed");
       }
       return this.#failure(
         owned,
@@ -1389,7 +1395,7 @@ export class BrowserAutomationService {
     }
     if (this.#expired(owned)) {
       this.#markExpired(owned);
-      const expired = snapshot(owned);
+      const expired = expiredSnapshot(owned.threadId, owned.record);
       void this.#safeClose(owned.record.contextId).finally(() => {
         this.#contexts.delete(owned.record.contextId);
       });
@@ -1481,7 +1487,26 @@ export class BrowserAutomationService {
           contextInspectWeight(right.record.state) - contextInspectWeight(left.record.state),
       )
       .slice(0, MAX_BROWSER_THREAD_CONTEXTS);
-    if (threadContexts.length === 0) return { status: "ready", threadId, evidence: [] };
+    if (threadContexts.length === 0) {
+      const expired = [...this.#expiredContexts.values()].find(
+        (receipt) => receipt.windowId === windowId && receipt.context.threadId === threadId,
+      );
+      if (expired === undefined) return { status: "ready", threadId, evidence: [] };
+      const granted = this.#authority.resolve(threadId, expired.context.authority.mode);
+      if (
+        !this.#authority.canAccessWindow(windowId, threadId, expired.context.authority.mode) ||
+        granted === undefined ||
+        !sameToolActionAuthority(expired.context.authority, granted)
+      ) {
+        this.#forgetExpiry(windowId, threadId);
+        return failedSnapshot(
+          threadId,
+          { category: "unauthorized", message: "Browser context authority is no longer active." },
+          "failed",
+        );
+      }
+      return expiredSnapshot(threadId, expired.context);
+    }
     if (threadContexts.length === 1) {
       const single = threadContexts[0];
       if (single === undefined) return { status: "ready", threadId, evidence: [] };
@@ -1690,6 +1715,7 @@ export class BrowserAutomationService {
     windowId: WindowId,
     threadId: BrowserThreadId,
   ): Promise<BrowserAutomationSnapshot> {
+    this.#forgetExpiry(windowId, threadId);
     const ownedContexts = [...this.#contexts.values()].filter(
       (owned) => owned.windowId === windowId && owned.threadId === threadId,
     );
@@ -1703,6 +1729,7 @@ export class BrowserAutomationService {
   }
 
   async revokeWindow(windowId: WindowId): Promise<void> {
+    this.#forgetExpiry(windowId);
     await Promise.all(
       [...this.#contexts.values()]
         .filter((owned) => owned.windowId === windowId)
@@ -1714,6 +1741,7 @@ export class BrowserAutomationService {
   }
 
   async close(): Promise<void> {
+    this.#expiredContexts.clear();
     this.#removeProcessExitListener?.();
     this.#removePersonInputListener?.();
     for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
@@ -1937,6 +1965,10 @@ export class BrowserAutomationService {
    */
   async closeProfile(profile: StoredBrowserProfile): Promise<void> {
     const key = browserProfileKey(profile);
+    for (const [id, receipt] of this.#expiredContexts) {
+      if (browserProfileKey(receipt.context.policy.profile) === key)
+        this.#expiredContexts.delete(id);
+    }
     const closing = [...this.#contexts.values()]
       .filter(
         (owned) =>
@@ -2047,7 +2079,29 @@ export class BrowserAutomationService {
     owned.cancelExpiry = undefined;
     owned.record = stoppedRecord(owned.record, this.#clock(), "timeout", "expired");
     owned.status = "stale";
-    owned.failure = { category: "context-expired", message: "The browser context expired." };
+    owned.failure = browserExpiryFailure(owned.record.policy.profile);
+    if (!owned.dedicated) {
+      this.#forgetExpiry(owned.windowId, owned.threadId);
+      if (this.#expiredContexts.size >= MAX_BROWSER_EXPIRY_RECEIPTS) {
+        const oldest = this.#expiredContexts.keys().next().value;
+        if (oldest !== undefined) this.#expiredContexts.delete(oldest);
+      }
+      this.#expiredContexts.set(owned.record.contextId, {
+        windowId: owned.windowId,
+        context: owned.record,
+      });
+    }
+  }
+
+  #forgetExpiry(windowId: WindowId, threadId?: BrowserThreadId): void {
+    for (const [id, receipt] of this.#expiredContexts) {
+      if (
+        receipt.windowId === windowId &&
+        (threadId === undefined || receipt.context.threadId === threadId)
+      ) {
+        this.#expiredContexts.delete(id);
+      }
+    }
   }
 
   async #safeClose(contextId: BrowserContextId): Promise<void> {
@@ -2222,6 +2276,19 @@ function mapToolCallDenial(reason: string, request: ToolActionRequest): BrowserA
   return {
     category: "policy-denied",
     message: `Browser tool call denied (${reason}) for ${request.capability.id}.`,
+  };
+}
+
+function expiredSnapshot(
+  threadId: BrowserThreadId,
+  context: BrowserContextRecord,
+): BrowserAutomationSnapshot {
+  return {
+    status: "stale",
+    threadId,
+    context,
+    evidence: [],
+    failure: browserExpiryFailure(context.policy.profile),
   };
 }
 

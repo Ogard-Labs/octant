@@ -346,15 +346,17 @@ function formatTimestamp(value: string): string {
 
 function formatActor(actor: {
   readonly actorId: string;
-  readonly kind: "local-user" | "system" | "remote-device" | "agent";
+  readonly kind: "local-user" | "system" | "remote-device" | "owner-unlock" | "agent";
 }) {
   const label =
     actor.kind === "local-user"
       ? "Local user"
       : actor.kind === "remote-device"
         ? "Remote device"
-        : actor.kind === "agent"
-          ? "Agent"
-          : "System";
+        : actor.kind === "owner-unlock"
+          ? "Owner device"
+          : actor.kind === "agent"
+            ? "Agent"
+            : "System";
   return `${label} · ${actor.actorId}`;
 }

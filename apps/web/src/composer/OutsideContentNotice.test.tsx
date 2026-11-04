@@ -87,7 +87,7 @@ describe("outside content notice", () => {
     const marked = fakeClient();
     const { unmount } = renderNotice(marked.client);
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "This thread has read outside content, so some actions will ask each time.",
+      "This thread has read outside content. Below Full access, some actions ask each time.",
     );
     expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
     expect(marked.readExternalContent).toHaveBeenCalledWith(

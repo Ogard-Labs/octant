@@ -69,6 +69,13 @@ prohibited, Thread prohibited, Not installed, Untrusted, Plugin disabled,
 Component disabled, Incompatible, Quarantined, Draining, Broken,
 Unavailable, Interrupted, or Waiting.
 
+Turning off an executable component waits for its supervised process group to
+stop. If cleanup cannot prove which process group it owns, or a signal is
+denied, it reports failure and keeps its local ownership receipt. Restarting
+Octant does not make an uncertain process safe to stop: a surviving group whose
+original leader has exited needs live ownership evidence. Octant preserves the
+receipt rather than signalling a potentially unrelated process.
+
 Standalone skills show name, availability, source label, qualified identity,
 review and desired state, effective state, content bytes, description, and
 diagnostics. A **Name collisions** section appears when the same skill name
@@ -362,6 +369,23 @@ secret store](../guide/secret-stores.md). Removing it deletes the
 package and its secrets. Adding a server works only from the Octant window on
 this host, not from a paired device, and a browser-hosted Settings cannot keep
 secrets.
+
+### Recover a server connection
+
+If an HTTP MCP server forgets its session or the connection/response is lost,
+Octant removes the stale tools. The failed action is not repeated automatically:
+it may already have changed something even though its answer did not arrive.
+Check the result before you explicitly repeat an action.
+
+On your next authorized task invocation, Octant can initialize the server and
+read its tool list again under the current trust and task permissions. A normal
+application refusal, such as invalid tool arguments, does not discard a healthy
+connection. Other servers remain independent, and reconnecting the same tool
+set keeps your task, transcript and unsent draft. Installation and a tool list
+alone do not establish that a service or its current document is usable.
+Providers that fix their tool list when a session starts still need separate
+continuation support if that list changes; transport recovery does not silently
+start another task or claim to refresh that provider's tools.
 
 ### Connectors
 

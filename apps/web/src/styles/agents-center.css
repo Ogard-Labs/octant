@@ -41,7 +41,8 @@
 
 /* Refused messages under the bounds line: one quiet row each, sender then the
    thread it named, the reason, and its age. */
-.agents-center__refusals {
+.agents-center__refusals,
+.agents-center__receipts {
   display: grid;
   gap: 0.25rem;
   margin: 0 0 0.75rem;
@@ -52,7 +53,8 @@
   font-variant-numeric: tabular-nums;
 }
 
-.agents-center__refusals li {
+.agents-center__refusals li,
+.agents-center__receipts li {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 0.5rem;

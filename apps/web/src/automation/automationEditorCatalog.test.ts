@@ -426,8 +426,8 @@ describe("automationEditorCatalog", () => {
     });
     expect(catalog.authorityProfiles).toHaveLength(1);
     expect(catalog.authorityProfiles[0]?.receipt.effective.executionPolicy).toBe("approval-gated");
-    expect(catalog.authorityProfiles[0]?.receipt.effective.shell).toBe(false);
-    expect(catalog.authorityProfiles[0]?.receipt.effective.git).toBe(false);
+    expect(catalog.authorityProfiles[0]?.receipt.effective.shell).toBe(true);
+    expect(catalog.authorityProfiles[0]?.receipt.effective.git).toBe(true);
     expect(catalog.authorityProfiles[0]?.receipt.effectiveAuthorityDigest).toHaveLength(64);
   });
 
