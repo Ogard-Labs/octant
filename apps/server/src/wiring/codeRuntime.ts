@@ -1,3 +1,4 @@
+import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
@@ -99,7 +100,8 @@ function withCodeOperationRuntime(
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
-    execute: (windowId, command) => service.execute(windowId, command),
+    execute: (windowId, command, signal, context) =>
+      service.execute(windowId, command, signal, context),
     executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
     inspectTerminal: (windowId, input) => runtime.inspectTerminal(windowId, input),
     watchTerminal: (windowId, input) => runtime.watchTerminal(windowId, input),
@@ -114,11 +116,20 @@ function withCodeOperationRuntime(
     conversationWindow: (windowId, threadId, request) =>
       runtime.conversationWindow(windowId, threadId, request),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
-    readOperationContent: (windowId, threadId, operationId, contentId) =>
-      runtime.readEvidence(windowId, threadId, operationId, decodeCodeEvidenceContentId(contentId)),
+    readOperationContent: (windowId, threadId, operationId, contentId, admissionCurrent) =>
+      runtime.readEvidence(
+        windowId,
+        threadId,
+        operationId,
+        decodeCodeEvidenceContentId(contentId),
+        admissionCurrent,
+      ),
     ...(readEvidenceBatch === undefined
       ? {}
-      : { readOperationContents: (windowId, input) => readEvidenceBatch(windowId, input) }),
+      : {
+          readOperationContents: (windowId, input, admissionCurrent) =>
+            readEvidenceBatch(windowId, input, admissionCurrent),
+        }),
     saveFile: (windowId, input) => service.saveFile(windowId, input),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
@@ -159,7 +170,8 @@ function withCodeBoard(
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
-    execute: (windowId, command, signal) => service.execute(windowId, command, signal),
+    execute: (windowId, command, signal, context) =>
+      service.execute(windowId, command, signal, context),
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
@@ -242,6 +254,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
+    | "browserModelBindings"
     | "agentRunPersistence"
     | "androidInputGrants"
     | "codeActiveTurns"
@@ -351,6 +364,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     appleToolchainService,
     bindDeviceApprovals,
     browserAuthority,
+    browserModelBindings,
     browserAutomationService,
     browserFlows,
     browserToolApprovalService,
@@ -628,6 +642,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }),
         windowAccess: {
           canAccessProject: canAccessCodeProject,
+          currentProjectAccess: (windowId, projectId) =>
+            codeProjectAccess.standingAuthority(() => canAccessCodeProject(windowId, projectId)),
           standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
           retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
@@ -645,6 +661,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           );
           return {
             checkoutRoot: root.rootPath,
+            rootIdentity: root.rootIdentity,
+            ...(root.current === undefined ? {} : { rootCurrent: root.current }),
             workingDirectory,
             shell: defaultTerminalShell(),
             credentialReferences: [],
@@ -862,6 +880,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserAutomationService.snapshotRefs(windowId, threadId),
         },
         browserFlows,
+        browserProfiles: {
+          approvals: browserToolApprovalService,
+          readBinding: (contextId) => browserModelBindings.get(contextId),
+          rememberBinding: (contextId, binding) =>
+            rememberModelBinding(browserModelBindings, contextId, binding),
+          forgetBinding: (contextId) => {
+            browserModelBindings.delete(contextId);
+          },
+        },
         isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
         // A paired device is not at the computer a saved download would land on.
         browserDownloadRefusal: (windowId) =>
@@ -1366,12 +1393,32 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       canAccessProject: canAccessCodeProject,
       createThread: async (windowId, creation, signal, executionContext) => {
         if (codeService instanceof CodeService) {
-          return codeService.execute(windowId, creation, signal, executionContext);
+          let creationStarted = false;
+          try {
+            return await codeService.execute(windowId, creation, signal, {
+              ...executionContext,
+              onCreationBoundary: () => {
+                creationStarted = true;
+              },
+            });
+          } catch (error) {
+            if (
+              !creationStarted &&
+              codeService.execute === CodeService.prototype.execute &&
+              error instanceof CodeServiceError
+            )
+              return { kind: "creation-not-started", failure: error.failure };
+            throw error;
+          }
         }
         if (executionContext.inheritedMark !== undefined) {
-          throw new CodeServiceError(
-            decodeCodeFailure({ category: "unavailable", message: INHERITED_MARK_REFUSAL }),
-          );
+          return {
+            kind: "creation-not-started",
+            failure: decodeCodeFailure({
+              category: "unavailable",
+              message: INHERITED_MARK_REFUSAL,
+            }),
+          };
         }
         return codeService.execute(windowId, creation, signal);
       },

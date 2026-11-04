@@ -89,6 +89,8 @@ export interface LinkedSecretStores {
   readonly awsCliPointer: () => Promise<AwsCliPointer | undefined>;
   /** Writes or removes that pointer. It names items; it never holds their values. */
   readonly setAwsCliPointer: (pointer: AwsCliPointer | undefined) => Promise<void>;
+  readonly googleCliPointer?: () => Promise<GoogleCliPointerState>;
+  readonly setGoogleCliPointer?: (pointer: GoogleCliPointer | undefined) => Promise<void>;
 }
 
 /**
@@ -100,6 +102,47 @@ export interface AwsCliPointer {
   readonly store: LinkedSecretStoreKind;
   readonly accessKeyIdReference: string;
   readonly secretAccessKeyReference: string;
+}
+
+/** Public metadata only; the JSON key is read from the linked item inside the broker. */
+export interface GoogleCliPointer {
+  readonly store: LinkedSecretStoreKind;
+  readonly reference: string;
+  readonly serviceAccountEmail: string;
+  readonly scopes: ReadonlyArray<string>;
+}
+
+export type GoogleCliPointerState =
+  | { readonly status: "none" }
+  | { readonly status: "unavailable" }
+  | { readonly status: "configured"; readonly pointer: GoogleCliPointer };
+
+export function googleCliPointerOf(value: unknown): GoogleCliPointer | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).sort().join(",") !== "reference,scopes,serviceAccountEmail,store")
+    return undefined;
+  const { store, reference, serviceAccountEmail, scopes } = record;
+  if (
+    !isLinkedSecretStoreKind(store) ||
+    typeof reference !== "string" ||
+    !isPlainReference(reference) ||
+    typeof serviceAccountEmail !== "string" ||
+    serviceAccountEmail.length > 256 ||
+    !/^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.gserviceaccount\.com$/.test(serviceAccountEmail) ||
+    !Array.isArray(scopes) ||
+    scopes.length < 1 ||
+    scopes.length > 16 ||
+    !scopes.every(
+      (scope): scope is string =>
+        typeof scope === "string" &&
+        scope.length <= 256 &&
+        /^https:\/\/www\.googleapis\.com\/auth\/[a-zA-Z0-9._/-]+$/.test(scope),
+    ) ||
+    new Set(scopes).size !== scopes.length
+  )
+    return undefined;
+  return { store, reference, serviceAccountEmail, scopes };
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +352,7 @@ export interface LinkedSecretStoresOptions {
 interface LinkedState {
   readonly stores: Readonly<Partial<Record<LinkedSecretStoreKind, { readonly linkedAt: string }>>>;
   readonly aws?: AwsCliPointer;
+  readonly google?: GoogleCliPointer;
 }
 
 export function linkedSecretStoresStatePath(dataDirectory: string): string {
@@ -338,14 +382,20 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
         if (typeof linkedAt === "string") result[kind] = { linkedAt };
       }
       const aws = awsCliPointerOf((parsed as { aws?: unknown }).aws);
-      return aws === undefined ? { stores: result } : { stores: result, aws };
+      const google = googleCliPointerOf((parsed as { google?: unknown }).google);
+      return {
+        stores: result,
+        ...(aws === undefined ? {} : { aws }),
+        ...(google === undefined ? {} : { google }),
+      };
     } catch {
       return { stores: {} };
     }
   };
   let writes: Promise<unknown> = Promise.resolve();
-  const save = (state: LinkedState): Promise<void> => {
+  const update = (change: (state: LinkedState) => LinkedState): Promise<void> => {
     const run = writes.then(async () => {
+      const state = change(await load());
       await mkdir(dirname(options.statePath), { recursive: true, mode: 0o700 });
       const staging = `${options.statePath}.${process.pid}.tmp`;
       await writeFile(staging, `${JSON.stringify({ version: 1, ...state })}\n`, { mode: 0o600 });
@@ -378,15 +428,18 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       // locked or missing tool is reported and nothing is linked.
       const tool = await adapter.probe();
       if (tool !== "ready") return { status: tool };
-      const state = await load();
-      await save({ ...state, stores: { ...state.stores, [kind]: { linkedAt: now() } } });
+      await update((state) => ({
+        ...state,
+        stores: { ...state.stores, [kind]: { linkedAt: now() } },
+      }));
       return { status: "linked" };
     },
     unlink: async (kind) => {
-      const state = await load();
-      const { [kind]: _removed, ...rest } = state.stores;
       // A pointer stays, and fails closed until the store is linked again.
-      await save({ ...state, stores: rest });
+      await update((state) => {
+        const { [kind]: _removed, ...rest } = state.stores;
+        return { ...state, stores: rest };
+      });
     },
     isLinked: async (kind) => (await load()).stores[kind] !== undefined,
     isValidReference: (kind, reference) => adapterFor(kind)?.isValidReference(reference) ?? false,
@@ -406,9 +459,43 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       return result.status === "read" ? { status: "found" } : result;
     },
     awsCliPointer: async () => (await load()).aws,
+    googleCliPointer: async () => {
+      try {
+        const text = await readFile(options.statePath, "utf8");
+        if (Buffer.byteLength(text, "utf8") > 64 * 1024) return { status: "unavailable" };
+        const parsed: unknown = JSON.parse(text);
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+          return { status: "unavailable" };
+        const record = parsed as Record<string, unknown>;
+        if (
+          record.version !== 1 ||
+          typeof record.stores !== "object" ||
+          record.stores === null ||
+          Array.isArray(record.stores)
+        )
+          return { status: "unavailable" };
+        if (record.google === undefined) return { status: "none" };
+        const pointer = googleCliPointerOf(record.google);
+        return pointer === undefined
+          ? { status: "unavailable" }
+          : { status: "configured", pointer };
+      } catch (error) {
+        return error instanceof Error && "code" in error && error.code === "ENOENT"
+          ? { status: "none" }
+          : { status: "unavailable" };
+      }
+    },
+    setGoogleCliPointer: async (pointer) => {
+      await update((current) => {
+        const { google: _removed, ...state } = current;
+        return pointer === undefined ? state : { ...state, google: pointer };
+      });
+    },
     setAwsCliPointer: async (pointer) => {
-      const { aws: _removed, ...state } = await load();
-      await save(pointer === undefined ? state : { ...state, aws: pointer });
+      await update((current) => {
+        const { aws: _removed, ...state } = current;
+        return pointer === undefined ? state : { ...state, aws: pointer };
+      });
     },
   };
 }

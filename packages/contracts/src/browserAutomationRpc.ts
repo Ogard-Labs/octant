@@ -18,6 +18,8 @@ import {
   ToolApprovalId,
   ToolEvidence,
 } from "./toolActions";
+import { BrowserProfileChoice } from "./projectBrowser";
+import { AggregateVersion } from "./events";
 import { UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -201,6 +203,50 @@ export const BrowserAutomationSnapshot = Schema.Struct({
   personUsedPage: Schema.optional(Schema.Literal("used", "handed-back")),
 }).annotations(strict);
 export type BrowserAutomationSnapshot = typeof BrowserAutomationSnapshot.Type;
+
+/** A local person's default for one task; it is a choice of store, never access. */
+export const BrowserTaskProfileReadCommand = Schema.Struct({
+  threadId: BrowserThreadId,
+  mode: Schema.Literal("work", "code"),
+}).annotations(strict);
+export type BrowserTaskProfileReadCommand = typeof BrowserTaskProfileReadCommand.Type;
+
+export const BrowserTaskProfileSelectCommand = Schema.Struct({
+  threadId: BrowserThreadId,
+  mode: Schema.Literal("work", "code"),
+  expectedVersion: AggregateVersion,
+  profile: BrowserProfileChoice,
+  expectedContextId: Schema.optional(BrowserContextId),
+  /** The current address the person sees; never a page's form values or storage. */
+  url: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
+}).annotations({ ...strict, ...personDecides });
+export type BrowserTaskProfileSelectCommand = typeof BrowserTaskProfileSelectCommand.Type;
+
+export const BrowserTaskProfileState = Schema.Struct({
+  threadId: BrowserThreadId,
+  mode: Schema.Literal("work", "code"),
+  version: AggregateVersion,
+  profile: BrowserProfileChoice,
+  contextId: Schema.optional(BrowserContextId),
+}).annotations(strict);
+export type BrowserTaskProfileState = typeof BrowserTaskProfileState.Type;
+
+export const BrowserTaskProfileSelection = Schema.Struct({
+  selection: BrowserTaskProfileState,
+  browser: BrowserAutomationSnapshot,
+}).annotations(strict);
+export type BrowserTaskProfileSelection = typeof BrowserTaskProfileSelection.Type;
+
+export const decodeBrowserTaskProfileReadCommand = Schema.decodeUnknownSync(
+  BrowserTaskProfileReadCommand,
+);
+export const decodeBrowserTaskProfileSelectCommand = Schema.decodeUnknownSync(
+  BrowserTaskProfileSelectCommand,
+);
+export const decodeBrowserTaskProfileState = Schema.decodeUnknownSync(BrowserTaskProfileState);
+export const decodeBrowserTaskProfileSelection = Schema.decodeUnknownSync(
+  BrowserTaskProfileSelection,
+);
 
 export const decodeBrowserThreadScopeRequest = Schema.decodeUnknownSync(BrowserThreadScopeRequest);
 export const decodeBrowserThreadScope = Schema.decodeUnknownSync(BrowserThreadScope);

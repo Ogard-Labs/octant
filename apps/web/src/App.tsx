@@ -415,6 +415,10 @@ import {
   useOpenCodeThreadProviderRequests,
 } from "./code/codeThreadControllers";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
+import {
+  createPlannerProposalTask,
+  type PlannerProposalReview,
+} from "./code/plannerProposalCreation";
 import type { ZenClient } from "@octant/client-runtime/zen-client";
 import { useZenController } from "./zen/useZenController";
 import type { ZenLiveThreadClients } from "./zen/ZenLiveThreadCards";
@@ -476,6 +480,7 @@ import { usePendingRequests } from "./palette/usePendingRequests";
 import { usePendingRequests as usePendingRequestRead } from "./pendingRequests/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
 import { HostPlatformContext } from "./platform";
+import { CodeDebugWindowProvider } from "./debug/CodeDebugWindowProvider";
 
 export type { ShellLaunch } from "./shell/shellLaunch";
 export { launchFromLocation } from "./shell/shellLaunch";
@@ -5951,6 +5956,7 @@ function LaunchedShell(
   async function handleDraftCreateCodeThread(
     input: CodeComposerSubmitInput,
     draftProjectId?: ProjectId,
+    plannerReview?: PlannerProposalReview,
   ): Promise<boolean> {
     setDraftCreating(true);
     setDraftError(undefined);
@@ -5992,6 +5998,15 @@ function LaunchedShell(
             : undefined;
       if (project === undefined) {
         setDraftError("Choose a Code Project before starting a thread.");
+        return false;
+      }
+      if (
+        plannerReview !== undefined &&
+        (String(plannerReview.proposal.projectId) !== String(project.id) ||
+          plannerReview.proposal.status !== "pending" ||
+          input.prompt !== plannerReview.proposal.intent)
+      ) {
+        setDraftError("The described planner proposal changed. Refresh it before approving.");
         return false;
       }
       if (codeController.bootstrap === undefined) {
@@ -6042,7 +6057,9 @@ function LaunchedShell(
         return false;
       }
       const timestamp = new Date().toISOString();
-      const title = input.prompt.length > 60 ? `${input.prompt.slice(0, 57)}…` : input.prompt;
+      const title =
+        plannerReview?.proposal.title ??
+        (input.prompt.length > 60 ? `${input.prompt.slice(0, 57)}…` : input.prompt);
       // The Project's remembered habit — overridable for this one thread
       // in the composer — decides which journaled create command runs. Both
       // still go through the same server checkout and approval path.
@@ -6061,7 +6078,37 @@ function LaunchedShell(
         return false;
       }
       const command = plan.command;
-      const created = await codeController.execute(command);
+      let created: Awaited<ReturnType<typeof codeController.execute>>;
+      if (plannerReview === undefined) created = await codeController.execute(command);
+      else {
+        if (
+          command.kind !== "create-code-thread" &&
+          command.kind !== "create-managed-code-thread"
+        ) {
+          setDraftError("This proposal cannot use that creation command.");
+          return false;
+        }
+        const outcome = await createPlannerProposalTask(codeClient, plannerReview, command);
+        if (outcome.status !== "confirmed") {
+          setDraftError(outcome.message);
+          if (outcome.existingThread !== undefined) {
+            const existing = outcome.existingThread;
+            void codeController.refreshNavigation();
+            codeThreadControllers.restoreDraft(existing.id, "", outcome.message);
+            await controller.openCodeThread(
+              existing.id,
+              existing.title,
+              undefined,
+              existing.projectId,
+            );
+          }
+          return false;
+        }
+        created = outcome.creation;
+        // Planner confirmation used its own route; update navigation without
+        // delaying the confirmed task's ordinary first-turn path on another read.
+        void codeController.refreshNavigation();
+      }
       if (created?.kind !== "managed-thread-created" && created?.kind !== "thread-created") {
         setDraftError(
           codeController.lastExecuteError.current?.message ??
@@ -7505,7 +7552,12 @@ function LaunchedShell(
                                         <ServerCodeProjectsContext.Provider
                                           value={serverCodeProjects}
                                         >
-                                          {shell}
+                                          <CodeDebugWindowProvider
+                                            origin={new URL(props.launch.serverUrl).origin}
+                                            windowId={String(props.launch.windowId)}
+                                          >
+                                            {shell}
+                                          </CodeDebugWindowProvider>
                                         </ServerCodeProjectsContext.Provider>
                                       </HostPlatformContext.Provider>
                                     </PlanUsageProvider>

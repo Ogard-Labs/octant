@@ -1,3 +1,20 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { openSqlite } from "../persistence/sqlitePort";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { BrowserAutomationService } from "../browser/browserAutomationService";
+import {
+  createBrowserAppManagedTools,
+  rememberModelBinding,
+  type BrowserModelBinding,
+} from "../browser/browserAppManagedTools";
+import { BrowserToolApprovalService } from "../browser/browserToolApprovalService";
+import { hydrateWorkThreadProjectionFromJournal } from "./workThreadProjection";
+import type { BrowserRuntimePort } from "../browser/browserRuntimePort";
+import type { ToolActionAuthority, ToolActionRequest } from "@octant/contracts";
 import {
   type AggregateVersion,
   type UtcTimestamp,
@@ -944,6 +961,267 @@ describe("WorkThreadService", () => {
       }),
     );
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("persists a switched task profile in SQLite and requires fresh agent approval on the replacement", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-task-profile-"));
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    const contexts = new Set<string>();
+    let browser: BrowserAutomationService | undefined;
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      journal.append({
+        aggregate: { aggregateType: "work-thread", aggregateId: ids.thread },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: "72000000-0000-4000-8000-000000000070" as never,
+            eventName: "work.thread-created@1",
+            eventVersion: 1,
+            correlationId: "72000000-0000-4000-8000-000000000071" as never,
+            actor: { kind: "local-user", actorId: "72000000-0000-4000-8000-000000000076" as never },
+            occurredAt: now,
+            payload: { kind: "thread-created", thread: thread() },
+          },
+        ],
+      });
+      const fixture = serviceFixture();
+      fixture.persistence.journal.append.mockImplementation(((
+        input: Parameters<Journal["append"]>[0],
+      ) => journal.append(input)) as never);
+      const authority: ToolActionAuthority = {
+        hostId: "72000000-0000-4000-8000-000000000072" as never,
+        mode: "work",
+        projectId: ids.project,
+        rootId: "72000000-0000-4000-8000-000000000073" as never,
+        providerInstanceId: ids.provider as never,
+        extension: { kind: "core" },
+      };
+      const action: ToolActionRequest = {
+        actionId: "72000000-0000-4000-8000-000000000074" as never,
+        correlationId: "72000000-0000-4000-8000-000000000075" as never,
+        capability: { id: "browser-automation" as never, version: 1 },
+        authority,
+        intent: "Open this task’s page.",
+        approval: { kind: "not-required" },
+      };
+      const policy = {
+        profileMode: "isolated" as const,
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true as const,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300000,
+      };
+      const runtime = {
+        available: async () => true,
+        nativeAvailable: async () => true,
+        createContext: async (id: string) => {
+          contexts.add(id);
+        },
+        inspectTarget: async () => ({ sensitive: false }),
+        act: vi.fn(async () => ({
+          url: "https://example.com",
+          title: "Fresh replacement",
+          extractedText: "Profile page",
+          contentHash: "a".repeat(64),
+        })),
+        closeContext: async (id: string) => {
+          contexts.delete(id);
+        },
+        closeAll: async () => {
+          contexts.clear();
+        },
+      } as unknown as BrowserRuntimePort;
+      let sequence = 80;
+      browser = new BrowserAutomationService({
+        runtime,
+        authority: { resolve: () => authority, canAccessWindow: () => true },
+        uuid: () => `72000000-0000-4000-8000-${String(sequence++).padStart(12, "0")}`,
+        clock: () => now,
+        now: () => Date.parse(now),
+        schedule: () => () => undefined,
+      });
+      const threadId = ids.thread as never;
+      const initial = await browser.create({ windowId: ids.window, threadId, action, policy });
+      const bindings = new Map<string, BrowserModelBinding>();
+      const switched = await browser.switchTaskProfile({
+        windowId: ids.window,
+        threadId,
+        action,
+        profile: { kind: "personal" },
+        expectedContextId: initial.context!.contextId,
+        isCurrent: () => true,
+        save: async (commitBrowserProfile) => {
+          await fixture.service.execute(
+            ids.window,
+            {
+              kind: "change-work-thread-browser-profile",
+              threadId: ids.thread,
+              expectedVersion: 1,
+              browserTaskProfile: "personal",
+            },
+            { commitBrowserProfile },
+          );
+          return { status: "saved" };
+        },
+        bind: (id, authority) =>
+          rememberModelBinding(bindings, String(id), {
+            modelId: "model-a",
+            authority,
+            approval: "pending",
+          }),
+      });
+      expect(switched.status).toBe("changed");
+      const recovered = new WorkThreadProjection();
+      hydrateWorkThreadProjectionFromJournal({
+        replay: ({ afterSequence, limit }) => journal.replay({ afterSequence, limit } as never),
+        projection: recovered,
+      });
+      expect(recovered.read(ids.thread)).toMatchObject({
+        browserTaskProfile: "personal",
+        version: 2,
+      });
+      expect(contexts.has(String(initial.context!.contextId))).toBe(false);
+      const approvals = new BrowserToolApprovalService({
+        uuid: () => `72000000-0000-4000-8000-${String(sequence++).padStart(12, "0")}`,
+        now: () => Date.now(),
+        authorityIsCurrent: () => true,
+      });
+      const tools = createBrowserAppManagedTools({
+        windowId: ids.window,
+        threadId,
+        mode: "work",
+        modelId: "model-a",
+        resolveModelId: () => "model-a",
+        resolveTaskProfile: () => recovered.read(ids.thread)?.browserTaskProfile,
+        resolveAuthority: () => authority,
+        modelBindings: bindings,
+        executionPolicy: "approval-gated",
+        browser,
+        approvals,
+        uuid: () => `72000000-0000-4000-8000-${String(sequence++).padStart(12, "0")}`,
+      });
+      vi.mocked(runtime.act).mockClear();
+      const answer = tools.execute({
+        name: "octant_browser",
+        inputJson: '{"operation":"snapshot"}',
+      });
+      await vi.waitFor(() => expect(approvals.list(ids.window)).toHaveLength(1));
+      expect(runtime.act).not.toHaveBeenCalled();
+      const prompt = approvals.list(ids.window)[0]!;
+      expect(prompt.profile).toEqual({ kind: "personal" });
+      approvals.decide(ids.window, { approvalId: prompt.approvalId, decision: "approved" });
+      expect((await answer).isError).toBe(false);
+      expect(runtime.act).toHaveBeenCalledOnce();
+      approvals.close();
+      const kept = browser.inspectThread(ids.window, threadId).context!;
+      let releaseAccess!: (value: Awaited<ReturnType<typeof fixture.projects.bootstrap>>) => void;
+      const access = new Promise<Awaited<ReturnType<typeof fixture.projects.bootstrap>>>(
+        (resolve) => {
+          releaseAccess = resolve;
+        },
+      );
+      fixture.projects.bootstrap.mockReturnValueOnce(access);
+      let authorizing = false;
+      const delayed = browser.switchTaskProfile({
+        windowId: ids.window,
+        threadId,
+        action,
+        profile: { kind: "private" },
+        expectedContextId: kept.contextId,
+        isCurrent: () => true,
+        bind: vi.fn(),
+        save: async (commitBrowserProfile) => {
+          authorizing = true;
+          try {
+            await fixture.service.execute(
+              ids.window,
+              {
+                kind: "change-work-thread-browser-profile",
+                threadId: ids.thread,
+                expectedVersion: 2,
+                browserTaskProfile: "private",
+              },
+              { commitBrowserProfile },
+            );
+            return { status: "saved" };
+          } catch {
+            return {
+              status: "refused",
+              failure: {
+                category: "stale",
+                message: "Page changed while Project access was checked.",
+              },
+            };
+          }
+        },
+      });
+      await vi.waitFor(() => expect(authorizing).toBe(true));
+      browser.takeOver(ids.window, threadId);
+      releaseAccess({
+        active: [{ id: ids.project, type: "work", name: "Knowledge", lifecycle: "active" }],
+        archived: [],
+      });
+      expect((await delayed).status).toBe("refused");
+      expect(browser.inspectThread(ids.window, threadId).context?.contextId).toBe(kept.contextId);
+      expect(browser.inspectThread(ids.window, threadId).waitingForPerson).toBe("take-over");
+      const afterRace = new WorkThreadProjection();
+      hydrateWorkThreadProjectionFromJournal({
+        replay: ({ afterSequence, limit }) => journal.replay({ afterSequence, limit } as never),
+        projection: afterRace,
+      });
+      expect(afterRace.read(ids.thread)).toMatchObject({
+        browserTaskProfile: "personal",
+        version: 2,
+      });
+      expect(contexts.size).toBe(1);
+    } finally {
+      await browser?.close();
+      connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("records a default Browser profile for this task and refuses an archived task", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    const changed = await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-browser-profile",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      browserTaskProfile: "personal",
+    });
+    expect(changed).toMatchObject({
+      kind: "thread-updated",
+      thread: { browserTaskProfile: "personal", version: 2 },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "work.thread-updated@1",
+            payload: expect.objectContaining({
+              thread: expect.objectContaining({ browserTaskProfile: "personal" }),
+            }),
+          }),
+        ],
+      }),
+    );
+    const archived = serviceFixture({ threads: [thread({ lifecycle: "archived" })] });
+    await expect(
+      archived.service.execute(ids.window, {
+        kind: "change-work-thread-browser-profile",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        browserTaskProfile: "project",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
   it("records the thread's choice of Claude artifacts and refuses it on an archived thread", async () => {

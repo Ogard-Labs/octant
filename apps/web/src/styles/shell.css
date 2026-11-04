@@ -4243,3 +4243,69 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   background: var(--oct-selection);
   color: var(--oct-fg);
 }
+.code-project-planner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+}
+
+.code-project-planner__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.code-project-planner__proposals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-4);
+  max-height: 560px;
+  overflow: auto;
+  padding: 0;
+  list-style: none;
+}
+
+/* Proposal titles sit below the section's own heading, so they never outrank it. */
+.code-project-planner__proposals h3,
+.code-project-planner__review h3 {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: 0;
+}
+
+.code-project-planner__intent {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-project-planner__review {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+
+/* The review reuses the start screen's composer, but it is a decision inside a
+   dialog: the composer fills the dialog's measure, and the decision heading
+   sits at its top edge, aligned with the text under it, instead of floating
+   centred in a start screen's open space. */
+.code-project-planner__review .welcome {
+  width: 100%;
+  min-height: 0;
+  padding-block: 0;
+}
+
+.code-project-planner__review .welcome__heading {
+  flex: 0 0 auto;
+  justify-items: start;
+  text-align: start;
+}
+
+.code-project-planner__review h2 {
+  margin: 0;
+  font-size: var(--oct-text-base);
+  font-weight: 600;
+  letter-spacing: var(--oct-tracking-tight);
+}

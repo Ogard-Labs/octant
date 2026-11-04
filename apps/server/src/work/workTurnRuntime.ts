@@ -90,6 +90,8 @@ export interface WorkTurnRuntimePort {
     readonly extraFolders?: ReadonlyArray<string>;
     readonly driver: ProviderDriver;
     readonly signal: AbortSignal;
+    /** Host-owned retained admission proof, rechecked after session startup immediately before send. */
+    readonly admissionCurrent?: () => boolean;
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     readonly modelOptionValues?: ProviderModelOptionValues;
@@ -575,31 +577,38 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               }),
             ),
           ),
-        send: Effect.sync(() => {
-          meter.sent();
-          input.onPromptSent?.();
-        }).pipe(
-          Effect.zipRight(
-            connection.send({
-              sessionId: input.providerSessionId,
-              prompt: input.command.prompt,
-              // A runtime that keeps its own conversation already holds the
-              // standing context an earlier completed turn of this session
-              // carried.
-              context: [
-                ...(input.driver.conversationOwnership === "provider"
-                  ? heldTurnContext.forTurn({
-                      sessionId: input.providerSessionId,
-                      resumed: input.resumeCursor !== undefined,
-                      context: input.context,
-                    }).context
-                  : (input.context ?? [])),
-              ],
-              attachments: [...(input.attachments ?? [])],
-              tools: [...(input.appManagedTools?.definitions ?? [])],
-            }),
-          ),
-        ),
+        send: Effect.suspend(() => {
+          if (input.admissionCurrent?.() === false)
+            return Effect.fail({
+              category: "unauthorized" as const,
+              message: "Work turn admission is no longer current. No prompt was sent.",
+            });
+          return Effect.sync(() => {
+            meter.sent();
+            input.onPromptSent?.();
+          }).pipe(
+            Effect.zipRight(
+              connection.send({
+                sessionId: input.providerSessionId,
+                prompt: input.command.prompt,
+                // A runtime that keeps its own conversation already holds the
+                // standing context an earlier completed turn of this session
+                // carried.
+                context: [
+                  ...(input.driver.conversationOwnership === "provider"
+                    ? heldTurnContext.forTurn({
+                        sessionId: input.providerSessionId,
+                        resumed: input.resumeCursor !== undefined,
+                        context: input.context,
+                      }).context
+                    : (input.context ?? [])),
+                ],
+                attachments: [...(input.attachments ?? [])],
+                tools: [...(input.appManagedTools?.definitions ?? [])],
+              }),
+            ),
+          );
+        }),
       });
       yield* Fiber.join(events);
       for (const requestId of pendingRequestHolds.keys()) {

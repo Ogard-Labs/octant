@@ -1175,6 +1175,32 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "aws secret access key item reference op vault",
         },
+        {
+          id: settingId("secret-store-google-cli"),
+          label: "Google Cloud command line",
+          scope: "host",
+          keywords:
+            "google gcloud cli command line current service account short-lived token expiry credentials shell read remove",
+        },
+        {
+          id: settingId("secret-store-google-cli-email"),
+          label: "Google Cloud service account email",
+          scope: "host",
+          keywords: "google gcloud service account email identity iam",
+        },
+        {
+          id: settingId("secret-store-google-cli-reference"),
+          label: "Google Cloud service-account JSON item",
+          scope: "host",
+          keywords:
+            "google gcloud service account json item reference linked secret store broker op vault private key",
+        },
+        {
+          id: settingId("secret-store-google-cli-scopes"),
+          label: "Google Cloud OAuth scopes",
+          scope: "host",
+          keywords: "google gcloud oauth scopes permissions access iam cloud platform readonly",
+        },
       ],
     },
     {

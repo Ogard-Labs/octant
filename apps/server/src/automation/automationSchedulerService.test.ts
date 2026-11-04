@@ -26,6 +26,10 @@ import { AutomationProjection, hydrateAutomationProjection } from "./automationP
 import { automationRunIdForOccurrence } from "./automationRunIdentity";
 import { AutomationSchedulerService } from "./automationSchedulerService";
 import {
+  initialAutomationFileCheckpoint,
+  reconcileAutomationFileObservation,
+} from "./automationFileSourceState";
+import {
   AUTOMATION_TEST_IDS,
   automationDefinitionFixture,
   automationRunForDefinition,
@@ -175,6 +179,133 @@ function markDispatching(session: Session, run: AutomationRun, at: string): void
 }
 
 describe("automation scheduler reconciliation pass", () => {
+  it("claims a settled file batch through the existing run-first ledger and refuses stale duplicate input", () => {
+    const session = openSession();
+    const definition = automationDefinitionFixture({
+      trigger: {
+        kind: "file-arrival",
+        directory: "Inbox",
+        includeExtensions: [],
+        excludeDirectories: [],
+        settleSeconds: 2,
+        automaticStartLimit: 8,
+      },
+      nextDueAt: null,
+    });
+    const at = definition.createdAt;
+    const initial = initialAutomationFileCheckpoint("a".repeat(64), at);
+    storeBaseline(session, definition, initial);
+    const previous = session.projection.getFileSource(definition.id);
+    if (previous === undefined || definition.trigger.kind !== "file-arrival")
+      throw new Error("Missing prepared source");
+    const decision = reconcileAutomationFileObservation({
+      trigger: definition.trigger,
+      previous,
+      snapshot: [{ path: "input.txt", digest: "b".repeat(64), size: 3 }],
+      observedAt: at,
+      settled: true,
+      activity: "quiet",
+      coverageGap: false,
+      missedRunPolicy: "skip",
+    });
+    expect(session.projection.getDefinition(definition.id)).toMatchObject({
+      version: 2,
+      lifecycle: "enabled",
+      trigger: { kind: "file-arrival" },
+    });
+    expect(previous).toMatchObject({ observationRevision: 2, automaticStarts: 0 });
+    expect(decision.kind).toBe("claim");
+    const { scheduler, offers } = createScheduler(session, at);
+    const request = {
+      automationId: definition.id,
+      expectedVersion: 2,
+      previousObservationRevision: 2,
+      decision,
+      current: () => true,
+    };
+    expect(scheduler.commitFileObservation(request)).toBe("committed");
+    expect(offers).toHaveLength(1);
+    expect(session.projection.getFileSource(definition.id)).toMatchObject({
+      automaticStarts: 1,
+      activityWindow: [offers[0]?.run.id],
+    });
+    expect(scheduler.commitFileObservation(request)).toBe("stale");
+    scheduler.runPass();
+    expect(offers).toHaveLength(1);
+    session.connection.close();
+  });
+
+  it("repairs a file run-before-ledger crash once without duplicate budget debit or dispatch", () => {
+    const session = openSession();
+    const definition = automationDefinitionFixture({
+      trigger: {
+        kind: "file-arrival",
+        directory: "Inbox",
+        includeExtensions: [],
+        excludeDirectories: [],
+        settleSeconds: 2,
+        automaticStartLimit: 8,
+      },
+      nextDueAt: null,
+    });
+    const at = definition.createdAt;
+    storeBaseline(session, definition, initialAutomationFileCheckpoint("a".repeat(64), at));
+    const previous = session.projection.getFileSource(definition.id);
+    if (previous === undefined || definition.trigger.kind !== "file-arrival")
+      throw new Error("Missing source");
+    const decision = reconcileAutomationFileObservation({
+      trigger: definition.trigger,
+      previous,
+      snapshot: [{ path: "arrived.txt", digest: "b".repeat(64), size: 4 }],
+      observedAt: at,
+      settled: true,
+      activity: "quiet",
+      coverageGap: false,
+      missedRunPolicy: "skip",
+    });
+    const { port, offers } = recordingPort();
+    const crashing = new AutomationSchedulerService({
+      store: {
+        appendRunCreated: (input) => session.store.appendRunCreated(input),
+        appendRunStatusChanged: (input) => session.store.appendRunStatusChanged(input),
+        replayEach: (apply) => session.store.replayEach(apply),
+        appendOccurrenceLedger: () => {
+          throw new Error("Injected ledger interruption");
+        },
+      },
+      projection: session.projection,
+      dispatch: port,
+      now: () => at,
+    });
+    expect(() =>
+      crashing.commitFileObservation({
+        automationId: definition.id,
+        expectedVersion: 2,
+        previousObservationRevision: 2,
+        decision,
+        current: () => true,
+      }),
+    ).toThrow("Injected ledger interruption");
+    expect(offers).toHaveLength(0);
+    expect(session.projection.getFileSource(definition.id)?.automaticStarts).toBe(0);
+    const queued = session.projection.latestRun(definition.id);
+    expect(queued?.lifecycle).toBe("queued");
+    expect(
+      hydrateAutomationProjection({ store: session.store, projection: session.projection }),
+    ).toBe("ok");
+    const recovered = createScheduler(session, at);
+    expect(recovered.scheduler.runPass().repairedRunIds).toEqual([queued?.id]);
+    expect(recovered.offers).toHaveLength(1);
+    expect(session.projection.getFileSource(definition.id)).toMatchObject({
+      automaticStarts: 1,
+      activityWindow: [queued?.id],
+    });
+    recovered.scheduler.runPass();
+    expect(recovered.offers).toHaveLength(1);
+    expect(session.projection.getFileSource(definition.id)?.automaticStarts).toBe(1);
+    session.connection.close();
+  });
+
   it("claims an on-time due occurrence exactly once and offers the queued run", () => {
     const session = openSession();
     const definition = intervalDefinition();
@@ -753,6 +884,26 @@ describe("automation scheduler reconciliation pass", () => {
     session.connection.close();
   });
 });
+
+function storeBaseline(
+  session: Session,
+  definition: AutomationDefinition,
+  initial: ReturnType<typeof initialAutomationFileCheckpoint>,
+): void {
+  session.store.appendDefinitionCreated({ automation: definition, fileSource: initial });
+  session.store.appendOccurrenceLedger({
+    automationId: definition.id,
+    expectedVersion: 1,
+    events: [
+      {
+        kind: "file-source-observed",
+        definitionRevision: definition.definitionRevision,
+        checkpoint: { ...initial, observationRevision: 2, baselineReady: true, phase: "watching" },
+        at: definition.createdAt,
+      },
+    ],
+  });
+}
 
 describe("automation scheduler effect loop", () => {
   it("claims when the armed effect timer fires, with no real-time sleeps", async () => {

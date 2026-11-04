@@ -634,6 +634,14 @@ folder.", rather than greying out with no reason. Every
 start screen's composer asks "Ask anything…", and the message field keeps its
 accessible name.
 
+The question belongs to a new task only. When the same composer serves a
+decision, such as reviewing a planner's proposal, the caller replaces the mark,
+question, and quiet line with a heading that names the decision ("Review the
+planner's proposal") and the proposal's title, set at the dialog's top-left with
+the fixed proposal text directly under them in the composer. Rendered review
+showed the question above a fixed proposal read as an invitation to write a
+different task.
+
 Every composer has one shape, on a start screen or under a thread, in Chat,
 Work, and Code: the same width, corner (`--oct-radius-lg`), hairline ring and
 mid shadow, a prompt two lines tall before it grows with the same insets, and
@@ -1833,6 +1841,8 @@ new tab identity, an isolated Browser context or Terminal session, and a stable
 numbered label when siblings are open. Files, Document, Review, Agents, Canvas,
 Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
 still appears in only one region at a time.
+
+Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
 launchable tool keeps the dock closed and omits its toggle. The exception is a

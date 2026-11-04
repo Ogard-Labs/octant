@@ -84,6 +84,8 @@ export interface NativeHarnessShellRun {
 
 export interface NativeHarnessShellPort {
   run(input: {
+    /** Final host admission immediately before process spawn. */
+    readonly beforeLaunch?: () => boolean;
     readonly command: string;
     readonly cwd: string;
     /** Extra Project folders the command may read and write like `cwd`; it still starts in `cwd`. */

@@ -842,6 +842,8 @@ describe("octant_browser profile argument", () => {
 
   function fixture(
     options: {
+      readonly defaultProfile?: "private" | "project" | "personal";
+      readonly paired?: boolean;
       readonly remembered?: (origin: string, profile: unknown) => boolean;
       readonly unattended?: boolean;
       readonly profileCaller?: "terminal-grant";
@@ -863,6 +865,7 @@ describe("octant_browser profile argument", () => {
       modelId,
       resolveModelId: () => modelId,
       modelBindings: options.modelBindings ?? new Map(),
+      resolveTaskProfile: () => options.defaultProfile,
       executionPolicy: "approval-gated",
       resolveAuthority: () => workAuthority,
       browser: {
@@ -876,6 +879,7 @@ describe("octant_browser profile argument", () => {
         isRemembered: (origin: string, profile: unknown) =>
           options.remembered?.(origin, profile) === true,
         isUnattendedScope: () => options.unattended === true,
+        isPairedDevice: () => options.paired === true,
       } as never,
       ...(options.profileCaller === undefined ? {} : { profileCaller: options.profileCaller }),
       uuid: () => "80000000-0000-4000-8000-000000000001",
@@ -892,6 +896,65 @@ describe("octant_browser profile argument", () => {
 
     expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
     expect(request.mock.calls[0]?.[0]).not.toHaveProperty("profile");
+  });
+
+  it("uses the task default without granting it, and lets an explicit Private override it", async () => {
+    const selected = fixture({ defaultProfile: "personal" });
+    await selected.run({ operation: "navigate", url: "https://example.com" });
+    expect(selected.request).toHaveBeenCalledWith(
+      expect.objectContaining({ profile: { kind: "personal" } }),
+    );
+    expect(selected.create.mock.calls[0]?.[0].policy.profile).toEqual({ kind: "personal" });
+    const explicit = fixture({ defaultProfile: "personal" });
+    await explicit.run({ operation: "navigate", url: "https://example.com", profile: "private" });
+    expect(explicit.create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
+  });
+
+  it.each([{ unattended: true }, { profileCaller: "terminal-grant" as const }, { paired: true }])(
+    "refuses an inherited stored default for excluded callers instead of opening Private: %j",
+    async (caller) => {
+      const f = fixture({ ...caller, defaultProfile: "personal" });
+      const answer = await f.run({ operation: "navigate", url: "https://example.com" });
+      expect(answer.isError).toBe(true);
+      expect(f.create).not.toHaveBeenCalled();
+      expect(f.request).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["same", "model", "authority"] as const)(
+    "checks a person-switched pending binding before exposing page content: %s",
+    async (change) => {
+      const active = activeContext({ kind: "personal" });
+      const bindings = new Map([
+        [
+          String(active.context!.contextId),
+          {
+            approval: "pending" as const,
+            modelId: change === "model" ? "old-model" : modelId,
+            authority:
+              change === "authority"
+                ? { ...workAuthority, rootId: "different" as never }
+                : workAuthority,
+          },
+        ],
+      ]);
+      const f = fixture({ inspect: active, modelBindings: bindings, remembered: () => true });
+      await f.run({ operation: "snapshot" });
+      expect(f.request).toHaveBeenCalledTimes(change === "same" ? 0 : 1);
+      expect(bindings.get(String(active.context!.contextId))).not.toHaveProperty("approval");
+    },
+  );
+
+  it("keeps a live explicit Private page when a later navigate omits its Project default", async () => {
+    const active = activeContext();
+    const bindings = new Map([
+      [String(active.context!.contextId), { modelId, authority: workAuthority }],
+    ]);
+    const f = fixture({ defaultProfile: "project", inspect: active, modelBindings: bindings });
+    expect((await f.run({ operation: "navigate", url: "https://example.com/next" })).isError).toBe(
+      false,
+    );
+    expect(f.create).not.toHaveBeenCalled();
   });
 
   it("asks the person about the site and names the profile", async () => {

@@ -1,3 +1,4 @@
+import { isUtf8 } from "node:buffer";
 import { GitMutationPort, type CommitIdentityResolver } from "../code/gitMutationPort";
 import { GitObservationPort } from "../code/gitObservationPort";
 import { GitHistoryPort } from "../code/gitHistoryPort";
@@ -44,6 +45,7 @@ const OBSERVATION_TIMEOUT_MS = 30_000;
 const MUTATION_TIMEOUT_MS = 120_000;
 
 interface ServerCommandResult {
+  readonly utf8Valid?: boolean;
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
@@ -62,6 +64,7 @@ export function createServerGitService(options: ServerGitOptions): GitService {
     args: readonly string[],
     environment: NodeJS.ProcessEnv,
     signal: AbortSignal,
+    stdin?: string,
   ): Promise<ServerCommandResult> => {
     const server = options.server();
     if (server === undefined) {
@@ -76,6 +79,7 @@ export function createServerGitService(options: ServerGitOptions): GitService {
     const call = await options.connection.run(server, {
       script: `export PAGER=cat GIT_PAGER=cat; exec env "$@"`,
       args: [...variables, file, ...args],
+      ...(stdin === undefined ? {} : { stdin: Buffer.from(stdin, "utf8") }),
       timeoutMs: MUTATION_TIMEOUT_MS,
       maxOutputBytes: MAX_OUTPUT_BYTES,
       signal,
@@ -87,6 +91,7 @@ export function createServerGitService(options: ServerGitOptions): GitService {
         : {
             exitCode: call.exitCode,
             stdout: call.output.toString("utf8"),
+            utf8Valid: isUtf8(call.output),
             stderr: call.errorOutput,
           };
     }

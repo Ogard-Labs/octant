@@ -13,7 +13,7 @@ import {
   rename,
   type FileHandle,
 } from "node:fs/promises";
-import type { Dir } from "node:fs";
+import { lstatSync, realpathSync, type Dir } from "node:fs";
 import { confinedEnumerationPath, openConfinedPath, statConfinedPath } from "../confinedPathOpen";
 
 /**
@@ -129,6 +129,10 @@ export interface WorkOpenDirectory {
  * must not be used after a containment proof — see `writeConfinedWorkFile`.
  */
 export interface WorkFilesystemPort {
+  /** Native host facts for an already-resolved directory at a final synchronous admission fence. */
+  currentDirectoryIdentity?(
+    path: string,
+  ): (WorkFileIdentity & { readonly canonicalPath: string }) | undefined;
   realpath(path: string): Promise<string>;
   lstat(path: string): Promise<WorkFileStat>;
   stat(path: string): Promise<WorkFileStat>;
@@ -160,6 +164,15 @@ const toStat = (info: LiveStat): WorkFileStat => ({
 });
 
 export const liveWorkFilesystem: WorkFilesystemPort = {
+  currentDirectoryIdentity: (path) => {
+    const info = lstatSync(path, { bigint: true });
+    if (info.isSymbolicLink() || !info.isDirectory()) return undefined;
+    return {
+      canonicalPath: realpathSync.native(path),
+      device: info.dev.toString(10),
+      inode: info.ino.toString(10),
+    };
+  },
   realpath: nodeRealpath,
   lstat: async (path) => toStat(await lstat(path, { bigint: true })),
   // Only ever called on a canonical path, and the identity it reports is what

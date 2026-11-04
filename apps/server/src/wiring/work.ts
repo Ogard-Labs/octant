@@ -426,6 +426,8 @@ export function wireWork(deps: WorkDependencies) {
                 return current === undefined ? undefined : String(current.modelId);
               },
               modelBindings: browserModelBindings,
+              resolveTaskProfile: () =>
+                workThreadProjection.read(input.thread.id)?.browserTaskProfile,
               executionPolicy: "approval-gated",
               resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
               browser: {

@@ -2,7 +2,7 @@ import { execFile as nodeExecFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
-import type { ProviderExecutionPolicy } from "@octant/contracts";
+import { MAX_CODE_GIT_HUNK_PATCH_BYTES, type ProviderExecutionPolicy } from "@octant/contracts";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
@@ -38,6 +38,7 @@ export interface GitMutationDependencies {
     args: readonly string[],
     environment: NodeJS.ProcessEnv,
     signal: AbortSignal,
+    stdin?: string,
   ) => Promise<CommandResult>;
   readonly pathExists: (path: string) => Promise<boolean>;
 }
@@ -69,14 +70,56 @@ export type GitMutationResult =
         | "invalid-refspec"
         | "unconfirmed-target"
         | "ignored-path-collision"
-        | "identity-missing";
+        | "identity-missing"
+        | "stale-state"
+        | "invalid-hunks"
+        | "hunk-offset"
+        | "read-only";
     }
   | { readonly status: "failed"; readonly detail?: string };
 
 const liveDependencies: GitMutationDependencies = {
-  execFile: (file, args, environment, signal) =>
-    new Promise((resolve) => {
-      nodeExecFile(
+  execFile: async (file, args, environment, signal, stdin) => {
+    // Bun's node:child_process pipe currently drops input. Its native input buffer
+    // preserves the same argv/environment/confinement and avoids a temporary patch file.
+    if (stdin !== undefined && typeof globalThis.Bun !== "undefined") {
+      try {
+        const child = Bun.spawn([file, ...args], {
+          env: environment,
+          signal,
+          stdin: Buffer.from(stdin, "utf8"),
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const read = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
+          const reader = stream.getReader();
+          const chunks: Uint8Array[] = [];
+          let size = 0;
+          while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            size += next.value.byteLength;
+            if (size > 1024 * 1024) {
+              child.kill();
+              await child.exited;
+              throw new Error("Git output exceeded its limit.");
+            }
+            chunks.push(next.value);
+          }
+          return Buffer.concat(chunks).toString("utf8");
+        };
+        const [stdout, stderr, exitCode] = await Promise.all([
+          read(child.stdout),
+          read(child.stderr),
+          child.exited,
+        ]);
+        return { stdout, stderr, exitCode };
+      } catch {
+        return { exitCode: 1, stdout: "", stderr: "Git could not complete the patch operation." };
+      }
+    }
+    return new Promise((resolve) => {
+      const child = nodeExecFile(
         file,
         [...args],
         {
@@ -94,7 +137,12 @@ const liveDependencies: GitMutationDependencies = {
           });
         },
       );
-    }),
+      if (stdin !== undefined) {
+        child.stdin?.on("error", () => {});
+        child.stdin?.end(stdin);
+      }
+    });
+  },
   pathExists: async (path) => {
     try {
       await access(path);
@@ -229,6 +277,80 @@ export class GitMutationPort {
       signal,
       input.executionPolicy,
     );
+  }
+
+  /** Exact host-derived patch only; no renderer bytes, three-way merge or relocation retry. */
+  async applyHunks(
+    input: {
+      readonly checkoutRoot: string;
+      readonly action: "stage" | "unstage" | "reverse";
+      readonly patch: string;
+      readonly beforeApply: () => Promise<boolean>;
+      readonly current: () => boolean;
+    } & GitMutationPolicy,
+    signal?: AbortSignal,
+  ): Promise<GitMutationResult> {
+    if (input.executionPolicy === "plan") return { status: "rejected", reason: "read-only" };
+    if (
+      Buffer.byteLength(input.patch) > MAX_CODE_GIT_HUNK_PATCH_BYTES ||
+      input.patch.includes("\0") ||
+      !input.patch.startsWith("diff --git ")
+    )
+      return { status: "rejected", reason: "invalid-hunks" };
+    const current = () => {
+      try {
+        return signal?.aborted !== true && input.current();
+      } catch {
+        return false;
+      }
+    };
+    if (!current()) return { status: "rejected", reason: "stale-state" };
+    const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
+    if (lock === "failed") return { status: "failed" };
+    if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    if (!current()) return { status: "rejected", reason: "stale-state" };
+    const args = [
+      "-C",
+      input.checkoutRoot,
+      "-c",
+      "apply.ignoreWhitespace=false",
+      "apply",
+      "--verbose",
+      "--whitespace=nowarn",
+      ...(input.action === "reverse" ? [] : ["--cached"]),
+      ...(input.action === "stage" ? [] : ["--reverse"]),
+    ];
+    const checked = await this.#run(
+      [...args, "--check"],
+      signal,
+      undefined,
+      input.executionPolicy,
+      input.patch,
+    );
+    if (checked.exitCode !== 0) return { status: "rejected", reason: "stale-state" };
+    // Git may otherwise move a matching fragment to another location even without --3way.
+    if (
+      /^\s*Hunk #\d+ succeeded at .*\(offset [^)]+\)/m.test(checked.stderr + "\n" + checked.stdout)
+    )
+      return { status: "rejected", reason: "hunk-offset" };
+    let same = false;
+    try {
+      same = await input.beforeApply();
+    } catch {
+      /* A missing fresh proof refuses the write. */
+    }
+    if (!same || !current()) return { status: "rejected", reason: "stale-state" };
+    // The existing managed-writer guard is held by the caller. External processes may still
+    // race after this final proof; this is not a filesystem-wide atomic compare-and-swap.
+    const applied = await this.#run(
+      args,
+      signal,
+      undefined,
+      input.executionPolicy,
+      input.patch,
+      current,
+    );
+    return applied.exitCode === 0 ? { status: "applied" } : failedMutation(applied.stderr);
   }
 
   async commit(
@@ -932,16 +1054,20 @@ export class GitMutationPort {
    */
   async #confined(
     parentSignal: AbortSignal | undefined,
-    run: (signal: AbortSignal) => Promise<CommandResult>,
+    run: (signal: AbortSignal, withinDeadline: () => boolean) => Promise<CommandResult>,
   ): Promise<CommandResult> {
     const controller = new AbortController();
     const abort = () => controller.abort();
     parentSignal?.addEventListener("abort", abort, { once: true });
     if (parentSignal?.aborted) controller.abort();
+    const deadline = performance.now() + this.#commandTimeoutMs;
     const timeout = setTimeout(abort, this.#commandTimeoutMs);
     try {
       if (controller.signal.aborted) throw new Error("Git mutation aborted.");
-      return await run(controller.signal);
+      return await run(
+        controller.signal,
+        () => !controller.signal.aborted && performance.now() < deadline,
+      );
     } catch (error) {
       if (error instanceof ProcessConfinementError) {
         return { exitCode: 1, stdout: "", stderr: "" };
@@ -1023,19 +1149,24 @@ export class GitMutationPort {
     parentSignal?: AbortSignal,
     environment?: Readonly<Record<string, string>>,
     executionPolicy?: ProviderExecutionPolicy,
+    stdin?: string,
+    beforeLaunch?: () => boolean,
   ): Promise<CommandResult> {
-    return this.#confined(parentSignal, async (signal) => {
+    return this.#confined(parentSignal, async (signal, withinDeadline) => {
       const checkoutRoot = args[0] === "-C" ? args[1] : undefined;
       if (checkoutRoot === undefined || !isAbsolute(checkoutRoot)) {
         return { exitCode: 1, stdout: "", stderr: "" };
       }
       if (this.#onServer) {
         if (executionPolicy === "plan") return PLAN_ON_SERVER;
+        if (signal.aborted || beforeLaunch?.() === false || !withinDeadline())
+          return { exitCode: 1, stdout: "", stderr: "" };
         return await this.#dependencies.execFile(
           "git",
           args,
           { ...createGitCommandEnvironment(process.env), ...environment },
           signal,
+          stdin,
         );
       }
       const launch = prepareGitSeatbeltLaunch({
@@ -1054,6 +1185,8 @@ export class GitMutationPort {
         // but the launch's own appended rules would otherwise outrank it.
         writable: executionPolicy !== "plan",
       });
+      if (signal.aborted || beforeLaunch?.() === false || !withinDeadline())
+        return { exitCode: 1, stdout: "", stderr: "" };
       return await this.#dependencies.execFile(
         launch.command,
         launch.args,
@@ -1061,6 +1194,7 @@ export class GitMutationPort {
         // cannot leak a caller's environment past the allowlist.
         { ...createGitCommandEnvironment(process.env), ...environment },
         signal,
+        stdin,
       );
     });
   }

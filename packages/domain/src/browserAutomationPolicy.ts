@@ -181,10 +181,29 @@ export function canRecordBrowserObservation(
   );
 }
 
-export function isContextExpired(context: BrowserContextRecord, now: number): boolean {
+/** Host-observed activity; previews and refused calls never update it. */
+export interface BrowserContextActivity {
+  readonly lastActivityAt: number;
+  readonly keptUntil?: number;
+}
+
+export function browserContextExpiresAt(
+  context: BrowserContextRecord,
+  activity?: BrowserContextActivity,
+): number {
+  return Math.max(
+    (activity?.lastActivityAt ?? Date.parse(context.createdAt)) + context.policy.sessionTimeoutMs,
+    activity?.keptUntil ?? 0,
+  );
+}
+
+export function isContextExpired(
+  context: BrowserContextRecord,
+  now: number,
+  activity?: BrowserContextActivity,
+): boolean {
   if (context.state !== "active" && context.state !== "creating") return false;
-  const createdAt = new Date(context.createdAt).getTime();
-  return now - createdAt >= context.policy.sessionTimeoutMs;
+  return now >= browserContextExpiresAt(context, activity);
 }
 
 export function shouldProtectCredentialField(

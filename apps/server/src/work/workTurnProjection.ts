@@ -15,6 +15,16 @@ import {
 import { WORK_TURN_CAPABILITIES } from "@octant/contracts";
 import { hydrateJournalProjection } from "../persistence/journalHydration";
 
+/** Isolate the new receipt from event and caller object aliases; legacy rows retain their shape. */
+function snapshotExternalInput(turn: WorkTurnState): WorkTurnState {
+  return turn.externalInput === undefined
+    ? turn
+    : {
+        ...turn,
+        externalInput: Object.freeze({ ...turn.externalInput }),
+      };
+}
+
 /**
  * Rebuildable in-memory Work turn projection. Journaled turn-accepted and
  * turn-updated events rebuild durable transcript state after reconnect or
@@ -63,6 +73,7 @@ export class WorkTurnProjection {
         providerSessionId: accepted.providerSessionId,
         ...(accepted.resumeCursor === undefined ? {} : { resumeCursor: accepted.resumeCursor }),
         ...(accepted.handoff === undefined ? {} : { handoff: accepted.handoff }),
+        ...(accepted.externalInput === undefined ? {} : { externalInput: accepted.externalInput }),
         ...(accepted.carriedFrom === undefined ? {} : { carriedFrom: accepted.carriedFrom }),
         status: "accepted",
         prompt: accepted.prompt,
@@ -79,7 +90,7 @@ export class WorkTurnProjection {
         acceptedAt: accepted.acceptedAt,
         updatedAt: accepted.acceptedAt,
       });
-      this.#byRequest.set(accepted.requestId, turn);
+      this.#byRequest.set(accepted.requestId, snapshotExternalInput(turn));
       const threadKey = String(accepted.threadId);
       this.#rewoundSinceLatest.delete(threadKey);
       const order = this.#byThread.get(threadKey) ?? [];
@@ -135,7 +146,8 @@ export class WorkTurnProjection {
   }
 
   lookup(requestId: WorkTurnRequestId): WorkTurnState | undefined {
-    return this.#byRequest.get(decodeWorkTurnRequestId(requestId));
+    const turn = this.#byRequest.get(decodeWorkTurnRequestId(requestId));
+    return turn === undefined ? undefined : snapshotExternalInput(turn);
   }
 
   /** Whether the thread was rewound since its last kept turn was accepted. */
@@ -150,20 +162,21 @@ export class WorkTurnProjection {
 
   latestForThread(threadId: WorkThreadId): WorkTurnState | undefined {
     const requestId = this.#byThread.get(String(threadId))?.at(-1);
-    return requestId === undefined ? undefined : this.#byRequest.get(requestId);
+    return requestId === undefined ? undefined : this.lookup(requestId);
   }
 
   listForThread(threadId: WorkThreadId): ReadonlyArray<WorkTurnState> {
     const order = this.#byThread.get(String(threadId)) ?? [];
     return order
-      .map((requestId) => this.#byRequest.get(requestId))
+      .map((requestId) => this.lookup(requestId))
       .filter((turn): turn is WorkTurnState => turn !== undefined);
   }
 
   listForProject(projectId: ProjectId): ReadonlyArray<WorkTurnState> {
     return [...this.#byRequest.values()]
       .filter((turn) => String(turn.projectId) === String(projectId))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map(snapshotExternalInput);
   }
 
   /**

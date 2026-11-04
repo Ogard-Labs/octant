@@ -1,12 +1,241 @@
 import type { CodeBoardCard, CodeBoardView } from "@octant/contracts";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { CodeOverview } from "./CodeOverview";
+import { reservePlannerAttempt, finishPlannerAttempt } from "./plannerProposalAttempt";
+import type { PlannerProposalReview } from "./plannerProposalCreation";
 import type { CodeController } from "./useCodeController";
 
 describe("CodeOverview", () => {
+  it("keeps an unresolved approval blocked after review close and component remount with a fresh pending read", async () => {
+    const value = controller();
+    const entry = {
+      proposal: {
+        id: "70000000-0000-4000-8000-000000000021",
+        projectId: ids.project,
+        plannerThreadId: ids.thread,
+        title: "Uncertain task",
+        intent: "Only this described task.",
+        status: "pending",
+        proposedAt: "2026-11-02T00:00:00.000Z",
+      },
+      proposalVersion: 1,
+    } as PlannerProposalReview;
+    const executePlannerProposal = vi.fn();
+    value.client = {
+      ...value.client,
+      readPlanner: vi.fn(async () => ({
+        designation: {
+          kind: "none",
+          projectId: ids.project,
+          updatedAt: "2026-11-02T00:00:00.000Z",
+        },
+        designationVersion: 0,
+        proposals: [entry],
+      })),
+      executePlannerProposal,
+    } as never;
+    const onCreateThread = vi.fn();
+    const onOpenThread = vi.fn();
+    const element = (
+      <CodeOverview
+        controller={value}
+        onOpenThread={onOpenThread}
+        projectId={ids.project as never}
+        showQuickStart={false}
+        onCreateThread={onCreateThread}
+      />
+    );
+    const rendered = render(element);
+    try {
+      await screen.findByText("Only this described task.");
+      expect(screen.getByRole("button", { name: "Review and approve" })).toBeEnabled();
+      await userEvent.click(screen.getByRole("button", { name: "Review and approve" }));
+      expect(
+        reservePlannerAttempt(entry, "90000000-0000-4000-8000-000000000021" as never).status,
+      ).toBe("none");
+      await userEvent.keyboard("{Escape}");
+      expect(screen.getByRole("button", { name: "Review and approve" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Decline proposal" })).toBeDisabled();
+      rendered.unmount();
+      render(element);
+      await screen.findByText("Only this described task.");
+      expect(screen.getByRole("button", { name: "Review and approve" })).toBeDisabled();
+      await userEvent.click(screen.getByRole("button", { name: "Inspect submitted task" }));
+      expect(onOpenThread).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000021");
+      expect(onCreateThread).not.toHaveBeenCalled();
+      expect(executePlannerProposal).not.toHaveBeenCalled();
+    } finally {
+      finishPlannerAttempt(entry);
+    }
+  });
+
+  it("keeps a stale proposal refused without retrying and disables decisions while disconnected", async () => {
+    const value = controller();
+    const executePlannerProposal = vi.fn(async () => ({
+      status: "refused",
+      reason: "proposal-changed",
+      message: "The proposal changed; reload and retry.",
+    }));
+    value.client = {
+      ...value.client,
+      readPlanner: vi.fn(async () => ({
+        designation: {
+          kind: "none",
+          projectId: ids.project,
+          updatedAt: "2026-11-02T00:00:00.000Z",
+        },
+        designationVersion: 0,
+        proposals: [
+          {
+            proposal: {
+              id: "70000000-0000-4000-8000-000000000003",
+              projectId: ids.project,
+              plannerThreadId: ids.thread,
+              title: "Review parser",
+              intent: "Only the described parser fix.",
+              status: "pending",
+              proposedAt: "2026-11-02T00:00:00.000Z",
+            },
+            proposalVersion: 2,
+          },
+        ],
+      })),
+      executePlannerProposal,
+    } as never;
+    const onCreateThread = vi.fn();
+    const { rerender } = render(
+      <CodeOverview
+        controller={value}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        showQuickStart={false}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    await screen.findByText("Only the described parser fix.");
+    fireEvent.click(screen.getByRole("button", { name: "Decline proposal" }));
+    expect(await screen.findByText("The proposal changed; reload and retry.")).toBeVisible();
+    expect(executePlannerProposal).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Review and approve" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Review and approve" }));
+    const review = await screen.findByRole("dialog", { name: "Approve planner proposal" });
+    expect(review).toBeVisible();
+    expect(
+      within(review).getByRole("heading", { name: "Review the planner's proposal" }),
+    ).toBeVisible();
+    expect(
+      within(review).queryByRole("heading", { name: "What are we building today?" }),
+    ).not.toBeInTheDocument();
+    expect(within(review).queryByText(/just start typing/)).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+      "Only the described parser fix.",
+    );
+    expect(screen.getByRole("button", { name: "Approve and start described task" })).toBeDisabled();
+    expect(
+      screen.getByText("Choose an available provider and model before approving this task."),
+    ).toBeVisible();
+    expect(onCreateThread).not.toHaveBeenCalled();
+    rerender(
+      <CodeOverview
+        controller={{ ...value, status: "disconnected" }}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        showQuickStart={false}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Decline proposal", hidden: true })).toBeDisabled();
+    expect(executePlannerProposal).toHaveBeenCalledTimes(1);
+    const readPlanner = value.client.readPlanner;
+    if (readPlanner === undefined) throw new Error("Expected planner fixture");
+    const snapshot = await readPlanner(ids.project as never);
+    const reconnect = Promise.withResolvers<typeof snapshot>();
+    vi.mocked(readPlanner).mockReturnValueOnce(reconnect.promise);
+    rerender(
+      <CodeOverview
+        controller={value}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        showQuickStart={false}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Decline proposal", hidden: true })).toBeDisabled();
+    reconnect.resolve(snapshot);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Decline proposal", hidden: true })).toBeEnabled(),
+    );
+  });
+
+  it("lets a person designate a same-Project planner and decline the exact current proposal", async () => {
+    const value = controller();
+    const proposalId = "70000000-0000-4000-8000-000000000001";
+    const executePlanner = vi.fn(async () => ({ status: "designated" }));
+    const executePlannerProposal = vi.fn(async () => ({ status: "declined" }));
+    value.client = {
+      ...value.client,
+      readPlanner: vi.fn(async () => ({
+        designation: {
+          kind: "none",
+          projectId: ids.project,
+          updatedAt: "2026-11-02T00:00:00.000Z",
+        },
+        designationVersion: 4,
+        proposals: [
+          {
+            proposal: {
+              id: proposalId,
+              projectId: ids.project,
+              plannerThreadId: ids.thread,
+              title: "Describe the next task",
+              intent: "Review the parser and fix the stale branch check.",
+              status: "pending",
+              proposedAt: "2026-11-02T00:00:00.000Z",
+            },
+            proposalVersion: 3,
+          },
+        ],
+      })),
+      executePlanner,
+      executePlannerProposal,
+    } as never;
+    render(
+      <CodeOverview
+        controller={value}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        showQuickStart={false}
+      />,
+    );
+    expect(await screen.findByRole("heading", { name: "Project planner" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Designate planner" }));
+    await waitFor(() =>
+      expect(executePlanner).toHaveBeenCalledWith({
+        kind: "designate-code-planner-thread",
+        projectId: ids.project,
+        threadId: ids.thread,
+        expectedVersion: 4,
+      }),
+    );
+    expect(screen.getByText("Review the parser and fix the stale branch check.")).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Decline proposal" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Decline proposal" }));
+    await waitFor(() =>
+      expect(executePlannerProposal).toHaveBeenCalledWith({
+        kind: "decline-planner-work-proposal",
+        proposalId,
+        expectedVersion: 3,
+      }),
+    );
+  });
+
   it("renders only authoritative thread, checkout, policy, and delivery facts", () => {
     const onOpenReview = vi.fn();
     const onOpenSurface = vi.fn();

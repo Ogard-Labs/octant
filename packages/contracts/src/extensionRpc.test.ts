@@ -10,11 +10,61 @@ import { ExtensionProvenance } from "./extensions";
 import { Schema } from "effect";
 
 const decodeExtensionProvenance = Schema.decodeUnknownSync(ExtensionProvenance);
+
+it("bounds root diagnostics and never accepts filesystem authority or an enablement grant in them", () => {
+  const status = {
+    sourceRef: "folder:opaque",
+    displayName: "skills",
+    status: "missing",
+    skillCount: 0,
+    watching: true,
+  };
+  const snapshot = {
+    sequence: 0,
+    snapshotAt: "2026-11-02T12:00:00.000Z",
+    packages: [],
+    collisions: [],
+    skillRoots: [status],
+  };
+  expect(decodeExtensionSnapshot(snapshot).skillRoots?.[0]?.status).toBe("missing");
+  expect(() =>
+    decodeExtensionSnapshot({
+      ...snapshot,
+      skillRoots: [{ ...status, sourceRef: "/private/root" }],
+    }),
+  ).toThrow();
+  for (const injected of [{ absolutePath: "/private" }, { trusted: true }, { enabled: true }])
+    expect(() =>
+      decodeExtensionSnapshot({ ...snapshot, skillRoots: [{ ...status, ...injected }] }),
+    ).toThrow();
+  expect(() =>
+    decodeExtensionSnapshot({ ...snapshot, skillRoots: Array(35).fill(status) }),
+  ).toThrow();
+});
 const extensionId = "10000000-0000-4000-8000-000000000001";
 const packageId = "20000000-0000-4000-8000-000000000001";
 const digest = `sha256:${"a".repeat(64)}`;
 
 describe("extension RPC contracts", () => {
+  it("decodes local Paper setup without inventing a hosted connector or executable grant", () => {
+    const request = {
+      name: "Paper",
+      localSetupId: "paper",
+      server: {
+        type: "streamable-http",
+        url: "http://127.0.0.1:29979/mcp",
+        headers: [],
+      },
+    };
+    expect(decodeUserAddedMcpServerRequest(request).localSetupId).toBe("paper");
+    expect(() =>
+      decodeUserAddedMcpServerRequest({ ...request, localSetupId: "unknown" }),
+    ).toThrow();
+    expect(() =>
+      decodeUserAddedMcpServerRequest({ ...request, executableTrusted: true }),
+    ).toThrow();
+  });
+
   it.each([
     { kind: "search-catalog", query: "build", cursor: "next-1" },
     { kind: "search-skills", query: "review", cursor: "next-1" },

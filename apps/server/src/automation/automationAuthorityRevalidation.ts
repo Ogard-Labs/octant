@@ -37,8 +37,8 @@ export type AutomationAuthorityRevalidationResult =
  * authority; Full access remains ineligible.
  */
 export function revalidateAutomationAuthority(input: {
-  readonly definition: AutomationDefinition;
-  readonly run: AutomationRun;
+  readonly definition: Pick<AutomationDefinition, "hostId">;
+  readonly run: Pick<AutomationRun, "definitionSnapshot" | "authoritySnapshot">;
   readonly facts: AutomationAuthorityLiveFacts;
 }): AutomationAuthorityRevalidationResult {
   const snapshot = input.run.definitionSnapshot;

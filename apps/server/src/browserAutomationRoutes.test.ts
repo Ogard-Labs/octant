@@ -81,6 +81,113 @@ describe("browser automation routes", () => {
     });
   });
 
+  describe("task default profile transaction", () => {
+    const choice = { threadId, mode: "work", expectedVersion: 1, profile: "personal" };
+    const post = (path: string, value: unknown) =>
+      new Request(`http://127.0.0.1/api/browser/${path}`, {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability },
+        body: JSON.stringify(value),
+      });
+    function fixture() {
+      let version = 1;
+      let model = "model-a";
+      let profile = "private" as "private" | "personal";
+      const save = vi.fn(async (_windowId, _command, commit) => {
+        commit(() => {
+          version += 1;
+          profile = "personal";
+        });
+        return { status: "saved" as const };
+      });
+      const bind = vi.fn();
+      const switchTaskProfile = vi.fn(async (input) => {
+        expect(input.isCurrent()).toBe(true);
+        expect(input.profile).toEqual({ kind: "personal" });
+        const saved = await input.save((persist: () => void) => {
+          persist();
+          return true;
+        });
+        if (saved.status === "refused") return saved;
+        input.bind(contextId, authority);
+        return { status: "changed", browser: snapshot };
+      });
+      const read = vi.fn(() => ({ version: version as never, modelId: model, profile }));
+      const handler = createBrowserAutomationRouteHandler({
+        service: { ...service, switchTaskProfile } as any,
+        taskProfiles: { read, save, bind },
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      return {
+        handler,
+        save,
+        bind,
+        read,
+        switchTaskProfile,
+        edit: () => {
+          version += 1;
+          model = "model-b";
+        },
+      };
+    }
+    it("reads only the task selection and saves through the shared switch boundary", async () => {
+      const f = fixture();
+      const current = await f.handler(post("task-profile/current", { threadId, mode: "work" }));
+      expect(await current?.json()).toMatchObject({ threadId, version: 1, profile: "private" });
+      const changed = await f.handler(post("task-profile", choice));
+      expect(changed?.status).toBe(200);
+      expect(await changed?.json()).toMatchObject({
+        selection: { profile: "personal", version: 2 },
+      });
+      expect(f.save).toHaveBeenCalledOnce();
+      expect(f.bind).toHaveBeenCalledWith(contextId, "model-a", authority);
+    });
+    it("detects a concurrent task/model edit while staging", async () => {
+      const f = fixture();
+      f.switchTaskProfile.mockImplementationOnce(async (input) => {
+        f.edit();
+        expect(input.isCurrent()).toBe(false);
+        return {
+          status: "refused",
+          failure: { category: "stale", message: "Task changed." },
+        } as any;
+      });
+      expect((await f.handler(post("task-profile", choice)))?.status).toBe(409);
+      expect(f.save).not.toHaveBeenCalled();
+      expect(f.bind).not.toHaveBeenCalled();
+    });
+    it("refuses stale versions and strict extra fields before creating any context", async () => {
+      const f = fixture();
+      expect(
+        (await f.handler(post("task-profile", { ...choice, expectedVersion: 2 })))?.status,
+      ).toBe(409);
+      expect((await f.handler(post("task-profile", { ...choice, cookies: "never" })))?.status).toBe(
+        400,
+      );
+      expect(f.switchTaskProfile).not.toHaveBeenCalled();
+    });
+    it("refuses paired devices before reading the stored selection", async () => {
+      const f = fixture();
+      const request = post("task-profile/current", { threadId, mode: "work" });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          deviceId: "90000000-0000-4000-8000-000000000001" as never,
+          hostId: "local" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+        }),
+        scopeId: windowId,
+      } as any);
+      expect((await f.handler(request))?.status).toBe(403);
+      expect(f.read).not.toHaveBeenCalled();
+    });
+  });
+
   it("rejects an unauthenticated browser scope request", async () => {
     const response = await handler(
       new Request("http://127.0.0.1/api/browser/scope", {

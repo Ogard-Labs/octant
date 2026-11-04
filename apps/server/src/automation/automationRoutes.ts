@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
   decodeAutomationCommandResult,
+  decodeAutomationCommand,
   decodeAutomationFollowUpRequest,
   decodeAutomationThreadRoutineRequest,
-  decodeAutomationTrigger,
+  decodeAutomationScheduledTrigger,
   decodeRoutineProposalDecision,
   decodeRoutineProposalId,
   decodeRoutineProposalDecisionResult,
@@ -25,7 +26,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { resolveNextAutomationOccurrence } from "@octant/domain";
-import { ClientPrincipalError } from "../clientPrincipal";
+import { ClientPrincipalError, WINDOW_CAPABILITY_HEADER } from "../clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "../principalRouteContext";
 import type { ProjectService } from "../projectService";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -34,6 +35,11 @@ import type { AutomationCommandService } from "./automationCommandService";
 import type { AutomationProjection } from "./automationProjection";
 import type { RoutineProposalService } from "./routineProposalService";
 import type { ThreadRoutineDraftResult } from "./threadRoutineDraft";
+import type {
+  AutomationFileSourcePreparation,
+  AutomationFileSourceRearmPreparation,
+} from "./automationFileSourceAuthority";
+import { AutomationFileSourceReviewError } from "./automationFileSources";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -65,6 +71,19 @@ export interface AutomationRouteDependencies {
   };
   readonly now?: () => number;
   readonly uuid?: () => string;
+  readonly prepareFileRearm?: (input: {
+    readonly command: Extract<AutomationCommand, { readonly kind: "rearm-file-automation" }>;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<AutomationFileSourceRearmPreparation>;
+  readonly prepareFileSource?: (input: {
+    readonly command: Extract<
+      AutomationCommand,
+      { readonly kind: "create-automation" | "update-automation" }
+    >;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<AutomationFileSourcePreparation>;
 }
 
 /**
@@ -147,7 +166,7 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
         return await handleHistory(dependencies, context, url, origin);
       }
       if (route === "commands" && request.method === "POST") {
-        return await handleCommand(dependencies, context, body, origin);
+        return await handleCommand(dependencies, context, body, origin, request);
       }
       if (route === "proposals" && request.method === "GET") {
         return jsonResponse(
@@ -289,9 +308,11 @@ async function handleGet(
     return failureResponse("Automation is unavailable.", 404, origin);
   }
   const runs = dependencies.projection.listRuns({ automationId, limit: DETAIL_RUNS_LIMIT });
+  const fileSource = dependencies.projection.getFileSourceSummary(automationId);
   return jsonResponse(
     decodeAutomationQueryResponse({
       kind: "automation-detail",
+      ...(fileSource === undefined ? {} : { fileSource }),
       automation: definition,
       runs: runs.runs,
     }),
@@ -352,7 +373,25 @@ async function handleCommand(
   context: PrincipalRouteContext,
   body: unknown,
   origin: string | null,
+  request: Request,
 ): Promise<Response> {
+  const signal = request.signal;
+  // File setup/review is local HTTP only. Retain the original capability, not merely
+  // a window id that could be revoked and registered again while preparation awaits.
+  const capability = request.headers.get(WINDOW_CAPABILITY_HEADER);
+  const localAuthorityCurrent = () => {
+    if (context.principal.kind !== "local-window" || capability === null) return false;
+    try {
+      return (
+        dependencies.windowAuthorityStore.authenticate(
+          capability,
+          dependencies.now?.() ?? Date.now(),
+        ) === context.scopeId
+      );
+    } catch {
+      return false;
+    }
+  };
   if (!isRecord(body)) {
     return failureResponse("Automation command is invalid.", 400, origin);
   }
@@ -422,7 +461,140 @@ async function handleCommand(
     principal: context.principal,
     origin: { kind: "interactive" },
   } as AutomationCommand;
-  const result = dependencies.commands.execute(command);
+  let preparation:
+    | AutomationFileSourcePreparation
+    | AutomationFileSourceRearmPreparation
+    | undefined;
+  if (command.kind === "rearm-file-automation") {
+    if (context.principal.kind !== "local-window")
+      return jsonResponse(
+        commandFailure(
+          "unauthorized",
+          "Re-arm this file routine from an Octant window on this host.",
+        ),
+        200,
+        origin,
+      );
+    let checked: AutomationCommand;
+    try {
+      checked = decodeAutomationCommand(command);
+    } catch {
+      return jsonResponse(commandFailure("invalid", "The input review is invalid."), 200, origin);
+    }
+    if (checked.kind !== "rearm-file-automation")
+      return jsonResponse(commandFailure("invalid", "The input review is invalid."), 200, origin);
+    const current = () =>
+      !signal.aborted &&
+      context.abortSignal?.aborted !== true &&
+      localAuthorityCurrent() &&
+      dependencies.projection.getDefinition(checked.automationId)?.version ===
+        checked.expectedVersion;
+    try {
+      if (dependencies.prepareFileRearm === undefined || !current())
+        return jsonResponse(
+          commandFailure(
+            "blocked",
+            "The current input review is unavailable. Refresh and try again.",
+          ),
+          200,
+          origin,
+        );
+      preparation = await dependencies.prepareFileRearm({ command: checked, current, signal });
+      const latestProjects = await accessibleProjects(dependencies, context);
+      if (
+        !current() ||
+        !preparation.current() ||
+        authorizeCommandProject(dependencies, body, latestProjects) !== undefined
+      )
+        return jsonResponse(
+          commandFailure(
+            "stale-version",
+            "The input review or its authority changed. Refresh it before re-arming.",
+          ),
+          200,
+          origin,
+        );
+    } catch (error) {
+      return jsonResponse(
+        commandFailure(
+          "blocked",
+          error instanceof AutomationFileSourceReviewError
+            ? error.message
+            : "The input could not be verified. Check the Project, refresh and try again.",
+        ),
+        200,
+        origin,
+      );
+    }
+  }
+  if (
+    (command.kind === "create-automation" || command.kind === "update-automation") &&
+    isRecord(body.definition) &&
+    isRecord(body.definition.trigger) &&
+    body.definition.trigger.kind === "file-arrival"
+  ) {
+    if (context.principal.kind !== "local-window")
+      return jsonResponse(
+        commandFailure(
+          "unauthorized",
+          "Configure a file routine from an Octant window on this host.",
+        ),
+        200,
+        origin,
+      );
+    let checked: AutomationCommand;
+    try {
+      checked = decodeAutomationCommand(command);
+    } catch {
+      return jsonResponse(commandFailure("invalid", "The file routine is invalid."), 200, origin);
+    }
+    if (checked.kind !== "create-automation" && checked.kind !== "update-automation")
+      return jsonResponse(commandFailure("invalid", "The file routine is invalid."), 200, origin);
+    const current = () =>
+      !signal.aborted &&
+      context.abortSignal?.aborted !== true &&
+      localAuthorityCurrent() &&
+      (checked.kind === "create-automation"
+        ? dependencies.projection.getDefinition(checked.automationId) === undefined
+        : dependencies.projection.getDefinition(checked.automationId)?.version ===
+          checked.expectedVersion);
+    try {
+      if (dependencies.prepareFileSource === undefined || !current())
+        return jsonResponse(
+          commandFailure(
+            "blocked",
+            "The local input folder is unavailable. Check the Project and try again.",
+          ),
+          200,
+          origin,
+        );
+      preparation = await dependencies.prepareFileSource({ command: checked, current, signal });
+      const latestProjects = await accessibleProjects(dependencies, context);
+      if (
+        !current() ||
+        !preparation.current() ||
+        authorizeCommandProject(dependencies, body, latestProjects) !== undefined
+      )
+        return jsonResponse(
+          commandFailure(
+            "unauthorized",
+            "The file routine's Project or window authority changed. Review it and try again.",
+          ),
+          200,
+          origin,
+        );
+    } catch {
+      return jsonResponse(
+        commandFailure(
+          "blocked",
+          "The local input folder is unavailable or changed. Check the Project and try again.",
+        ),
+        200,
+        origin,
+      );
+    }
+  }
+  const result = dependencies.commands.execute(command, undefined, preparation);
   return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
 }
 
@@ -602,7 +774,10 @@ async function handleFollowUp(
       origin,
     );
   }
-  const trigger = decodeAutomationTrigger({ kind: "once", scheduledAt: request.scheduledAt });
+  const trigger = decodeAutomationScheduledTrigger({
+    kind: "once",
+    scheduledAt: request.scheduledAt,
+  });
   if (request.kind === "schedule-follow-up") {
     const result = await createThreadRoutine(dependencies, context, {
       proposalId: decodeRoutineProposalId((dependencies.uuid ?? randomUUID)()),

@@ -994,6 +994,30 @@ describe("CodeService commands", () => {
     );
   });
 
+  it("reports the host creation boundary before plain-checkout journaling and after every admission gate", async () => {
+    for (const stage of ["before", "journal"] as const) {
+      const boundary = vi.fn();
+      const fixture = serviceFixture({
+        threads: [],
+        ...(stage === "before" ? { isProviderModelAllowed: () => false } : {}),
+      });
+      if (stage === "journal")
+        vi.mocked(fixture.persistence.journal.append).mockImplementation(() => {
+          expect(boundary).toHaveBeenCalledTimes(1);
+          throw new Error("Journal failed after boundary");
+        });
+      await expect(
+        fixture.service.execute(
+          ids.window,
+          { kind: "create-code-thread", thread: thread({ executionPolicy: "approval-gated" }) },
+          undefined,
+          { onCreationBoundary: boundary },
+        ),
+      ).rejects.toBeInstanceOf(CodeServiceError);
+      expect(boundary).toHaveBeenCalledTimes(stage === "before" ? 0 : 1);
+    }
+  });
+
   it("stores a declared reasoning choice without creating a provider handoff", async () => {
     const probe = reasoningProbe();
     const fixture = serviceFixture({ threads: [thread()], probeProvider: async () => probe });
@@ -2015,6 +2039,58 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("records a default Browser profile for this task and refuses an archived task", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    const changed = await fixture.service.execute(ids.window, {
+      kind: "change-code-thread-browser-profile",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      browserTaskProfile: "personal",
+    });
+    expect(changed).toMatchObject({
+      kind: "thread-updated",
+      thread: { browserTaskProfile: "personal", version: 2 },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "code.thread-updated@1",
+            payload: expect.objectContaining({
+              thread: expect.objectContaining({ browserTaskProfile: "personal" }),
+            }),
+          }),
+        ],
+      }),
+    );
+    const stale = serviceFixture();
+    const commitBrowserProfile = vi.fn(() => false);
+    await expect(
+      stale.service.execute(
+        ids.window,
+        {
+          kind: "change-code-thread-browser-profile",
+          threadId: ids.thread,
+          expectedVersion: 1,
+          browserTaskProfile: "personal",
+        },
+        undefined,
+        { commitBrowserProfile },
+      ),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    expect(commitBrowserProfile).toHaveBeenCalledOnce();
+    expect(stale.persistence.journal.append).not.toHaveBeenCalled();
+    const archived = serviceFixture({ threads: [thread({ lifecycle: "archived" })] });
+    await expect(
+      archived.service.execute(ids.window, {
+        kind: "change-code-thread-browser-profile",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        browserTaskProfile: "project",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
   it("records the thread's choice of Claude artifacts and refuses it on an archived thread", async () => {
     const fixture = serviceFixture();
     await expect(
@@ -2873,6 +2949,29 @@ describe("CodeService managed thread creation", () => {
       cleanup: vi.fn(overrides.cleanup ?? (async () => ({ status: "removed" as const }))),
     };
   }
+
+  it("reports the host creation boundary before managed commit and after source validation", async () => {
+    for (const stage of ["prepare", "commit"] as const) {
+      const boundary = vi.fn();
+      const port = mockCreationPort(
+        stage === "prepare"
+          ? { prepare: async () => ({ status: "refused", reason: "ref-unavailable" }) }
+          : {
+              commit: async () => {
+                expect(boundary).toHaveBeenCalledTimes(1);
+                throw new Error("Commit outcome unknown");
+              },
+            },
+      );
+      const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+      await expect(
+        fixture.service.execute(ids.window, managedCommand, undefined, {
+          onCreationBoundary: boundary,
+        }),
+      ).rejects.toBeInstanceOf(CodeServiceError);
+      expect(boundary).toHaveBeenCalledTimes(stage === "prepare" ? 0 : 1);
+    }
+  });
 
   it("creates the managed worktree on the delivery branch, journals checkout + thread, and returns exact provenance", async () => {
     const port = mockCreationPort();

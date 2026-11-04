@@ -55,6 +55,8 @@ export interface BrowserAppManagedToolsOptions {
   ) => string | undefined;
   /** Host-owned in-memory bindings that survive per-turn tool-set factories. */
   readonly modelBindings: Map<string, BrowserModelBinding>;
+  /** Live task default, used only when navigate omits its explicit profile. */
+  readonly resolveTaskProfile?: () => "private" | "project" | "personal" | undefined;
   readonly resolveAuthority: (
     threadId: BrowserThreadId,
     mode: ToolActionAuthority["mode"],
@@ -78,6 +80,7 @@ export interface BrowserAppManagedToolsOptions {
       readonly threadId?: BrowserThreadId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
+      readonly activityBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
@@ -141,6 +144,8 @@ export interface BrowserAppManagedToolsOptions {
 }
 
 export interface BrowserModelBinding {
+  /** Identity of a person-switched page; it grants no agent access. */
+  readonly approval?: "pending";
   readonly modelId: string;
   readonly authority: ToolActionAuthority;
 }
@@ -241,13 +246,20 @@ export function createBrowserAppManagedTools(
     ) {
       return failure("browser-profile-differs-stop-first");
     }
+    const defaultChoice = options.resolveTaskProfile?.();
+    const choice = input.operation === "navigate" ? (input.profile ?? defaultChoice) : undefined;
     const profile: StoredBrowserProfile | undefined =
       existing !== undefined
         ? existingProfile
-        : input.operation === "navigate" && input.profile !== undefined
-          ? requestedProfile(input.profile, authority)
+        : input.operation === "navigate" && choice !== undefined
+          ? requestedProfile(choice, authority)
           : undefined;
-    if (input.operation === "navigate" && input.profile === "project" && profile === undefined) {
+    if (
+      existing === undefined &&
+      input.operation === "navigate" &&
+      choice === "project" &&
+      profile === undefined
+    ) {
       return failure("profile-unavailable");
     }
     if (
@@ -257,18 +269,28 @@ export function createBrowserAppManagedTools(
     ) {
       return failure("profile-needs-a-person");
     }
+    if (
+      profile !== undefined &&
+      defaultChoice !== undefined &&
+      defaultChoice !== "private" &&
+      (input.operation !== "navigate" || input.profile === undefined) &&
+      options.approvals?.isPairedDevice?.(options.windowId) === true
+    )
+      return failure("profile-not-local");
     const existingBinding =
       existing === undefined ? undefined : options.modelBindings.get(String(existing.contextId));
-    const contextApproved =
+    const identityMatches =
       existingBinding !== undefined &&
       String(existingBinding.modelId) === String(options.modelId) &&
       sameToolActionAuthority(existingBinding.authority, authority);
+    const contextApproved = identityMatches && existingBinding?.approval !== "pending";
     // A remembered origin grant stands in for the prompt when the context
     // itself is new: "always allow" answered an open for this origin before.
     // An existing context still asks when its binding no longer matches —
     // the remembered grant covers the page, not a new model driving it.
     const remembered =
-      existing === undefined && options.approvals?.isRemembered?.(origin, profile) === true;
+      (existing === undefined || (identityMatches && existingBinding?.approval === "pending")) &&
+      options.approvals?.isRemembered?.(origin, profile) === true;
     if ((existing === undefined || !contextApproved) && !remembered) {
       if (options.approvals === undefined) return failure("browser-approval-required");
       const outcome = await options.approvals.request({
@@ -293,6 +315,11 @@ export function createBrowserAppManagedTools(
         });
       }
     }
+    if (remembered && existing !== undefined)
+      rememberModelBinding(options.modelBindings, String(existing.contextId), {
+        modelId: options.modelId,
+        authority,
+      });
     if (existing === undefined) {
       const created = await options.browser.create({
         windowId: options.windowId,
@@ -320,6 +347,7 @@ export function createBrowserAppManagedTools(
     const binding = options.modelBindings.get(contextId);
     const bindingMatches =
       binding !== undefined &&
+      binding.approval !== "pending" &&
       String(binding.modelId) === String(options.modelId) &&
       sameToolActionAuthority(binding.authority, authority);
     if (!bindingMatches && existing !== undefined) {
@@ -568,9 +596,10 @@ function signInRefusal(options: BrowserAppManagedToolsOptions): string | undefin
 
 /** The stored profile a `profile` argument names for this thread, if it has one. */
 function requestedProfile(
-  choice: "project" | "personal",
+  choice: "private" | "project" | "personal",
   authority: ToolActionAuthority,
 ): StoredBrowserProfile | undefined {
+  if (choice === "private") return undefined;
   if (choice === "personal") return { kind: "personal" };
   return authority.projectId === undefined
     ? undefined
@@ -584,7 +613,7 @@ function modelIsCurrent(options: BrowserAppManagedToolsOptions): boolean {
 
 const MAX_BROWSER_MODEL_BINDINGS = 256;
 
-function rememberModelBinding(
+export function rememberModelBinding(
   bindings: Map<string, BrowserModelBinding>,
   contextId: string,
   binding: BrowserModelBinding,

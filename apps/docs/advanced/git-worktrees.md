@@ -68,10 +68,14 @@ confirmation when work may remain. Ambiguous identity or inventory becomes
 Read-only observation and mutation are separate ports. Mutation serializes
 per checkout and refuses an active Git index lock.
 
-Serializing does not make a restore safe against another thread's turn. Restoring
-files in place refuses while a different thread has a writing turn in flight on
-the same checkout path. A thread on its own managed worktree has its own path
-and is never held up by, or holding up, the Project's checkout.
+Restoring files in place and discarding tracked changes refuse while another
+thread has a writing turn running or waiting on approval in the same checkout
+folder. Discard also waits for you to finish or stop the requesting thread's own
+turn before you retry. The refusal names the blocking thread when it is in the
+same Project. Approval does not override this check: a writer that starts while
+you review an approval still blocks discard. A turn starting during an overwrite
+waits for it to finish. Plan turns and threads on a different managed worktree
+do not block the operation. Refresh Review before retrying if the files changed.
 
 **Unavailable in V1:** broad staging, shared stash, reset, checkout-based
 discard, rebase, history rewriting, and force push options. Staging always

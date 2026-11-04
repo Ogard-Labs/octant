@@ -223,6 +223,7 @@ function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFil
         { kind: "path", base: "data", path: "octant-bridge-secret" },
         { kind: "path", base: "data", path: "remote" },
         { kind: "path", base: "data", path: "integrations" },
+        { kind: "path", base: "data", path: "harness/cloud-cli" },
         names("", "[^/]*\\.secret", 1, { base: "runtime" }),
       ],
     },

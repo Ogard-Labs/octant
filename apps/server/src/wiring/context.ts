@@ -1,5 +1,7 @@
+import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { randomUUID } from "node:crypto";
 import {
+  DEFAULT_WORK_ACCESS,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeProjectId,
@@ -11,6 +13,9 @@ import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthorit
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
 import { SessionCompactionService } from "../context/sessionCompaction";
 import { createContextRouteHandler } from "../contextRoutes";
+import { createTaskAccessFacts } from "../context/taskAccessFacts";
+import { createTaskAccessSubjectReader } from "../context/taskAccessSubject";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { windowCanOpenProject } from "../projectOpenAuthority";
 import { createBrowserAutomationRouteHandler } from "../browserAutomationRoutes";
 import { createAgentMessageRouteHandler } from "../agentMessage/agentMessageRoutes";
@@ -29,11 +34,17 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 import type { HarnessWiring } from "./harness";
+import type { HarnessStateWiring } from "./harnessState";
+import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 
 export type ContextDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "browserCaptures" | "windowAuthorityStore"> &
+  Pick<
+    AuthorityWiring,
+    "browserCaptures" | "windowAuthorityStore" | "browserModelBindings" | "codeSessionAuthority"
+  > &
   Pick<AgentRunsWiring, "capacityScheduler"> &
-  Pick<HarnessWiring, "nativeHarnessHooks"> &
+  Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield"> &
+  Pick<HarnessStateWiring, "serverProjectStore"> &
   Pick<IntegrationsWiring, "agentMessageProjection"> &
   Pick<WorkspaceWiring, "contextHarness" | "projectService" | "spendCeilingService"> &
   Pick<CodeWiring, "canAccessCodeProject"> &
@@ -62,11 +73,13 @@ export function wireContext(deps: ContextDependencies) {
     browserAuthority,
     browserAutomationService,
     browserCaptures,
+    browserModelBindings,
     browserToolApprovalService,
     canAccessCodeProject,
     capacityScheduler,
     chatService,
     codeOperationRuntime,
+    codeSessionAuthority,
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
@@ -74,10 +87,12 @@ export function wireContext(deps: ContextDependencies) {
     browserFlowService,
     browserProfileService,
     nativeHarnessHooks,
+    hostShield,
     persistence,
     projectService,
     providerRuntimeRegistry,
     routeCodeService,
+    serverProjectStore,
     spendCeilingService,
     windowAuthorityStore,
     workThreadProjection,
@@ -455,8 +470,32 @@ export function wireContext(deps: ContextDependencies) {
     spendCeiling: spendCeilingService,
     uuid: randomUUID,
   });
+  const taskAccessFacts = createTaskAccessFacts({
+    subject: createTaskAccessSubjectReader({
+      code: (id) => persistence.readCodeThread(id),
+      work: (id) => workThreadProjection.read(id),
+      project: (id) => persistence.readProject(id),
+      codeSettings: () =>
+        persistence.readCodeSettings()?.settings ?? { defaultExecutionPolicy: "approval-gated" },
+      workSettings: () => workThreadProjection.settings() ?? { defaultAccess: DEFAULT_WORK_ACCESS },
+      canAccessCodeProject,
+      session: codeSessionAuthority,
+      activeCode: (thread) => codeOperationRuntime?.threadWithActiveTurnPosture?.(thread) ?? thread,
+      runningWork: (id) => workTurnService.runningTurnAccess(id),
+      holdsServerWorkThread: (thread) =>
+        serverWorkProjectOf(serverProjectStore, thread) !== undefined,
+      workStanding: (thread) => workTurnService.turnStandingRefusal(thread),
+      tainted: (id) =>
+        readThreadExternalContentTaint(persistence.connection, id).externalContentIngested,
+    }),
+    instance: (id) => persistence.readProviderInstance(id),
+    observed: (id) => providerRuntimeRegistry.observedState(id),
+    reviewer: hostShield.describe,
+    clock: () => new Date().toISOString(),
+  });
   const contextRoutes = createContextRouteHandler({
     service: {
+      taskAccess: (subject, _principal, windowId) => taskAccessFacts(subject, windowId),
       inspect: (subject, afterSequence, principal) =>
         sessionCompaction.inspect(subject, afterSequence, principal),
       execute: (command, principal, windowId) =>
@@ -470,8 +509,81 @@ export function wireContext(deps: ContextDependencies) {
     windowAuthorityStore,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
+  const taskProfileThread = (threadId: string, mode: "work" | "code") => {
+    const thread =
+      mode === "work"
+        ? workThreadProjection.read(decodeWorkThreadId(threadId))
+        : persistence.readCodeThread(decodeCodeThreadId(threadId));
+    return thread?.lifecycle === "active" ? thread : undefined;
+  };
   const browserAutomationRoutes = createBrowserAutomationRouteHandler({
     service: browserAutomationService,
+    taskProfiles: {
+      read: (threadId, mode) => {
+        const thread = taskProfileThread(String(threadId), mode);
+        return thread === undefined
+          ? undefined
+          : {
+              version: thread.version,
+              profile: thread.browserTaskProfile ?? "private",
+              modelId: String(thread.modelId),
+            };
+      },
+      save: async (windowId, command, commit) => {
+        let committed = false;
+        const commitBrowserProfile = (persist: () => void) =>
+          commit(() => {
+            persist();
+            committed = true;
+          });
+        try {
+          const common = {
+            expectedVersion: command.expectedVersion,
+            browserTaskProfile: command.profile,
+          };
+          if (command.mode === "work") {
+            await workThreadService.execute(
+              windowId,
+              {
+                ...common,
+                kind: "change-work-thread-browser-profile",
+                threadId: decodeWorkThreadId(String(command.threadId)),
+              },
+              { commitBrowserProfile },
+            );
+          } else {
+            await routeCodeService.execute(
+              windowId,
+              {
+                ...common,
+                kind: "change-code-thread-browser-profile",
+                threadId: decodeCodeThreadId(String(command.threadId)),
+              },
+              undefined,
+              { commitBrowserProfile },
+            );
+          }
+        } catch {
+          /* A refused journal never calls the final promotion. A later edit
+           * cannot turn a completed switch into a persistence failure. */
+        }
+        if (committed) return { status: "saved" };
+        return {
+          status: "refused",
+          failure: {
+            category: "stale",
+            message:
+              "The task's Browser profile could not be saved. The page was not replaced; reload and retry.",
+          },
+        };
+      },
+      bind: (contextId, modelId, authority) =>
+        rememberModelBinding(browserModelBindings, contextId, {
+          modelId,
+          authority,
+          approval: "pending",
+        }),
+    },
     captures: browserCaptures,
     windowCanOpenThread: windowCanOpenThreadById,
     projectBrowsers: liveProjectBrowsers,

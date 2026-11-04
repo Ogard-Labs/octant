@@ -445,3 +445,7 @@ export function forgeShellChangeSummary(changes: ReadonlyArray<ForgeShellChange>
   }
   return { kinds, branches, unreadable: changes.some((change) => change.unreadable) };
 }
+
+/** Generic shell consent cannot bind a forge act to a repository, head and checks. */
+export const FORGE_SHELL_TOOL_REQUIRED_MESSAGE =
+  "Octant refused this command: below Full access, pushes and pull-request changes must use Octant's Git and pull-request tools, which check the repository, branch, revision, authority and required approval.";

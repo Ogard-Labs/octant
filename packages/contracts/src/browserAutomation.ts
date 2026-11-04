@@ -84,6 +84,7 @@ export const BrowserContextPolicy = Schema.Struct({
   allowedOrigins: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
   credentialFieldProtection: Schema.Boolean,
   maxConcurrentTabs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(16)),
+  /** Idle interval after activation; authorized work renews it, passive previews do not. */
   sessionTimeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(3_600_000)),
   /**
    * Accept this context's own localhost certificate. A dev server on

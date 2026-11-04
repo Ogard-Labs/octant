@@ -1,6 +1,11 @@
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { CONNECTOR_PACKAGE_PREFIX, connectorById, connectorPackageName } from "@octant/domain";
+import { basename, join } from "node:path";
+import {
+  CONNECTOR_PACKAGE_PREFIX,
+  connectorById,
+  connectorPackageName,
+  PAPER_LOCAL_SETUP,
+} from "@octant/domain";
 import type { UserAddedMcpServerRequest } from "@octant/contracts/extension-rpc";
 import type { ExtensionPackageState, ExtensionSource } from "@octant/contracts/extensions";
 import {
@@ -85,7 +90,16 @@ export class UserAddedMcpServerStore {
   }
 
   async add(request: UserAddedMcpServerRequest): Promise<{ source: UserAddedMcpServerSource }> {
-    const slug = connectorSlug(request) ?? packageSlug(request.name);
+    if (request.localSetupId !== undefined && request.connectorId !== undefined) {
+      throw new UserAddedMcpServerError("invalid", "Choose a local setup or a hosted connector.");
+    }
+    const slug = localSetupSlug(request) ?? connectorSlug(request) ?? packageSlug(request.name);
+    if (request.localSetupId === undefined && slug === PAPER_LOCAL_SETUP.packageName) {
+      throw new UserAddedMcpServerError(
+        "invalid",
+        "This name is reserved for the local Paper setup.",
+      );
+    }
     if (request.connectorId === undefined && slug.startsWith(CONNECTOR_PACKAGE_PREFIX)) {
       throw new UserAddedMcpServerError(
         "invalid",
@@ -234,6 +248,40 @@ export class UserAddedMcpServerStore {
     return this.#registry.get(sourceRef) !== undefined;
   }
 
+  /** Verify the generated source's actual configuration, including packages added before this setup existed. */
+  localSetupId(sourceRef: string): "paper" | undefined {
+    const registered = this.#registry.get(sourceRef);
+    if (
+      registered === undefined ||
+      basename(registered.absolutePath) !== PAPER_LOCAL_SETUP.packageName
+    )
+      return undefined;
+    const content = registered.packageInput.entries.find(
+      (entry) => entry.path === "mcp.json",
+    )?.content;
+    if (content === undefined) return undefined;
+    try {
+      const document = validateAgentPluginsMcpDocument(
+        JSON.parse(typeof content === "string" ? content : new TextDecoder().decode(content)),
+        {
+          pluginSchema: AGENT_PLUGINS_PLUGIN_SCHEMA,
+        },
+      );
+      const [server, ...others] = document.servers;
+      if (
+        document.topLevelInvalid ||
+        others.length !== 0 ||
+        server?.type !== "streamable-http" ||
+        server.url !== PAPER_LOCAL_SETUP.url ||
+        Object.keys(server.headers ?? {}).length !== 0
+      )
+        return undefined;
+      return "paper";
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
    * The address a sign-in may target: the hosted server in a package this
    * host wrote for one the person added, read from the installed package's
@@ -261,6 +309,7 @@ export class UserAddedMcpServerStore {
     ) {
       return undefined;
     }
+    if (this.localSetupId(installed.source.sourceRef) === "paper") return undefined;
     const component = installed.components.find(
       (candidate) => String(candidate.component.id) === componentId,
     )?.component;
@@ -398,6 +447,21 @@ function connectorSlug(request: UserAddedMcpServerRequest): string | undefined {
     throw new UserAddedMcpServerError("invalid", "This address is not the connector's own.");
   }
   return connectorPackageName(entry.id);
+}
+
+function localSetupSlug(request: UserAddedMcpServerRequest): string | undefined {
+  if (request.localSetupId === undefined) return undefined;
+  if (
+    request.server.type !== "streamable-http" ||
+    request.server.url !== PAPER_LOCAL_SETUP.url ||
+    request.server.headers.length !== 0
+  ) {
+    throw new UserAddedMcpServerError(
+      "invalid",
+      "Paper's local setup uses its own loopback address without credentials.",
+    );
+  }
+  return PAPER_LOCAL_SETUP.packageName;
 }
 
 function validateRemoteUrl(url: string): void {

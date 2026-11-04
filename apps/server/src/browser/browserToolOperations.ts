@@ -78,7 +78,7 @@ export type BrowserToolInput = {
       readonly operation: "navigate";
       readonly url: string;
       /** Ask for a page in the Project's or the Personal profile; absent is Private. */
-      readonly profile?: "project" | "personal";
+      readonly profile?: "private" | "project" | "personal";
     }
   | ({ readonly operation: "read-page" } & Partial<BrowserToolTarget>)
   | { readonly operation: "snapshot" | "screenshot" | "stop" }
@@ -216,7 +216,12 @@ function parseBrowserToolRecord(
   if (operation === "navigate" && only("url", "profile") && text("url", 4096)) {
     if (record.profile !== undefined) {
       if (!options.allowProfile) return undefined;
-      if (record.profile !== "project" && record.profile !== "personal") return undefined;
+      if (
+        record.profile !== "private" &&
+        record.profile !== "project" &&
+        record.profile !== "personal"
+      )
+        return undefined;
     }
     return {
       ...common,

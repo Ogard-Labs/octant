@@ -148,3 +148,30 @@ export const decodeServerProjectRenamedPayload = Schema.decodeUnknownSync(
 export const decodeServerProjectRemovedPayload = Schema.decodeUnknownSync(
   ServerProjectRemovedPayload,
 );
+
+/** Person-operated preview of one selected port on the registered server's loopback. */
+export const ServerPreviewCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("start"),
+    projectId: ProjectId,
+    remotePort: Schema.Int.pipe(Schema.between(1, 65535)),
+    localPort: Schema.Int.pipe(Schema.between(0, 65535)),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("stop", "reconnect"), projectId: ProjectId }).annotations(
+    strict,
+  ),
+);
+export type ServerPreviewCommand = typeof ServerPreviewCommand.Type;
+export const ServerPreviewView = Schema.Struct({
+  projectId: Schema.String,
+  remotePort: Schema.Int.pipe(Schema.between(1, 65535)),
+  localPort: Schema.Int.pipe(Schema.between(1, 65535)),
+  endpoint: Schema.String,
+  status: Schema.Literal("listening", "lost", "stopped", "revoked"),
+}).annotations(strict);
+export type ServerPreviewView = typeof ServerPreviewView.Type;
+export const ServerPreviewResult = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("tunnel"), view: ServerPreviewView }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("refused"), reason: Schema.String }).annotations(strict),
+);
+export type ServerPreviewResult = typeof ServerPreviewResult.Type;

@@ -1,3 +1,4 @@
+import { PAPER_LOCAL_SETUP } from "@octant/domain";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
   DiscoveredAgentToolingListing,
@@ -25,7 +26,7 @@ import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
-import { connectConnector } from "./connectConnector";
+import { connectConnector, connectPaperLocalServer } from "./connectConnector";
 import { connectorLogoInks } from "../theme/connectorBrandColors";
 import { CONNECTOR_LOGOS } from "./connectorLogos";
 import { McpServerSignInControl } from "./McpServerSignInControl";
@@ -180,6 +181,18 @@ export function LibraryView(props: LibraryViewProps) {
     props.connectClient !== undefined && props.localHost === true && !props.disabled;
 
   const connect = async (item: LibraryItem, secret?: string): Promise<boolean> => {
+    if (item.localSetupId === "paper" && props.connectClient !== undefined) {
+      setConnectingId(item.id);
+      setFailure(undefined);
+      const result = await connectPaperLocalServer(props.connectClient);
+      setConnectingId(undefined);
+      if (result.kind === "failed") {
+        setFailure(result.failure);
+        return false;
+      }
+      props.onConnected?.();
+      return true;
+    }
     if (
       item.connectorId === undefined ||
       item.connectorAuth === undefined ||
@@ -433,6 +446,7 @@ interface LibraryCardProps {
 /** What a card offers before anything is installed: the one next step. */
 function cardAction(item: LibraryItem): string | undefined {
   if (item.state !== "available") return undefined;
+  if (item.localSetupId === "paper") return "Set up…";
   if (item.kind === "connector")
     return item.connectorAuth?.kind === "key" ? "Add key…" : "Connect…";
   return "Review";
@@ -632,6 +646,7 @@ function LibraryDetail(props: LibraryDetailProps) {
   const locked = props.disabled || props.busy;
   const available = ref === undefined;
   const connector = available && item.kind === "connector" && item.connectorId !== undefined;
+  const localSetup = item.localSetupId === "paper";
   const reviewable = available && item.marketplaceExtensionId !== undefined;
   const preview = props.inspection?.status === "ready" ? props.inspection.preview : undefined;
   const capabilities = preview?.review.declaredCapabilities;
@@ -676,6 +691,26 @@ function LibraryDetail(props: LibraryDetailProps) {
         <p className="library-detail__summary">{item.summary}</p>
       )}
       <StepLadder steps={item.steps} />
+      {localSetup ? (
+        <section aria-label="Paper Desktop setup" className="library-detail__review">
+          <h4 className="library-detail__label">On this computer</h4>
+          <p className="library__note">
+            Open Paper Desktop and a file before using its tools. Adding the server does not check
+            that a document is available.
+          </p>
+          <p className="library__note">
+            This setup connects to Paper Desktop&apos;s local address on this host.
+          </p>
+          <p className="library__note">
+            The Paper CLI is optional for this local-address setup. If Desktop is closed or no file
+            is open, open both and retry in your task. Restart the agent session if it needs to
+            reload its tools.
+          </p>
+          <a href={PAPER_LOCAL_SETUP.documentationUrl} target="_blank" rel="noreferrer">
+            Paper setup instructions
+          </a>
+        </section>
+      ) : null}
       {item.stateNote === undefined ? null : (
         <p className="library__note" role="status">
           {item.stateNote}
@@ -788,6 +823,15 @@ function LibraryDetail(props: LibraryDetailProps) {
         </form>
       ) : null}
       <footer className="library-detail__actions">
+        {localSetup && available ? (
+          <OctantButton
+            disabled={!props.canConnect || props.connecting}
+            onClick={() => void props.onConnect()}
+            type="button"
+          >
+            {props.connecting ? "Adding…" : "Add local server"}
+          </OctantButton>
+        ) : null}
         {connector && item.connectorAuth?.kind !== "key" ? (
           <OctantButton
             disabled={!props.canConnect || props.connecting}
@@ -839,7 +883,7 @@ function LibraryDetail(props: LibraryDetailProps) {
             Turn off
           </OctantButton>
         ) : null}
-        {available && !connector && !reviewable ? (
+        {available && !connector && !reviewable && !localSetup ? (
           <OctantButton onClick={() => props.onOpen(item.handoff)} type="button">
             {HANDOFF_ACTION[item.handoff]}
           </OctantButton>
@@ -855,15 +899,19 @@ function LibraryDetail(props: LibraryDetailProps) {
         ) : null}
       </footer>
       <p className="library-detail__foot oct-meta">
-        {connector
+        {localSetup
           ? props.localHost
-            ? "Connect adds this server to this host, trusts it and turns it on as one act, the only package that does. Tool calls still follow the thread's approval policy."
-            : "Connect from the Octant window on this host; a browser-hosted Settings cannot keep a key or run a sign-in."
-          : reviewable
-            ? "Install only adds it. You trust it and turn it on as separate steps afterwards."
-            : ref === undefined
-              ? "Installing never trusts or turns anything on by itself. You confirm each step, except a connector, which installs, trusts and turns on as one confirmed act."
-              : "Tool calls follow the thread's approval policy, including approvals you chose to remember."}
+            ? "Adds this local server, trusts it and turns it on after this confirmation. Tool calls still follow the task's approval policy."
+            : "Add the local server from the Octant window on this host."
+          : connector
+            ? props.localHost
+              ? "Connect adds this server to this host, trusts it and turns it on after this confirmation. Tool calls still follow the thread's approval policy."
+              : "Connect from the Octant window on this host; a browser-hosted Settings cannot keep a key or run a sign-in."
+            : reviewable
+              ? "Install only adds it. You trust it and turn it on as separate steps afterwards."
+              : ref === undefined
+                ? "Installing never trusts or turns anything on by itself. You confirm each step, except a server you add directly, whose confirmation covers those steps."
+                : "Tool calls follow the thread's approval policy, including approvals you chose to remember."}
       </p>
     </OctantDialog>
   );

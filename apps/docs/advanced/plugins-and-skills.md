@@ -69,6 +69,13 @@ prohibited, Thread prohibited, Not installed, Untrusted, Plugin disabled,
 Component disabled, Incompatible, Quarantined, Draining, Broken,
 Unavailable, Interrupted, or Waiting.
 
+Turning off an executable component waits for its supervised process group to
+stop. If cleanup cannot prove which process group it owns, or a signal is
+denied, it reports failure and keeps its local ownership receipt. Restarting
+Octant does not make an uncertain process safe to stop: a surviving group whose
+original leader has exited needs live ownership evidence. Octant preserves the
+receipt rather than signalling a potentially unrelated process.
+
 Standalone skills show name, availability, source label, qualified identity,
 review and desired state, effective state, content bytes, description, and
 diagnostics. A **Name collisions** section appears when the same skill name
@@ -394,6 +401,33 @@ Extension packages by the service's name, as **Connector**. **Hide** keeps
 an entry out of sight on this computer; **Show hidden** brings them back.
 Connecting works only from the Octant window on this host.
 
+### Paper Desktop
+
+In the **Library**, search for **Paper**, choose **Set up…**, read the local
+access notice, then choose **Add local server**. This adds Paper through the
+same installed-package flow as Add MCP server, with its local address
+`http://127.0.0.1:29979/mcp`. No hosted connector or OAuth sign-in is required.
+Keep Paper Desktop running with a file open on the same host. Installation
+alone does not check whether that file or its tools are available.
+
+Paper recommends the CLI installed by Paper Desktop: copy its absolute path
+from Paper's MCP panel and use the argument `mcp`. The CLI can expose its tool
+list even when Desktop is closed; actual reads and writes still require
+Desktop and an open file. Octant's confined app-managed command runtime does
+not grant Desktop access, so this Library setup explicitly uses Paper's
+still-supported local HTTP path. It does not run the CLI or widen its sandbox.
+If `paper` is not on your PATH, this local-address setup still works without
+the CLI. For a provider's own native MCP setup, use Paper's copied executable
+path rather than guessing a global installation path.
+
+If tools are unavailable, open Desktop and a file, then retry in your task.
+Restart the agent session if that provider needs to reload its tool list; keep
+the existing task and draft. A Desktop-closed or no-file condition is not
+inferred from installation or a tool list. Trust, turning on, selecting the
+server and the task's usual tool permissions still apply. Turn off or remove
+the package in **Installed** to stop offering its tools. See
+[Paper's current setup instructions](https://paper.design/docs/mcp).
+
 ### Sign in to a hosted server
 
 A server you added by its address can ask you to sign in instead of taking a
@@ -541,11 +575,22 @@ symlink, or that leads outside the Project, is ignored without a message.
 
 In **Settings › Skills & Extensions › Skill folders** you can switch on Claude
 Code's skills (`~/.claude/skills`) and Codex's skills (`$CODEX_HOME/skills`, or
-`~/.codex/skills`), and add any other folder by its absolute path. Each is off
+`~/.codex/skills`), and add any other folder by its absolute path. Desktop also
+offers **Choose folder…** beside the path field; browser clients keep manual
+entry. Selecting a folder uses the same settings save and does not install,
+trust or enable its contents. If the save is refused, the path stays for retry.
+Each provider folder is off
 until you switch it on. Listing a folder only indexes its skills: every skill
 there still starts untrusted and switched off, and a skill with the same name as
-another is a separate skill until you choose. A folder that is a link, or that
-does not exist, is ignored.
+another is a separate skill until you choose. Folder status explains when it is
+missing, unreadable, linked or not a directory. A readable empty folder still
+needs packages, each with its own `SKILL.md`. A missing folder is watched for
+creation using only necessary existence metadata, so it can appear later.
+Eligible package changes and removal refresh the catalog too. Live watching is
+bounded; if unavailable, use **Refresh** in Skill folders. Folder changes
+from another window are reconciled by the host even with Settings closed.
+Linked folders remain ignored. None of these actions grants access to a skill
+or changes its separate review, trust and enable choices.
 
 A skill at a Project's root is available to every thread in that Project and
 to no other Project. A skill in a subfolder is available only to a thread

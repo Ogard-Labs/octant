@@ -1,7 +1,7 @@
 # Language services and debugging companion
 
 This topic specification owns how a Code thread's editor gets language
-services (diagnostics and go-to-definition first, more requests later) and,
+services (diagnostics, go-to-definition, and explicit capability-aware references) and,
 in later slices, a debugger, from separately launched processes that run under
 Code Project and thread authority. Architecture owns the boundaries it builds
 on: [process topology](../architecture.md#process-topology), the
@@ -34,6 +34,12 @@ host) are built: the host installs a reviewed adapter, records a local
 window's confirmation, and runs, controls, and ends sessions behind local-only
 routes that no window calls until 8c's panel. Monaco editing and the explicit external-editor
 handoff stay the primary Code editing paths and are unchanged by every slice.
+
+The editor also offers explicit checkout references when its current initialized
+server reports support. References are a read-only snapshot; rename and reviewed
+text-only quick fixes remain follow-on work and are not enabled by a capability
+advertisement. Installed-server and native confinement acceptance is separate
+from controlled protocol and editor verification.
 
 ## Outcome
 
@@ -187,11 +193,12 @@ behind its own approval and confinement rules.
 - **What Octant sends.** Slice 2's allow-list: `initialize`, `initialized`,
   `shutdown`, `exit`, `textDocument/didOpen`, `didChange`, `didClose`, pulled
   `textDocument/diagnostic` (a pushed `publishDiagnostics` is also accepted),
-  `textDocument/definition`, `workspace/didChangeWatchedFiles` fed from
+  `textDocument/definition`, `textDocument/references`, `workspace/didChangeWatchedFiles` fed from
   `codeFileWatchService`, and `$/cancelRequest`. Each later request type is
   added on purpose with its own contract.
 - **What a server may ask.** `client/registerCapability` is accepted only for
-  methods on the allow-list. `workspace/configuration` gets Octant's fixed
+  methods on the allow-list. Exact matching `client/unregisterCapability` removes
+  known registrations; both operations are bounded to 256 registrations. `workspace/configuration` gets Octant's fixed
   values. `window/workDoneProgress/create` is accepted. Every other request,
   including `workspace/applyEdit`, `window/showDocument`, and
   `workspace/executeCommand`, gets a method-not-found error and has no effect.
@@ -361,6 +368,60 @@ design left a choice open.
 - **Not built yet.** The bounded `window/logMessage` log and the lifecycle
   counts under Diagnostics, and removing a cache when its checkout is removed
   or its component uninstalled.
+
+### Explicit checkout references
+
+- The person invokes **Find references in checkout** at the current cursor, from
+  the editor toolbar, context menu, or **⌘/Ctrl+Alt+F12**. Monaco's own single-file
+  references shortcut stays unchanged. No passive polling discovers support.
+- A `capabilities` read reports references as `supported`, `unsupported`, or
+  `unknown` from the actual initialized connection and matching dynamic
+  registrations. Missing or false declarations are unsupported; unrecognized
+  selector patterns remain unknown. Advertising rename or code actions does
+  not expose them. These new reads require an already-ready exact connection,
+  document, component, and physical root; they never start or retarget a server.
+  Existing document open/sync and diagnostics/definition behavior is unchanged.
+- Before a query the renderer syncs the current draft in memory, without saving.
+  That foreground change carries the last acknowledged `expectedRevision`. It
+  requires the exact ready document/connection/component/root and the host's
+  current original request proof, checked again after awaits before `didChange`;
+  missing or retired proof refuses. A mismatch returns `stale` without starting,
+  retargeting or changing a document. Ordinary open/change syncing is unchanged.
+  A successful sync may acknowledge a numeric `documentVersion` and ephemeral
+  `documentRevision`, bound to that connection and document instance. References
+  name both, and a close/reopen, replacement connection, or intervening edit
+  invalidates the old acknowledgement even if the numeric version is reused.
+  An older host with no acknowledgement cannot confirm a references query.
+  Closing a query does not undo a foreground memory sync already admitted by
+  the host. A usable late acknowledgement advances only the exact original
+  client/file/session/text and prior revision; it never publishes cancelled
+  references or replaces a newer acknowledgement. If the reply is genuinely
+  lost or stale, Find/Recheck refuses rather than looping with an obsolete
+  revision. **Reload language document** explicitly invokes the existing
+  person-controlled open/retry path under current root, launch approval and
+  authority; Find/Recheck never invokes that path implicitly.
+- The adapter accepts Locations only, with at most 1,000 candidate locations and
+  64 distinct inside-root files. It removes exact duplicates and marks omitted
+  work `truncated`. Paths and ranges reuse definition containment and outside
+  labels; an outside location never exposes its host path or opens a file.
+  Extra-folder targets stay within the current authorized folder and use the
+  existing file-open representation. No workspace edits or commands are accepted.
+- Thread, Project, checkout, physical root, current component, posture, document,
+  connection and capability are checked across awaited boundaries and before
+  publication. A local route revalidates the original window capability after
+  reading the body and after the service answer; paired reads retain existing
+  remote scope and transport cancellation. No new remote rights or agent tool.
+- The renderer allows 15 seconds total and checks absolute elapsed time after
+  every awaited boundary, aborts optional transport, and ignores late or
+  superseded results. The companion's existing 10-second request bound remains.
+  A query never automatically retries or starts a language server. Unsupported,
+  unknown, stale, unavailable, or timed-out answers offer explicit recheck and
+  the existing external-editor handoff where available.
+- The bounded, scrollable list names its checkout and labels locations as a
+  snapshot. Selection uses existing file-open/reveal; it neither saves nor
+  applies changes. Source text, file, thread, checkout or client replacement
+  hides the old list. Recheck removes old locations while waiting, and Escape
+  closes the list and returns focus to its trigger.
 
 ### Editor rules
 
@@ -1126,7 +1187,7 @@ Rejected: a read-only agent tool for the stopped state now.
 ### Debugger data and privacy
 
 - **Never journaled or exported:** variable values, `evaluate` expressions and
-  results, stack frames, program output, breakpoints, and fetched sources. They
+  results, stack frames, program output, session breakpoint responses, and fetched sources. They
   live in the host's memory for the session (output in a 1 MiB ring, as a
   Project terminal's transcript is) and are gone when it ends. Diagnostics
   exports carry session counts and end reasons only.
@@ -1138,8 +1199,18 @@ Rejected: a read-only agent tool for the stopped state now.
   Project, thread, configuration digest, and end reason. A thread purge removes
   the session records; a Project erase removes those, the approvals, and the
   egress records, and ends running sessions at once.
-- **Breakpoints** are the window's state for the thread, sent at each start,
-  and are not kept by the host after the session.
+- **Breakpoint configuration** is saved only in this device's renderer storage,
+  separately from session state, under the canonical server origin, launch
+  window ID, thread and checkout. It stores selected paths and lines plus the
+  Project/file identity and content digest needed to check them; never source
+  text, variables, output, expressions, stopped frames or a session ID. It is
+  not journaled, backed up, exported or replicated by the host. The host receives
+  verified locations at Start and keeps none after the session. A successful person-triggered thread
+  purge result received by this browser clears that origin's exact Code thread configuration across its window
+  and checkout namespaces; another mode with the same ID is unaffected. A local
+  storage failure is reported and cleanup can be retried without another host
+  purge. A renderer that was offline during the purge cannot claim remote device
+  erasure. Browser storage may be cleared independently.
 - **No memory views.** Memory, disassembly, and register views are not offered.
 
 ### Debugger threat model
@@ -1344,13 +1415,28 @@ the addendum left a choice open.
   offers nothing to start or confirm.
 - **Breakpoints.** A line breakpoint is set from the editor's glyph gutter
   or with F9 on the cursor's line, so the pointer is never the only way.
-  They are held in the renderer's memory for the thread on its checkout,
-  shared by the editor and the panel and never persisted, so a reload
-  starts with none. A toggle past 256 lines in a file or 64 files takes
-  none, since the host would refuse the Start, and the editor says which
-  bound it reached until the next toggle it takes. Start sends them all;
-  while a session runs, each file whose lines change is sent at once with
-  `set-breakpoints`. The panel offers no conditions, exception filters,
+  They are shared by the editor and panel and saved as configuration only.
+  Reload or host restart never starts or attaches a debug session. Restored
+  entries begin unresolved until ordinary authorized reads confirm the current
+  Project, checkout, file ID, device/inode and digest. The content client verifies
+  length and SHA-256 for the host's immutable content reference; a metadata
+  digest by itself is not proof of returned bytes. Reads are bounded to selected
+  files, four at once, 5 MiB each and an absolute 15-second validation deadline.
+  Missing, unreadable, changed, dirty or out-of-range locations remain listed and
+  are not sent to the adapter; line numbers are never silently moved or clamped.
+  A fresh clean read allows explicit **Use current locations** to accept a changed
+  file. The person's unsaved draft, including a draft retained across pane
+  remounts, blocks acceptance until saved or discarded; an unrelated clean
+  reader cannot clear it. A toggle past 256 lines in a file or 64 files takes
+  none and says which bound it reached. The list can remove a location without
+  opening its file. Start rechecks every selected file and refuses to start while
+  any remains unresolved. While a session runs, only verified lines are sent by
+  `set-breakpoints`; invalidation clears that file's active lines.
+  The canonical origin identifies an endpoint, not physical-host continuity:
+  moving to another origin does not migrate settings, and reusing an origin for
+  another host still requires the exact authorized file match. No new host ID or
+  debug authority is introduced. Storage failures warn that changes may be held
+  only in memory, and corrupt records are refused rather than silently replaced. The panel offers no conditions, exception filters,
   watches, or hover evaluation yet: the adapter's default exception filters
   apply, as the host sends them.
 - **The current file.** A launch file's current-file variables are filled

@@ -100,6 +100,9 @@ describe("secret guard list", () => {
   it("protects Octant's own secrets", () => {
     expect(covered(`${darwin.dataDirectory}/octant-bridge-secret`)).toBe("octant-credentials");
     expect(covered(`${darwin.runtimeDirectory}/host.secret`)).toBe("octant-credentials");
+    const commandToken = `${darwin.dataDirectory}/harness/cloud-cli/google-command/access-token`;
+    expect(covered(commandToken)).toBe("octant-credentials");
+    expect(covered(commandToken, [`${darwin.dataDirectory}/harness`])).toBe("octant-credentials");
     expect(covered(`${darwin.dataDirectory}/octant.sqlite3`)).toBeUndefined();
   });
 
