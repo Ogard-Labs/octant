@@ -298,6 +298,8 @@ Add endpoint opens a dialog: the sign-ins first, then the presets, then a guided
 
 ## Endpoint address and stored key
 
+A remote model endpoint must use HTTPS. Plain HTTP is accepted only for a loopback address.
+
 A model endpoint's API key belongs to the address it was entered for, so the
 host deletes it when the saved address changes. The address field says so
 while it differs from the saved one, in calm guidance text beneath the field
