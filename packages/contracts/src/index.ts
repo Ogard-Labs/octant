@@ -144,6 +144,7 @@ export * from "./artifactBundle";
 export * from "./replicaEntry";
 export * from "./replicaStoreSettings";
 export * from "./appUpdates";
+export * from "./nightlyInstallation";
 export * from "./scaffolds";
 export * from "./workspacePresets";
 export * from "./threadCheckpoints";

@@ -1,3 +1,4 @@
+import type { NightlyInstallationState } from "@octant/contracts/nightly-installation";
 import type { EmbeddedBrowserBridge } from "@octant/contracts/desktop-bridge";
 import type { CodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import type { AppReleaseRing, AppUpdateState } from "@octant/contracts/app-updates";
@@ -422,6 +423,15 @@ export interface OctantHostBridge
    * The desktop app's own update path. Absent on a remote client, which is
    * served by a host it does not update.
    */
+  readonly readNightlyInstallationState?: () => Promise<NightlyInstallationState>;
+  readonly refreshNightlyInstallationState?: () => Promise<NightlyInstallationState>;
+  readonly installNightly?: () => Promise<NightlyInstallationState>;
+  readonly openNightly?: () => Promise<NightlyInstallationState>;
+  readonly removeNightly?: () => Promise<NightlyInstallationState>;
+  readonly cancelNightlyInstallation?: () => Promise<NightlyInstallationState>;
+  readonly subscribeNightlyInstallationState?: (
+    listener: (state: NightlyInstallationState) => void,
+  ) => () => void;
   readonly checkForAppUpdate?: () => Promise<AppUpdateState>;
   /** This application's native process persists its own update preferences. */
   readonly appUpdatePreferenceScope?: "local";

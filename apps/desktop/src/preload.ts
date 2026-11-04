@@ -1,3 +1,5 @@
+import { decodeNightlyInstallationState } from "./nightlyInstallationState";
+import type { NightlyInstallationState } from "@octant/contracts/nightly-installation";
 import type {
   HumanBrowserRequest,
   HumanBrowserResult,
@@ -253,6 +255,15 @@ export interface OctantHostBridge {
     request: ExtensionPopupRequest,
   ) => Promise<{ readonly opened: boolean }>;
   readonly closeBrowserExtensionPopup: () => Promise<void>;
+  readonly readNightlyInstallationState: () => Promise<NightlyInstallationState>;
+  readonly refreshNightlyInstallationState: () => Promise<NightlyInstallationState>;
+  readonly installNightly: () => Promise<NightlyInstallationState>;
+  readonly openNightly: () => Promise<NightlyInstallationState>;
+  readonly removeNightly: () => Promise<NightlyInstallationState>;
+  readonly cancelNightlyInstallation: () => Promise<NightlyInstallationState>;
+  readonly subscribeNightlyInstallationState: (
+    listener: (state: NightlyInstallationState) => void,
+  ) => () => void;
   readonly checkForAppUpdate: () => Promise<AppUpdateState>;
   readonly downloadAppUpdate: () => Promise<AppUpdateState>;
   readonly installAppUpdate: () => Promise<AppUpdateInstallOutcome>;
@@ -624,6 +635,43 @@ export function createHostBridge(
       return decodeManagedToolsStatus(
         await ipc.invoke(IPC_CHANNELS.managedToolsConfigure, { automaticUpdates: enabled }),
       );
+    },
+    readNightlyInstallationState: async () =>
+      decodeNightlyInstallationState(await ipc.invoke(IPC_CHANNELS.nightlyInstallationState)),
+    refreshNightlyInstallationState: async () =>
+      decodeNightlyInstallationState(await ipc.invoke(IPC_CHANNELS.nightlyInstallationRefresh)),
+    installNightly: async () =>
+      decodeNightlyInstallationState(await ipc.invoke(IPC_CHANNELS.nightlyInstallationInstall)),
+    openNightly: async () =>
+      decodeNightlyInstallationState(await ipc.invoke(IPC_CHANNELS.nightlyInstallationOpen)),
+    removeNightly: async () =>
+      decodeNightlyInstallationState(await ipc.invoke(IPC_CHANNELS.nightlyInstallationRemove)),
+    cancelNightlyInstallation: async () =>
+      decodeNightlyInstallationState(await ipc.invoke(IPC_CHANNELS.nightlyInstallationCancel)),
+    subscribeNightlyInstallationState: (listener: (state: NightlyInstallationState) => void) => {
+      let active = true;
+      let receivedLiveState = false;
+      const receive: MaterialListener = (_event, value) => {
+        try {
+          const state = decodeNightlyInstallationState(value);
+          if (!active) return;
+          receivedLiveState = true;
+          listener(state);
+        } catch {
+          /* Malformed native state cannot widen the fixed installation vocabulary. */
+        }
+      };
+      ipc.on(IPC_CHANNELS.nightlyInstallationState, receive);
+      void ipc
+        .invoke(IPC_CHANNELS.nightlyInstallationState)
+        .then((value) => {
+          if (active && !receivedLiveState) listener(decodeNightlyInstallationState(value));
+        })
+        .catch(() => undefined);
+      return () => {
+        active = false;
+        ipc.removeListener(IPC_CHANNELS.nightlyInstallationState, receive);
+      };
     },
     checkForAppUpdate: async () =>
       decodeAppUpdateState(await ipc.invoke(IPC_CHANNELS.appUpdateCheck)),

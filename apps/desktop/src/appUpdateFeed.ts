@@ -217,6 +217,64 @@ export function buildUpdateCheckRequest(
  * `OCTANT_UPDATE_CHECK_DISCLOSURE` is the list this has to stay true to; a test
  * reads both.
  */
+const MAX_UPDATE_FEED_BYTES = 64 * 1024;
+
+async function discardResponseBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
+}
+
+async function readBoundedBody(
+  response: Response,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<
+  | { readonly kind: "read"; readonly bytes: Uint8Array }
+  | { readonly kind: "too-large" }
+  | { readonly kind: "unreachable" }
+> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) return { kind: "too-large" };
+  if (response.body === null) return { kind: "read", bytes: new Uint8Array() };
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = response.body.getReader();
+  } catch {
+    return { kind: "unreachable" };
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let finished = false;
+  let cancellation: Promise<void> | undefined;
+  const cancel = () => (cancellation ??= reader.cancel().catch(() => undefined));
+  const abort = () => {
+    void cancel();
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    for (;;) {
+      if (signal?.aborted) return { kind: "unreachable" };
+      const next = await reader.read();
+      if (signal?.aborted) return { kind: "unreachable" };
+      if (next.done) {
+        finished = true;
+        return { kind: "read", bytes: Buffer.concat(chunks, size) };
+      }
+      size += next.value.byteLength;
+      if (size > maxBytes) {
+        await cancel();
+        finished = true;
+        return { kind: "too-large" };
+      }
+      chunks.push(next.value);
+    }
+  } catch {
+    return { kind: "unreachable" };
+  } finally {
+    signal?.removeEventListener("abort", abort);
+    if (!finished) await cancel();
+    reader.releaseLock();
+  }
+}
+
 export async function fetchUpdateFeed(
   feedUrl: string,
   identity: UpdateCheckIdentity,
@@ -234,9 +292,18 @@ export async function fetchUpdateFeed(
   } catch {
     return { kind: "unreachable" };
   }
-  if (!response.ok) return { kind: "unreachable" };
+  if (!response.ok) {
+    await discardResponseBody(response);
+    return { kind: "unreachable" };
+  }
+  const body = await readBoundedBody(response, MAX_UPDATE_FEED_BYTES, signal);
+  if (body.kind === "unreachable") return { kind: "unreachable" };
+  if (body.kind === "too-large") return { kind: "malformed" };
   try {
-    return { kind: "fetched", document: await response.json() };
+    return {
+      kind: "fetched",
+      document: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body.bytes)),
+    };
   } catch {
     return { kind: "malformed" };
   }
@@ -277,19 +344,18 @@ export async function fetchVerifiedArtifact(
   } catch {
     return { kind: "unreachable" };
   }
-  if (!response.ok) return { kind: "unreachable" };
-  let bytes: Uint8Array;
-  try {
-    const buffer = await response.arrayBuffer();
-    // A release is a known size; a body far past it is not a release, and
-    // reading it into memory to find that out is how a download becomes a
-    // denial of service.
-    if (buffer.byteLength > input.maxBytes) return { kind: "corrupt" };
-    bytes = new Uint8Array(buffer);
-  } catch {
+  if (!response.ok) {
+    await discardResponseBody(response);
     return { kind: "unreachable" };
   }
-  return matchesDigest(bytes, input.sha256) ? { kind: "verified", bytes } : { kind: "corrupt" };
+  // Enforce the bound while reading; checking after arrayBuffer() has already
+  // retained the entire untrusted response and cannot protect memory use.
+  const body = await readBoundedBody(response, input.maxBytes, signal);
+  if (body.kind === "too-large") return { kind: "corrupt" };
+  if (body.kind === "unreachable") return { kind: "unreachable" };
+  return matchesDigest(body.bytes, input.sha256)
+    ? { kind: "verified", bytes: body.bytes }
+    : { kind: "corrupt" };
 }
 
 /** Constant-time comparison, so a mismatch reveals nothing about where it differs. */

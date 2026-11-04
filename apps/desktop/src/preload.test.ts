@@ -503,6 +503,7 @@ describe("desktop preload bridge", () => {
       "approveRemotePairingRequest",
       "attachBrowserSurface",
       "cancelCodeOperationApproval",
+      "cancelNightlyInstallation",
       "captureWindow",
       "checkComputerUseUpdates",
       "checkForAppUpdate",
@@ -528,6 +529,7 @@ describe("desktop preload bridge", () => {
       "hubAdministrationRequest",
       "initialProjectTarget",
       "installAppUpdate",
+      "installNightly",
       "listCaptureWindows",
       "listOpenInApplications",
       "listPairedComputers",
@@ -545,6 +547,7 @@ describe("desktop preload bridge", () => {
       "openCodeExternalEditor",
       "openComputerUsePermissionSettings",
       "openInNewWindow",
+      "openNightly",
       "openRemoteServerPage",
       "ownerUnlockForgetKey",
       "ownerUnlockMakeKey",
@@ -557,8 +560,11 @@ describe("desktop preload bridge", () => {
       "projectWindowCapability",
       "providerCredentialStatus",
       "readBundledWhatsNew",
+      "readNightlyInstallationState",
       "reconcileExpiredRemoteDevices",
       "recoverRemoteHostIdentity",
+      "refreshNightlyInstallationState",
+      "removeNightly",
       "removeProviderApiKey",
       "renameProviderApiKey",
       "renameRemoteDevice",
@@ -595,6 +601,7 @@ describe("desktop preload bridge", () => {
       "subscribeCanvasPrototypeEvents",
       "subscribeCodeDeepLinks",
       "subscribeMenuBarTask",
+      "subscribeNightlyInstallationState",
       "subscribeOpenSettings",
       "subscribeProjectWindowCapability",
       "subscribeQuitShortcutHint",
@@ -1514,4 +1521,65 @@ describe("native menu bridge", () => {
     expect(await bridge.popupNativeMenu(request)).toEqual({ kind: "refused" });
     expect(await bridge.popupNativeMenu(request)).toEqual({ kind: "refused" });
   });
+});
+
+describe("manual installation bridge", () => {
+  it("sends fixed actions without paths and rejects malformed native installation state", async () => {
+    const state = {
+      status: "ready",
+      productName: "Octant Nightly",
+      application: { kind: "absent" },
+    };
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(async () => state),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const bridge = createHostBridge(ipc, projectWindowCapability);
+    expect(await bridge.installNightly()).toEqual(state);
+    expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.nightlyInstallationInstall);
+    expect(Object.isFrozen(await bridge.readNightlyInstallationState())).toBe(true);
+    vi.mocked(ipc.invoke).mockResolvedValue({ ...state, target: "/tmp/other.app" });
+    await expect(bridge.openNightly()).rejects.toThrow("Invalid Nightly");
+    vi.mocked(ipc.invoke).mockResolvedValue({
+      ...state,
+      application: { kind: "installed", version: "bad", running: false },
+    });
+    await expect(bridge.removeNightly()).rejects.toThrow("Invalid Nightly");
+  });
+  it.each(["live state", "unsubscribe"] as const)(
+    "ignores a delayed installation snapshot after %s",
+    async (action) => {
+      const initial = Promise.withResolvers<unknown>();
+      let receive: ((event: unknown, value: unknown) => void) | undefined;
+      const ipc: IpcRendererPort = {
+        invoke: vi.fn(() => initial.promise),
+        on: vi.fn((_channel, listener) => {
+          receive = listener;
+        }),
+        removeListener: vi.fn(),
+      };
+      const listener = vi.fn();
+      const stop = createHostBridge(ipc, projectWindowCapability).subscribeNightlyInstallationState(
+        listener,
+      );
+      const live = {
+        status: "unavailable",
+        productName: "Octant Nightly",
+        reason: "closed",
+        message: "Closing.",
+      };
+      if (action === "live state") receive?.({}, live);
+      else stop();
+      initial.resolve({
+        status: "ready",
+        productName: "Octant Nightly",
+        application: { kind: "absent" },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(listener.mock.calls).toEqual(action === "live state" ? [[live]] : []);
+      stop();
+    },
+  );
 });

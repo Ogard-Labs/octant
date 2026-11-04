@@ -116,6 +116,12 @@ import type {
   CodeOperationApprovalAnchor,
   HostCapabilities,
 } from "@octant/contracts/desktop-bridge";
+import { createNightlyInstallation } from "./nightlyInstallation";
+import { loadNightlyInstallationNative } from "./nightlyInstallationNative";
+import {
+  registerNightlyInstallationIpc,
+  closeNightlyInstallationForQuit,
+} from "./nightlyInstallationIpc";
 import { createAppUpdateService } from "./appUpdateService";
 import {
   createPortableImagePort,
@@ -1284,6 +1290,8 @@ let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
 let browserExtensionPopupHost: ReturnType<typeof createExtensionPopupHost> | undefined;
 let browserExtensionBridge: ReturnType<typeof createExtensionBridge> | undefined;
 let canvasPrototypeSurface: CanvasPrototypeSurface | undefined;
+let nightlyInstallationService: ReturnType<typeof createNightlyInstallation> | undefined;
+let nightlyInstallationClosing = false;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
@@ -3625,6 +3633,25 @@ function installIpcHandlers(): void {
     });
     return managedToolService.status();
   });
+  registerNightlyInstallationIpc({
+    handle: (channel, listener) => ipcMain.handle(channel, listener),
+    installation: nightlyInstallation,
+    resolveWindow: (event) => ownedTopLevelWindowContext(event).window,
+    confirmRemoval: async (window) => {
+      const result = await dialog.showMessageBox(window, {
+        type: "question",
+        title: "Move Octant Nightly to the Trash?",
+        message: "Move Octant Nightly to the Trash?",
+        detail:
+          "Only the verified application beside Octant will be moved. Your Projects, threads and settings stay on this Mac.",
+        buttons: ["Cancel", "Move to Trash"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      return result.response === 1;
+    },
+  });
   ipcMain.handle(IPC_CHANNELS.appUpdateState, (event) => {
     ownedTopLevelWindowContext(event);
     return appUpdates().state();
@@ -3940,6 +3967,39 @@ function bundledWhatsNewOptions(): {
       await writeFile(path, contents, "utf8");
     },
   };
+}
+
+function nightlyInstallation(): ReturnType<typeof createNightlyInstallation> {
+  if (nightlyInstallationClosing) throw new Error("Octant is closing installation admission.");
+  if (nightlyInstallationService === undefined) {
+    const installation = createNightlyInstallation({
+      native: loadNightlyInstallationNative(),
+      app: {
+        packaged: app.isPackaged,
+        platform: process.platform,
+        arch: process.arch,
+        version: app.getVersion(),
+      },
+      feedBaseUrl: resolveUpdateFeedBaseUrl(process.env),
+    });
+    nightlyInstallationService = installation;
+    installation.subscribe(() => {
+      for (const { window } of desktopWindows.active()) {
+        if (!window.isDestroyed()) {
+          try {
+            window.webContents.send(
+              IPC_CHANNELS.nightlyInstallationState,
+              installation.snapshot(window),
+            );
+          } catch {
+            /* A retired local window cannot interrupt another window's operation. */
+          }
+        }
+      }
+    });
+    void installation.refresh();
+  }
+  return nightlyInstallationService;
 }
 
 function appUpdates(): ReturnType<typeof createAppUpdateService> {
@@ -4552,11 +4612,14 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
   armQuitDeadline({
     forceExit: forceExitAfterStalledQuit({ server, managedTools: managedToolService }),
   });
-  await shutDownForQuit({
-    flushWindowState,
-    stopHost: stopHostForQuit,
-    log: logQuitProblem,
-  });
+  nightlyInstallationClosing = true;
+  await closeNightlyInstallationForQuit(nightlyInstallationService, () =>
+    shutDownForQuit({
+      flushWindowState,
+      stopHost: stopHostForQuit,
+      log: logQuitProblem,
+    }),
+  );
   finishQuit();
 }
 
@@ -4566,11 +4629,14 @@ async function handleFatalStartup(error: unknown): Promise<void> {
   armQuitDeadline({
     forceExit: forceExitAfterStalledQuit({ server, managedTools: managedToolService }),
   });
-  await shutDownForQuit({
-    flushWindowState: async () => undefined,
-    stopHost: stopHostForQuit,
-    log: logQuitProblem,
-  });
+  nightlyInstallationClosing = true;
+  await closeNightlyInstallationForQuit(nightlyInstallationService, () =>
+    shutDownForQuit({
+      flushWindowState: async () => undefined,
+      stopHost: stopHostForQuit,
+      log: logQuitProblem,
+    }),
+  );
   finishQuit();
 }
 

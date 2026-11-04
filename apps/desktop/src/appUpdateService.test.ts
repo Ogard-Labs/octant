@@ -697,6 +697,69 @@ describe("where the feed is", () => {
 });
 
 describe("artifact integrity", () => {
+  it.each(["feed", "artifact"] as const)(
+    "cancels and drains an unsuccessful %s response before settling",
+    async (kind) => {
+      let finishCancel = () => {};
+      const cancelled = new Promise<void>((resolve) => {
+        finishCancel = resolve;
+      });
+      const cancel = vi.fn(() => cancelled);
+      const body = new ReadableStream<Uint8Array>({ cancel }, { highWaterMark: 0 });
+      const fetchImpl: typeof globalThis.fetch = async () => new Response(body, { status: 503 });
+      const pending =
+        kind === "artifact"
+          ? fetchVerifiedArtifact(
+              { url: release.url, sha256: artifactDigest, maxBytes: 64 },
+              fetchImpl,
+            )
+          : fetchUpdateFeed(
+              FEED_URL,
+              { version: "0.2.0", platform: "darwin", arch: "arm64" },
+              fetchImpl,
+            );
+      let settled = false;
+      void pending.then(() => {
+        settled = true;
+      });
+      await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+      expect(settled).toBe(false);
+      finishCancel();
+      await expect(pending).resolves.toEqual({ kind: "unreachable" });
+    },
+  );
+
+  it("aborts an in-progress artifact body and waits for its cancellation to drain", async () => {
+    const drained = Promise.withResolvers<void>();
+    const reading = Promise.withResolvers<void>();
+    const cancel = vi.fn(() => drained.promise);
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull() {
+          reading.resolve();
+        },
+        cancel,
+      },
+      { highWaterMark: 0 },
+    );
+    const abort = new AbortController();
+    const pending = fetchVerifiedArtifact(
+      { url: release.url, sha256: artifactDigest, maxBytes: 64 },
+      async () => new Response(body),
+      abort.signal,
+    );
+    await reading.promise;
+    abort.abort();
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+    drained.resolve();
+    await expect(pending).resolves.toEqual({ kind: "unreachable" });
+  });
+
   it("accepts bytes that hash to the signed release", async () => {
     const fetchImpl = vi.fn(
       async () => new Response(served(artifactBytes), { status: 200 }),
@@ -725,17 +788,55 @@ describe("artifact integrity", () => {
     ).toEqual({ kind: "corrupt" });
   });
 
-  it("refuses to read a body far larger than a release", async () => {
-    const fetchImpl = vi.fn(
-      async () => new Response(served(Buffer.alloc(4096)), { status: 200 }),
-    ) as unknown as typeof globalThis.fetch;
-
+  it("stops and cancels an oversized release before reading its remaining body", async () => {
+    const cancel = vi.fn();
+    let reads = 0;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          reads += 1;
+          if (reads <= 2) controller.enqueue(new Uint8Array(40));
+          else controller.error(new Error("The reader consumed past its byte limit."));
+        },
+        cancel,
+      },
+      { highWaterMark: 0 },
+    );
+    const fetchImpl: typeof globalThis.fetch = async () => new Response(body);
     expect(
       await fetchVerifiedArtifact(
         { url: release.url, sha256: artifactDigest, maxBytes: 64 },
         fetchImpl,
       ),
     ).toEqual({ kind: "corrupt" });
+    expect(reads).toBe(2);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("cancels oversized feed metadata before parsing or reading its remaining body", async () => {
+    const cancel = vi.fn();
+    let reads = 0;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          reads += 1;
+          if (reads <= 2) controller.enqueue(new Uint8Array(40 * 1024));
+          else controller.error(new Error("The reader consumed past its metadata limit."));
+        },
+        cancel,
+      },
+      { highWaterMark: 0 },
+    );
+    const fetchImpl: typeof globalThis.fetch = async () => new Response(body);
+    expect(
+      await fetchUpdateFeed(
+        FEED_URL,
+        { version: "0.2.0", platform: "darwin", arch: "arm64" },
+        fetchImpl,
+      ),
+    ).toEqual({ kind: "malformed" });
+    expect(reads).toBe(2);
+    expect(cancel).toHaveBeenCalledOnce();
   });
 });
 

@@ -2,8 +2,9 @@ import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
+import type { NightlyInstallationState } from "@octant/contracts/nightly-installation";
 import type { UtcTimestamp } from "@octant/contracts";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppUpdateSettings } from "./AppUpdateSettings";
 import type { AppUpdateState, OctantHostBridge } from "../shell/hostBridge";
@@ -78,6 +79,33 @@ function view(overrides: Partial<OctantHostBridge> = {}, automaticChecks = true)
 }
 
 describe("AppUpdateSettings", () => {
+  it("offers an explicit separate Nightly installation from a verified Stable window", async () => {
+    const installNightly = vi.fn(async () => ({
+      status: "ready" as const,
+      productName: "Octant Nightly" as const,
+      application: {
+        kind: "installed" as const,
+        version: "0.1.0-preview.20261104.1" as AppUpdateState["currentVersion"],
+        running: false,
+      },
+    }));
+    view({
+      readNightlyInstallationState: vi.fn(
+        async (): Promise<NightlyInstallationState> => ({
+          status: "ready",
+          productName: "Octant Nightly",
+          application: { kind: "absent" },
+        }),
+      ),
+      installNightly,
+      subscribeNightlyInstallationState: vi.fn(() => () => undefined),
+    });
+    const install = await screen.findByRole("button", { name: "Install Octant Nightly" });
+    expect(installNightly).not.toHaveBeenCalled();
+    fireEvent.click(install);
+    await waitFor(() => expect(installNightly).toHaveBeenCalledOnce());
+  });
+
   it("keeps Nightly update preferences local and offers only its own release rings", () => {
     const local: AppUpdateState = {
       ...ready,
@@ -369,5 +397,119 @@ describe("AppUpdateSettings", () => {
 
     expect(screen.queryByRole("note")).toBeNull();
     expect(screen.getByRole("button", { name: "What's new" })).toBeTruthy();
+  });
+});
+
+describe("separate Nightly installation", () => {
+  const absent: NightlyInstallationState = {
+    status: "ready",
+    productName: "Octant Nightly",
+    application: { kind: "absent" },
+  };
+  it("keeps install and removal separate from Stable settings and disables removal while Nightly is running", async () => {
+    const installed: NightlyInstallationState = {
+      status: "ready",
+      productName: "Octant Nightly",
+      application: { kind: "installed", version: ready.currentVersion, running: true },
+    };
+    const f = view({ readNightlyInstallationState: async () => installed });
+    expect(
+      (await screen.findByRole("button", { name: "Remove Octant Nightly" })).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Open Octant Nightly" }).hasAttribute("disabled"),
+    ).toBe(false);
+    expect(f.onReleaseRingChange).not.toHaveBeenCalled();
+    expect(f.onAutomaticChecksChange).not.toHaveBeenCalled();
+  });
+  it("keeps controls busy until cancelled native work has drained", async () => {
+    let receive: ((state: NightlyInstallationState) => void) | undefined;
+    const operation = Promise.withResolvers<NightlyInstallationState>();
+    const cancellation = Promise.withResolvers<NightlyInstallationState>();
+    const f = view({
+      readNightlyInstallationState: async () => absent,
+      installNightly: () => operation.promise,
+      cancelNightlyInstallation: vi.fn(() => cancellation.promise),
+      subscribeNightlyInstallationState: (listener) => {
+        receive = listener;
+        return () => undefined;
+      },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Install Octant Nightly" }));
+    await act(async () => {
+      receive?.({
+        status: "working",
+        productName: "Octant Nightly",
+        application: { kind: "absent" },
+        operation: "install",
+        phase: "downloading",
+        cancellable: true,
+      });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(f.host.cancelNightlyInstallation).toHaveBeenCalledOnce();
+    await act(async () => {
+      receive?.({
+        status: "working",
+        productName: "Octant Nightly",
+        application: { kind: "absent" },
+        operation: "install",
+        phase: "cancelling",
+        cancellable: false,
+      });
+    });
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Install Octant Nightly" }).hasAttribute("disabled"),
+    ).toBe(true);
+    await act(async () => {
+      receive?.(absent);
+      cancellation.resolve(absent);
+      operation.resolve(absent);
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Install Octant Nightly" }).hasAttribute("disabled"),
+      ).toBe(false),
+    );
+  });
+  it("keeps newer live installation state when an older action receipt arrives", async () => {
+    let receive: ((state: NightlyInstallationState) => void) | undefined;
+    const old = Promise.withResolvers<NightlyInstallationState>();
+    view({
+      readNightlyInstallationState: async () => absent,
+      installNightly: () => old.promise,
+      subscribeNightlyInstallationState: (listener) => {
+        receive = listener;
+        return () => undefined;
+      },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Install Octant Nightly" }));
+    await act(async () => {
+      receive?.({
+        status: "working",
+        productName: "Octant Nightly",
+        application: { kind: "absent" },
+        operation: "install",
+        phase: "verifying",
+        cancellable: false,
+      });
+    });
+    await act(async () => {
+      old.resolve(absent);
+    });
+    expect(screen.getByText("Verifying the downloaded application…")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Install Octant Nightly" }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("does not show installation controls in Nightly itself", async () => {
+    const read = vi.fn(async () => absent);
+    view({ appUpdatePreferenceScope: "local", readNightlyInstallationState: read });
+    expect(read).not.toHaveBeenCalled();
+    expect(screen.queryByText("Nightly application")).toBeNull();
   });
 });

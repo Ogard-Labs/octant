@@ -20,7 +20,7 @@ second app.
 
 The remaining delivery includes complete embedded browsing parity,
 full lifecycle acceptance, shared sign-in operations, the complete
-`octant-nightly` command, the installer and removal controls, inverted icon,
+`octant-nightly` command, signed installation/removal acceptance, inverted icon,
 and the functional release preflight. Coexistence and rollback
 still need their remaining implementation and packaged evidence. Bounded native
 lease reconnect is implemented; full signed lifecycle acceptance remains separate. The
@@ -447,22 +447,57 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 
 ## Getting Octant Nightly
 
-- **From Octant.** Settings › Updates replaces the ring switch with an Octant
-  Nightly row: "Install Octant Nightly" downloads the newest preview build and
-  places it beside Octant after three checks:
-  - The feed signature, against the preview ring's trust set (the preview key
-    and the stable key). This installer is the only part of Octant that reads
-    a preview feed; Octant's own updater still trusts and checks only `stable`.
-  - The artifact hash inside that signed feed.
-  - On macOS, a code-signature requirement written for Nightly: bundle id
-    `app.octant.desktop.nightly`, signed by Octant's own Developer ID team. It
-    is not the self-updater's check, which requires the running app's bundle
-    id and would refuse Nightly; and it is never just "validly signed", which
-    would admit another publisher's app.
-    Once installed, the row offers "Open Octant Nightly" and "Remove Octant
-    Nightly", which moves the app to the Trash and leaves the shared data alone.
-    Installing is a download the person starts; Octant never installs Nightly by
-    itself.
+- **From Octant on Apple Silicon macOS.** Settings › Updates replaces the stable-only
+  ring choice with an Octant Nightly row. “Install Octant Nightly” explicitly
+  downloads the newest preview build and places it beside Octant after checking:
+  - The feed signature against the preview trust set (preview and stable keys).
+    Stable's self-updater continues to read and trust only `stable`.
+  - The artifact hash covered by that signature, with a 512 MiB streaming download
+    limit and a two-minute download bound. Metadata is limited to 64 KiB.
+  - The complete Nightly code seal, exact bundle/entry identity, hardened runtime,
+    fuses and Octant's own Developer ID team, plus the feed's exact version and
+    an executable compatible with this Apple Silicon Mac. “Validly signed” by
+    another publisher is insufficient. Development, unsigned, Runtime, helper
+    and Worker entry points cannot acquire installation authority.
+
+  The native operation derives one fixed sibling destination from the signed
+  primary Octant application. It creates private staging beside Octant and
+  publishes exclusively: an existing app, symlink or changed destination is
+  refused and never replaced. Bounded ZIP extraction admits only the Nightly
+  bundle, safe internal links and normalized AppleDouble metadata discarded
+  without restoration (1 MiB each/16 MiB total). Extraction limits are 4 GiB,
+  50,000 entries and depth 32. Quarantine remains set; installation grants no
+  Gatekeeper exemption. An unwritable parent reports a refusal.
+
+  Installed state offers “Open Octant Nightly” and “Remove Octant Nightly”. Both
+  revalidate the current fixed bundle; removal also requires an inactive app
+  and confirmation on the actual requesting local window before moving only
+  that application to Trash. Projects, threads, credentials and settings are
+  never removal targets. Filesystem identity is checked immediately before the
+  OS operation; the subsequent filesystem-to-OS dispatch gap is not an atomic
+  lock against an external rename. Open completion acknowledges OS dispatch,
+  not a ready or authenticated Nightly window.
+
+  Each manual operation belongs to its current local top-level window. Losing
+  that owner before publication stops the operation and drains owned staging.
+  Cancellation after publication or OS dispatch cannot undo that accepted side
+  effect: the UI reports the receipt and freshly inspected installation instead.
+  One operation runs at a time; another window cannot cancel it. A failed cleanup
+  leaves mutation unavailable until cleanup is confirmed. Accepted terminal quit
+  and fatal startup close this operation and still run existing host shutdown;
+  retained UI-only close and cancelled quit confirmation do not. Close waits up
+  to three seconds and returns failure if actual work/callbacks are still pending,
+  below the existing terminal quit deadline; failure never means drained. A failed
+  drain still runs host shutdown, then refuses normal quit completion and leaves
+  the existing forced-exit deadline armed.
+
+  Reading the installation row performs no feed request. Octant never installs
+  Nightly automatically or changes Stable's release ring. These controls are not
+  available in Nightly itself, remote clients or Linux. The code and bounded
+  synthetic/native refusal evidence do not establish signed-positive installed
+  Install/Open/Trash acceptance; that remains part of the functional publication
+  gate. The independently reviewed inverted icon is a separate integration slice.
+
 - **From the website.** octant.sh offers both downloads. The Nightly download
   says it works with Octant and needs it installed.
 - Nightly then updates itself on its own rings. Octant's updater only ever

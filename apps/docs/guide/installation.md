@@ -114,8 +114,7 @@ new window identity. A connected Browser can display Stable-owned page images an
 forward ordinary pointer, text and keyboard input inside the Nightly window.
 Control-Escape leaves the page; Tab moves among its controls. IME composition,
 page accessibility, native popups, other native brokers and full lifecycle
-acceptance remain unfinished, so this is not a usable Nightly release. Installation and
-publication remain pending.
+acceptance remain unfinished, so this is not a usable Nightly release. Signed installed-app acceptance and publication remain pending.
 
 An in-app Quit command in Octant closes its workspace windows while a current
 Nightly window still uses its host. The host remains in the background, and
@@ -127,6 +126,20 @@ host-ready for its first Nightly window, then follows that same guarded quit.
 An already retained current Nightly client receives bounded recovery grace during
 an app-managed host restart. This does not yet prove full signed coexistence or
 reconnect acceptance.
+
+On Apple Silicon macOS, signed Octant's Settings › Updates offers a separate
+Nightly application row. Install explicitly downloads the latest scheduled build,
+verifies the signed feed, hash and same-publisher Nightly application, and installs
+it beside Octant without replacing an existing target. An unwritable location,
+unknown app or symlink is refused. Open checks the current installed app again.
+Remove asks for confirmation in the requesting window and moves only a verified,
+inactive Nightly app to Trash; your workspace data stays on this Mac. Quit Nightly
+before removing it. Cancelling stops owned preparation, but cannot undo an install
+or OS operation already accepted. If cleanup cannot be confirmed, check the
+installation before trying again. No installation happens automatically, and none
+of these controls changes Octant's stable update channel. Development/unsigned
+builds refuse installation; these controls are unavailable in Nightly, remote
+clients and Linux. Signed installed Install/Open/Trash acceptance is still pending.
 
 Nightly's update controls follow only Nightly and Preview, with automatic checks
 and the chosen channel saved separately from Octant. Changing them does not

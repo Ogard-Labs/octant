@@ -21,6 +21,7 @@
     "./linked-thread-prompt": "./src/linkedThreadPrompt.ts",
     "./linked-thread-aggregation": "./src/linkedThreadAggregation.ts",
     "./app-updates": "./src/appUpdates.ts",
+    "./nightly-installation": "./src/nightlyInstallation.ts",
     "./scaffolds": "./src/scaffolds.ts",
     "./workspace-presets": "./src/workspacePresets.ts",
     "./chat": "./src/chat.ts",
