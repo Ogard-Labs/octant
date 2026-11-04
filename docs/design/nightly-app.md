@@ -21,7 +21,7 @@ second app.
 The remaining delivery includes complete embedded browsing parity,
 full lifecycle acceptance, shared sign-in operations, the complete
 `octant-nightly` command, the installer and removal controls, inverted icon,
-Nightly labels, and the functional release preflight. Coexistence and rollback
+and the functional release preflight. Coexistence and rollback
 still need their remaining implementation and packaged evidence. Bounded native
 lease reconnect is implemented; full signed lifecycle acceptance remains separate. The
 preview/candidate workflow now selects the Nightly flavor and matching artifact
@@ -528,9 +528,18 @@ remain separate packaged acceptance.
 - The Nightly icon is the Octant icon with its colours inverted: the same
   silhouette and sizes, so the Dock and the app switcher tell the two apart at
   a glance.
-- A small "Nightly" pill sits beside the name in the sidebar header. When the
-  sidebar is collapsed, it moves to the window's title bar. It is a quiet
-  label at the meta step, not a warning colour.
+- A small neutral "Nightly" pill sits beside "Octant" in a compact sidebar
+  identity row below the native window controls. The existing title rail,
+  traffic-light clearance and navigation actions keep their geometry. When the
+  sidebar is collapsed, the same label moves to the window's measured leading
+  title-bar cluster, including when the icon rail remains visible. Standalone
+  Settings keeps one label in its own sidebar, or in the title bar at narrow
+  widths. It is a quiet label at the meta step, not a warning colour.
+  The local application bootstrap supplies the closed flavor and product name
+  from the existing immutable identity record. The preload requires one matching
+  name/flavor pair before exposing this display-only identity; it never
+  identifies a host or window and grants no capability or shared-data authority.
+  Stable and remote clients do not show the Nightly label.
 - The window title, menu bar, About panel, notifications, and menu-bar extra
   name the app ("Octant Nightly"). Copy that names the product reads its name
   from the identity record.

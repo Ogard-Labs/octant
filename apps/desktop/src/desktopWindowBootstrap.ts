@@ -1,4 +1,5 @@
 import type { BrowserWindowConstructorOptions } from "electron";
+import { DESKTOP_FLAVOR_IDENTITIES } from "@octant/host-runtime";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { WindowBounds } from "./nativeWindowState";
@@ -83,6 +84,7 @@ export function createMainBrowserWindowOptions(options: {
   readonly initialThreadMode?: "code" | "work";
   readonly initialThreadId?: string;
   readonly localUpdatePreferences?: boolean;
+  readonly applicationFlavor?: "stable" | "nightly";
   readonly preloadPath: string;
   readonly browserWindow: WindowPresentation["browserWindow"];
 }): BrowserWindowConstructorOptions {
@@ -106,6 +108,13 @@ export function createMainBrowserWindowOptions(options: {
     webPreferences: {
       contextIsolation: true,
       additionalArguments: [
+        ...(options.applicationFlavor === "nightly" &&
+        options.productName === DESKTOP_FLAVOR_IDENTITIES.nightly.productName
+          ? [
+              "--octant-application-flavor=nightly",
+              `--octant-application-name=${DESKTOP_FLAVOR_IDENTITIES.nightly.productName}`,
+            ]
+          : []),
         ...(options.localUpdatePreferences === true ? ["--octant-local-update-preferences"] : []),
         `--octant-project-capability=${options.capability}`,
         `--octant-window-id=${options.windowId}`,

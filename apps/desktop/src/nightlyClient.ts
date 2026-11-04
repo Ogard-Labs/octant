@@ -249,6 +249,7 @@ export async function runNightlyClient(
               createMainBrowserWindowOptions({
                 bounds,
                 localUpdatePreferences: true,
+                applicationFlavor: identity.flavor,
                 productName: identity.productName,
                 capability: bootstrap.capability,
                 windowId: bootstrap.windowId,

@@ -187,6 +187,7 @@ import {
   type OctantHostBridge,
 } from "./hostBridge";
 import { openExternalUrl } from "./openExternalUrl";
+import { ApplicationIdentity } from "./ApplicationIdentity";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import "../styles/settings.css";
 import "../styles/settings-specialty.css";
@@ -590,6 +591,11 @@ export function SettingsView(props: SettingsViewProps) {
               <span className="settings-view__drag-space" />
             </div>
           ) : null}
+          {props.hostBridge?.applicationIdentity !== undefined ? (
+            <div className="sidebar__application-identity">
+              <ApplicationIdentity productName={props.hostBridge.applicationIdentity.productName} />
+            </div>
+          ) : null}
           <div className="settings-view__sidebar-content">
             <div className="settings-view__rail-head">
               <h2 className="settings-view__rail-title">Settings</h2>
@@ -634,7 +640,26 @@ export function SettingsView(props: SettingsViewProps) {
                   <span>Back to app</span>
                 </OctantButton>
               )}
-              <span className="settings-view__mobile-title">{subPage ?? currentSectionLabel}</span>
+              <span
+                className={
+                  props.hostBridge?.applicationIdentity !== undefined
+                    ? "settings-view__mobile-title settings-view__mobile-title--nightly"
+                    : "settings-view__mobile-title"
+                }
+              >
+                {props.hostBridge?.applicationIdentity !== undefined ? (
+                  <>
+                    <span className="settings-view__mobile-section-name">
+                      {subPage ?? currentSectionLabel}
+                    </span>
+                    <ApplicationIdentity
+                      productName={props.hostBridge.applicationIdentity.productName}
+                    />
+                  </>
+                ) : (
+                  (subPage ?? currentSectionLabel)
+                )}
+              </span>
               <OctantButton
                 aria-expanded={navigationOpen}
                 aria-haspopup="dialog"
