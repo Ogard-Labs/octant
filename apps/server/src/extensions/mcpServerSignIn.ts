@@ -40,6 +40,7 @@ export interface McpServerSignInRecord {
   readonly issuer: string;
   /** Set once the broker answered that the grant is gone; Settings then says Sign in again. */
   readonly signInAgain?: McpSignInAgainReason;
+  readonly signOutPending?: boolean;
 }
 
 type AwaitingConsent = Extract<McpServerSignInView, { kind: "awaiting-consent" }>;
@@ -68,6 +69,8 @@ export interface McpServerSignInOptions {
   readonly pickPort?: () => Promise<number>;
   readonly pointTimeoutMs?: number;
   readonly retirementTimeoutMs?: number;
+  /** Fences cached task transports when this component's broker grant changes. */
+  readonly onAuthenticationChanged?: (extensionId: string, componentId: string) => Promise<void>;
   readonly beginTimeoutMs?: number;
   /** State replacement boundary; the default writes an owner-only file then atomically renames it. */
   readonly replaceState?: (path: string, contents: string) => Promise<void>;
@@ -254,9 +257,16 @@ export class McpServerSignIn {
     componentId: string,
     principalKind: PrincipalKind,
   ): Promise<McpServerSignInView> {
-    return this.#forServer(extensionId, componentId, () =>
-      this.#signOut(extensionId, componentId, principalKind),
-    );
+    return this.#forServer(extensionId, componentId, async () => {
+      if (principalKind === "local-window" && this.#removals.has(extensionId)) {
+        await this.#load();
+        const record = this.#signIns.get(signInKey(extensionId, componentId));
+        return record?.signOutPending
+          ? recordView(record)
+          : refused("unavailable", "Finish removing this server before changing its sign-in.");
+      }
+      return this.#signOut(extensionId, componentId, principalKind);
+    });
   }
   async preparePackageRemoval(extensionId: string): Promise<() => void> {
     this.#removals.set(extensionId, (this.#removals.get(extensionId) ?? 0) + 1);
@@ -273,6 +283,15 @@ export class McpServerSignIn {
       const prefix = `${extensionId}:`;
       for (const resource of this.#packageResources(extensionId))
         await this.#serialized(resource, async () => {
+          if (
+            Array.from(this.#signIns).some(
+              ([key, record]) =>
+                key.startsWith(prefix) &&
+                record.descriptor.resource === resource &&
+                record.signOutPending,
+            )
+          )
+            throw new Error("Finish signing out before removing this server.");
           for (const [key, pending] of Array.from(this.#attempts))
             if (key.startsWith(prefix) && pending.discovered.resource === resource) {
               if (!(await this.#cancelPending(key, "local-window")))
@@ -764,6 +783,13 @@ export class McpServerSignIn {
       return refused("local-host-required", "Sign in from the Octant window on this host.");
     }
     const key = signInKey(extensionId, componentId);
+    const previous = this.#signIns.get(key);
+    if (previous !== undefined) {
+      if (previous.signOutPending || previous.signInAgain === undefined)
+        return recordView(previous);
+      const cleaned = await this.#signOut(extensionId, componentId, principalKind);
+      if (cleaned.kind !== "signed-out") return cleaned;
+    }
     const existing = this.#attempts.get(key);
     if (existing !== undefined)
       return existing.cancelPending
@@ -988,6 +1014,10 @@ export class McpServerSignIn {
         committed = true;
       });
       if (!committed) return pending.cancelPending ? cancellationPending() : { kind: "signed-out" };
+      await this.#options.onAuthenticationChanged?.(
+        key.slice(0, key.indexOf(":")),
+        key.slice(key.indexOf(":") + 1),
+      );
       await this.#retireUnusedSecret(previousRef);
       return { kind: "signed-in", issuer: pending.discovered.issuer };
     }
@@ -1053,23 +1083,73 @@ export class McpServerSignIn {
     const key = signInKey(extensionId, componentId);
     if (!(await this.#cancelPending(key, principalKind))) return cancellationPending();
     const record = this.#signIns.get(key);
-    if (record === undefined) return { kind: "signed-out" };
-    // The grant is revoked at the issuer where it can be and forgotten
-    // locally either way; a stale local record would only ever attach a
-    // dead bearer.
-    await this.#options.oauth.signOut({
-      principalKind,
-      descriptor: record.descriptor,
-      credentialRef: record.credentialRef,
-      forgetWhenNotRevoked: true,
-    });
-    await this.#commit(async () => {
-      if (this.#signIns.get(key) === record) this.#signIns.delete(key);
-      this.#reserveUnownedSecret(record.descriptor.clientAuthentication?.secretRef);
-      await this.#persist();
-    });
-    await this.#retireUnusedSecret(record.descriptor.clientAuthentication?.secretRef);
-    return { kind: "signed-out" };
+    if (record === undefined) {
+      await this.#options.onAuthenticationChanged?.(extensionId, componentId);
+      return { kind: "signed-out" };
+    }
+    const pending = record.signOutPending ? record : { ...record, signOutPending: true };
+    let persisted = true;
+    try {
+      await this.#commit(async () => {
+        if (this.#signIns.get(key) !== record) return;
+        this.#signIns.set(key, pending);
+        await this.#persist();
+      });
+    } catch {
+      persisted = false;
+    }
+    try {
+      await this.#options.onAuthenticationChanged?.(extensionId, componentId);
+    } catch {
+      return signOutPending();
+    }
+    if (!persisted || this.#signIns.get(key) !== pending) return signOutPending();
+    let result: Awaited<ReturnType<HostOAuthService["signOut"]>>;
+    try {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        result = await Promise.race([
+          this.#options.oauth.signOut({
+            principalKind,
+            descriptor: pending.descriptor,
+            credentialRef: pending.credentialRef,
+            forgetWhenNotRevoked: true,
+          }),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("Sign-out cleanup timed out.")),
+              REQUEST_TIMEOUT_MS,
+            );
+            timer.unref?.();
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      return signOutPending();
+    }
+    if (result.kind !== "signed-out" && result.kind !== "signed-out-locally")
+      return signOutPending();
+    try {
+      await this.#commit(async () => {
+        if (this.#signIns.get(key) !== pending) return;
+        this.#signIns.delete(key);
+        const secretRef = pending.descriptor.clientAuthentication?.secretRef;
+        const reserved = this.#reserveUnownedSecret(secretRef);
+        try {
+          await this.#persist();
+        } catch (error) {
+          this.#signIns.set(key, pending);
+          if (reserved && secretRef !== undefined) this.#retiredClientSecrets.delete(secretRef);
+          throw error;
+        }
+      });
+    } catch {
+      return signOutPending();
+    }
+    await this.#retireUnusedSecret(pending.descriptor.clientAuthentication?.secretRef);
+    return this.#signIns.has(key) ? signOutPending() : { kind: "signed-out" };
   }
 
   #packageResources(extensionId: string): Set<string> {
@@ -1123,7 +1203,8 @@ export class McpServerSignIn {
     if (launch.transport === "stdio") return launch;
     const key = signInKey(extensionId, componentId);
     const record = this.#signIns.get(key);
-    if (record === undefined) return launch;
+    if (record === undefined || record.signOutPending || record.signInAgain !== undefined)
+      return launch;
     const transportUrl = canonicalResource(launch.url);
     if (record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect) {
       if (
@@ -1146,11 +1227,17 @@ export class McpServerSignIn {
     if (answer.kind === "sign-in-again") {
       const reason = signInAgainReason(answer.reason);
       if (reason !== undefined && record.signInAgain !== reason) {
-        await this.#commit(async () => {
-          if (this.#signIns.get(key) !== record) return;
-          this.#signIns.set(key, { ...record, signInAgain: reason });
-          await this.#persist();
-        });
+        let changed = false;
+        try {
+          await this.#commit(async () => {
+            if (this.#signIns.get(key) !== record) return;
+            this.#signIns.set(key, { ...record, signInAgain: reason });
+            changed = true;
+            await this.#persist();
+          });
+        } finally {
+          if (changed) await this.#options.onAuthenticationChanged?.(extensionId, componentId);
+        }
       }
       return launch;
     }
@@ -1471,6 +1558,7 @@ function refused(
 }
 
 function recordView(record: McpServerSignInRecord): McpServerSignInView {
+  if (record.signOutPending) return signOutPending();
   return record.signInAgain === undefined
     ? { kind: "signed-in", issuer: record.issuer }
     : { kind: "sign-in-again", reason: record.signInAgain };
@@ -1618,5 +1706,13 @@ function statusUnavailable(): Extract<
     kind: "status-unavailable",
     message:
       "Sign-in status is unavailable. Restore the credential broker, then check sign-in or cancel this attempt.",
+  };
+}
+
+function signOutPending(): Extract<McpServerSignInView, { readonly kind: "sign-out-pending" }> {
+  return {
+    kind: "sign-out-pending",
+    message:
+      "Sign-out is not confirmed. Restore the credential broker, then finish signing out. This connection cannot be used meanwhile.",
   };
 }

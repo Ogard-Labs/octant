@@ -8792,6 +8792,35 @@ even if an adapter ignores abort. This does not assert that a host operation
 stopped or that a setup save failed; an unknown save is checked by reopening
 setup. Other extension RPCs keep their existing policy.
 
+Completed MCP grant sign-out first retains an unusable cleanup owner in the
+existing sign-in state. A broker failure or ten-second cleanup-stage timeout
+keeps that reference and offers Finish signing out; it cannot begin replacement
+consent or attach a bearer meanwhile. Only confirmed broker deletion and a
+persisted local removal complete sign-out. Application registration remains.
+A late response to an expired cleanup wait cannot silently complete the action.
+If writing the intent fails, the running host refuses use and retains the
+original owner rather than deleting its broker grant; a failed disk write does
+not claim durable intent across restart.
+An owned generated package cannot be removed while a completed sign-out owner
+awaits cleanup: finish signing out first, so its existing retry control remains
+reachable. During an admitted removal, new explicit sign-out is refused by the
+same package gate; internal post-removal cleanup keeps its existing order.
+This does not revoke an established grant early or change uninstall ordering.
+
+Grant replacement, sign-out intent and a proven revoked/expired grant retire
+the existing session manager's authentication generation for only that
+extension/component, across its task scopes. Tool indexing and desired sessions
+are removed before transport cleanup, whose wait is bounded to ten seconds.
+An already resolved task-tool closure and a held approval recheck the current
+record before dispatch. Old initialization, transport-close callbacks and late
+call completion cannot reinstall or retire a replacement session. Calls already
+dispatched may have completed and are never replayed; their late result is not
+adopted as current authenticated content. Unrelated components stay usable.
+Only later authoritative task reconciliation initializes and lists again with
+the current broker grant; Settings does not probe tools. This fence does not
+refresh bearer headers in an otherwise reused HTTP session or implement
+changed-catalog continuation for a retained provider thread.
+
 The authenticated broker also accepts cancellation of a retained MCP PKCE
 attempt only under the actor and descriptor recorded at Begin. It takes no
 caller-selected grant reference. Cancellation closes that attempt's listeners,

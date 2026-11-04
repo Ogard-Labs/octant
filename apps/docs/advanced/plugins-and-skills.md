@@ -442,6 +442,16 @@ server with a key in a header. Support for each service's setup and account
 eligibility is added separately. Signing in and out work only from the Octant
 window on this host.
 
+If sign-out cannot be confirmed, the row offers **Finish signing out**. Restore
+the connection to this host and its credential store, then choose that action
+to retry cleanup. Octant keeps the cleanup reference and blocks further use of
+that connection and replacement sign-in meanwhile. Signing out keeps your app
+registration, so you can sign in again without setting it up again. A tool call
+already sent before sign-out may have completed even if its answer was lost;
+check its outcome before trying again. Octant does not replay that call.
+Finish any unconfirmed sign-out before removing that server; Octant keeps it
+installed so the cleanup action stays available.
+
 Choose **Client setup** to use an app identity you registered yourself. The dialog
 shows the server and authorization server and an exact **Callback address** you
 can copy into your app registration. Enter the public **Client ID**, or choose

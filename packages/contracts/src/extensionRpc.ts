@@ -292,6 +292,10 @@ export const McpServerSignInView = Schema.Union(
     strict,
   ),
   Schema.Struct({
+    kind: Schema.Literal("sign-out-pending"),
+    message: boundedText(512),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("status-unavailable"),
     message: boundedText(512),
   }).annotations(strict),

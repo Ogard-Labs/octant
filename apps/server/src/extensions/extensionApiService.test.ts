@@ -1,3 +1,7 @@
+import { decodeExtensionSnapshot, decodeExtensionCommand } from "@octant/contracts/extension-rpc";
+import { decodeHostOAuthDescriptor } from "@octant/contracts/host-oauth";
+import { createHostOAuthService } from "../providers/oauth/hostOAuthService";
+import { McpServerSignIn } from "./mcpServerSignIn";
 import { describe, expect, it, vi } from "vitest";
 import type {
   ExtensionEffectiveSnapshot,
@@ -11,7 +15,7 @@ import {
 } from "./packageInspector";
 import { ExtensionApiService } from "./extensionApiService";
 import type { ExtensionLifecycleService } from "./extensionLifecycleService";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeExtensionPackageManifest } from "@octant/contracts/extensions";
@@ -100,6 +104,171 @@ function lifecycle(captured: Array<InspectedExtensionPackage>): ExtensionLifecyc
 }
 
 describe("extension inspection and lifecycle API service", () => {
+  it("retains completed sign-out cleanup controls when the person requests uninstall", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-uninstall-sign-out-"));
+    const componentId = "server";
+    const credentialRef = "55000000-0000-4000-8000-000000000002";
+    const oauthDescriptor = decodeHostOAuthDescriptor({
+      descriptorId: "mcp-fixture",
+      flow: "authorization-code-pkce",
+      dialect: "mcp-authorization",
+      clientId: "owned-client",
+      authorizationEndpoint: "https://issuer.example/authorize",
+      tokenEndpoint: "https://issuer.example/token",
+      resource: "https://mcp.example/mcp",
+      redirectPort: 43125,
+      scopes: [],
+      termsId: "terms-v1",
+    });
+    const statePath = join(directory, "sign-ins.json");
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        signIns: {
+          [`${extensionId}:${componentId}`]: {
+            descriptor: oauthDescriptor,
+            credentialRef,
+            issuer: "https://issuer.example",
+          },
+        },
+        registrations: {
+          "https://mcp.example/mcp": {
+            kind: "registered",
+            clientId: "owned-client",
+            issuer: "https://issuer.example",
+            resource: "https://mcp.example/mcp",
+            redirectPort: 43125,
+          },
+        },
+      }),
+    );
+    let available = false;
+    const drop = vi.fn(async () => {
+      if (!available) throw new Error("Synthetic credential broker unavailable");
+    });
+    const oauth = createHostOAuthService({
+      journal: { append: () => undefined },
+      broker: {
+        begin: async () => ({}),
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: drop,
+        revoke: async () => {
+          await drop();
+          return { kind: "revoked" };
+        },
+      },
+    });
+    const signIn = new McpServerSignIn({
+      statePath,
+      oauth,
+      access: async () => ({ kind: "unavailable" }),
+      serverUrl: async () => "https://mcp.example/mcp",
+      actorId: credentialRef,
+    });
+    const activation = {
+      installed: true,
+      trusted: true,
+      pluginDesired: true,
+      componentDesired: true,
+      compatible: true,
+      policyAllowed: true,
+      quarantined: false,
+      draining: false,
+      broken: false,
+      unavailable: false,
+      interrupted: false,
+      waiting: false,
+    };
+    let snapshot = decodeExtensionSnapshot({
+      sequence: 1,
+      snapshotAt: "2026-11-02T00:00:00.000Z",
+      packages: [
+        {
+          extensionId,
+          packageId,
+          stateVersion: 1,
+          version: "1.0.0",
+          digest: `sha256:${"0".repeat(64)}`,
+          source: { kind: "user-added", sourceRef: "owned-server" },
+          compatibility: { platforms: ["linux"], modes: ["chat"], providerFamilies: [] },
+          activation,
+          components: [
+            {
+              component: {
+                id: componentId,
+                kind: "mcp-server",
+                displayName: "Server",
+                declaredCapabilities: ["mcp"],
+                entryPoint: "mcp.json",
+              },
+              activation,
+              effectiveState: { kind: "effective" },
+            },
+          ],
+          diagnostics: [],
+        },
+      ],
+      collisions: [],
+    });
+    const state = lifecycle([]);
+    state.snapshot = () => snapshot;
+    state.uninstall = vi.fn(async () => {
+      snapshot = decodeExtensionSnapshot({
+        ...snapshot,
+        packages: snapshot.packages.map((pkg) => ({
+          ...pkg,
+          activation: { ...pkg.activation, installed: false, trusted: false, pluginDesired: false },
+          components: pkg.components.map((component) => ({
+            ...component,
+            activation: { ...component.activation, installed: false },
+            effectiveState: { kind: "blocked", reason: "not-installed" },
+          })),
+        })),
+      });
+      return snapshot;
+    });
+    const remove = vi.fn(async () => undefined);
+    const service = new ExtensionApiService({
+      lifecycle: state,
+      resolver: { resolve: async () => resolvedPackage() },
+      userAddedMcpServers: {
+        owns: (ref) => ref === "owned-server",
+        prepareRemoval: (id) => signIn.preparePackageRemoval(id),
+        remove,
+      },
+    });
+    const command = decodeExtensionCommand({ kind: "uninstall-package", extensionId, packageId });
+    try {
+      expect(await signIn.signOut(extensionId, componentId, "local-window")).toMatchObject({
+        kind: "sign-out-pending",
+      });
+      const cleanupCalls = drop.mock.calls.length;
+      expect(await service.execute(command)).toMatchObject({
+        kind: "extension-command-failed",
+        failure: { category: "blocked", message: expect.stringContaining("signing out") },
+      });
+      expect(state.uninstall).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+      expect(drop).toHaveBeenCalledTimes(cleanupCalls);
+      expect(state.snapshot().packages[0]?.activation.installed).toBe(true);
+      expect(await signIn.status(extensionId, componentId, "local-window")).toMatchObject({
+        kind: "sign-out-pending",
+      });
+      available = true;
+      expect(await signIn.signOut(extensionId, componentId, "local-window")).toEqual({
+        kind: "signed-out",
+      });
+      expect((await service.execute(command)).kind).toBe("extension-state-updated");
+      expect(state.uninstall).toHaveBeenCalledOnce();
+      expect(state.snapshot().packages[0]?.activation.installed).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps an owned user-added package installed until sign-in cancellation is confirmed and releases preflight on later failure", async () => {
     const state = lifecycle([]);
     const installed = {

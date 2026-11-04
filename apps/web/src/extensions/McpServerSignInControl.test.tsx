@@ -9,6 +9,82 @@ const extensionId = "44000000-0000-4000-8000-000000000002";
 const componentId = "mcp-docs";
 
 describe("Sign in to a hosted server", () => {
+  it("offers only explicit cleanup retry for an unconfirmed completed sign-out", async () => {
+    const user = userEvent.setup();
+    const pending = {
+      kind: "sign-out-pending",
+      message: "Restore the broker, then finish signing out.",
+    } as const;
+    const mcpServerSignIn = vi.fn(async (request: { kind: string }) =>
+      request.kind === "sign-out" ? ({ kind: "signed-out" } as const) : pending,
+    );
+    render(
+      <McpServerSignInControl
+        client={{ mcpServerSignIn: mcpServerSignIn as never }}
+        extensionId={extensionId}
+        componentId={componentId}
+        disabled={false}
+      />,
+    );
+    await screen.findByRole("button", { name: "Finish signing out" });
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Finish signing out" }));
+    await screen.findByRole("button", { name: "Sign in" });
+    expect(mcpServerSignIn.mock.calls.map(([request]) => request.kind)).toEqual([
+      "status",
+      "sign-out",
+    ]);
+  });
+
+  it("keeps completed-grant cleanup retry after the real client deadline and ignores late success", async () => {
+    const held = Promise.withResolvers<Response>();
+    let signOuts = 0;
+    const client = createExtensionClient({
+      baseUrl: "http://127.0.0.1:9",
+      windowCapability: "synthetic-window",
+      fetch: async (_url, init) => {
+        const request = JSON.parse(String(init?.body));
+        return request.kind === "status"
+          ? Response.json({ kind: "signed-in", issuer: "fixture.example" })
+          : ++signOuts === 1
+            ? held.promise
+            : Response.json({ kind: "signed-out" });
+      },
+    });
+    render(
+      <McpServerSignInControl
+        client={client}
+        componentId={componentId}
+        extensionId={extensionId}
+        disabled={false}
+      />,
+    );
+    const button = await screen.findByRole("button", { name: "Sign out" });
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(button);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_001);
+      });
+      expect(screen.getByRole("button", { name: "Finish signing out" })).toBeEnabled();
+      expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
+      await act(async () => {
+        held.resolve(Response.json({ kind: "signed-out" }));
+        await held.promise;
+      });
+      expect(screen.getByRole("button", { name: "Finish signing out" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Finish signing out" }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText("Not signed in")).toBeInTheDocument();
+      expect(signOuts).toBe(2);
+    } finally {
+      held.resolve(Response.json({ kind: "signed-out" }));
+      vi.useRealTimers();
+    }
+  });
+
   it("does not schedule a poll into the generation of an interactive cancellation", async () => {
     vi.useFakeTimers();
     const cancel = Promise.withResolvers<McpServerSignInView>();
