@@ -7,6 +7,8 @@ import { isLoopbackHostname } from "./shellRoutes";
 import {
   isCanonical256BitToken,
   WindowAuthorityError,
+  NATIVE_WINDOW_LEASE_MS,
+  type NativeWindowSource,
   type WindowAuthorityStore,
 } from "./windowAuthorityStore";
 
@@ -28,8 +30,9 @@ export function createProjectBindingRouteHandler(dependencies: ProjectBindingRou
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const isAuthorityRoute = url.pathname === "/api/desktop/window-authorities";
+    const isNativeAuthorityRoute = url.pathname === "/api/desktop/native-window-authorities";
     const isReceiptRoute = url.pathname === "/api/desktop/project-binding-receipts";
-    if (!isAuthorityRoute && !isReceiptRoute) return undefined;
+    if (!isAuthorityRoute && !isReceiptRoute && !isNativeAuthorityRoute) return undefined;
     if (dependencies.desktopBridgeSecret === undefined) {
       return failure("unavailable", "Desktop Project binding is unavailable.", 503);
     }
@@ -53,11 +56,36 @@ export function createProjectBindingRouteHandler(dependencies: ProjectBindingRou
       return failure("unsupported", "HTTP method is not supported for this route.", 400);
     }
 
-    const decoded = await readJson(request, maxBody);
+    if (isNativeAuthorityRoute && !["POST", "PUT", "DELETE"].includes(request.method)) {
+      return failure("unsupported", "HTTP method is not supported for this route.", 400);
+    }
+    const decoded = await readJson(
+      request,
+      isNativeAuthorityRoute ? Math.min(maxBody, 4096) : maxBody,
+    );
     if (decoded.kind === "too-large") return failure("invalid", "Request body is too large.", 413);
     if (decoded.kind === "invalid") return failure("invalid", "Request body is invalid.", 400);
 
     try {
+      if (isNativeAuthorityRoute) {
+        const body = decodeNativeAuthority(decoded.value, request.method === "POST");
+        if (request.method === "DELETE") {
+          dependencies.windowAuthorityStore.revokeNative(body);
+          return new Response(null, { status: 204 });
+        }
+        const lease =
+          request.method === "POST"
+            ? dependencies.windowAuthorityStore.registerNative({
+                ...body,
+                rendererIdentity: requireRendererIdentity(body.rendererIdentity),
+                now: now(),
+              })
+            : dependencies.windowAuthorityStore.renewNative({ ...body, now: now() });
+        return Response.json(
+          { ...lease, leaseMs: NATIVE_WINDOW_LEASE_MS },
+          { status: request.method === "POST" ? 201 : 200 },
+        );
+      }
       if (isAuthorityRoute && request.method === "POST") {
         const body = decodeAuthorityRegistration(decoded.value);
         dependencies.windowAuthorityStore.register({ ...body, now: now() });
@@ -87,7 +115,13 @@ export function createProjectBindingRouteHandler(dependencies: ProjectBindingRou
       return failure(
         category,
         safeMessage(category, clockRecovery),
-        category === "unavailable" && clockRecovery ? 503 : category === "conflict" ? 409 : 400,
+        category === "unavailable" && clockRecovery
+          ? 503
+          : category === "conflict"
+            ? 409
+            : isNativeAuthorityRoute && category === "unauthorized"
+              ? 401
+              : 400,
       );
     }
   };
@@ -224,4 +258,56 @@ function safeMessage(category: ProjectFailure["category"], clockRecovery = false
 
 function failure(category: ProjectFailure["category"], message: string, status: number): Response {
   return Response.json({ category, message }, { status });
+}
+
+function requireRendererIdentity(value: string | undefined): string {
+  if (!isCanonical256BitToken(value)) throw new Error("invalid");
+  return value;
+}
+
+function decodeNativeAuthority(
+  value: unknown,
+  registering: boolean,
+): {
+  readonly windowId: WindowId;
+  readonly capability: string;
+  readonly rendererIdentity?: string;
+  readonly source: NativeWindowSource;
+} {
+  requireKeys(
+    value,
+    registering
+      ? ["windowId", "capability", "rendererIdentity", "source"]
+      : ["windowId", "capability", "source"],
+  );
+  const source = value.source;
+  requireKeys(source, ["kind", "processRegistration", "incarnation", "generation"]);
+  if (
+    !isCanonical256BitToken(value.capability) ||
+    source.kind !== "native-nightly" ||
+    !isCanonical256BitToken(source.processRegistration) ||
+    typeof source.incarnation !== "string" ||
+    !/^[0-9a-f]{64}$/.test(source.incarnation) ||
+    typeof source.generation !== "number" ||
+    !Number.isSafeInteger(source.generation) ||
+    source.generation < 1
+  )
+    throw new Error("invalid");
+  return {
+    windowId: decodeWindowId(value.windowId),
+    capability: value.capability,
+    ...(registering
+      ? {
+          rendererIdentity: requireRendererIdentity(
+            typeof value.rendererIdentity === "string" ? value.rendererIdentity : undefined,
+          ),
+        }
+      : {}),
+    source: {
+      kind: "native-nightly",
+      processRegistration: source.processRegistration,
+      incarnation: source.incarnation,
+      generation: source.generation,
+    },
+  };
 }

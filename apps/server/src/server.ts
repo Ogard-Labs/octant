@@ -1483,6 +1483,11 @@ export function startOctantServer(
       (server) =>
         Effect.promise(async () => {
           let shutdownFailure: unknown;
+          try {
+            windowAuthorityStore.revokeNativeLeases();
+          } catch (error) {
+            shutdownFailure = error;
+          }
           let httpStop: void | Promise<void> = undefined;
           try {
             githubAuthenticationPort.close();

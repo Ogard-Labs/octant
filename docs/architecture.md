@@ -256,7 +256,12 @@ script runs under the trusted desktop executable's identity. See the owning
 The ordinary packaged macOS main owns a bounded native status preflight for
 Nightly, authenticated in both directions from kernel audit tokens, same-user
 login scope and strict signed primary-app policy. Its discovery name grants no
-authority; the status response includes no endpoint or lease. See
+authority; the status response includes no endpoint or lease. A separate
+closed window protocol issues a fresh server window identity and short native
+lease to an authenticated Nightly main. The lease is enforced on window and
+renderer requests and held responses; administrative bridge secrets remain in
+Stable. Embedded Browser and retained-host parity remain unfinished. See
+[native client window leases](design/nightly-app.md#native-client-window-leases) and
 [desktop status preflight](design/nightly-app.md#authenticated-desktop-status-preflight).
 
 ```mermaid
@@ -12257,9 +12262,11 @@ macOS-only.
   The first technical preview therefore ships as Octant on `stable`
   ([Octant Nightly](design/nightly-app.md)). Identity and packaging foundations
   now stamp separate app flavors and restrict each packaged updater to its
-  identity's rings. Until the typed stable-host desktop bridge is implemented,
-  Nightly refuses before loading the module that initializes host paths and
-  credential services; it cannot start a host or migrate shared data.
+  identity's rings. A separate authenticated native window bootstrap can load
+  Nightly's own renderer with a short server-enforced lease. It never loads
+  the host-owning module, starts a host or migrates shared data; incompatible
+  or unsigned builds refuse. Embedded Browser, native brokers and retained-host
+  behavior remain unfinished.
   Packaged macOS Nightly additionally seals its JavaScript entry in ASAR and
   disables alternate Node/loader entry paths. Its existing scoped terminal MCP
   command runs through a fixed bundled role. Stable uses a separately identified
@@ -12267,7 +12274,7 @@ macOS-only.
   Code confinement does not acquire GUI-service permissions. This is a prerequisite for peer admission, not
   evidence that a signed Nightly peer or embedded Browser bridge is usable;
   the owning [fixed-entry rules](design/nightly-app.md#fixed-packaged-entry)
-  preserve the functional launch and publication gates.
+  preserve authenticated registration and the functional publication gate.
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
   bundled file read from disk, so What's New never adds a request.

@@ -1,19 +1,24 @@
 #include "desktopPeerPolicy.h"
+#include <CommonCrypto/CommonDigest.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
 #include <atomic>
 #include <bsm/libbsm.h>
 #include <chrono>
+#include <cmath>
+#include <condition_variable>
 #include <crt_externs.h>
 #include <cstring>
 #include <fcntl.h>
 #include <limits.h>
 #include <mach/mach.h>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <node_api.h>
 #include <servers/bootstrap.h>
 #include <string>
+#include <sys/event.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <thread>
@@ -666,6 +671,7 @@ void set(napi_env env, napi_value object, const char *key,
   napi_create_string_utf8(env, text.data(), text.size(), &value);
   napi_set_named_property(env, object, key, value);
 }
+#include "desktopPeerWindows.h"
 void complete(napi_env env, napi_status, void *data) {
   std::unique_ptr<Work> job(static_cast<Work *>(data));
   if (!job->executed && job->operation != "close")
@@ -745,6 +751,7 @@ napi_value operation(napi_env env, napi_callback_info info) {
   return promise;
 }
 napi_value initialize(napi_env env, napi_value exports) {
+  install_window_exports(env, exports);
   for (const char *name : {"start", "status", "close"}) {
     napi_value function;
     napi_create_function(env, name, NAPI_AUTO_LENGTH, operation,
@@ -755,6 +762,21 @@ napi_value initialize(napi_env env, napi_value exports) {
     napi_add_env_cleanup_hook(
         env,
         [](void *) {
+          stop_windows();
+          {
+            std::lock_guard guard(window_state->lock);
+            if (window_state->callback) {
+              napi_release_threadsafe_function(window_state->callback,
+                                               napi_tsfn_abort);
+              window_state->callback = nullptr;
+            }
+            if (window_state->worker.joinable()) {
+              if (window_state->finished)
+                window_state->worker.join();
+              else
+                window_state->worker.detach();
+            }
+          }
           stop(state);
           std::lock_guard guard(state->lock);
           if (state->worker.joinable()) {
