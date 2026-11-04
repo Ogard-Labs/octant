@@ -92,7 +92,7 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
           }
           className="outside-content-notice"
         >
-          This thread has read outside content, so some actions will ask each time.
+          This thread has read outside content. Below Full access, some actions ask each time.
         </OctantAlert>
       ) : null}
       {reviewing === undefined ? null : (

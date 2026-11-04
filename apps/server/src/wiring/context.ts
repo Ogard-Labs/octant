@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  DEFAULT_WORK_ACCESS,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeProjectId,
@@ -11,6 +12,9 @@ import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthorit
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
 import { SessionCompactionService } from "../context/sessionCompaction";
 import { createContextRouteHandler } from "../contextRoutes";
+import { createTaskAccessFacts } from "../context/taskAccessFacts";
+import { createTaskAccessSubjectReader } from "../context/taskAccessSubject";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { windowCanOpenProject } from "../projectOpenAuthority";
 import { createBrowserAutomationRouteHandler } from "../browserAutomationRoutes";
 import { createAgentMessageRouteHandler } from "../agentMessage/agentMessageRoutes";
@@ -29,11 +33,14 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 import type { HarnessWiring } from "./harness";
+import type { HarnessStateWiring } from "./harnessState";
+import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 
 export type ContextDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "browserCaptures" | "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "browserCaptures" | "windowAuthorityStore" | "codeSessionAuthority"> &
   Pick<AgentRunsWiring, "capacityScheduler"> &
-  Pick<HarnessWiring, "nativeHarnessHooks"> &
+  Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield"> &
+  Pick<HarnessStateWiring, "serverProjectStore"> &
   Pick<IntegrationsWiring, "agentMessageProjection"> &
   Pick<WorkspaceWiring, "contextHarness" | "projectService" | "spendCeilingService"> &
   Pick<CodeWiring, "canAccessCodeProject"> &
@@ -67,6 +74,7 @@ export function wireContext(deps: ContextDependencies) {
     capacityScheduler,
     chatService,
     codeOperationRuntime,
+    codeSessionAuthority,
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
@@ -74,10 +82,12 @@ export function wireContext(deps: ContextDependencies) {
     browserFlowService,
     browserProfileService,
     nativeHarnessHooks,
+    hostShield,
     persistence,
     projectService,
     providerRuntimeRegistry,
     routeCodeService,
+    serverProjectStore,
     spendCeilingService,
     windowAuthorityStore,
     workThreadProjection,
@@ -455,8 +465,32 @@ export function wireContext(deps: ContextDependencies) {
     spendCeiling: spendCeilingService,
     uuid: randomUUID,
   });
+  const taskAccessFacts = createTaskAccessFacts({
+    subject: createTaskAccessSubjectReader({
+      code: (id) => persistence.readCodeThread(id),
+      work: (id) => workThreadProjection.read(id),
+      project: (id) => persistence.readProject(id),
+      codeSettings: () =>
+        persistence.readCodeSettings()?.settings ?? { defaultExecutionPolicy: "approval-gated" },
+      workSettings: () => workThreadProjection.settings() ?? { defaultAccess: DEFAULT_WORK_ACCESS },
+      canAccessCodeProject,
+      session: codeSessionAuthority,
+      activeCode: (thread) => codeOperationRuntime?.threadWithActiveTurnPosture?.(thread) ?? thread,
+      runningWork: (id) => workTurnService.runningTurnAccess(id),
+      holdsServerWorkThread: (thread) =>
+        serverWorkProjectOf(serverProjectStore, thread) !== undefined,
+      workStanding: (thread) => workTurnService.turnStandingRefusal(thread),
+      tainted: (id) =>
+        readThreadExternalContentTaint(persistence.connection, id).externalContentIngested,
+    }),
+    instance: (id) => persistence.readProviderInstance(id),
+    observed: (id) => providerRuntimeRegistry.observedState(id),
+    reviewer: hostShield.describe,
+    clock: () => new Date().toISOString(),
+  });
   const contextRoutes = createContextRouteHandler({
     service: {
+      taskAccess: (subject, _principal, windowId) => taskAccessFacts(subject, windowId),
       inspect: (subject, afterSequence, principal) =>
         sessionCompaction.inspect(subject, afterSequence, principal),
       execute: (command, principal, windowId) =>
