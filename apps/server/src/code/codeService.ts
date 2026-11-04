@@ -632,6 +632,8 @@ export interface CodeRepositoryTestDiscoveryPort {
 
 /** Host-only facts a caller adds to a command; the wire commands cannot carry them. */
 export interface CodeServiceExecutionContext {
+  /** Final Browser CAS and journal write run without yielding; never decoded from HTTP. */
+  readonly commitBrowserProfile?: (persist: () => void) => boolean;
   /**
    * The outside-content mark a thread this command creates starts with, set
    * by a host caller that makes it from a marked thread (a follow-up).
@@ -1787,6 +1789,12 @@ export class CodeService {
         // Choosing Claude artifacts turns on the runtime's telemetry, so only
         // the change command, which a paired device cannot send with it, may
         // make that choice; a create carrying it would skip that refusal.
+        if (command.thread.browserTaskProfile !== undefined) {
+          throw this.#failure(
+            "unauthorized",
+            "Choose a default Browser profile from this task after creating it.",
+          );
+        }
         if (command.thread.documentDelivery === "native-artifacts") {
           throw this.#failure(
             "unauthorized",
@@ -2068,6 +2076,12 @@ export class CodeService {
       }
       // The choice takes effect when the next turn launches its provider; a
       // running turn keeps the launch it started with.
+      if (command.kind === "change-code-thread-browser-profile" && current.lifecycle !== "active") {
+        throw this.#failure(
+          "invalid",
+          "Only an active task can choose its default Browser profile.",
+        );
+      }
       if (
         command.kind === "change-code-thread-document-delivery" &&
         current.lifecycle === "archived"
@@ -2270,32 +2284,56 @@ export class CodeService {
                                   version: command.expectedVersion + 1,
                                   updatedAt,
                                 }
-                              : {
-                                  ...current,
-                                  workingDirectory: command.workingDirectory,
-                                  version: command.expectedVersion + 1,
-                                  updatedAt,
-                                },
+                              : command.kind === "change-code-thread-browser-profile"
+                                ? {
+                                    ...current,
+                                    browserTaskProfile: command.browserTaskProfile,
+                                    version: command.expectedVersion + 1,
+                                    updatedAt,
+                                  }
+                                : {
+                                    ...current,
+                                    workingDirectory: command.workingDirectory,
+                                    version: command.expectedVersion + 1,
+                                    updatedAt,
+                                  },
       );
       const next =
         command.kind === "change-code-thread-access"
           ? this.#withGuardrailStamp(requestedNext)
           : requestedNext;
-      this.#inUnit(() => {
-        this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
-          kind: "thread-updated",
-          thread: next,
+      const persist = () =>
+        this.#inUnit(() => {
+          this.#append(
+            "code-thread",
+            current.id,
+            command.expectedVersion,
+            "code.thread-updated@1",
+            {
+              kind: "thread-updated",
+              thread: next,
+            },
+          );
+          if (command.kind === "change-code-thread-access") {
+            this.#journalLowering({
+              scope: "thread",
+              from: permissionModeOf(current),
+              to: permissionModeOf(next),
+              projectId: current.projectId,
+              threadId: String(current.id),
+            });
+          }
         });
-        if (command.kind === "change-code-thread-access") {
-          this.#journalLowering({
-            scope: "thread",
-            from: permissionModeOf(current),
-            to: permissionModeOf(next),
-            projectId: current.projectId,
-            threadId: String(current.id),
-          });
-        }
-      });
+      if (
+        command.kind === "change-code-thread-browser-profile" &&
+        executionContext?.commitBrowserProfile !== undefined
+      ) {
+        if (!executionContext.commitBrowserProfile(persist))
+          throw this.#failure(
+            "stale",
+            "The task or Browser changed before its profile could be saved.",
+          );
+      } else persist();
       if (command.kind === "change-code-thread-working-directory") {
         await this.#onWorkingDirectoryChanged({
           mode: "code",

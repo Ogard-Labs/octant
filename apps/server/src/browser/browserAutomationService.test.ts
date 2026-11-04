@@ -1370,6 +1370,190 @@ describe("BrowserAutomationService", () => {
     expect(refreshed.observation?.revision).toBe(1);
   });
 
+  it("switches the task's shared Browser only after staging and saving its choice", async () => {
+    const fixture = harness();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    await fixture.service.act({ windowId, request: request() });
+    let saved = false;
+    const bind = vi.fn(() => {
+      expect(saved).toBe(true);
+      expect(fixture.service.inspectThread(windowId, threadOne).context?.contextId).toBe(
+        contextOne,
+      );
+    });
+    const result = await fixture.service.switchTaskProfile({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      profile: { kind: "personal" },
+      expectedContextId: contextOne,
+      isCurrent: () => true,
+      save: async (commit) => {
+        commit(() => {
+          saved = true;
+        });
+        return { status: "saved" };
+      },
+      bind,
+    });
+    expect(result.status).toBe("changed");
+    const current = fixture.service.inspectThread(windowId, threadOne);
+    expect(current.context?.contextId).not.toBe(contextOne);
+    expect(current.context?.policy.profile).toEqual({ kind: "personal" });
+    expect(fixture.contexts.has(contextOne)).toBe(false);
+    expect(fixture.contexts.size).toBe(1);
+    expect(bind).toHaveBeenCalledOnce();
+    expect(fixture.service.snapshotRefs(windowId, threadOne)).toEqual([]);
+    await fixture.service.close();
+  });
+
+  it.each(["creation", "storage", "revision"] as const)(
+    "keeps the original shared page and choice when %s fails",
+    async (failure) => {
+      const fixture = harness();
+      await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await fixture.service.act({ windowId, request: request() });
+      let current = true;
+      if (failure === "creation")
+        vi.mocked(fixture.runtime.createContext).mockRejectedValueOnce(
+          new Error("Native profile unavailable"),
+        );
+      if (failure === "revision")
+        vi.mocked(fixture.runtime.act).mockImplementationOnce(async () => {
+          current = false;
+          return { url: "https://example.com/start", title: "Replacement" };
+        });
+      const save = vi.fn(async () => ({
+        status: "refused" as const,
+        failure: { category: "failed" as const, message: "Storage write failed." },
+      }));
+      const bind = vi.fn();
+      const result = await fixture.service.switchTaskProfile({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        profile: { kind: "personal" },
+        expectedContextId: contextOne,
+        isCurrent: () => current,
+        save,
+        bind,
+      });
+      expect(result.status).toBe("refused");
+      const original = fixture.service.inspectThread(windowId, threadOne);
+      expect(original.context?.contextId).toBe(contextOne);
+      expect(original.context?.policy.profile).toBeUndefined();
+      expect(fixture.contexts.size).toBe(1);
+      expect(fixture.contexts.has(contextOne)).toBe(true);
+      expect(bind).not.toHaveBeenCalled();
+      expect(save).toHaveBeenCalledTimes(failure === "storage" ? 1 : 0);
+      await fixture.service.close();
+    },
+  );
+
+  it.each(["input", "take-over", "stop", "authority", "task"] as const)(
+    "refuses a %s change during delayed persistence before writing or retiring the original page",
+    async (change) => {
+      const fixture = harness();
+      await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await fixture.service.act({ windowId, request: request() });
+      let finish!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      let entered = false;
+      let current = true;
+      const persist = vi.fn();
+      const bind = vi.fn();
+      const switching = fixture.service.switchTaskProfile({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        profile: { kind: "personal" },
+        expectedContextId: contextOne,
+        isCurrent: () => current,
+        bind,
+        save: async (commit) => {
+          entered = true;
+          await ready; // Like Work's asynchronous Project-folder authorization.
+          return commit(persist)
+            ? { status: "saved" }
+            : {
+                status: "refused",
+                failure: { category: "stale", message: "Changed before commit." },
+              };
+        },
+      });
+      await vi.waitFor(() => expect(entered).toBe(true));
+      expect(fixture.service.inspectThread(windowId, threadOne).context?.contextId).toBe(
+        contextOne,
+      );
+      if (change === "input") fixture.personTyped();
+      if (change === "take-over") fixture.service.takeOver(windowId, threadOne);
+      if (change === "stop") await fixture.service.releaseThread(windowId, threadOne);
+      if (change === "authority") fixture.revoke(threadOne);
+      if (change === "task") current = false;
+      finish();
+      expect((await switching).status).toBe("refused");
+      expect(persist).not.toHaveBeenCalled();
+      expect(bind).not.toHaveBeenCalled();
+      expect(fixture.contexts.size).toBe(change === "stop" ? 0 : 1);
+      if (change !== "stop") expect(fixture.contexts.has(contextOne)).toBe(true);
+      await fixture.service.close();
+    },
+  );
+
+  it("acknowledges a completed switch when a later edit changes the task before save resolves", async () => {
+    const fixture = harness();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    let current = true;
+    const persisted = vi.fn();
+    const result = await fixture.service.switchTaskProfile({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      profile: { kind: "personal" },
+      expectedContextId: contextOne,
+      isCurrent: () => current,
+      bind: vi.fn(),
+      save: async (commit) => {
+        expect(commit(persisted)).toBe(true);
+        current = false; // A subsequent thread edit is not a failed profile switch.
+        return { status: "saved" };
+      },
+    });
+    expect(result.status).toBe("changed");
+    expect(persisted).toHaveBeenCalledOnce();
+    expect(fixture.contexts.has(contextOne)).toBe(false);
+    expect(fixture.service.inspectThread(windowId, threadOne).context?.policy.profile).toEqual({
+      kind: "personal",
+    });
+    await fixture.service.close();
+  });
+
+  it("leaves a person handoff and an unavailable profile untouched", async () => {
+    const fixture = harness();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const release = fixture.service.holdForPerson(windowId, threadOne);
+    const save = vi.fn(async () => ({ status: "saved" as const }));
+    const input = {
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      profile: { kind: "personal" as const },
+      expectedContextId: contextOne,
+      isCurrent: () => true,
+      save,
+      bind: vi.fn(),
+    };
+    expect((await fixture.service.switchTaskProfile(input)).status).toBe("refused");
+    release?.();
+    vi.mocked(fixture.runtime.nativeAvailable!).mockResolvedValue(false);
+    expect((await fixture.service.switchTaskProfile(input)).status).toBe("refused");
+    expect(save).not.toHaveBeenCalled();
+    expect(fixture.contexts.has(contextOne)).toBe(true);
+    await fixture.service.close();
+  });
+
   it("cancels and destroys the owned context", async () => {
     const { contexts, runtime, service } = harness();
     await service.create({ windowId, threadId: threadOne, action: action(), policy });

@@ -473,6 +473,7 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
+  readonly browserProfiles?: CodeAppManagedToolsOptions["browserProfiles"];
   /** The Project's Browser flows and the recorder; see the Code Browser tool. */
   readonly browserFlows?: CodeAppManagedToolsOptions["browserFlows"];
   /**
@@ -2381,6 +2382,7 @@ interface ActiveTurn {
     }
   >;
   readonly browserGrantKeys: Set<string>;
+  readonly browserProfileContexts: Set<string>;
   readonly questions: Set<string>;
   /** Questions the native harness asked on this turn; answered by the host, not the provider. */
   readonly harnessQuestions: Set<string>;
@@ -3055,6 +3057,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       approvals: new Map(),
       toolApprovals: new Map(),
       browserGrantKeys: new Set(),
+      browserProfileContexts: new Set(),
       questions: new Set(),
       harnessQuestions: new Set(),
       cursor: 0,
@@ -4180,6 +4183,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const sets: Array<AppManagedToolSet | undefined> = [];
     const service = this.#service;
     if (supportsAppManagedTools && service !== undefined) {
+      const browserProfiles = this.#options.browserProfiles;
       sets.push(
         this.#options.computerUseTools?.({
           windowId: active.windowId,
@@ -4240,6 +4244,31 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 : this.#askToolApproval(active, bounded, undefined, signal);
             },
           },
+          ...(browserProfiles === undefined
+            ? {}
+            : {
+                browserProfiles: {
+                  approvals: browserProfiles.approvals,
+                  readBinding: (contextId: string) =>
+                    active.abort.signal.aborted
+                      ? undefined
+                      : browserProfiles.readBinding(contextId),
+                  rememberBinding: (
+                    contextId: string,
+                    binding: Parameters<
+                      NonNullable<CodeAppManagedToolsOptions["browserProfiles"]>["rememberBinding"]
+                    >[1],
+                  ) => {
+                    if (active.abort.signal.aborted) return;
+                    browserProfiles.rememberBinding(contextId, binding);
+                    active.browserProfileContexts.add(contextId);
+                  },
+                  forgetBinding: (contextId: string) => {
+                    active.browserProfileContexts.delete(contextId);
+                    browserProfiles.forgetBinding(contextId);
+                  },
+                },
+              }),
           browserApproval: {
             isBound: (contextId) => {
               const key = this.#browserApprovalKey(active, contextId);
@@ -4953,6 +4982,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   #revokeBrowserGrants(active: ActiveTurn): void {
+    for (const contextId of active.browserProfileContexts)
+      this.#options.browserProfiles?.forgetBinding(contextId);
+    active.browserProfileContexts.clear();
     for (const key of active.browserGrantKeys) {
       this.#approvedBrowserContexts.delete(key);
       this.#boundBrowserContexts.delete(key);

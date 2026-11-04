@@ -1,5 +1,6 @@
 import type {
   BrowserActionRequest,
+  BrowserProfile,
   BrowserAutomationFailure,
   BrowserDownloadRefusalReason,
   BrowserDownloadReport,
@@ -74,6 +75,27 @@ export interface BrowserAuthorityResolver {
   ): boolean;
 }
 
+export type BrowserTaskProfileCommit =
+  | { readonly status: "saved" }
+  | { readonly status: "refused"; readonly failure: BrowserAutomationFailure };
+
+export interface BrowserTaskProfileSwitchInput {
+  readonly windowId: WindowId;
+  readonly threadId: BrowserThreadId;
+  readonly action: ToolActionRequest;
+  readonly profile: BrowserProfile;
+  readonly expectedContextId?: BrowserContextId;
+  readonly url?: string;
+  readonly isCurrent: () => boolean;
+  readonly save: (commit: (persist: () => void) => boolean) => Promise<BrowserTaskProfileCommit>;
+  /** Registers an identity-only pending binding before the shared page is exposed. */
+  readonly bind: (contextId: BrowserContextId, authority: ToolActionAuthority) => void;
+}
+
+export type BrowserTaskProfileSwitchResult =
+  | { readonly status: "changed"; readonly browser: BrowserAutomationSnapshot }
+  | { readonly status: "refused"; readonly failure: BrowserAutomationFailure };
+
 export interface BrowserAutomationServiceOptions {
   readonly runtime: BrowserRuntimePort;
   readonly authority: BrowserAuthorityResolver;
@@ -135,7 +157,7 @@ interface OwnedContext {
    * context and a second Local servers Open neither reuses nor replaces the
    * first server's session.
    */
-  readonly dedicated: boolean;
+  dedicated: boolean;
   readonly action: ToolActionRequest;
   readonly abort: AbortController;
   actionTail: Promise<void>;
@@ -281,6 +303,7 @@ export class BrowserAutomationService {
   readonly #now: () => number;
   readonly #schedule: (delayMs: number, callback: () => void) => () => void;
   readonly #contexts = new Map<BrowserContextId, OwnedContext>();
+  readonly #taskProfileSwitches = new Set<string>();
   readonly #expiredContexts = new Map<
     BrowserContextId,
     {
@@ -515,6 +538,216 @@ export class BrowserAutomationService {
       this.#contexts.delete(contextId);
     }
     return created;
+  }
+
+  /** The person's task default replaces a shared page only after staging and saving succeed. */
+  async switchTaskProfile(
+    input: BrowserTaskProfileSwitchInput,
+  ): Promise<BrowserTaskProfileSwitchResult> {
+    const key = JSON.stringify([input.windowId, input.threadId]);
+    if (this.#taskProfileSwitches.has(key))
+      return {
+        status: "refused",
+        failure: {
+          category: "unavailable",
+          message: "A Browser profile switch is already in progress for this task.",
+        },
+      };
+    this.#taskProfileSwitches.add(key);
+    try {
+      return await this.#switchTaskProfile(input);
+    } finally {
+      this.#taskProfileSwitches.delete(key);
+    }
+  }
+
+  async #switchTaskProfile(
+    input: BrowserTaskProfileSwitchInput,
+  ): Promise<BrowserTaskProfileSwitchResult> {
+    const refused = (message: string): BrowserTaskProfileSwitchResult => ({
+      status: "refused",
+      failure: { category: "stale", message },
+    });
+    if (this.#isUnattendedScope(input.windowId))
+      return {
+        status: "refused",
+        failure: {
+          category: "unauthorized",
+          message: "Only a person on this computer can choose a task's default Browser profile.",
+        },
+      };
+    const granted = this.#authority.resolve(input.threadId, input.action.authority.mode);
+    if (
+      !this.#authority.canAccessWindow(
+        input.windowId,
+        input.threadId,
+        input.action.authority.mode,
+      ) ||
+      granted === undefined ||
+      authorizeToolAction(input.action, granted).kind !== "allowed"
+    )
+      return {
+        status: "refused",
+        failure: {
+          category: "unauthorized",
+          message: "This window cannot change the task's Browser profile.",
+        },
+      };
+    const previous = this.#current(input.windowId, input.threadId);
+    if (previous?.record.contextId !== input.expectedContextId || !input.isCurrent())
+      return refused("This task or its Browser changed. Reload before choosing a profile.");
+    if (
+      previous !== undefined &&
+      (previous.record.state !== "active" || !this.#authorityIsActive(previous))
+    )
+      return refused("The task's Browser authority changed. Reload before choosing a profile.");
+    if (previous?.waitingForPerson !== undefined)
+      return {
+        status: "refused",
+        failure: {
+          category: "unavailable",
+          message: "Finish the Browser handoff before changing this task's default profile.",
+        },
+      };
+    const target = previous === undefined ? undefined : (input.url ?? previous.observation?.url);
+    let origin: string | undefined;
+    if (target !== undefined) {
+      origin = originOfUrl(target);
+      if (origin === undefined)
+        return {
+          status: "refused",
+          failure: {
+            category: "invalid",
+            message: "A Browser profile switch needs an HTTP or HTTPS page.",
+          },
+        };
+    }
+    const policy: BrowserContextPolicy = {
+      ...hostPolicy,
+      ...(input.profile.kind === "private" ? {} : { profile: input.profile }),
+      allowedOrigins:
+        origin === undefined ? (previous?.record.policy.allowedOrigins ?? []) : [origin],
+    };
+    const profileFailure = await this.#authorizeProfile({
+      windowId: input.windowId,
+      action: input.action,
+      policy,
+    });
+    if (profileFailure !== undefined) return { status: "refused", failure: profileFailure };
+    if (
+      previous === undefined ||
+      browserProfileKey(previous.record.policy.profile) === browserProfileKey(input.profile)
+    ) {
+      if (
+        !input.isCurrent() ||
+        this.#current(input.windowId, input.threadId) !== previous ||
+        (previous !== undefined &&
+          (!this.#authorityIsActive(previous) || previous.waitingForPerson !== undefined))
+      )
+        return refused("The task changed before its Browser choice was saved.");
+      let committed = false;
+      const saved = await input.save((persist) => {
+        const live = this.#authority.resolve(input.threadId, input.action.authority.mode);
+        if (
+          !input.isCurrent() ||
+          this.#current(input.windowId, input.threadId) !== previous ||
+          live === undefined ||
+          authorizeToolAction(input.action, live).kind !== "allowed" ||
+          !this.#authority.canAccessWindow(
+            input.windowId,
+            input.threadId,
+            input.action.authority.mode,
+          ) ||
+          (previous !== undefined &&
+            (!this.#authorityIsActive(previous) || previous.waitingForPerson !== undefined))
+        )
+          return false;
+        persist();
+        committed = true;
+        return true;
+      });
+      if (committed)
+        return { status: "changed", browser: this.inspectThread(input.windowId, input.threadId) };
+      return saved.status === "refused"
+        ? saved
+        : refused("The task changed before its Browser choice was saved.");
+    }
+    const revision = previous.observationRevision;
+    const personInputs = previous.personInputs;
+    let staged: OwnedContext | undefined;
+    let committed = false;
+    try {
+      const created = await this.create({
+        windowId: input.windowId,
+        threadId: input.threadId,
+        action: input.action,
+        policy,
+        dedicated: true,
+      });
+      if (created.context !== undefined) staged = this.#contexts.get(created.context.contextId);
+      if (created.failure !== undefined) return { status: "refused", failure: created.failure };
+      if (staged === undefined || staged.record.state !== "active")
+        return {
+          status: "refused",
+          failure: {
+            category: "unavailable",
+            message: "The replacement Browser page could not open.",
+          },
+        };
+      if (target !== undefined) {
+        const navigated = await this.act({
+          windowId: input.windowId,
+          threadId: input.threadId,
+          request: {
+            actionId: staged.record.actionId,
+            contextId: staged.record.contextId,
+            correlationId: staged.record.correlationId,
+            authority: staged.record.authority,
+            kind: "navigate",
+            target,
+          },
+        });
+        if (navigated.failure !== undefined)
+          return { status: "refused", failure: navigated.failure };
+      }
+      const replacement = staged;
+      if (!input.isCurrent()) return refused("The task changed while its replacement was opening.");
+      return await this.#queueAction(previous, async () => {
+        let retired: Promise<void> | undefined;
+        const saved = await input.save((persist) => {
+          if (
+            this.#current(input.windowId, input.threadId) !== previous ||
+            previous.record.state !== "active" ||
+            replacement.record.state !== "active" ||
+            previous.waitingForPerson !== undefined ||
+            previous.observationRevision !== revision ||
+            previous.personInputs !== personInputs ||
+            !this.#authorityIsActive(previous) ||
+            !this.#authorityIsActive(replacement) ||
+            !input.isCurrent()
+          )
+            return false;
+          // Final CAS, durable write, binding and exposure cannot yield. Native
+          // teardown starts synchronously, then finishes after this commit.
+          persist();
+          input.bind(replacement.record.contextId, replacement.record.authority);
+          retired = this.#destroy(previous, "user-requested", "ready");
+          replacement.dedicated = false;
+          committed = true;
+          return true;
+        });
+        if (saved.status === "refused" && !committed) return saved;
+        if (!committed)
+          return refused(
+            "The task or page changed while its replacement was opening. The page was not replaced.",
+          );
+        await retired;
+        return { status: "changed", browser: snapshot(replacement) };
+      });
+    } finally {
+      if (!committed && staged !== undefined)
+        await this.#destroy(staged, "user-requested", "ready");
+    }
   }
 
   async act(input: {

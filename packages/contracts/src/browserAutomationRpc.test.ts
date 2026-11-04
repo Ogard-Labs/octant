@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeBrowserAutomationSnapshot,
+  decodeBrowserTaskProfileReadCommand,
+  decodeBrowserTaskProfileSelectCommand,
+  decodeBrowserTaskProfileSelection,
   decodeBrowserContextCreateCommand,
   decodeBrowserContextInspectCommand,
   decodeBrowserContextStopCommand,
@@ -21,6 +24,30 @@ const authority = {
 } as const;
 
 describe("browser automation RPC", () => {
+  it("bounds task-profile selection to a versioned task and never accepts credentials or authority", () => {
+    const input = {
+      threadId: "50000000-0000-4000-8000-000000000001",
+      mode: "code",
+      expectedVersion: 1,
+      profile: "personal",
+    };
+    expect(decodeBrowserTaskProfileSelectCommand(input).profile).toBe("personal");
+    expect(() => decodeBrowserTaskProfileSelectCommand({ ...input, cookies: [] })).toThrow();
+    expect(() => decodeBrowserTaskProfileSelectCommand({ ...input, authority })).toThrow();
+    expect(() =>
+      decodeBrowserTaskProfileSelectCommand({ ...input, expectedVersion: -1 }),
+    ).toThrow();
+    expect(() =>
+      decodeBrowserTaskProfileReadCommand({ threadId: input.threadId, mode: "chat" }),
+    ).toThrow();
+    expect(() =>
+      decodeBrowserTaskProfileSelection({
+        selection: { ...input, version: 2 },
+        browser: { status: "ready", threadId: input.threadId, evidence: [] },
+      }),
+    ).toThrow();
+  });
+
   it("decodes a server-resolved thread authority scope", () => {
     expect(
       decodeBrowserThreadScope({

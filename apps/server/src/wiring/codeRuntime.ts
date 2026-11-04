@@ -1,3 +1,4 @@
+import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
@@ -99,7 +100,8 @@ function withCodeOperationRuntime(
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
-    execute: (windowId, command) => service.execute(windowId, command),
+    execute: (windowId, command, signal, context) =>
+      service.execute(windowId, command, signal, context),
     executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
     inspectTerminal: (windowId, input) => runtime.inspectTerminal(windowId, input),
     watchTerminal: (windowId, input) => runtime.watchTerminal(windowId, input),
@@ -168,7 +170,8 @@ function withCodeBoard(
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
-    execute: (windowId, command, signal) => service.execute(windowId, command, signal),
+    execute: (windowId, command, signal, context) =>
+      service.execute(windowId, command, signal, context),
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
@@ -251,6 +254,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
+    | "browserModelBindings"
     | "agentRunPersistence"
     | "androidInputGrants"
     | "codeActiveTurns"
@@ -360,6 +364,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     appleToolchainService,
     bindDeviceApprovals,
     browserAuthority,
+    browserModelBindings,
     browserAutomationService,
     browserFlows,
     browserToolApprovalService,
@@ -875,6 +880,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserAutomationService.snapshotRefs(windowId, threadId),
         },
         browserFlows,
+        browserProfiles: {
+          approvals: browserToolApprovalService,
+          readBinding: (contextId) => browserModelBindings.get(contextId),
+          rememberBinding: (contextId, binding) =>
+            rememberModelBinding(browserModelBindings, contextId, binding),
+          forgetBinding: (contextId) => {
+            browserModelBindings.delete(contextId);
+          },
+        },
         isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
         // A paired device is not at the computer a saved download would land on.
         browserDownloadRefusal: (windowId) =>

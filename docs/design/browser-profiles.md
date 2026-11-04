@@ -27,8 +27,9 @@ and service workers in. There are three kinds:
 | Project  | On disk, one per Work or Code Project | Every page of that Project, in any thread  | Yes                |
 | Personal | On disk, one per host                 | Every page that chooses it, in any Project | Yes                |
 
-- Private is the default for every page, the person's and the agent's. It is
-  today's isolated, ephemeral context, unchanged.
+- Private is the initial default. A person can choose a different default for
+  their Project pages or explicitly for a Work or Code task, as described below.
+  Private remains an isolated, ephemeral context.
 - A Project profile is how a team of threads shares one sign-in: sign in to the
   staging site once in that Project's profile, and every thread of the Project
   that opens a page in it is signed in.
@@ -47,7 +48,8 @@ and service workers in. There are three kinds:
 
 ### Choosing a profile
 
-- The profile is chosen per page. A new page opens Private. The person changes
+- The profile is fixed per page. A new page uses its applicable default, initially
+  Private. The person changes
   it from the profile control at the left of the Browser toolbar's address field
   (Private, Project, Personal). Changing it opens the same address in the chosen
   profile as a new browsing context; the old context closes, and nothing it held
@@ -57,19 +59,41 @@ and service workers in. There are three kinds:
 - Tabs a page opens stay in its profile.
 - The control remembers the person's last choice per Project for new pages they
   open. It never changes the profile of a page the agent opens.
-- An agent's own new page is Private. A Work agent may ask to open a page in the
-  Project or Personal profile (a `profile` argument on the Browser tool's
+- An agent's own new page is Private unless the person explicitly chose a
+  **Default browser profile for this task**. That Work or Code thread's
+  optional `browserTaskProfile` choice is journaled on the host with the
+  thread and survives turns and host restart; absence keeps Private. The
+  host resolves Project to the thread's live Project, never another Project
+  named by a caller. A fork or new task starts without the choice.
+- Only a person at a local window changes this default. A paired device,
+  routine, child, terminal grant, agent, plugin, or imported thread cannot set
+  it. It is a default, not a pin: an explicit agent profile request still
+  follows the ordinary approval path and does not rewrite the default.
+  Selecting a stored profile grants no access; callers that cannot use it are
+  refused rather than silently moved to Private.
+- Changing the task's default while its shared agent page is open stages a
+  replacement at the current address, then saves the versioned choice and
+  retires the old page only after creation and live authority checks succeed.
+  A failed creation, storage write or concurrent task/page edit closes the
+  staged page and keeps the old page and choice. A person handoff must finish
+  before switching. The replacement remains the task's shared Browser, not a
+  dedicated person-only tab. The task, conversation and composer draft stay;
+  page form state is lost, and cookies, snapshots and refs are not copied.
+  The new context's model/site/profile binding is revalidated before agent
+  reads or actions, under the existing approval policy including a valid
+  remembered grant. A new model or authority cannot inherit the old binding.
+- The person's own per-Project page preference stays separate. Project and
+  Personal profiles still share their store with the same pages described
+  above, so signing out affects every page in that profile; a saved task
+  default is no sign-in or approval grant.
+- The agent may ask to open a page in the
+  Private, Project or Personal profile (a `profile` argument on the Browser tool's
   `navigate` operation, honoured only when no page is open). The host decides,
   not the tool argument: the request raises a site approval naming the profile
   unless the person already remembered that (origin, profile) pair, and
   rebinding a page to a different model or authority still asks (see below). A
   page keeps the profile it opened in; the agent changes it only by stopping its
   Browser and opening again, which asks again.
-- The separate Code agent adapter does not yet accept `profile` on `navigate`;
-  its new pages are Private. The person's Code Browser toolbar can select a
-  stored profile, but this is not evidence that Code agent profile selection
-  and per-profile approval are wired. That task/profile foundation remains to
-  be implemented; no new Code profile selection is implied by expiry recovery.
 - The thread-less Project Browser (the person's own browser for a Project) uses
   the same control. It has no agent, so no approval applies there.
 
@@ -224,8 +248,10 @@ thread made.
   site. A remembered Private origin never covers a profile page, and a pair
   remembered for one Project's profile never covers another Project's profile or
   the Personal profile.
-- **Rebinding still asks**, as today: a remembered pair covers the page, not who
-  drives it.
+- **Rebinding to a different model or authority still asks**: a remembered pair
+  covers the page, not a new controller. A person-switched replacement for the
+  same live task/model/authority uses the ordinary site/profile approval policy,
+  including a valid remembered pair; its pending identity alone grants nothing.
 - **Credential fields stay protected.** Credential-field protection is always
   on: the agent never types into, reads, or receives a picture of a password or
   one-time-code field. A screenshot of a frame that holds one is withheld.

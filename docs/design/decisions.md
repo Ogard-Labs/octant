@@ -2323,9 +2323,11 @@ Status: Built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](br
 
 ### Browser profiles and extensions
 
-Browser pages may keep sign-in in a Project or Personal profile. Private remains the default, and extensions are enabled only per profile.
+Browser pages may keep sign-in in a Project or Personal profile. Private is the initial default, and extensions are enabled only per profile.
 
-- Private is the default for every page. A Work agent may request a Project or Personal profile through site approval; Code's separate agent adapter still opens new pages Private and does not yet accept the profile argument. The person's profile controls are built in both.
+- Private is the initial default. A local person may journal a Work or Code task’s default Browser profile; it is a default, not a pin or an approval grant. Explicit agent profile requests still follow existing policy, and excluded callers never silently substitute Private.
+- Switching a task’s shared page stages a fresh context and makes one final synchronous task/page/authority check with the durable write, pending identity binding and shared-context promotion. Failure keeps the old page and choice; task, conversation and composer draft remain open. Unsaved page forms do not carry over.
+- Work and Code revalidate the fresh binding before agent reads/actions, including a valid remembered site/profile grant for the same model/authority. A different model or authority still asks. Named accounts and idle lifecycle are separate from this default/binding contract.
 - On a profile page the agent needs a site approval for each origin and profile, for reading too. Credential fields stay protected.
 - Routines, subagents, paired devices and terminal grants are refused on profile pages.
 - An extension is installed and enabled only by a person at a local window. Install never enables, and no agent, plugin or skill can install or enable.

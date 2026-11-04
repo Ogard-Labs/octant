@@ -2039,6 +2039,58 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("records a default Browser profile for this task and refuses an archived task", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    const changed = await fixture.service.execute(ids.window, {
+      kind: "change-code-thread-browser-profile",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      browserTaskProfile: "personal",
+    });
+    expect(changed).toMatchObject({
+      kind: "thread-updated",
+      thread: { browserTaskProfile: "personal", version: 2 },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "code.thread-updated@1",
+            payload: expect.objectContaining({
+              thread: expect.objectContaining({ browserTaskProfile: "personal" }),
+            }),
+          }),
+        ],
+      }),
+    );
+    const stale = serviceFixture();
+    const commitBrowserProfile = vi.fn(() => false);
+    await expect(
+      stale.service.execute(
+        ids.window,
+        {
+          kind: "change-code-thread-browser-profile",
+          threadId: ids.thread,
+          expectedVersion: 1,
+          browserTaskProfile: "personal",
+        },
+        undefined,
+        { commitBrowserProfile },
+      ),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    expect(commitBrowserProfile).toHaveBeenCalledOnce();
+    expect(stale.persistence.journal.append).not.toHaveBeenCalled();
+    const archived = serviceFixture({ threads: [thread({ lifecycle: "archived" })] });
+    await expect(
+      archived.service.execute(ids.window, {
+        kind: "change-code-thread-browser-profile",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        browserTaskProfile: "project",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
   it("records the thread's choice of Claude artifacts and refuses it on an archived thread", async () => {
     const fixture = serviceFixture();
     await expect(

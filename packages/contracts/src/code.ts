@@ -19,6 +19,7 @@ import {
   ThreadProviderHandoff,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 
@@ -326,6 +327,8 @@ export const CodeThread = Schema.Struct({
    * {@link ThreadDocumentDelivery}.
    */
   documentDelivery: Schema.optional(ThreadDocumentDelivery),
+  /** A person's default for this task's new Browser pages; a profile choice grants no access. */
+  browserTaskProfile: Schema.optional(BrowserProfileChoice),
   /** Completed and snoozed rest, shared with Chat and Work; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   lifecycle: CodeThreadLifecycle,
@@ -786,6 +789,11 @@ export const CodeCommand = Schema.Union(
    * only a person at a window on this host may choose it; a paired device may
    * choose Canvas.
    */
+  Schema.Struct({
+    kind: Schema.Literal("change-code-thread-browser-profile"),
+    ...CodeThreadCommandFields,
+    browserTaskProfile: BrowserProfileChoice,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-document-delivery"),
     ...CodeThreadCommandFields,

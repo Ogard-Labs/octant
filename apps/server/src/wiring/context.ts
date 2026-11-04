@@ -1,3 +1,4 @@
+import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { randomUUID } from "node:crypto";
 import {
   DEFAULT_WORK_ACCESS,
@@ -37,7 +38,10 @@ import type { HarnessStateWiring } from "./harnessState";
 import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 
 export type ContextDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "browserCaptures" | "windowAuthorityStore" | "codeSessionAuthority"> &
+  Pick<
+    AuthorityWiring,
+    "browserCaptures" | "windowAuthorityStore" | "browserModelBindings" | "codeSessionAuthority"
+  > &
   Pick<AgentRunsWiring, "capacityScheduler"> &
   Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield"> &
   Pick<HarnessStateWiring, "serverProjectStore"> &
@@ -69,6 +73,7 @@ export function wireContext(deps: ContextDependencies) {
     browserAuthority,
     browserAutomationService,
     browserCaptures,
+    browserModelBindings,
     browserToolApprovalService,
     canAccessCodeProject,
     capacityScheduler,
@@ -504,8 +509,81 @@ export function wireContext(deps: ContextDependencies) {
     windowAuthorityStore,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
+  const taskProfileThread = (threadId: string, mode: "work" | "code") => {
+    const thread =
+      mode === "work"
+        ? workThreadProjection.read(decodeWorkThreadId(threadId))
+        : persistence.readCodeThread(decodeCodeThreadId(threadId));
+    return thread?.lifecycle === "active" ? thread : undefined;
+  };
   const browserAutomationRoutes = createBrowserAutomationRouteHandler({
     service: browserAutomationService,
+    taskProfiles: {
+      read: (threadId, mode) => {
+        const thread = taskProfileThread(String(threadId), mode);
+        return thread === undefined
+          ? undefined
+          : {
+              version: thread.version,
+              profile: thread.browserTaskProfile ?? "private",
+              modelId: String(thread.modelId),
+            };
+      },
+      save: async (windowId, command, commit) => {
+        let committed = false;
+        const commitBrowserProfile = (persist: () => void) =>
+          commit(() => {
+            persist();
+            committed = true;
+          });
+        try {
+          const common = {
+            expectedVersion: command.expectedVersion,
+            browserTaskProfile: command.profile,
+          };
+          if (command.mode === "work") {
+            await workThreadService.execute(
+              windowId,
+              {
+                ...common,
+                kind: "change-work-thread-browser-profile",
+                threadId: decodeWorkThreadId(String(command.threadId)),
+              },
+              { commitBrowserProfile },
+            );
+          } else {
+            await routeCodeService.execute(
+              windowId,
+              {
+                ...common,
+                kind: "change-code-thread-browser-profile",
+                threadId: decodeCodeThreadId(String(command.threadId)),
+              },
+              undefined,
+              { commitBrowserProfile },
+            );
+          }
+        } catch {
+          /* A refused journal never calls the final promotion. A later edit
+           * cannot turn a completed switch into a persistence failure. */
+        }
+        if (committed) return { status: "saved" };
+        return {
+          status: "refused",
+          failure: {
+            category: "stale",
+            message:
+              "The task's Browser profile could not be saved. The page was not replaced; reload and retry.",
+          },
+        };
+      },
+      bind: (contextId, modelId, authority) =>
+        rememberModelBinding(browserModelBindings, contextId, {
+          modelId,
+          authority,
+          approval: "pending",
+        }),
+    },
     captures: browserCaptures,
     windowCanOpenThread: windowCanOpenThreadById,
     projectBrowsers: liveProjectBrowsers,

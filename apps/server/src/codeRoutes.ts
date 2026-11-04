@@ -179,7 +179,7 @@ import {
 import { Schema } from "effect";
 import type { CodeDebugService } from "./code/codeDebugService";
 import type { CodeLanguageService } from "./code/codeLanguageService";
-import type { CodeService } from "./code/codeService";
+import type { CodeService, CodeServiceExecutionContext } from "./code/codeService";
 import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
@@ -289,6 +289,7 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     command: CodeCommand,
     signal?: AbortSignal,
+    executionContext?: CodeServiceExecutionContext,
   ) => Promise<CodeCommandResult> | CodeCommandResult;
   readonly executeOperation?: (
     authenticatedWindowId: WindowId,
@@ -721,6 +722,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           ) {
             return failureResponse(
               { category: "unauthorized", message: NATIVE_ARTIFACTS_LOCAL_ONLY },
+              403,
+              origin,
+            );
+          }
+          if (command?.kind === "change-code-thread-browser-profile") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Choose the default Browser profile through this task’s Browser control.",
+              },
               403,
               origin,
             );

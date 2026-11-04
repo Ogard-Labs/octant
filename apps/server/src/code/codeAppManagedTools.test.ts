@@ -1,3 +1,4 @@
+import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import type {
   BrowserAutomationSnapshot,
   CodeOperationCommand,
@@ -542,6 +543,160 @@ describe("Code app-managed tools", () => {
         status: "running",
         page: { title: "Example", text: "Readable page text", observationRevision: 7 },
       },
+    });
+  });
+
+  describe("task Browser profile defaults and fresh bindings", () => {
+    function fixture(
+      options: {
+        profile?: "private" | "project" | "personal";
+        explicit?: "private" | "project" | "personal";
+        active?: boolean;
+        pending?: "same" | "model" | "authority";
+        remembered?: boolean;
+        denied?: boolean;
+        unattended?: boolean;
+        paired?: boolean;
+      } = {},
+    ) {
+      const authority = browserAuthority();
+      const current = thread(
+        options.profile === undefined ? {} : { browserTaskProfile: options.profile },
+      );
+      const initial = browserSnapshot(authority);
+      const active =
+        options.active || options.pending
+          ? {
+              ...initial,
+              context: {
+                ...initial.context!,
+                policy: { ...initial.context!.policy, profile: { kind: "personal" as const } },
+              },
+            }
+          : initial;
+      const bindings = new Map<string, BrowserModelBinding>();
+      if (options.pending)
+        bindings.set(String(active.context!.contextId), {
+          approval: "pending",
+          modelId: options.pending === "model" ? "other-model" : String(current.modelId),
+          authority:
+            options.pending === "authority"
+              ? { ...authority, providerInstanceId: "different" as never }
+              : authority,
+        });
+      const request = vi.fn(async () =>
+        options.denied ? ("denied" as const) : ("approved" as const),
+      );
+      const create = vi.fn(async (_input: { policy: { profile?: unknown } }) => active);
+      const act = vi.fn(async () => active);
+      const privateRequest = vi.fn(async () => "approved" as const);
+      const tools = createCodeAppManagedTools({
+        windowId,
+        thread: current,
+        readThread: () => current,
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browserProfiles: {
+          approvals: {
+            request,
+            isRemembered: () => options.remembered === true,
+            isUnattendedScope: () => options.unattended === true,
+            isPairedDevice: () => options.paired === true,
+          },
+          readBinding: (id) => bindings.get(id),
+          rememberBinding: (id, binding) => {
+            bindings.set(id, binding);
+          },
+          forgetBinding: (id) => {
+            bindings.delete(id);
+          },
+        },
+        browserApproval: {
+          request: privateRequest,
+          isApproved: () => false,
+          remember: vi.fn(),
+          forget: vi.fn(),
+          isOriginRemembered: () => true,
+        },
+        browser: {
+          resolveAuthority: () => authority,
+          inspectThread: () =>
+            options.active || options.pending
+              ? active
+              : { status: "ready", threadId: threadId as never, evidence: [] },
+          create,
+          act,
+          releaseThread: vi.fn(async () => active),
+        },
+      });
+      const run = (input: Record<string, unknown>) =>
+        tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson: JSON.stringify(input) });
+      return { run, request, privateRequest, create, act, bindings, active };
+    }
+    it.each(["project", "personal"] as const)(
+      "asks through the real profile policy for a %s default even at Full access",
+      async (profile) => {
+        const f = fixture({ profile });
+        const result = await f.run({ operation: "navigate", url: "https://example.com" });
+        expect(result.isError).toBe(false);
+        expect(f.request).toHaveBeenCalledWith(
+          expect.objectContaining({
+            origin: "https://example.com",
+            profile: expect.objectContaining({ kind: profile }),
+          }),
+        );
+        expect(f.privateRequest).not.toHaveBeenCalled();
+        expect(f.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            policy: expect.objectContaining({
+              profile: expect.objectContaining({ kind: profile }),
+            }),
+          }),
+        );
+      },
+    );
+    it("accepts an explicit Private override without rewriting the task default", async () => {
+      const f = fixture({ profile: "personal" });
+      await f.run({ operation: "navigate", url: "https://example.com", profile: "private" });
+      expect(f.request).not.toHaveBeenCalled();
+      expect(f.create.mock.calls[0]?.[0]).not.toHaveProperty("policy.profile");
+    });
+    it("refuses a denied profile even though a Private origin was remembered", async () => {
+      const f = fixture({ profile: "personal", denied: true });
+      expect(await f.run({ operation: "navigate", url: "https://example.com" })).toMatchObject({
+        isError: true,
+        result: { error: "browser-approval-denied" },
+      });
+      expect(f.create).not.toHaveBeenCalled();
+      expect(f.act).not.toHaveBeenCalled();
+    });
+    it.each([{ unattended: true }, { paired: true }])(
+      "never substitutes Private for an excluded caller: %j",
+      async (caller) => {
+        const f = fixture({ profile: "personal", ...caller });
+        expect((await f.run({ operation: "navigate", url: "https://example.com" })).isError).toBe(
+          true,
+        );
+        expect(f.request).not.toHaveBeenCalled();
+        expect(f.create).not.toHaveBeenCalled();
+      },
+    );
+    it.each(["same", "model", "authority"] as const)(
+      "rechecks a staged page binding before allowing content: %s",
+      async (pending) => {
+        const f = fixture({ pending, remembered: true });
+        await f.run({ operation: "snapshot" });
+        expect(f.request).toHaveBeenCalledTimes(pending === "same" ? 0 : 1);
+        expect(f.bindings.get(String(f.active.context!.contextId))).not.toHaveProperty("approval");
+      },
+    );
+    it("requires stop before an explicit agent profile change", async () => {
+      const f = fixture({ active: true });
+      expect(
+        await f.run({ operation: "navigate", url: "https://example.com", profile: "project" }),
+      ).toMatchObject({ isError: true, result: { error: "browser-profile-differs-stop-first" } });
+      expect(f.act).not.toHaveBeenCalled();
     });
   });
 

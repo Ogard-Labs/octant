@@ -17,6 +17,7 @@ import {
   ThreadProviderHandoff,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -98,6 +99,8 @@ export const WorkThread = Schema.Struct({
    * {@link ThreadDocumentDelivery}.
    */
   documentDelivery: Schema.optional(ThreadDocumentDelivery),
+  /** A person's default for this task's new Browser pages; a profile choice grants no access. */
+  browserTaskProfile: Schema.optional(BrowserProfileChoice),
   /** Present on a fork: the thread and turn its carried conversation came from. */
   forkedFrom: Schema.optional(WorkThreadForkOrigin),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
@@ -248,6 +251,14 @@ export const ChangeWorkThreadProviderCommand = Schema.Struct({
 }).annotations(strict);
 export type ChangeWorkThreadProviderCommand = typeof ChangeWorkThreadProviderCommand.Type;
 
+export const ChangeWorkThreadBrowserProfileCommand = Schema.Struct({
+  kind: Schema.Literal("change-work-thread-browser-profile"),
+  ...WorkThreadCommandFields,
+  browserTaskProfile: BrowserProfileChoice,
+}).annotations(strict);
+export type ChangeWorkThreadBrowserProfileCommand =
+  typeof ChangeWorkThreadBrowserProfileCommand.Type;
+
 /**
  * Chooses how this thread delivers documents. Turning on `native-artifacts`
  * enables the provider runtime's usage telemetry for the thread's turns, so
@@ -353,6 +364,7 @@ export const WorkThreadCommand = Schema.Union(
   MoveWorkThreadCommand,
   ChangeWorkThreadProviderCommand,
   ChangeWorkThreadDocumentDeliveryCommand,
+  ChangeWorkThreadBrowserProfileCommand,
   ChangeWorkThreadAccessCommand,
   ScheduleWorkUsageResumeCommand,
   CancelWorkUsageResumeCommand,

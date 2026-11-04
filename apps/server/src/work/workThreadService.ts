@@ -254,6 +254,8 @@ export interface ServerWorkProjectThreads {
 
 /** Host-only facts a caller adds to a command; the wire commands cannot carry them. */
 export interface WorkThreadExecutionContext {
+  /** Final Browser CAS and journal write run without yielding; never decoded from HTTP. */
+  readonly commitBrowserProfile?: (persist: () => void) => boolean;
   /**
    * The outside-content mark a thread this command creates starts with, set
    * by a host caller that makes it from a marked thread (a follow-up).
@@ -812,6 +814,34 @@ export class WorkThreadService {
           payload: { resume: scheduled.record },
         });
         this.#projection.apply({ kind: "thread-updated", thread: updated });
+        return { kind: "thread-updated", thread: updated };
+      }
+      if (command.kind === "change-work-thread-browser-profile") {
+        if (current.lifecycle !== "active")
+          throw this.#failure(
+            "invalid",
+            "Only an active task can choose its default Browser profile.",
+          );
+        const updated = decodeWorkThread({
+          ...current,
+          browserTaskProfile: command.browserTaskProfile,
+          version: command.expectedVersion + 1,
+          updatedAt: decodeTimestamp(this.#clock()),
+        });
+        const persist = () => {
+          this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
+            kind: "thread-updated",
+            thread: updated,
+          });
+          this.#projection.apply({ kind: "thread-updated", thread: updated });
+        };
+        if (executionContext?.commitBrowserProfile !== undefined) {
+          if (!executionContext.commitBrowserProfile(persist))
+            throw this.#failure(
+              "stale",
+              "The task or Browser changed before its profile could be saved.",
+            );
+        } else persist();
         return { kind: "thread-updated", thread: updated };
       }
       if (command.kind === "change-work-thread-document-delivery") {
