@@ -4435,14 +4435,16 @@ async function stopHostForQuit(): Promise<void> {
     native,
     windows,
   ]);
-  if (windowsResult.status === "rejected" || windowsResult.value?.kind === "failed")
-    logQuitProblem("Octant could not finish closing its Nightly window leases.");
-  if (
-    nativeResult.status === "rejected" ||
-    (nativeResult.value !== undefined && nativeResult.value.kind === "failed")
-  )
-    logQuitProblem("Octant could not finish closing its desktop status endpoint.");
+  const windowsFailed =
+    windowsResult.status === "rejected" || windowsResult.value?.kind === "failed";
+  const nativeFailed = nativeResult.status === "rejected" || nativeResult.value?.kind === "failed";
+  if (windowsFailed) logQuitProblem("Octant could not finish closing its Nightly window leases.");
+  if (nativeFailed) logQuitProblem("Octant could not finish closing its desktop status endpoint.");
   if (hostResult.status === "rejected") throw hostResult.reason;
+  // Native close can retain an OS launch after its deadline. Report failure
+  // only after every sibling has settled, so quit never records it as clean.
+  if (windowsFailed || nativeFailed)
+    throw new Error("Octant could not finish closing its native desktop owners.");
 }
 
 function finishQuit(): void {
