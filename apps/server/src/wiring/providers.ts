@@ -1011,6 +1011,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       userAddedMcpServers: {
         owns: (sourceRef) => userAddedMcpServers.owns(sourceRef),
+        localSetupId: (sourceRef) => userAddedMcpServers.localSetupId(sourceRef),
         remove: async (sourceRef, extensionId) => {
           await mcpServerSignInHolder.current?.forgetPackage(extensionId);
           await userAddedMcpServers.remove(sourceRef);

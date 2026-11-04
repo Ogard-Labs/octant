@@ -86,6 +86,7 @@ export class ExtensionApiService {
   readonly #userAddedMcpServers:
     | {
         owns(sourceRef: string): boolean;
+        localSetupId?(sourceRef: string): "paper" | undefined;
         remove(sourceRef: string, extensionId: string): Promise<void>;
       }
     | undefined;
@@ -105,6 +106,7 @@ export class ExtensionApiService {
     /** Removes the folder and secrets of a server the person added by hand, once its package is gone. */
     readonly userAddedMcpServers?: {
       owns(sourceRef: string): boolean;
+      localSetupId?(sourceRef: string): "paper" | undefined;
       remove(sourceRef: string, extensionId: string): Promise<void>;
     };
   }) {
@@ -131,11 +133,22 @@ export class ExtensionApiService {
   #markAddedInSettings(snapshot: ExtensionSnapshot): ExtensionSnapshot {
     return {
       ...snapshot,
-      packages: snapshot.packages.map(({ addedInSettings: _claimed, ...packageState }) =>
-        "sourceRef" in packageState.source &&
-        this.#userAddedMcpServers?.owns(packageState.source.sourceRef) === true
-          ? { ...packageState, addedInSettings: true as const }
-          : packageState,
+      packages: snapshot.packages.map(
+        ({ addedInSettings: _claimed, localSetupId: _localClaim, ...packageState }) => {
+          if (
+            !("sourceRef" in packageState.source) ||
+            this.#userAddedMcpServers?.owns(packageState.source.sourceRef) !== true
+          )
+            return packageState;
+          const localSetupId = this.#userAddedMcpServers.localSetupId?.(
+            packageState.source.sourceRef,
+          );
+          return {
+            ...packageState,
+            addedInSettings: true as const,
+            ...(localSetupId === undefined ? {} : { localSetupId }),
+          };
+        },
       ),
     };
   }

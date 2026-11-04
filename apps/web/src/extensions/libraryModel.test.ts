@@ -68,12 +68,75 @@ function snapshot(...packages: ReadonlyArray<unknown>): ExtensionSnapshot {
 }
 
 describe("the library model", () => {
+  it("keeps Paper separate from hosted connectors and distinguishes installed from usable", () => {
+    const available = buildLibrary({ snapshot: undefined, connectors: [] }).find(
+      (item) => item.localSetupId === "paper",
+    );
+    expect(available).toMatchObject({
+      kind: "mcp-server",
+      source: "Local Paper setup",
+      stateLabel: "Not added",
+    });
+    expect(available?.stateNote).toContain("availability has not been checked");
+    const installed = pkg(
+      "local-paper",
+      { installed: true, trusted: true, pluginDesired: true },
+      { addedInSettings: true, slug: "local-paper", localSetupId: "paper" },
+      ["mcp"],
+      "effective",
+    );
+    const snapshot = {
+      packages: [installed],
+      skills: [],
+      collisions: [],
+      sequence: 0,
+      snapshotAt: "2026-11-02T12:00:00.000Z",
+    } as unknown as ExtensionSnapshot;
+    const paper = buildLibrary({ snapshot, connectors: [] }).filter(
+      (item) => item.localSetupId === "paper",
+    );
+    expect(paper).toHaveLength(1);
+    expect(paper[0]?.stateLabel).toBe("Installed · on");
+    expect(paper[0]?.connectorId).toBeUndefined();
+    expect(paper[0]?.stateNote).toContain("connection not checked");
+    const impersonator = { ...installed, addedInSettings: false };
+    expect(
+      buildLibrary({
+        snapshot: { ...snapshot, packages: [impersonator] } as unknown as ExtensionSnapshot,
+        connectors: [],
+      }).filter((item) => item.localSetupId === "paper"),
+    ).toHaveLength(1);
+    expect(
+      buildLibrary({
+        snapshot: { ...snapshot, packages: [impersonator] } as unknown as ExtensionSnapshot,
+        connectors: [],
+      }).find((item) => item.localSetupId === "paper")?.state,
+    ).toBe("available");
+  });
+
+  it("keeps Paper trust and policy failures separate from Desktop or document availability", () => {
+    for (const [activation, expected] of [
+      [{ trusted: false, pluginDesired: true }, "needs-trust"],
+      [{ trusted: true, pluginDesired: false }, "off"],
+      [{ trusted: true, pluginDesired: true }, "blocked"],
+    ] as const) {
+      const installed = pkg("local-paper", activation, {
+        addedInSettings: true,
+        localSetupId: "paper",
+      });
+      const paper = buildLibrary({ snapshot: snapshot(installed), connectors: [] }).find(
+        (item) => item.localSetupId === "paper",
+      );
+      expect(paper?.state).toBe(expected);
+      expect(paper?.stateNote).not.toContain("Desktop is closed");
+      expect(paper?.stateNote).not.toContain("No file is open");
+    }
+  });
+
   it("lists the bundled connectors with no snapshot and fetches nothing", () => {
     const items = buildLibrary({ snapshot: undefined });
     expect(items.length).toBeGreaterThan(10);
-    expect(items.every((item) => item.kind === "connector" && item.state === "available")).toBe(
-      true,
-    );
+    expect(items.every((item) => item.state === "available")).toBe(true);
     expect(items.find((item) => item.name === "Linear")?.address).toBe(
       "https://mcp.linear.app/mcp",
     );
@@ -201,10 +264,11 @@ describe("the library model", () => {
       },
     });
     expect(items.map((item) => [item.name, item.provider, item.state])).toEqual([
+      ["Paper", "Every provider", "available"],
       ["files", "Claude Code", "available"],
       ["Review", "Codex", "available"],
     ]);
-    expect(items[0]?.providerLogo).toBe("claude");
+    expect(items.find((item) => item.name === "files")?.providerLogo).toBe("claude");
   });
 
   it("keeps every provider a package declares, labels it with all of them, and finds it under each", () => {
@@ -233,9 +297,9 @@ describe("the library model", () => {
       filterLibrary(items, { query: "", kind: "all", state: "all", provider }).map(
         (item) => item.name,
       );
-    expect(names("claude")).toEqual(["duo"]);
-    expect(names("codex")).toEqual(["duo"]);
-    expect(names("gemini")).toEqual(["solo"]);
+    expect(names("claude")).toEqual(["duo", "Paper"]);
+    expect(names("codex")).toEqual(["duo", "Paper"]);
+    expect(names("gemini")).toEqual(["solo", "Paper"]);
   });
 
   it("does not promise that every tool call asks, since remembered approvals cover some", () => {
@@ -266,7 +330,12 @@ describe("the library's lead row and groups", () => {
   it("groups what is left by the catalog's own categories and shows nothing twice", () => {
     const shown = filterLibrary(buildLibrary({ snapshot: undefined }), all);
     const groups = groupLibrary(shown, all);
-    expect(groups.map((group) => group.title)).toEqual(["Popular", "Developer tools", "Business"]);
+    expect(groups.map((group) => group.title)).toEqual([
+      "Popular",
+      "Developer tools",
+      "Business",
+      "On this computer",
+    ]);
     const lead = new Set(featuredItems(shown, all).map((item) => item.id));
     for (const group of groups) {
       for (const item of group.items) expect(lead.has(item.id)).toBe(false);

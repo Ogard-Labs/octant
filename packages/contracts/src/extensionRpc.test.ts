@@ -46,6 +46,25 @@ const packageId = "20000000-0000-4000-8000-000000000001";
 const digest = `sha256:${"a".repeat(64)}`;
 
 describe("extension RPC contracts", () => {
+  it("decodes local Paper setup without inventing a hosted connector or executable grant", () => {
+    const request = {
+      name: "Paper",
+      localSetupId: "paper",
+      server: {
+        type: "streamable-http",
+        url: "http://127.0.0.1:29979/mcp",
+        headers: [],
+      },
+    };
+    expect(decodeUserAddedMcpServerRequest(request).localSetupId).toBe("paper");
+    expect(() =>
+      decodeUserAddedMcpServerRequest({ ...request, localSetupId: "unknown" }),
+    ).toThrow();
+    expect(() =>
+      decodeUserAddedMcpServerRequest({ ...request, executableTrusted: true }),
+    ).toThrow();
+  });
+
   it.each([
     { kind: "search-catalog", query: "build", cursor: "next-1" },
     { kind: "search-skills", query: "review", cursor: "next-1" },
