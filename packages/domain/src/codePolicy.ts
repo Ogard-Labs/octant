@@ -212,13 +212,16 @@ export function turnBlocksInPlaceRestore(
 const RESTORE_REFUSAL_TITLE_LIMIT = 100;
 
 /** `title` is given only when the writing thread is in the requester's Project. */
-export function inPlaceRestoreRefusalText(title?: string): string {
+export function inPlaceRestoreRefusalText(
+  title?: string,
+  action: "restore" | "discard" = "restore",
+): string {
   if (title === undefined) {
-    return "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.";
+    return `A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then ${action}.`;
   }
   // Cut by code point: a UTF-16 slice can split an emoji into a lone surrogate.
   const shown = Array.from(title).slice(0, RESTORE_REFUSAL_TITLE_LIMIT).join("");
-  return `Another thread is writing in this checkout: "${shown}". Wait for its turn to finish or stop it, then restore.`;
+  return `Another thread is writing in this checkout: "${shown}". Wait for its turn to finish or stop it, then ${action}.`;
 }
 
 export function authorizeCodeOperation(input: CodePolicyInput): CodePolicyDecision {

@@ -1645,7 +1645,15 @@ folder, or a recovered start that captures nothing, run on a half-restored
 tree. Restore from here and Fork from here create a thread on its own worktree
 and are not subject to the check. The files part of a rewind (below) is an
 in-place restore and takes the same check and the same serialization. Discard
-and revert also overwrite files and are not yet covered.
+uses the same live-writer check and root serialization, checked after approval
+and immediately before Git is called. A writing turn that starts during discard
+waits before capturing its checkpoint; another restore or discard is refused
+until the overwrite finishes, including when it fails. Discard also refuses
+while its own thread has a starting or live turn, as a rewind does: that turn
+could otherwise write the files being discarded. The existing reviewed-state
+token and tracked-path checks still apply. Stage and unstage do not discard
+files and keep their existing rules. No command currently reaches commit revert;
+a future destructive reversal must reuse this protection.
 
 **Rewind and fork instead of edit (maintainer decision, 2026-11-01).** Chat,
 Work and Code threads do not edit a sent message: editing rewrites what the
