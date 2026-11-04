@@ -2904,9 +2904,30 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   the host keeps only the bodies of waiting messages. A message an earlier
   host journaled as delivered without a turn carrying it stays as journaled
   and is never offered.
-- **Not built.** Nothing journals `agent.message-acknowledged@1`, and a sender
-  has no tool to read what became of a message. The Chat mention path is
-  unchanged.
+- **Acknowledgement and sender read-back.** The host-authored envelope names
+  its immutable messageId. The existing `octant_agent_message` tool accepts
+  explicit `acknowledge` and `status` actions for up to 20 durable IDs per call,
+  while legacy send input remains supported. An acknowledgement is the current
+  recipient reporting receipt: the host checks the exact delivered record,
+  current sender and recipient Code authority and same-Project relationship.
+  A sender cannot acknowledge its outgoing message or name another recipient;
+  the caller thread comes from the running turn. Duplicate acknowledgements
+  and replay retain one fact. Neither prompt acceptance nor turn completion
+  automatically acknowledges a message. Acknowledgement proves no understanding
+  or action. Sender status reads only that thread's own queued, delivered,
+  acknowledged or refused metadata, never a body, target title or peer lookup.
+  The authenticated existing facts route lists bounded recent receipts and
+  refusals only for sender threads the window may open. Its provider-delivered
+  count includes acknowledged messages; acknowledgement is a later receipt,
+  not an additive delivery total. The tool remains omitted and all its actions
+  refused in Plan, on excluded profiles and cancelled turns; managed children,
+  Chat and Work gain no messaging rights. Sending again, including retrying a
+  send, creates a new durable message; receipt retries use the existing ID.
+- **Expiry not implemented.** Queued messages currently have no recorded
+  lifetime and can wait indefinitely for a recipient turn. No timestamp is
+  inferred to be expiry and no receipt claims Expired. A new expiry policy
+  requires an explicit deadline/authorizer and journal-before-cleanup rule.
+  The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
   the tool (a turn in Plan, a profile without the tool, a call with no
   message; a cancelled turn is not a refusal), and at delivery, with these
@@ -7914,6 +7935,25 @@ same. This holds in Chat, Work, and Code.
   plugin with its `.venv/bin/python` as the command. Extension processes have no Linux confinement, so no other host
   starts one in the first place.
 
+- **MCP HTTP session recovery.** A successful initialize and tool listing is a
+  connection observation, not permanent service or document readiness. An
+  unknown-session HTTP 404, failed network request or unreadable response
+  retires that transport and removes its tools immediately. The existing
+  transport-close path records the component unavailable without guessing a
+  vendor-specific cause. A normal JSON-RPC application refusal keeps the
+  healthy session. Cleanup is best effort, bounded and idempotent; a late call
+  from the old transport cannot evict a replacement session.
+
+  The failed call is never replayed: a response can disappear after the server
+  committed a write, so its outcome may be unknown. Only a later authoritative
+  task selection/reconciliation may initialize and list a replacement under
+  the current mode, Project, thread, trust and enablement; another explicit
+  invocation is needed to call a tool. Sibling sessions remain independent.
+  Reconnecting the same tool catalog changes no task, transcript, draft or
+  provider session. A changed tool catalog on a provider that fixes its tools
+  at session start still needs separate provider continuation support; this
+  transport recovery does not claim that support is built.
+
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
   that one Project (`extension.tool-grant-recorded@1` on the Project's
@@ -10114,8 +10154,10 @@ access` agree); a thread's own change is journaled as
   per browsing context) unless the person at a local window puts it in their
   Project's persistent profile or the host's Personal profile; a profile page
   opens only in the desktop app's native Browser, never headless. Octant never
-  opens another browser's profile in place. An agent reads or acts on an
-  origin in a profile page only after a site approval naming the profile;
+  opens another browser's profile in place. The Work agent adapter accepts a
+  stored profile request; Code's separate adapter still opens new pages
+  Private and rejects the profile argument, while its person-facing profile
+  controls are built. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
   paired devices, routines, subagents, and terminal Browser grants are refused
   on profile pages; a paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
@@ -10811,7 +10853,50 @@ access` agree); a thread's own change is journaled as
     an unreachable store leaves the request for the next start. The authority
     boundary above is unchanged: the new route sits behind the same bridge
     secret, window capability, no-`Origin`, and loopback checks.
-    <a id="linked-secret-stores"></a>
+
+- **One-use credential cards.** The app-managed `request_credential` tool can
+  ask a person at the owning local window to authorize one supported integration
+  operation. The first consumer is `linear-account-check`, a fixed read-only
+  `viewer { id }` request to `https://api.linear.app/graphql`. It is available
+  in Code when the provider carries app-managed tools, the profile allows the
+  tool, the thread is active and outside Plan, and the integration is effective.
+  The host supplies the label, purpose, destination and action text from the
+  registered consumer; agents cannot supply a URL, query, credential reference,
+  file destination or command. Consumer descriptors use the public
+  `@octant/plugin-api/credential-request` contract and register through
+  `IntegrationHostPort.registerCredentialOperation`. The host snapshots bounded
+  descriptors, rejects duplicate identifiers and unsafe destinations, and returns
+  an idempotent release function. The tool lists only the currently effective
+  registrations and rechecks that the same registration still exists at use.
+  The bundled consumer registers from its plugin factory through this same port;
+  server startup does not import its descriptor or name its operation.
+  - The card submits privately to `/api/credential-requests`, authenticated to
+    its originating window. Paired clients are refused. It neither submits a
+    chat message nor writes a credential to the journal. The host immediately
+    claims the request before asynchronous work, rechecks thread, Project,
+    checkout, provider, profile and window authority, and performs at most one
+    HTTPS request with redirects refused. The secret is transient request
+    material in the host process, not a saved Keychain item or a broker grant
+    reusable by another operation. No file, environment variable, persistent
+    token slot or shell receives it. This deliberate one-shot path avoids
+    creating stored material that needs later cleanup.
+  - Requests expire after ten minutes of process-monotonic time; expiry is
+    checked at submission. Cancellation, lost authority and tool-set teardown
+    abort pending use. A restart loses every request. One window/thread has at
+    most one outstanding request, and the host holds at most 128 records.
+    Network use has a 15-second deadline and a 16 KiB response bound. Only a
+    typed status returns to the model; response content and raw errors do not.
+    There is no automatic retry or saved sign-in. An already transmitted
+    credential cannot be recalled by cancellation.
+  - Consent is one explicit submission in the card. Host-generated privacy
+    text describes this specific consumer, not a general guarantee about every
+    tool. A future credential-bearing command needs a separate consumer and
+    its ordinary execution approval; it cannot reuse this card's grant.
+    Administrator passwords and arbitrary command/file delivery are not
+    supported. Linked-store selection is a separate follow-up; this card does
+    not widen the existing linked-store or provider-credential interfaces.
+
+<a id="linked-secret-stores"></a>
 
 - **Linked secret stores.** A person may link a secret store they already use
   and point a credential at an item in it. Octant never holds the value: the
@@ -12403,7 +12488,9 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with
   `out/Octant-linux-x64/` kept for inspection). Linux packages skip Darwin
-  helpers. A dogfood AppImage is not code-signed. Its launcher preserves
+  helpers. The macOS Keychain, Code-file, and device Swift helpers explicitly
+  target `arm64-apple-macos14.0`, so a newer compiler host cannot raise their
+  deployment target. A dogfood AppImage is not code-signed. Its launcher preserves
   Chromium's sandbox and lets Chromium refuse when the host cannot establish
   it; it never adds `--no-sandbox`. A separate `unshare` executable has a
   different AppArmor identity and is not a prerequisite probe for Octant.

@@ -579,6 +579,7 @@ const openedSession = (expiresAt: number) =>
   Response.json({ status: "opened", session: { sessionId: SESSION_ID, expiresAt } });
 const postureRequest = (posture: "plan" | "full-access") =>
   decodeOwnerPostureChangeRequest({
+    expectedVersion: "a".repeat(64),
     subject: { kind: "code-thread", threadId: "77777777-7777-4777-8777-777777777777" },
     posture,
     persistence: "current-session",

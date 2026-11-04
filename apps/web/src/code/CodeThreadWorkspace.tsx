@@ -1,3 +1,4 @@
+import { CredentialRequests } from "../credentials/CredentialRequests";
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import type { AutoReview } from "./autoReview";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
@@ -1481,6 +1482,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       ) : (
         <SelectionThreadScope mode="code" projectId={view?.thread.projectId}>
           <TranscriptWindow
+            trail={
+              <CredentialRequests
+                key={String(props.threadId)}
+                threadId={String(props.threadId)}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+              />
+            }
             className="code-thread-workspace__conversation transcript-scroll"
             estimateSize={96}
             gap={20}
