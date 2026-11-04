@@ -33,6 +33,7 @@ const descriptor: HostOAuthDescriptor = {
   flow: "authorization-code-pkce",
   authorizationEndpoint: slack.authorizationEndpoint,
   redirectPort: 43125,
+  redirectHostname: "localhost",
 };
 function memoryStore(): CredentialStore & { values: Map<string, string> } {
   const values = new Map<string, string>();
@@ -70,7 +71,7 @@ function protocol(
     ...binding,
     clientId: descriptor.clientId ?? "",
     code: "synthetic-code",
-    redirectUri: "http://127.0.0.1:43125/oauth/callback",
+    redirectUri: "http://localhost:43125/oauth/callback",
     verifier,
     challenge: createHash("sha256").update(verifier).digest("base64url"),
     fetch: fetchImpl,
@@ -81,6 +82,25 @@ function protocol(
 }
 
 describe("Slack MCP dedicated user-token dialect", () => {
+  it.each([
+    "http://127.0.0.1:43125/oauth/callback",
+    "https://localhost:43125/oauth/callback",
+    "http://localhost:43125/wrong",
+    "http://localhost:43125/oauth/callback?extra=1",
+    "http://localhost:43125/oauth/callback#extra",
+    "http://other.example:43125/oauth/callback",
+  ])(
+    "refuses an unregistered callback before secret access or exchange (%s)",
+    async (redirectUri) => {
+      const { input, calls } = protocol();
+      const resolveClientSecret = vi.fn(async () => secret);
+      expect(
+        await exchangeAuthorizationCode({ ...input, redirectUri, resolveClientSecret }),
+      ).toMatchObject({ kind: "refused" });
+      expect(resolveClientSecret).not.toHaveBeenCalled();
+      expect(calls).toHaveLength(0);
+    },
+  );
   it("normalizes only the closed user-token dialect and preserves its refresh binding", async () => {
     const { calls, fetchImpl, input } = protocol();
     const exchanged = await exchangeAuthorizationCode(input);

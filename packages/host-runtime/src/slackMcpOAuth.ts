@@ -44,14 +44,36 @@ export function isSlackMcpUserGrantBinding(binding: GrantBinding): boolean {
 export function isSlackMcpUserDescriptorBinding(
   binding: GrantBinding & {
     readonly authorizationEndpoint?: unknown;
+    readonly redirectHostname?: unknown;
+    readonly redirectPort?: unknown;
     readonly scopes?: unknown;
   },
 ): boolean {
   return (
     isSlackMcpUserGrantBinding(binding) &&
+    binding.redirectHostname === "localhost" &&
+    Number.isInteger(binding.redirectPort) &&
+    Number(binding.redirectPort) >= 1024 &&
+    Number(binding.redirectPort) <= 65535 &&
     binding.authorizationEndpoint === SLACK_MCP_USER_OAUTH.authorizationEndpoint &&
     Array.isArray(binding.scopes) &&
     binding.scopes.length === 1 &&
     binding.scopes[0] === SLACK_MCP_USER_OAUTH.readScope
   );
+}
+
+/** Exact localhost callback, chosen by the app owner before consent. */
+export function isSlackMcpCallbackUri(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const port = Number(url.port);
+    return (
+      Number.isInteger(port) &&
+      port >= 1024 &&
+      port <= 65535 &&
+      value === `http://localhost:${port}/oauth/callback`
+    );
+  } catch {
+    return false;
+  }
 }

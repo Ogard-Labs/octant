@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import {
   CredentialStoreFailure,
   SLACK_MCP_USER_OAUTH as slack,
@@ -22,6 +24,8 @@ const descriptor: HostOAuthBrokerDescriptor = {
   resource: slack.resource,
   mcpTransportUrl: slack.transportUrl,
   mcpIssuer: slack.issuer,
+  redirectHostname: "localhost",
+  redirectPort: 43125,
   clientAuthentication: {
     method: "client_secret_post",
     secretRef: "55000000-0000-4000-8000-000000000001",
@@ -82,30 +86,34 @@ describe("host OAuth broker client closed MCP binding", () => {
     const broker = await startCredentialBroker(memoryStore());
     try {
       const client = makeHostOAuthBrokerClient({ url: broker.url, token: broker.token });
-      const started = await client.begin({
-        descriptor,
-        actorId: randomUUID(),
-        termsAcknowledgedAt: "2026-11-02T00:00:00.000Z",
+      const portProbe = createServer();
+      await new Promise<void>((resolve, reject) => {
+        portProbe.once("error", reject);
+        portProbe.listen(0, "127.0.0.1", resolve);
       });
-      expect(started).toMatchObject({ kind: "awaiting-consent", flow: "authorization-code-pkce" });
-      if (typeof started !== "object" || started === null || !("authorizationUrl" in started))
-        return;
-      const authorization = new URL(String(started.authorizationUrl));
-      expect(authorization.origin + authorization.pathname).toBe(slack.authorizationEndpoint);
-      expect(authorization.searchParams.get("resource")).toBe(slack.resource);
-      expect(authorization.searchParams.get("scope")).toBe(slack.readScope);
-      // This wire foundation does not claim Slack accepts the legacy callback.
-      expect(authorization.searchParams.get("redirect_uri")).toMatch(/^http:\/\/127\.0\.0\.1:/);
+      const port = (portProbe.address() as AddressInfo).port;
+      await new Promise<void>((resolve) => portProbe.close(() => resolve()));
       const service = createHostOAuthService({
         broker: client,
         journal: { append: () => undefined },
       });
       const actorId = randomUUID();
-      const trusted = decodeHostOAuthDescriptor(descriptor);
+      const trusted = decodeHostOAuthDescriptor({ ...descriptor, redirectPort: port });
       service.acknowledgeTerms({ principalKind: "local-window", actorId, descriptor: trusted });
-      expect(
-        await service.begin({ principalKind: "local-window", actorId, descriptor: trusted }),
-      ).toMatchObject({ kind: "awaiting-consent" });
+      const started = await service.begin({
+        principalKind: "local-window",
+        actorId,
+        descriptor: trusted,
+      });
+      expect(started).toMatchObject({ kind: "awaiting-consent", flow: "authorization-code-pkce" });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") return;
+      const authorization = new URL(started.authorizationUrl);
+      expect(authorization.origin + authorization.pathname).toBe(slack.authorizationEndpoint);
+      expect(authorization.searchParams.get("resource")).toBe(slack.resource);
+      expect(authorization.searchParams.get("scope")).toBe(slack.readScope);
+      expect(authorization.searchParams.get("redirect_uri")).toBe(
+        `http://localhost:${port}/oauth/callback`,
+      );
       await expect(
         client.begin({
           descriptor: { ...descriptor, mcpIssuer: "https://other.example" },

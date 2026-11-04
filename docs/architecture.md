@@ -8674,13 +8674,26 @@ refresh and ordinary restart. Documented revoked/expired/invalid-refresh
 errors ask for sign-in again, while rate limits and service outages retain the
 grant for a later attempt. Ordinary MCP token interpretation is unchanged.
 
-This is wire support, not a supported Slack connection or a catalog entry.
-The high-level Slack Begin action refuses until the documented exact retained
-localhost callback is expressible; the existing `127.0.0.1` callback is not
-claimed compatible. That callback is a concrete remaining implementation,
-while eligible app registration, consent and a permitted tool read require the
-separate live verification. No app is registered or shared secret shipped by
-this dialect. Scopes
+A registered Slack app must explicitly retain `redirectHostname: localhost`
+with its fixed callback port before Begin. The exact URI is
+`http://localhost:<port>/oauth/callback`; an older registration without that
+choice retains its `127.0.0.1` meaning and must be updated explicitly, never
+silently rewritten. The broker binds both `127.0.0.1` and IPv6-only `::1` at
+that same port without DNS or a wildcard listener. Either bind failing refuses
+the attempt and closes any partial listener; it never picks another port or
+claims that one family suffices. The callback must arrive from loopback with
+the exact localhost Host authority, method and path. State, PKCE and any
+reported issuer remain bound to the attempt. Success, denial, timeout and host
+close release both listeners, including a bind completing after host close.
+Every other dialect keeps its existing loopback callback policy.
+
+This supplies a callback contract and protected registration route, not an
+advertised Slack connection or a catalog entry. The reusable app-setup view
+must select and save this same hostname after checking its displayed callback;
+that integration is separate concrete code while its owning stack remains
+under review. Eligible app registration, consent and a permitted tool read
+require separate live verification. No app is registered or shared secret
+shipped by this dialect. Scopes
 follow the RFC 6749 scope-token grammar, so a URL-shaped scope survives. An
 issuer may grant an access token without a refresh token; such a grant lasts
 as long as the access token and then asks for a new sign-in. Every issuer

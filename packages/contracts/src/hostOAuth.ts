@@ -67,8 +67,9 @@ export const McpOAuthClientRegistration = Schema.Struct({
   resource: Endpoint,
   issuer: Endpoint,
   clientId: Schema.Union(ClientId, MetadataClientId),
-  /** Exact http://127.0.0.1:<port>/oauth/callback, retained across host restarts. */
+  /** Exact retained loopback callback; localhost is an explicit closed Slack choice. */
   redirectPort: Schema.Int.pipe(Schema.between(1024, 65535)),
+  redirectHostname: Schema.optional(Schema.Literal("localhost")),
   clientAuthentication: Schema.optional(McpOAuthClientAuthentication),
 })
   .pipe(
@@ -81,6 +82,15 @@ export const McpOAuthClientRegistration = Schema.Struct({
         issuer.hash !== "" ||
         resource.protocol !== "https:" ||
         resource.hash !== ""
+      )
+        return false;
+      if (
+        value.redirectHostname !== undefined &&
+        (value.resource !== "https://mcp.slack.com" ||
+          value.issuer !== "https://mcp.slack.com" ||
+          value.kind !== "registered" ||
+          value.clientAuthentication?.method !== "client_secret_post" ||
+          value.clientAuthentication.tokenEndpoint !== "https://slack.com/api/oauth.v2.user.access")
       )
         return false;
       return value.kind === "metadata-document"
@@ -190,6 +200,8 @@ export const HostOAuthDescriptor = Schema.Struct({
    * on, chosen before the flow so the client registration could name it.
    */
   redirectPort: Schema.optional(Schema.Int.pipe(Schema.between(1024, 65535))),
+  /** Only the closed Slack profile may explicitly retain a localhost callback. */
+  redirectHostname: Schema.optional(Schema.Literal("localhost")),
   /** Directory dialect only: the organization's tenant. */
   tenantId: Schema.optional(DirectoryGuid),
   /** Directory dialect only: the one resource the driver kind's endpoint accepts. */
@@ -211,7 +223,8 @@ export const HostOAuthDescriptor = Schema.Struct({
           return false;
         if (
           descriptor.dialect !== "slack-mcp-user" &&
-          (descriptor.mcpTransportUrl !== undefined ||
+          (descriptor.redirectHostname !== undefined ||
+            descriptor.mcpTransportUrl !== undefined ||
             descriptor.mcpIssuer !== undefined ||
             descriptor.resource === "https://mcp.slack.com" ||
             descriptor.authorizationEndpoint === "https://slack.com/oauth/v2_user/authorize" ||
@@ -287,7 +300,9 @@ export const HostOAuthDescriptor = Schema.Struct({
         if (descriptor.dialect === "mcp-authorization" || descriptor.dialect === "slack-mcp-user") {
           if (
             descriptor.dialect === "slack-mcp-user" &&
-            (descriptor.resource !== "https://mcp.slack.com" ||
+            (descriptor.redirectHostname !== "localhost" ||
+              descriptor.redirectPort === undefined ||
+              descriptor.resource !== "https://mcp.slack.com" ||
               descriptor.mcpIssuer !== "https://mcp.slack.com" ||
               descriptor.mcpTransportUrl !== "https://mcp.slack.com/mcp" ||
               descriptor.authorizationEndpoint !== "https://slack.com/oauth/v2_user/authorize" ||
