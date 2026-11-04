@@ -2479,6 +2479,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   >();
   readonly #active: CodeActiveTurns;
   readonly #approvedBrowserContexts = new Set<string>();
+  // Full access may open without approval, but recovery still needs the
+  // original controller identity. Keeping this separate never manufactures a grant.
+  readonly #boundBrowserContexts = new Set<string>();
 
   readonly #spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
   /** Mints the one-use approval a device effect the person allowed in the thread carries. */
@@ -4110,6 +4113,21 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             },
           },
           browserApproval: {
+            isBound: (contextId) => {
+              const key = this.#browserApprovalKey(active, contextId);
+              const bound = this.#boundBrowserContexts.has(key);
+              if (bound) active.browserGrantKeys.add(key);
+              return bound;
+            },
+            rememberBinding: (contextId) => {
+              const key = this.#browserApprovalKey(active, contextId);
+              if (!this.#boundBrowserContexts.has(key) && this.#boundBrowserContexts.size >= 256) {
+                const oldest = this.#boundBrowserContexts.values().next().value;
+                if (oldest !== undefined) this.#boundBrowserContexts.delete(oldest);
+              }
+              this.#boundBrowserContexts.add(key);
+              active.browserGrantKeys.add(key);
+            },
             isApproved: (contextId) => {
               const key = this.#browserApprovalKey(active, contextId);
               const approved = this.#approvedBrowserContexts.has(key);
@@ -4129,8 +4147,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               this.#approvedBrowserContexts.add(key);
               active.browserGrantKeys.add(key);
             },
-            forget: (contextId) =>
-              this.#approvedBrowserContexts.delete(this.#browserApprovalKey(active, contextId)),
+            forget: (contextId) => {
+              const key = this.#browserApprovalKey(active, contextId);
+              this.#approvedBrowserContexts.delete(key);
+              this.#boundBrowserContexts.delete(key);
+            },
           },
           ...(this.#options.browserSignIn === undefined
             ? {}
@@ -4804,7 +4825,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   #revokeBrowserGrants(active: ActiveTurn): void {
-    for (const key of active.browserGrantKeys) this.#approvedBrowserContexts.delete(key);
+    for (const key of active.browserGrantKeys) {
+      this.#approvedBrowserContexts.delete(key);
+      this.#boundBrowserContexts.delete(key);
+    }
     active.browserGrantKeys.clear();
   }
 

@@ -142,6 +142,16 @@ function debugDecorationsFor(
       stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
     },
   }));
+  breakpoints.push(
+    ...(decorations.unresolvedBreakpoints ?? []).map((line) => ({
+      range: new monaco.Range(line, 1, line, 1),
+      options: {
+        glyphMarginClassName: "code-debug-breakpoint-unresolved",
+        glyphMarginHoverMessage: { value: "Unresolved breakpoint; review in Run and debug" },
+        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+      },
+    })),
+  );
   const stopped = decorations.stoppedLine;
   return stopped === undefined
     ? breakpoints

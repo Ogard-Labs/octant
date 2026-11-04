@@ -528,7 +528,9 @@ export const BrowserAutomationFailure = Schema.Union(
   Schema.Struct({
     category: Schema.Literal("policy-denied"),
     message: Schema.NonEmptyTrimmedString,
-    reason: Schema.optional(BrowserProfileRefusalReason),
+    reason: Schema.optional(
+      Schema.Union(BrowserProfileRefusalReason, Schema.Literal("origin-not-approved")),
+    ),
   }).annotations(strict),
   Schema.Struct({
     category: Schema.Literal("context-expired"),

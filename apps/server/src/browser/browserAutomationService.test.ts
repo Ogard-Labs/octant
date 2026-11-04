@@ -8,13 +8,18 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_THREAD_CONTEXTS } from "@octant/contracts";
+import {
+  decodeBrowserAutomationFailure,
+  decodeWindowId,
+  MAX_BROWSER_THREAD_CONTEXTS,
+} from "@octant/contracts";
 import { decodeToolActionRequest } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   BrowserAutomationService,
   createBrowserToolCallAuthorityService,
 } from "./browserAutomationService";
+import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
 import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
 import { BrowserNavigationBlockedError, type BrowserRuntimePort } from "./browserRuntimePort";
 
@@ -765,7 +770,7 @@ describe("BrowserAutomationService", () => {
     fixture.advance(150_000);
     fixture.expire();
     await Promise.resolve();
-    expect(fixture.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+    expect(fixture.service.inspectThread(windowId, threadOne).context?.state).toBe("expired");
   });
 
   describe("person and agent together", () => {
@@ -1894,14 +1899,211 @@ describe("BrowserAutomationService", () => {
     advance(policy.sessionTimeoutMs);
     expire();
     await vi.waitFor(() =>
-      expect(service.inspectThread(windowId, threadOne)).toEqual({
-        status: "ready",
-        threadId: threadOne,
+      expect(service.inspectThread(windowId, threadOne)).toMatchObject({
+        status: "stale",
+        context: { state: "expired" },
+        failure: { category: "context-expired" },
         evidence: [],
       }),
     );
     expect(runtime.closeContext).toHaveBeenCalledWith(contextOne);
     expect(contexts.has(contextOne)).toBe(false);
+  });
+
+  it("keeps only the former profile on an expired page and clears it on stop or reopening", async () => {
+    const fixture = harness();
+    await fixture.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy: { ...policy, profile: { kind: "personal" } },
+    });
+    await fixture.service.act({ windowId, request: request() });
+    fixture.expire();
+    await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
+    const expired = fixture.service.inspectThread(windowId, threadOne);
+    expect(expired.failure).toMatchObject({
+      category: "context-expired",
+      message: expect.stringContaining('profile "personal"'),
+    });
+    expect(expired.observation).toBeUndefined();
+    expect(expired.evidence).toEqual([]);
+    expect(fixture.service.inspectThread(otherWindowId, threadOne).failure).toBeUndefined();
+    expect(fixture.service.inspectThread(windowId, threadTwo).failure).toBeUndefined();
+    await fixture.service.releaseThread(windowId, threadOne);
+    expect(fixture.service.inspectThread(windowId, threadOne).failure).toBeUndefined();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    fixture.expire();
+    await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
+    const reopened = await fixture.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy,
+    });
+    expect(reopened.context?.state).toBe("active");
+    expect(fixture.service.inspectThread(windowId, threadOne).failure).toBeUndefined();
+    await fixture.service.close();
+  });
+
+  it("does not reveal the expired profile after authority revocation or profile clearing", async () => {
+    for (const clear of ["authority", "profile", "window", "host"] as const) {
+      const fixture = harness();
+      await fixture.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, profile: { kind: "personal" } },
+      });
+      fixture.expire();
+      await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
+      if (clear === "authority") fixture.revoke(threadOne);
+      if (clear === "profile") await fixture.service.closeProfile({ kind: "personal" });
+      if (clear === "window") await fixture.service.revokeWindow(windowId);
+      if (clear === "host") await fixture.service.close();
+      const inspected = fixture.service.inspectThread(windowId, threadOne);
+      expect(inspected.context).toBeUndefined();
+      expect(inspected.failure?.category).not.toBe("context-expired");
+      expect(JSON.stringify(inspected)).not.toContain("personal");
+      await fixture.service.close();
+    }
+  });
+
+  it("bounds expiry receipts and forgets the oldest window's metadata", async () => {
+    const fixture = harness();
+    const windows = Array.from({ length: 257 }, (_, index) =>
+      decodeWindowId(`ba000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
+    );
+    for (const scopedWindow of windows) {
+      await fixture.service.create({
+        windowId: scopedWindow,
+        threadId: threadOne,
+        action: action(),
+        policy,
+      });
+      fixture.expire();
+    }
+    const first = windows[0];
+    const last = windows.at(-1);
+    if (first === undefined || last === undefined) throw Error("Missing test window");
+    expect(fixture.service.inspectThread(first, threadOne).failure).toBeUndefined();
+    expect(fixture.service.inspectThread(last, threadOne).failure?.category).toBe(
+      "context-expired",
+    );
+    await fixture.service.close();
+  });
+
+  it("carries a real tool page's expired profile across turns without reopening it", async () => {
+    const fixture = harness();
+    const modelBindings = new Map<string, BrowserModelBinding>();
+    const makeTools = () =>
+      createBrowserAppManagedTools({
+        windowId,
+        threadId: threadOne,
+        mode: "work",
+        modelId: "model-a",
+        resolveModelId: () => "model-a",
+        resolveAuthority: () => authorityOne,
+        modelBindings,
+        executionPolicy: "approval-gated",
+        browser: {
+          inspectThread: fixture.service.inspectThread.bind(fixture.service),
+          create: fixture.service.create.bind(fixture.service),
+          act: fixture.service.act.bind(fixture.service),
+          releaseThread: fixture.service.releaseThread.bind(fixture.service),
+        },
+        approvals: { request: async () => "approved" },
+        uuid: () => crypto.randomUUID(),
+      });
+    const call = (tools: ReturnType<typeof makeTools>, input: Record<string, unknown>) =>
+      tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
+    await call(makeTools(), {
+      operation: "navigate",
+      url: "https://example.com/start",
+      profile: "personal",
+    });
+    fixture.advance(600_001);
+    fixture.expire();
+    await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
+    for (const operation of ["snapshot", "read-page", "screenshot"]) {
+      expect(await call(makeTools(), { operation })).toMatchObject({
+        isError: true,
+        result: {
+          failure: {
+            category: "context-expired",
+            message: expect.stringContaining('profile "personal"'),
+          },
+        },
+      });
+    }
+    expect(fixture.runtime.createContext).toHaveBeenCalledTimes(1);
+    expect(fixture.runtime.act).toHaveBeenCalledTimes(1);
+    await call(makeTools(), {
+      operation: "navigate",
+      url: "https://example.com/start",
+      profile: "personal",
+    });
+    expect(fixture.runtime.createContext).toHaveBeenCalledTimes(2);
+    expect(fixture.service.inspectThread(windowId, threadOne).failure).toBeUndefined();
+    await fixture.service.close();
+  });
+
+  it("says when Continue leaves the real Browser tool on an unapproved site", async () => {
+    const fixture = harness();
+    vi.mocked(fixture.runtime.createContext).mockImplementation(async (contextId) => {
+      fixture.contexts.add(contextId);
+      return "native-live";
+    });
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId: threadOne,
+      mode: "work",
+      modelId: "model-a",
+      resolveModelId: () => "model-a",
+      resolveAuthority: () => authorityOne,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      browser: {
+        inspectThread: fixture.service.inspectThread.bind(fixture.service),
+        create: fixture.service.create.bind(fixture.service),
+        act: fixture.service.act.bind(fixture.service),
+        releaseThread: fixture.service.releaseThread.bind(fixture.service),
+        holdForPerson: fixture.service.holdForPerson.bind(fixture.service),
+      },
+      approvals: {
+        request: async (input) => {
+          if (input.signIn !== undefined)
+            vi.mocked(fixture.runtime.act).mockRejectedValueOnce(
+              new BrowserNavigationBlockedError("https://identity.example/private?code=secret"),
+            );
+          return "approved";
+        },
+      },
+      uuid: () => crypto.randomUUID(),
+    });
+    const call = (input: Record<string, unknown>) =>
+      tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
+    await call({ operation: "navigate", url: "https://example.com/start", profile: "personal" });
+    const answer = await call({ operation: "sign-in" });
+    expect(answer).toMatchObject({
+      isError: true,
+      result: {
+        failure: {
+          category: "policy-denied",
+          reason: "origin-not-approved",
+          message: expect.stringContaining(
+            "The person left the page on an unapproved site after Continue.",
+          ),
+        },
+      },
+    });
+    expect(JSON.stringify(answer)).not.toContain("secret");
+    expect(JSON.stringify(answer)).not.toContain("identity.example");
+    expect(
+      fixture.service.inspectThread(windowId, threadOne).context?.policy.allowedOrigins,
+    ).toEqual(["https://example.com"]);
+    expect(fixture.runtime.createContext).toHaveBeenCalledTimes(1);
+    await fixture.service.close();
   });
 
   it("reports synchronous reconnect inspection as stale when expiry is discovered", async () => {
@@ -2047,6 +2249,24 @@ describe("BrowserAutomationService", () => {
     });
   });
 
+  it("explains a new site's approval without navigating outside the existing origin", async () => {
+    const fixture = harness();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const refused = await fixture.service.act({
+      windowId,
+      request: request({ target: "https://other.example/private?code=secret" }),
+    });
+    expect(refused.failure).toMatchObject({
+      category: "policy-denied",
+      reason: "origin-not-approved",
+      message: expect.stringContaining("Call stop, then navigate"),
+    });
+    expect(refused.failure?.message).toContain("sign-in");
+    expect(JSON.stringify(refused.failure)).not.toContain("secret");
+    expect(fixture.runtime.act).not.toHaveBeenCalled();
+    await fixture.service.close();
+  });
+
   it("names the refused origin when a navigation redirects outside the allowlist", async () => {
     const { runtime, service } = harness();
     vi.mocked(runtime.act).mockRejectedValueOnce(
@@ -2054,11 +2274,13 @@ describe("BrowserAutomationService", () => {
     );
     await service.create({ windowId, threadId: threadOne, action: action(), policy });
     const failed = await service.act({ windowId, request: request() });
-    expect(failed.failure).toEqual({
+    expect(failed.failure).toMatchObject({
       category: "policy-denied",
-      message:
-        "The page moved to https://www.example.com, which is outside this session's allowed origin. Open https://www.example.com/ directly to browse it there.",
+      reason: "origin-not-approved",
+      message: expect.stringContaining("Call stop, then navigate"),
     });
+    expect(failed.failure?.message).toContain("sign-in");
+    expect(decodeBrowserAutomationFailure(failed.failure)).toEqual(failed.failure);
   });
 
   it("carries what the page logged and failed to load into the observation", async () => {

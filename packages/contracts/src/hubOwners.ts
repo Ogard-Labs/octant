@@ -171,7 +171,7 @@ export const OwnerPostureSubject = Schema.Union(
 export type OwnerPostureSubject = typeof OwnerPostureSubject.Type;
 
 export const OwnerPostureReadRequest = Schema.Struct({
-  subject: OwnerPostureSubject,
+  subject: Schema.optional(OwnerPostureSubject),
 }).annotations(strict);
 export type OwnerPostureReadRequest = typeof OwnerPostureReadRequest.Type;
 export const decodeOwnerPostureReadRequest = Schema.decodeUnknownSync(OwnerPostureReadRequest);
@@ -180,11 +180,22 @@ export const decodeOwnerPostureReadRequest = Schema.decodeUnknownSync(OwnerPostu
 export const OwnerPosture = Schema.Struct({
   subject: OwnerPostureSubject,
   posture: ProviderExecutionPolicy,
+  version: digest,
+  autoApprove: Schema.optional(Schema.Boolean),
   persistence: Schema.optional(PermissionPersistence),
 }).annotations(strict);
 export type OwnerPosture = typeof OwnerPosture.Type;
 
+export const decodeOwnerPosture = Schema.decodeUnknownSync(OwnerPosture);
+export const OwnerPostureTarget = Schema.Struct({
+  title: Schema.NonEmptyString,
+  posture: OwnerPosture,
+}).annotations(strict);
+export type OwnerPostureTarget = typeof OwnerPostureTarget.Type;
+export const decodeOwnerPostureTargets = Schema.decodeUnknownSync(Schema.Array(OwnerPostureTarget));
+
 export const OwnerPostureChangeRequest = Schema.Struct({
+  expectedVersion: digest,
   subject: OwnerPostureSubject,
   posture: ProviderExecutionPolicy,
   persistence: PermissionPersistence,

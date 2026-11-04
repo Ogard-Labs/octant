@@ -71,7 +71,15 @@ describe("the agent message facts route", () => {
       maxOpenInFlightPerSender: MAX_OPEN_AGENT_MESSAGES_PER_SENDER,
       delivered: 0,
       refused: 0,
-      recent: [],
+      recent: [
+        {
+          messageId: sent.messageId,
+          senderThreadId: sent.senderThreadId,
+          recipientThreadId: sent.recipientThreadId,
+          state: "in-flight",
+          occurredAt: sent.occurredAt,
+        },
+      ],
     });
   });
 

@@ -67,6 +67,43 @@ const ids = {
   content: decodeCodeEvidenceContentId("00000000-0000-4000-8000-000000001010"),
   profile: "00000000-0000-4000-8000-000000001011",
 } as const;
+
+describe("owner-device Code posture", () => {
+  it("journals the owner identity and refuses a stale version without an effect", () => {
+    const fixture = serviceFixture({
+      project: rememberedFullAccessProject,
+      threads: [thread({ executionPolicy: "approval-gated" })],
+    });
+    const request = {
+      threadId: ids.thread,
+      expectedVersion: thread().version,
+      executionPolicy: "full-access" as const,
+      permissionPersistence: "project-default" as const,
+      ownerMemberId: "00000000-0000-4000-8000-000000001099",
+      freshFull: true,
+    };
+    const changed = fixture.service.changeOwnerPosture(request);
+    expect(changed.executionPolicy).toBe("full-access");
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            actor: {
+              kind: "owner-unlock",
+              actorId: request.ownerMemberId,
+              memberId: request.ownerMemberId,
+            },
+          }),
+        ],
+      }),
+    );
+    fixture.persistence.journal.append.mockClear();
+    expect(() => fixture.service.changeOwnerPosture({ ...request, expectedVersion: 0 })).toThrow();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(() => fixture.service.changeOwnerPosture({ ...request, freshFull: false })).toThrow();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
 const testUuid = (sequence: number) =>
   `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`;
 const now = "2026-07-20T23:00:00.000Z";

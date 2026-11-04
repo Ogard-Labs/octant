@@ -143,18 +143,25 @@ path meets the threats above.
   own, so its data boundary is exactly as strong as that framing function.
 - **A message may wait indefinitely.** Delivery happens only when the
   recipient's next turn starts, and messaging starts none. The sender is told
-  `sent` and has no tool to read the later outcome.
+  `sent` initially and can read its own bounded receipt metadata later. Queued
+  messages have no recorded expiry policy; age alone is not an expired fact.
 - **Delivery is at least once.** `agent.message-delivered@1` is appended only
   after a provider accepted the turn's prompt and context. A host that stops
   between the two offers the same message to the next turn. The taint record
   is idempotent; the body is read twice. A host stop never drops a message
   unread.
-- **No recipient acknowledgement.** Nothing journals
-  `agent.message-acknowledged@1`; `delivered` means a provider was sent the
-  body, not that the model acted on it.
-- **Refusals at admission are journaled without endpoints.** The refused
-  event carries no sender or recipient id, so the Agents center counts only
-  refusals of messages that were first admitted.
+- **Recipient acknowledgement is a claim of receipt.** Only an explicit tool
+  petition from the actual current recipient can journal acknowledgement of
+  its delivered message, under current same-Project Code authority on both
+  sides. The model cannot supply its caller identity. Delivery or terminal
+  completion never auto-acknowledges, and a recipient's claim does not prove
+  understanding or action. Unknown, foreign, undelivered, purged and revoked
+  receipt targets refuse without disclosing another thread. The sender reads
+  only its own metadata; bodies remain deleted after provider delivery.
+- **Refusals reveal only the sender's own petition.** Admission refusals carry
+  the endpoints the sender already named, with bounded retention. Receipt
+  reads and the Agents center expose them only to that sender or a window
+  that can open it. Legacy refusals with no endpoints remain unlisted.
 - Model-to-model social engineering inside a single already-authorized thread
   remains a residual of ordinary tool use; within one Project, a message from
   a thread that ingested hostile content carries that content to its

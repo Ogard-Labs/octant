@@ -8,7 +8,23 @@
 // unlock, an expired one, the wrong device, the hub, or no member key at all is
 // refused and changes nothing.
 
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
+import { ProjectService } from "../projectService";
+import { BindingReceiptStore } from "../bindingReceiptStore";
+import { CodeService } from "../code/codeService";
+import { CodeContentStore } from "../code/codeContentStore";
+import { createOwnerPostureHost } from "./ownerPostureHost";
+import {
+  AppendEventsRequest,
+  decodeCodeThread,
+  decodeProject,
+  decodeCodeCheckoutIdentity,
+  decodeOwnerPosture,
+  ReplayCursor,
+} from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CodeThreadId,
@@ -358,6 +374,7 @@ describe("owner routes for a Project's or thread's posture", () => {
     host.postures.seed({
       subject: { kind: "code-thread", threadId: decodeThreadId(THREAD) },
       posture: "approval-gated",
+      version: "a".repeat(64),
       persistence: "current-session",
     });
 
@@ -379,7 +396,12 @@ describe("owner routes for a Project's or thread's posture", () => {
     const { a, asPhone, openSession, unlock } = await startWorld();
     seed(a);
     const session = await openSession(a);
-    const change = (posture: string) => ({ subject, posture, persistence: "current-session" });
+    const change = (posture: string) => ({
+      subject,
+      posture,
+      expectedVersion: "a".repeat(64),
+      persistence: "current-session",
+    });
 
     const toPlan = await asPhone(a, HUB_OWNER_ROUTES.postureChange, change("plan"), { session });
     const fullViaSession = await asPhone(a, HUB_OWNER_ROUTES.postureChange, change("full-access"), {
@@ -407,7 +429,12 @@ describe("owner routes for a Project's or thread's posture", () => {
     const answered = await asPhone(
       a,
       HUB_OWNER_ROUTES.postureChange,
-      { subject, posture: "full-access", persistence: "project-default" },
+      {
+        subject,
+        posture: "full-access",
+        expectedVersion: "a".repeat(64),
+        persistence: "project-default",
+      },
       { unlock },
     );
 
@@ -422,6 +449,7 @@ describe("owner routes for a Project's or thread's posture", () => {
     seed(a);
     const request = {
       subject,
+      expectedVersion: "a".repeat(64),
       posture: "plan",
       persistence: "current-session",
     };
@@ -731,5 +759,290 @@ describe("an owner device applying or dismissing a provisioning proposal", () =>
     expect(answered.status).toBe(409);
     expect(answered.json).toEqual({ status: "refused", kind: "apply-failed" });
     expect(a.spokeProvision.view().proposals).toHaveLength(1);
+  });
+});
+
+describe("owner posture routes with the production Code and Project services", () => {
+  it("binds fresh proof to current targets, persists the owner actor, and refuses replay, expiry, stale state and revocation without effects", async () => {
+    const { a, asPhone, openSession, unlock, phone } = await startWorld();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          yield* Effect.promise(async () => {
+            const id = "50000000-0000-4000-8000-000000000001";
+            const revision = "50000000-0000-4000-8000-000000000002";
+            const checkoutId = "50000000-0000-4000-8000-000000000003";
+            const timestamp = new Date().toISOString();
+            const repositoryId = `repo_${"a".repeat(64)}`;
+            const project = decodeProject({
+              id,
+              type: "code",
+              name: "Owner repository",
+              lifecycle: "active",
+              pinned: false,
+              rank: "0/1",
+              version: 1,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              binding: { canonicalRoot: "/owner-repository" },
+              codeAccessPersistence: "current-session",
+              bindingHistory: [
+                {
+                  revisionId: revision,
+                  revision: 1,
+                  currentBinding: { canonicalRoot: "/owner-repository" },
+                  actor: { kind: "local-user", actorId: id },
+                  changedAt: timestamp,
+                },
+              ],
+            });
+            const checkout = decodeCodeCheckoutIdentity({
+              id: checkoutId,
+              repositoryId,
+              kind: "existing-worktree",
+              availability: "available",
+              head: { kind: "branch", name: "main", oid: "a".repeat(40) },
+              observedAt: timestamp,
+            });
+            const thread = decodeCodeThread({
+              id: THREAD,
+              projectId: id,
+              bindingRevisionId: revision,
+              repositoryId,
+              checkoutId,
+              title: "Owner task",
+              lifecycle: "active",
+              providerInstanceId: id,
+              modelId: "fixture",
+              executionPolicy: "approval-gated",
+              permissionPersistence: "current-session",
+              version: 1,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              deliveryTarget: {
+                branchIntent: "feature/owner",
+                remoteName: "origin",
+                proposedBaseRepository: "octant/octant",
+                proposedBaseBranch: "main",
+                outcomeKind: "opened-pr",
+                confirmedAt: timestamp,
+              },
+            });
+            const seed = (
+              aggregateType: string,
+              aggregateId: string,
+              eventName: string,
+              payload: unknown,
+              expectedVersion = 0,
+            ) =>
+              persistence.journal.append(
+                Schema.decodeUnknownSync(AppendEventsRequest)({
+                  aggregate: { aggregateType, aggregateId },
+                  expectedVersion,
+                  events: [
+                    {
+                      eventId: randomUUID(),
+                      eventName,
+                      eventVersion: 1,
+                      hostId: "local",
+                      correlationId: randomUUID(),
+                      actor: { kind: "system", actorId: id },
+                      occurredAt: timestamp,
+                      payload,
+                    },
+                  ],
+                }),
+              );
+            seed("project", id, "project.created@1", { project });
+            seed("code-checkout", checkoutId, "code.checkout-observed@1", {
+              kind: "checkout-observed",
+              checkout,
+            });
+            seed("code-thread", THREAD, "code.thread-created@1", {
+              kind: "thread-created",
+              thread,
+            });
+            const unavailable = async (): Promise<never> => {
+              throw new Error("A posture change must not use a window or a file port.");
+            };
+            const code = new CodeService({
+              persistence,
+              access: { canBrowseProject: () => false, canAccessProject: () => false },
+              checkouts: { observe: unavailable },
+              roots: { resolve: unavailable },
+              files: { open: unavailable, save: unavailable },
+              tests: { discover: async () => [] },
+              content: new CodeContentStore(),
+              uuid: randomUUID,
+              clock: () => new Date().toISOString(),
+              workingDirectories: { resolve: unavailable },
+              onWorkingDirectoryChanged: unavailable,
+            });
+            const projects = new ProjectService({
+              persistence,
+              bindingReceiptStore: new BindingReceiptStore(),
+              projectRootPort: { validate: unavailable },
+              uuid: randomUUID,
+              clock: () => new Date().toISOString(),
+            });
+            const host = createOwnerPostureHost({
+              readCodeThread: persistence.readCodeThread,
+              readCodeThreads: persistence.readCodeThreads,
+              readProject: persistence.readProject,
+              readProjects: persistence.readProjects,
+              readCheckout: persistence.readCodeCheckout,
+              code,
+              projects,
+            });
+            vi.spyOn(a.postures, "read").mockImplementation(host.read);
+            if (host.list === undefined) throw new Error("Missing production target listing");
+            vi.spyOn(a.postures, "list").mockImplementation(host.list);
+            expect(
+              (await asPhone(a, HUB_OWNER_ROUTES.postureRead, {}, { unlock })).json,
+            ).toMatchObject({
+              status: "read",
+              targets: expect.arrayContaining([
+                expect.objectContaining({ title: "Owner task" }),
+                expect.objectContaining({ title: "Owner repository" }),
+              ]),
+            });
+            vi.spyOn(a.postures, "change").mockImplementation(host.change);
+            const subject = { kind: "code-thread", threadId: thread.id } as const;
+            const reading = await host.read(subject);
+            if (reading.status !== "read") throw new Error("Missing Code reading");
+            const request = {
+              subject,
+              expectedVersion: reading.posture.version,
+              posture: "full-access",
+              persistence: "project-default",
+            };
+            const session = await openSession(a);
+            expect(
+              (await asPhone(a, HUB_OWNER_ROUTES.postureChange, request, { session })).json,
+            ).toEqual({ status: "refused", kind: "own-unlock-required" });
+            expect(
+              (
+                await asPhone(a, HUB_OWNER_ROUTES.postureChange, request, {
+                  unlock: { ...unlock, delayMs: 61_000 },
+                })
+              ).status,
+            ).not.toBe(200);
+            a.clock.offset = 0;
+            expect(persistence.readCodeThread(thread.id)?.executionPolicy).toBe("approval-gated");
+            expect(
+              (
+                await asPhone(a, HUB_OWNER_ROUTES.postureChange, request, {
+                  unlock: {
+                    ...unlock,
+                    boundTo: {
+                      route: HUB_OWNER_ROUTES.postureChange,
+                      body: JSON.stringify({ ...request, posture: "plan" }),
+                    },
+                  },
+                })
+              ).status,
+            ).not.toBe(200);
+            const changed = await asPhone(a, HUB_OWNER_ROUTES.postureChange, request, { unlock });
+            expect(changed.status).toBe(200);
+            expect(persistence.readCodeThread(thread.id)?.executionPolicy).toBe("full-access");
+            if (changed.proofHeader === undefined) throw new Error("Missing proof header");
+            const replay = await asPhone(a, HUB_OWNER_ROUTES.postureChange, request, {
+              unlock: { ...unlock, reuse: changed.proofHeader },
+            });
+            expect(replay.status).not.toBe(200);
+            expect(
+              (await asPhone(a, HUB_OWNER_ROUTES.postureChange, request, { unlock })).json,
+            ).toEqual({ status: "refused", kind: "posture-stale" });
+            const beforeProjectChange = await host.read(subject);
+            if (beforeProjectChange.status !== "read")
+              throw new Error("Missing thread reading before Project change");
+            const projectReading = await host.read({ kind: "project", projectId: project.id });
+            if (projectReading.status !== "read") throw new Error("Missing Project reading");
+            const projectRequest = {
+              subject: projectReading.posture.subject,
+              expectedVersion: projectReading.posture.version,
+              posture: "full-access",
+              persistence: "project-default",
+            };
+            expect(
+              (await asPhone(a, HUB_OWNER_ROUTES.postureChange, projectRequest, { unlock })).status,
+            ).toBe(200);
+            expect(persistence.readProject(project.id)).toMatchObject({
+              codeAccessPersistence: "project-default",
+              version: 2,
+            });
+            expect(
+              (
+                await asPhone(
+                  a,
+                  HUB_OWNER_ROUTES.postureChange,
+                  {
+                    ...request,
+                    expectedVersion: beforeProjectChange.posture.version,
+                    posture: "plan",
+                  },
+                  { unlock },
+                )
+              ).json,
+            ).toEqual({ status: "refused", kind: "posture-stale" });
+            const after = await host.read(subject);
+            if (after.status !== "read") throw new Error("Missing current Code reading");
+            seed(
+              "code-checkout",
+              checkoutId,
+              "code.checkout-observed@1",
+              {
+                kind: "checkout-observed",
+                checkout: {
+                  ...checkout,
+                  head: { kind: "branch", name: "changed-target", oid: "b".repeat(40) },
+                },
+              },
+              1,
+            );
+            expect(
+              (
+                await asPhone(
+                  a,
+                  HUB_OWNER_ROUTES.postureChange,
+                  { ...request, expectedVersion: after.posture.version, posture: "plan" },
+                  { unlock },
+                )
+              ).json,
+            ).toEqual({ status: "refused", kind: "posture-stale" });
+            const beforeVersion = decodeOwnerPosture(reading.posture).version;
+            expect(after.posture.version).not.toBe(beforeVersion);
+            const ownerEvents = persistence.journal
+              .replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 100 }))
+              .filter((event) => event.actor.kind === "owner-unlock");
+            expect(ownerEvents).toHaveLength(4);
+            expect(
+              ownerEvents.every(
+                (event) =>
+                  event.actor.kind === "owner-unlock" && event.actor.memberId === phone.hostId,
+              ),
+            ).toBe(true);
+            const count = ownerEvents.length;
+            a.spoke.removeOwner(phone.hostId, window);
+            expect(
+              (
+                await asPhone(
+                  a,
+                  HUB_OWNER_ROUTES.postureChange,
+                  { ...request, expectedVersion: after.posture.version, posture: "plan" },
+                  { unlock },
+                )
+              ).status,
+            ).not.toBe(200);
+            expect(
+              persistence.journal
+                .replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 100 }))
+                .filter((event) => event.actor.kind === "owner-unlock"),
+            ).toHaveLength(count);
+          });
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: join(a.directory, "postures") }))),
+    );
   });
 });
