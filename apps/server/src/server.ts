@@ -1277,6 +1277,8 @@ export function startOctantServer(
       secretStoresRoutes,
       remoteHost,
     } = wireRemote({
+      codeService,
+      projectService,
       browserExtensionService,
       browserFlowService,
       browserProfileService,
