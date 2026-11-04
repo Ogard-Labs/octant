@@ -9,10 +9,11 @@ afterEach(async () => {
 });
 function fixture() {
   let current = true;
+  const closedOwners = new Set<string>();
   const records: unknown[] = [];
   const tunnels = new ServerPreviewTunnels({
     address: () => (current ? { server, identity: "binding-1" } : undefined),
-    ownerCurrent: () => true,
+    ownerCurrent: (owner) => !closedOwners.has(owner),
     agentSocket: () => undefined,
     record: (record) => {
       records.push(record);
@@ -25,6 +26,9 @@ function fixture() {
     records,
     revoke: () => {
       current = false;
+    },
+    closeOwner: (owner: string) => {
+      closedOwners.add(owner);
     },
   };
 }
@@ -96,5 +100,18 @@ describe("owned server previews", () => {
         socket.on("error", reject);
       }),
     ).rejects.toThrow();
+  });
+  it("lets another window open the Project's preview after the owning window closes", async () => {
+    const { tunnels, closeOwner } = fixture();
+    expect((await tunnels.start("project", "window", 5173, 0)).kind).toBe("tunnel");
+    closeOwner("window");
+    await tunnels.reconcile();
+    expect(tunnels.read("project", "window")).toMatchObject({ status: "revoked" });
+    const replaced = await tunnels.start("project", "other-window", 3000, 0);
+    expect(replaced).toMatchObject({
+      kind: "tunnel",
+      view: { remotePort: 3000, status: "listening" },
+    });
+    expect(tunnels.read("project", "window")).toBeUndefined();
   });
 });

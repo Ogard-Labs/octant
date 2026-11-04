@@ -131,6 +131,8 @@ paired-host preview instead.
 
 **Stop preview** closes the tunnel and leaves the dev server running. Removing
 the Project or its registered server, or revoking the window, also closes it.
+After the owning window closes or the hour runs out, another window can start a
+new preview for the Project.
 A dropped SSH connection shows **lost**. **Reconnect same endpoint** keeps the
 same ports and server binding and never restarts the remote program. A local
 port collision refuses; stop the preview before selecting another port.

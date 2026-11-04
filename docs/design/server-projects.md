@@ -454,7 +454,9 @@ remote or dynamic listeners. Ordinary command connections are unchanged.
 Only an authenticated local window can start, stop or reconnect its preview.
 Before listening and before each stream, the host checks the current Project,
 registered server, binding identity and owner. A one-second sweep closes the
-listener and its streams after removal or owner revocation, and after one hour.
+listener and its streams after removal or owner revocation, and after one hour,
+including a lost preview whose owner is gone. A revoked preview releases its
+ownership: any current local window may start a new preview for that Project.
 Stopping a preview leaves the remote program running. A port collision refuses
 without choosing another address. A failed SSH stream marks the preview lost
 and closes the listener. **Reconnect same endpoint** makes one explicit attempt

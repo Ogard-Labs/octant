@@ -45,7 +45,7 @@ interface PreviewOpening {
   readonly identity: string;
   readonly ownerCurrent: () => boolean;
   readonly previous: Preview | undefined;
-  readonly previousStatus: "stopped" | "lost";
+  readonly previousStatus: "stopped" | "lost" | "revoked";
 }
 export interface ServerPreviewOptions {
   readonly address: (
@@ -121,7 +121,13 @@ export class ServerPreviewTunnels {
     )
       return refused("invalid-port");
     const existing = this.#previews.get(projectId);
-    if (this.#pending.has(projectId) || (existing !== undefined && existing.status !== "stopped"))
+    // A revoked preview has released its owner (window closed, lifetime
+    // expired or binding changed); keeping it would refuse every later start
+    // until the host restarts, since only that gone owner could stop it.
+    if (
+      this.#pending.has(projectId) ||
+      (existing !== undefined && existing.status !== "stopped" && existing.status !== "revoked")
+    )
       return refused("already-owned");
     if (this.#previews.size >= 64 && existing === undefined) return refused("too-many-tunnels");
     return this.#queueStart({
@@ -133,7 +139,7 @@ export class ServerPreviewTunnels {
       server: address.server,
       identity: address.identity,
       previous: existing,
-      previousStatus: "stopped",
+      previousStatus: existing?.status === "revoked" ? "revoked" : "stopped",
     });
   }
   async stop(projectId: string, owner: string): Promise<ServerPreviewResult> {
@@ -168,7 +174,11 @@ export class ServerPreviewTunnels {
   async reconcile(): Promise<void> {
     await Promise.all(
       [...this.#previews.values()]
-        .filter((preview) => preview.status === "listening" && !this.#current(preview))
+        .filter(
+          (preview) =>
+            (preview.status === "listening" || preview.status === "lost") &&
+            !this.#current(preview),
+        )
         .map((preview) => this.#end(preview, "revoked")),
     );
   }
