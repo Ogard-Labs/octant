@@ -199,3 +199,4 @@ export * from "./hostAnswer";
 export * from "./terminalSessions";
 
 export * from "./providerCloudSessions";
+export * from "./gitHunks";

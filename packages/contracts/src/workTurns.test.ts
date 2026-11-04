@@ -15,6 +15,7 @@ import {
   decodeWorkTurnState,
   decodeWorkTurnUpdated,
   decodeStartWorkThreadTurnCommand,
+  decodeWorkExternalInputReceipt,
   WorkTurnStreamFrame,
 } from "./workTurns";
 
@@ -422,4 +423,33 @@ describe("a Work turn's Shield rows on an older client", () => {
       { toolCallId: "shield:call-1", toolName: "bash", state: "completed", summary: "git status" },
     ]);
   });
+});
+
+describe("host-owned Work external input receipt", () => {
+  const receipt = { referenceId: "owned-workflow:input-1", digest: "a".repeat(64) };
+  it("strictly decodes only the bounded reference and digest", () => {
+    expect(decodeWorkExternalInputReceipt(receipt)).toEqual(receipt);
+    for (const invalid of [
+      { ...receipt, referenceId: "" },
+      { ...receipt, digest: "not-a-digest" },
+      { ...receipt, token: "not-accepted" },
+    ])
+      expect(() => decodeWorkExternalInputReceipt(invalid)).toThrow();
+  });
+  it.each(["externalInput", "externalData"])(
+    "does not let a public start command claim %s",
+    (field) => {
+      expect(() =>
+        decodeStartWorkThreadTurnCommand({
+          kind: "start-work-thread-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          prompt: "Review",
+          authority,
+          [field]: receipt,
+        }),
+      ).toThrow();
+    },
+  );
 });

@@ -284,6 +284,7 @@ export function codeRuntimeWorkPlan(
       return { id: command.testRunId, kind: "test", starts: false, reachesNetwork: false };
     case "commit-git":
     case "push-git":
+    case "reverse-git-hunks":
     case "discard-git-changes":
     case "restore-git-checkpoint":
     case "merge-run":

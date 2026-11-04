@@ -237,7 +237,15 @@ export const WorkTurnCarriedFrom = Schema.Struct({
 }).annotations(strict);
 export type WorkTurnCarriedFrom = typeof WorkTurnCarriedFrom.Type;
 
+/** Host-computed framed input accepted with this turn, never a public start-command claim. */
+export const WorkExternalInputReceipt = Schema.Struct({
+  referenceId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  digest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+}).annotations(strict);
+export type WorkExternalInputReceipt = typeof WorkExternalInputReceipt.Type;
+
 export const WorkTurnState = Schema.Struct({
+  externalInput: Schema.optional(WorkExternalInputReceipt),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
@@ -480,6 +488,7 @@ export const WorkTurnStreamFrame = Schema.Union(
 export type WorkTurnStreamFrame = typeof WorkTurnStreamFrame.Type;
 
 export const WorkTurnAccepted = Schema.Struct({
+  externalInput: Schema.optional(WorkExternalInputReceipt),
   kind: Schema.Literal("turn-accepted"),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
@@ -626,3 +635,5 @@ export const decodeRewindWorkThreadCommand = Schema.decodeUnknownSync(RewindWork
 export const decodeWorkThreadRewound = Schema.decodeUnknownSync(WorkThreadRewound);
 export const decodeWorkThreadRewindResult = Schema.decodeUnknownSync(WorkThreadRewindResult);
 export const decodeWorkTurnWrittenFiles = Schema.decodeUnknownSync(WorkTurnWrittenFiles);
+
+export const decodeWorkExternalInputReceipt = Schema.decodeUnknownSync(WorkExternalInputReceipt);

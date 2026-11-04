@@ -223,3 +223,4 @@ export * from "./hubWakePolicy";
 export * from "./hubGuestPolicy";
 
 export * from "./providerCloudPolicy";
+export * from "./unifiedDiff";

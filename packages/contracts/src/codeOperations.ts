@@ -1,3 +1,10 @@
+import {
+  CodeGitHunk,
+  CodeGitHunkScope,
+  CodeGitHunkUnavailable,
+  MAX_CODE_GIT_HUNKS,
+  MAX_CODE_SELECTED_GIT_HUNKS,
+} from "./gitHunks";
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ContextHandoffOmissions } from "./contextHandoff";
@@ -432,6 +439,30 @@ const ObserveGit = Schema.Struct({
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
   /** Read the diff with Git's `-w`; only the diff text changes, never the checkout state. */
   ignoreWhitespace: Schema.optional(Schema.Boolean),
+}).annotations(strict);
+const PrepareGitHunks = Schema.Struct({
+  kind: Schema.Literal("prepare-git-hunks"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  scope: CodeGitHunkScope,
+}).annotations(strict);
+const SelectedGitHunkFields = {
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  comparisonOperationId: CodeOperationId,
+  selected: uniqueArray(CodeDigest, MAX_CODE_SELECTED_GIT_HUNKS).pipe(Schema.minItems(1)),
+};
+const StageGitHunks = Schema.Struct({
+  kind: Schema.Literal("stage-git-hunks"),
+  ...SelectedGitHunkFields,
+}).annotations(strict);
+const UnstageGitHunks = Schema.Struct({
+  kind: Schema.Literal("unstage-git-hunks"),
+  ...SelectedGitHunkFields,
+}).annotations(strict);
+const ReverseGitHunks = Schema.Struct({
+  kind: Schema.Literal("reverse-git-hunks"),
+  ...SelectedGitHunkFields,
 }).annotations(strict);
 const StageGit = Schema.Struct({
   kind: Schema.Literal("stage-git"),
@@ -912,6 +943,10 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "observe-git",
   "review-run",
   "merge-run",
+  "prepare-git-hunks",
+  "stage-git-hunks",
+  "unstage-git-hunks",
+  "reverse-git-hunks",
   "stage-git",
   "commit-git",
   "push-git",
@@ -941,6 +976,10 @@ export const CodeOperationCommand = Schema.Union(
   CancelRepositoryTest,
   RunScaffold,
   ObserveGit,
+  PrepareGitHunks,
+  StageGitHunks,
+  UnstageGitHunks,
+  ReverseGitHunks,
   StageGit,
   DiscardGitChanges,
   CommitGit,
@@ -1015,6 +1054,21 @@ const GitObservation = Schema.Struct({
       state: Schema.Literal("active", "locked", "prunable", "unavailable"),
     }).annotations(strict),
   ).pipe(Schema.filter((worktrees) => worktrees.length <= 1_000)),
+}).annotations(strict);
+const GitHunksResult = Schema.Struct({
+  kind: Schema.Literal("git-hunks"),
+  operationId: CodeOperationId,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  gitOperationId: CodeGitOperationId,
+  scope: CodeGitHunkScope,
+  stateToken: GitStateToken,
+  digest: CodeDigest,
+  /** Opaque host root/binding witness; never a renderer path or inode. */
+  rootDigest: CodeDigest,
+  diff: CodeEvidenceReference,
+  hunks: Schema.Array(CodeGitHunk).pipe(Schema.maxItems(MAX_CODE_GIT_HUNKS)),
+  unavailable: Schema.Array(CodeGitHunkUnavailable).pipe(Schema.maxItems(MAX_CODE_OPERATION_PATHS)),
 }).annotations(strict);
 const TerminalStateFields = {
   operationId: CodeOperationId,
@@ -1091,6 +1145,9 @@ const GitMutationResult = Schema.Struct({
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
   mutation: Schema.Literal(
+    "stage-hunks",
+    "unstage-hunks",
+    "reverse-hunks",
     "stage",
     "unstage",
     "discard",
@@ -1121,6 +1178,9 @@ const GitMutationResult = Schema.Struct({
       "stale-state",
       "unlisted-path",
       "untracked-path",
+      "invalid-hunks",
+      "hunk-offset",
+      "read-only",
     ),
   ),
   /**
@@ -1424,6 +1484,7 @@ export const CodeOperationResult = Schema.Union(
   RepositoryTestResult,
   ScaffoldResult,
   GitObservation,
+  GitHunksResult,
   GitMutationResult,
   GitDraftResult,
   PullRequestResult,
@@ -2639,6 +2700,9 @@ export type CodeBoardView = typeof CodeBoardView.Type;
  * back out of the index or off the disk.
  */
 const APPROVAL_GATED_OPERATION_KINDS = new Set([
+  "stage-git-hunks",
+  "unstage-git-hunks",
+  "reverse-git-hunks",
   "start-terminal",
   "run-repository-test",
   "cancel-repository-test",

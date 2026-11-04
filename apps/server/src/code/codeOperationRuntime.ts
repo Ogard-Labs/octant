@@ -320,6 +320,7 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
+    readonly currentProjectAccess?: CodeOperationAuthorityPort["currentProjectAccess"];
     /**
      * Runs `run` on the window's standing authority: its persisted binding,
      * judged when each check inside runs, never a request's admission.
@@ -406,7 +407,8 @@ export interface CodeOperationRuntimeOptions {
     | "snapshotWorkingTree"
     | "restoreWorkingTree"
     | "releaseCheckpoint"
-  >;
+  > &
+    Partial<Pick<GitMutationPort, "applyHunks">>;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   readonly supportsAcpClientCapabilities?: (thread: CodeThread) => boolean;
   /**
@@ -784,10 +786,12 @@ export interface CodeOperationRuntime {
     threadId: CodeThreadId,
     operationId: CodeOperationId,
     contentId: CodeEvidenceContentId,
+    admissionCurrent?: () => boolean,
   ): Promise<{ readonly bytes: Uint8Array; readonly digest: string; readonly byteLength: number }>;
   readEvidenceBatch?(
     windowId: WindowId,
     input: CodeEvidenceBatchRequest,
+    admissionCurrent?: () => boolean,
   ): Promise<CodeEvidenceBatchResponse>;
   prepareApproval(
     windowId: WindowId,
@@ -931,6 +935,9 @@ export function createCodeOperationRuntime(
       options.sessionAuthority?.effectiveThread(windowId, thread) ?? thread,
     readCheckout: (checkoutId) => options.persistence.readCodeCheckout(checkoutId),
     canAccessProject: options.windowAccess.canAccessProject,
+    ...(options.windowAccess.currentProjectAccess === undefined
+      ? {}
+      : { currentProjectAccess: options.windowAccess.currentProjectAccess }),
     ...(options.windowAccess.retainProjectAccess === undefined
       ? {}
       : { retainProjectAccess: options.windowAccess.retainProjectAccess }),
@@ -1391,7 +1398,51 @@ export function createCodeOperationRuntime(
       const command = approvalEffect.kind === "operation" ? approvalEffect.command : undefined;
       const context = await approvalContext(options, command, thread, checkout);
       if (context === undefined) return undefined;
-      const prompt = approvalPrompt(approvalEffect, thread, checkout, context.pullRequestTarget);
+      let hunkDetail: string | undefined;
+      if (
+        command?.kind === "stage-git-hunks" ||
+        command?.kind === "unstage-git-hunks" ||
+        command?.kind === "reverse-git-hunks"
+      ) {
+        const replay = events.replay({
+          threadId: thread.id,
+          operationId: command.comparisonOperationId,
+          afterCursor: 0,
+          limit: 16,
+        });
+        if (replay.status !== "ok") return undefined;
+        const comparison = replay.frames
+          .map((frame) =>
+            frame.event.kind === "operation-result" ? frame.event.result : undefined,
+          )
+          .find((result) => result?.kind === "git-hunks");
+        if (
+          comparison?.kind !== "git-hunks" ||
+          comparison.threadId !== thread.id ||
+          comparison.checkoutId !== checkout.id ||
+          comparison.scope !== (command.kind === "unstage-git-hunks" ? "staged" : "unstaged")
+        )
+          return undefined;
+        const hunks = command.selected.map((id) => comparison.hunks.find((hunk) => hunk.id === id));
+        if (hunks.some((hunk) => hunk === undefined)) return undefined;
+        hunkDetail = [
+          comparison.scope === "staged" ? "HEAD → Index" : "Index → Working tree",
+          ...hunks.flatMap((hunk) =>
+            hunk === undefined
+              ? []
+              : [
+                  `${hunk.path}: −${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines}`,
+                ],
+          ),
+        ].join("\n");
+      }
+      const prompt = approvalPrompt(
+        approvalEffect,
+        thread,
+        checkout,
+        context.pullRequestTarget,
+        hunkDetail,
+      );
       return approvalStore.prepare({
         windowId,
         effect: approvalEffect,
@@ -1786,9 +1837,15 @@ export function createCodeOperationRuntime(
         ? forkPointFrom(captured.snapshot)
         : { status: "refused", reason: "unavailable" };
     },
-    readEvidence: async (windowId, threadId, operationId, contentId) => {
+    readEvidence: async (windowId, threadId, operationId, contentId, admissionCurrent) => {
       try {
-        const evidence = await service.readEvidence(windowId, threadId, operationId, contentId);
+        const evidence = await service.readEvidence(
+          windowId,
+          threadId,
+          operationId,
+          contentId,
+          admissionCurrent,
+        );
         const bytes = new TextEncoder().encode(evidence.text);
         const digest = createHash("sha256").update(bytes).digest("hex");
         if (
@@ -1802,11 +1859,16 @@ export function createCodeOperationRuntime(
         throw codeEvidenceReadFailure(error);
       }
     },
-    readEvidenceBatch: async (windowId, input) => {
+    readEvidenceBatch: async (windowId, input, admissionCurrent) => {
       try {
         return decodeCodeEvidenceBatchResponse({
           threadId: input.threadId,
-          items: await service.readEvidenceBatch(windowId, input.threadId, input.items),
+          items: await service.readEvidenceBatch(
+            windowId,
+            input.threadId,
+            input.items,
+            admissionCurrent,
+          ),
         });
       } catch (error) {
         throw codeEvidenceReadFailure(error);
@@ -1956,6 +2018,7 @@ function approvalPrompt(
   thread: CodeThread,
   checkout: CodeCheckoutIdentity,
   pullRequestTarget: ApprovalContext["pullRequestTarget"],
+  hunkDetail?: string,
 ): { readonly message: string; readonly detail: string } {
   const head =
     checkout.head.kind === "branch"
@@ -2050,6 +2113,19 @@ function approvalPrompt(
       case "cancel-repository-test":
         message = "Allow repository test cancellation?";
         effectDetail = `Cancel test run ${command.testRunId}`;
+        break;
+      case "stage-git-hunks":
+      case "unstage-git-hunks":
+      case "reverse-git-hunks":
+        if (hunkDetail === undefined)
+          throw new TypeError("Selected Git comparison is unavailable.");
+        message =
+          command.kind === "reverse-git-hunks"
+            ? "Reverse these uncommitted hunks?"
+            : command.kind === "stage-git-hunks"
+              ? "Stage these selected hunks?"
+              : "Unstage these selected hunks?";
+        effectDetail = `${command.kind === "reverse-git-hunks" ? "Selected uncommitted changes are lost. Other hunks and the index are kept.\n" : "Working files are kept.\n"}${hunkDetail}`;
         break;
       case "stage-git":
         message = "Allow Code stage operation?";
@@ -5337,6 +5413,8 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
             : { kind: "network" as const, url: remote.pushUrl },
       }));
     },
+    prepareHunks: (input) => git.prepareHunks(input),
+    applyHunks: (input) => git.applyHunks(input),
     stage: (input) => git.stage(input),
     discard: (input) => git.discard(input),
     commit: (input) =>

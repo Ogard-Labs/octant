@@ -468,6 +468,18 @@ wording, and reads are specified in [Start screen](start-screen.md).
 
 ## Tool lifecycles
 
+In current Code Review, **Select Git hunks** opens separate **Index → Working
+tree** and **HEAD → Index** comparisons. The selected unified hunk shows its
+file and both line ranges before Stage, Unstage or Reverse. Selection always
+uses exact whitespace, independently of the ordinary diff's display preference.
+Reversal asks confirmation and changes only selected unstaged hunks; its
+confirmation does not bypass ordinary approvals. Plan may inspect these
+comparisons but cannot mutate. Unsupported binary, rename, conflict or
+unavailable bytes are explicit. After applying, Review rereads the index and
+working tree. Stale selections require a new comparison; captured run and Git
+History views do not offer mutations. The authority, native preflight and writer
+rules are in [Architecture: Code](../architecture.md#modes-chat-work-and-code).
+
 Thread utilities live in the Right Utility Dock outside the split tree.
 The shell loads each tool through `dockModuleRegistry`; modules under
 `apps/web/src/dockModules` receive only declared inputs and contain render

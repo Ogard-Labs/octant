@@ -43,6 +43,8 @@ import {
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { AutomationFileSourceStatus } from "./AutomationFileSourceStatus";
+import { routineFileSourceLabel } from "./routineFileSourcePresentation";
 import { AutomationDefinitionEditor } from "./AutomationDefinitionEditor";
 import {
   automationAuthoritySummary,
@@ -211,7 +213,14 @@ export function AutomationCenter(props: AutomationCenterProps) {
 
   function selectRow(automationId: string) {
     setEditor({ kind: "closed" });
-    controller.select(automationId);
+    const summary =
+      controller.list.status === "ready" || controller.list.status === "refreshing"
+        ? controller.list.items.find((item) => String(item.id) === automationId)
+        : undefined;
+    controller.select(
+      automationId,
+      summary?.trigger.kind === "file-arrival" ? { fileSourceReview: true } : undefined,
+    );
   }
 
   function backToList() {
@@ -620,6 +629,13 @@ function AutomationListBody(props: {
                   <span className="automation-row__name">{summary.displayName}</span>
                 </OctantButton>
                 <div className="automation-row__meta">
+                  {summary.trigger.kind === "file-arrival" ? (
+                    <span>
+                      {routineFileSourceLabel(summary.fileSource)} ·{" "}
+                      {summary.fileSource?.remainingStarts ?? summary.trigger.automaticStartLimit}{" "}
+                      starts remaining
+                    </span>
+                  ) : null}
                   <span className="automation-row__project">
                     {props.projectNames.get(String(summary.projectId)) ?? "Project"}
                   </span>
@@ -820,6 +836,14 @@ function arrangeableRoutine(
  * sentence when the last thing it did went wrong.
  */
 function routineListStatus(summary: AutomationSummary): "active" | "needs-attention" | "finished" {
+  if (
+    summary.trigger.kind === "file-arrival" &&
+    (summary.fileSource?.phase === "held" ||
+      summary.fileSource?.phase === "unavailable" ||
+      (summary.fileSource?.phase === "needs-rearm" &&
+        summary.fileSource.reason !== "known-activity"))
+  )
+    return "needs-attention";
   if (summary.latestRunLifecycle === "failed" || summary.latestRunLifecycle === "interrupted") {
     return "needs-attention";
   }
@@ -895,9 +919,11 @@ function AutomationDetail(props: {
           {automationLifecycleLabel(automation.lifecycle)}
         </span>
         <span>
-          {automation.nextDueAt === null
-            ? "Not scheduled"
-            : `Next run: ${automationNextRunLabel(automation.nextDueAt, props.format)}`}
+          {automation.trigger.kind === "file-arrival"
+            ? "Runs on settled file changes"
+            : automation.nextDueAt === null
+              ? "Not scheduled"
+              : `Next run: ${automationNextRunLabel(automation.nextDueAt, props.format)}`}
         </span>
       </p>
       {automation.blockedReason === undefined ? null : (
@@ -1004,6 +1030,15 @@ function AutomationDetail(props: {
           </OctantButton>
         )}
       </div>
+
+      {automation.trigger.kind === "file-arrival" ? (
+        <AutomationFileSourceStatus
+          automation={automation}
+          source={controller.detail.fileSource}
+          execute={controller.execute}
+          refresh={controller.retryDetail}
+        />
+      ) : null}
 
       <dl className="automation-detail__facts">
         <div>

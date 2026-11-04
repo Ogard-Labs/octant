@@ -22,6 +22,7 @@ import {
   decodeCodeEvidenceReference,
   decodeCodeOperationEvent,
   decodeCodeOperationId,
+  decodeCodeOperationCommand,
   decodeCodeThread,
   decodeCodeTerminalId,
   decodeCodeThreadId,
@@ -7461,6 +7462,10 @@ function runtimeFixture(options: {
   credentialResolver?: Parameters<typeof createCodeOperationRuntime>[0]["credentialResolver"];
   credentialReferences?: readonly { environmentName: string; reference: string }[];
   gitObservation?: GitObservationResult;
+  hunkCurrent?: () => boolean;
+  hunkApply?: NonNullable<
+    NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["applyHunks"]
+  >;
   gitRemotes?: ReadonlyArray<{
     readonly name: string;
     readonly fetchUrl: string;
@@ -7720,6 +7725,7 @@ function runtimeFixture(options: {
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
     windowAccess: {
       canAccessProject: access,
+      ...(options.hunkCurrent === undefined ? {} : { currentProjectAccess: options.hunkCurrent }),
       standingAuthority: (run) =>
         hostAccess === undefined ? run() : hostAccess.standingAuthority(run),
     },
@@ -7728,6 +7734,9 @@ function runtimeFixture(options: {
       : { acpTerminalConfinement: options.acpTerminalConfinement }),
     resolveCheckoutRoot: async () => ({
       checkoutRoot: options.checkoutRoot ?? "/private/exact",
+      ...(options.hunkCurrent === undefined
+        ? {}
+        : { rootCurrent: options.hunkCurrent, rootIdentity: { device: "1", inode: "1" } }),
       shell: "/bin/zsh",
       credentialReferences: options.credentialReferences ?? [],
       environment: {},
@@ -7920,6 +7929,7 @@ function runtimeFixture(options: {
           }),
     },
     gitMutationPort: {
+      ...(options.hunkApply === undefined ? {} : { applyHunks: options.hunkApply }),
       stage: async () => ({ status: "failed" as const }),
       unstage: async () => ({ status: "failed" as const }),
       commit: async () => ({ status: "failed" as const }),
@@ -10203,3 +10213,122 @@ async function functionCallingEndpoint(
   };
   return { driver, bodies, answers };
 }
+
+it.each(["stage-git-hunks", "unstage-git-hunks", "reverse-git-hunks"] as const)(
+  "prepares exact retained %s approval and applies it through the production runtime adapter",
+  async (kind) => {
+    const patch =
+      "diff --git a/src/main.ts b/src/main.ts\n--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    const base = readyGitObservation([]);
+    if (base.status !== "ready") throw new Error("Invalid observation fixture");
+    let live = true;
+    const apply = vi.fn(
+      async (
+        input: Parameters<
+          NonNullable<
+            NonNullable<
+              Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]
+            >["applyHunks"]
+          >
+        >[0],
+      ) => {
+        expect(input.current()).toBe(true);
+        expect(await input.beforeApply()).toBe(true);
+        expect(input.patch).toBe(patch);
+        return { status: "applied" as const };
+      },
+    );
+    const fixture = runtimeFixture({
+      approvalValidator: false,
+      hunkCurrent: () => live,
+      hunkApply: apply,
+      gitObservation: {
+        ...base,
+        statusEntries: [{ path: "src/main.ts", index: "M", worktree: "M" }],
+        changedPaths: ["src/main.ts"],
+      },
+      gitReadDiff: async () => ({
+        status: "ready",
+        paths: ["src/main.ts"],
+        diff: { text: patch, byteLength: Buffer.byteLength(patch), truncated: false },
+      }),
+    });
+    try {
+      const scope = kind === "unstage-git-hunks" ? "staged" : "unstaged";
+      const prepared = await fixture.runtime.execute(
+        windowId,
+        decodeCodeOperationCommand({
+          kind: "prepare-git-hunks",
+          threadId,
+          checkoutId,
+          operationId: operationId(1970),
+          gitOperationId: operationId(1971),
+          scope,
+        }),
+        { initiator: "user", admissionCurrent: () => live },
+      );
+      expect(prepared.kind).toBe("git-hunks");
+      if (prepared.kind !== "git-hunks") throw new Error("Comparison missing");
+      const bytes = await fixture.runtime.readEvidence(
+        windowId,
+        threadId,
+        prepared.operationId,
+        prepared.diff.contentId,
+        () => live,
+      );
+      expect(new TextDecoder().decode(bytes.bytes)).toBe(patch);
+      const command = decodeCodeOperationCommand({
+        kind,
+        threadId,
+        checkoutId,
+        operationId: operationId(1972),
+        gitOperationId: operationId(1973),
+        comparisonOperationId: prepared.operationId,
+        selected: [prepared.hunks[0]!.id],
+      });
+      const challenge = await fixture.runtime.prepareApproval(windowId, {
+        effect: { kind: "operation", command },
+      });
+      expect(challenge?.detail).toContain("src/main.ts: −1,1 +1,1");
+      expect(challenge?.detail).toContain(
+        scope === "staged" ? "HEAD → Index" : "Index → Working tree",
+      );
+      expect(challenge?.detail).not.toContain(prepared.hunks[0]!.id);
+      const receipt = await fixture.runtime.confirmApproval(windowId, {
+        challengeId: challenge!.challengeId,
+      });
+      expect(receipt).toBeDefined();
+      const result = await fixture.runtime.execute(windowId, command, {
+        initiator: "user",
+        admissionCurrent: () => live,
+      });
+      expect(result).toMatchObject({ kind: "git-mutation-state", state: "completed" });
+      expect(apply).toHaveBeenCalledTimes(1);
+      const second = decodeCodeOperationCommand({ ...command, operationId: operationId(1974) });
+      live = false;
+      const refused = await fixture.runtime.execute(windowId, second, {
+        initiator: "user",
+        admissionCurrent: () => live,
+      });
+      expect(refused).toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "unauthorized" },
+      });
+      expect(apply).toHaveBeenCalledTimes(1);
+      expect(
+        await fixture.runtime.prepareApproval(windowId, {
+          effect: {
+            kind: "operation",
+            command: decodeCodeOperationCommand({
+              ...command,
+              comparisonOperationId: operationId(1975),
+            }),
+          },
+        }),
+      ).toBeUndefined();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  },
+);

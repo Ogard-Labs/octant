@@ -1,3 +1,4 @@
+import type { GitService } from "./gitService";
 import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
@@ -7,7 +8,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { chooseThreadTerminalFolder } from "./codeTerminalFolder";
 import { chooseCodeRewindFilePoint } from "./codeForkPoint";
 import { turnChangedFiles } from "./codeTurnChangedFiles";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import {
@@ -178,6 +179,10 @@ const SERVER_CONNECTORS_UNAVAILABLE =
   "Connectors and plugins run on this computer, so a thread in a Project on a server does not offer them. Send the message without them.";
 
 export interface CodeOperationAuthorityPort {
+  readonly currentProjectAccess?: (
+    windowId: WindowId,
+    projectId: CodeThread["projectId"],
+  ) => boolean;
   readonly readThread: (threadId: CodeOperationCommand["threadId"]) => CodeThread | undefined;
   readonly effectiveThread?: (windowId: WindowId, thread: CodeThread) => CodeThread;
   readonly readCheckout: (
@@ -208,6 +213,8 @@ export interface CodeOperationAuthorityPort {
   ) => Awaitable<
     | Readonly<{
         checkoutRoot: string;
+        rootCurrent?: () => boolean;
+        rootIdentity?: { readonly device: string; readonly inode: string };
         workingDirectory?: string;
         /** The Project's extra folders, by absolute path. */
         extraFolders?: ReadonlyArray<string>;
@@ -504,6 +511,8 @@ export interface CodeOperationScaffoldPort {
 }
 
 export interface CodeOperationGitPort {
+  readonly prepareHunks?: GitService["prepareHunks"];
+  readonly applyHunks?: GitService["applyHunks"];
   readonly observe: (input: {
     readonly checkoutRoot: string;
     readonly maxDiffBytes: number;
@@ -712,7 +721,10 @@ type GitMutationOutcome =
         | "identity-missing"
         | "stale-state"
         | "unlisted-path"
-        | "untracked-path";
+        | "untracked-path"
+        | "invalid-hunks"
+        | "hunk-offset"
+        | "read-only";
     }
   | { readonly status: "unavailable" }
   | { readonly status: "failed"; readonly detail?: string };
@@ -1294,6 +1306,14 @@ export class CodeOperationService {
     options: CodeOperationExecuteOptions = {},
   ): Promise<CodeOperationResult> {
     const command = decodeCodeOperationCommand(rawCommand);
+    const hunkCommand = isSelectedHunkCommand(command);
+    let hunkAdmissionCurrent: (() => boolean) | undefined;
+    if (hunkCommand && options.admissionCurrent?.() !== true)
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Checkout request is no longer current.",
+      );
     const deliveredResult = (result: CodeOperationResult): CodeOperationResult =>
       command.kind === "start-provider-turn" &&
       command.delivery !== undefined &&
@@ -1309,6 +1329,12 @@ export class CodeOperationService {
     }
     const scope = await this.#scope(windowId, command);
     if ("failure" in scope) return this.#failed(command.operationId, scope.failure, scope.message);
+    if (hunkCommand && options.admissionCurrent?.() !== true)
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Checkout request is no longer current.",
+      );
     // A `remote-root` checkout is never a folder of this host. A server
     // Project's thread runs its turns there, with the server's tools; every
     // other operation here (terminals, tests, Git, files, pull requests)
@@ -1448,6 +1474,12 @@ export class CodeOperationService {
     /** A Stop journaled this start's result while it was still preparing. */
     let journaledByStop: CodeOperationResult | undefined;
     const gate = await this.#authorize(windowId, command, scope.thread, scope.checkout, initiator);
+    if (hunkCommand && options.admissionCurrent?.() !== true)
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Checkout request is no longer current.",
+      );
     if (gate !== "allow") {
       result = this.#failed(
         command.operationId,
@@ -1490,6 +1522,14 @@ export class CodeOperationService {
           "Code checkout authority is unavailable.",
         );
       else {
+        if (hunkCommand)
+          hunkAdmissionCurrent = this.#hunkCurrent(
+            windowId,
+            scope.thread,
+            scope.checkout,
+            root,
+            options.admissionCurrent,
+          );
         const recordedStart = replay.frames.find(
           (
             frame,
@@ -1673,6 +1713,37 @@ export class CodeOperationService {
           }
         }
       }
+    }
+    if (hunkCommand && hunkAdmissionCurrent?.() !== true) {
+      // A launched write can finish after authority retires. Keep only its private
+      // outcome so the same operation cannot be replayed as a second mutation.
+      // Fresh comparison bytes and native failure detail never cross this fence.
+      if (result.kind === "git-mutation-state") {
+        const outcome = decodeCodeOperationResult({
+          kind: result.kind,
+          operationId: result.operationId,
+          gitOperationId: result.gitOperationId,
+          mutation: result.mutation,
+          state: result.state,
+          ...(result.reason === undefined ? {} : { reason: result.reason }),
+        });
+        this.#options.events.append({
+          threadId: command.threadId,
+          operationId: command.operationId,
+          expectedCursor: resultCursor,
+          event: { kind: "operation-result", result: outcome },
+        });
+        return this.#failed(
+          command.operationId,
+          "unauthorized",
+          "Checkout authority changed after this request began. The checkout may have changed. Refresh Review from an authorized window before trying again.",
+        );
+      }
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Checkout authority changed. Refresh Review before trying again.",
+      );
     }
     if (journaledByStop !== undefined) return journaledByStop;
     result = deliveredResult(result);
@@ -2339,27 +2410,74 @@ export class CodeOperationService {
     }
   }
 
+  #hunkEvidenceScope(
+    threadId: CodeThreadId,
+    operationId: CodeOperationId,
+    frame: CodeOperationEventFrame,
+  ): CodeCheckoutId | false | undefined {
+    if (frame.event.kind !== "operation-result" || frame.event.result.kind !== "git-hunks")
+      return undefined;
+    const result = frame.event.result;
+    return frame.threadId === threadId &&
+      frame.operationId === operationId &&
+      result.operationId === operationId &&
+      result.threadId === threadId
+      ? result.checkoutId
+      : false;
+  }
+
+  #requireHunkEvidenceCurrent(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+    admissionCurrent?: () => boolean,
+  ): void {
+    const thread = this.#options.authority.readThread(threadId);
+    const checkout = this.#options.authority.readCheckout(checkoutId);
+    if (
+      admissionCurrent?.() !== true ||
+      thread?.id !== threadId ||
+      thread.checkoutId !== checkoutId ||
+      thread.lifecycle !== "active" ||
+      checkout?.availability !== "available" ||
+      checkout.repositoryId !== thread.repositoryId ||
+      this.#options.authority.currentProjectAccess?.(windowId, thread.projectId) !== true
+    )
+      throw new CodeOperationServiceError("unauthorized");
+  }
+
   async readEvidence(
     windowId: WindowId,
     threadId: CodeThreadId,
     operationId: CodeOperationId,
     contentId: CodeEvidenceReference["contentId"],
+    admissionCurrent?: () => boolean,
   ): Promise<{ readonly reference: CodeEvidenceReference; readonly text: string }> {
     let cursor = 0;
     let reference: CodeEvidenceReference | undefined;
+    let hunkCheckoutId: CodeCheckoutId | undefined;
     while (reference === undefined) {
       const frames = await this.subscribe(windowId, threadId, operationId, cursor, 256);
       for (const frame of frames) {
+        const hunkScope = this.#hunkEvidenceScope(threadId, operationId, frame);
+        if (hunkScope === false) continue;
         reference = evidenceReferences(frame.event).find(
           (candidate) => candidate.contentId === contentId,
         );
-        if (reference !== undefined) break;
+        if (reference !== undefined) {
+          hunkCheckoutId = hunkScope;
+          break;
+        }
       }
       if (reference !== undefined || frames.length < 256) break;
       cursor = frames.at(-1)?.cursor ?? cursor;
     }
     if (reference === undefined) throw new CodeOperationServiceError("unauthorized");
+    if (hunkCheckoutId !== undefined)
+      this.#requireHunkEvidenceCurrent(windowId, threadId, hunkCheckoutId, admissionCurrent);
     const text = await this.#options.evidence.read?.(reference);
+    if (hunkCheckoutId !== undefined)
+      this.#requireHunkEvidenceCurrent(windowId, threadId, hunkCheckoutId, admissionCurrent);
     if (text === undefined) throw new CodeOperationServiceError("unavailable");
     return { reference, text };
   }
@@ -2371,6 +2489,7 @@ export class CodeOperationService {
       readonly operationId: CodeOperationId;
       readonly contentId: CodeEvidenceContentId;
     }>,
+    admissionCurrent?: () => boolean,
   ): Promise<
     ReadonlyArray<{
       readonly operationId: CodeOperationId;
@@ -2392,6 +2511,7 @@ export class CodeOperationService {
       requestedByOperation.set(String(item.operationId), requested);
     }
     const references = new Map<string, CodeEvidenceReference>();
+    const hunkScopes = new Map<string, CodeCheckoutId>();
     const processedOperations = new Set<string>();
     for (const item of items) {
       const operationKey = String(item.operationId);
@@ -2402,9 +2522,13 @@ export class CodeOperationService {
       for (;;) {
         const frames = this.#replay(threadId, item.operationId, cursor, 256).frames;
         for (const frame of frames) {
+          const hunkScope = this.#hunkEvidenceScope(threadId, item.operationId, frame);
+          if (hunkScope === false) continue;
           for (const reference of evidenceReferences(frame.event)) {
             if (requested.has(String(reference.contentId))) {
-              references.set(`${operationKey}:${String(reference.contentId)}`, reference);
+              const key = `${operationKey}:${String(reference.contentId)}`;
+              references.set(key, reference);
+              if (hunkScope !== undefined) hunkScopes.set(key, hunkScope);
             }
           }
         }
@@ -2420,10 +2544,19 @@ export class CodeOperationService {
     for (const item of items) {
       const reference = references.get(`${String(item.operationId)}:${String(item.contentId)}`);
       if (reference === undefined) throw new CodeOperationServiceError("unauthorized");
+      const hunkCheckoutId = hunkScopes.get(
+        `${String(item.operationId)}:${String(item.contentId)}`,
+      );
+      if (hunkCheckoutId !== undefined)
+        this.#requireHunkEvidenceCurrent(windowId, threadId, hunkCheckoutId, admissionCurrent);
       const text = await this.#options.evidence.read?.(reference);
+      if (hunkCheckoutId !== undefined)
+        this.#requireHunkEvidenceCurrent(windowId, threadId, hunkCheckoutId, admissionCurrent);
       if (text === undefined) throw new CodeOperationServiceError("unavailable");
       result.push({ operationId: item.operationId, contentId: item.contentId, text });
     }
+    for (const checkoutId of hunkScopes.values())
+      this.#requireHunkEvidenceCurrent(windowId, threadId, checkoutId, admissionCurrent);
     return result;
   }
 
@@ -3022,6 +3155,19 @@ export class CodeOperationService {
         return this.#reviewRun(command, thread, root.checkoutRoot);
       case "merge-run":
         return this.#mergeRun(command, thread, root.checkoutRoot);
+      case "prepare-git-hunks":
+      case "stage-git-hunks":
+      case "unstage-git-hunks":
+      case "reverse-git-hunks":
+        return this.#selectedHunks(
+          command,
+          windowId,
+          thread,
+          checkout,
+          root,
+          git,
+          admissionCurrent,
+        );
       case "stage-git":
         if (git === undefined)
           return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
@@ -3703,10 +3849,201 @@ export class CodeOperationService {
     });
   }
 
+  #hunkCurrent(
+    windowId: WindowId,
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity,
+    root: NonNullable<Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>>,
+    admissionCurrent?: () => boolean,
+  ): () => boolean {
+    const threadProof = JSON.stringify(thread);
+    const checkoutProof = JSON.stringify(checkout);
+    return () => {
+      try {
+        const stored = this.#options.authority.readThread(thread.id);
+        const effective =
+          stored === undefined
+            ? undefined
+            : (this.#options.authority.effectiveThread?.(windowId, stored) ?? stored);
+        return (
+          admissionCurrent?.() === true &&
+          this.#options.authority.currentProjectAccess?.(windowId, thread.projectId) === true &&
+          JSON.stringify(effective) === threadProof &&
+          JSON.stringify(this.#options.authority.readCheckout(checkout.id)) === checkoutProof &&
+          root.rootCurrent?.() === true &&
+          admissionCurrent() === true
+        );
+      } catch {
+        return false;
+      }
+    };
+  }
+
+  async #selectedHunks(
+    command: Extract<
+      CodeOperationCommand,
+      {
+        readonly kind:
+          | "prepare-git-hunks"
+          | "stage-git-hunks"
+          | "unstage-git-hunks"
+          | "reverse-git-hunks";
+      }
+    >,
+    windowId: WindowId,
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity,
+    root: NonNullable<Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>>,
+    git: CodeOperationGitPort | undefined,
+    admissionCurrent?: () => boolean,
+  ): Promise<CodeOperationResult> {
+    const current = this.#hunkCurrent(windowId, thread, checkout, root, admissionCurrent);
+    if (root.rootIdentity === undefined)
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "The original checkout root cannot be verified. Refresh Review before trying again.",
+      );
+    const rootDigest = createHash("sha256")
+      .update(
+        JSON.stringify([
+          thread.id,
+          thread.projectId,
+          thread.bindingRevisionId,
+          checkout.id,
+          checkout.repositoryId,
+          root.checkoutRoot,
+          root.rootIdentity.device,
+          root.rootIdentity.inode,
+        ]),
+      )
+      .digest("hex");
+    if (!current())
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Checkout authority changed. Refresh Review before trying again.",
+      );
+    if (command.kind === "prepare-git-hunks") {
+      const comparison = await git?.prepareHunks?.({
+        checkoutId: checkout.id,
+        checkoutRoot: root.checkoutRoot,
+        scope: command.scope,
+        current,
+      });
+      if (!current())
+        return this.#failed(
+          command.operationId,
+          "unauthorized",
+          "Checkout authority changed. Refresh Review before trying again.",
+        );
+      if (comparison?.status !== "ready")
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          "Exact Git hunks are unavailable. Refresh the checkout and try again.",
+        );
+      return decodeCodeOperationResult({
+        kind: "git-hunks",
+        operationId: command.operationId,
+        threadId: thread.id,
+        checkoutId: checkout.id,
+        gitOperationId: command.gitOperationId,
+        scope: comparison.scope,
+        stateToken: comparison.stateToken,
+        digest: comparison.digest,
+        rootDigest,
+        hunks: comparison.hunks,
+        unavailable: comparison.unavailable,
+        diff: this.#options.evidence.put(comparison.diff.text, {
+          truncated: comparison.diff.truncated,
+        }),
+      });
+    }
+    const comparison = this.#replay(thread.id, command.comparisonOperationId, 0, 16)
+      .frames.map((frame) =>
+        frame.event.kind === "operation-result" ? frame.event.result : undefined,
+      )
+      .find((result) => result?.kind === "git-hunks");
+    const action =
+      command.kind === "stage-git-hunks"
+        ? "stage"
+        : command.kind === "unstage-git-hunks"
+          ? "unstage"
+          : "reverse";
+    if (
+      comparison?.kind !== "git-hunks" ||
+      comparison.threadId !== thread.id ||
+      comparison.checkoutId !== checkout.id ||
+      comparison.rootDigest !== rootDigest ||
+      comparison.scope !== (action === "unstage" ? "staged" : "unstaged") ||
+      command.selected.some((id) => !comparison.hunks.some((hunk) => hunk.id === id))
+    ) {
+      return this.#failed(
+        command.operationId,
+        "invalid",
+        "Select hunks from a current comparison in this thread and checkout.",
+      );
+    }
+    const applyHunks = git?.applyHunks?.bind(git);
+    if (applyHunks === undefined)
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "Selected Git hunks are unavailable.",
+      );
+    const writerCurrent = () =>
+      current() &&
+      (action !== "reverse" ||
+        (this.#options.turns.holdsTurn?.(String(thread.id)) !== true &&
+          ![...this.#startingTurns].some((turn) => turn.thread.id === thread.id) &&
+          this.#threadsWritingIn(root.checkoutRoot, thread.id).length === 0));
+    if (!writerCurrent())
+      return this.#failed(
+        command.operationId,
+        "conflict",
+        "A turn is writing to this checkout. Wait or stop it before reversing hunks.",
+      );
+    if (action === "reverse") {
+      const refusal = this.#checkoutOverwriteRefusal(thread, root.checkoutRoot, "discard");
+      if (refusal !== undefined) return this.#failed(command.operationId, ...refusal);
+    }
+    const applying = (async () => {
+      try {
+        return await applyHunks({
+          checkoutId: checkout.id,
+          checkoutRoot: root.checkoutRoot,
+          scope: comparison.scope,
+          action,
+          selected: command.selected,
+          expectedStateToken: comparison.stateToken,
+          expectedDigest: comparison.digest,
+          executionPolicy: thread.executionPolicy,
+          current: writerCurrent,
+        });
+      } catch {
+        return { status: "failed" as const };
+      }
+    })();
+    const result =
+      action === "reverse"
+        ? await this.#overwriteCheckout(root.checkoutRoot, applying)
+        : await applying;
+    return this.#gitMutation(
+      command.operationId,
+      command.gitOperationId,
+      action === "stage" ? "stage-hunks" : action === "unstage" ? "unstage-hunks" : "reverse-hunks",
+      result,
+    );
+  }
+
   #gitMutation(
     operationId: CodeOperationCommand["operationId"],
     gitOperationId: string,
     mutation:
+      | "stage-hunks"
+      | "unstage-hunks"
+      | "reverse-hunks"
       | "stage"
       | "unstage"
       | "discard"
@@ -5127,6 +5464,7 @@ function evidenceReferences(event: CodeOperationEvent): readonly CodeEvidenceRef
 function resultEvidenceReferences(result: CodeOperationResult): readonly CodeEvidenceReference[] {
   switch (result.kind) {
     case "git-observed":
+    case "git-hunks":
       return [result.diff];
     case "pull-request-review":
       return result.state === "observed" ? [result.description, result.diff] : [];
@@ -5166,14 +5504,19 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
     // shell command with a narrower surface, not a new kind of authority.
     case "run-scaffold":
       return "terminal";
+    case "prepare-git-hunks":
+      return "read";
+    case "stage-git-hunks":
     case "stage-git":
       return "stage";
+    case "unstage-git-hunks":
     case "unstage-git":
       return "unstage";
     // Drafting reads the checkout's own diff and writes a sentence. It
     // changes nothing, so it is an ordinary read.
     case "draft-git-text":
       return "read";
+    case "reverse-git-hunks":
     case "discard-git-changes":
       return "discard";
     case "restore-git-checkpoint":
@@ -5232,4 +5575,13 @@ function pullRequestState(
     baseBranch: pr.baseBranch,
     ...(draft === undefined ? {} : { draft }),
   });
+}
+
+function isSelectedHunkCommand(command: CodeOperationCommand): boolean {
+  return (
+    command.kind === "prepare-git-hunks" ||
+    command.kind === "stage-git-hunks" ||
+    command.kind === "unstage-git-hunks" ||
+    command.kind === "reverse-git-hunks"
+  );
 }

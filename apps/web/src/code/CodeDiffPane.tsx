@@ -20,6 +20,7 @@ import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { parseUnifiedDiff, type ParsedDiffFile } from "./unifiedDiff";
 import { UnifiedDiffList } from "./UnifiedDiffList";
+import { CodeSelectedHunks } from "./CodeSelectedHunks";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -293,6 +294,23 @@ function AvailableDiff(
           </label>
         )}
       </header>
+
+      {props.diff.state === "available" &&
+      props.createOperationId !== undefined &&
+      props.createGitOperationId !== undefined &&
+      props.executionPolicy !== undefined ? (
+        <CodeSelectedHunks
+          client={props.client}
+          threadId={props.diff.threadId}
+          checkoutId={props.diff.checkoutId}
+          executionPolicy={props.executionPolicy}
+          createOperationId={props.createOperationId}
+          createGitOperationId={props.createGitOperationId}
+          {...(props.requestApproval === undefined
+            ? {}
+            : { requestApproval: props.requestApproval })}
+        />
+      ) : null}
 
       {props.staleNotice === undefined ? null : (
         <OctantAlert className="code-diff-pane__warning" tone="warning">

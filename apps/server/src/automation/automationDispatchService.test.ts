@@ -1,10 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deriveAutomationOccurrenceKey,
+  decodeAutomationDefinition,
+  ReplayCursor,
   type AutomationDefinition,
   type AutomationRun,
   type UtcTimestamp,
@@ -21,7 +23,7 @@ import {
   AutomationDispatchService,
 } from "./automationDispatchService";
 import { AutomationEventStore } from "./automationEventStore";
-import { AutomationProjection } from "./automationProjection";
+import { AutomationProjection, hydrateAutomationProjection } from "./automationProjection";
 import { automationRunIdForOccurrence } from "./automationRunIdentity";
 import { AutomationSchedulerService } from "./automationSchedulerService";
 import type {
@@ -37,6 +39,21 @@ import {
   unavailableAutomationWorkDispatchPort,
 } from "./automationTestFixtures";
 import { buildAutomationAuthorityFactsFromHost } from "./automationDispatchService";
+import {
+  WorkTurnProjection,
+  hydrateWorkTurnProjectionFromJournal,
+} from "../work/workTurnProjection";
+import { createAutomationWorkDispatchPort } from "./automationWorkDispatchPort";
+import { decodeWorkThreadId } from "@octant/contracts";
+import {
+  decodeStartWorkThreadTurnCommand,
+  decodeWorkTurnAccepted,
+  decodeWorkTurnUpdated,
+  decodeWorkTurnState,
+  type WorkTurnUpdated,
+  type WorkTurnFailure,
+  WORK_TURN_CAPABILITIES,
+} from "@octant/contracts/work-turns";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 const directories: Array<string> = [];
@@ -59,15 +76,21 @@ function nextUuid(): string {
 }
 
 interface Session {
+  readonly databasePath: string;
+  readonly journal: Journal;
   readonly connection: SqliteConnection;
   readonly store: AutomationEventStore;
   readonly projection: AutomationProjection;
 }
 
-function openSession(): Session {
-  const directory = mkdtempSync(join(tmpdir(), "octant-automation-dispatch-"));
-  directories.push(directory);
-  const connection = openSqlite(join(directory, "octant.sqlite3"));
+function openSession(existingPath?: string): Session {
+  const directory =
+    existingPath === undefined
+      ? mkdtempSync(join(tmpdir(), "octant-automation-dispatch-"))
+      : dirname(existingPath);
+  if (existingPath === undefined) directories.push(directory);
+  const databasePath = existingPath ?? join(directory, "octant.sqlite3");
+  const connection = openSqlite(databasePath);
   applyMigrations(connection, MIGRATIONS, () => "2026-08-10T12:00:00.000Z");
   const runtime = createPhase1RuntimeRegistries();
   const journal = new Journal({
@@ -77,7 +100,12 @@ function openSession(): Session {
     clock: () => "2026-08-10T12:00:00.000Z",
   });
   const store = new AutomationEventStore({ journal, uuid: nextUuid, actor });
-  return { connection, store, projection: runtime.automationProjection };
+  if (
+    existingPath !== undefined &&
+    hydrateAutomationProjection({ store, projection: runtime.automationProjection }) !== "ok"
+  )
+    throw new Error("Automation history did not rehydrate");
+  return { databasePath, connection, journal, store, projection: runtime.automationProjection };
 }
 
 const INTERVAL_ANCHOR = "2026-08-10T13:00:00.000Z";
@@ -291,7 +319,425 @@ function alwaysAdmit(): AutomationCapacityAdmissionPort {
   };
 }
 
+async function persistedWorkRoutine(
+  options: {
+    readonly status?: WorkTurnUpdated["status"];
+    readonly failure?: WorkTurnFailure;
+    readonly receipt?: string;
+  } = {},
+) {
+  const session = openSession();
+  try {
+    const definition = workDefinition();
+    const run = claimQueuedRun(session, definition);
+    const workTurns = new WorkTurnProjection();
+    let starts = 0;
+    const actualWork = createAutomationWorkDispatchPort({
+      threads: {
+        bootstrap: async () => ({ threads: [] }),
+        execute: async (_scope, raw) => {
+          if (typeof raw !== "object" || raw === null || !("threadId" in raw))
+            throw new Error("Missing actual created thread identity");
+          return { kind: "thread-created", thread: { id: decodeWorkThreadId(raw.threadId) } };
+        },
+      },
+      turns: {
+        startFirstTurn: async (_scope, raw) => {
+          ++starts;
+          const command = decodeStartWorkThreadTurnCommand(raw);
+          const accepted = decodeWorkTurnAccepted({
+            kind: "turn-accepted",
+            requestId: command.requestId,
+            threadId: command.threadId,
+            turnId: command.turnId,
+            projectId: definition.projectId,
+            authority: command.authority,
+            providerSessionId: run.firstTurnRequestId,
+            prompt: command.prompt,
+            capabilities: WORK_TURN_CAPABILITIES,
+            acceptedAt: "2026-08-10T13:00:23.000Z",
+          });
+          const completed = decodeWorkTurnUpdated({
+            kind: "turn-updated",
+            requestId: command.requestId,
+            threadId: command.threadId,
+            turnId: command.turnId,
+            status: options.status ?? "completed",
+            ...(options.failure === undefined ? {} : { failure: options.failure }),
+            response: "Controlled provider finished",
+            updatedAt: "2026-08-10T13:00:23.000Z",
+          });
+          session.journal.append({
+            aggregate: { aggregateType: "work-turn", aggregateId: command.requestId },
+            expectedVersion: 0,
+            events: [
+              {
+                eventId: nextUuid(),
+                eventName: "work.turn-accepted@1",
+                eventVersion: 1,
+                correlationId: nextUuid(),
+                actor,
+                payload: accepted,
+                occurredAt: accepted.acceptedAt,
+              },
+              {
+                eventId: nextUuid(),
+                eventName: "work.turn-updated@1",
+                eventVersion: 1,
+                correlationId: nextUuid(),
+                actor,
+                payload: completed,
+                occurredAt: completed.updatedAt,
+              },
+            ],
+          });
+          workTurns.apply(accepted);
+          workTurns.apply(completed);
+          const persisted = workTurns.lookup(command.requestId);
+          if (persisted === undefined) throw new Error("Missing journaled Work turn");
+          return { kind: "accepted", turn: persisted };
+        },
+      },
+      clock: () => "2026-08-10T13:00:23.000Z" as UtcTimestamp,
+      uuid: nextUuid,
+    });
+    const work: AutomationWorkDispatchPort =
+      options.receipt === undefined
+        ? actualWork
+        : {
+            ...actualWork,
+            startOrRecoverFirstTurn: async (input) => {
+              const outcome = await actualWork.startOrRecoverFirstTurn(input);
+              return outcome.kind === "accepted"
+                ? { ...outcome, runtimeReceipt: options.receipt ?? outcome.runtimeReceipt }
+                : outcome;
+            },
+          };
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: createCodePort().port,
+      work,
+      capacity: alwaysAdmit(),
+      resolveFacts: () => matchingFacts(definition),
+      now: () => "2026-08-10T13:00:23.000Z" as UtcTimestamp,
+    });
+    await dispatcher.dispatchNow(definition.id, run.id);
+    return { session, definition, run, workTurns, startCount: () => starts };
+  } catch (error) {
+    session.connection.close();
+    throw error;
+  }
+}
+
 describe("AutomationDispatchService", () => {
+  it("releases the routine slot after the persisted first Work turn has completed", async () => {
+    const { session, definition, run, workTurns, startCount } = await persistedWorkRoutine();
+    try {
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+      expect(workTurns.listForProject(definition.projectId)[0]?.status).toBe("completed");
+      expect(session.projection.getRun(run.id)?.firstTurnAcceptance?.runtimeReceipt).toBe(
+        `work-turn:${run.firstTurnRequestId}`,
+      );
+      const scheduler = new AutomationSchedulerService({
+        store: session.store,
+        projection: session.projection,
+        dispatch: { offer: () => undefined },
+        readWorkTurn: (requestId) => workTurns.lookup(requestId),
+        now: () => "2026-08-10T14:00:10.000Z" as UtcTimestamp,
+      });
+      const next = scheduler.runPass();
+      expect.soft(session.projection.getRun(run.id)?.lifecycle).toBe("completed");
+      expect.soft(next.deferredAutomationIds).not.toContain(definition.id);
+      expect.soft(next.claimedRunIds).toHaveLength(1);
+      expect(startCount()).toBe(1);
+    } finally {
+      session.connection.close();
+    }
+  });
+  it.each([
+    "missing-reader",
+    "missing-turn",
+    "request",
+    "thread",
+    "project",
+    "authority-project",
+    "host",
+    "binding",
+    "provider",
+    "model",
+    "receipt",
+  ] as const)("retains the active slot with %s evidence", async (variant) => {
+    const fixture = await persistedWorkRoutine(
+      variant === "receipt" ? { receipt: "work-turn:unrelated" } : {},
+    );
+    const { session, run, workTurns, startCount } = fixture;
+    try {
+      const other = "bb000000-0000-4000-8000-000000000010";
+      const read: NonNullable<
+        ConstructorParameters<typeof AutomationSchedulerService>[0]["readWorkTurn"]
+      > = (requestId) => {
+        const turn = workTurns.lookup(requestId);
+        if (turn === undefined || variant === "missing-turn") return undefined;
+        switch (variant) {
+          case "request":
+            return decodeWorkTurnState({ ...turn, requestId: other });
+          case "thread":
+            return decodeWorkTurnState({ ...turn, threadId: other });
+          case "project":
+            return decodeWorkTurnState({ ...turn, projectId: other });
+          case "authority-project":
+            return decodeWorkTurnState({
+              ...turn,
+              authority: { ...turn.authority, projectId: other },
+            });
+          case "host":
+            return decodeWorkTurnState({
+              ...turn,
+              authority: { ...turn.authority, hostId: "other-host" },
+            });
+          case "binding":
+            return decodeWorkTurnState({
+              ...turn,
+              authority: { ...turn.authority, bindingRevisionId: other },
+            });
+          case "provider":
+            return decodeWorkTurnState({
+              ...turn,
+              authority: { ...turn.authority, providerInstanceId: other },
+            });
+          case "model":
+            return decodeWorkTurnState({
+              ...turn,
+              authority: { ...turn.authority, modelId: "other-model" },
+            });
+          default:
+            return turn;
+        }
+      };
+      const scheduler = new AutomationSchedulerService({
+        store: session.store,
+        projection: session.projection,
+        dispatch: { offer: () => undefined },
+        ...(variant === "missing-reader" ? {} : { readWorkTurn: read }),
+        now: () => "2026-08-10T14:00:10.000Z" as UtcTimestamp,
+      });
+      const result = scheduler.runPass();
+      expect(result.errors).toEqual([]);
+      expect(result.claimedRunIds).toEqual([]);
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+      expect(startCount()).toBe(1);
+    } finally {
+      session.connection.close();
+    }
+  });
+
+  it.each(["cancelled", "failed", "waiting"] as const)(
+    "records actual Work %s truth without replay",
+    async (status) => {
+      const { session, run, workTurns, startCount } = await persistedWorkRoutine({
+        status,
+      });
+      try {
+        const scheduler = new AutomationSchedulerService({
+          store: session.store,
+          projection: session.projection,
+          dispatch: { offer: () => undefined },
+          readWorkTurn: (id) => workTurns.lookup(id),
+          now: () => "2026-08-10T14:00:10.000Z" as UtcTimestamp,
+        });
+        const result = scheduler.runPass();
+        const after = session.projection.getRun(run.id);
+        expect(result.errors).toEqual([]);
+        expect(after?.lifecycle).toBe(status === "cancelled" ? "interrupted" : status);
+        if (status === "failed") expect(after?.failure?.reason).toBe("runtime-failed");
+        expect(result.claimedRunIds).toHaveLength(status === "waiting" ? 0 : 1);
+        scheduler.runPass();
+        expect(startCount()).toBe(1);
+      } finally {
+        session.connection.close();
+      }
+    },
+  );
+
+  it.each(["paused", "archived"] as const)(
+    "settles an already accepted run while its definition is %s",
+    async (lifecycle) => {
+      const { session, definition, run, workTurns } = await persistedWorkRoutine();
+      try {
+        const current = session.projection.getDefinition(definition.id);
+        if (current === undefined) throw new Error("Missing definition");
+        session.store.appendDefinitionLifecycleChanged({
+          automation: decodeAutomationDefinition({
+            ...current,
+            lifecycle,
+            nextDueAt: null,
+            version: Number(current.version) + 1,
+            updatedAt: "2026-08-10T13:00:24.000Z",
+          }),
+          previousLifecycle: current.lifecycle,
+          expectedVersion: current.version,
+        });
+        const scheduler = new AutomationSchedulerService({
+          store: session.store,
+          projection: session.projection,
+          dispatch: { offer: () => undefined },
+          readWorkTurn: (id) => workTurns.lookup(id),
+          now: () => "2026-08-10T14:00:10.000Z" as UtcTimestamp,
+        });
+        expect(scheduler.runPass().claimedRunIds).toEqual([]);
+        expect(session.projection.getRun(run.id)?.lifecycle).toBe("completed");
+        expect(session.projection.getDefinition(definition.id)?.lifecycle).toBe(lifecycle);
+      } finally {
+        session.connection.close();
+      }
+    },
+  );
+
+  it("uses the run snapshot after the current definition is edited", async () => {
+    const { session, definition, run, workTurns } = await persistedWorkRoutine();
+    try {
+      const current = session.projection.getDefinition(definition.id);
+      if (current === undefined) throw new Error("Missing definition");
+      session.store.appendDefinitionUpdated({
+        automation: decodeAutomationDefinition({
+          ...current,
+          executionProfile: { ...current.executionProfile, modelId: "updated-model" },
+          taskPrompt: "A later task",
+          definitionRevision: Number(current.definitionRevision) + 1,
+          version: Number(current.version) + 1,
+          updatedAt: "2026-08-10T13:00:24.000Z",
+        }),
+        previousDefinitionRevision: current.definitionRevision,
+        expectedVersion: current.version,
+      });
+      const scheduler = new AutomationSchedulerService({
+        store: session.store,
+        projection: session.projection,
+        dispatch: { offer: () => undefined },
+        readWorkTurn: (id) => workTurns.lookup(id),
+        now: () => "2026-08-10T13:00:30.000Z" as UtcTimestamp,
+      });
+      expect(scheduler.runPass().errors).toEqual([]);
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("completed");
+      expect(session.projection.getRun(run.id)?.definitionSnapshot.executionProfile.modelId).toBe(
+        definition.executionProfile.modelId,
+      );
+    } finally {
+      session.connection.close();
+    }
+  });
+
+  it("does not admit the next occurrence until terminal status is durably committed", async () => {
+    const { session, run, workTurns, startCount } = await persistedWorkRoutine();
+    try {
+      const append = session.store.appendRunStatusChanged.bind(session.store);
+      const failed = vi
+        .spyOn(session.store, "appendRunStatusChanged")
+        .mockImplementation((input) => {
+          if (input.lifecycle === "completed") throw new Error("Synthetic storage failure");
+          return append(input);
+        });
+      const scheduler = new AutomationSchedulerService({
+        store: session.store,
+        projection: session.projection,
+        dispatch: { offer: () => undefined },
+        readWorkTurn: (id) => workTurns.lookup(id),
+        now: () => "2026-08-10T14:00:10.000Z" as UtcTimestamp,
+      });
+      const refused = scheduler.runPass();
+      expect(refused.errors).toHaveLength(1);
+      expect(refused.claimedRunIds).toEqual([]);
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+      failed.mockRestore();
+      expect(scheduler.runPass().claimedRunIds).toHaveLength(1);
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("completed");
+      expect(startCount()).toBe(1);
+    } finally {
+      session.connection.close();
+    }
+  });
+
+  it("replays a committed terminal status after a failed notification without replaying the provider", async () => {
+    const fixture = await persistedWorkRoutine();
+    const { session, definition, run, workTurns, startCount } = fixture;
+    const notify = vi.fn(() => {
+      throw new Error("Synthetic notification unavailable");
+    });
+    const first = new AutomationSchedulerService({
+      store: session.store,
+      projection: session.projection,
+      dispatch: { offer: () => undefined },
+      readWorkTurn: (id) => workTurns.lookup(id),
+      onRunStatusChanged: notify,
+      now: () => "2026-08-10T13:00:30.000Z" as UtcTimestamp,
+    });
+    try {
+      expect(first.runPass().errors).toEqual([]);
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("completed");
+      expect(notify).toHaveBeenCalledOnce();
+    } finally {
+      session.connection.close();
+    }
+    const restarted = openSession(session.databasePath);
+    try {
+      const turns = new WorkTurnProjection();
+      expect(
+        hydrateWorkTurnProjectionFromJournal({
+          projection: turns,
+          replay: (cursor) =>
+            restarted.journal.replayAggregateType({
+              ...Schema.decodeUnknownSync(ReplayCursor)({
+                afterSequence: cursor.afterSequence,
+                limit: cursor.limit,
+              }),
+              aggregateType: cursor.aggregateType ?? "work-turn",
+            }),
+        }),
+      ).toBe("ok");
+      const offers: AutomationRun[] = [];
+      const scheduler = new AutomationSchedulerService({
+        store: restarted.store,
+        projection: restarted.projection,
+        dispatch: { offer: (input) => offers.push(input.run) },
+        readWorkTurn: (id) => turns.lookup(id),
+        onRunStatusChanged: notify,
+        now: () => "2026-08-10T14:00:10.000Z" as UtcTimestamp,
+      });
+      expect(scheduler.runPass().claimedRunIds).toHaveLength(1);
+      expect(scheduler.runPass().claimedRunIds).toEqual([]);
+      expect(restarted.projection.getRun(run.id)?.lifecycle).toBe("completed");
+      expect(
+        restarted.projection.listRuns({ automationId: definition.id, limit: 20 }).runs,
+      ).toHaveLength(2);
+      expect(offers).toHaveLength(1);
+      expect(notify).toHaveBeenCalledOnce();
+      expect(startCount()).toBe(1);
+    } finally {
+      restarted.connection.close();
+    }
+  });
+
+  it("records an interrupted Work failure as interruption", async () => {
+    const { session, run, workTurns } = await persistedWorkRoutine({
+      status: "failed",
+      failure: { category: "interrupted", message: "Synthetic stopped provider" },
+    });
+    try {
+      const scheduler = new AutomationSchedulerService({
+        store: session.store,
+        projection: session.projection,
+        dispatch: { offer: () => undefined },
+        readWorkTurn: (id) => workTurns.lookup(id),
+        now: () => "2026-08-10T13:00:30.000Z" as UtcTimestamp,
+      });
+      expect(scheduler.runPass().errors).toEqual([]);
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("interrupted");
+    } finally {
+      session.connection.close();
+    }
+  });
+
   it("creates exactly one Code thread per occurrence and links the dispatch intent", async () => {
     const session = openSession();
     const definition = codeDefinition();

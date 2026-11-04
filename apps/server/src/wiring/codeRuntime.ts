@@ -114,11 +114,20 @@ function withCodeOperationRuntime(
     conversationWindow: (windowId, threadId, request) =>
       runtime.conversationWindow(windowId, threadId, request),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
-    readOperationContent: (windowId, threadId, operationId, contentId) =>
-      runtime.readEvidence(windowId, threadId, operationId, decodeCodeEvidenceContentId(contentId)),
+    readOperationContent: (windowId, threadId, operationId, contentId, admissionCurrent) =>
+      runtime.readEvidence(
+        windowId,
+        threadId,
+        operationId,
+        decodeCodeEvidenceContentId(contentId),
+        admissionCurrent,
+      ),
     ...(readEvidenceBatch === undefined
       ? {}
-      : { readOperationContents: (windowId, input) => readEvidenceBatch(windowId, input) }),
+      : {
+          readOperationContents: (windowId, input, admissionCurrent) =>
+            readEvidenceBatch(windowId, input, admissionCurrent),
+        }),
     saveFile: (windowId, input) => service.saveFile(windowId, input),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
@@ -628,6 +637,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }),
         windowAccess: {
           canAccessProject: canAccessCodeProject,
+          currentProjectAccess: (windowId, projectId) =>
+            codeProjectAccess.standingAuthority(() => canAccessCodeProject(windowId, projectId)),
           standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
           retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
@@ -645,6 +656,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           );
           return {
             checkoutRoot: root.rootPath,
+            rootIdentity: root.rootIdentity,
+            ...(root.current === undefined ? {} : { rootCurrent: root.current }),
             workingDirectory,
             shell: defaultTerminalShell(),
             credentialReferences: [],

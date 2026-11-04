@@ -1,5 +1,7 @@
 import {
   decodeAutomationDefinitionDraft,
+  decodeAutomationTrigger,
+  type AutomationFileArrivalTrigger,
   type AutomationAuthorityProfileReceipt,
   type AutomationBindingReceipt,
   type AutomationBlockReason,
@@ -135,6 +137,8 @@ export function automationTriggerSummary(
   options: AutomationFormatOptions = {},
 ): string {
   switch (trigger.kind) {
+    case "file-arrival":
+      return `File arrivals in ${trigger.directory}; at most ${trigger.automaticStartLimit} automatic runs per arm`;
     case "once":
       return `Once at ${formatAutomationInstant(trigger.scheduledAt, options)}`;
     case "interval":
@@ -231,6 +235,7 @@ export interface AutomationEditorCatalog {
 }
 
 export type AutomationTriggerFormValue =
+  | AutomationFileArrivalTrigger
   | { readonly kind: "once"; readonly scheduledAt: string }
   | { readonly kind: "interval"; readonly anchorAt: string; readonly intervalMinutes: number }
   | {
@@ -242,6 +247,17 @@ export type AutomationTriggerFormValue =
 
 /** "project" follows the Project's level; the rest cap a run, never raise it. */
 export type AutomationRunLevelChoice = "project" | AutomationRunLevel;
+
+export const AUTOMATION_RUN_LEVEL_OPTIONS: ReadonlyArray<{
+  readonly id: AutomationRunLevelChoice;
+  readonly label: string;
+}> = [
+  { id: "ask-first", label: "Ask first" },
+  { id: "auto-accept-edits", label: "Accept edits" },
+  { id: "auto", label: "Auto" },
+  { id: "full-access", label: "Full access" },
+  { id: "project", label: "The Project's mode" },
+];
 
 export interface AutomationDraftFormInput {
   readonly displayName: string;
@@ -301,6 +317,15 @@ export function isValidAutomationTimeZone(timeZone: string): boolean {
 /** What is wrong with a schedule as entered, in the editor's words; empty when it is valid. */
 export function automationTriggerIssues(trigger: AutomationTriggerFormValue): readonly string[] {
   switch (trigger.kind) {
+    case "file-arrival":
+      try {
+        decodeAutomationTrigger(trigger);
+        return [];
+      } catch {
+        return [
+          "Choose an existing Project-relative input folder, valid comma-separated suffixes and exclusions, 2–60 settling seconds and 1–32 automatic runs per arm.",
+        ];
+      }
     case "once":
       return isStrictUtcInstant(trigger.scheduledAt) ? [] : ["Choose a valid start time."];
     case "interval": {
@@ -330,6 +355,12 @@ export function automationTriggerIssues(trigger: AutomationTriggerFormValue): re
 }
 
 function normalizedTrigger(trigger: AutomationTriggerFormValue): unknown {
+  if (trigger.kind === "file-arrival")
+    return {
+      ...trigger,
+      includeExtensions: [...new Set(trigger.includeExtensions)],
+      excludeDirectories: [...new Set(trigger.excludeDirectories)],
+    };
   if (trigger.kind !== "weekly-local") return trigger;
   return {
     kind: "weekly-local",
@@ -369,6 +400,10 @@ export function buildAutomationDraft(input: AutomationDraftFormInput): Automatio
   }
   issues.push(...crossConsistencyIssues(input));
   issues.push(...automationTriggerIssues(input.trigger));
+  if (input.trigger.kind === "file-arrival" && input.mode !== "work")
+    issues.push(
+      "File arrivals start Work routines only. Code input transfer is not available yet.",
+    );
   if (targetSummary.length === 0) issues.push("Describe the delivery target.");
   if (targetSummary.length > MAX_AUTOMATION_TARGET_LENGTH) {
     issues.push(`Keep the delivery target under ${MAX_AUTOMATION_TARGET_LENGTH} characters.`);

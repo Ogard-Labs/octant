@@ -988,14 +988,16 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
   }
   if (
     definition.lifecycle === "enabled" &&
-    (definition.trigger.kind === "once"
-      ? definition.nextDueAt !== definition.trigger.scheduledAt
-      : definition.nextDueAt === null ||
-        !recurringDueMatchesTrigger(
-          definition.trigger,
-          definition.nextDueAt,
-          definition.nextDueResolution,
-        ))
+    (definition.trigger.kind === "file-arrival"
+      ? definition.nextDueAt !== null
+      : definition.trigger.kind === "once"
+        ? definition.nextDueAt !== definition.trigger.scheduledAt
+        : definition.nextDueAt === null ||
+          !recurringDueMatchesTrigger(
+            definition.trigger,
+            definition.nextDueAt,
+            definition.nextDueResolution,
+          ))
   ) {
     return reject(
       "invalid-definition",
