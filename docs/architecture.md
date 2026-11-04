@@ -626,6 +626,25 @@ host lends no browser; Apple or Android when the host has no toolchain to
 lend; the planner's `octant_board` and `octant_propose_thread` outside the
 designated planner thread. Browser shares one definition across modes.
 
+Omission is decided per session where the runtime keeps its own tool list,
+because a tool list sits at the start of a provider's cached prompt and any
+change to it re-bills the whole conversation:
+
+- **Claude Code** lists a tool from the first turn that offers it until the
+  session ends. A tool a later turn adds reconnects the in-process server
+  (removed, then added again), because Claude Code ignored a replacement
+  server under the same name and kept the tools it first listed (2.1.211
+  against a local stand-in endpoint). A listed tool the turn does not offer
+  stays listed and is refused before it runs, by the permission callback and
+  the pre-tool hook with "This Octant tool is not available in this turn",
+  and by the server itself if a call still arrives. A turn that offers no
+  tools leaves the server connected. A new session lists only what its first
+  turn offers.
+- **Codex** takes its tools in `thread/start.dynamicTools`, which
+  `thread/resume` does not accept, so a Codex thread keeps the tools it
+  started with; one not offered in a later turn is refused by the host's tool
+  policy, and one first offered later does not reach that thread.
+
 Each mode offers only its admitted tools, so every runtime receives the same
 definitions without a separate global tool installation or prompt catalogue,
 through the transport its adapter verified:

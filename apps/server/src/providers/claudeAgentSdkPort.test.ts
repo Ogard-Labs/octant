@@ -44,7 +44,11 @@ class FakeQuery implements ClaudeAgentSdkQueryLike {
   readonly supportedModels = vi.fn(async () => initialization.models);
   readonly accountInfo = vi.fn(async () => initialization.account);
   readonly close = vi.fn(() => undefined);
-  readonly setMcpServers = vi.fn(async () => ({ added: ["octant"], removed: [], errors: {} }));
+  readonly setMcpServers = vi.fn(async (_servers: Readonly<Record<string, unknown>>) => ({
+    added: ["octant"],
+    removed: [],
+    errors: {},
+  }));
   getContextUsage?: () => Promise<unknown>;
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (options?: {
     readonly skipBehaviors?: boolean;
@@ -188,6 +192,79 @@ describe("Claude Agent SDK port", () => {
         }),
       ),
     );
+  });
+
+  describe("a session's Octant tool list", () => {
+    const alpha = { name: "octant_alpha", inputSchema: { type: "object" } } as const;
+    const bravo = { name: "octant_bravo", inputSchema: { type: "object" } } as const;
+    const answer = async () => ({ resultJson: "{}", isError: false });
+    const runTurns = (turns: ReadonlyArray<ReadonlyArray<typeof alpha | typeof bravo>>) => {
+      const harness = makeHarness();
+      const decisions: Array<Record<string, unknown>> = [];
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery(openInput);
+            yield* Stream.runHead(query.messages);
+            const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+            const permission = harness.invocation!.options.canUseTool;
+            for (const tools of turns) {
+              yield* query.send({
+                text: "turn",
+                appManagedTools: tools,
+                ...(tools.length === 0 ? {} : { onAppToolCall: answer }),
+              });
+              yield* Effect.promise(() => iterator.next());
+            }
+            for (const name of ["mcp__octant__octant_alpha", "mcp__octant__octant_bravo"]) {
+              decisions.push(
+                yield* Effect.promise(() =>
+                  permission(
+                    name,
+                    {},
+                    {
+                      signal: new AbortController().signal,
+                      toolUseID: `tool-${name}`,
+                      requestId: "request-1",
+                    },
+                  ),
+                ),
+              );
+            }
+          }),
+        ),
+      ).then(() => ({ calls: harness.query.setMcpServers.mock.calls, decisions }));
+    };
+
+    test("reconnects the tool server when a later turn adds a tool, so the model can see it", async () => {
+      const { calls, decisions } = await runTurns([[alpha], [alpha, bravo]]);
+      expect(calls.map(([servers]) => Object.keys(servers))).toEqual([["octant"], [], ["octant"]]);
+      expect(decisions).toEqual([
+        { behavior: "allow", updatedInput: {} },
+        { behavior: "allow", updatedInput: {} },
+      ]);
+    });
+
+    test("keeps a tool listed but refuses it once a later turn stops offering it, leaving the list untouched", async () => {
+      const { calls, decisions } = await runTurns([[alpha, bravo], [alpha]]);
+      expect(calls).toHaveLength(1);
+      expect(decisions).toEqual([
+        { behavior: "allow", updatedInput: {} },
+        { behavior: "deny", message: "This Octant tool is not available in this turn." },
+      ]);
+    });
+
+    test("keeps the tool server connected through a turn that offers no tools", async () => {
+      const { calls, decisions } = await runTurns([[alpha], []]);
+      expect(calls).toHaveLength(1);
+      expect(decisions).toEqual([
+        { behavior: "deny", message: "This Octant tool is not available in this turn." },
+        {
+          behavior: "deny",
+          message: "Claude requested a tool outside the configured allowlist.",
+        },
+      ]);
+    });
   });
 
   test("constructs an isolated streaming query with exact root, executable, resume, policy, and tools", async () => {

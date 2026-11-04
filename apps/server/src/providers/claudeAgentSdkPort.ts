@@ -515,6 +515,46 @@ interface ClaudeAgentSdkHookOutput {
   };
 }
 
+/** Why a listed Octant tool the current turn does not offer is refused. */
+const WITHDRAWN_TOOL_MESSAGE = "This Octant tool is not available in this turn.";
+const WITHDRAWN_TOOL_ANSWER: ManagedToolAnswer = {
+  resultJson: '{"error":"tool-unavailable"}',
+  isError: true,
+};
+
+/**
+ * The session's tool list after a turn offers `offered`: unchanged when it
+ * already lists every offered tool as offered, otherwise the listed tools
+ * followed by each new one, with a changed definition replacing the listed
+ * one in place. A listed tool the turn does not offer is kept.
+ */
+function growToolListing(
+  listed: ReadonlyArray<ProviderToolDefinition>,
+  offered: ReadonlyArray<ProviderToolDefinition>,
+):
+  | { readonly kind: "unchanged" }
+  | { readonly kind: "grown"; readonly tools: ReadonlyArray<ProviderToolDefinition> }
+  | { readonly kind: "invalid" } {
+  const names = new Set<string>();
+  for (const tool of offered) {
+    if (names.has(tool.name)) return { kind: "invalid" };
+    names.add(tool.name);
+  }
+  const tools = [...listed];
+  let grown = false;
+  for (const tool of offered) {
+    const index = tools.findIndex((candidate) => candidate.name === tool.name);
+    if (index === -1) {
+      tools.push(tool);
+      grown = true;
+    } else if (JSON.stringify(tools[index]) !== JSON.stringify(tool)) {
+      tools[index] = tool;
+      grown = true;
+    }
+  }
+  return grown ? { kind: "grown", tools } : { kind: "unchanged" };
+}
+
 /** The settings files a query reads: the account's home, the Project's, and the Project's local file. */
 export type ClaudeSettingSource = "user" | "project" | "local";
 
@@ -922,12 +962,24 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           let managedServer:
             | import("@modelcontextprotocol/sdk/server/mcp.js").McpServer
             | undefined;
-          let managedToolNames: ReadonlyArray<string> = [];
-          const isManagedTool = (name: string) => managedToolNames.includes(name);
+          // The session's Octant tool list only grows. Claude Code keeps the
+          // tools a server listed when it first connected: replacing the
+          // server under the same name changed nothing the model saw (2.1.211
+          // against a local stand-in endpoint), and any change to the list
+          // re-bills the whole conversation's cached prefix. So a tool joins
+          // the list the first time a turn offers it, stays listed after, and
+          // is refused while the current turn does not offer it.
+          let listedTools: ReadonlyArray<ProviderToolDefinition> = [];
+          let offeredToolNames: ReadonlyArray<string> = [];
+          let answerToolCall: ClaudeUserMessage["onAppToolCall"];
+          const managedName = (name: string) => `mcp__octant__${name}`;
+          const isManagedTool = (name: string) => offeredToolNames.includes(name);
+          const isWithdrawnTool = (name: string) =>
+            !isManagedTool(name) && listedTools.some((tool) => managedName(tool.name) === name);
           const decodingInput = (): ClaudeOpenQueryInput => ({
             ...input,
-            tools: [...input.tools, ...managedToolNames],
-            managedToolServer: managedToolNames.length > 0,
+            tools: [...input.tools, ...listedTools.map((tool) => managedName(tool.name))],
+            managedToolServer: listedTools.length > 0,
           });
           const closeCoordinator = makeClaudeCloseCoordinator(
             () => prompt.close(),
@@ -971,6 +1023,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               // This only authorizes forwarding to the app. The in-process
               // handler still waits for the server's tool policy and answer.
               if (isManagedTool(toolName)) return { behavior: "allow", updatedInput: toolInput };
+              if (isWithdrawnTool(toolName)) {
+                return { behavior: "deny", message: WITHDRAWN_TOOL_MESSAGE };
+              }
               if (!claudeOffersTool(input, toolName)) {
                 return {
                   behavior: "deny",
@@ -1042,6 +1097,15 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     hookSpecificOutput: {
                       hookEventName: "PreToolUse",
                       permissionDecision: "allow",
+                    },
+                  };
+                }
+                if (isWithdrawnTool(hookInput.tool_name)) {
+                  return {
+                    hookSpecificOutput: {
+                      hookEventName: "PreToolUse",
+                      permissionDecision: "deny",
+                      permissionDecisionReason: WITHDRAWN_TOOL_MESSAGE,
                     },
                   };
                 }
@@ -1332,41 +1396,51 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               messages,
               send: ({ text, appManagedTools = [], onAppToolCall }) =>
                 request(async () => {
-                  if (appManagedTools.length > 0 || managedServer !== undefined) {
-                    if (
-                      query?.setMcpServers === undefined ||
-                      (appManagedTools.length > 0 && onAppToolCall === undefined)
-                    ) {
+                  if (appManagedTools.length > 0) {
+                    if (query?.setMcpServers === undefined || onAppToolCall === undefined) {
                       throw protocol("App tool transport is unavailable.");
                     }
-                    const prepared =
-                      appManagedTools.length === 0 || onAppToolCall === undefined
-                        ? undefined
-                        : createManagedMcpTools(appManagedTools, onAppToolCall);
-                    if (prepared?.kind === "invalid")
+                    const listing = growToolListing(listedTools, appManagedTools);
+                    if (listing.kind === "invalid")
                       throw protocol("App tool catalogue is invalid.");
-                    const next = prepared?.server;
-                    const previous = managedServer;
-                    const previousNames = managedToolNames;
-                    managedToolNames = appManagedTools.map((tool) => `mcp__octant__${tool.name}`);
-                    try {
-                      const result = await query.setMcpServers(
-                        next === undefined
-                          ? {}
-                          : {
-                              octant: { type: "sdk", name: "octant", instance: next },
-                            },
+                    if (listing.kind === "grown") {
+                      const prepared = createManagedMcpTools(
+                        listing.tools,
+                        (name, inputJson, signal) => {
+                          const answer = answerToolCall;
+                          return offeredToolNames.includes(managedName(name)) &&
+                            answer !== undefined
+                            ? answer(name, inputJson, signal)
+                            : Promise.resolve(WITHDRAWN_TOOL_ANSWER);
+                        },
                       );
-                      if (Object.keys(result.errors).length > 0)
-                        throw protocol("App tool transport could not connect.");
-                      managedServer = next;
-                      await previous?.close();
-                    } catch (error) {
-                      managedToolNames = previousNames;
-                      await next?.close();
-                      throw error;
+                      if (prepared.kind === "invalid")
+                        throw protocol("App tool catalogue is invalid.");
+                      const previous = managedServer;
+                      try {
+                        // Claude Code reloads a server's tools only when the
+                        // server is removed and added again.
+                        if (previous !== undefined) {
+                          managedServer = undefined;
+                          listedTools = [];
+                          await query.setMcpServers({});
+                          await previous.close();
+                        }
+                        const result = await query.setMcpServers({
+                          octant: { type: "sdk", name: "octant", instance: prepared.server },
+                        });
+                        if (Object.keys(result.errors).length > 0)
+                          throw protocol("App tool transport could not connect.");
+                        managedServer = prepared.server;
+                        listedTools = listing.tools;
+                      } catch (error) {
+                        await prepared.server.close();
+                        throw error;
+                      }
                     }
                   }
+                  offeredToolNames = appManagedTools.map((tool) => managedName(tool.name));
+                  answerToolCall = onAppToolCall;
                   // Read at each prompt, not from the last successful result:
                   // a resumed session also contains interrupted/failed usage.
                   // Overlapping inputs have no separable session-cost window.
