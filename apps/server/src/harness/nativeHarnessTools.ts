@@ -38,11 +38,10 @@ import {
   type ProviderExecutionPolicy,
   type ProviderToolDefinition,
   type ToolActionAuthority,
-  type ToolActionRequest,
 } from "@octant/contracts";
 import { planRefusesApprovalClass } from "@octant/domain/tool-call-policy";
 import { Schema } from "effect";
-import { decodeToolActionRequest } from "@octant/contracts";
+import { admitNativeHarnessTool } from "./nativeHarnessToolAdmission";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ToolEgressCallConfirmation } from "./nativeHarnessEgressRules";
@@ -57,13 +56,6 @@ const DEFAULT_SHELL_TIMEOUT_MS = 120_000;
 const GOAL_CHECK_TIMEOUT_MS = 600_000;
 const MAX_FETCH_TEXT_BYTES = 128 * 1024;
 const DEFAULT_DELEGATE_WAIT_MS = 60_000;
-/**
- * Read by the model and relayed to the person, so it says what changed rather
- * than leaving them a bare code. A retry cannot renew the grant; it returns
- * only when the thread can act again.
- */
-const STALE_AUTHORITY_MESSAGE =
-  "This thread can no longer use tools: it was archived or deleted, its folder or Project changed, or its provider was turned off. Do not retry. Tell the person what you would have done, and that they can reopen the thread or start a new one.";
 
 function shellExtraRoots(filesystem: { readonly extraRoots?: ReadonlyArray<string> }): {
   readonly extraRoots?: ReadonlyArray<string>;
@@ -281,7 +273,6 @@ export interface CreateNativeHarnessToolsOptions {
   readonly clock?: () => string;
 }
 
-const decodeRequest = decodeToolActionRequest;
 const MAX_TOOL_SUMMARY_LENGTH = 240;
 const isToolName = Schema.is(Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES));
 
@@ -369,82 +360,24 @@ export function createNativeHarnessTools(
     } catch {
       return refused("invalid-tool-input", `The ${name} arguments do not match the tool's schema.`);
     }
-    const authority = options.resolveAuthority();
-    if (authority === undefined) return refused("tool-authority-stale", STALE_AUTHORITY_MESSAGE);
-    const capabilityId = nativeHarnessToolCapabilityId(name);
     // The command a person approves is fixed here, before any wait, and is
     // the only one the check may run.
     const approvedCheck =
       name === "goal-check"
         ? criterionCheck(args as NativeHarnessGoalCheckArguments, options.ports.goal)
         : undefined;
-    let request: ToolActionRequest;
-    try {
-      request = decodeRequest({
-        actionId: options.uuid(),
-        correlationId: options.uuid(),
-        capability: { id: capabilityId, version: 1 },
-        authority,
-        // A check's approval must show the command it will run, which lives
-        // on the goal rather than in the call.
-        intent:
-          name === "goal-check"
-            ? `goal-check: ${approvedCheck ?? (args as NativeHarnessGoalCheckArguments).criterionId}`
-            : intentFor(name, args),
-        approval: { kind: "not-required" },
-      });
-    } catch {
-      return refused("tool-authority-stale", STALE_AUTHORITY_MESSAGE);
-    }
-    const turnExecutionPolicy = options.resolveTurnExecutionPolicy?.();
-    const decision = options.authority.authorize({
-      threadId: options.threadId,
-      request,
-      arguments: args,
-      ...(turnExecutionPolicy === undefined ? {} : { turnExecutionPolicy }),
+    const admission = await admitNativeHarnessTool(options, {
+      name,
+      args,
+      intent:
+        name === "goal-check"
+          ? `goal-check: ${approvedCheck ?? (args as NativeHarnessGoalCheckArguments).criterionId}`
+          : intentFor(name, args),
+      approvedCheck,
+      ...(signal === undefined ? {} : { signal }),
     });
-    if (decision.kind === "deny") {
-      return refused(
-        decision.reason,
-        decision.reason.startsWith("search-query-refused-under-taint")
-          ? "This thread has taken in outside content, so a search may not carry data. Search with a short question in plain words, without URLs, addresses, keys, or encoded text."
-          : `The ${name} tool was refused by policy.`,
-      );
-    }
-    if (decision.kind === "prompt") {
-      if (options.ports.approvals === undefined) {
-        return refused(
-          "approval-required",
-          `The ${name} tool needs approval (${decision.policy.approvalClass}) under the thread's current access posture.`,
-        );
-      }
-      const outcome = await options.ports.approvals({
-        toolName: name,
-        summary: request.intent,
-        approvalClass: decision.policy.approvalClass,
-        freshConfirmation: decision.reason === "taint-requires-fresh-confirmation",
-        callId: String(request.actionId),
-        arguments: args,
-        ...(approvedCheck === undefined ? {} : { command: approvedCheck }),
-        ...(signal === undefined ? {} : { signal }),
-      });
-      if (outcome !== "approved") {
-        return refused(
-          outcome === "denied" || outcome === "shield-denied"
-            ? "approval-denied"
-            : `approval-${outcome}`,
-          outcome === "denied"
-            ? `The person did not allow ${name} here. Do not retry it; say what you would have done.`
-            : outcome === "shield-denied"
-              ? `Octant Shield did not allow ${name} here. Do not retry it; say what you would have done.`
-              : outcome === "expired"
-                ? `Nobody answered the approval for ${name} in time. Continue without it and say so.`
-                : outcome === "too-many-waiting"
-                  ? `Too many approvals are already waiting for a person, so ${name} was not asked. Continue without it and say so.`
-                  : `The turn was cancelled while waiting for approval of ${name}.`,
-        );
-      }
-    }
+    if (admission.status === "refused") return admission.outcome;
+    const { request } = admission;
     let outcome;
     try {
       outcome =

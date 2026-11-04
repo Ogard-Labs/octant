@@ -134,6 +134,8 @@ export interface SeatbeltProfileInput {
    * account home by name.
    */
   readonly ownAccountPaths?: ReadonlyArray<string>;
+  /** Fixed credential recipients never inherit a provider's own-account exemption. */
+  readonly ownAccountAccess?: "none";
   readonly extraRules?: ReadonlyArray<string>;
   readonly homeDirectory?: string;
   readonly usersDirectory?: string;
@@ -180,6 +182,8 @@ export interface ProcessConfinementPrepareInput {
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
   /** See {@link SeatbeltProfileInput.ownAccountPaths}. */
   readonly ownAccountPaths?: ReadonlyArray<string>;
+  /** See {@link SeatbeltProfileInput.ownAccountAccess}. */
+  readonly ownAccountAccess?: "none";
   readonly extraRules?: ReadonlyArray<string>;
   /**
    * Whether this launch is an interactive shell on a pseudo-terminal, and where
@@ -921,10 +925,14 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
  * temporary directory, which a person or the host chose for other reasons.
  */
 export function ownAccountRoots(
-  input: Pick<SeatbeltProfileInput, "boundRoot" | "temporaryDirectory" | "ownAccountPaths">,
+  input: Pick<
+    SeatbeltProfileInput,
+    "boundRoot" | "temporaryDirectory" | "ownAccountPaths" | "ownAccountAccess"
+  >,
   readRoots: ReadonlyArray<string>,
   additionalWriteRoots: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
+  if (input.ownAccountAccess === "none") return [];
   const shared = new Set([
     ...resolvedRootForms(input.boundRoot),
     ...resolvedRootForms(input.temporaryDirectory),
@@ -1072,6 +1080,7 @@ function prepareSeatbeltLaunch(
     ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
     privateHomeAllowPaths,
     ...(input.ownAccountPaths === undefined ? {} : { ownAccountPaths: input.ownAccountPaths }),
+    ...(input.ownAccountAccess === undefined ? {} : { ownAccountAccess: input.ownAccountAccess }),
     ...(input.extraRules === undefined && input.terminal === undefined
       ? {}
       : {

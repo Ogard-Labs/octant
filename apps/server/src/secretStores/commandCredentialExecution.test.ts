@@ -1,4 +1,5 @@
-import { mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, renameSync, writeFileSync, rmSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -66,6 +67,59 @@ async function fixture() {
   return { root, binding, context };
 }
 describe("fixed command credential execution", () => {
+  it("refuses a recipient replaced while the authentication parent waits before launching it", async () => {
+    const f = await fixture();
+    const cli = f.binding.credentialExecutable;
+    const executable = join(f.root, "recipient");
+    writeFileSync(executable, "#!/bin/sh\nprintf 'original recipient\\n'\n", { mode: 0o700 });
+    writeFileSync(
+      cli,
+      '#!/bin/sh\n: > "$0.ready"\nn=0\nwhile [ ! -f "$0.release" ]; do\n n=$((n+1))\n [ "$n" -lt 200 ] || exit 94\n sleep 0.01\ndone\nshift 4\nexec "$@"\n',
+      { mode: 0o700 },
+    );
+    const op = await pinCommandExecutable(cli);
+    const recipient = await pinCommandExecutable(executable);
+    if (op === undefined || recipient === undefined) throw Error("Fixture executable unavailable");
+    const binding = decodeCommandCredentialBinding({
+      ...f.binding,
+      credentialExecutableDigest: op.digest,
+      executableDigest: recipient.digest,
+      definition: { ...f.binding.definition, executable: recipient.executable, args: [] },
+    });
+    const port = new RepositoryTestProcessPort({
+      temporaryDirectory: f.root,
+      receiptDirectory: join(f.root, "receipts"),
+      confinement: { prepare: ({ executable, args }) => ({ command: executable, args }) },
+    });
+    const execution = createCommandCredentialExecution({
+      process: port,
+      broker: {
+        commandUse: async () => ({ status: "authorized" as const, revision: "linked-one" }),
+      },
+    })(
+      binding,
+      f.context,
+      new AbortController().signal,
+      () => true,
+      () => undefined,
+    );
+    try {
+      const deadline = Date.now() + 1500;
+      while (!existsSync(`${cli}.ready`) && Date.now() < deadline) await delay(10);
+      expect(existsSync(`${cli}.ready`)).toBe(true);
+      const replacement = join(f.root, "replacement");
+      writeFileSync(replacement, "#!/bin/sh\nprintf 'replacement recipient executed\\n'\n", {
+        mode: 0o700,
+      });
+      renameSync(replacement, executable);
+      writeFileSync(`${cli}.release`, "");
+      const result = await execution;
+      expect(result.output).not.toContain("replacement recipient executed");
+    } finally {
+      writeFileSync(`${cli}.release`, "");
+      await execution;
+    }
+  });
   it("runs only the pinned synthetic CLI and recipient with reference-only environment through the real owned process port", async () => {
     const f = await fixture();
     vi.stubEnv("OP_SESSION", "fixture-ambient-session");

@@ -53,6 +53,26 @@ function temporaryRoot(): string {
 }
 
 describe("shared Seatbelt profile builder", () => {
+  it("keeps credential denials for a recipient whose binary parent overlaps an account home", () => {
+    const base = temporaryRoot();
+    const home = join(base, "home");
+    const project = join(base, "project");
+    mkdirSync(home);
+    mkdirSync(project);
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: project,
+      temporaryDirectory: project,
+      networkEgress: "none",
+      homeDirectory: home,
+      usersDirectory: base,
+      readRoots: [home],
+      ownAccountAccess: "none",
+    });
+    expect(profile).toContain(
+      `(deny file-read* file-write* (subpath "${escapeSeatbeltPath(join(home, ".codex/auth.json"))}"))`,
+    );
+  });
+
   it.skipIf(process.platform !== "darwin")(
     "starts the system shell without a shell-selection warning",
     () => {
