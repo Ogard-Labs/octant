@@ -129,8 +129,8 @@ describe("startOctantServer", () => {
             port: 0,
             extensionSkillRoots: { resolve: async () => [] },
             serve,
-          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-        ),
+          }),
+        ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       );
       expect(serve).toHaveBeenCalledOnce();
       expect(wire).toHaveBeenCalledOnce();
