@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { decodeProviderCloudRequest, decodeProviderCloudResponse } from "./providerCloudSessions";
+import { Schema } from "effect";
+import {
+  decodeProviderCloudRequest,
+  decodeProviderCloudResponse,
+  ProviderCloudCreateInput,
+} from "./providerCloudSessions";
 
 const start = {
   kind: "start",
@@ -32,5 +37,16 @@ describe("provider cloud boundary", () => {
         credential: "forbidden",
       }),
     ).toThrow();
+  });
+  it("keeps reviewed task text exactly as reviewed, surrounding whitespace included, and refuses blank text", () => {
+    const pasted = "  Indented reviewed task\n";
+    expect(decodeProviderCloudRequest({ ...start, input: pasted })).toMatchObject({
+      input: pasted,
+    });
+    expect(() => decodeProviderCloudRequest({ ...start, input: " \n\t" })).toThrow();
+    const decodeCreate = Schema.decodeUnknownSync(ProviderCloudCreateInput);
+    const create = { jobId: start.jobId, modelId: start.modelId };
+    expect(decodeCreate({ ...create, text: pasted })).toMatchObject({ text: pasted });
+    expect(() => decodeCreate({ ...create, text: "   " })).toThrow();
   });
 });

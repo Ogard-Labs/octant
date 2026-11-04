@@ -50,6 +50,15 @@ export const ProviderCloudJob = Schema.Struct({
 }).annotations(strict);
 export type ProviderCloudJob = typeof ProviderCloudJob.Type;
 
+// The person reviews and consents to the exact text, and its digest covers
+// every byte; trimming here would refuse ordinary pasted prompts (a trailing
+// newline, leading indentation) that review already accepted.
+const ProviderCloudTaskText = Schema.String.pipe(
+  Schema.maxLength(MAX_PROVIDER_CLOUD_INPUT),
+  Schema.filter((value) => value.trim().length > 0, {
+    message: () => "Cloud task text must not be blank.",
+  }),
+);
 export const ProviderCloudRequest = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("profiles") }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("list"), threadId: CodeThreadId }).annotations(strict),
@@ -64,7 +73,7 @@ export const ProviderCloudRequest = Schema.Union(
     threadId: CodeThreadId,
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
-    input: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_PROVIDER_CLOUD_INPUT)),
+    input: ProviderCloudTaskText,
     reviewedInputDigest: ProviderCloudInputDigest,
     cloudExecutionConsent: Schema.Literal(true),
     acknowledgedUnknownJobs: Schema.optional(
@@ -118,7 +127,7 @@ export const decodeProviderCloudInputDigest = Schema.decodeUnknownSync(ProviderC
 export const ProviderCloudCreateInput = Schema.Struct({
   jobId: ProviderCloudJobId,
   modelId: ProviderModelId,
-  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_PROVIDER_CLOUD_INPUT)),
+  text: ProviderCloudTaskText,
 }).annotations(strict);
 export const ProviderCloudObservation = Schema.Union(
   Schema.Struct({
