@@ -21,7 +21,10 @@ import {
   type AgentPluginMcpSessionManagerOptions,
 } from "./agentPluginMcpSessionManager";
 
-vi.mock("./agentPluginMcpClient", () => ({ connectAgentPluginMcpSession: vi.fn() }));
+vi.mock("./agentPluginMcpClient", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agentPluginMcpClient")>()),
+  connectAgentPluginMcpSession: vi.fn(),
+}));
 const connect = vi.mocked(connectAgentPluginMcpSession);
 const EXTENSION = "15000000-0000-4000-8000-000000000001";
 const THREAD = "17000000-0000-4000-8000-000000000099";
@@ -145,6 +148,105 @@ function cachedExecution(subject: AgentPluginMcpSessionManager, threadId = THREA
 }
 
 describe("MCP authentication retirement", () => {
+  it("does not resolve credentials before required tool approval or retire on an application error", async () => {
+    const transport = session();
+    connect.mockResolvedValue(transport);
+    const check = vi.fn(async () => "unchanged" as const);
+    const rejected = vi.fn(async () => undefined);
+    let approved = false;
+    const subject = manager(async () => approved, {
+      isUserAddedSource: () => true,
+      bindUserAddedAuthentication: async () => ({ check, rejected }),
+    });
+    await subject.reconcile(effective());
+    const execute = cachedExecution(subject);
+    expect(await execute()).toMatchObject({
+      isError: true,
+      result: { error: "extension-tool-approval-required" },
+    });
+    expect(check).not.toHaveBeenCalled();
+    expect(transport.callTool).not.toHaveBeenCalled();
+    approved = true;
+    vi.mocked(transport.callTool).mockRejectedValue(new Error("Synthetic application refusal"));
+    expect((await execute()).isError).toBe(true);
+    expect(check).toHaveBeenCalledOnce();
+    expect(rejected).not.toHaveBeenCalled();
+    expect(subject.sessions().map((record) => record.session)).toEqual([transport]);
+  });
+
+  it("suppresses an old credential check completing after replacement without retiring the replacement", async () => {
+    const entered = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<"unchanged">();
+    const old = session();
+    const replacement = session();
+    connect.mockResolvedValueOnce(old).mockResolvedValue(replacement);
+    let binding = 0;
+    const subject = manager(async () => true, {
+      isUserAddedSource: () => true,
+      bindUserAddedAuthentication: async () =>
+        ++binding === 1
+          ? {
+              check: async () => {
+                entered.resolve();
+                return held.promise;
+              },
+              rejected: async () => undefined,
+            }
+          : { check: async () => "unchanged", rejected: async () => undefined },
+    });
+    await subject.reconcile(effective());
+    const pending = cachedExecution(subject)();
+    await entered.promise;
+    await subject.invalidateAuthentication(EXTENSION, "mcp-remote");
+    await subject.reconcile(effective());
+    held.resolve("unchanged");
+    expect(await pending).toMatchObject({
+      isError: true,
+      result: { error: "extension-tool-authentication-changed" },
+    });
+    expect(old.callTool).not.toHaveBeenCalled();
+    expect(replacement.callTool).not.toHaveBeenCalled();
+    expect(subject.sessions().map((record) => record.session)).toEqual([replacement]);
+  });
+
+  it("retires a rejected HTTP authentication session without replaying its dispatched tool call", async () => {
+    const actual =
+      await vi.importActual<typeof import("./agentPluginMcpClient")>("./agentPluginMcpClient");
+    connect.mockImplementation(actual.connectAgentPluginMcpSession);
+    let calls = 0;
+    const fetchImpl: typeof fetch = Object.assign(
+      async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        if (init?.method === "DELETE") return new Response(null, { status: 204 });
+        const body = JSON.parse(String(init?.body));
+        if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+        if (body.method === "tools/call") {
+          calls++;
+          return new Response(null, { status: 401 });
+        }
+        return Response.json({
+          jsonrpc: "2.0",
+          id: body.id,
+          result:
+            body.method === "initialize"
+              ? {
+                  protocolVersion: "2025-03-26",
+                  capabilities: {},
+                  serverInfo: { name: "fixture", version: "1" },
+                }
+              : { tools: [{ name: "lookup", inputSchema: { type: "object" } }] },
+        });
+      },
+      { preconnect: () => undefined },
+    );
+    const subject = manager(async () => true, { fetch: fetchImpl, isUserAddedSource: () => true });
+    await subject.reconcile(effective());
+    const execute = cachedExecution(subject);
+    expect((await execute()).isError).toBe(true);
+    expect(subject.toolDefinitions()).toEqual([]);
+    expect((await execute()).isError).toBe(true);
+    expect(calls).toBe(1);
+  });
+
   it("fences the actual resolved task-tool closure after completed-grant Sign out", async () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-mcp-auth-retirement-"));
     const approval = Promise.withResolvers<boolean>();

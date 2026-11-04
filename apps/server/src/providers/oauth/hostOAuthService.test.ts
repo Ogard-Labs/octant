@@ -7,7 +7,7 @@ import {
   decodeHostOAuthDescriptor,
   type HostOAuthJournalRecord,
 } from "@octant/contracts/host-oauth";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { makeHostOAuthBrokerClient } from "./hostOAuthBrokerClient";
 import { createHostOAuthService, extAgentHostIdFor } from "./hostOAuthService";
 
@@ -54,6 +54,52 @@ function chatGptPlan() {
 }
 
 describe("host OAuth service", () => {
+  it.each(["revoked", "unavailable"])(
+    "uses runtime retirement for MCP cleanup without claiming issuer revocation (%s)",
+    async (kind) => {
+      const journal: HostOAuthJournalRecord[] = [];
+      const forget = vi.fn(async () => undefined);
+      const revoke = vi.fn(async () => ({ kind }));
+      const service = createHostOAuthService({
+        journal: { append: (record) => journal.push(record) },
+        broker: {
+          begin: async () => ({}),
+          status: async () => ({}),
+          refresh: async () => ({}),
+          access: async () => ({}),
+          forget,
+          revoke,
+        },
+      });
+      const mcp = decodeHostOAuthDescriptor({
+        descriptorId: "mcp-fixture",
+        dialect: "mcp-authorization",
+        flow: "authorization-code-pkce",
+        clientId: "owned-client",
+        authorizationEndpoint: "https://issuer.example/authorize",
+        tokenEndpoint: "https://issuer.example/token",
+        resource: "https://mcp.example/mcp",
+        redirectPort: 43125,
+        scopes: [],
+        termsId: "terms-v1",
+      });
+      expect(service.revokesOnSignOut(mcp)).toBe(false);
+      expect(
+        await service.signOut({
+          principalKind: "local-window",
+          descriptor: mcp,
+          credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          forgetWhenNotRevoked: true,
+        }),
+      ).toEqual({ kind: kind === "revoked" ? "signed-out" : "unavailable" });
+      expect(revoke).toHaveBeenCalledExactlyOnceWith("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+      expect(forget).not.toHaveBeenCalled();
+      expect(journal.some((record) => record.name === "host-oauth.signed-out")).toBe(
+        kind === "revoked",
+      );
+    },
+  );
+
   it("records who acknowledged the terms and when, without a secret", () => {
     const journal: HostOAuthJournalRecord[] = [];
     const service = createHostOAuthService({

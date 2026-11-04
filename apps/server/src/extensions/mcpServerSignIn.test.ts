@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { setImmediate as nextMacrotask } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { HostOAuthDescriptor, HostOAuthSignInState } from "@octant/contracts/host-oauth";
@@ -137,6 +138,7 @@ async function signIn(options: {
   readonly fetchImpl: typeof fetch;
   readonly oauth: HostOAuthService;
   readonly access?: (credentialRef: string) => Promise<unknown>;
+  readonly refresh?: (credentialRef: string) => Promise<unknown>;
   readonly serverUrl?: string | undefined;
   readonly linkedSecrets?: LinkedSecretPointers;
   readonly pickPort?: () => Promise<number>;
@@ -155,6 +157,7 @@ async function signIn(options: {
       statePath,
       oauth: options.oauth,
       access: options.access ?? (async () => ({ kind: "unavailable" })),
+      ...(options.refresh === undefined ? {} : { refresh: options.refresh }),
       serverUrl: async () => ("serverUrl" in options ? options.serverUrl : SERVER),
       fetch: options.fetchImpl,
       ...(options.linkedSecrets === undefined ? {} : { linkedSecrets: options.linkedSecrets }),
@@ -199,6 +202,156 @@ describe("signing in to a hosted MCP server", () => {
     expect(await service.signOut(EXTENSION, COMPONENT, "local-window")).toEqual({
       kind: "signed-out",
     });
+  });
+
+  it("does not attach or mark a replacement from a late old expired-grant refresh or401", async () => {
+    const { oauth } = fakeOauth();
+    const entered = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<unknown>();
+    const access = vi.fn(async () => ({
+      kind: "granted",
+      tokenType: "Bearer",
+      accessToken: "old-synthetic-token",
+      expiresAt: "2000-01-01T00:00:00.000Z",
+    }));
+    const { service, statePath } = await signIn({
+      fetchImpl: issuerFetch().fetchImpl,
+      oauth,
+      access,
+      refresh: async () => {
+        entered.resolve();
+        return held.promise;
+      },
+    });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    const port = await service.bindAuthentication(EXTENSION, COMPONENT, {
+      transport: "streamable-http",
+      name: "remote",
+      url: SERVER,
+      headers: { Authorization: "Bearer old-synthetic-token" },
+    });
+    if (port === undefined) throw new Error("Expected a bound grant");
+    const checking = port.check();
+    await entered.promise;
+    expect(await service.signOut(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "signed-out",
+    });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    await port.rejected();
+    held.resolve({ kind: "refreshed" });
+    expect(await checking).toBe("changed");
+    expect(access).toHaveBeenCalledOnce();
+    expect(
+      JSON.parse(await readFile(statePath, "utf8")).signIns[`${EXTENSION}:${COMPONENT}`]
+        .refreshRequired,
+    ).toBeUndefined();
+    expect(await service.status(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "signed-in",
+    });
+  });
+
+  it("bounds a hung expiry refresh while retaining the grant for explicit recovery", async () => {
+    const { oauth } = fakeOauth();
+    const entered = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<unknown>();
+    const { service, statePath } = await signIn({
+      fetchImpl: issuerFetch().fetchImpl,
+      oauth,
+      access: async () => ({
+        kind: "granted",
+        tokenType: "Bearer",
+        accessToken: "expired-synthetic-token",
+        expiresAt: "2000-01-01T00:00:00.000Z",
+      }),
+      refresh: async () => {
+        entered.resolve();
+        return held.promise;
+      },
+    });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    const port = await service.bindAuthentication(EXTENSION, COMPONENT, {
+      transport: "streamable-http",
+      name: "remote",
+      url: SERVER,
+      headers: { Authorization: "Bearer expired-synthetic-token" },
+    });
+    if (port === undefined) throw new Error("Expected a bound grant");
+    vi.useFakeTimers();
+    try {
+      const checking = port.check();
+      await entered.promise;
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(await checking).toBe("unavailable");
+      expect(
+        JSON.parse(await readFile(statePath, "utf8")).signIns[`${EXTENSION}:${COMPONENT}`]
+          .credentialRef,
+      ).toBe(CREDENTIAL);
+      expect(await service.begin(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+        kind: "signed-in",
+      });
+      expect(oauth.begin).toHaveBeenCalledTimes(1);
+      held.resolve({ kind: "refreshed" });
+      await Promise.resolve();
+      expect(await service.status(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+        kind: "signed-in",
+      });
+    } finally {
+      held.resolve({ kind: "unavailable" });
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies Sign out to its current grant when a queued401 marker replaced that record", async () => {
+    const { oauth } = fakeOauth();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let hold = false;
+    const other = "https://other.example/mcp";
+    const { service, statePath } = await signIn({
+      fetchImpl: issuerFetch().fetchImpl,
+      oauth,
+      replaceState: async (path, contents) => {
+        if (hold && JSON.parse(contents).registrations[other] !== undefined) {
+          hold = false;
+          entered.resolve();
+          await release.promise;
+        }
+        await writeFile(path, contents);
+      },
+    });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    const port = await service.bindAuthentication(EXTENSION, COMPONENT, {
+      transport: "streamable-http",
+      name: "remote",
+      url: SERVER,
+      headers: { Authorization: "Bearer synthetic-token" },
+    });
+    if (port === undefined) throw new Error("Expected a bound grant");
+    hold = true;
+    const sibling = service.configureClient(
+      {
+        kind: "registered",
+        clientId: "other-client",
+        resource: other,
+        issuer: ISSUER,
+        redirectPort: 43126,
+      },
+      "local-window",
+    );
+    await entered.promise;
+    const marking = port.rejected();
+    const signingOut = service.signOut(EXTENSION, COMPONENT, "local-window");
+    await nextMacrotask();
+    release.resolve();
+    await sibling;
+    await marking;
+    expect(await signingOut).toEqual({ kind: "signed-out" });
+    expect(oauth.signOut).toHaveBeenCalledOnce();
+    expect(JSON.parse(await readFile(statePath, "utf8")).signIns).toEqual({});
   });
 
   it("retains an unusable completed grant across restart until explicit sign-out cleanup succeeds", async () => {

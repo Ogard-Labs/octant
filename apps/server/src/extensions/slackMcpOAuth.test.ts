@@ -101,6 +101,7 @@ async function fixture(
     readonly transport?: string;
     readonly metadata?: Parameters<typeof metadataFetch>[0];
     readonly access?: (credential: string) => Promise<unknown>;
+    readonly now?: () => Date;
     readonly linkedSecrets?: McpServerSignInOptions["linkedSecrets"];
     readonly serverUrl?: McpServerSignInOptions["serverUrl"];
   } = {},
@@ -126,6 +127,7 @@ async function fixture(
     serverUrl: options.serverUrl ?? (async () => options.transport ?? slack.transportUrl),
     ...(options.linkedSecrets === undefined ? {} : { linkedSecrets: options.linkedSecrets }),
     fetch: metadata.fetchImpl,
+    ...(options.now === undefined ? {} : { now: options.now }),
     access,
     actorId: credentialRef,
     pickPort: async () => 43125,
@@ -313,6 +315,7 @@ describe("closed Slack MCP transport and OAuth resource", () => {
     });
     try {
       const { service, statePath, access } = await fixture({
+        now: () => new Date(1_000_000),
         access: async (id) => {
           const refreshed = await runtime.refresh(id);
           return refreshed.kind === "refreshed" ? runtime.access(id) : refreshed;

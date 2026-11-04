@@ -936,6 +936,12 @@ export function wireProviders(deps: ProvidersDependencies) {
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
+        bindUserAddedAuthentication: (launch, target) =>
+          mcpServerSignInHolder.current?.bindAuthentication(
+            target.extensionId,
+            target.componentId,
+            launch,
+          ) ?? Promise.resolve(undefined),
         resolveUserAddedSecrets: async (launch, target) => {
           const withSecrets = await userAddedMcpServers.resolveLaunchSecrets(launch);
           const signIn = mcpServerSignInHolder.current;
@@ -1405,6 +1411,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         statePath: join(providerDataDirectory, "extensions", "mcp-server-sign-ins.json"),
         oauth: hostOAuth,
         access: (credentialRef) => oauthBroker.access(credentialRef),
+        refresh: (credentialRef) => oauthBroker.refresh(credentialRef),
         actorId: OCTANT_LOCAL_ACTOR_ID,
         serverUrl: mcpServerSignInAddress,
         onAuthenticationChanged: (extensionId, componentId) =>
