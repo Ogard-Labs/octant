@@ -482,6 +482,7 @@ export function startOctantServer(
       shieldServerRoutes,
       shieldServerStore,
       serverProjectRoutes,
+      serverPreviewTunnels,
       nativeHarnessSessionRoutes,
       onHarnessPausedByPerson,
       onHarnessRecoveryLifted,
@@ -1519,6 +1520,14 @@ export function startOctantServer(
       (server) =>
         Effect.promise(async () => {
           let shutdownFailure: unknown;
+          try {
+            const previewCleanup = await serverPreviewTunnels.close();
+            if (previewCleanup.status === "unsettled") {
+              shutdownFailure = new Error("Server Project preview cleanup could not be confirmed.");
+            }
+          } catch (error) {
+            shutdownFailure = error;
+          }
           let httpStop: void | Promise<void> = undefined;
           try {
             githubAuthenticationPort.close();
