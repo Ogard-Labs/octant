@@ -634,6 +634,14 @@ folder.", rather than greying out with no reason. Every
 start screen's composer asks "Ask anything…", and the message field keeps its
 accessible name.
 
+The question belongs to a new task only. When the same composer serves a
+decision, such as reviewing a planner's proposal, the caller replaces the mark,
+question, and quiet line with a heading that names the decision ("Review the
+planner's proposal") and the proposal's title, set at the dialog's top-left with
+the fixed proposal text directly under them in the composer. Rendered review
+showed the question above a fixed proposal read as an invitation to write a
+different task.
+
 Every composer has one shape, on a start screen or under a thread, in Chat,
 Work, and Code: the same width, corner (`--oct-radius-lg`), hairline ring and
 mid shadow, a prompt two lines tall before it grows with the same insets, and

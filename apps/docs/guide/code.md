@@ -43,7 +43,9 @@ tasks by itself; you can remove the designation at any time.
 
 The overview lists each proposal's exact task, explanation and status. Choose
 **Decline proposal**, or **Review and approve** to choose the provider/model,
-checkout and access for the described work. The task text and Project stay fixed.
+checkout and access for the described work. The review opens under **Review the
+planner's proposal**, with the proposal's title and exact text below it; the
+task text and Project stay fixed.
 **Approve and start described task** creates its ordinary Code thread and sends
 that exact first message only after the host confirms creation. **Open created
 task** returns to its work. If its first turn fails, the task retains the prompt

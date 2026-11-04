@@ -151,6 +151,12 @@ export interface CodeComposerAdapterProps {
   readonly pendingMessage?: string;
   /** A reviewed planner proposal is sent exactly as shown, never edited in this form. */
   readonly fixedPrompt?: string;
+  /**
+   * Replaces the start screen's question when the composer serves a decision
+   * rather than a new task: a review dialog asking "What are we building
+   * today?" above a fixed proposal reads as an invitation to write one.
+   */
+  readonly heading?: ReactNode;
   readonly createLabel?: string;
   readonly createDisabledReason?: string;
   readonly onCancelFirstTurn?: () => void;
@@ -794,7 +800,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading projectChosen={props.projectId !== undefined} />
+          {props.heading ?? <WelcomeHeading projectChosen={props.projectId !== undefined} />}
           {props.projectAvailable === false &&
           props.projectId !== undefined &&
           props.errorMessage === undefined ? (

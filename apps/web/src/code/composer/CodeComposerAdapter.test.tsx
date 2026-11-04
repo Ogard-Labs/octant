@@ -284,6 +284,17 @@ describe("CodeComposerAdapter", () => {
     expect(new Set(composerIds).size).toBe(2);
   });
 
+  it("shows a caller's decision heading in place of the start screen's question", () => {
+    const { rerender } = render(<CodeComposerAdapter {...defaultProps} />);
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+    rerender(<CodeComposerAdapter {...defaultProps} heading={<h2>Review the proposal</h2>} />);
+    expect(screen.getByRole("heading", { name: "Review the proposal" })).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "What are we building today?" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/just start typing/)).not.toBeInTheDocument();
+  });
+
   it("asks in the same plain words as every start screen rather than opening on a tip", () => {
     render(<CodeComposerAdapter {...defaultProps} />);
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveAttribute(

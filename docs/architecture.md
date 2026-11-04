@@ -2553,7 +2553,8 @@ designation or resolution are not added. The rules are:
 - **Review and execution.** The overview shows the proposal's title, exact
   intent, rationale and current status. **Review and approve** opens the ordinary
   Code creation controls for provider/model, checkout and access, with the Project
-  and proposal text fixed. **Approve and start described task** sends the current
+  and proposal text fixed, under a heading that names the decision rather than
+  the start screen's new-task question. **Approve and start described task** sends the current
   proposal version and ordinary creation command, then starts the exact intent
   as the first message only after confirmed creation, through the normal thread
   authority path. An unavailable selected provider prevents approval. Created
