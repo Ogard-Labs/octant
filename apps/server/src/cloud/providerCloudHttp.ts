@@ -54,7 +54,12 @@ export function makeProviderCloudPorts(input: {
         throw new CloudSessionRequestRefused();
       }
       // A key unlock can wait. Authority and opt-in must still hold at dispatch.
-      if (signal.aborted || consumed.has(key) || !input.admission())
+      if (
+        credential.trim().length === 0 ||
+        signal.aborted ||
+        consumed.has(key) ||
+        !input.admission()
+      )
         throw new CloudSessionRequestRefused();
       consumed.add(key);
       if (input.intent.kind === "create") {
