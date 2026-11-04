@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { desktopIdentity, type DesktopIdentity } from "@octant/host-runtime";
 import {
   appOutputContext,
   packagedServerEnvironment,
@@ -12,16 +13,22 @@ import {
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
-export function packagedServerBundle(repositoryRootPath: string): string {
-  return resolve(repositoryRootPath, "out/Octant.app");
+export function packagedServerBundle(
+  repositoryRootPath: string,
+  identity: DesktopIdentity = desktopIdentity("stable"),
+): string {
+  return resolve(repositoryRootPath, "out", `${identity.productName}.app`);
 }
 
 export function packagedServerEntry(appBundle: string): string {
   return resolve(appBundle, "Contents/Resources/app/apps/server/dist/main.mjs");
 }
 
-export function packagedServerExecutable(appBundle: string): string {
-  return resolve(appBundle, "Contents/MacOS/Octant");
+export function packagedServerExecutable(
+  appBundle: string,
+  identity: DesktopIdentity = desktopIdentity("stable"),
+): string {
+  return resolve(appBundle, "Contents/MacOS", identity.productName);
 }
 
 async function waitForStorageReady(
@@ -57,16 +64,18 @@ export async function assertPackagedServerStarts(input: {
   readonly platform: NodeJS.Platform;
   readonly arch: string;
   readonly repositoryRoot: string;
+  readonly identity?: DesktopIdentity;
 }): Promise<void> {
   if (input.platform !== "darwin" || input.arch !== "arm64") {
     throw new Error("The packaged-server start check requires Apple Silicon macOS.");
   }
-  const sourceBundle = packagedServerBundle(input.repositoryRoot);
+  const identity = input.identity ?? desktopIdentity("stable");
+  const sourceBundle = packagedServerBundle(input.repositoryRoot, identity);
   if (!existsSync(sourceBundle)) {
-    throw new Error(`Packaged Octant.app is missing at ${sourceBundle}.`);
+    throw new Error(`Packaged ${identity.productName}.app is missing at ${sourceBundle}.`);
   }
   const appBundle = stagePackagedAppBundle(sourceBundle);
-  const executable = packagedServerExecutable(appBundle);
+  const executable = packagedServerExecutable(appBundle, identity);
   const serverEntry = packagedServerEntry(appBundle);
   if (!existsSync(executable) || !existsSync(serverEntry)) {
     throw new Error("The packaged app is missing its Octant executable or server entry.");
@@ -108,6 +117,7 @@ async function main(): Promise<void> {
     platform: process.platform,
     arch: process.arch,
     repositoryRoot,
+    identity: desktopIdentity(process.env.OCTANT_PACKAGE_FLAVOR ?? "stable"),
   });
   console.log("Packaged server started outside the checkout.");
 }

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { parseCodeDeepLink } from "./codeDeepLinks";
 
+it("keeps stable and Nightly links in their own app", () => {
+  const path = "code/project/11111111-1111-4111-8111-111111111111";
+  expect(parseCodeDeepLink(`octant-nightly://${path}`, "octant-nightly")).toMatchObject({
+    kind: "project",
+  });
+  expect(() => parseCodeDeepLink(`octant://${path}`, "octant-nightly")).toThrow();
+  expect(() => parseCodeDeepLink(`octant-nightly://${path}`)).toThrow();
+});
+
 const ids = {
   project: "10000000-0000-4000-8000-000000000001",
   thread: "20000000-0000-4000-8000-000000000001",

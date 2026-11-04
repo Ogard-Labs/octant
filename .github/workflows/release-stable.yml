@@ -112,6 +112,7 @@ jobs:
         if: matrix.apple_signing
         env:
           OCTANT_RELEASE_BUILD: "1"
+          OCTANT_PACKAGE_FLAVOR: stable
           OCTANT_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
           OCTANT_PACKAGE_TARGET: ${{ matrix.target }}
           OCTANT_SIGNING_IDENTITY: ${{ vars.OCTANT_SIGNING_IDENTITY }}
@@ -122,6 +123,7 @@ jobs:
       - name: Package Linux AppImage (unsigned dogfood)
         if: ${{ !matrix.apple_signing }}
         env:
+          OCTANT_PACKAGE_FLAVOR: stable
           OCTANT_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
           OCTANT_PACKAGE_TARGET: ${{ matrix.target }}
           APPIMAGE_EXTRACT_AND_RUN: "1"

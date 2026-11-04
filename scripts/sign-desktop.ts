@@ -282,6 +282,7 @@ export async function signAndNotarizeDesktop(input: {
   readonly appPath: string;
   readonly archivePath: string;
   readonly credentials: SigningCredentials;
+  readonly productName?: string;
   readonly run: CommandRunner;
   readonly runForOutput: CommandOutputRunner;
 }): Promise<void> {
@@ -302,7 +303,7 @@ export async function signAndNotarizeDesktop(input: {
     await input.run(
       createCodesignArgv({
         identity: input.credentials.identity,
-        target: `${input.appPath}/${relativePath}`,
+        target: `${input.appPath}/${relativePath.replace("Contents/Frameworks/Octant Helper", `Contents/Frameworks/${input.productName ?? "Octant"} Helper`)}`,
         entitlements,
       }),
     );

@@ -85,6 +85,28 @@ If your host cannot mount nested AppImages, run with `APPIMAGE_EXTRACT_AND_RUN=1
 
 AppRun preserves Chromium's sandbox and lets Chromium refuse when it cannot establish one. It never adds `--no-sandbox`. A separate `unshare` command is not a reliable prerequisite probe because it has a different AppArmor identity. See [Desktop sandbox prerequisites](./linux-host#desktop-sandbox-prerequisites) for a tested isolated installation and the boundary for administrator-reviewed host profiles.
 
+## Nightly development foundation
+
+Nightly's separate application identity and packaging foundation are available
+for development. It is not yet a usable second app: startup reports that the
+stable desktop client bridge is unavailable before it opens host data or
+initializes credentials. Installation and publication remain pending.
+
+A local desktop package defaults to Octant. An explicitly selected
+`OCTANT_PACKAGE_FLAVOR=nightly` requires a matching dated preview or candidate
+`OCTANT_RELEASE_VERSION` for the repository's existing base version. Packaging
+stamps the flavor, product name, bundle id and link scheme. Nightly keeps its
+window storage under `Octant Nightly`, separate from Octant's shared host data.
+It cannot start or migrate that host data.
+
+Packaged Octant follows only the stable update ring. The Nightly identity
+follows preview or candidate and refuses a stable feed. Development runs keep
+their existing behavior. The stable-host connection, full Nightly command,
+installer, visual identity and coexistence remain required before Nightly can
+be offered as a usable download. The preview/candidate release workflow has an
+explicit preflight stop until that functional client is implemented and
+verified. Stable releases and local packaging have no such temporary stop.
+
 ## Data directory
 
 ### macOS

@@ -12707,7 +12707,11 @@ macOS-only.
   Octant's running host and never runs a host of its own on that folder, so the
   journal keeps one writer and no nightly migrates data Octant must still open.
   The first technical preview therefore ships as Octant on `stable`
-  ([Octant Nightly](design/nightly-app.md)).
+  ([Octant Nightly](design/nightly-app.md)). Identity and packaging foundations
+  now stamp separate app flavors and restrict each packaged updater to its
+  identity's rings. Until the typed stable-host desktop bridge is implemented,
+  Nightly refuses before loading the module that initializes host paths and
+  credential services; it cannot start a host or migrate shared data.
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
   bundled file read from disk, so What's New never adds a request.

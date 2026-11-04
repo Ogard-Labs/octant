@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { createServer, type Server } from "node:http";
+import { createServer, Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { AppReleaseRing, AppUpdateRelease, AppVersion } from "@octant/contracts/app-updates";
 import {
@@ -93,6 +93,7 @@ function service(
     readonly currentVersion?: string;
     readonly feedBaseUrl?: string;
     readonly ring?: "stable" | "preview";
+    readonly allowedRings?: ReadonlyArray<AppReleaseRing>;
     /** What the artifact host actually serves, when it disagrees with the signed hash. */
     readonly serves?: Buffer;
     readonly artifactUnreachable?: boolean;
@@ -125,6 +126,7 @@ function service(
       arch: "arm64",
     },
     ...(options.ring === undefined ? {} : { ring: options.ring }),
+    ...(options.allowedRings === undefined ? {} : { allowedRings: options.allowedRings }),
     automaticChecks: true,
     verifier: createFeedVerifier(
       options.trust ?? onEveryRing(options.publicKey ?? publicKeyBase64),
@@ -453,6 +455,160 @@ describe("release rings", () => {
     const { updates } = service({ ring: "preview" });
 
     expect(await updates.check()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+  });
+
+  it("keeps stable and Nightly on their own update rings", async () => {
+    const stable = service({ allowedRings: ["stable"] }).updates;
+    expect(stable.setRing("preview")).toMatchObject({
+      ring: "stable",
+      status: "refused",
+      refusal: "wrong-ring",
+    });
+    const nightly = service({
+      ring: "preview",
+      allowedRings: ["preview", "candidate"],
+      currentVersion: "0.1.0-preview.20261103.1",
+    }).updates;
+    expect(nightly.setRing("stable")).toMatchObject({
+      ring: "preview",
+      status: "refused",
+      refusal: "wrong-ring",
+    });
+    expect(nightly.setRing("candidate")).toMatchObject({ ring: "candidate", status: "idle" });
+  });
+
+  it("does not resurrect an old ring's offer when its pending check finishes", async () => {
+    let answer: (response: Response) => void = () => {
+      throw new Error("No pending feed");
+    };
+    const response = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    const fetchImpl = vi.fn(async () => response);
+    const updates = createAppUpdateService({
+      updater: updater(),
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
+      automaticChecks: false,
+      ring: "stable",
+      allowedRings: ["stable"],
+      verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
+      fetchImpl,
+    });
+    const pending = updates.check();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    updates.setRing("preview");
+    answer(new Response(JSON.stringify(signedFeed())));
+    expect(await pending).toMatchObject({
+      ring: "stable",
+      status: "refused",
+      refusal: "wrong-ring",
+    });
+    expect(updates.state().available).toBeUndefined();
+  });
+
+  it("does not replace a ring refusal with an older hand-off failure", async () => {
+    const { updates, port } = service({ allowedRings: ["stable"] });
+    await updates.check();
+    const listen = vi.spyOn(Server.prototype, "listen").mockImplementation(function (this: Server) {
+      updates.setRing("preview");
+      this.emit("error", new Error("The older hand-off failed"));
+      return this;
+    });
+    try {
+      expect(await updates.download()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+      expect(port.calls.checkForUpdates).toBe(0);
+    } finally {
+      listen.mockRestore();
+    }
+  });
+
+  it("does not replace a ring refusal with an older Linux launch refusal", async () => {
+    let answer: (location: { readonly kind: "not-portable" }) => void = () => {
+      throw new Error("No pending location");
+    };
+    const location = new Promise<{ readonly kind: "not-portable" }>((resolve) => {
+      answer = resolve;
+    });
+    const locate = vi.fn(async () => location);
+    const fetchImpl = vi.fn(async () => new Response());
+    const updates = createAppUpdateService({
+      updater: updater(),
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "linux", arch: "x64" },
+      automaticChecks: false,
+      ring: "stable",
+      allowedRings: ["stable"],
+      fetchImpl,
+      portableImage: { locate, replaceAndRelaunch: async () => ({ kind: "relaunched" }) },
+    });
+    const pending = updates.check();
+    await vi.waitFor(() => expect(locate).toHaveBeenCalledOnce());
+    updates.setRing("preview");
+    answer({ kind: "not-portable" });
+    expect(await pending).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("ignores a native download's completion after its offer was withdrawn", async () => {
+    const { updates, port } = service({ allowedRings: ["stable"] });
+    await updates.check();
+    await updates.download();
+    updates.setRing("preview");
+    port.emit("update-downloaded");
+    expect(updates.state()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+    expect(updates.state().available).toBeUndefined();
+  });
+
+  it("closes an older native hand-off after a new check without replacing the newer offer", async () => {
+    const { updates, port } = service();
+    try {
+      await updates.check();
+      await updates.download();
+      const feed = port.calls.setFeedURL[0];
+      if (feed === undefined) throw new Error("No native hand-off was staged");
+      expect((await fetch(feed)).status).toBe(200);
+      await updates.check();
+      const current = updates.state();
+      port.emit("update-downloaded");
+      expect(updates.state()).toEqual(current);
+      await expect(fetch(feed)).rejects.toThrow();
+    } finally {
+      updates.dispose();
+    }
+  });
+
+  it("does not stage a pending download after the service is disposed", async () => {
+    let answer: (response: Response) => void = () => {
+      throw new Error("No pending artifact");
+    };
+    const artifact = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    const fetchImpl = vi.fn(async (input: string | URL | Request) =>
+      String(input).includes("/stable/") ? new Response(JSON.stringify(signedFeed())) : artifact,
+    );
+    const port = updater();
+    const updates = createAppUpdateService({
+      updater: port,
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
+      automaticChecks: false,
+      verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
+      fetchImpl,
+    });
+    try {
+      await updates.check();
+      const pending = updates.download();
+      await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
+      updates.dispose();
+      answer(new Response(served(artifactBytes)));
+      await pending;
+      expect(port.calls.setFeedURL).toEqual([]);
+      expect(port.calls.checkForUpdates).toBe(0);
+    } finally {
+      updates.dispose();
+    }
   });
 
   it("drops a verified offer when the ring changes", async () => {
