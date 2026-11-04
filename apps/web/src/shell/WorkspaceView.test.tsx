@@ -10,6 +10,7 @@ import {
   type WorkspaceTab,
 } from "@octant/contracts/shell";
 import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/chat";
+import { decodeCodeBoardView } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -93,6 +94,71 @@ describe("WorkspaceView welcome", () => {
       binding: { canonicalRoot: "/Users/example/code/octant" },
       codeAccessPersistence: "current-session",
     }) as never;
+
+  it("opens a confirmed planner task before the ordinary navigation list has refreshed", async () => {
+    const project = codeProject("active");
+    const props = propsFor({
+      id: decodeWorkspaceTabId(ids.tab),
+      kind: "project",
+      mode: "code",
+      title: project.name,
+      projectId: project.id,
+    });
+    const onOpenCodeThread = vi.fn();
+    const createdThreadId = "90000000-0000-4000-8000-000000000010";
+    const client = {
+      ...codeClient(),
+      queryBoard: vi.fn(async () =>
+        decodeCodeBoardView({
+          version: 1,
+          query: { version: 1 },
+          cards: [],
+          generatedAt: "2026-11-02T00:00:00.000Z",
+        }),
+      ),
+      readPlanner: vi.fn(async () => ({
+        designation: { kind: "none", projectId: project.id, updatedAt: "2026-11-02T00:00:00.000Z" },
+        designationVersion: 0,
+        proposals: [
+          {
+            proposal: {
+              id: "90000000-0000-4000-8000-000000000011",
+              projectId: project.id,
+              plannerThreadId: ids.thread,
+              title: "Newly approved task",
+              intent: "Inspect the parser.",
+              status: "confirmed",
+              proposedAt: "2026-11-02T00:00:00.000Z",
+              resolvedAt: "2026-11-02T00:00:00.000Z",
+              createdThreadId,
+            },
+            proposalVersion: 2,
+          },
+        ],
+      })),
+    };
+    render(
+      <WorkspaceView
+        {...props}
+        projects={[project]}
+        onOpenCodeThread={onOpenCodeThread}
+        codeController={{
+          ...props.codeController,
+          client: client as never,
+          navigation: [],
+          bootstrap: {
+            settings: {} as never,
+            threads: [],
+            checkouts: [],
+            activity: [],
+            runtime: [],
+          },
+        }}
+      />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Open created task" }));
+    expect(onOpenCodeThread).toHaveBeenCalledWith(createdThreadId, "Code task", project.id);
+  });
 
   it("uses the shared Code composer when the only Code Project is archived", async () => {
     render(<WorkspaceView {...propsFor(welcome)} projects={[codeProject("archived")]} />);

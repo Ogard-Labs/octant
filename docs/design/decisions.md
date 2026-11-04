@@ -780,13 +780,15 @@ Status: Designed, not built. Since: —. Detail: [Architecture: Modes: Chat, Wor
 
 ### Project planner thread
 
-A Code Project may designate one of its own threads as its planner, whose agent proposes new Code threads for a person to accept. It is a server-only capability today.
+A Code Project may designate one of its own threads as its planner, whose agent proposes new Code threads for a person to accept in the Project overview.
 
 - Only a person confirms or declines a proposal; a proposal executes nothing and the planner has no creation authority of its own.
 - The planner tools are offered only to the designated thread and re-resolve the designation on every call.
-- No renderer, phone or CLI surface designates a planner, lists proposals or resolves them (not built yet).
+- The Code Project overview designates a same-Project thread and lists versioned proposals with approve/decline and resulting tasks. Phone and CLI mutation surfaces are not added.
+- Approval reviews ordinary provider, checkout and access controls with the proposal intent fixed; only confirmed creation proceeds to the normal first-message path. Stale, refused or uncertain decisions never start work or retry automatically.
+- The host journals one submitted creation identity before awaiting creation; cross-window and restarted attempts cannot replace it. The window retains that identity through reload. Missing task data never releases uncertainty; only confirmed creation or a newer host-proven precreation failure permits progress. Unknown/post-boundary failures remain reserved for inspection.
 
-Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ## Routines and timed turns
 

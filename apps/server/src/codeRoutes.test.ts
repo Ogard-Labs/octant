@@ -1914,6 +1914,39 @@ describe("Code board route", () => {
 });
 
 describe("Code planner routes", () => {
+  it("returns the authoritative stale refusal for the submitted proposal version", async () => {
+    const proposalId = "00000000-0000-4000-8000-000000000910";
+    const executePlannerProposal = vi.fn(async () => ({
+      status: "refused" as const,
+      reason: "proposal-changed" as const,
+      message: "The proposal changed; reload and retry.",
+    }));
+    const route = routeFixture({ executePlannerProposal });
+    const response = await route(
+      request("/api/code/planner/proposals/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "decline-planner-work-proposal",
+          proposalId,
+          expectedVersion: 7,
+        }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    const result = await response?.json();
+    expect(result).toEqual({
+      status: "refused",
+      reason: "proposal-changed",
+      message: "The proposal changed; reload and retry.",
+    });
+    expect(executePlannerProposal).toHaveBeenCalledExactlyOnceWith(
+      windowId,
+      { kind: "decline-planner-work-proposal", proposalId, expectedVersion: 7 },
+      expect.anything(),
+    );
+  });
+
   const plannerView = {
     designation: { kind: "none" as const, projectId, updatedAt: now },
     designationVersion: 0,
