@@ -34,7 +34,8 @@ charges. It does not run your local tools or receive local command approvals.
 3. Choose **Review cloud task**. Only that text is attached: no files, history,
    host tools or credentials. Check anything you paste for private information.
 4. Read the remote execution and cost disclosure, approve the exact text, then
-   choose **Run in provider cloud**. Plan refuses submission. A task with a
+   choose **Run in provider cloud**. Plan refuses submission; you can still
+   inspect or request cancellation of an existing job. A task with a
    thread or Project spend ceiling also refuses, because this API cannot enforce
    the required hard cloud charge limit.
 

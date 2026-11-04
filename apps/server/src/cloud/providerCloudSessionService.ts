@@ -25,6 +25,7 @@ export interface ProviderCloudThreadContext {
   readonly projectId: ProjectId;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly current: () => boolean;
+  readonly canSubmit: () => boolean;
   readonly requiresUnsupportedBound: () => boolean;
 }
 
@@ -91,9 +92,10 @@ export class ProviderCloudSessionService {
     windowId: WindowId,
     command: ProviderCloudRequest,
     signal?: AbortSignal,
+    callerIsCurrent: () => boolean = () => true,
   ): Promise<ProviderCloudResponse> {
     try {
-      return await this.#execute(windowId, command, signal);
+      return await this.#execute(windowId, command, signal, callerIsCurrent);
     } catch {
       return { status: "refused", reason: "journal-unavailable" };
     }
@@ -102,9 +104,11 @@ export class ProviderCloudSessionService {
   async #execute(
     windowId: WindowId,
     command: ProviderCloudRequest,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    callerIsCurrent: () => boolean,
   ): Promise<ProviderCloudResponse> {
     const input = this.#input;
+    if (!callerIsCurrent()) return { status: "refused", reason: "unauthorized" };
     if (command.kind === "profiles")
       return input.canManageProvider(windowId)
         ? this.#view()
@@ -128,7 +132,7 @@ export class ProviderCloudSessionService {
           }
         }
       }
-      return this.#view();
+      return callerIsCurrent() ? this.#view() : { status: "refused", reason: "unauthorized" };
     }
     const existing =
       command.kind === "read" || command.kind === "cancel"
@@ -137,9 +141,10 @@ export class ProviderCloudSessionService {
     const threadId =
       command.kind === "start" || command.kind === "list" ? command.threadId : existing?.threadId;
     if (threadId === undefined) return { status: "refused", reason: "unknown-job" };
-    const context = input.context(windowId, threadId, signal);
-    if (context === undefined || !context.current())
+    const owned = input.context(windowId, threadId, signal);
+    if (owned === undefined || !callerIsCurrent() || !owned.current())
       return { status: "refused", reason: "unauthorized" };
+    const context = { ...owned, current: () => callerIsCurrent() && owned.current() };
     if (command.kind === "list") return this.#view(threadId);
     const instanceId = command.kind === "start" ? command.instanceId : existing?.instanceId;
     const instance = input.instances().find((item) => String(item.id) === String(instanceId));
@@ -220,7 +225,7 @@ export class ProviderCloudSessionService {
           updatedAt: now,
         }),
       );
-      if (!context.current() || !input.store.enabled(instance.id)) {
+      if (!context.current() || !context.canSubmit() || !input.store.enabled(instance.id)) {
         input.store.put({
           ...job,
           state: "unavailable",
@@ -235,6 +240,7 @@ export class ProviderCloudSessionService {
           { kind: "create", jobId: job.id, modelId: job.modelId, text: job.input },
           () =>
             context.current() &&
+            context.canSubmit() &&
             !context.requiresUnsupportedBound() &&
             input.store.enabled(instance.id) &&
             input
@@ -302,6 +308,7 @@ export class ProviderCloudSessionService {
           this.#closed ||
           !input.store.enabled(instance.id) ||
           !context.current() ||
+          !context.canSubmit() ||
           context.requiresUnsupportedBound()
         )
           await this.#cancel(observed, instance);

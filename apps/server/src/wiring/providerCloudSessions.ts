@@ -108,8 +108,7 @@ export function wireProviderCloudSessions(
             next.lifecycle === "active" &&
             String(next.projectId) === String(projectId) &&
             String(next.bindingRevisionId) === String(stored.bindingRevisionId) &&
-            String(next.checkoutId) === String(stored.checkoutId) &&
-            input.codeSessionAuthority.effectiveThread(windowId, next).executionPolicy !== "plan"
+            String(next.checkoutId) === String(stored.checkoutId)
           );
         });
       if (!current()) return undefined;
@@ -117,6 +116,13 @@ export function wireProviderCloudSessions(
         threadId,
         projectId,
         current,
+        canSubmit: () => {
+          const next = persistence.readCodeThread(threadId);
+          return (
+            next !== undefined &&
+            input.codeSessionAuthority.effectiveThread(windowId, next).executionPolicy !== "plan"
+          );
+        },
         executionPolicy: input.codeSessionAuthority.effectiveThread(windowId, stored)
           .executionPolicy,
         requiresUnsupportedBound: () => {

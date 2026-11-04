@@ -3,6 +3,7 @@ import {
   decodeProviderCloudResponse,
 } from "@octant/contracts/provider-cloud-sessions";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
+import { WINDOW_CAPABILITY_HEADER } from "../clientPrincipal";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ProviderCloudSessionService } from "./providerCloudSessionService";
@@ -37,6 +38,20 @@ export function createProviderCloudSessionRoutes(input: {
         now: Date.now(),
       });
       if (principal.principal.kind !== "local-window") return new Response(null, { status: 403 });
+      // The same window id can be registered again while its body or key unlock
+      // waits. Keep the original capability, not merely a currently live id.
+      const capability = request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "";
+      const callerIsCurrent = () => {
+        try {
+          return (
+            !request.signal.aborted &&
+            String(input.windowAuthorityStore.authenticate(capability, Date.now())) ===
+              String(principal.scopeId)
+          );
+        } catch {
+          return false;
+        }
+      };
       const reader = request.body?.getReader();
       if (reader === undefined) return new Response(null, { status: 400 });
       let bytes = 0;
@@ -54,7 +69,14 @@ export function createProviderCloudSessionRoutes(input: {
       }
       const command = decodeProviderCloudRequest(JSON.parse(Buffer.concat(parts).toString("utf8")));
       if (request.signal.aborted) return new Response(null, { status: 499 });
-      const result = await input.service.execute(principal.scopeId, command, request.signal);
+      if (!callerIsCurrent()) return new Response(null, { status: 403 });
+      const result = await input.service.execute(
+        principal.scopeId,
+        command,
+        request.signal,
+        callerIsCurrent,
+      );
+      if (!callerIsCurrent()) return new Response(null, { status: 403 });
       return new Response(JSON.stringify(decodeProviderCloudResponse(result)), {
         status: 200,
         headers,

@@ -5,6 +5,7 @@ import {
   decodeProjectId,
   decodeProviderInstance,
   decodeWindowId,
+  type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import {
   decodeProviderCloudRequest,
@@ -49,6 +50,7 @@ function fixture(
   const jobs = new Map<string, ProviderCloudJob>();
   const enabled = new Map<string, boolean>();
   let current = true;
+  let policy: ProviderExecutionPolicy = "full-access";
   let starts = 0;
   let cancels = 0;
   const dispatched = new Set<string>();
@@ -62,8 +64,9 @@ function fixture(
     context: () => ({
       threadId,
       projectId: decodeProjectId(id(5)),
-      executionPolicy: "full-access",
+      executionPolicy: policy,
       current: () => current,
+      canSubmit: () => policy !== "plan",
       requiresUnsupportedBound: () => false,
     }),
     store: {
@@ -100,7 +103,13 @@ function fixture(
         if (result.status === "observed") onCreated?.(observedId ?? result.remoteId);
         return result;
       },
-      read: async () => ({ status: "unavailable" }),
+      read: async (remoteId) => ({
+        status: "observed",
+        remoteId,
+        state: "running",
+        output: "",
+        truncated: false,
+      }),
       cancel: async () => {
         cancels += 1;
         return { status: "requested" };
@@ -126,10 +135,45 @@ function fixture(
     revoke: () => {
       current = false;
     },
+    plan: () => {
+      policy = "plan";
+    },
   };
 }
 
 describe("provider cloud tasks", () => {
+  it("allows owned status and cancellation in Plan without admitting another remote execution", async () => {
+    const f = fixture(async () => ({
+      status: "observed",
+      remoteId: decodeProviderCloudRemoteId("sess_owned"),
+      state: "running",
+      output: "",
+      truncated: false,
+    }));
+    await f.service.execute(windowId, { kind: "opt-in", instanceId: instance.id, enabled: true });
+    await f.service.execute(windowId, f.start);
+    f.plan();
+    expect((await f.service.execute(windowId, { kind: "list", threadId })).status).toBe("ready");
+    expect(
+      (await f.service.execute(windowId, { kind: "read", jobId: decodeProviderCloudJobId(id(2)) }))
+        .status,
+    ).toBe("ready");
+    expect(
+      (
+        await f.service.execute(windowId, {
+          kind: "cancel",
+          jobId: decodeProviderCloudJobId(id(2)),
+        })
+      ).status,
+    ).toBe("ready");
+    expect(f.cancels()).toBe(1);
+    expect(
+      await f.service.execute(windowId, decodeProviderCloudRequest({ ...f.start, jobId: id(8) })),
+    ).toEqual({ status: "refused", reason: "plan" });
+    expect(f.starts()).toBe(1);
+    await f.service.close();
+  });
+
   it("requires independent opt-in and journals uncertain submission so a retry or restart cannot create it again", async () => {
     const f = fixture();
     expect(await f.service.execute(windowId, f.start)).toEqual({

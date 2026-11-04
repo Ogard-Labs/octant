@@ -250,6 +250,7 @@ describe("outside harness endpoint proxy", () => {
           executionPolicy: "full-access",
           current: () => current,
           requiresUnsupportedBound: () => false,
+          canSubmit: () => true,
         }),
         store: {
           enabled: () => enabled,

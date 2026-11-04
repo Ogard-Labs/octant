@@ -3903,7 +3903,8 @@ credentials or approval callback. Text the person pastes may itself contain
 private information; path-based secret guards cannot inspect an arbitrary
 provider-native command. Explicit per-job consent authorizes execution inside
 the provider's sandbox without local command approval callbacks. It does not
-grant that sandbox any local authority. Plan refuses submission.
+grant that sandbox any local authority. Plan refuses submission but preserves
+owned job inspection and cancellation.
 
 The optional public `CloudSessionDriver` capability and equivalent outside-driver
 RPC normalize create/read/cancel. The first supported protocol is the published
@@ -3919,7 +3920,9 @@ Opt-in defaults off independently for each provider instance. A local window
 must own the current Code Project/thread; paired clients, routines, subagents
 and headless callers receive no implicit authority. Submission rechecks current
 window, Project binding, checkout, effective posture, opt-in, instance version,
-key availability and spend policy after any credential unlock. The existing key
+key availability and spend policy after any credential unlock. The original
+authenticated window capability remains current across body reads and unlocks;
+re-registering the same window ID cannot revive an old request. The existing key
 pool chooses a current configured key; it exposes no generation receipt, so no
 atomic same-key-generation guarantee is made. The one-use create permit is
 consumed immediately before dispatch. That dispatch journals one unpriced usage
