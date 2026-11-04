@@ -7,7 +7,7 @@ import {
 
 const clientHandle = "00000000-0000-4000-8000-000000000593";
 const peer = "a".repeat(64);
-function fixture() {
+function fixture(onCount?: (count: number) => void) {
   let receive: (event: unknown) => void = () => {};
   let elapsed = 0;
   let expire = () => {};
@@ -50,6 +50,7 @@ function fixture() {
       return () => {};
     },
     closeOwnerContexts: closeContexts,
+    ...(onCount === undefined ? {} : { onActiveWindowCountChanged: onCount }),
     fetch,
   });
   const send = (requestId: number, operation: "register" | "renew" | "revoke") =>
@@ -183,4 +184,67 @@ describe("Nightly native window lease ownership", () => {
       await f.owner.close();
     }
   });
+});
+
+it("counts only acknowledged current-host leases and not pending registration", async () => {
+  const counts: number[] = [];
+  const f = fixture((count) => counts.push(count));
+  let settle: (response: Response) => void = () => {};
+  f.fetch.mockImplementationOnce(
+    () =>
+      new Promise<Response>((resolve) => {
+        settle = resolve;
+      }),
+  );
+  const pending = f.send(1, "register");
+  expect(f.owner.activeWindowCount()).toBe(0);
+  settle(Response.json({ generation: 1, leaseMs: 15_000 }, { status: 201 }));
+  await pending;
+  expect(f.owner.activeWindowCount()).toBe(1);
+  f.replaceHost();
+  expect(f.owner.activeWindowCount()).toBe(0);
+  await f.send(2, "renew");
+  expect(counts).toEqual([1, 0]);
+  await f.owner.close();
+});
+
+it("revokes state before a failing count observer without skipping lease cleanup", async () => {
+  const snapshots: number[] = [];
+  let current = () => -1;
+  const f = fixture((count) => {
+    snapshots.push(current());
+    if (count === 0) throw new Error("observer failed");
+  });
+  current = f.owner.activeWindowCount;
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const reply = await f.send(1, "register");
+    if (reply.kind !== "registered") throw new Error("Fixture registration failed");
+    f.expire();
+    expect(f.owner.activeWindowCount()).toBe(0);
+    await expect(f.owner.close()).resolves.toEqual({ kind: "closed" });
+    expect(snapshots).toEqual([1, 0]);
+    expect(f.closeContexts).toHaveBeenCalledWith(reply.windowId);
+    expect(f.requests.some((request) => request.method === "DELETE")).toBe(true);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+it("does not count a server acquisition before its native registration reply succeeds", async () => {
+  const f = fixture();
+  let beforeAcknowledgement = -1;
+  const reply = f.replies.getMockImplementation();
+  if (reply === undefined) throw new Error("Fixture reply is missing");
+  f.replies.mockImplementationOnce((requestId, result) => {
+    beforeAcknowledgement = f.owner.activeWindowCount();
+    return reply(requestId, result);
+  });
+  try {
+    await f.send(1, "register");
+    expect(beforeAcknowledgement).toBe(0);
+    expect(f.owner.activeWindowCount()).toBe(1);
+  } finally {
+    await f.owner.close();
+  }
 });
