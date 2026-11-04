@@ -13,6 +13,8 @@
  * exercised on hosts that hold no certificate.
  */
 
+import { desktopIdentity, type DesktopIdentity } from "@octant/host-runtime";
+import { packagedNativePath } from "./desktop-client-runtime";
 import { open, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -282,11 +284,12 @@ export async function signAndNotarizeDesktop(input: {
   readonly appPath: string;
   readonly archivePath: string;
   readonly credentials: SigningCredentials;
-  readonly productName?: string;
+  readonly identity?: DesktopIdentity;
   readonly run: CommandRunner;
   readonly runForOutput: CommandOutputRunner;
 }): Promise<void> {
   const entitlements = resolve(input.repositoryRoot, ENTITLEMENTS_PATH);
+  const identity = input.identity ?? desktopIdentity("stable");
   // Vendored tools are signed without Octant's entitlements: JIT, unsigned
   // executable memory, and audio input are exceptions Electron and dictation
   // need, not these helpers.
@@ -296,14 +299,14 @@ export async function signAndNotarizeDesktop(input: {
   await input.run(
     createCodesignArgv({
       identity: input.credentials.identity,
-      target: `${input.appPath}/${BUNDLED_LANGUAGE_SERVER_SIGNING_PATH}`,
+      target: `${input.appPath}/${packagedNativePath(BUNDLED_LANGUAGE_SERVER_SIGNING_PATH, identity)}`,
     }),
   );
   for (const relativePath of SIGNING_ORDER) {
     await input.run(
       createCodesignArgv({
         identity: input.credentials.identity,
-        target: `${input.appPath}/${relativePath.replace("Contents/Frameworks/Octant Helper", `Contents/Frameworks/${input.productName ?? "Octant"} Helper`)}`,
+        target: `${input.appPath}/${packagedNativePath(relativePath, identity).replace("Contents/Frameworks/Octant Helper", `Contents/Frameworks/${identity.productName} Helper`)}`,
         entitlements,
       }),
     );

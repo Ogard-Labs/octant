@@ -85,6 +85,38 @@ and input, IME, accessibility, and native-popup parity need implementation and
 evidence. An isolated synthetic fixture is feasibility evidence only; it is not
 packaged coexistence, signed-in browsing, or native identity verification.
 
+## Fixed packaged entry
+
+A packaged macOS Nightly runs its bundled application entry from `app.asar`.
+Packaging verifies the archive header against `ElectronAsarIntegrity` and checks
+its file bytes before signing. Application JavaScript stays inside the archive;
+only the listed native addons, adjacent libraries, PTY executable and language
+server are unpacked to physical paths and signed before the app seal.
+
+Nightly disables Electron's Node-mode, Node-options environment and Node
+inspection entry paths. It requires ASAR-only loading and embedded ASAR integrity
+validation, with fuse readback on the artifact before signing. Its application
+entry accepts a bounded set of launch arguments: ordinary startup, one macOS
+Launch Services process token, its own valid Code link, or the fixed scoped
+terminal role. It refuses unknown positional entries, loader options and
+Chromium remote-debugging options before importing host or client-registration
+code. Refusal in JavaScript alone does not establish that Chromium exposed no
+debugging endpoint during startup; native startup checks cover that separately.
+
+The terminal's bundled `octant mcp` and help commands use that fixed role, without
+loading the host-owning GUI module or accepting a caller-selected script. This
+preserves the current terminal Browser-grant consumer, not the full planned
+`octant-nightly` command. Stable keeps its existing Node-mode host and terminal
+launcher.
+
+These restrictions are a prerequisite for native peer admission. A signature on
+an interpreter that also accepts arbitrary JavaScript would not identify trusted
+Nightly application code. Fixed-entry packaging alone does not authenticate a
+peer, grant a window capability, establish same-Team signed-app acceptance or
+complete the stable-host bridge. The functional launch and publication gates
+remain until those requirements and embedded Browser parity are implemented and
+verified.
+
 ## Identity
 
 The apps differ only in what macOS and Linux need to keep two apps apart:

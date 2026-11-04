@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./web": "./src/web.ts",
     "./status": "./src/status.ts",
-    "./mcp": "./src/mcpCommand.ts"
+    "./mcp": "./src/mcpCommand.ts",
+    "./terminal-launcher": "./src/terminalLauncher.ts"
   },
   "scripts": {
     "build": "tsdown",

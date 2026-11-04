@@ -12712,6 +12712,13 @@ macOS-only.
   identity's rings. Until the typed stable-host desktop bridge is implemented,
   Nightly refuses before loading the module that initializes host paths and
   credential services; it cannot start a host or migrate shared data.
+  Packaged macOS Nightly additionally seals its JavaScript entry in ASAR and
+  disables alternate Node/loader entry paths. Its existing scoped terminal MCP
+  command runs through a fixed bundled role, while Stable retains Node-mode
+  host and terminal behavior. This is a prerequisite for peer admission, not
+  evidence that a signed Nightly peer or embedded Browser bridge is usable;
+  the owning [fixed-entry rules](design/nightly-app.md#fixed-packaged-entry)
+  preserve the functional launch and publication gates.
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
   bundled file read from disk, so What's New never adds a request.
