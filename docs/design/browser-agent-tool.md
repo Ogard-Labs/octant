@@ -513,6 +513,62 @@ use`), a size still applies. The person sees the page at the emulated size
   confirm is the answer that changes nothing. Bounding the viewport to common
   phone and desktop sizes keeps the page renderable at any size it reaches.
 
+## Page lifetime
+
+A Browser context is a live resource on this host, not a persistent owner or an
+approval grant. Its existing `sessionTimeoutMs` is an idle interval: ten minutes
+for an agent-opened page and five minutes for the person's ordinary toolbar
+page. Creation has that same finite bound from its start; activation starts a
+fresh idle interval. A late native creation is closed after timeout rather than
+made active.
+
+- **Meaningful activity renews idle.** Terminal-grant operations use host-owned
+  activity attribution independently of capture retention: an explicit terminal
+  read renews idle without keeping a capture or extending a person's hold.
+  An explicitly requested Browser operation
+  renews the interval after authority, policy, revision/ref and credential
+  checks, immediately before it reaches the runtime, and again when it finishes
+  while the context is still live. Intentional agent reads, snapshots,
+  screenshots, waits, tab operations and diagnostics count, as navigation and
+  input do. A runtime failure after true admission is still a recent attempt;
+  a refusal, a held call or a call waiting in the queue is not activity.
+- **The person's input counts.** Native keys and clicks, and the existing
+  meaningful actions relayed through the pane, renew idle. An intentional
+  screenshot taken by the person also counts. Moving the pointer, focus,
+  key-up and ordinary scrolling do not. This does not change which person
+  input invalidates the agent's refs.
+- **Watching does not keep a page open.** Renderer inspection, preview pictures,
+  dashboard listings and automatic polling never renew it. The toolbar names
+  the page's idle interval, or its separate person hold; it is not a countdown.
+- **Active work can last longer than ten minutes.** There is no new
+  creation-based cap that closes a page while meaningful authorized work
+  continues. Each operation still revalidates authority. Without activity, the
+  finite idle deadline aborts pending runtime calls and closes the context;
+  a hung call, queued call, late answer or late input cannot extend or revive
+  it. A timer that was already queued checks the latest deadline before expiry,
+  and cannot restart a stopped context's scheduling.
+- **Handoffs have their existing phase bounds.** A sign-in card waits at most
+  ten minutes; its page is retained for eleven minutes from the hold. Take-over
+  input renews that eleven-minute hold, with the existing one-minute scheduling
+  throttle. Answering the card or handing back replaces the hold with two
+  minutes of grace, taking the later of that grace and the ordinary idle
+  deadline. The release control alone does not grant a fresh normal interval;
+  subsequent admitted work or person input does. Waiting agent calls and
+  passive handoff polling never extend it.
+- **Closing and recovery keep their authority.** Stop, revocation, window/host
+  close and process death keep their existing teardown behavior. Expiry is
+  recoverable only by an explicit newly authorized navigation; it never
+  silently opens a page or changes profile. A stored profile may keep its site
+  data, but an expired context, refs and controller binding do not survive.
+  Routine, child, terminal-grant, paired-device and profile restrictions remain
+  unchanged; activity adds no persistent owner, sign-in right or new grant.
+
+Rationale: applying the existing interval to actual work fixes creation-based
+expiry without turning renderer observation into a keepalive or inventing a new
+absolute limit that would interrupt an active task again. Activity stays in
+host memory; no cookies, account inventory or persistent activity journal is
+needed.
+
 ## Asking the person to sign in
 
 - `sign-in` (with an optional `reason`, at most 300 characters) hands the open
@@ -532,8 +588,9 @@ use`), a size still applies. The person sees the page at the emulated size
   The hold is checked again right before an action runs, so a call that was
   already waiting on an approval when the hand-off began does not act either.
   One hand-off at a time per page.
-- The page outlives the hand-off: it stays open past its 10-minute session
-  while the person signs in, and for 2 minutes after the card is answered so
+- The page outlives the hand-off under the finite phase windows described in
+  [Page lifetime](#page-lifetime): eleven minutes from the hold, then the later
+  of its ordinary idle deadline and two minutes after the card is answered so
   the agent can read it.
 - The person signs in by typing into the page themselves. Octant saves no
   password and fills none, and the agent never sees what they typed: a

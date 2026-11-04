@@ -3,6 +3,7 @@ import {
   decodeAutomationRun,
   deriveAutomationOccurrenceKey,
   type AutomationDefinition,
+  type AutomationDefinitionSnapshot,
   type AutomationFirstTurnRequestId,
   type AutomationOccurrence,
   type AutomationOccurrenceKeyText,
@@ -66,26 +67,7 @@ export function buildAutomationRunForOccurrence(
     occurrenceKey,
     scheduledAt: occurrence.kind === "scheduled" ? occurrence.scheduledAt : null,
     claimedAt: now,
-    definitionSnapshot: {
-      automationId: definition.id,
-      definitionRevision: definition.definitionRevision,
-      displayName: definition.displayName,
-      taskPrompt: definition.taskPrompt,
-      hostId: definition.hostId,
-      mode: definition.mode,
-      projectId: definition.projectId,
-      projectVersion: definition.projectVersion,
-      binding: definition.binding,
-      executionProfile: definition.executionProfile,
-      authorityProfile: definition.authorityProfile,
-      deliveryTarget: definition.deliveryTarget,
-      trigger: definition.trigger,
-      missedRunPolicy: definition.missedRunPolicy,
-      targetPolicy: definition.targetPolicy,
-      ...(definition.projectLevel === undefined ? {} : { projectLevel: definition.projectLevel }),
-      ...(definition.runLevel === undefined ? {} : { runLevel: definition.runLevel }),
-      ...(definition.agentMerge === undefined ? {} : { agentMerge: definition.agentMerge }),
-    },
+    definitionSnapshot: captureAutomationDefinitionSnapshot(definition),
     authoritySnapshot: {
       profileId: definition.authorityProfile.profileId,
       profileVersion: definition.authorityProfile.profileVersion,
@@ -101,4 +83,30 @@ export function buildAutomationRunForOccurrence(
     createdAt: now,
     updatedAt: now,
   });
+}
+
+/** Capture the same closed definition used by dispatch and source preflight. */
+export function captureAutomationDefinitionSnapshot(
+  definition: AutomationDefinition,
+): AutomationDefinitionSnapshot {
+  return {
+    automationId: definition.id,
+    definitionRevision: definition.definitionRevision,
+    displayName: definition.displayName,
+    taskPrompt: definition.taskPrompt,
+    hostId: definition.hostId,
+    mode: definition.mode,
+    projectId: definition.projectId,
+    projectVersion: definition.projectVersion,
+    binding: definition.binding,
+    executionProfile: definition.executionProfile,
+    authorityProfile: definition.authorityProfile,
+    deliveryTarget: definition.deliveryTarget,
+    trigger: definition.trigger,
+    missedRunPolicy: definition.missedRunPolicy,
+    targetPolicy: definition.targetPolicy,
+    ...(definition.projectLevel === undefined ? {} : { projectLevel: definition.projectLevel }),
+    ...(definition.runLevel === undefined ? {} : { runLevel: definition.runLevel }),
+    ...(definition.agentMerge === undefined ? {} : { agentMerge: definition.agentMerge }),
+  };
 }

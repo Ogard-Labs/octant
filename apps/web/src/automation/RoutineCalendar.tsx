@@ -57,6 +57,11 @@ export function RoutineCalendar(props: {
         </OctantIconButton>
       </header>
 
+      {props.routines.some((routine) => routine.trigger.kind === "file-arrival") ? (
+        <p>
+          File-arrival routines have no scheduled dates. Use List to inspect their input status.
+        </p>
+      ) : null}
       <div aria-hidden="true" className="routine-calendar__weekdays">
         {WEEKDAY_HEADINGS.map((weekday) => (
           <span key={weekday}>{weekday}</span>

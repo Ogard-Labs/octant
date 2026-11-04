@@ -1,13 +1,13 @@
 import {
   decodeAutomationThreadId,
-  decodeAutomationTrigger,
+  decodeAutomationScheduledTrigger,
   decodeProjectId,
   MAX_AUTOMATION_DISPLAY_NAME_LENGTH,
   MAX_AUTOMATION_TASK_PROMPT_LENGTH,
   ROUTINE_PROPOSAL_TOOL_NAME,
   type AutomationMissedRunPolicy,
   type OctantMode,
-  type AutomationTrigger,
+  type AutomationScheduledTrigger,
   type ProviderExecutionPolicy,
   type ProviderToolDefinition,
   type UtcTimestamp,
@@ -179,7 +179,7 @@ type ParsedInput =
       readonly kind: "ok";
       readonly name: string;
       readonly prompt: string;
-      readonly trigger: AutomationTrigger;
+      readonly trigger: AutomationScheduledTrigger;
       readonly missedRunPolicy: AutomationMissedRunPolicy;
       readonly followUp: boolean;
       readonly firstRunAt: UtcTimestamp;
@@ -243,7 +243,7 @@ function parseTrigger(
   fields: ReadonlyMap<string, unknown>,
   nowMs: number,
 ):
-  | { readonly kind: "ok"; readonly trigger: AutomationTrigger }
+  | { readonly kind: "ok"; readonly trigger: AutomationScheduledTrigger }
   | { readonly kind: "invalid"; readonly message: string } {
   try {
     switch (fields.get("trigger")) {
@@ -257,7 +257,10 @@ function parseTrigger(
           };
         }
         if (Date.parse(at) <= nowMs) return { kind: "invalid", message: "`at` is in the past." };
-        return { kind: "ok", trigger: decodeAutomationTrigger({ kind: "once", scheduledAt: at }) };
+        return {
+          kind: "ok",
+          trigger: decodeAutomationScheduledTrigger({ kind: "once", scheduledAt: at }),
+        };
       }
       case "interval": {
         const minutes = fields.get("everyMinutes");
@@ -279,7 +282,7 @@ function parseTrigger(
         }
         return {
           kind: "ok",
-          trigger: decodeAutomationTrigger({
+          trigger: decodeAutomationScheduledTrigger({
             kind: "interval",
             anchorAt: anchor,
             intervalMinutes: minutes,
@@ -289,7 +292,7 @@ function parseTrigger(
       case "weekly":
         return {
           kind: "ok",
-          trigger: decodeAutomationTrigger({
+          trigger: decodeAutomationScheduledTrigger({
             kind: "weekly-local",
             weekdays: fields.get("weekdays"),
             localTime: fields.get("localTime"),

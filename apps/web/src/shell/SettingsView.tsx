@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { settleSettingsRail } from "./settingsRailScroll";
+import type { SkillRootStatus } from "@octant/contracts/extension-rpc";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
@@ -194,6 +195,7 @@ import "../styles/extensions-settings.css";
 import "../styles/extension-library.css";
 
 export interface SettingsViewProps {
+  readonly pickSkillFolder?: () => Promise<string | undefined>;
   readonly chatController?: ChatController;
   /** Work's defaults for new threads; absent where no Work host is reachable. */
   readonly workSettings?: WorkSettingsController;
@@ -1999,11 +2001,13 @@ function SkillsSection({
   props,
 }: SectionProps & { readonly onApplyDeepLink: (link: SettingsDeepLink) => void }) {
   const [skillFolderSaves, setSkillFolderSaves] = useState(0);
+  const [skillRoots, setSkillRoots] = useState<ReadonlyArray<SkillRootStatus>>([]);
   return (
     <div className="settings-section-stack" id="settings-skills">
       {props.extensionClient === undefined ? null : (
         <ExtensionsSettingsView
           client={props.extensionClient}
+          onSkillRootsChanged={setSkillRoots}
           marketplaceFetchesEnabled={props.settings.marketplaceFetchesEnabled}
           skillFoldersKey={`${JSON.stringify(props.settings.skillFolders)}:${skillFolderSaves}`}
           showHeading={false}
@@ -2041,6 +2045,7 @@ function SkillsSection({
         />
       )}
       <SkillFoldersSection
+        skillRoots={skillRoots}
         onSaved={() => setSkillFolderSaves((count) => count + 1)}
         props={props}
       />
@@ -2054,15 +2059,37 @@ function SkillsSection({
  * folder indexes its skills only; the activation ladder still applies.
  */
 function SkillFoldersSection({
+  skillRoots,
   onSaved,
   props,
-}: Pick<SectionProps, "props"> & { readonly onSaved: () => void }) {
+}: Pick<SectionProps, "props"> & {
+  readonly onSaved: () => void;
+  readonly skillRoots: ReadonlyArray<SkillRootStatus>;
+}) {
   return (
-    <SettingsSection title="Skill folders">
+    <SettingsSection
+      title="Skill folders"
+      actions={
+        props.extensionClient === undefined ? undefined : (
+          <OctantButton
+            aria-label="Refresh folder status"
+            onClick={onSaved}
+            type="button"
+            variant="outline"
+          >
+            Refresh
+          </OctantButton>
+        )
+      }
+    >
       <SkillFolderSettingsPanel
-        onChange={(skillFolders) =>
-          void Promise.resolve(props.onSettingsChange({ skillFolders })).then(onSaved)
-        }
+        {...(props.pickSkillFolder === undefined ? {} : { pickFolder: props.pickSkillFolder })}
+        statuses={skillRoots}
+        onChange={async (skillFolders) => {
+          const accepted = await props.onSettingsChange({ skillFolders });
+          if (accepted !== false) onSaved();
+          return accepted;
+        }}
         value={props.settings.skillFolders}
       />
     </SettingsSection>

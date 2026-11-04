@@ -1,3 +1,7 @@
+import {
+  decodeCodeLanguageDocumentRequest,
+  decodeCodeLanguageReadRequest,
+} from "@octant/contracts/code-language";
 import { describe, expect, it, vi } from "vitest";
 import { decodeProjectId } from "@octant/contracts/projects";
 import {
@@ -1311,6 +1315,79 @@ describe("code client", () => {
       `${baseUrl}/api/code/tests/status?threadId=${ids.thread}&checkoutId=${ids.checkout}`,
       expect.objectContaining({ method: "GET" }),
     );
+  });
+
+  it("carries acknowledged document identity and optional cancellation through typed references reads", async () => {
+    const fileId = "b0000000-0000-4000-8000-000000000001";
+    const revision = "90000000-0000-4000-8000-000000000001";
+    const scope = { threadId: ids.thread, checkoutId: ids.checkout, fileId };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          status: "synced",
+          ...scope,
+          documentVersion: 2,
+          documentRevision: revision,
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ status: "capabilities", ...scope, references: "supported" }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          status: "references",
+          ...scope,
+          documentVersion: 2,
+          documentRevision: revision,
+          targets: [],
+          truncated: false,
+        }),
+      );
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const controller = new AbortController();
+    await expect(
+      client.syncLanguageDocument?.(
+        decodeCodeLanguageDocumentRequest({
+          kind: "change",
+          ...scope,
+          text: "unsaved text",
+          expectedRevision: revision,
+        }),
+        controller.signal,
+      ),
+    ).resolves.toMatchObject({ documentVersion: 2, documentRevision: revision });
+    await expect(
+      client.readLanguage?.(
+        decodeCodeLanguageReadRequest({ kind: "capabilities", ...scope }),
+        controller.signal,
+      ),
+    ).resolves.toMatchObject({ references: "supported" });
+    const read = decodeCodeLanguageReadRequest({
+      kind: "references",
+      ...scope,
+      position: { line: 2, character: 4 },
+      includeDeclaration: true,
+      expectedVersion: 2,
+      expectedRevision: revision,
+    });
+    await expect(client.readLanguage?.(read, controller.signal)).resolves.toMatchObject({
+      status: "references",
+      documentVersion: 2,
+      documentRevision: revision,
+    });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      `${baseUrl}/api/code/language/documents`,
+      `${baseUrl}/api/code/language/read`,
+      `${baseUrl}/api/code/language/read`,
+    ]);
+    for (const [, init] of fetch.mock.calls) {
+      expect(init.signal).toBe(controller.signal);
+      expect(new Headers(init.headers).get("x-octant-window-capability")).toBe(capability);
+    }
+    expect(JSON.parse(fetch.mock.calls[2]?.[1].body)).toEqual(read);
+    controller.abort();
+    expect(fetch.mock.calls[2]?.[1].signal.aborted).toBe(true);
   });
 
   it("opens an editor document and reads a definition through the host's language routes", async () => {

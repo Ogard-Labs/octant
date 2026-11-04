@@ -2,6 +2,8 @@ import { fileURLToPath } from "node:url";
 import { isAbsolute, normalize, relative, sep } from "node:path";
 import {
   MAX_CODE_LANGUAGE_DEFINITION_TARGETS,
+  MAX_CODE_LANGUAGE_REFERENCES,
+  MAX_CODE_LANGUAGE_REFERENCE_FILES,
   MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH,
   MAX_CODE_LANGUAGE_DIAGNOSTICS,
   type CodeLanguageDefinitionTarget,
@@ -161,6 +163,43 @@ export async function toDefinitionTargets(input: {
     targets.push(await placeTarget(uri, range, input.roots, input.realpath));
   }
   return targets;
+}
+
+/** References are bounded Locations, never arbitrary workspace edits or commands. */
+export async function toReferenceTargets(input: {
+  readonly result: unknown;
+  readonly roots: LanguageServerResultRoots;
+  readonly realpath: (path: string) => Promise<string>;
+  readonly current: () => boolean;
+}): Promise<{
+  readonly targets: ReadonlyArray<CodeLanguageDefinitionTarget>;
+  readonly truncated: boolean;
+}> {
+  const entries = Array.isArray(input.result) ? input.result : [];
+  const targets: CodeLanguageDefinitionTarget[] = [];
+  const files = new Set<string>();
+  const seen = new Set<string>();
+  let truncated = entries.length > MAX_CODE_LANGUAGE_REFERENCES;
+  for (const entry of entries.slice(0, MAX_CODE_LANGUAGE_REFERENCES)) {
+    if (!input.current()) break;
+    if (!isRecord(entry) || typeof entry.uri !== "string") continue;
+    const range = toRange(entry.range);
+    if (range === undefined) continue;
+    const target = await placeTarget(entry.uri, range, input.roots, input.realpath);
+    if (!input.current()) break;
+    if (target.kind === "checkout-location" && !files.has(target.path)) {
+      if (files.size === MAX_CODE_LANGUAGE_REFERENCE_FILES) {
+        truncated = true;
+        continue;
+      }
+      files.add(target.path);
+    }
+    const identity = JSON.stringify(target);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    targets.push(target);
+  }
+  return { targets, truncated };
 }
 
 async function placeTarget(

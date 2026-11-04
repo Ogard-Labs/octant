@@ -507,6 +507,7 @@ export class TerminalBrowserGrantService {
             windowId: actingWindow,
             ...(actingThread === undefined ? {} : { threadId: actingThread }),
             request,
+            activityBy: "agent",
             ...(refuseStaleRevision === undefined ? {} : { refuseStaleRevision }),
           }),
         releaseThread: lent.automation.releaseThread,

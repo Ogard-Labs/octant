@@ -40,7 +40,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
-| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 4       | 0            | 0                   |
+| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 9       | 1            | 0                   |
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
@@ -49,7 +49,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Extensions](#extensions)                                                             | 8         | 7       | 1            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
-| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 8       | 0            | 0                   |
+| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 6       | 2            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **223**   | **190** | **30**       | **3**               |
+| **All areas**                                                                         | **223**   | **189** | **31**       | **3**               |
 
 ## Principles and hard lines
 
@@ -168,7 +168,8 @@ Below Full access, secret files stay out of every agent's reach by an operating-
 - Octant Shield's Judge sends a command that reaches a secret file to the person and refuses one that reads secrets then sends something off the computer; it reads the person's protected list beside its own patterns.
 - Built: the Watcher's `secret-path-read` label on every call of Octant's own tools that names a protected path, refused or not; the Watcher's `secret-env-print` label on a call of Octant's own shell that prints an environment variable whose name says it holds a secret, by the name alone; the Judge reading the list in force; a journaled `reads-secrets-then-egress` tag on an Octant Harness command at Full access.
 - Built: the AWS command line in Octant's own shell gets a one-hour session the broker makes with AWS STS from a key pair the person pointed at a linked store; the pair never leaves the broker.
-- Not built yet: short-lived credentials for the Google Cloud and Azure command lines.
+- Built: the Google Cloud `gcloud` command line in Octant's own shell receives a command-owned access-token file and private configuration after the person confirms an exact linked service account and OAuth scopes. The broker alone reads the reusable signing key; clearing the selection blocks pending and future commands, not tokens already given to running commands.
+- Not built yet: the Azure command line's general short-lived credential channel. Google ADC, `gsutil`, `bq`, delegated subjects, and impersonation are outside the bounded `gcloud` adapter.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Secret guard](../architecture.md#secret-guard).
 
@@ -284,7 +285,7 @@ The key providers run inside Octant as they run on their own, with their native 
 - Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run at every level, each shown as a child run, with their approvals and app-tool calls answered through the parent's approval path and their web searches marking the thread.
 - OpenCode loads its own skills, the MCP servers in the person's own configuration, and the permission rules they wrote (over the level, under Plan's denials and the outside-directory refusal; a catch-all rule is ignored), follows each session its `task` tool delegates to as a child run with its requests answered through the parent, and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; Octant Shield answers its approvals at Auto like every other runtime's.
 - OpenCode reports file changes and compacts its own session on request only from the 2.x release whose server was read for them (2.2.0); an older 2.x release reports no file changes and compaction `unavailable`, 1.x reports compaction `unavailable` and reports no file changes (not built yet), and a change no edit grant names still fails the turn. A compaction request is held open until the run that carried it ends, so the closing idle is never read as a completed turn. Rationale: the narrower choice trusts only a release that was read, since routes and events differ between 2.x releases and the claim adds no authority.
-- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; its own subagents run only at Full access in Work and Code, shown as child runs, because a subagent's permission request names nothing Octant could show; it stays on the ACP bridge, because its `vibe-app-server` is an unversioned surface that ships with its own client; reading usage, compaction, review and questions from `vibe-acp`'s own extensions is not built yet.
+- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; its own subagents run only at Full access in Work and Code, shown as child runs, because a subagent's permission request names nothing Octant could show; it stays on the ACP bridge, because its `vibe-app-server` is an unversioned surface that ships with its own client; reading usage and context from verified `vibe-acp` 3.0.3 is built ([Provider runtimes](provider-runtimes.md#mistral-vibe-surface)); reading compaction, review and questions from its own extensions is not built yet.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
 
@@ -386,6 +387,7 @@ Status: Built. Since: —. Detail: [Architecture: Desktop menu bar](../architect
 
 Code editor language services and the debugger run as confined children the server launches per checkout. Agents read the same servers through two read-only tools.
 
+- Explicit checkout references use actual initialized support and current acknowledged draft identity, stay bounded and read-only, and never start or retarget a server. Cancelled queries may retain only an exact late document acknowledgement; a genuinely lost reply offers a distinct person-controlled language-document reload, never an implicit restart from Recheck. Unknown/unsupported support has an explicit external-editor fallback; rename and reviewed text-only quick fixes remain follow-on work.
 - The bundled language server can be switched off in Settings; a person can add a static server from a local folder, which installs untrusted and disabled until reviewed and switched on.
 - A repository-tooling server starts only after a local-window approval, never in Plan or for a paired device, and agents never start or read through one.
 - Debugger routes are local-window only with no remote action and no agent tool; nothing a session shows is journaled. Breakpoint configuration alone is saved in device-local renderer storage per endpoint/window/thread/checkout; restored locations are unresolved until an authorized exact file check, changed locations require explicit acceptance, and restoration never starts or attaches a session.
@@ -560,6 +562,7 @@ An agent reaches a remote machine with `ssh` through the thread's shell, in Work
 - At Guarded, the first connection to each host in a thread asks the person, naming the host.
 - Network egress for shell commands follows the level: Project rules at Guarded and Reviewed, open at Full access.
 - A Code Project may be bound to a folder on a registered server, in a catalog of its own; the connection uses this host's `ssh` and the person's agent, forwards nothing, refuses an unknown host key, shares one connection per server through a private control socket, and fails closed with no local fallback. Built: the catalog, the connection, the folder check, Octant Harness Code threads with files, commands and Git on the server at every level (a remembered approval never covers a command there), thread terminals and the Project terminal as logins on the server, the Git tab and the dock's Review tool with Git on the server (Plan changes nothing there), the Files panel, file editor and Tests panel reading, saving and running on the server (saves checked by digest, no folder watch), and a thread's own worktree made with Git on the server and its pull request by repository and branch name (Plan makes no worktree there). A Work Project may be bound there too (`mode: "work"`; a Code Project's record is unchanged), whose Work threads run on the Octant Harness with file tools and commands on the server and no tool of this host (built, with its Work sidebar, composer, and thread view; [Server Projects](server-projects.md)). Its tests ran against a throwaway local `sshd` only, never a real server, and pull requests against a stand-in for `gh`, never GitHub.
+- A local person can open an owned loopback dev-server preview for a server Project. Dedicated SSH stdio streams carry HTTP and WebSockets without changing the ordinary command connection; stop, connection loss, revocation and explicit same-endpoint reconnect are visible. Stop/reopen and shutdown await retained resource receipts and pending starts, with bounded failure if cleanup is unconfirmed ([Server Projects](server-projects.md#person-operated-dev-server-previews)).
 - On a server, no login shell parses a call: the script and arguments travel encoded for `sh` alone, so any login shell (`fish` and the `csh` family included) reads them unchanged. Octant's file tools, Files panel, and search there refuse the secret guard's one list at every level, the person's changes included; a shell command there can still read what the login user can, gated only by the level. At Reviewed the server's action profile caps a Project's own calls and this host's safe places and protected paths judge nothing there; Shield treats a server thread as having read outside content, and the Watcher marks one it finds steering text in. A server with bound Projects cannot change its alias or user (built; [Server Projects](server-projects.md)).
 - The earlier SSH target binding was removed and old journals still replay; its `remote-root` threads keep refusing every operation.
 
@@ -734,7 +737,8 @@ A Code thread may push its own branch and open, update and stack pull requests f
 - Built: push, amend with force-with-lease, plain force-push on approval, open (ready, draft, stacked), edit, labels of existing labels only, comments and review replies (approved for each post at every level), close and reopen, and an agent's merge on request or on a stored Project or routine choice.
 - The review pane carries the person's own label, comment, review-reply, approve, request-changes, close and reopen controls; the labels and review threads they name are read through a desktop-window-only query, and a label the repository lacks is never offered. A review is recorded on the head the person read and refused when it moved; no agent, routine or paired device reviews.
 - Built: every push, merge and pull-request change Octant reads in a shell command is journaled under the thread (`shield-forge-changes.observed@1`) with who ran it and what happened; at Full access an Octant Harness command that merges, force-pushes plainly, forces or deletes a branch other than the thread's own, or pushes to another thread's branch is refused before it runs, and a provider runtime's command, seen only as it starts, is recorded with the hard line it crossed. A target behind an expansion is recorded as unreadable.
-- At Guarded and Reviewed a Code agent's shell can still reach forge credentials, and a change made that way is journaled as a forge change where Octant sees it, but none of the pull-request rules applies to it (known gap).
+- At Guarded and Reviewed, recognizable pushes and pull-request writes are refused before Octant's Harness shell runs them, and before Octant answers a provider's pending approval call, with or without Shield. Generic shell consent does not bind repository, revision or checks; the agent uses the structured tools. Shield's forge hard lines use the same command reader and still ask the person.
+- A provider reviewer answers internally and gives Octant no pending call to intercept; Full access tool-start observations arrive after execution starts. Those paths are recorded, never represented as pre-action enforcement. Arbitrary scripts and hidden targets remain unsupported for complete forge enforcement. An unreadable branch-ownership lookup refuses a Full access Harness push rather than dropping its other-thread check.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -777,13 +781,15 @@ Status: Designed, not built. Since: —. Detail: [Architecture: Modes: Chat, Wor
 
 ### Project planner thread
 
-A Code Project may designate one of its own threads as its planner, whose agent proposes new Code threads for a person to accept. It is a server-only capability today.
+A Code Project may designate one of its own threads as its planner, whose agent proposes new Code threads for a person to accept in the Project overview.
 
 - Only a person confirms or declines a proposal; a proposal executes nothing and the planner has no creation authority of its own.
 - The planner tools are offered only to the designated thread and re-resolve the designation on every call.
-- No renderer, phone or CLI surface designates a planner, lists proposals or resolves them (not built yet).
+- The Code Project overview designates a same-Project thread and lists versioned proposals with approve/decline and resulting tasks. Phone and CLI mutation surfaces are not added.
+- Approval reviews ordinary provider, checkout and access controls with the proposal intent fixed; only confirmed creation proceeds to the normal first-message path. Stale, refused or uncertain decisions never start work or retry automatically.
+- The host journals one submitted creation identity before awaiting creation; cross-window and restarted attempts cannot replace it. The window retains that identity through reload. Missing task data never releases uncertainty; only confirmed creation or a newer host-proven precreation failure permits progress. Unknown/post-boundary failures remain reserved for inspection.
 
-Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ## Routines and timed turns
 
@@ -795,9 +801,19 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
 - An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile.
 - The scheduler is an in-process timer; nothing runs in a cloud, and a self-hosted wake service on a person's hub can wake a spoke for a routine (built; run only between hosts on loopback with a fake socket).
+- A Work run observes the exact retained first-turn request and captured receipt/thread/Project/host/binding/provider/model. Proven terminal status is journaled before the active slot is reused; missing/mismatched evidence stays active, edits do not replace the run snapshot, and replay or notification failure never redelivers the provider call. First-turn completion does not prove child/process quiescence.
 - A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
 
-Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+- A new file trigger is Work/new-thread only, under the main local Project root, using the existing Secret guard and confined reads. The existing journal owns its baseline, deterministic batch and finite automatic-start budget (default 8, selectable 1–32); no restart or quiet reset. Hidden/linked/protected input is excluded, unsupported or incomplete scans block, and filesystem hints never identify writers.
+- File changes during the known routine/child/process activity window are held for explicit current-authority Review/Re-arm, with the held batch preserved. Offline recovery sees net surviving final-state changes only. The run-first source/claim ledger repairs without a second run or budget debit.
+- A transient unavailable/oversized source preserves an existing required review in the same durable cursor. After recovery or restart, neither missed-run policy may silently re-arm or dispatch input that still requires the person's decision.
+- Native canonical root/directory identities remain bound through the final synchronous journal and provider-send fences, including awaits for provider session startup. Missing native-current evidence refuses new file admission; a timed-out run-input proof is invalidated and never automatically resubmitted.
+- The local-window file editor discloses the finite allowance, ignored baseline, busy-input review and offline limits before enable. Status separates saved/arming/watching/held/unavailable. Review binds the displayed definition/source/observation/batch; a lost response requires explicit refresh, without an automatic resend. Input paths use bounded framed external data in the ordinary Work context plan; the person's task stays fixed and file contents are read only under normal task authority.
+- Work file-input recovery requires the original exact turn/authority and host-journaled framed-input reference/digest before any fresh source read or mark. Missing legacy or mismatched evidence stays unconfirmed without automatic resend; the receipt records acceptance, not provider delivery/completion.
+- The retained activity window is bounded at 64 owned runs. Overflow remains unknown across replay; finish and review Project tasks/cleanup, archive the old routine and explicitly configure a new one. Quiet, Resume and Save do not discard that ownership.
+- **Remaining:** Code input-transfer support and native/filesystem/provider acceptance evidence. Controlled fixtures prove Work source/journal/normal-dispatch and protected review composition; they do not establish native watcher behavior or a live provider workflow.
+
+Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Routine authority level
 
@@ -1001,6 +1017,7 @@ API keys live in the host credential store and are reached only through the loop
 - Directory sign-in and cloud request signing run through the broker. The server never holds a signing key, and the broker signs only inside the scope stored at sign-in.
 - A person may link a secret store they already use, and the broker resolves it at use by opaque reference; Octant keeps only the store name and item address.
 - The AWS command line's key pair may point at two items in a linked store; Octant's own shell then gets only a short-lived session the broker makes from it.
+- The Google Cloud command line may point at one service-account JSON item with an exact expected email and explicit scopes. The fixed-endpoint broker exchange keeps the signing key out of the server; local-window consent is journaled before dispatch and a lost reply remains unconfirmed. Account IAM roles may span cloud Projects. Each command owns its token/configuration files, and receipt recovery must be confirmed before stale-resource cleanup; failure leaves those files untouched and disables only this channel.
 
 Status: Built. Since: 2026-10-26. Detail: [Architecture: Providers](../architecture.md#providers) and [Enterprise provider identity](enterprise-provider-identity.md).
 
@@ -1232,6 +1249,7 @@ Octant discovers skills only from the closed Project allow-list, the user-global
 - A runtime that loads Project skills, MCP servers, hooks or plugins by itself runs with a proven switch or is denied the file in the OS profile. Instruction files stay readable.
 - Two runtimes are refused at start in a Project holding their settings entries, because their loaders fail on a denied file.
 - Skills from Claude Code's and Codex's own folders, turned on one by one, and folders a person adds in Settings are discoverable roots under the same ladder; Octant adds none on its own.
+- Desktop offers a window-owned purpose receipt folder picker alongside manual paths; it records only the existing skill-folder setting and grants no trust or enablement. Chosen-root diagnostics explain zero discovery. Bounded selected-root/package watching covers later creation and package changes; committed-setting reconciliation works without a mounted Settings view, and host teardown prevents late watcher restart.
 
 Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
 
@@ -1455,7 +1473,7 @@ Four key providers are first-class, each promised full native capability; every 
 - A capability only some providers have still reaches the others through the published SDK and plugin seams; no seam is widened for one vendor.
 - Outside harness endpoint drivers are held to the bundled endpoints' declared ceiling and reach Octant's tools only for models the host itself verified.
 - A test pins the matrix against the drivers' static capability blocks and the catalog's per-mode columns.
-- The remaining gaps of the key providers that are not yet fully native are not built yet. Mistral Vibe stays on the ACP bridge ([Provider runtimes](provider-runtimes.md#mistral-vibe-surface)): reading its usage, compaction, review and question messages over ACP is allowed, and needs a probe against a signed-in install first.
+- The remaining gaps of the key providers that are not yet fully native are not built yet. Mistral Vibe stays on the ACP bridge ([Provider runtimes](provider-runtimes.md#mistral-vibe-surface)): its usage and context over ACP are read for the verified 3.0.3 release after a signed-in probe; reading its compaction, review and question messages over ACP is allowed, and each needs its own signed-in runtime evidence first.
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Provider capability matrix ("degraded on")](../architecture.md#security-and-authority).
 
@@ -1625,11 +1643,13 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Canvas
 
 A product-feedback note is one comment the person pointed at an element of the running product, journaled on its own aggregate and sent with the next turn exactly once.
 
-- The client sends only where it tapped and the text; the host resolves the element and cuts the crop after checking the caller may see the thread and the browsing context is the window's own. _Here only._
-- The comment is the person's words; the element description is outside content that taints the thread and is framed as content, never instructions. _Here only._
-- A picture travels only to a model that reads images; the crop lives in purgeable evidence storage referenced from the journal, and notes queue per thread up to a small bound. _Here only._
+- The client sends only where it tapped and the text; the host resolves the element and cuts the crop after checking the caller may see the thread and the browsing context is the window's own.
+- The comment is the person's words; the element description is outside content that taints the thread and is framed as content, never instructions.
+- A picture travels only to a model that reads images; the crop lives in purgeable evidence storage referenced from the journal, and notes queue per thread up to a small bound.
+- Built: host-authorized headless Playwright point resolution, bounded pending notes, external-content marking, purgeable crop references and durable once-only delivery.
+- Not built yet: pointed-element capture through the desktop routing/native runtime and the native screenshot/context preview.
 
-Status: Built. Since: —. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
+Status: Partly built. Since: —. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
 
 ### Project actions
 
@@ -1718,7 +1738,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Pairin
 
 ### Hosts never trust each other
 
-Credentials and mutable authority never cross hosts; multi-host views merge read models client-side.
+Multi-host views merge read models client-side without transferring authority. Federation shares no credentials; the explicit [Shared sign-ins](hub-and-spokes.md#shared-sign-ins) API-key copy requires a fresh own-unlock on each host and a one-use receiving ticket. Subscription sign-ins refuse copying.
 
 - Conflicting facts stay under their owning host; create and mutation routing name one destination and refuse when that host is not routable, and nothing queues offline work.
 - An all-hosts list keeps every registered host; an unreachable host's cached items stay listed as stale and read-only.
@@ -1920,7 +1940,7 @@ Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](..
 Quitting the desktop app is guarded so that open provider sessions are never dropped silently.
 
 - Ordinary Quit and Fully quit share one shutdown that confirms when provider sessions remain open or the desktop cannot tell what the host is running.
-- The quit keyboard shortcut needs a second press within 1.5 seconds. Pointer quits, OS shutdown and updater restarts stay immediate.
+- When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds. With no window able to show it, the first press enters guarded shutdown. Pointer quits, OS shutdown and updater restarts stay immediate.
 - Once confirmed, quitting never waits on a person; a fixed deadline ends the app.
 
 Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
@@ -1929,7 +1949,7 @@ Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](..
 
 A new window, its background and its drafts behave predictably.
 
-- A new window starts with the right dock and bottom panel closed; an explicit show or hide is restored per window later. _Here only._
+- Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed, subject to the active pane having an eligible dock subject. The bottom panel starts closed. An explicit show or hide is restored per window later.
 - A photo ground comes from the host's background image library (8 MiB, 4096x4096, PNG, JPEG or WebP). The host refuses to delete a photo while it is showing, and ground settings are kept across kinds. _Here only._
 - While an everywhere background covers the sidebar, the sidebar's own background is not drawn and its controls are disabled with a note; saved sidebar values are kept. _Here only._
 - A new-task composer keeps its identity while its Project changes. A refused binding keeps the prior authorized Project and the draft.
@@ -2015,6 +2035,7 @@ The dock is contextual: it follows the active pane's thread and Project, and nev
 - Each thread keeps its own open tools and selected tool; a tool with no valid subject shows an explicit unavailable state. _Here only._
 - A saved layout never starts a new shell. Restoring a Terminal tab may reattach to an existing process; otherwise it offers Start terminal.
 - Git History stays read-only in every posture, Plan included. Browsing or refreshing it never fetches, checks out, stages, reverts or resets. _Here only._
+- Current Code Review selects exact staged or unstaged text hunks through retained host comparison identities; stage and unstage preserve unrelated changes, and reversal confirms selected unstaged loss under the existing root writer guard and approval policy. Stale, unsupported and captured views never silently become whole-file mutations.
 - Hand off is authorized exactly as export is. An unreadable thread is refused identically, and a paired device may hand off only threads it may read. _Here only._
 - The Files tool lists the whole bound folder. A listed file opens through a host-minted target id and opaque reference, never a path; a forgotten or cross-Project token resolves to nothing. _Here only._
 
@@ -2292,11 +2313,12 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - `flow-save` keeps the agent's successful operations since the page opened (at most 50; refs as role and name, expected path and title per step) as a named flow in the thread's Project, and `flow-run` replays it with no model turn, every step admitted like a call and the replay stopping at the first step that fails, is refused, finds not exactly one element, or ends on a different path or title. A step that needs the person, or an address with a secret in it, ends what can be saved. A paired device cannot save or run, a routine may run but not save, and the person lists and deletes flows in Settings. Flows are journaled per Project, erased with it, and in no export or replica sync.
 - The person's keys and clicks reach the page while the agent acts and are never dropped. They drop the snapshot's refs, the agent's next answer says in one line that the person used the page, and an agent click or keystroke is refused as stale until it takes a snapshot, so it never overwrites what the person is typing.
 - **Take over** holds every agent Browser call on the page (the sign-in hold, refused as `browser-person-took-over`) until **Hand back**, which answers the agent's next acting call with a fresh snapshot. It is the person's, at a window of this computer, checked on the server; a paired device, routine, subagent or terminal CLI cannot, and it is not journaled.
+- Browser lifetime uses each caller’s existing idle interval, renewed by meaningful admitted Browser work or person input, never passive renderer polling or refused/held/queued calls. Active authorized work may last beyond ten minutes without a new absolute cap; creation and unresponsive actions remain bounded, late completion/input cannot revive expiry, and existing eleven-minute handoff/two-minute release windows remain separate. Stop/revocation/host close and all caller/profile exclusions remain unchanged; no persistent owner or new grant is added.
 - No password saving and no agent-written script in the page.
 - Diagnostics report console errors, failed requests, and 4xx and 5xx responses (address, method, status; never a body or header), console warnings on request, each numbered, read after a `since` cursor without clearing.
 - Threads of a Project drive their own pages at the same time without waiting on each other. An agent's action reaches only its own thread's context, checked on the server by thread as well as authority. The Project browser dock lists each thread's live page by title or host, owner thread, and an "Agent active" mark, as names only: a selected page shows its thread's own picture read-only, and a paired device sees a stored-profile page by its existence alone.
 
-Status: Built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Flows](browser-agent-tool.md#flows), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), [Person and agent together](browser-agent-tool.md#person-and-agent-together), [Diagnostics](browser-agent-tool.md#diagnostics), [Download](browser-agent-tool.md#download), and [Parallel threads](browser-agent-tool.md#parallel-threads).
+Status: Built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Page lifetime](browser-agent-tool.md#page-lifetime), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Flows](browser-agent-tool.md#flows), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), [Person and agent together](browser-agent-tool.md#person-and-agent-together), [Diagnostics](browser-agent-tool.md#diagnostics), [Download](browser-agent-tool.md#download), and [Parallel threads](browser-agent-tool.md#parallel-threads).
 
 ### Browser profiles and extensions
 
@@ -2404,7 +2426,7 @@ Status: Built. Since: —. Detail: [Provider runtimes: local-server adapter](pro
 
 Octant tells the person when a newer runtime release exists, and runs the runtime's own updater only when they click Update CLI. Discovery never installs or updates anything.
 
-- The check is one anonymous registry lookup with no task, thread, Project, account or host identifier, cached for a day and never made at discovery.
+- Each lookup is one anonymous registry GET with no task, thread, Project, account or host identifier. A successful answer is cached for one day and a failed or refused lookup for one hour. The check is never made at discovery.
 - The check follows the Marketplace fetches switch; with the switch off no request is made.
 - Nothing updates by itself, and the runtime is probed again after the updater exits so a release that fails a floor shows its reason.
 - Update CLI runs only the configured absolute binary's verified update subcommand, only when no active session uses it, on the owning host. The renderer never receives an updater command. _Here only._
@@ -2440,7 +2462,7 @@ Status: Built. Since: —. Detail: [Model endpoints: subscription sign-in lifecy
 A model endpoint's key belongs to the address it was entered for, and a model's limits come from the best source that names them.
 
 - A saved address change deletes the stored key, and the address field says so before saving.
-- A remote model endpoint must use HTTPS; plain HTTP is accepted only for a loopback address. _Here only._
+- A remote model endpoint must use HTTPS; plain HTTP is accepted only for a loopback address.
 - A model's limits and capabilities come from the first source that names them: observed behaviour, runtime metadata, reviewed catalog metadata, user-supplied metadata, then unknown. User-supplied metadata can make a model selectable but never authorizes a side effect. _Here only._
 
 Status: Built. Since: —. Detail: [Model endpoints: endpoint address and stored key](model-endpoints.md#endpoint-address-and-stored-key) and [endpoint list](model-endpoints.md#octant-harness-model-endpoints).

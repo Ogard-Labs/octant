@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { Schema } from "effect";
+import { ExtensionSnapshot as ExtensionSnapshotSchema } from "@octant/contracts/extension-rpc";
 import type {
   ExtensionCommand,
   ExtensionCommandResult,
@@ -83,6 +85,129 @@ function request(path: string, body?: unknown, headers: Record<string, string> =
 }
 
 describe("bounded authenticated extension routes", () => {
+  it("resolves a native skill-purpose receipt only for its local window, without installing or enabling", async () => {
+    const authorities = new WindowAuthorityStore();
+    authorities.register({ windowId: windowId as never, capability, now });
+    const receipts = new LocalPluginImportReceiptStore();
+    const execute = vi.fn();
+    const handler = createExtensionRouteHandler({
+      service: {
+        snapshot: () =>
+          Schema.decodeUnknownSync(ExtensionSnapshotSchema)({
+            sequence: 0,
+            snapshotAt: "2026-07-28T12:00:00.000Z",
+            packages: [],
+            collisions: [],
+          }),
+        execute,
+      },
+      windowAuthorityStore: authorities,
+      localPluginImportReceipts: receipts,
+      desktopBridgeSecret: "desktop-secret",
+      now: () => now,
+    });
+    const issued = await handler(
+      new Request("http://127.0.0.1/api/extensions/import-local-receipts", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-desktop-secret": "desktop-secret",
+        },
+        body: JSON.stringify({
+          windowId,
+          absolutePath: "/tmp/selected-skills",
+          purpose: "skill-folder",
+        }),
+      }),
+    );
+    expect(issued?.status).toBe(201);
+    const issuedBody = (await issued?.json()) as { receiptId: string };
+    const body = { receiptId: issuedBody.receiptId };
+    expect(
+      (await handler(pairedDeviceRequest("/api/extensions/skill-folder-selection", body)))?.status,
+    ).toBe(401);
+    // A skill choice cannot become an Agent Plugins installation receipt.
+    expect(receipts.consume({ receiptId: body.receiptId, windowId, now })).toBeUndefined();
+    const resolved = await handler(request("/api/extensions/skill-folder-selection", body));
+    expect(resolved?.status).toBe(200);
+    expect(await resolved?.json()).toEqual({ folderPath: "/tmp/selected-skills" });
+    expect((await handler(request("/api/extensions/skill-folder-selection", body)))?.status).toBe(
+      400,
+    );
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it.each(["revoked", "expired", "rotated"] as const)(
+    "refuses skill selection if bound local authority is %s while reading the body",
+    async (change) => {
+      let currentTime = now;
+      const authorities = new WindowAuthorityStore();
+      authorities.register({ windowId: windowId as never, capability, now });
+      const receipts = new LocalPluginImportReceiptStore({ ttlMs: 48 * 60 * 60 * 1000 });
+      const issued = receipts.issue({
+        windowId,
+        absolutePath: "/tmp/skills",
+        purpose: "skill-folder",
+        now,
+      });
+      const handler = createExtensionRouteHandler({
+        service: { snapshot: vi.fn(), execute: vi.fn() },
+        windowAuthorityStore: authorities,
+        localPluginImportReceipts: receipts,
+        now: () => currentTime,
+      });
+      const read = Promise.withResolvers<ArrayBuffer>();
+      const pending = request("/api/extensions/skill-folder-selection", {});
+      bindPrincipalRouteContext(pending, {
+        principal: { kind: "local-window", windowId, capabilityGeneration: 0 },
+        scopeId: windowId as never,
+      });
+      pending.arrayBuffer = () => read.promise;
+      const result = handler(pending);
+      if (change === "revoked") authorities.revoke(windowId as never);
+      else if (change === "expired") currentTime += 24 * 60 * 60 * 1000 + 1;
+      else {
+        authorities.revoke(windowId as never);
+        authorities.register({
+          windowId: windowId as never,
+          capability: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA",
+          now,
+        });
+      }
+      read.resolve(
+        new TextEncoder().encode(JSON.stringify({ receiptId: issued.receiptId })).buffer,
+      );
+      expect((await result)?.status).toBe(401);
+      expect(
+        receipts.consume({ receiptId: issued.receiptId, windowId, purpose: "skill-folder", now }),
+      ).toBe("/tmp/skills");
+    },
+  );
+
+  it("keeps chosen-root names and diagnostics off paired-device snapshots", async () => {
+    const snapshot = Schema.decodeUnknownSync(ExtensionSnapshotSchema)({
+      sequence: 0,
+      snapshotAt: "2026-07-28T12:00:00.000Z",
+      packages: [],
+      collisions: [],
+      skillRoots: [
+        {
+          sourceRef: "folder:opaque",
+          displayName: "private-label",
+          status: "missing",
+          skillCount: 0,
+          watching: true,
+        },
+      ],
+    });
+    const handler = setup({ snapshot: () => snapshot, execute: vi.fn() });
+    expect(await (await handler(request("/api/extensions/snapshot")))?.json()).toHaveProperty(
+      "skillRoots",
+    );
+    expect(
+      await (await handler(pairedDeviceRequest("/api/extensions/snapshot", {})))?.json(),
+    ).not.toHaveProperty("skillRoots");
+  });
   it("accepts source-qualified skill lifecycle commands only from an authorized window", async () => {
     const observed: Array<ExtensionCommand> = [];
     const handler = setup({

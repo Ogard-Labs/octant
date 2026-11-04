@@ -448,6 +448,18 @@ wording, and reads are specified in [Start screen](start-screen.md).
 
 ## Tool lifecycles
 
+In current Code Review, **Select Git hunks** opens separate **Index → Working
+tree** and **HEAD → Index** comparisons. The selected unified hunk shows its
+file and both line ranges before Stage, Unstage or Reverse. Selection always
+uses exact whitespace, independently of the ordinary diff's display preference.
+Reversal asks confirmation and changes only selected unstaged hunks; its
+confirmation does not bypass ordinary approvals. Plan may inspect these
+comparisons but cannot mutate. Unsupported binary, rename, conflict or
+unavailable bytes are explicit. After applying, Review rereads the index and
+working tree. Stale selections require a new comparison; captured run and Git
+History views do not offer mutations. The authority, native preflight and writer
+rules are in [Architecture: Code](../architecture.md#modes-chat-work-and-code).
+
 Thread utilities live in the Right Utility Dock outside the split tree.
 The shell loads each tool through `dockModuleRegistry`; modules under
 `apps/web/src/dockModules` receive only declared inputs and contain render
@@ -984,6 +996,24 @@ terminal, or opens and pins one, and enters Zen to show it (see
 likewise offers the window's Work or Code Project as "This Project": the dock
 names the Project, never a thread, and shows that Project's own page under the
 Project browsing context rule in the same section.
+
+## Project planner
+
+The Code Project overview's **Project planner** section designates an existing
+thread of that Project, shows its current proposals and offers versioned
+approve/decline decisions. Proposal review keeps the exact intent and Project
+fixed while reusing the ordinary provider/model, checkout and access controls.
+The final action says **Approve and start described task**; only confirmed
+creation sends the intent through the normal first-message path. Refused or
+uncertain replies retain the submitted task identity for inspection, with no
+automatic retry or provider turn. The host's journaled creation admission and
+the window's retained identity prevent another approval across windows, review
+close/remount or reload while the outcome is unknown. A fresh pending proposal
+or missing task never releases it. Only confirmed creation or a newer host-proven
+precreation failure allows progress; an explicit retry reviews that new version.
+A disconnect disables decisions until the
+current host state has been refreshed. Resulting tasks remain reachable from
+approved proposals. See the [Project planner rule](../architecture.md#modes-chat-work-and-code).
 
 ## Local-server ownership
 

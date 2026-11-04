@@ -570,6 +570,8 @@ export interface ManagedCodeThreadCreationPort {
 }
 
 export interface CodeFileRootResolution {
+  /** Host-only retained binding/physical proof; never a renderer assertion. */
+  readonly current?: () => boolean;
   readonly fileId: CodeFileId;
   readonly rootPath: string;
   readonly rootIdentity: FileIdentity;
@@ -637,6 +639,8 @@ export interface CodeServiceExecutionContext {
    * by a host caller that makes it from a marked thread (a follow-up).
    */
   readonly inheritedMark?: InheritedExternalContentMark;
+  /** Host observer, called before the first worktree or thread-creation mutation. */
+  readonly onCreationBoundary?: () => void;
 }
 
 export interface CodeServiceOptions {
@@ -1503,6 +1507,7 @@ export class CodeService {
           }),
         );
         // Commit creates the worktree (the only mutation) and confirms the HEAD.
+        executionContext?.onCreationBoundary?.();
         const committed = await this.#managedThreadCreation.commit(
           creationInput,
           preparation,
@@ -1867,6 +1872,7 @@ export class CodeService {
             "This provider or model is not allowed by this Code Project's provider policy.",
           );
         }
+        executionContext?.onCreationBoundary?.();
         this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
           this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
             kind: "thread-created",

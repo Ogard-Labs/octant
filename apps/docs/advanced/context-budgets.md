@@ -193,8 +193,11 @@ What the breakdown can say depends on the runtime:
   marked Estimated, because what is left of a figure after an estimate is not
   exact. A runtime that gives no window size shows no share at all.
 
-- **ACP agents** manage their own history and report no usage, so there is no
-  window to show.
+- **Mistral Vibe 3.0.3** reports per-turn token usage after a turn when a valid
+  pre-prompt baseline and final receipt are available. It includes context
+  occupancy when the latest runtime snapshot matches those final counters. It reports no breakdown
+  of the context's contents. Other ACP agents and unverified Vibe releases
+  report no usage, so there is no window to show.
 - A planned thread (Octant Harness, Chat, Work) shows the categories Octant
   itself attributed, as before.
 

@@ -32,7 +32,10 @@ export interface ResolveAutomationAuthorityLiveFactsDeps {
  */
 export function resolveAutomationAuthorityLiveFacts(
   deps: ResolveAutomationAuthorityLiveFactsDeps,
-  input: { readonly definition: AutomationDefinition; readonly run: AutomationRun },
+  input: {
+    readonly definition: Pick<AutomationDefinition, "hostId">;
+    readonly run: Pick<AutomationRun, "definitionSnapshot">;
+  },
 ): AutomationAuthorityLiveFacts {
   const snapshot = input.run.definitionSnapshot;
   const project = deps.readProject(String(snapshot.projectId));

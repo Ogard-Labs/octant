@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,7 +12,7 @@ import type {
   ExtensionSnapshot,
 } from "@octant/contracts/extension-rpc";
 import { filterSkillCatalogForScope, type SkillCatalog } from "@octant/plugin-host";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCodeProfileSkillResolver } from "../code/codeProfileSkillResolver";
 import { buildCatalogs } from "./extensionChatResolver";
 import { SkillDiscoveryService } from "./skillDiscoveryService";
@@ -28,6 +28,259 @@ afterEach(async () => {
 });
 
 describe("bounded standalone skill discovery", () => {
+  it("recovers an unreadable chosen root after permissions are repaired using only existence metadata", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-skill-root-repair-"));
+    directories.push(root);
+    const added = join(root, "private");
+    await mkdir(join(added, "example"), { recursive: true });
+    await writeFile(join(added, "example", "SKILL.md"), "# Repaired root\n");
+    const service = new SkillDiscoveryService({
+      roots: {
+        resolve: async () => [
+          {
+            workingDirectory: root,
+            projectRoot: root,
+            projectRef: "fixture",
+            userGlobalSkillsRoot: join(root, "global"),
+            extraSkillRoots: [{ sourceRef: "folder:private", path: added }],
+          },
+        ],
+      },
+    });
+    try {
+      await chmod(added, 0o000);
+      await service.reconcile();
+      expect(service.rootStatuses()[0]?.status).toBe("unreadable");
+      await service.startWatching();
+      await chmod(added, 0o700);
+      await vi.waitFor(
+        () => expect(service.snapshot().skills[0]?.instructions).toBe("# Repaired root\n"),
+        { timeout: 1200, interval: 25 },
+      );
+      expect(service.snapshot().skills[0]).toMatchObject({
+        reviewed: false,
+        desiredEnabled: false,
+      });
+    } finally {
+      service.close();
+      await chmod(added, 0o700);
+    }
+  });
+  it("does not restart watching after host teardown while root resolution was awaited", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const resolve = vi.fn(async () => {
+      entered.resolve();
+      await release.promise;
+      return [
+        {
+          workingDirectory: "/tmp",
+          projectRoot: "/tmp",
+          projectRef: "closed",
+          userGlobalSkillsRoot: "/tmp/not-a-skill-root",
+        },
+      ];
+    });
+    const service = new SkillDiscoveryService({ roots: { resolve } });
+    const outcome = service.reconcile().catch((error) => error);
+    await entered.promise;
+    service.close();
+    release.resolve();
+    expect(await outcome).toMatchObject({ message: "Skill discovery is stopped." });
+    await service.startWatching();
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("coalesces package events while one reconciliation is still pending", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-skill-watch-coalesce-"));
+    directories.push(root);
+    const added = join(root, "added");
+    const path = join(added, "example", "SKILL.md");
+    await mkdir(join(added, "example"), { recursive: true });
+    await writeFile(path, "# First\n");
+    const service = new SkillDiscoveryService({
+      roots: {
+        resolve: async () => [
+          {
+            workingDirectory: root,
+            projectRoot: root,
+            projectRef: "fixture",
+            userGlobalSkillsRoot: join(root, "global"),
+            extraSkillRoots: [{ sourceRef: "folder:fixture", path: added }],
+          },
+        ],
+      },
+    });
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    await service.reconcile();
+    await service.startWatching();
+    const original = service.reconcile.bind(service);
+    let held = false;
+    const spy = vi.spyOn(service, "reconcile").mockImplementation(async () => {
+      if (!held) {
+        held = true;
+        entered.resolve();
+        await release.promise;
+      }
+      return original();
+    });
+    try {
+      await writeFile(path, "# Start\n");
+      await entered.promise;
+      for (let i = 0; i < 10; i += 1) await writeFile(path, `# Changed ${i}\n`);
+      // Observe more than the50ms debounce with the first actual scan deliberately held.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(spy).toHaveBeenCalledTimes(1);
+      release.resolve();
+      await vi.waitFor(
+        () => expect(service.snapshot().skills[0]?.instructions).toBe("# Changed 9\n"),
+        { timeout: 1200, interval: 25 },
+      );
+    } finally {
+      release.resolve();
+      service.close();
+      spy.mockRestore();
+    }
+  });
+  it("reports a missing added root instead of silently showing no skills", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-skill-root-status-"));
+    directories.push(root);
+    const service = new SkillDiscoveryService({
+      roots: {
+        resolve: async () => [
+          {
+            workingDirectory: root,
+            projectRoot: root,
+            projectRef: "fixture",
+            userGlobalSkillsRoot: join(root, "global"),
+            extraSkillRoots: [{ sourceRef: "folder:fixture", path: join(root, "later") }],
+          },
+        ],
+      },
+    });
+    await service.reconcile();
+    expect(service.snapshot().skills).toHaveLength(0);
+    expect(service.rootStatuses()).toContainEqual(
+      expect.objectContaining({ sourceRef: "folder:fixture", status: "missing" }),
+    );
+  });
+
+  it("discovers a later-created added root and subsequent package changes without a manual reconcile", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-skill-root-watch-"));
+    directories.push(root);
+    const added = join(root, "later", "skills");
+    const service = new SkillDiscoveryService({
+      roots: {
+        resolve: async () => [
+          {
+            workingDirectory: root,
+            projectRoot: root,
+            projectRef: "fixture",
+            userGlobalSkillsRoot: join(root, "global"),
+            extraSkillRoots: [{ sourceRef: "folder:fixture", path: added }],
+          },
+        ],
+      },
+    });
+    try {
+      await service.reconcile();
+      await service.startWatching();
+      await mkdir(join(added, "example"), { recursive: true });
+      await writeFile(join(added, "example", "SKILL.md"), "# First instructions\n");
+      await vi.waitFor(
+        () => expect(service.snapshot().skills[0]?.instructions).toBe("# First instructions\n"),
+        { timeout: 1200, interval: 25 },
+      );
+      await writeFile(join(added, "example", "SKILL.md"), "# Changed instructions\n");
+      await vi.waitFor(
+        () => expect(service.snapshot().skills[0]?.instructions).toBe("# Changed instructions\n"),
+        { timeout: 1200, interval: 25 },
+      );
+      expect(service.snapshot().skills[0]).toMatchObject({
+        reviewed: false,
+        desiredEnabled: false,
+        provenance: { reviewed: false },
+      });
+      await rm(join(added, "example"), { recursive: true });
+      await vi.waitFor(() => expect(service.snapshot().skills).toHaveLength(0), {
+        timeout: 1200,
+        interval: 25,
+      });
+    } finally {
+      service.stopWatching();
+      expect(service.rootStatuses().every((status) => status.watching === false)).toBe(true);
+    }
+  });
+
+  it("reports an actually unreadable added root and retains no instructions from it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-skill-root-unreadable-"));
+    directories.push(root);
+    const added = join(root, "private");
+    await mkdir(join(added, "example"), { recursive: true });
+    await writeFile(join(added, "example", "SKILL.md"), "# Kept private\n");
+    const service = new SkillDiscoveryService({
+      roots: {
+        resolve: async () => [
+          {
+            workingDirectory: root,
+            projectRoot: root,
+            projectRef: "fixture",
+            userGlobalSkillsRoot: join(root, "global"),
+            extraSkillRoots: [{ sourceRef: "folder:private", path: added }],
+          },
+        ],
+      },
+    });
+    await service.reconcile();
+    expect(service.snapshot().skills).toHaveLength(1);
+    try {
+      await chmod(added, 0o000);
+      await expect(readdir(added)).rejects.toMatchObject({ code: "EACCES" });
+      await service.reconcile();
+      expect(service.snapshot().skills).toHaveLength(0);
+      expect(service.rootStatuses()).toContainEqual(
+        expect.objectContaining({ sourceRef: "folder:private", status: "unreadable" }),
+      );
+    } finally {
+      await chmod(added, 0o700);
+    }
+  });
+
+  it("watches an existing package's instruction changes under an added root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-skill-package-watch-"));
+    directories.push(root);
+    const added = join(root, "added");
+    await mkdir(join(added, "example"), { recursive: true });
+    const path = join(added, "example", "SKILL.md");
+    await writeFile(path, "# First instructions\n");
+    const service = new SkillDiscoveryService({
+      roots: {
+        resolve: async () => [
+          {
+            workingDirectory: root,
+            projectRoot: root,
+            projectRef: "fixture",
+            userGlobalSkillsRoot: join(root, "global"),
+            extraSkillRoots: [{ sourceRef: "folder:fixture", path: added }],
+          },
+        ],
+      },
+    });
+    try {
+      await service.reconcile();
+      await service.startWatching();
+      expect(service.snapshot().skills[0]?.instructions).toBe("# First instructions\n");
+      await writeFile(path, "# Changed instructions\n");
+      await vi.waitFor(
+        () => expect(service.snapshot().skills[0]?.instructions).toBe("# Changed instructions\n"),
+        { timeout: 1200, interval: 25 },
+      );
+    } finally {
+      service.stopWatching();
+    }
+  });
+
   it("walks only bounded project ancestry and user-global roots, rejects links, and stays disabled", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-skill-discovery-"));
     directories.push(root);

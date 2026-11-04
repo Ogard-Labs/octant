@@ -1,3 +1,6 @@
+import { ServerPreviewTunnels } from "../serverProjects/serverPreviewTunnel";
+import { createServerPreviewTunnelRoutes } from "../serverProjects/serverPreviewTunnelRoutes";
+import { readOwnedProcessReceipts } from "../process/nodeOwnedProcessReceipt";
 import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -90,6 +93,7 @@ import {
   readRunbookFile,
   ShieldServerStore,
 } from "../shield/shieldServerStore";
+import { createGoogleCliCommandCredentials } from "../secretStores/googleCliCommandCredentials";
 import { awsCliEnvironment } from "../secretStores/awsCliEnvironment";
 import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -240,10 +244,36 @@ export function wireHarness(deps: HarnessDependencies) {
   // Code Projects bound to a folder on one of those servers.
   serverRegistry.servers = () => shieldServerStore.servers();
   serverRegistry.serversFor = (projectId) => shieldServerStore.serversFor(projectId);
-  const serverProjectRoutes = createServerProjectRouteHandler({
+  const serverPreviewTunnels = new ServerPreviewTunnels({
+    address: (projectId) => {
+      const project = serverProjectStore.project(projectId);
+      const address = serverProjectStore.addressOf(projectId);
+      if (project === undefined || address.kind !== "address") return undefined;
+      return {
+        server: address.server,
+        identity: JSON.stringify([
+          project.serverId,
+          project.folder,
+          project.boundAt,
+          address.server,
+        ]),
+      };
+    },
+    ownerCurrent: (owner) =>
+      windowAuthorityStore.listWindowIds().some((id) => String(id) === owner),
+    agentSocket: sshAgentSocket,
+    record: (record) => serverProjectStore.recordPreview(record),
+  });
+  const previewRoutes = createServerPreviewTunnelRoutes({
+    windows: windowAuthorityStore,
+    tunnels: serverPreviewTunnels,
+  });
+  const catalogRoutes = createServerProjectRouteHandler({
     windowAuthorityStore,
     store: serverProjectStore,
   });
+  const serverProjectRoutes = async (request: Request) =>
+    (await previewRoutes(request)) ?? catalogRoutes(request);
   const runtimeRemoteCommands = new RuntimeRemoteCommands((input) =>
     shieldServerStore.recordRemoteCommand(input),
   );
@@ -281,6 +311,11 @@ export function wireHarness(deps: HarnessDependencies) {
   // command cannot swap the script another thread is about to run.
   const harnessScriptDirectory = join(providerDataDirectory, "harness", "scripts");
   mkdirSync(harnessScriptDirectory, { recursive: true, mode: 0o700 });
+  const googleCliCommands = createGoogleCliCommandCredentials({
+    broker: secretStoreBroker,
+    scriptRoot: harnessScriptDirectory,
+    configurationRoot: join(providerDataDirectory, "harness", "cloud-cli"),
+  });
   const harnessProcessPort = new RepositoryTestProcessPort({
     receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
     temporaryDirectory: harnessWorkDirectory,
@@ -333,6 +368,7 @@ export function wireHarness(deps: HarnessDependencies) {
             scriptDirectory: harnessScriptDirectory,
             sshAgentSocket,
             cloudCliEnvironment,
+            googleCliCredentials: googleCliCommands.prepare,
             // Below Full access a command reaches a registered server only
             // through the host's relays and agent socket: ports Seatbelt
             // opens on macOS, sockets the capsule's forwarder dials on Linux.
@@ -842,18 +878,21 @@ export function wireHarness(deps: HarnessDependencies) {
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
       cloudCliEnvironment,
+      googleCliCredentials: googleCliCommands.prepare,
     }),
     offlineShell: createNativeHarnessShell({
       process: harnessOfflineProcessPort,
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
       cloudCliEnvironment,
+      googleCliCredentials: googleCliCommands.prepare,
     }),
     fullAccessShell: createNativeHarnessShell({
       process: harnessFullAccessProcessPort,
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
       cloudCliEnvironment,
+      googleCliCredentials: googleCliCommands.prepare,
     }),
     ...(harnessProxiedShell === undefined
       ? {}
@@ -912,6 +951,16 @@ export function wireHarness(deps: HarnessDependencies) {
   // what later areas add.
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   return {
+    readHarnessProcessReceipts: async () =>
+      (
+        await readOwnedProcessReceipts({
+          receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+          supervisor: "repository-test-runner",
+        })
+      ).map((row) => row.receipt),
+
+    beginGoogleCliChange: googleCliCommands.beginChange,
+    recoverGoogleCliCommands: () => googleCliCommands.recover(() => harnessProcessPort.reconcile()),
     personMemorySweep,
     runtimeForgeChanges,
     followUpCreation,
@@ -923,6 +972,7 @@ export function wireHarness(deps: HarnessDependencies) {
     shieldServerRoutes,
     shieldServerStore,
     serverProjectRoutes,
+    serverPreviewTunnels,
     nativeHarnessHooks,
     nativeHarnessSessionRoutes,
     onHarnessPausedByPerson,

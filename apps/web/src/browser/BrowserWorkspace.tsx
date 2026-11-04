@@ -1064,7 +1064,20 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           {nativeState?.loading || nativeState?.control === "agent" ? (
             <LoaderCircle aria-hidden="true" size={12} />
           ) : null}
-          {controlLabel}
+          <span>{controlLabel}</span>
+          {activeContext ? (
+            <span
+              title={
+                snapshot?.waitingForPerson === undefined
+                  ? "Authorized Browser work and person input renew this idle interval. Preview polling does not."
+                  : "The handoff has its own finite retention window; waiting agent calls do not keep it open."
+              }
+            >
+              {snapshot?.waitingForPerson === undefined
+                ? `· ${Math.ceil((snapshot?.context?.policy.sessionTimeoutMs ?? 600_000) / 60_000)}m idle`
+                : "· Person hold"}
+            </span>
+          ) : null}
         </span>
         {activeContext && personHasPage && props.client.handBack !== undefined ? (
           <OctantButton

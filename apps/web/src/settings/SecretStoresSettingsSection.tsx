@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantInput } from "../ui/base/OctantInput";
+import { GoogleCliAccountSettings } from "./GoogleCliAccountSettings";
 import { SettingRow, SettingsSection, SettingsState } from "./primitives";
 
 /** What each state of the tool means for the person, in plain words. */
@@ -372,6 +373,14 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
             )}
           </div>
         </SettingsSection>
+      ) : null}
+
+      {view?.brokerAvailable === true ? (
+        <GoogleCliAccountSettings
+          client={client}
+          linkedStore={linkedStore}
+          focusedSetting={props.focusedSetting}
+        />
       ) : null}
 
       {unlinking === undefined ? null : (

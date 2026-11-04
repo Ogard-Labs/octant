@@ -1045,6 +1045,54 @@ describe("BrowserWorkspace", () => {
     }
   });
 
+  it("shows the current idle interval and distinguishes the person's finite hold", async () => {
+    const browser = client();
+    vi.mocked(browser.inspectThread).mockResolvedValue({
+      status: "running",
+      threadId,
+      context,
+      evidence: [],
+      waitingForPerson: "take-over",
+    } as any);
+    const { unmount } = render(
+      <BrowserWorkspace
+        client={browser}
+        tab={
+          {
+            kind: "browser",
+            id: "90000000-0000-4000-8000-000000000022",
+            mode: "work",
+            title: "Browser",
+            threadId,
+          } as any
+        }
+      />,
+    );
+    expect(await screen.findByText("· Person hold")).toBeInTheDocument();
+    unmount();
+    vi.mocked(browser.inspectThread).mockResolvedValue({
+      status: "running",
+      threadId,
+      context,
+      evidence: [],
+    } as any);
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={
+          {
+            kind: "browser",
+            id: "90000000-0000-4000-8000-000000000023",
+            mode: "work",
+            title: "Browser",
+            threadId,
+          } as any
+        }
+      />,
+    );
+    expect(await screen.findByText("· 5m idle")).toBeInTheDocument();
+  });
+
   it.each([
     ["personal", { kind: "personal" }, "Agent active · Personal"],
     [

@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeCodeThreadId,
+  decodeCodeThread,
+  decodeCodePlannerProposalOutcome,
   decodeProjectId,
-  type CodeCommandResult,
   type CodePlannerThreadCreation,
   type CodeThread,
   type CodeThreadId,
@@ -12,13 +13,18 @@ import {
   type ProjectId,
   type WindowId,
 } from "@octant/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import type { PersistenceService } from "../persistence/persistenceService";
-import { CodePlannerService } from "./codePlannerService";
+import { CodePlannerService, type CodePlannerServiceOptions } from "./codePlannerService";
+import { CodeProjection } from "../persistence/codeProjection";
+import { rebuildProjection } from "../persistence/projection";
+import { createCodeRouteHandler } from "../codeRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { createPlannerProposalTask } from "../../../web/src/code/plannerProposalCreation";
 
 const directories: Array<string> = [];
 const now = "2026-08-29T12:00:00.000Z";
@@ -51,10 +57,7 @@ interface FixtureOptions {
   readonly projectLifecycle?: "active" | "archived";
   readonly threadLifecycle?: CodeThread["lifecycle"];
   readonly threadProjectId?: string;
-  readonly createThread?: (
-    windowId: WindowId,
-    creation: CodePlannerThreadCreation,
-  ) => Promise<CodeCommandResult>;
+  readonly createThread?: CodePlannerServiceOptions["createThread"];
   readonly canAccessProject?: (windowId: WindowId, projectId: ProjectId) => boolean;
   readonly isMarkedWithOutsideContent?: (threadId: string) => boolean;
 }
@@ -63,6 +66,8 @@ function fixture(options?: FixtureOptions): {
   service: CodePlannerService;
   created: Array<CodePlannerThreadCreation>;
   contexts: Array<unknown>;
+  persistence: PersistenceService;
+  createdThreads: Map<string, CodeThread>;
 } {
   const connection = openConnection();
   const runtime = createPhase1RuntimeRegistries();
@@ -84,13 +89,13 @@ function fixture(options?: FixtureOptions): {
     providerInstanceId: ids.provider,
     title: "Planner thread",
   } as unknown as CodeThread;
+  const createdThreads = new Map([[String(thread.id), thread]]);
   const persistence = {
     connection,
     journal,
     readProject: (projectId: ProjectId) =>
       String(projectId) === ids.project ? project : undefined,
-    readCodeThread: (threadId: CodeThreadId) =>
-      String(threadId) === ids.thread ? thread : undefined,
+    readCodeThread: (threadId: CodeThreadId) => createdThreads.get(String(threadId)),
   } as unknown as PersistenceService;
   const created: Array<CodePlannerThreadCreation> = [];
   const contexts: Array<unknown> = [];
@@ -104,11 +109,20 @@ function fixture(options?: FixtureOptions): {
       (async (_windowId, creation, _signal, executionContext) => {
         created.push(creation);
         contexts.push(executionContext);
-        return { kind: "thread-created", thread: creation as never } as never;
+        const createdThread =
+          creation.kind === "create-code-thread"
+            ? creation.thread
+            : ({
+                id: creation.threadId,
+                projectId: creation.projectId,
+                title: creation.title,
+              } as CodeThread);
+        createdThreads.set(String(createdThread.id), createdThread);
+        return { kind: "thread-created", thread: createdThread };
       }),
     isMarkedWithOutsideContent: options?.isMarkedWithOutsideContent ?? (() => false),
   });
-  return { service, created, contexts };
+  return { service, created, contexts, persistence, createdThreads };
 }
 
 const projectId = decodeProjectId(ids.project);
@@ -247,6 +261,340 @@ describe("planner board access", () => {
 });
 
 describe("planner work proposals", () => {
+  it("retains an unresolved admission across replay and another service instance after an unknown failure", async () => {
+    const createThread = vi.fn<CodePlannerServiceOptions["createThread"]>(async () => {
+      throw new Error("Unknown creation failure");
+    });
+    const world = fixture({ createThread });
+    await designate(world.service);
+    const proposed = world.service.propose(threadId, draft);
+    if (proposed.status !== "proposed") throw new Error("Expected proposal");
+    const command = {
+      kind: "confirm-planner-work-proposal",
+      proposalId: proposed.proposal.id,
+      expectedVersion: 1,
+      creation: managedCreation(),
+    };
+    await expect(world.service.resolveProposal(windowId, command)).rejects.toThrow();
+    rebuildProjection({
+      connection: world.persistence.connection,
+      journal: world.persistence.journal,
+      projection: new CodeProjection(),
+      clock: () => now,
+    });
+    const restarted = new CodePlannerService({
+      persistence: world.persistence,
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+      canAccessProject: () => true,
+      createThread,
+      isMarkedWithOutsideContent: () => false,
+    });
+    const current = restarted.readView(windowId, ids.project).proposals[0];
+    expect(current).toMatchObject({
+      proposalVersion: 2,
+      proposal: {
+        status: "pending",
+        creationAttempt: { status: "creating", threadId: ids.otherThread },
+      },
+    });
+    expect(
+      await restarted.resolveProposal(windowId, {
+        ...command,
+        expectedVersion: current?.proposalVersion,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await restarted.resolveProposal(windowId, {
+        kind: "decline-planner-work-proposal",
+        proposalId: proposed.proposal.id,
+        expectedVersion: current?.proposalVersion,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(createThread).toHaveBeenCalledTimes(1);
+  });
+
+  it("permits explicit repair retry only after the host records definitive noncreation at a newer version", async () => {
+    let calls = 0;
+    const createThread = vi.fn<CodePlannerServiceOptions["createThread"]>(
+      async (_window, creation) => {
+        calls += 1;
+        if (calls === 1)
+          return {
+            kind: "creation-not-started",
+            failure: {
+              category: "unavailable",
+              message: "Provider validation failed before creation.",
+            },
+          };
+        return {
+          kind: "thread-created",
+          thread:
+            creation.kind === "create-code-thread"
+              ? creation.thread
+              : ({ id: creation.threadId, projectId: creation.projectId } as CodeThread),
+        };
+      },
+    );
+    const { service } = fixture({ createThread });
+    await designate(service);
+    const proposed = service.propose(threadId, draft);
+    if (proposed.status !== "proposed") throw new Error("Expected proposal");
+    const command = {
+      kind: "confirm-planner-work-proposal",
+      proposalId: proposed.proposal.id,
+      expectedVersion: 1,
+      creation: managedCreation(),
+    };
+    expect(await service.resolveProposal(windowId, command)).toMatchObject({
+      status: "refused",
+      reason: "creation-not-started",
+    });
+    const refreshed = service.readView(windowId, ids.project).proposals[0];
+    expect(refreshed).toMatchObject({
+      proposalVersion: 3,
+      proposal: { status: "pending", creationAttempt: { status: "failed" } },
+    });
+    expect(await service.resolveProposal(windowId, command)).toMatchObject({ status: "refused" });
+    expect(calls).toBe(1);
+    expect(
+      await service.resolveProposal(windowId, {
+        ...command,
+        expectedVersion: refreshed?.proposalVersion,
+      }),
+    ).toMatchObject({ status: "confirmed" });
+    expect(calls).toBe(2);
+  });
+
+  it("keeps final-append failure reserved and links an observed stored task without another creation", async () => {
+    const world = fixture();
+    await designate(world.service);
+    const proposed = world.service.propose(threadId, draft);
+    if (proposed.status !== "proposed") throw new Error("Expected proposal");
+    const original = world.persistence.journal.append.bind(world.persistence.journal);
+    const append = vi.spyOn(world.persistence.journal, "append").mockImplementation((input) => {
+      const events =
+        typeof input === "object" && input !== null && "events" in input ? input.events : undefined;
+      if (
+        Array.isArray(events) &&
+        events.some(
+          (event: unknown) =>
+            typeof event === "object" &&
+            event !== null &&
+            "eventName" in event &&
+            "payload" in event &&
+            event.eventName === "code.planner-proposal-updated@1" &&
+            JSON.stringify(event.payload).includes('"status":"confirmed"'),
+        )
+      )
+        throw new Error("Final proposal journal unavailable");
+      return original(input);
+    });
+    const command = {
+      kind: "confirm-planner-work-proposal",
+      proposalId: proposed.proposal.id,
+      expectedVersion: 1,
+      creation: managedCreation(),
+    };
+    await expect(world.service.resolveProposal(windowId, command)).rejects.toThrow();
+    const current = world.service.readView(windowId, ids.project).proposals[0];
+    expect(current).toMatchObject({
+      proposalVersion: 2,
+      proposal: { status: "pending", creationAttempt: { status: "creating" } },
+    });
+    expect(
+      await world.service.resolveProposal(windowId, {
+        ...command,
+        expectedVersion: current?.proposalVersion,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(world.created).toHaveLength(1);
+    append.mockRestore();
+    expect(world.service.readView(windowId, ids.project).proposals[0]?.proposal).toMatchObject({
+      status: "confirmed",
+      createdThreadId: ids.otherThread,
+    });
+    expect(world.created).toHaveLength(1);
+  });
+
+  it("never submits a replacement after timeout and task404 while the real authenticated creation remains pending", async () => {
+    vi.useFakeTimers();
+    const gate = Promise.withResolvers<void>();
+    const task = decodeCodeThread({
+      id: ids.otherThread,
+      projectId: ids.project,
+      bindingRevisionId: ids.binding,
+      repositoryId: `repo_${"a".repeat(64)}`,
+      checkoutId: "80000000-0000-4000-8000-000000000001",
+      title: draft.title,
+      lifecycle: "active",
+      providerInstanceId: ids.provider,
+      modelId: "model-1",
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+      deliveryTarget: managedCreation().deliveryTarget,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    let calls = 0;
+    const world = fixture({
+      createThread: async () => {
+        calls += 1;
+        await gate.promise;
+        world.createdThreads.set(String(task.id), task);
+        return { kind: "thread-created", thread: task };
+      },
+    });
+    await designate(world.service);
+    const proposed = world.service.propose(threadId, draft);
+    if (proposed.status !== "proposed") throw new Error("Expected proposal");
+    const review = world.service.readView(windowId, ids.project).proposals[0];
+    if (review === undefined) throw new Error("Expected proposal view");
+    const store = new WindowAuthorityStore();
+    const capability = "A".repeat(43);
+    store.register({ windowId, capability, now: 0 });
+    const route = createCodeRouteHandler({
+      service: {
+        executePlannerProposal: (window: WindowId, command: unknown, signal: AbortSignal) =>
+          world.service.resolveProposal(window, command, signal),
+      } as never,
+      windowAuthorityStore: store,
+      now: () => 1,
+    });
+    let commandCalls = 0;
+    let pending: Promise<unknown> | undefined;
+    const readIds: string[] = [];
+    const client = {
+      executePlannerProposal: (
+        command: Parameters<
+          NonNullable<Parameters<typeof createPlannerProposalTask>[0]["executePlannerProposal"]>
+        >[0],
+      ) => {
+        commandCalls += 1;
+        const response = (async () => {
+          const answer = await route(
+            new Request("http://127.0.0.1/api/code/planner/proposals/commands", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-octant-window-capability": capability,
+              },
+              body: JSON.stringify(command),
+            }),
+          );
+          if (answer === undefined || !answer.ok) throw new Error("Approval transport failed");
+          return decodeCodePlannerProposalOutcome(await answer.json());
+        })();
+        pending = response;
+        return response;
+      },
+      thread: async (id: CodeThreadId) => {
+        readIds.push(String(id));
+        const found = world.persistence.readCodeThread(id);
+        if (found === undefined) throw new Error("HTTP404: submitted task is not present yet");
+        return { thread: found };
+      },
+    };
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+    };
+    const creation = { kind: "create-code-thread" as const, thread: task };
+    const firstSend = vi.fn();
+    try {
+      const first = createPlannerProposalTask(client, review, creation, storage).then((result) => {
+        if (result.status === "confirmed") firstSend();
+        return result;
+      });
+      await vi.waitFor(() => expect(calls).toBe(1));
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await first).toMatchObject({ status: "unconfirmed" });
+      const replacement = {
+        ...creation,
+        thread: decodeCodeThread({ ...task, id: "20000000-0000-4000-8000-000000000003" }),
+      };
+      // A new invocation/storage adapter models review remount/reload; pending/404 is not completion.
+      expect(
+        await createPlannerProposalTask({ ...client }, review, replacement, { ...storage }),
+      ).toMatchObject({ status: "unconfirmed" });
+      expect(commandCalls).toBe(1);
+      expect(calls).toBe(1);
+      expect(readIds).toEqual([String(task.id), String(task.id)]);
+      expect(firstSend).not.toHaveBeenCalled();
+      gate.resolve();
+      await pending;
+      expect(world.service.readView(windowId, ids.project).proposals[0]?.proposal).toMatchObject({
+        status: "confirmed",
+        createdThreadId: task.id,
+      });
+      expect(calls).toBe(1);
+      expect(firstSend).not.toHaveBeenCalled();
+    } finally {
+      gate.resolve();
+      try {
+        await pending;
+      } catch {
+        /* The assertion reports the original failure. */
+      }
+      vi.useRealTimers();
+    }
+  });
+
+  it("admits one creation across windows before awaiting the ordinary creation result", async () => {
+    const gate = Promise.withResolvers<void>();
+    let calls = 0;
+    const { service } = fixture({
+      createThread: async (_window, creation) => {
+        calls += 1;
+        await gate.promise;
+        return {
+          kind: "thread-created",
+          thread:
+            creation.kind === "create-code-thread"
+              ? creation.thread
+              : ({ id: creation.threadId, projectId: creation.projectId } as CodeThread),
+        };
+      },
+    });
+    await designate(service);
+    const proposed = service.propose(threadId, draft);
+    if (proposed.status !== "proposed") throw new Error("Expected proposal");
+    const first = service.resolveProposal(windowId, {
+      kind: "confirm-planner-work-proposal",
+      proposalId: proposed.proposal.id,
+      expectedVersion: 1,
+      creation: managedCreation(),
+    });
+    const second = service.resolveProposal("60000000-0000-4000-8000-000000000002" as WindowId, {
+      kind: "confirm-planner-work-proposal",
+      proposalId: proposed.proposal.id,
+      expectedVersion: 1,
+      creation: { ...managedCreation(), threadId: "20000000-0000-4000-8000-000000000003" },
+    });
+    const pending = service.readView(windowId, ids.project).proposals[0];
+    const currentVersionAttempt = service.resolveProposal(windowId, {
+      kind: "confirm-planner-work-proposal",
+      proposalId: proposed.proposal.id,
+      expectedVersion: pending?.proposalVersion,
+      creation: { ...managedCreation(), threadId: "20000000-0000-4000-8000-000000000004" },
+    });
+    gate.resolve();
+    const results = await Promise.all([first, second, currentVersionAttempt]);
+    expect(calls).toBe(1);
+    expect(results.map((result) => result.status).sort()).toEqual([
+      "confirmed",
+      "refused",
+      "refused",
+    ]);
+  });
+
   it("journals a pending proposal from the planner thread", async () => {
     const { service } = fixture();
     await designate(service);

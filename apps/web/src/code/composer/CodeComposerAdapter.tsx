@@ -149,6 +149,10 @@ export interface CodeComposerAdapterProps {
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
+  /** A reviewed planner proposal is sent exactly as shown, never edited in this form. */
+  readonly fixedPrompt?: string;
+  readonly createLabel?: string;
+  readonly createDisabledReason?: string;
   readonly onCancelFirstTurn?: () => void;
   readonly folderControl?: ReactNode;
   readonly projectSetup?: ReactNode;
@@ -254,7 +258,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     () => (isServer ? serverCodeThreadProviderGroups(props.providerGroups) : props.providerGroups),
     [props.providerGroups, isServer],
   );
-  const [prompt, setPrompt] = useNewTaskPrompt();
+  const [draftPrompt, setPrompt] = useNewTaskPrompt();
+  const prompt = props.fixedPrompt ?? draftPrompt;
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
   const storedCheckout =
@@ -509,6 +514,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     : undefined;
   const canSubmit =
     trimmed.length > 0 &&
+    props.createDisabledReason === undefined &&
     !props.creating &&
     !submitting &&
     !atMenu.resolving &&
@@ -876,6 +882,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 autoFocus
                 className="composer-input"
                 disabled={props.creating}
+                readOnly={props.fixedPrompt !== undefined}
                 onChange={(event) => {
                   setPrompt(event.target.value);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
@@ -980,7 +987,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   </span>
                   {props.poolControl}
                   <ComposerVoiceButton
-                    disabled={props.creating === true}
+                    disabled={props.creating === true || props.fixedPrompt !== undefined}
                     onTranscript={(transcript) =>
                       setPrompt((current) => appendTranscript(current, transcript))
                     }
@@ -991,7 +998,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 kind: "send",
                 send: {
                   ariaLabel:
-                    props.errorMessage === undefined ? "Create thread" : "Retry creating thread",
+                    props.createLabel ??
+                    (props.errorMessage === undefined ? "Create thread" : "Retry creating thread"),
                   disabled: !canSubmit,
                   onSend: submit,
                 },
@@ -1011,6 +1019,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             {sendNotice}
           </OctantAlert>
         ) : null}
+        {props.createDisabledReason === undefined ? null : (
+          <p className="code-composer-adapter__notice" role="status">
+            {props.createDisabledReason}
+          </p>
+        )}
 
         {serverRefusal !== undefined && props.errorMessage === undefined ? (
           <p className="code-composer-adapter__notice" role="status">
