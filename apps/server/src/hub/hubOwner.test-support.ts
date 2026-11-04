@@ -30,7 +30,12 @@ import type {
   CredentialReadResult,
   CredentialStoreResult,
 } from "./ownerCredentialCopy";
-import type { OwnerPostureChange, OwnerPostureHost, OwnerPostureRead } from "./ownerPostureHost";
+import type {
+  OwnerPostureAuthority,
+  OwnerPostureChange,
+  OwnerPostureHost,
+  OwnerPostureRead,
+} from "./ownerPostureHost";
 import { createPinnedHubTransport } from "./pinnedHubTransport";
 
 export interface SoftwareAuthenticator {
@@ -289,6 +294,10 @@ export class TestPostureHost implements OwnerPostureHost {
     this.postures.set(JSON.stringify(posture.subject), posture);
   }
 
+  async list(): Promise<ReadonlyArray<{ readonly title: string; readonly posture: OwnerPosture }>> {
+    return [...this.postures.values()].map((posture) => ({ title: "Code target", posture }));
+  }
+
   async read(subject: OwnerPostureSubject): Promise<OwnerPostureRead> {
     const found = this.postures.get(JSON.stringify(subject));
     return found === undefined
@@ -296,7 +305,10 @@ export class TestPostureHost implements OwnerPostureHost {
       : { status: "read", posture: found };
   }
 
-  async change(request: OwnerPostureChangeRequest): Promise<OwnerPostureChange> {
+  async change(
+    request: OwnerPostureChangeRequest,
+    _authority: OwnerPostureAuthority,
+  ): Promise<OwnerPostureChange> {
     const key = JSON.stringify(request.subject);
     if (!this.postures.has(key)) return { status: "refused", kind: "not-found" };
     // The host's own rule, as a window meets it: a thread keeps Full access only
@@ -312,6 +324,7 @@ export class TestPostureHost implements OwnerPostureHost {
     this.changes.push(request);
     const next: OwnerPosture = {
       subject: request.subject,
+      version: "a".repeat(64),
       posture: request.posture,
       persistence: request.persistence,
     };

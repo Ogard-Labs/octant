@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BrowserAutomationSnapshot, ToolActionAuthority } from "@octant/contracts";
+import {
+  decodeToolActionAuthority,
+  type BrowserAutomationSnapshot,
+  type ToolActionAuthority,
+} from "@octant/contracts";
 import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
 import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
 import { browserToolInputRecord, flowDecision } from "./browserFlows";
@@ -882,7 +886,7 @@ describe("octant_browser profile argument", () => {
     });
     const run = (input: Record<string, unknown>) =>
       tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
-    return { create, request, run };
+    return { create, act, request, run };
   }
 
   it("keeps a page Private when no profile is asked for", async () => {
@@ -1050,6 +1054,107 @@ describe("octant_browser profile argument", () => {
 
     expect(result).toMatchObject({ isError: true, result: { error: "profile-needs-a-person" } });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("reports an expired page without creating, approving, or switching its profile", async () => {
+    const opened = activeContext({ kind: "personal" });
+    const expired = snapshot({
+      ...opened,
+      status: "stale",
+      context: { ...opened.context, state: "expired" } as never,
+      failure: {
+        category: "context-expired",
+        message: 'The Browser page expired. Call navigate with profile "personal".',
+      },
+    });
+    const bindings = new Map<string, BrowserModelBinding>([
+      [String(opened.context?.contextId), { modelId, authority: workAuthority }],
+    ]);
+    const { run, create, act, request } = fixture({ inspect: expired, modelBindings: bindings });
+    for (const operation of ["snapshot", "read-page", "screenshot", "sign-in"]) {
+      expect(await run({ operation })).toMatchObject({
+        isError: true,
+        result: {
+          failure: {
+            category: "context-expired",
+            message: expect.stringContaining('profile "personal"'),
+          },
+        },
+      });
+    }
+    expect(create).not.toHaveBeenCalled();
+    expect(act).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(bindings.size).toBe(1);
+    await run({ operation: "navigate", url: "https://example.com/a", profile: "personal" });
+    expect(create.mock.calls[0]?.[0].policy.profile).toEqual({ kind: "personal" });
+  });
+
+  it("keeps a never-opened page distinct and hides expiry from mismatched or missing bindings", async () => {
+    const never = fixture();
+    expect(await never.run({ operation: "snapshot" })).toMatchObject({
+      isError: true,
+      result: { error: "browser-navigation-required" },
+    });
+    const opened = activeContext({ kind: "personal" });
+    const expired = snapshot({
+      ...opened,
+      status: "stale",
+      context: { ...opened.context, state: "expired" } as never,
+      failure: {
+        category: "context-expired",
+        message: "The Browser page expired in the Personal profile.",
+      },
+    });
+    const otherAuthority = decodeToolActionAuthority({
+      ...workAuthority,
+      hostId: "30000000-0000-4000-8000-000000000002",
+    });
+    for (const binding of [
+      undefined,
+      { modelId: "another-model", authority: workAuthority },
+      { modelId, authority: otherAuthority },
+    ]) {
+      const { run, create, request } = fixture({
+        inspect: expired,
+        modelBindings:
+          binding === undefined
+            ? new Map()
+            : new Map([[String(opened.context?.contextId), binding]]),
+      });
+      const result = await run({ operation: "snapshot" });
+      expect(result).toMatchObject({
+        isError: true,
+        result: { error: "browser-navigation-required" },
+      });
+      expect(JSON.stringify(result)).not.toContain("Personal");
+      expect(create).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled();
+    }
+  });
+
+  it("keeps expired stored profiles unavailable to unattended and terminal callers", async () => {
+    const opened = activeContext({ kind: "personal" });
+    const expired = snapshot({
+      ...opened,
+      status: "stale",
+      context: { ...opened.context, state: "expired" } as never,
+      failure: { category: "context-expired", message: "Expired Personal page." },
+    });
+    for (const caller of [{ unattended: true }, { profileCaller: "terminal-grant" as const }]) {
+      const { run, create, act } = fixture({
+        ...caller,
+        inspect: expired,
+        modelBindings: new Map([
+          [String(opened.context?.contextId), { modelId, authority: workAuthority }],
+        ]),
+      });
+      const answer = await run({ operation: "snapshot" });
+      expect(answer).toMatchObject({ isError: true, result: { error: "profile-needs-a-person" } });
+      expect(JSON.stringify(answer)).not.toContain("Personal");
+      expect(create).not.toHaveBeenCalled();
+      expect(act).not.toHaveBeenCalled();
+    }
   });
 
   it("rejects a profile other than project or personal", async () => {

@@ -300,7 +300,7 @@ export class AgentPluginMcpSessionManager {
           if (controller.signal.aborted) {
             await this.#close(indexed.sessionKey, record);
             const desired = this.#desired.get(indexed.sessionKey);
-            if (desired !== undefined) {
+            if (desired !== undefined && !this.#sessions.has(indexed.sessionKey)) {
               this.#failures.set(indexed.sessionKey, {
                 target: desired,
                 reason: "MCP tool transport closed; authority reconciliation is required.",
@@ -597,16 +597,19 @@ export class AgentPluginMcpSessionManager {
     this.#reindex();
     this.#failures.set(key, {
       target,
-      reason: "MCP stdio transport closed; authority reconciliation is required.",
+      reason: "MCP transport closed; authority reconciliation is required.",
     });
   }
 
   async #close(key: string, record: AgentPluginMcpSessionRecord): Promise<void> {
-    const idleTimer = this.#idleTimers.get(key);
-    if (idleTimer !== undefined) clearTimeout(idleTimer);
-    this.#idleTimers.delete(key);
-    this.#sessions.delete(key);
-    this.#reindex();
+    // A late failed call from a retired transport must not remove its replacement.
+    if (this.#sessions.get(key) === record) {
+      const idleTimer = this.#idleTimers.get(key);
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+      this.#idleTimers.delete(key);
+      this.#sessions.delete(key);
+      this.#reindex();
+    }
     await record.session.close().catch(() => undefined);
   }
 

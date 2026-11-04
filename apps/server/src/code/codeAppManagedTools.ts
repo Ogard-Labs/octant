@@ -4,6 +4,7 @@ import type {
   BrowserAppManagedToolsOptions,
   BrowserModelBinding,
 } from "../browser/browserAppManagedTools";
+import { browserSignInOriginRefusal } from "../browser/browserRecoveryMessages";
 import { browserToolImage } from "../browser/browserToolImage";
 import { admitBrowserUpload, browserUploadSummary } from "../browser/browserUploadFiles";
 import { browserDownloadQuestion } from "@octant/domain";
@@ -49,7 +50,7 @@ import type {
   ToolApprovalId,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
+import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
 import {
   decodeAppleSimulatorId,
   decodeAndroidEmulatorId,
@@ -395,6 +396,9 @@ export interface CodeAppManagedToolsOptions {
   };
   readonly browserApproval?: {
     readonly isApproved: (contextId: string) => boolean;
+    /** Identity-only receipts for expiry recovery; these never satisfy an approval. */
+    readonly isBound?: (contextId: string) => boolean;
+    readonly rememberBinding?: (contextId: string) => void;
     readonly request: (
       origin: string,
       signal?: AbortSignal,
@@ -1234,6 +1238,7 @@ async function browserToolOne(
   options: CodeAppManagedToolsOptions,
   input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
   signal?: AbortSignal,
+  afterSignIn = false,
 ): Promise<BrowserToolAnswer> {
   if (options.browser === undefined) return failure("invalid-browser-input");
   const threadId = browserThreadIdOf(options);
@@ -1254,6 +1259,27 @@ async function browserToolOne(
   // While the person signs in, the page is theirs; see Work's tool.
   if (snapshot.waitingForPerson !== undefined) {
     return heldForPersonAnswer(snapshot.waitingForPerson);
+  }
+  if (snapshot.failure?.category === "context-expired" && input.operation !== "navigate") {
+    const context = snapshot.context;
+    if (
+      context === undefined ||
+      !sameToolActionAuthority(context.authority, authority) ||
+      options.browserApproval?.isBound?.(String(context.contextId)) !== true
+    ) {
+      return failure("browser-navigation-required");
+    }
+    if (context.policy.profile?.kind === "project" || context.policy.profile?.kind === "personal") {
+      const callerRefusal = options.browserSignIn?.refusal(options.windowId);
+      if (options.browserSignIn === undefined || callerRefusal !== undefined) {
+        return failure(
+          callerRefusal === "sign-in-needs-this-computer"
+            ? "profile-not-local"
+            : "profile-needs-a-person",
+        );
+      }
+    }
+    return browserToolResult(snapshot);
   }
   if (input.operation === "sign-in") {
     const refusal =
@@ -1397,14 +1423,16 @@ async function browserToolOne(
     );
     if (created.kind === "failure") return failure(created.reason);
     snapshot = created.snapshot;
-    if (snapshot.context?.state === "active" && usesProfileBinding && !signal?.aborted) {
-      profiles?.rememberBinding(String(snapshot.context.contextId), {
-        modelId: String(options.thread.modelId),
-        authority,
-      });
-    }
-    if (requiresApproval && snapshot.context?.state === "active") {
-      options.browserApproval?.remember(String(snapshot.context.contextId));
+    if (snapshot.context?.state === "active") {
+      const contextId = String(snapshot.context.contextId);
+      if (usesProfileBinding && !signal?.aborted) {
+        profiles?.rememberBinding(contextId, {
+          modelId: String(options.thread.modelId),
+          authority,
+        });
+      }
+      if (requiresApproval) options.browserApproval?.remember(contextId);
+      options.browserApproval?.rememberBinding?.(contextId);
     }
   }
   const context = snapshot.context;
@@ -1426,7 +1454,7 @@ async function browserToolOne(
           signIn: input.reason === undefined ? {} : { reason: input.reason },
           ...(signal === undefined ? {} : { signal }),
         }),
-      snapshotAfter: () => browserToolOne(options, { operation: "snapshot" }, signal),
+      snapshotAfter: () => browserToolOne(options, { operation: "snapshot" }, signal, true),
     });
   }
   if (input.operation === "download-save") {
@@ -1501,11 +1529,21 @@ async function browserToolOne(
   if (heldInQueue !== undefined) return heldForPersonAnswer(heldInQueue);
   if (
     input.operation === "screenshot" &&
+    acted.snapshot.failure === undefined &&
     browserToolImage(acted.snapshot.observation?.screenshotDataUrl) === undefined
   ) {
     return failure("browser-screenshot-unavailable");
   }
-  return browserToolResult(acted.snapshot, browserToolWantsScreenshot(input));
+  if (acted.snapshot.failure === undefined)
+    options.browserApproval?.rememberBinding?.(String(context.contextId));
+  return browserToolResult(
+    afterSignIn &&
+      acted.snapshot.failure?.category === "policy-denied" &&
+      acted.snapshot.failure.reason === "origin-not-approved"
+      ? { ...acted.snapshot, failure: browserSignInOriginRefusal() }
+      : acted.snapshot,
+    browserToolWantsScreenshot(input),
+  );
 }
 
 /**

@@ -700,6 +700,229 @@ describe("Code app-managed tools", () => {
     });
   });
 
+  it.each(["approval-gated", "full-access"] as const)(
+    "keeps an expired Code Browser distinct at %s without granting approval",
+    async (executionPolicy) => {
+      const authority = browserAuthority();
+      const active = browserSnapshot(authority);
+      let current: BrowserAutomationSnapshot = {
+        status: "ready",
+        threadId: active.threadId,
+        evidence: [],
+      };
+      const bound = new Set<string>();
+      const request = vi.fn(async () => "approved" as const);
+      const remember = vi.fn();
+      const create = vi.fn(async () => {
+        current = active;
+        return active;
+      });
+      const act = vi.fn(async () => active);
+      const browserApproval = {
+        isApproved: () => false,
+        isBound: (contextId: string) => bound.has(contextId),
+        rememberBinding: (contextId: string) => void bound.add(contextId),
+        request,
+        remember,
+        forget: (contextId: string) => void bound.delete(contextId),
+      };
+      const tools = createCodeAppManagedTools({
+        windowId,
+        thread: thread({ executionPolicy }),
+        readThread: () => thread({ executionPolicy }),
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browserApproval,
+        browser: {
+          resolveAuthority: () => authority,
+          inspectThread: () => current,
+          create,
+          act,
+          releaseThread: async () => {
+            current = { status: "ready", threadId: active.threadId, evidence: [] };
+            return current;
+          },
+        },
+      });
+      const call = (input: Record<string, unknown>) =>
+        tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson: JSON.stringify(input) });
+      expect(await call({ operation: "snapshot" })).toMatchObject({
+        result: { error: "browser-navigation-required" },
+      });
+      await call({ operation: "navigate", url: "https://example.com" });
+      expect(request).toHaveBeenCalledTimes(executionPolicy === "full-access" ? 0 : 1);
+      expect(remember).toHaveBeenCalledTimes(executionPolicy === "full-access" ? 0 : 1);
+      if (active.context === undefined) throw Error("Missing test context");
+      current = {
+        status: "stale",
+        threadId: active.threadId,
+        context: { ...active.context, state: "expired" },
+        evidence: [],
+        failure: {
+          category: "context-expired",
+          message: "The Browser page expired. It used the Private profile.",
+        },
+      };
+      for (const operation of ["snapshot", "read-page", "screenshot"]) {
+        expect(await call({ operation })).toMatchObject({
+          isError: true,
+          result: {
+            failure: {
+              category: "context-expired",
+              message: expect.stringContaining("Private profile"),
+            },
+          },
+        });
+      }
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(act).toHaveBeenCalledTimes(1);
+      bound.clear();
+      expect(await call({ operation: "snapshot" })).toMatchObject({
+        result: { error: "browser-navigation-required" },
+      });
+      await call({ operation: "stop" });
+      expect(await call({ operation: "snapshot" })).toMatchObject({
+        result: { error: "browser-navigation-required" },
+      });
+    },
+  );
+
+  it.each(["sign-in-needs-a-person", "sign-in-needs-this-computer"])(
+    "keeps an expired stored-profile hint private for %s",
+    async (callerRefusal) => {
+      const authority = browserAuthority();
+      const active = browserSnapshot(authority);
+      if (active.context === undefined) throw Error("Missing test context");
+      const expired: BrowserAutomationSnapshot = {
+        ...active,
+        status: "stale",
+        context: {
+          ...active.context,
+          state: "expired",
+          policy: { ...active.context.policy, profile: { kind: "personal" } },
+        },
+        failure: { category: "context-expired", message: "Expired Personal page." },
+      };
+      const tools = createCodeAppManagedTools({
+        windowId,
+        thread: thread(),
+        readThread: () => thread(),
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browserApproval: {
+          isApproved: () => false,
+          isBound: () => true,
+          request: vi.fn(),
+          remember: vi.fn(),
+          forget: vi.fn(),
+        },
+        browser: {
+          resolveAuthority: () => authority,
+          inspectThread: () => expired,
+          create: vi.fn(),
+          act: vi.fn(),
+          releaseThread: vi.fn(),
+        },
+        browserSignIn: { refusal: () => callerRefusal, request: vi.fn() },
+      });
+      const answer = await tools.execute({
+        name: CODE_BROWSER_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "snapshot" }),
+      });
+      expect(answer).toMatchObject({
+        result: {
+          error:
+            callerRefusal === "sign-in-needs-this-computer"
+              ? "profile-not-local"
+              : "profile-needs-a-person",
+        },
+      });
+      expect(JSON.stringify(answer)).not.toContain("Personal");
+    },
+  );
+
+  it("keeps a Code screenshot's expiry failure instead of replacing it with image-unavailable", async () => {
+    const authority = browserAuthority();
+    const active = browserSnapshot(authority);
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => authority,
+        inspectThread: () => active,
+        create: vi.fn(),
+        act: async () => ({
+          ...active,
+          failure: { category: "context-expired", message: "The Browser page expired." },
+        }),
+        releaseThread: vi.fn(),
+      },
+    });
+    expect(
+      await tools.execute({
+        name: CODE_BROWSER_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "screenshot" }),
+      }),
+    ).toMatchObject({ isError: true, result: { failure: { category: "context-expired" } } });
+  });
+
+  it("explains an unapproved site after Continue in the Code Browser", async () => {
+    const authority = browserAuthority();
+    const active = browserSnapshot(authority);
+    if (active.context === undefined) throw Error("Missing test context");
+    const native: BrowserAutomationSnapshot = {
+      ...active,
+      context: { ...active.context, presentation: "native-live" },
+    };
+    const act = vi.fn(async () => ({
+      ...native,
+      failure: {
+        category: "policy-denied" as const,
+        reason: "origin-not-approved" as const,
+        message: "The page left its approved origin.",
+      },
+    }));
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => authority,
+        inspectThread: () => native,
+        create: vi.fn(),
+        act,
+        releaseThread: vi.fn(),
+        holdForPerson: () => () => undefined,
+      },
+      browserSignIn: { refusal: () => undefined, request: async () => "approved" },
+    });
+    const answer = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "sign-in" }),
+    });
+    expect(answer).toMatchObject({
+      isError: true,
+      result: {
+        failure: {
+          reason: "origin-not-approved",
+          message: expect.stringContaining(
+            "The person left the page on an unapproved site after Continue.",
+          ),
+        },
+      },
+    });
+    expect(act).toHaveBeenCalledOnce();
+  });
+
   it("asks for browser-session approval without raising the thread access posture", async () => {
     const approve = vi.fn(async () => "approved" as const);
     const remember = vi.fn();

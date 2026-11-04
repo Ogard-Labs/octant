@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import {
-  execFile,
-  spawn as nodeSpawn,
-  type ChildProcessWithoutNullStreams,
-} from "node:child_process";
+import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   access,
   chmod,
@@ -18,13 +14,19 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
-import { promisify } from "node:util";
 import {
   makeProcessConfinementLive,
   SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
   seatbeltAllowLiteralMetadataRule,
   seatbeltAllowLiteralReadRule,
 } from "../process/seatbeltProfile";
+import {
+  captureProcessGroupWitnesses,
+  ownsProcessGroup,
+  readProcessIdentity,
+  terminateOwnedProcess,
+  type ProcessGroupWitness,
+} from "../process/nodeOwnedProcessReceipt";
 import type {
   ExtensionProcessExit,
   ExtensionProcessHandle,
@@ -40,7 +42,6 @@ const READY_HANDSHAKE = "OCTANT_EXTENSION_READY";
 const MAX_HANDSHAKE_BYTES = 1_024;
 const MAX_RECEIPT_BYTES = 4_096;
 const MAX_RECEIPTS = 256;
-const execFileAsync = promisify(execFile);
 
 // Executable components become ready only after emitting this complete stdout line.
 
@@ -134,9 +135,24 @@ async function startProcess(
   let readyResolve!: () => void;
   let readyReject!: (error: Error) => void;
   let readySettled = false;
-  const ready = new Promise<void>((resolve, reject) => {
+  const readiness = new Promise<void>((resolve, reject) => {
     readyResolve = resolve;
     readyReject = reject;
+  });
+  let ownershipReadyResolve!: () => void;
+  const ownershipReady = new Promise<void>((resolve) => {
+    ownershipReadyResolve = resolve;
+  });
+  let witnesses: ReadonlyArray<ProcessGroupWitness> = [];
+  const ready = Promise.all([readiness, ownershipReady]).then(async () => {
+    if (child.pid !== undefined && ownedProcessIdentity !== undefined) {
+      const observed = await captureProcessGroupWitnesses(
+        child.pid,
+        ownedProcessIdentity,
+        processIdentity,
+      );
+      if (observed.length > 0) witnesses = observed;
+    }
   });
   void ready.catch(() => undefined);
   let outputBytes = 0;
@@ -146,7 +162,26 @@ async function startProcess(
   let receiptPath: string | undefined;
   let ownedProcessIdentity: string | undefined;
   const stop = (): Promise<void> => {
-    termination ??= terminate(child, shutdownTimeoutMs, ownedProcessIdentity, processIdentity);
+    termination ??= (async () => {
+      if (child.pid === undefined) return;
+      if (ownedProcessIdentity === undefined) {
+        // The ChildProcess handle still identifies the direct launch. Without
+        // its stable group identity it cannot authorize a negative-PID signal.
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        await waitForDirectChildExit(wait, shutdownTimeoutMs);
+      } else {
+        await terminateOwnedProcess(
+          child.pid,
+          ownedProcessIdentity,
+          shutdownTimeoutMs,
+          processIdentity,
+          undefined,
+          undefined,
+          witnesses,
+        );
+      }
+      if (receiptPath !== undefined) await unlink(receiptPath).catch(() => undefined);
+    })();
     return termination;
   };
   const capture = (chunk: Buffer | string) => {
@@ -189,19 +224,42 @@ async function startProcess(
   const cancel = () => stop();
   const onAbort = () => void stop().catch(() => undefined);
   input.signal.addEventListener("abort", onAbort, { once: true });
-  void wait.finally(() => {
-    input.signal.removeEventListener("abort", onAbort);
-    if (receiptPath !== undefined) void unlink(receiptPath).catch(() => undefined);
-  });
+  void wait
+    .then(async () => {
+      input.signal.removeEventListener("abort", onAbort);
+      if (
+        receiptPath === undefined ||
+        child.pid === undefined ||
+        ownedProcessIdentity === undefined
+      )
+        return;
+      // A closed leader does not establish that all its descendants have exited.
+      if (
+        !(await ownsProcessGroup(
+          child.pid,
+          ownedProcessIdentity,
+          processIdentity,
+          undefined,
+          witnesses,
+        ))
+      ) {
+        await unlink(receiptPath).catch(() => undefined);
+      }
+    })
+    .catch(() => undefined);
 
   try {
     await waitForSpawn(child);
     if (child.pid === undefined) throw new Error("Extension process did not expose a valid pid.");
     ownedProcessIdentity = await processIdentity(child.pid);
     if (ownedProcessIdentity === undefined) {
-      signalProcessGroup(child.pid, "SIGKILL");
       throw new Error("Extension process identity is unavailable.");
     }
+    witnesses = await captureProcessGroupWitnesses(
+      child.pid,
+      ownedProcessIdentity,
+      processIdentity,
+    );
     if (receiptDirectory !== undefined) {
       await mkdir(receiptDirectory, { recursive: true, mode: 0o700 });
       await chmod(receiptDirectory, 0o700);
@@ -215,6 +273,8 @@ async function startProcess(
   } catch (error) {
     await stop().catch(() => undefined);
     throw error;
+  } finally {
+    ownershipReadyResolve();
   }
 
   return {
@@ -573,41 +633,47 @@ async function readReceipts(
   if (receiptDirectory === undefined) return [];
   let names: string[];
   try {
-    names = (await readdir(receiptDirectory)).sort().slice(0, MAX_RECEIPTS);
-  } catch {
-    return [];
+    names = (await readdir(receiptDirectory)).sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
   }
+  if (names.length > MAX_RECEIPTS) throw new Error("Too many extension ownership receipts.");
   const receipts: ExtensionProcessReceipt[] = [];
   for (const name of names) {
     if (!/^receipt-[a-f0-9]{64}\.json$/.test(name)) continue;
     const path = join(receiptDirectory, name);
+    let receipt: DurableReceipt | undefined;
     try {
       const metadata = await stat(path);
-      if (!metadata.isFile() || metadata.size > MAX_RECEIPT_BYTES) {
+      if (!metadata.isFile() || metadata.size > MAX_RECEIPT_BYTES)
+        throw new Error("Invalid receipt size.");
+      receipt = parseReceipt(JSON.parse(await readFile(path, "utf8")));
+      if (!(await ownsProcessGroup(receipt.pid, receipt.processIdentity, processIdentity))) {
         await unlink(path).catch(() => undefined);
         continue;
       }
-      const receipt = parseReceipt(JSON.parse(await readFile(path, "utf8")));
-      if (
-        !processGroupExists(receipt.pid) ||
-        (await processIdentity(receipt.pid)) !== receipt.processIdentity
-      ) {
-        await unlink(path).catch(() => undefined);
-        continue;
-      }
+      const owned = receipt;
+      let termination: Promise<void> | undefined;
       receipts.push({
-        extensionId: receipt.extensionId,
-        packageId: receipt.packageId,
-        componentId: receipt.componentId,
-        version: receipt.version,
-        digest: receipt.digest,
+        extensionId: owned.extensionId,
+        packageId: owned.packageId,
+        componentId: owned.componentId,
+        version: owned.version,
+        digest: owned.digest,
         state: "running",
         stop: () =>
-          terminatePid(receipt.pid, shutdownTimeoutMs, receipt.processIdentity, processIdentity),
+          (termination ??= terminateOwnedProcess(
+            owned.pid,
+            owned.processIdentity,
+            shutdownTimeoutMs,
+            processIdentity,
+          )),
         remove: () => unlink(path).catch(() => undefined),
       });
-    } catch {
-      await unlink(path).catch(() => undefined);
+    } catch (error) {
+      if (receipt === undefined && (error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
     }
   }
   return receipts;
@@ -680,116 +746,24 @@ async function waitForSpawn(child: ChildProcessWithoutNullStreams): Promise<void
   });
 }
 
-async function terminate(
-  child: ChildProcessWithoutNullStreams,
+async function waitForDirectChildExit(
+  wait: Promise<ExtensionProcessExit>,
   timeoutMs: number,
-  expectedIdentity: string | undefined,
-  processIdentity: (pid: number) => Promise<string | undefined>,
 ): Promise<void> {
-  if (child.pid === undefined) return;
-  await terminatePid(child.pid, timeoutMs, expectedIdentity, processIdentity);
-}
-
-async function terminatePid(
-  pid: number,
-  timeoutMs: number,
-  expectedIdentity: string | undefined,
-  processIdentity: (pid: number) => Promise<string | undefined>,
-): Promise<void> {
-  if (!(await ownsProcess(pid, expectedIdentity, processIdentity))) return;
-  signalProcessGroup(pid, "SIGTERM");
-  if (await waitForOwnedProcessExit(pid, timeoutMs, expectedIdentity, processIdentity)) return;
-  if (!(await ownsProcess(pid, expectedIdentity, processIdentity))) return;
-  signalProcessGroup(pid, "SIGKILL");
-  if (!(await waitForOwnedProcessExit(pid, timeoutMs, expectedIdentity, processIdentity))) {
-    throw new Error("Extension process group did not terminate after SIGKILL.");
-  }
-}
-
-async function ownsProcess(
-  pid: number,
-  expectedIdentity: string | undefined,
-  processIdentity: (pid: number) => Promise<string | undefined>,
-): Promise<boolean> {
-  if (!processGroupExists(pid)) return false;
-  if (expectedIdentity === undefined) return false;
-  return (await processIdentity(pid)) === expectedIdentity;
-}
-
-function processGroupExists(pid: number): boolean {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    process.kill(process.platform === "win32" ? pid : -pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+    await Promise.race([
+      wait,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Extension launch did not exit after SIGKILL.")),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
-}
-
-function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
-  try {
-    if (process.platform === "win32") process.kill(pid, signal);
-    else process.kill(-pid, signal);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "EPERM" && process.platform !== "win32") {
-      process.kill(pid, signal);
-      return;
-    }
-    if (code !== "ESRCH") throw error;
-  }
-}
-
-async function waitForOwnedProcessExit(
-  pid: number,
-  timeoutMs: number,
-  expectedIdentity: string | undefined,
-  processIdentity: (pid: number) => Promise<string | undefined>,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while ((await ownsProcess(pid, expectedIdentity, processIdentity)) && Date.now() < deadline)
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  return !(await ownsProcess(pid, expectedIdentity, processIdentity));
-}
-
-async function readProcessIdentity(pid: number): Promise<string | undefined> {
-  try {
-    if (!Number.isSafeInteger(pid) || pid < 1) return undefined;
-    if (process.platform === "linux") {
-      const [processStat, bootId] = await Promise.all([
-        readFile(`/proc/${pid}/stat`, "utf8"),
-        readFile("/proc/sys/kernel/random/boot_id", "utf8"),
-      ]);
-      const commandEnd = processStat.lastIndexOf(")");
-      if (commandEnd < 0) return undefined;
-      const fields = processStat
-        .slice(commandEnd + 1)
-        .trim()
-        .split(/\s+/);
-      const processGroupId = fields[2];
-      const startTicks = fields[19];
-      if (processGroupId !== String(pid) || startTicks === undefined) return undefined;
-      return hashProcessIdentity(["linux", String(pid), bootId.trim(), startTicks]);
-    }
-    if (process.platform === "darwin") {
-      const { stdout } = await execFileAsync(
-        "/bin/ps",
-        ["-o", "pid=,pgid=,lstart=", "-p", String(pid)],
-        { timeout: 1_000, maxBuffer: 4_096 },
-      );
-      const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(stdout);
-      if (match?.[1] !== String(pid) || match[2] !== String(pid) || match[3] === undefined) {
-        return undefined;
-      }
-      return hashProcessIdentity(["darwin", match[1], match[2], match[3]]);
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function hashProcessIdentity(parts: ReadonlyArray<string>): string {
-  return `sha256:${createHash("sha256").update(parts.join("\0")).digest("hex")}`;
 }
 
 function bounded(value: number | undefined, fallback: number): number {

@@ -1,3 +1,4 @@
+import { browserSignInOriginRefusal } from "./browserRecoveryMessages";
 import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
 import {
@@ -167,6 +168,7 @@ export function createBrowserAppManagedTools(
   const runOne = async (
     input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
     signal: AbortSignal | undefined,
+    afterSignIn = false,
   ): Promise<BrowserToolAnswer> => {
     const authority = options.resolveAuthority(options.threadId, options.mode);
     if (authority === undefined) return failure("browser-authority-unavailable");
@@ -189,6 +191,27 @@ export function createBrowserAppManagedTools(
     // reaches it until they press Continue or the ask ends.
     if (snapshot.waitingForPerson !== undefined) {
       return heldForPersonAnswer(snapshot.waitingForPerson);
+    }
+    if (snapshot.failure?.category === "context-expired" && input.operation !== "navigate") {
+      const previous =
+        snapshot.context === undefined
+          ? undefined
+          : options.modelBindings.get(String(snapshot.context.contextId));
+      if (
+        previous === undefined ||
+        String(previous.modelId) !== String(options.modelId) ||
+        !sameToolActionAuthority(previous.authority, authority)
+      ) {
+        return failure("browser-navigation-required");
+      }
+      if (
+        storedBrowserProfile(snapshot.context?.policy.profile) !== undefined &&
+        (options.profileCaller === "terminal-grant" ||
+          options.approvals?.isUnattendedScope?.(options.windowId) === true)
+      ) {
+        return failure("profile-needs-a-person");
+      }
+      return browserToolResult(snapshot);
     }
     if (input.operation === "sign-in") {
       const refusal = signInRefusal(options) ?? signInPageRefusal(snapshot);
@@ -364,7 +387,7 @@ export function createBrowserAppManagedTools(
             signIn: input.reason === undefined ? {} : { reason: input.reason },
             ...(signal === undefined ? {} : { signal }),
           }),
-        snapshotAfter: () => runOne({ operation: "snapshot" }, signal),
+        snapshotAfter: () => runOne({ operation: "snapshot" }, signal, true),
       });
     }
     if (input.operation === "download-save") {
@@ -474,11 +497,19 @@ export function createBrowserAppManagedTools(
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
     if (
       input.operation === "screenshot" &&
+      acted.failure === undefined &&
       browserToolImage(acted.observation?.screenshotDataUrl) === undefined
     ) {
       return failure("browser-screenshot-unavailable");
     }
-    return browserToolResult(acted, browserToolWantsScreenshot(input));
+    return browserToolResult(
+      afterSignIn &&
+        acted.failure?.category === "policy-denied" &&
+        acted.failure.reason === "origin-not-approved"
+        ? { ...acted, failure: browserSignInOriginRefusal() }
+        : acted,
+      browserToolWantsScreenshot(input),
+    );
   };
   const activeContextId = (): string | undefined => {
     const context = options.browser.inspectThread(options.windowId, options.threadId).context;

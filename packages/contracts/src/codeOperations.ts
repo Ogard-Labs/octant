@@ -1118,6 +1118,9 @@ const GitMutationResult = Schema.Struct({
       "unconfirmed-target",
       "ignored-path-collision",
       "identity-missing",
+      "stale-state",
+      "unlisted-path",
+      "untracked-path",
     ),
   ),
   /**

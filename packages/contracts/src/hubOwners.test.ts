@@ -147,7 +147,11 @@ describe("owner administration session, posture, and sign-in copy contracts", ()
   });
 
   it("names a posture for a Code Project or a Code thread and refuses any other subject", () => {
-    const change = { posture: "plan", persistence: "current-session" };
+    const change = {
+      posture: "plan",
+      expectedVersion: "a".repeat(64),
+      persistence: "current-session",
+    };
 
     expect(
       decodeOwnerPostureChangeRequest({ ...change, subject: { kind: "project", projectId: uuid } })

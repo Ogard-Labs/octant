@@ -39,6 +39,42 @@
   white-space: nowrap;
 }
 
+.run-debug__content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.run-debug__content > .run-debug__body,
+.run-debug__content > .run-debug__session {
+  flex: 1;
+}
+.run-debug__breakpoints {
+  flex: none;
+  max-height: min(35vh, 16rem, 40%);
+  overflow: auto;
+  padding: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
+}
+.run-debug__breakpoint-files,
+.run-debug__breakpoint-files ul {
+  margin: var(--oct-space-2) 0;
+  padding: 0;
+  list-style: none;
+}
+.run-debug__breakpoint-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-1);
+  overflow-wrap: anywhere;
+}
+.run-debug__breakpoint-row > :first-child {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .run-debug__body,
 .run-debug__session {
   display: flex;
@@ -417,6 +453,7 @@
 
 /* ─── the editor's gutter ──────────────────────────────────────────── */
 .code-debug-breakpoint::before,
+.code-debug-breakpoint-unresolved::before,
 .code-debug-stopped::after {
   content: "";
   position: absolute;
@@ -424,11 +461,17 @@
   margin: auto;
 }
 
-.code-debug-breakpoint::before {
+.code-debug-breakpoint::before,
+.code-debug-breakpoint-unresolved::before {
   width: 10px;
   height: 10px;
   border-radius: var(--oct-radius-pill);
+}
+.code-debug-breakpoint::before {
   background: var(--oct-danger);
+}
+.code-debug-breakpoint-unresolved::before {
+  border: 1px solid var(--oct-warn);
 }
 
 .code-debug-stopped::after {

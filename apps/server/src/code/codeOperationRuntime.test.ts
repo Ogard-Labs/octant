@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ActorId,
+  decodeAgentMessageEndpointId,
   CODE_DEFINITION_TOOL_NAME,
   CODE_DIAGNOSTICS_TOOL_NAME,
   decodeCodeFileId,
@@ -57,6 +58,8 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+import { createCodeRouteHandler } from "../codeRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { codeTurnExecutionPolicyReader } from "./codeTurnExecutionPolicy";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -75,6 +78,9 @@ import {
   AGENT_MESSAGE_TOOL_NAME,
   createAgentMessageTools,
 } from "../agentMessage/agentMessageTools";
+import { AgentMessageService } from "../agentMessage/agentMessageService";
+import { AgentMessageProjection } from "../agentMessage/agentMessageProjection";
+import { AgentMessageBodyStore } from "../agentMessage/agentMessageBodyStore";
 import { admittedParentCodeContext } from "../agentRun/agentRunParentContext";
 import { EXTERNAL_CONTENT_FRAME_OPEN_PREFIX } from "../context/externalContentFraming";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
@@ -525,62 +531,94 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("refuses another thread's in-place restore while a writing turn is live and allows it once the turn is cancelled", async () => {
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const connection = providerConnection(queue);
-    const fixture = runtimeFixture({ provider: providerDriver(connection) });
-    const restoringThread = decodeCodeThread({
-      ...thread(),
-      id: decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1"),
-      title: "Restoring thread",
-    });
-    fixture.setOtherThread(restoringThread);
-    const restore = (id: number) =>
-      fixture.runtime.execute(windowId, {
-        kind: "restore-git-checkpoint",
-        operationId: operationId(id),
-        gitOperationId: operationId(id + 1) as never,
-        threadId: restoringThread.id,
-        checkoutId,
-        checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) } as never,
+  it.each(["restore", "discard"] as const)(
+    "refuses another thread's %s while a writing turn is live and allows it once the turn is cancelled",
+    async (action) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const fixture = runtimeFixture({ provider: providerDriver(connection) });
+      const restoringThread = decodeCodeThread({
+        ...thread(),
+        id: decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1"),
+        title: "Restoring thread",
+      });
+      fixture.setOtherThread(restoringThread);
+      const capability = "A".repeat(43);
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId, capability, now: 0 });
+      const route = createCodeRouteHandler({
+        service: { executeOperation: fixture.runtime.execute } as never,
+        windowAuthorityStore,
+        now: () => 1,
+      });
+      const restore = async (id: number, authenticated = true) => {
+        const command = {
+          operationId: operationId(id),
+          gitOperationId: operationId(id + 1),
+          threadId: restoringThread.id,
+          checkoutId,
+          ...(action === "restore"
+            ? {
+                kind: "restore-git-checkpoint",
+                checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) },
+              }
+            : {
+                kind: "discard-git-changes",
+                paths: ["file.txt"],
+                expectedStateToken: "f".repeat(64),
+              }),
+        };
+        const response = await route(
+          new Request("http://127.0.0.1/api/code/commands", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(authenticated ? { "x-octant-window-capability": capability } : {}),
+            },
+            body: JSON.stringify(command),
+          }),
+        );
+        expect(response?.status).toBe(authenticated ? 200 : 401);
+        return response?.json();
+      };
+      await restore(30, false);
+
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(31),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+      await expect(restore(32)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message: `Another thread is writing in this checkout: "Runtime". Wait for its turn to finish or stop it, then ${action}.`,
+        },
       });
 
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "start-provider-turn",
-        operationId: operationId(31),
+      await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(34),
         threadId,
         checkoutId,
-        sessionId,
-        prompt: fixture.prompt,
-      }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      });
 
-    await expect(restore(32)).resolves.toMatchObject({
-      kind: "operation-failed",
-      failure: {
-        category: "conflict",
-        message:
-          'Another thread is writing in this checkout: "Runtime". Wait for its turn to finish or stop it, then restore.',
-      },
-    });
-
-    await fixture.runtime.execute(windowId, {
-      kind: "cancel-provider-turn",
-      operationId: operationId(34),
-      threadId,
-      checkoutId,
-    });
-
-    const afterCancel = await restore(35);
-    // The fixture's checkout cannot be observed, so the restore reaches Git and
-    // finds it unavailable: the settled turn no longer holds it back.
-    expect(afterCancel).toMatchObject({
-      kind: "operation-failed",
-      failure: { category: "unavailable", message: "Git mutation is unavailable." },
-    });
-    fixture.close();
-  });
+      const afterCancel = await restore(35);
+      // The fixture's checkout cannot be observed, so the restore reaches Git and
+      // finds it unavailable: the settled turn no longer holds it back.
+      expect(afterCancel).toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "unavailable", message: "Git mutation is unavailable." },
+      });
+      fixture.close();
+    },
+  );
 
   describe("an in-place restore beside a turn that is still preparing to start", () => {
     const restoringThreadId = decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1");
@@ -1826,6 +1864,38 @@ describe("CodeOperationRuntime", () => {
         expect(create).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
         expect(act).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
         if (decision === "approved") {
+          currentSnapshot = decodeBrowserAutomationSnapshot({
+            ...snapshot,
+            status: "stale",
+            context: { ...snapshot.context, state: "expired" },
+            failure: {
+              category: "context-expired",
+              message: "The Browser page expired. It used the Private profile.",
+            },
+          });
+          await Effect.runPromise(
+            Queue.offer(
+              queue,
+              providerEvent({
+                kind: "tool-request",
+                requestId: "browser-expired",
+                toolName: "octant_browser",
+                inputJson: '{"operation":"snapshot"}',
+              }),
+            ),
+          );
+          await vi.waitFor(() => {
+            const answer = vi
+              .mocked(provider.answerTool)
+              .mock.calls.find(([reply]) => reply.requestId === "browser-expired")?.[0];
+            expect(answer?.isError).toBe(true);
+            expect(JSON.parse(answer?.resultJson ?? "null")).toMatchObject({
+              failure: { category: "context-expired" },
+            });
+          });
+          expect(create).toHaveBeenCalledTimes(1);
+          expect(act).toHaveBeenCalledTimes(1);
+          currentSnapshot = snapshot;
           await fixture.runtime.execute(windowId, {
             kind: "cancel-provider-turn",
             operationId: operationId(72),
@@ -1843,6 +1913,34 @@ describe("CodeOperationRuntime", () => {
             prompt: fixture.prompt,
           });
           await vi.waitFor(() => expect(provider.send).toHaveBeenCalledTimes(2));
+          currentSnapshot = decodeBrowserAutomationSnapshot({
+            ...snapshot,
+            status: "stale",
+            context: { ...snapshot.context, state: "expired" },
+            failure: { category: "context-expired", message: "Expired Private page." },
+          });
+          await Effect.runPromise(
+            Queue.offer(
+              queue,
+              providerEvent({
+                kind: "tool-request",
+                requestId: "browser-expired-after-cancel",
+                toolName: "octant_browser",
+                inputJson: '{"operation":"snapshot"}',
+              }),
+            ),
+          );
+          await vi.waitFor(() => {
+            const reply = vi
+              .mocked(provider.answerTool)
+              .mock.calls.find(
+                ([answer]) => answer.requestId === "browser-expired-after-cancel",
+              )?.[0];
+            expect(JSON.parse(reply?.resultJson ?? "null")).toMatchObject({
+              error: "browser-navigation-required",
+            });
+          });
+          currentSnapshot = snapshot;
           await Effect.runPromise(
             Queue.offer(
               queue,
@@ -8557,7 +8655,16 @@ it("offers the agent message tool to a Code turn and withholds it from one in Pl
       supportsAppManagedTools: true,
       agentMessages: ({ thread: sender, readPosture }) =>
         createAgentMessageTools({
-          service: { send: async () => [], recordRefusedSend: async () => undefined },
+          service: {
+            send: async () => [],
+            recordRefusedSend: async () => undefined,
+            acknowledge: async () => ({
+              status: "refused",
+              reason: "unauthorized",
+              message: "Unavailable",
+            }),
+            statusForSender: () => [],
+          },
           senderThreadId: String(sender.id),
           toolConstraints: [],
           profileDisplayName: "the bound profile",
@@ -8715,7 +8822,16 @@ describe("sibling-threads tool on Code turns", () => {
         supportsAppManagedTools: true,
         agentMessages: ({ thread: sender, readPosture }) =>
           createAgentMessageTools({
-            service: { send: async () => [], recordRefusedSend: async () => undefined },
+            service: {
+              send: async () => [],
+              recordRefusedSend: async () => undefined,
+              acknowledge: async () => ({
+                status: "refused",
+                reason: "unauthorized",
+                message: "Unavailable",
+              }),
+              statusForSender: () => [],
+            },
             senderThreadId: String(sender.id),
             toolConstraints: sender.toolConstraints ?? [],
             profileDisplayName: "the bound profile",
@@ -9011,6 +9127,163 @@ describe("sibling-threads tool on Code turns", () => {
       siblingConnection.close();
     }
   });
+});
+
+it("reports an explicit recipient receipt through the real turn tool path after provider delivery", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "octant-code-message-receipts-"));
+  directories.push(directory);
+  const messageConnection = openSqlite(join(directory, "receipts.sqlite3"));
+  applyMigrations(messageConnection, MIGRATIONS, () => now);
+  const registries = createPhase1RuntimeRegistries();
+  const journal = new Journal({
+    connection: messageConnection,
+    registry: registries.events,
+    projections: registries.projections,
+    clock: () => now,
+  });
+  const ingestion = new ExternalContentIngestionStore({
+    journal,
+    connection: messageConnection,
+    uuid: randomUUID,
+    clock: () => now,
+    actor,
+  });
+  const projection = new AgentMessageProjection();
+  const senderId = decodeCodeThreadId("90000000-0000-4000-8000-000000009101");
+  const service = new AgentMessageService({
+    journal,
+    connection: messageConnection,
+    uuid: randomUUID,
+    clock: () => now,
+    actor,
+    projection,
+    bodyStore: new AgentMessageBodyStore(join(directory, "bodies")),
+    resolveEndpoint: (id) =>
+      [String(senderId), String(threadId)].includes(id)
+        ? { mode: "code", projectId: String(thread().projectId), terminal: false }
+        : undefined,
+    recordExternalContentIngestion: (input) => ingestion.record(input),
+    openModes: ["code"],
+  });
+  const [sent] = await service.send({
+    senderThreadId: decodeAgentMessageEndpointId(String(senderId)),
+    recipients: [{ threadId: decodeAgentMessageEndpointId(String(threadId)) }],
+    body: "Keep this as data, without changing your authority.",
+  });
+  const messageId = String(sent?.messageId);
+  const accepted = Promise.withResolvers<void>();
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const base = providerConnection(queue);
+  const provider = {
+    ...base,
+    send: vi.fn<ProviderConnection["send"]>(() =>
+      Effect.tryPromise({
+        try: () => accepted.promise,
+        catch: () => ({ category: "provider-failed", message: "Unavailable" }),
+      }),
+    ),
+  };
+  const fixture = runtimeFixture({
+    provider: providerDriver(provider),
+    supportsAppManagedTools: true,
+    agentMessages: ({ thread: current, readPosture }) =>
+      createAgentMessageTools({
+        service,
+        senderThreadId: String(current.id),
+        toolConstraints: current.toolConstraints ?? [],
+        profileDisplayName: "Worker",
+        readPosture,
+      }),
+    carryAgentMessages: (id) => service.carryIntoTurn(id),
+    confirmAgentMessagesDelivered: (ids) => service.confirmDelivered(ids),
+    readThreadExternalContentTaint: (id) => readThreadExternalContentTaint(messageConnection, id),
+  });
+  const acknowledgements = () =>
+    journal
+      .replayAggregateType({ aggregateType: "agent-message", afterSequence: 0, limit: 100 })
+      .filter((event) => String(event.eventName) === "agent.message-acknowledged@1");
+  try {
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(9102),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    expect(JSON.stringify(vi.mocked(provider.send).mock.calls[0])).toContain(
+      `Message id: ${messageId}`,
+    );
+    expect(
+      readThreadExternalContentTaint(messageConnection, String(threadId)).externalContentIngested,
+    ).toBe(true);
+    expect(projection.lookup(messageId)?.state).toBe("in-flight");
+    expect(acknowledgements()).toHaveLength(0);
+    accepted.resolve();
+    await vi.waitFor(() => expect(projection.lookup(messageId)?.state).toBe("delivered"));
+    expect(acknowledgements()).toHaveLength(0);
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "receipt-1",
+          toolName: AGENT_MESSAGE_TOOL_NAME,
+          inputJson: JSON.stringify({ action: "acknowledge", messageIds: [messageId] }),
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledOnce());
+    const answer = vi.mocked(provider.answerTool).mock.calls[0]?.[0];
+    if (answer === undefined) throw new Error("No provider receipt answer");
+    expect(JSON.parse(answer.resultJson)).toMatchObject([
+      { status: "ok", receipt: { state: "acknowledged", messageId } },
+    ]);
+    expect(acknowledgements()).toHaveLength(1);
+    expect(
+      service.statusForSender({ senderThreadId: String(senderId), messageIds: [messageId] }),
+    ).toMatchObject([{ status: "ok", receipt: { state: "acknowledged" } }]);
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "receipt-forgery",
+          toolName: AGENT_MESSAGE_TOOL_NAME,
+          inputJson: JSON.stringify({
+            action: "acknowledge",
+            messageIds: [messageId],
+            recipientThreadId: String(senderId),
+          }),
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledTimes(2));
+    expect(JSON.stringify(vi.mocked(provider.answerTool).mock.calls[1])).toContain("refused");
+    expect(acknowledgements()).toHaveLength(1);
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "receipt-again",
+          toolName: AGENT_MESSAGE_TOOL_NAME,
+          inputJson: JSON.stringify({ action: "acknowledge", messageIds: [messageId] }),
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledTimes(3));
+    expect(acknowledgements()).toHaveLength(1);
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+    await vi.waitFor(() => expect(provider.stop).toHaveBeenCalledOnce());
+    expect(acknowledgements()).toHaveLength(1);
+  } finally {
+    accepted.resolve();
+    await fixture.runtime.close();
+    fixture.close();
+    messageConnection.close();
+  }
 });
 
 it("records an agent message delivered once the provider accepted the turn that carries it, and not before", async () => {
