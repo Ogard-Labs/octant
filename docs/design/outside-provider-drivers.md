@@ -361,8 +361,8 @@ the fail-closed option.
   stop and learns no path of the person's. On Electron's Node the set adds
   exactly `ELECTRON_RUN_AS_NODE=1`, without which the executable starts as an
   app rather than as Node.
-- **Nothing widens the runtime.** The packaged app leaves Electron's fuses at
-  their defaults, so its Node would honour `NODE_OPTIONS` and the `--inspect`
+- **Nothing widens the runtime.** The separately identified worker runtime keeps
+  Node support; the trusted desktop executable does not. Worker Node would honour `NODE_OPTIONS` and the `--inspect`
   family of flags. Neither can reach a driver: the environment above replaces
   the caller's whole environment, so no `NODE_OPTIONS` is set, and the command
   line is the runtime and the entry and nothing else, which the package store
@@ -1141,11 +1141,13 @@ alternatives considered and the reason for the choice follow it.
    confinement design; until then Linux reports `host-prohibited`.
 6. **Driver runtime.** One `.mjs` ES module entry on the runtime that runs the
    server, with no executables: Bun in development, and in the packaged app
-   the Electron executable it already ships, run as Node
-   (`ELECTRON_RUN_AS_NODE=1` with the server's own `process.execPath`, as the
-   packaged server, the managed device tools, and the terminal-browser grant
-   already run). This keeps one measured profile per runtime, no second runtime
-   to ship, and no native code to review. Rejected: any executable the package
+   the separately identified, same-version bundled Electron worker executable,
+   run as Node with `ELECTRON_RUN_AS_NODE=1` and the server's own `process.execPath`.
+   The packaged host, managed device tools and scoped terminal Browser
+   command use it too. This preserves the existing
+   standalone executable and confinement contract. The worker must never be
+   admitted as a trusted desktop peer; see the
+   [fixed-entry boundary](nightly-app.md#fixed-packaged-entry). Rejected: any executable the package
    ships; shipping Bun in the packaged app, which would be a second runtime to
    sign, notarize, and update for drivers alone.
    _Rationale (maintainer decision, 2026-10-27; earlier this decision allowed

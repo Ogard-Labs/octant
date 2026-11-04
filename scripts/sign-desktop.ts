@@ -14,6 +14,10 @@
  */
 
 import { desktopIdentity, type DesktopIdentity } from "@octant/host-runtime";
+import {
+  DESKTOP_NODE_RUNTIME_APP,
+  DESKTOP_NODE_RUNTIME_NAME,
+} from "../apps/desktop/src/runtimePaths";
 import { packagedNativePath } from "./desktop-client-runtime";
 import { open, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -290,6 +294,22 @@ export async function signAndNotarizeDesktop(input: {
 }): Promise<void> {
   const entitlements = resolve(input.repositoryRoot, ENTITLEMENTS_PATH);
   const identity = input.identity ?? desktopIdentity("stable");
+  if (identity.flavor === "stable") {
+    const runtime = `${input.appPath}/${DESKTOP_NODE_RUNTIME_APP}`;
+    for (const path of SIGNING_ORDER.filter((path) => path.startsWith("Contents/Frameworks/"))) {
+      await input.run(
+        createCodesignArgv({
+          identity: input.credentials.identity,
+          target: `${runtime}/${path.replace("Octant Helper", `${DESKTOP_NODE_RUNTIME_NAME} Helper`)}`,
+          entitlements,
+        }),
+      );
+    }
+    await input.run(
+      createCodesignArgv({ identity: input.credentials.identity, target: runtime, entitlements }),
+    );
+  }
+
   // Vendored tools are signed without Octant's entitlements: JIT, unsigned
   // executable memory, and audio input are exceptions Electron and dictation
   // need, not these helpers.

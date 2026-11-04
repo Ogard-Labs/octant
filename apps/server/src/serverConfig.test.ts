@@ -68,6 +68,35 @@ describe("parseTerminalLauncher", () => {
     });
   });
 
+  it("grants only the fixed CLI and separate worker resources when its host runs under the nested worker", () => {
+    const worker = {
+      ...packagedMac,
+      execPath:
+        "/Users/person/Applications/Octant.app/Contents/Frameworks/Octant Runtime.app/Contents/MacOS/Octant Runtime",
+    };
+    const directory = "/Users/person/Applications/Octant.app/Contents/Resources/terminal-launcher";
+    expect(parseTerminalLauncher(directory, worker)).toEqual({
+      directory,
+      readRoots: [
+        directory,
+        worker.execPath,
+        "/Users/person/Applications/Octant.app/Contents/Frameworks/Octant Runtime.app/Contents/Frameworks",
+      ],
+    });
+    expect(() =>
+      parseTerminalLauncher("/different/Octant.app/Contents/Resources/terminal-launcher", worker),
+    ).toThrow(/does not match/);
+    expect(() =>
+      parseTerminalLauncher(
+        "/different/Octant.app/Contents/Resources/terminal-launcher",
+        packagedMac,
+      ),
+    ).toThrow(/does not match/);
+    expect(() =>
+      parseTerminalLauncher(directory, { ...worker, execPath: "/usr/local/bin/node" }),
+    ).toThrow(/does not match/);
+  });
+
   it("refuses a relative folder, and any host that is not the packaged macOS app", () => {
     expect(() => parseTerminalLauncher("terminal-launcher", packagedMac)).toThrow(
       "OCTANT_TERMINAL_LAUNCHER_DIRECTORY must be an absolute path",

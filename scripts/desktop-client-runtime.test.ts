@@ -3,13 +3,13 @@ import { createPackageWithOptions, getRawHeader, statFile } from "@electron/asar
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { desktopIdentity } from "@octant/host-runtime";
 import { describe, expect, it } from "vitest";
 import {
-  prepareNightlyRuntimeFuses,
-  validateNightlyRuntimeFuses,
-  readNightlyArchive,
-  NIGHTLY_UNPACKED_FILES,
+  prepareDesktopRuntimeFuses,
+  validateDesktopRuntimeFuses,
+  readDesktopArchive,
+  DESKTOP_UNPACKED_FILES,
+  validateNodeRuntimeFuses,
 } from "./desktop-client-runtime";
 
 // Public fuse-wire format with the states observed in the pinned runtime.
@@ -25,27 +25,27 @@ describe("Nightly runtime entry restrictions", () => {
     const binary = join(root, "electron");
     try {
       await writeFile(binary, originalWire);
-      await expect(validateNightlyRuntimeFuses(binary)).rejects.toThrow("RunAsNode");
-      await prepareNightlyRuntimeFuses(binary, desktopIdentity("nightly"));
-      await expect(validateNightlyRuntimeFuses(binary)).resolves.toBeUndefined();
+      await expect(validateDesktopRuntimeFuses(binary)).rejects.toThrow("RunAsNode");
+      await prepareDesktopRuntimeFuses(binary);
+      await expect(validateDesktopRuntimeFuses(binary)).resolves.toBeUndefined();
       await writeFile(binary, originalWire);
-      await expect(validateNightlyRuntimeFuses(binary)).rejects.toThrow("RunAsNode");
+      await expect(validateDesktopRuntimeFuses(binary)).rejects.toThrow("RunAsNode");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("preserves Stable's runtime bytes and refuses a malformed Nightly runtime", async () => {
+  it("keeps worker Node support distinct from the sealed desktop and refuses malformed binaries", async () => {
     const root = await mkdtemp(join(tmpdir(), "nightly-fuses-"));
     const binary = join(root, "electron");
     try {
       await writeFile(binary, originalWire);
-      await prepareNightlyRuntimeFuses(binary, desktopIdentity("stable"));
+      await validateNodeRuntimeFuses(binary);
       expect(await readFile(binary)).toEqual(originalWire);
+      await prepareDesktopRuntimeFuses(binary);
+      await expect(validateNodeRuntimeFuses(binary)).rejects.toThrow("required Node entry");
       await writeFile(binary, "not an Electron fuse wire");
-      await expect(
-        prepareNightlyRuntimeFuses(binary, desktopIdentity("nightly")),
-      ).rejects.toThrow();
+      await expect(prepareDesktopRuntimeFuses(binary)).rejects.toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -66,29 +66,29 @@ it("verifies sealed application bytes and refuses loose JavaScript or mismatched
       },
     });
     await createPackageWithOptions(stage, archive, {});
-    expect(readNightlyArchive(archive, metadata())).toEqual([
+    expect(readDesktopArchive(archive, metadata())).toEqual([
       { path: "entry.mjs", content: "export const value = 'fixture';" },
     ]);
-    expect(() => readNightlyArchive(archive, {})).toThrow(/integrity/);
+    expect(() => readDesktopArchive(archive, {})).toThrow(/integrity/);
     const bytes = await readFile(archive);
     bytes[bytes.length - 2] = 0;
     await writeFile(archive, bytes);
-    expect(() => readNightlyArchive(archive, metadata())).toThrow(/entry.mjs/);
+    expect(() => readDesktopArchive(archive, metadata())).toThrow(/entry.mjs/);
     await createPackageWithOptions(stage, archive, { unpack: "*.mjs" });
-    expect(() => readNightlyArchive(archive, metadata())).toThrow(/unpacked/);
-    const nativePath = NIGHTLY_UNPACKED_FILES[0];
+    expect(() => readDesktopArchive(archive, metadata())).toThrow(/unpacked/);
+    const nativePath = DESKTOP_UNPACKED_FILES[0];
     await mkdir(join(stage, nativePath, ".."), { recursive: true });
     await writeFile(join(stage, nativePath), "native fixture");
     await createPackageWithOptions(stage, archive, {
-      unpack: `**/{${NIGHTLY_UNPACKED_FILES.join(",")}}`,
+      unpack: `**/{${DESKTOP_UNPACKED_FILES.join(",")}}`,
     });
-    expect(readNightlyArchive(archive, metadata()).map((entry) => entry.path)).toContain(
+    expect(readDesktopArchive(archive, metadata()).map((entry) => entry.path)).toContain(
       nativePath,
     );
     expect(statFile(archive, "entry.mjs")).not.toHaveProperty("unpacked", true);
     expect(statFile(archive, nativePath)).toHaveProperty("unpacked", true);
     await writeFile(`${archive}.unpacked/${nativePath}`, "modified native fixture");
-    expect(() => readNightlyArchive(archive, metadata())).toThrow(/mismatched file bytes/);
+    expect(() => readDesktopArchive(archive, metadata())).toThrow(/mismatched file bytes/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

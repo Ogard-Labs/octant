@@ -1,3 +1,4 @@
+import { packagedNativePath } from "./desktop-client-runtime";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -181,8 +182,16 @@ describe("signAndNotarizeDesktop", () => {
       .map((command) => command[command.length - 1]);
 
     expect(signed[signed.length - 1]).toBe("/repo/out/Octant.app");
+    expect(signed).toContain("/repo/out/Octant.app/Contents/Frameworks/Octant Runtime.app");
+    expect(
+      signed.indexOf("/repo/out/Octant.app/Contents/Frameworks/Octant Runtime.app"),
+    ).toBeLessThan(signed.length - 1);
     for (const nested of SIGNING_ORDER) {
-      expect(signed.indexOf(`/repo/out/Octant.app/${nested}`)).toBeLessThan(signed.length - 1);
+      expect(
+        signed.indexOf(
+          `/repo/out/Octant.app/${packagedNativePath(nested, desktopIdentity("stable"))}`,
+        ),
+      ).toBeLessThan(signed.length - 1);
     }
   });
 

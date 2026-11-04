@@ -1,6 +1,6 @@
 import { desktopIdentity } from "@octant/host-runtime";
 import { describe, expect, it, vi } from "vitest";
-import { launchDesktopApplication, resolveNightlyLaunch } from "./desktopLaunch";
+import { launchDesktopApplication, resolvePackagedDesktopLaunch } from "./desktopLaunch";
 
 describe("packaged desktop launch", () => {
   it("refuses Nightly before loading the module that initializes credentials and shared host paths", async () => {
@@ -30,13 +30,20 @@ describe("Nightly's fixed packaged entry", () => {
       ["-psn_0_123"],
       ["octant-nightly://code/project/123e4567-e89b-42d3-a456-426614174000"],
     ]) {
-      expect(resolveNightlyLaunch(args)).toEqual({ kind: "desktop" });
+      expect(resolvePackagedDesktopLaunch(desktopIdentity("nightly"), args)).toEqual({
+        kind: "desktop",
+      });
     }
   });
 
   it("selects only the bundled scoped terminal command", () => {
     for (const args of [["--help"], ["mcp"], ["mcp", "--help"]]) {
-      expect(resolveNightlyLaunch(["--octant-terminal-cli", ...args])).toEqual({
+      expect(
+        resolvePackagedDesktopLaunch(desktopIdentity("nightly"), [
+          "--octant-terminal-cli",
+          ...args,
+        ]),
+      ).toEqual({
         kind: "terminal",
         args,
       });
@@ -62,6 +69,28 @@ describe("Nightly's fixed packaged entry", () => {
     ["x".repeat(16385)],
     Array.from({ length: 65 }, () => "-psn_0_1"),
   ])("refuses an unrecognized entry or runtime override %#", (...args) => {
-    expect(resolveNightlyLaunch(args).kind).toBe("refused");
+    expect(resolvePackagedDesktopLaunch(desktopIdentity("nightly"), args).kind).toBe("refused");
   });
+});
+
+it("accepts only Stable's fixed packaged roles and refuses a caller-selected script", () => {
+  expect(resolvePackagedDesktopLaunch(desktopIdentity("stable"), [])).toEqual({ kind: "desktop" });
+  expect(
+    resolvePackagedDesktopLaunch(desktopIdentity("stable"), [
+      "--octant-terminal-cli",
+      "mcp",
+      "--help",
+    ]),
+  ).toEqual({ kind: "terminal", args: ["mcp", "--help"] });
+  expect(
+    resolvePackagedDesktopLaunch(desktopIdentity("stable"), ["--octant-canvas-prototype-host"]),
+  ).toEqual({ kind: "canvas" });
+  for (const args of [
+    ["/tmp/arbitrary.mjs"],
+    ["--inspect"],
+    ["--remote-debugging-pipe"],
+    ["--octant-canvas-prototype-host", "/tmp/arbitrary.mjs"],
+  ]) {
+    expect(resolvePackagedDesktopLaunch(desktopIdentity("stable"), args).kind).toBe("refused");
+  }
 });
