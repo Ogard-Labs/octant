@@ -834,11 +834,12 @@ describe("owner posture routes with the production Code and Project services", (
               aggregateId: string,
               eventName: string,
               payload: unknown,
+              expectedVersion = 0,
             ) =>
               persistence.journal.append(
                 Schema.decodeUnknownSync(AppendEventsRequest)({
                   aggregate: { aggregateType, aggregateId },
-                  expectedVersion: 0,
+                  expectedVersion,
                   events: [
                     {
                       eventId: randomUUID(),
@@ -987,6 +988,29 @@ describe("owner posture routes with the production Code and Project services", (
             ).toEqual({ status: "refused", kind: "posture-stale" });
             const after = await host.read(subject);
             if (after.status !== "read") throw new Error("Missing current Code reading");
+            seed(
+              "code-checkout",
+              checkoutId,
+              "code.checkout-observed@1",
+              {
+                kind: "checkout-observed",
+                checkout: {
+                  ...checkout,
+                  head: { kind: "branch", name: "changed-target", oid: "b".repeat(40) },
+                },
+              },
+              1,
+            );
+            expect(
+              (
+                await asPhone(
+                  a,
+                  HUB_OWNER_ROUTES.postureChange,
+                  { ...request, expectedVersion: after.posture.version, posture: "plan" },
+                  { unlock },
+                )
+              ).json,
+            ).toEqual({ status: "refused", kind: "posture-stale" });
             const beforeVersion = decodeOwnerPosture(reading.posture).version;
             expect(after.posture.version).not.toBe(beforeVersion);
             const ownerEvents = persistence.journal
