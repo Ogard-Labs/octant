@@ -11162,7 +11162,11 @@ access` agree); a thread's own change is journaled as
   resolved to check where it points; the endpoint is whatever the person on
   the host typed, and only that person can set it.
 - **Hosts never trust each other.** Multi-host views merge read models
-  client-side; credentials and mutable authority never cross hosts. Completing
+  client-side without transferring authority. Federation shares no
+  credentials; the explicit
+  [Shared sign-ins](design/hub-and-spokes.md#shared-sign-ins) API-key copy
+  requires a fresh own-unlock on each host and a one-use receiving ticket.
+  Subscription sign-ins refuse copying. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client
   registry work, not a new trust boundary. Conflicting facts stay under their owning host;
   create and mutation routing name one destination and refuse when that host is

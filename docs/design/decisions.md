@@ -1720,7 +1720,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Pairin
 
 ### Hosts never trust each other
 
-Credentials and mutable authority never cross hosts; multi-host views merge read models client-side.
+Multi-host views merge read models client-side without transferring authority. Federation shares no credentials; the explicit [Shared sign-ins](hub-and-spokes.md#shared-sign-ins) API-key copy requires a fresh own-unlock on each host and a one-use receiving ticket. Subscription sign-ins refuse copying.
 
 - Conflicting facts stay under their owning host; create and mutation routing name one destination and refuse when that host is not routable, and nothing queues offline work.
 - An all-hosts list keeps every registered host; an unreachable host's cached items stay listed as stale and read-only.
