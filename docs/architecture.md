@@ -7620,6 +7620,33 @@ same. This holds in Chat, Work, and Code.
 - Executable components are quarantined until explicitly reviewed and then run
   in supervised, sandboxed processes with a ready handshake, bounded output,
   durable process receipts, and drain-then-stop on disable.
+  Extension launches reuse the shared process identity and bounded TERM/KILL
+  termination rules; their schema-2 receipts retain package, component, version,
+  and digest identity. Repeated stop requests share one completion. A failure to
+  observe identity, denied group signal, malformed receipt, or exceeded receipt
+  bound is a cleanup failure, never evidence that the process is absent. The
+  receipt remains for recovery; a denied group signal never falls back to
+  signalling only its leader.
+
+  A live extension captures descendant identity witnesses while its launch
+  leader still matches, at launch, readiness, and stop. After the leader exits,
+  a signal requires a captured witness with the same start identity still in
+  that process group. Losing that evidence refuses cleanup and retains the
+  receipt. Witnesses are bounded to 256 members and stay in memory: startup
+  recovery cannot infer continuity from a persisted leaderless PGID, which could
+  have been reused after a reboot. A leaderless group with no live witness is
+  therefore ownership-uncertain, even when a zero signal says that group exists.
+  A proven absent group or a changed leader identity can release stale evidence.
+
+  Group observation requests only PID, PGID, and start identity, never commands
+  or environment: BSD `ps -g` on macOS (one second, 32 KiB) and `pgrep -g` plus
+  selected `/proc` start ticks and boot ID on Linux (one second, 4 KiB of PIDs).
+  `pgrep` is optional evidence, not an installation prerequisite: a missing,
+  failed, or overflowing observer adds no witness and cannot prevent signalling
+  a matching live leader. It cannot authorize a leaderless signal either.
+  A launch whose initial identity cannot be observed can stop only its direct
+  `ChildProcess` handle; it cannot claim process-group cleanup.
+
   On macOS the deny-default Seatbelt profile reads the system roots, the
   component's own roots, and its runtime's install: the executable's folder
   and, for a Homebrew runtime, `<prefix>/Cellar`, `<prefix>/opt`, and
@@ -7633,6 +7660,7 @@ same. This holds in Chat, Work, and Code.
   runtime, no fork, a read-only package, one temporary folder, of the system
   only what a runtime reads to start, and a fixed environment), and on any host but macOS its component is `host-prohibited`
   ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
+
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
   (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
