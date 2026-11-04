@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { OwnerPostureTarget, ProviderExecutionPolicy } from "@octant/contracts";
 import {
@@ -20,21 +20,31 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const host = spokes.find((entry) => entry.memberId === hostId) ?? spokes[0];
-  useEffect(() => {
+  const generation = useRef(0);
+  // Replacing a member or its client invalidates readings and pending UI results.
+  useLayoutEffect(() => {
+    generation.current += 1;
+    setHostId(host?.memberId ?? "");
     setTargets([]);
     setSelected(undefined);
     setMessage("");
-  }, [host?.memberId]);
+    setBusy(false);
+    return () => {
+      generation.current += 1;
+    };
+  }, [host?.memberId, host?.client, host?.openAt]);
   const reset = () => {
     setTargets([]);
     setSelected(undefined);
   };
   const load = async () => {
     if (host === undefined || busy) return;
+    const operation = ++generation.current;
     setBusy(true);
     reset();
     setMessage("");
     const result = await readOwnerPostures(host.client);
+    if (operation !== generation.current) return;
     if (result.status === "read") {
       setTargets(result.targets);
       setMessage(
@@ -47,17 +57,25 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
   };
   const apply = async () => {
     if (host === undefined || selected === undefined || busy) return;
+    const operation = ++generation.current;
     setBusy(true);
     const result = await changeOwnerPosture(host.client, selected.posture, requested);
+    if (operation !== generation.current) return;
     reset();
     setMessage(
       ownerActionNotice(result, "Level changed. Refresh to read the current level.").message,
     );
     setBusy(false);
   };
-  const button = (label: string, act: () => void, chosen = false, disabled = false) => (
+  const button = (
+    key: string,
+    label: string,
+    act: () => void,
+    chosen = false,
+    disabled = false,
+  ) => (
     <Pressable
-      key={label}
+      key={key}
       accessibilityRole="button"
       accessibilityState={{ disabled: busy || disabled, selected: chosen }}
       disabled={busy || disabled}
@@ -83,6 +101,7 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
       <Text style={{ color: colors.textPrimary }}>Computer: {host?.name}</Text>
       {spokes.map((spoke) =>
         button(
+          `host:${spoke.memberId}`,
           spoke.name,
           () => {
             setHostId(spoke.memberId);
@@ -92,9 +111,10 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
           host?.memberId === spoke.memberId,
         ),
       )}
-      {button("Refresh Code levels", () => void load())}
+      {button("refresh", "Refresh Code levels", () => void load())}
       {targets.map((target) =>
         button(
+          `target:${JSON.stringify(target.posture.subject)}`,
           `${target.posture.subject.kind === "project" ? "Project" : "Thread"}: ${target.title}`,
           () => {
             setSelected(target);
@@ -117,12 +137,14 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
             : (["approval-gated", "auto-accept-edits", "plan", "full-access"] as const)
           ).map((policy) =>
             button(
+              `policy:${policy}`,
               ownerPostureLabel(selected.posture, policy),
               () => setRequested(policy),
               requested === policy,
             ),
           )}
           {button(
+            "apply",
             "Apply Code level",
             () => void apply(),
             false,

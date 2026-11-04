@@ -1078,7 +1078,11 @@ maintainer's hardware, or names the maintainer gate.
      never mint a window or cache a grant. A thread change discards legacy
      session grants everywhere. Settings and the phone show named targets and
      current/requested postures, including an existing automatic reviewer, and discard their reading after any apply;
-     retry begins with an authoritative refresh and the required proof. A
+     retry begins with an authoritative refresh and the required proof. Readings,
+     selections and pending UI results belong to the selected member and client
+     incarnation. A roster removal or client replacement clears that state before
+     display and ignores old completions; it never transfers or retries a signed
+     command against the replacement host. A
      running turn keeps the posture it launched with. The Project path changes
      its remembered Full access default; it does not change existing threads.
      Actual signed routes, Code/Project services and SQLite readback/replay are

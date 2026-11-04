@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { OwnerPostureTarget, ProviderExecutionPolicy } from "@octant/contracts";
 import {
   ownerPostureLabel,
@@ -18,20 +18,31 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
   const [requested, setRequested] = useState<ProviderExecutionPolicy>("approval-gated");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const host = spokes.find((spoke) => spoke.memberId === hostId);
+  const host = spokes.find((spoke) => spoke.memberId === hostId) ?? spokes[0];
+  const generation = useRef(0);
   const selected = targets.find((target) => JSON.stringify(target.posture.subject) === targetKey);
-  useEffect(() => {
+  // Invalidate before paint: a replacement client must never display or apply
+  // a reading captured by the previous member/client, even at the same member id.
+  useLayoutEffect(() => {
+    generation.current += 1;
+    setHostId(host?.memberId ?? "");
     setTargets([]);
     setTargetKey("");
     setMessage("");
-  }, [hostId]);
+    setBusy(false);
+    return () => {
+      generation.current += 1;
+    };
+  }, [host?.memberId, host?.client, host?.openAt]);
   const load = async () => {
     if (host === undefined || busy) return;
+    const operation = ++generation.current;
     setBusy(true);
     setTargets([]);
     setTargetKey("");
     setMessage("");
     const result = await readOwnerPostures(host.client);
+    if (operation !== generation.current) return;
     if (result.status === "read") {
       setTargets(result.targets);
       setMessage(
@@ -44,8 +55,10 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
   };
   const apply = async () => {
     if (host === undefined || selected === undefined || busy || host.openAt !== undefined) return;
+    const operation = ++generation.current;
     setBusy(true);
     const result = await changeOwnerPosture(host.client, selected.posture, requested);
+    if (operation !== generation.current) return;
     // A spent or uncertain proof never leaves an Apply button over cached state.
     setTargets([]);
     setTargetKey("");
@@ -70,7 +83,7 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
         <OctantSelectField
           aria-label="Code recovery computer"
           disabled={busy}
-          value={hostId}
+          value={host?.memberId ?? ""}
           options={spokes.map((spoke) => ({ id: spoke.memberId, label: spoke.name }))}
           onValueChange={setHostId}
         />
