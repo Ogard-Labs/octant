@@ -1344,18 +1344,23 @@ export function createNativeHarnessConnection(
 }
 
 /**
- * Instructions blocks become the system prompt, joined in the order they came
- * so the prefix stays byte-stable from turn to turn; every other block rides
- * in the user message as before.
+ * Instructions blocks, Octant's and skills', become the system prompt, joined
+ * in the order they came so the prefix stays byte-stable from turn to turn;
+ * every other block, including one-turn instructions, rides in the user message
+ * as before.
  */
+function inSystemPrompt(block: ProviderContextBlock): boolean {
+  return block.kind === "instructions" || block.kind === "skill-instructions";
+}
+
 function splitInstructions(context: ReadonlyArray<ProviderContextBlock> | undefined): {
   readonly system: ReadonlyArray<string>;
   readonly rest: ReadonlyArray<ProviderContextBlock>;
 } {
   const blocks = context ?? [];
   return {
-    system: blocks.filter((block) => block.kind === "instructions").map((block) => block.text),
-    rest: blocks.filter((block) => block.kind !== "instructions"),
+    system: blocks.filter(inSystemPrompt).map((block) => block.text),
+    rest: blocks.filter((block) => !inSystemPrompt(block)),
   };
 }
 

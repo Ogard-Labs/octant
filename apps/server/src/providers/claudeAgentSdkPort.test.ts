@@ -614,6 +614,48 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
+  test("hands each message's Octant context to the prompt hook for that message alone", async () => {
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+          yield* query.send({ text: "hei", context: "Octant's rules." });
+          const offered = yield* Effect.promise(() => iterator.next());
+          expect(offered.value).toMatchObject({ message: { role: "user", content: "hei" } });
+          yield* query.send({ text: "plain" });
+          yield* Effect.promise(() => iterator.next());
+
+          const promptHook = harness.invocation?.options.hooks.UserPromptSubmit[0]?.hooks[0];
+          if (promptHook === undefined) throw new Error("Expected the prompt hook.");
+          const signal = new AbortController().signal;
+          const submit = (prompt: string) =>
+            Effect.promise(() =>
+              promptHook(
+                { hook_event_name: "UserPromptSubmit", prompt, session_id: "session-1" },
+                undefined,
+                { signal },
+              ),
+            );
+          expect(yield* submit("plain")).toEqual({});
+          expect(yield* submit("hei")).toEqual({
+            hookSpecificOutput: {
+              hookEventName: "UserPromptSubmit",
+              additionalContext: "Octant's rules.",
+            },
+          });
+          expect(yield* submit("hei")).toEqual({});
+
+          yield* query.send({ text: "again", context: "Rules before the interrupt." });
+          yield* query.interrupt();
+          expect(yield* submit("again")).toEqual({});
+        }),
+      ),
+    );
+  });
+
   test("interrupt clears locally queued input and prevents later prompt execution", async () => {
     const harness = makeHarness();
 

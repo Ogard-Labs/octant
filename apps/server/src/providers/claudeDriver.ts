@@ -24,6 +24,8 @@ import {
   type ThreadPublishedSnapshot,
   type UtcTimestamp,
   type ProviderApprovalCall,
+  type ProviderContextBlock,
+  type ProviderTurnInput,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -33,6 +35,8 @@ import type {
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
+  isOctantInstructionContext,
+  renderProviderContextSections,
   renderProviderTurnPrompt,
   unsupportedChatCapabilities,
   validateChatTurnInput,
@@ -86,6 +90,7 @@ import { readClaudePublishedSnapshot } from "./claudePublishedSnapshot";
 import { secretGuardRefusal, secretGuardSearchRefusal } from "../process/secretGuard";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
+import { isAtLeastRelease } from "./releaseVersion";
 import {
   acquireProviderRuntimeNetwork,
   type ProviderRuntimeNetworkPort,
@@ -93,6 +98,58 @@ import {
   withServerAccess,
   type ProviderServerAccessPort,
 } from "../network/providerRuntimeNetwork";
+
+/**
+ * The releases measured to pass `UserPromptSubmit` hook context to the model
+ * as its own reminder beside the message, record it apart from the message,
+ * and keep it across resume without changing the request prefix (2.1.211 and
+ * 2.1.318 against a local stand-in endpoint). An older install keeps the
+ * context framed inside the message.
+ */
+const CLAUDE_PROMPT_HOOK_RELEASE = [2, 1, 211] as const;
+
+/**
+ * Claude Code saves hook context longer than 10,000 characters to a file and
+ * shows the model only a 2 KB preview (both releases above). Counted in UTF-8
+ * bytes, which are never fewer than characters, so context under the limit
+ * always arrives whole.
+ */
+const CLAUDE_PROMPT_HOOK_CONTEXT_BYTES = 10_000;
+
+/**
+ * The message for one turn and the Octant context the prompt hook adds beside
+ * it. The message is only what the person typed whenever the context fits the
+ * hook; when it does not, Octant's own rules still go to the hook if they fit,
+ * and the rest stays framed inside the message, which keeps every block whole.
+ * The hook context reaches the model at the same user level as the message, so
+ * no block's authority changes.
+ */
+function claudeTurnMessage(
+  input: ProviderTurnInput,
+  runtimeVersion: string,
+): { readonly text: string; readonly context?: string } {
+  const context = input.context ?? [];
+  if (context.length === 0 || !isAtLeastRelease(runtimeVersion, CLAUDE_PROMPT_HOOK_RELEASE)) {
+    return { text: renderProviderTurnPrompt(input) };
+  }
+  const fits = (blocks: ReadonlyArray<ProviderContextBlock>) =>
+    Buffer.byteLength(renderProviderContextSections(blocks), "utf8") <=
+    CLAUDE_PROMPT_HOOK_CONTEXT_BYTES;
+  if (fits(context)) {
+    return { text: input.prompt, context: renderProviderContextSections(context) };
+  }
+  const instructions = context.filter(isOctantInstructionContext);
+  if (instructions.length === 0 || !fits(instructions)) {
+    return { text: renderProviderTurnPrompt(input) };
+  }
+  return {
+    text: renderProviderTurnPrompt({
+      prompt: input.prompt,
+      context: context.filter((block) => !isOctantInstructionContext(block)),
+    }),
+    context: renderProviderContextSections(instructions),
+  };
+}
 
 const CLAUDE_TOOLS = [
   "Read",
@@ -2680,7 +2737,7 @@ function makeConnection(
         }).pipe(
           Effect.zipRight(
             state.query.send({
-              text: renderProviderTurnPrompt(input),
+              ...claudeTurnMessage(input, state.expectedRuntimeVersion),
               ...(input.tools.length === 0
                 ? {}
                 : {

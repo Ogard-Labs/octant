@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { isAtLeastRelease } from "./releaseVersion";
 import {
   accessSync,
   chmodSync,
@@ -282,21 +283,6 @@ function parseSemVer(version: string): string | undefined {
 function parseCodexVersion(output: string): string | undefined {
   const candidate = VERSION_LINE_PATTERN.exec(output)?.[1];
   return candidate === undefined ? undefined : parseSemVer(candidate);
-}
-
-/** A release, not its prereleases: `0.145.0-alpha.1` predates `0.145.0`. */
-export function isAtLeastRelease(
-  version: string,
-  floor: readonly [number, number, number],
-): boolean {
-  const match = /^(\d+)\.(\d+)\.(\d+)(-)?/.exec(version);
-  if (match === null) return false;
-  const core = [Number(match[1]), Number(match[2]), Number(match[3])];
-  for (const [index, part] of core.entries()) {
-    const floorPart = floor[index] ?? 0;
-    if (part !== floorPart) return part > floorPart;
-  }
-  return match[4] === undefined;
 }
 
 /**

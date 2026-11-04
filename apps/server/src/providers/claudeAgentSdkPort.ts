@@ -429,6 +429,13 @@ export type ClaudeDecodedMessage =
 
 export interface ClaudeUserMessage {
   readonly text: string;
+  /**
+   * Octant's context for this message, handed to Claude Code by the
+   * `UserPromptSubmit` hook so the message itself is only the person's text.
+   * Claude Code records it beside the message, not in it, and keeps it in the
+   * session's history across resume.
+   */
+  readonly context?: string;
   readonly appManagedTools?: ReadonlyArray<ProviderToolDefinition>;
   readonly onAppToolCall?: (
     name: string,
@@ -493,6 +500,7 @@ export interface ClaudeAgentSdkInputMessage {
 
 interface ClaudeAgentSdkHookInput {
   readonly hook_event_name?: unknown;
+  readonly prompt?: unknown;
   readonly session_id?: unknown;
   readonly cwd?: unknown;
   readonly tool_name?: unknown;
@@ -554,6 +562,15 @@ function growToolListing(
   }
   return grown ? { kind: "grown", tools } : { kind: "unchanged" };
 }
+
+type ClaudeAgentSdkPromptHookOutput =
+  | {
+      readonly hookSpecificOutput: {
+        readonly hookEventName: "UserPromptSubmit";
+        readonly additionalContext: string;
+      };
+    }
+  | Record<string, never>;
 
 /** The settings files a query reads: the account's home, the Project's, and the Project's local file. */
 export type ClaudeSettingSource = "user" | "project" | "local";
@@ -656,6 +673,17 @@ interface ClaudeAgentSdkInvocationOptions {
             toolUseId: string | undefined,
             options: ClaudeAgentSdkHookOptions,
           ) => Promise<ClaudeAgentSdkHookOutput>,
+        ];
+      },
+    ];
+    readonly UserPromptSubmit: readonly [
+      {
+        readonly hooks: readonly [
+          (
+            input: ClaudeAgentSdkHookInput,
+            toolUseId: string | undefined,
+            options: ClaudeAgentSdkHookOptions,
+          ) => Promise<ClaudeAgentSdkPromptHookOutput>,
         ];
       },
     ];
@@ -902,6 +930,7 @@ function liveBridge(): ClaudeAgentSdkBridge {
             }),
         hooks: {
           PreToolUse: [{ hooks: [...invocation.options.hooks.PreToolUse[0].hooks] }],
+          UserPromptSubmit: [{ hooks: [...invocation.options.hooks.UserPromptSubmit[0].hooks] }],
         },
       };
       return queryClaude({
@@ -954,6 +983,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
         try: async () => {
           const prompt = new BoundedAsyncInput<ClaudeAgentSdkInputMessage>(inputCapacity);
           const issuedMessageIds = new Set<string>();
+          // Several messages can wait in the input at once, so each context
+          // waits for the hook call naming its own message's text.
+          const pendingContexts: Array<{ readonly text: string; readonly context: string }> = [];
           let query: ClaudeAgentSdkQueryLike | undefined;
           let initializedSessionId: string | undefined;
           let costBaseline: number | undefined;
@@ -1050,6 +1082,21 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 signal: callback.signal,
               });
             };
+            const userPromptSubmit: ClaudeAgentSdkInvocationOptions["hooks"]["UserPromptSubmit"][0]["hooks"][0] =
+              async (hookInput) => {
+                const index = pendingContexts.findIndex(
+                  (pending) => pending.text === hookInput.prompt,
+                );
+                const pending = pendingContexts[index];
+                if (pending === undefined) return {};
+                pendingContexts.splice(index, 1);
+                return {
+                  hookSpecificOutput: {
+                    hookEventName: "UserPromptSubmit",
+                    additionalContext: pending.context,
+                  },
+                };
+              };
             const preToolUse: ClaudeAgentSdkInvocationOptions["hooks"]["PreToolUse"][0]["hooks"][0] =
               async (hookInput, toolUseId, callback) => {
                 if (
@@ -1208,7 +1255,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 return spawned;
               },
               canUseTool,
-              hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
+              hooks: {
+                PreToolUse: [{ hooks: [preToolUse] }],
+                UserPromptSubmit: [{ hooks: [userPromptSubmit] }],
+              },
             };
             query = sdk.query({ prompt, options: invocationOptions });
             const initialization = {
@@ -1394,7 +1444,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 catch: (error) => sanitizeFailure(error, "session discovery"),
               }),
               messages,
-              send: ({ text, appManagedTools = [], onAppToolCall }) =>
+              send: ({ text, context, appManagedTools = [], onAppToolCall }) =>
                 request(async () => {
                   if (appManagedTools.length > 0) {
                     if (query?.setMcpServers === undefined || onAppToolCall === undefined) {
@@ -1464,6 +1514,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   }
                   const messageId = crypto.randomUUID();
                   issuedMessageIds.add(messageId);
+                  if (context !== undefined) pendingContexts.push({ text, context });
                   return prompt.offer({
                     type: "user",
                     message: { role: "user", content: text },
@@ -1493,6 +1544,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               interrupt: () =>
                 request(async () => {
                   for (const message of prompt.clear()) issuedMessageIds.delete(message.uuid);
+                  // An interrupted turn never counts as holding its context, so
+                  // the next turn sends it again; a stale entry left here could
+                  // attach to a later message with the same text.
+                  pendingContexts.length = 0;
                   try {
                     const receipt = decodeInterruptReceipt(await query!.interrupt());
                     if (

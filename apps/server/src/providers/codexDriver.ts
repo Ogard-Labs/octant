@@ -32,6 +32,8 @@ import type {
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   attachmentMediaTypeToModality,
+  isOctantInstructionContext,
+  renderProviderContextSections,
   renderProviderTurnPrompt,
   unsupportedChatCapabilities,
   validateChatTurnInput,
@@ -50,8 +52,8 @@ import {
 } from "./codexEventMapper";
 import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import { isAtLeastRelease } from "./releaseVersion";
 import {
-  isAtLeastRelease,
   type CodexAppServerConnection,
   type CodexLaunchAuthority,
   type CodexProcessPort,
@@ -345,9 +347,23 @@ export type CodexTurnInputItem =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "image"; readonly url: string };
 
+/** One entry of `turn/start.additionalContext`, rendered by Codex under a tag named by its key. */
+export interface CodexAdditionalContextEntry {
+  /** `application` becomes a developer message; `untrusted` a user message tagged as external. */
+  readonly kind: "application" | "untrusted";
+  readonly value: string;
+}
+
 export interface CodexTurnStartInput {
   readonly threadId: string;
   readonly input: readonly CodexTurnInputItem[];
+  /**
+   * Octant's context for this turn, apart from the person's request. Codex
+   * places each entry ahead of the request as its own message and records it
+   * in the thread's history, so the request reads as typed in Codex's own
+   * transcript and thread titles.
+   */
+  readonly additionalContext?: Readonly<Record<string, CodexAdditionalContextEntry>>;
   /** Restated per turn, because a turn without it falls back to the thread's. */
   readonly environments?: readonly [];
   readonly approvalPolicy: "never" | "on-request" | "untrusted";
@@ -527,8 +543,40 @@ function codexChatCapabilities(
   };
 }
 
-function codexTurnInput(input: ProviderTurnInput): readonly CodexTurnInputItem[] {
-  const items: CodexTurnInputItem[] = [{ type: "text", text: renderProviderTurnPrompt(input) }];
+/**
+ * The first release measured to take `turn/start.additionalContext` and record
+ * each entry as its own message (0.140.0, 0.150.0, 0.155.1, 0.159.3, 0.162.1
+ * and 0.164.0 against a local stand-in endpoint). 0.130.0 accepted the field
+ * and dropped it without a word, so an older install keeps the context framed
+ * inside the request rather than losing it.
+ */
+const CODEX_TURN_CONTEXT_RELEASE = [0, 140, 0] as const;
+
+/**
+ * Keys name the tag Codex wraps each entry in, so they read as what they hold.
+ * Codex sends an entry only when its value differs from the last one under its
+ * key; Octant sends standing context only when the session lacks it, so a
+ * skipped value is already the latest message of its kind in the thread. A
+ * compaction drops both the entries and Codex's memory of them (measured on
+ * 0.164.0), and Octant then sends them again.
+ */
+const CODEX_INSTRUCTIONS_KEY = "octant_instructions";
+const CODEX_MATERIAL_KEY = "octant_context";
+
+/**
+ * The turn's input and its Octant context. Octant's own rules go as developer
+ * context; skills, memory, files, and earlier messages keep the user-level
+ * authority they had inside the request, so third-party text is never lifted
+ * into Codex's developer channel.
+ */
+function codexTurnRequest(
+  input: ProviderTurnInput,
+  version: string,
+): Pick<CodexTurnStartInput, "input" | "additionalContext"> {
+  const context = input.context ?? [];
+  const separate = context.length > 0 && isAtLeastRelease(version, CODEX_TURN_CONTEXT_RELEASE);
+  const text = separate ? input.prompt : renderProviderTurnPrompt(input);
+  const items: CodexTurnInputItem[] = [{ type: "text", text }];
   for (const attachment of input.attachments) {
     const modality = attachmentMediaTypeToModality(attachment.mediaType);
     if (modality !== "image") continue;
@@ -538,7 +586,30 @@ function codexTurnInput(input: ProviderTurnInput): readonly CodexTurnInputItem[]
       url: `data:${attachment.mediaType};base64,${base64}`,
     });
   }
-  return items;
+  if (!separate) return { input: items };
+  const instructions = context.filter(isOctantInstructionContext);
+  const material = context.filter((block) => !isOctantInstructionContext(block));
+  return {
+    input: items,
+    additionalContext: {
+      ...(instructions.length === 0
+        ? {}
+        : {
+            [CODEX_INSTRUCTIONS_KEY]: {
+              kind: "application",
+              value: renderProviderContextSections(instructions),
+            },
+          }),
+      ...(material.length === 0
+        ? {}
+        : {
+            [CODEX_MATERIAL_KEY]: {
+              kind: "untrusted",
+              value: renderProviderContextSections(material),
+            },
+          }),
+    },
+  };
 }
 
 function codexDynamicTools(
@@ -2093,7 +2164,7 @@ function makeConnection(
                   try {
                     const turn = await client.turnStart({
                       threadId: state.threadId,
-                      input: codexTurnInput(input),
+                      ...codexTurnRequest(input, version),
                       ...codexTurnExecutionSettings(state.executionPolicy, state.autoApprove),
                       ...state.turnOverrides,
                       ...(mode === "chat" ? { environments: [] as const } : {}),

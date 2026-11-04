@@ -4,11 +4,16 @@ import {
   type ClaudeAuthentication,
   type ContextEntryId,
   type PermissionPersistence,
+  type ProviderContextBlock,
   type ProviderFailure,
   type ProviderModelId,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
+import {
+  renderProviderContextSections,
+  renderProviderTurnPrompt,
+} from "@octant/provider-sdk/chat-conformance";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -75,6 +80,7 @@ const initialized = (
   sdkSessionId: string,
   root = projectRoot,
   model: string = modelId,
+  runtimeVersion = "2.1.211",
 ): ClaudeDecodedMessage => ({
   kind: "initialized",
   sessionId: sdkSessionId,
@@ -84,7 +90,7 @@ const initialized = (
   permissionMode: "default",
   tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"],
   capabilities: ["interrupt_receipt_v1"],
-  runtimeVersion: "2.1.211",
+  runtimeVersion,
 });
 
 const completed = (sdkSessionId: string): ClaudeDecodedMessage => ({
@@ -168,6 +174,7 @@ class FakeQuery implements ClaudeQueryPort {
     models: ClaudeQueryPort["initialization"]["models"] = [],
     autoCompactThreshold?: number,
     compactAnnounced = true,
+    runtimeVersion?: string,
   ) {
     this.initialization = {
       ...this.initialization,
@@ -180,7 +187,7 @@ class FakeQuery implements ClaudeQueryPort {
     this.messages =
       stream ??
       Stream.concat(
-        Stream.make(initialized(sdkSessionId, projectRoot, model)),
+        Stream.make(initialized(sdkSessionId, projectRoot, model, runtimeVersion)),
         Stream.fromPubSub(this.pubsub),
       );
   }
@@ -202,6 +209,7 @@ function harness(
     readonly autoCompactThreshold?: number;
     readonly compactAnnounced?: boolean;
     readonly configDirectory?: string;
+    readonly runtimeVersion?: string;
     readonly artifactDelivery?: () => boolean;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly makeEnvironmentScope?: (
@@ -228,6 +236,7 @@ function harness(
           options.models ?? [],
           options.autoCompactThreshold,
           options.compactAnnounced ?? true,
+          options.runtimeVersion,
         );
         queries.push(query);
         sessions.set(query.sdkSessionId, {
@@ -248,7 +257,7 @@ function harness(
     ),
   };
   const process: ClaudeProcessPort = {
-    probeVersion: vi.fn(() => Effect.succeed("2.1.211")),
+    probeVersion: vi.fn(() => Effect.succeed(options.runtimeVersion ?? "2.1.211")),
     probeSubscription: vi.fn(() => Effect.succeed("authenticated" as const)),
     spawn: vi.fn() as ClaudeProcessPort["spawn"],
   };
@@ -4501,6 +4510,56 @@ describe("Claude session lifecycle", () => {
     await acquired.close();
     expect(f.queries.every((query) => query.close.mock.calls.length === 1)).toBe(true);
     expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
+  });
+
+  describe("Octant context beside the person's message", () => {
+    const rules = { kind: "instructions", text: "Offer follow-ups only when useful." } as const;
+    const status = {
+      kind: "project-memory",
+      key: "work-status-file",
+      text: "Draft sent.",
+    } as const;
+    const sendWith = async (
+      f: ReturnType<typeof harness>,
+      context: ReadonlyArray<ProviderContextBlock>,
+    ) => {
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
+      );
+      const call = f.queries[0]?.send.mock.calls[0]?.[0];
+      await acquired.close();
+      return call;
+    };
+
+    it("hands the context to the prompt hook and sends only what the person typed", async () => {
+      expect(await sendWith(harness(), [rules, status])).toMatchObject({
+        text: "hei",
+        context: renderProviderContextSections([rules, status]),
+      });
+    });
+
+    it("keeps material that would be cut short in the message, and Octant's rules beside it", async () => {
+      const large = { kind: "user-message", text: "x".repeat(12_000) } as const;
+      expect(await sendWith(harness(), [rules, large])).toMatchObject({
+        text: renderProviderTurnPrompt({ prompt: "hei", context: [large] }),
+        context: renderProviderContextSections([rules]),
+      });
+    });
+
+    it("frames the context inside the message on a Claude Code too old for the prompt hook", async () => {
+      const call = await sendWith(
+        harness("subscription", "current-session", { runtimeVersion: "2.1.200" }),
+        [rules],
+      );
+      expect(call).toMatchObject({
+        text: renderProviderTurnPrompt({ prompt: "hei", context: [rules] }),
+      });
+      expect(call).not.toHaveProperty("context");
+    });
   });
 
   it("queues multiple turns through one query and emits exactly one terminal per turn", async () => {

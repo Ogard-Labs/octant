@@ -5174,9 +5174,10 @@ Octant sent inside the prompt is counted. Per runtime:
 
 **What Octant sends with each turn.** Octant's instructions (a profile's
 instructions, the Browser guidance), skills (a profile's admitted skills and the
-skills selected for a turn) and attachments travel inside the prompt:
-`renderProviderTurnPrompt` puts each context block in the prompt text as a
-tagged plain-text section ahead of the request, and attachments travel as the
+skills selected for a turn) and attachments travel with the prompt: each context
+block is a tagged plain-text section, beside the request where the runtime has a
+channel for it and inside the prompt text ahead of the request otherwise (see
+[held standing context](#held-standing-context)), and attachments travel as the
 prompt's images. A runtime that keeps its prompts holds every copy it was sent,
 so standing context it already holds is not sent again (see
 [held standing context](#held-standing-context)); this turn's copy is only what
@@ -5894,16 +5895,45 @@ Claude Code, Codex, OpenCode, Pi, Oh My Pi and ACP agents) records every user
 message it is sent and sends it again with every later request. Octant's turn
 prompt is therefore built to be appended, never rewritten:
 
-- **Framing.** `renderProviderTurnPrompt` writes each context block as a
-  `<octant-context kind="…">` section of plain text, in the order given, then
-  `Current request:` and the request. The framing holds nothing but the blocks'
-  own text, so the same blocks render to the same bytes every turn, and the
-  runtime's own transcript reads as plain user and assistant text. A block's
-  text cannot open or close a section: `<octant-context` and `</octant-context`
-  inside it are written with `&lt;`. This replaced a single JSON array of every
-  block, which put escaped JSON at the head of every recorded user message.
-- **Only what is new.** Standing blocks (`instructions`, which carry Octant's
-  instructions and skills, `project-memory` and `work-item`) that the session
+- **Framing.** `renderProviderContextSections` writes each context block as a
+  `<octant-context kind="…">` section of plain text, in the order given. The
+  framing holds nothing but the blocks' own text, so the same blocks render to
+  the same bytes every turn. A block's text cannot open or close a section:
+  `<octant-context` and `</octant-context` inside it are written with `&lt;`.
+  This replaced a single JSON array of every block, which put escaped JSON at
+  the head of every recorded user message.
+- **Beside the request, not inside it.** Where the runtime offers a channel
+  for context apart from the message, the message is only what the person
+  typed, so the runtime's own transcript and thread titles show the request
+  rather than Octant's tags. Context still enters the conversation as appended
+  messages, never through a system prompt or a tool list, so it never changes
+  the cached prefix of earlier turns.
+  - _Codex_ 0.140.0 and later: `turn/start.additionalContext`. Octant's own
+    instructions (`instructions`, `turn-instructions`) go as one
+    `application` entry, which Codex records as a developer message; skills
+    and material go as one `untrusted` entry, a user message, so third-party
+    text keeps the user-level authority it had inside the request. Codex sends
+    an entry only when its value changed, which can skip only a value that is
+    already the latest of its kind in the thread; a compaction clears both the
+    entries and that memory. 0.130.0 accepted the field and dropped it, so an
+    older install keeps the context inside the request.
+  - _Claude Code_ 2.1.211 and later: the `UserPromptSubmit` hook. Claude Code
+    shows the context to the model as a reminder in the same user turn, records
+    it beside the message, and keeps it across resume. It saves hook context
+    over 10,000 characters to a file and shows only a preview, so the context
+    goes there only while it fits; otherwise Octant's own instructions go there
+    if they fit and the rest stays inside the message.
+  - _Every other runtime_, and Codex or Claude Code below those releases:
+    the sections, then `Current request:` and the request, in one message
+    (`renderProviderTurnPrompt`). Octant Harness instead makes `instructions`
+    and `skill-instructions` its system prompt and renders the rest this way.
+  - _Measured_ against local stand-in endpoints (Codex 0.120.0 through
+    0.164.0; Claude Code 2.1.211 and 2.1.318): placement, persistence across
+    resume and compaction, size limits, and that consecutive requests share a
+    byte-identical prefix apart from the newest turn.
+- **Only what is new.** Standing blocks (`instructions` and
+  `skill-instructions`, which carry Octant's instructions and skills,
+  `project-memory` and `work-item`) that the session
   already holds are left out of the turn; per-turn blocks (messages, summaries,
   mentions, issue context, handoffs, and `turn-instructions`, Octant's
   instructions for one turn alone) are always sent. A new session, including

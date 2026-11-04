@@ -14,6 +14,10 @@ import {
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, Scope, Stream } from "effect";
+import {
+  renderProviderContextSections,
+  renderProviderTurnPrompt,
+} from "@octant/provider-sdk/chat-conformance";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   codexAppServerArgs,
@@ -1480,6 +1484,66 @@ describe("Codex thread and turn lifecycle", () => {
       sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
       approvalsReviewer: "user",
     });
+    await acquired.close();
+  });
+
+  it("sends Octant's rules as developer context and other material as user context, leaving the typed request alone", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await startSession(acquired.connection);
+
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "hei",
+        context: [
+          { kind: "instructions", text: "Offer follow-ups only when useful." },
+          { kind: "skill-instructions", text: "Review as a skeptic." },
+          { kind: "project-memory", key: "work-status-file", text: "Draft sent." },
+          { kind: "turn-instructions", text: "Take stock first." },
+        ],
+        attachments: [],
+        tools: [],
+      }),
+    );
+
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      input: [{ type: "text", text: "hei" }],
+      additionalContext: {
+        octant_instructions: {
+          kind: "application",
+          value: renderProviderContextSections([
+            { kind: "instructions", text: "Offer follow-ups only when useful." },
+            { kind: "turn-instructions", text: "Take stock first." },
+          ]),
+        },
+        octant_context: {
+          kind: "untrusted",
+          value: renderProviderContextSections([
+            { kind: "skill-instructions", text: "Review as a skeptic." },
+            { kind: "project-memory", key: "work-status-file", text: "Draft sent." },
+          ]),
+        },
+      },
+    });
+    await acquired.close();
+  });
+
+  it("frames context inside the request on a Codex too old to take it separately", async () => {
+    const f = fixture({ version: "0.130.0" });
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await startSession(acquired.connection);
+    const context = [{ kind: "instructions", text: "Offer follow-ups only when useful." }] as const;
+
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
+    );
+
+    const turn = f.calls.find(({ method }) => method === "turn/start")?.input;
+    expect(turn).toMatchObject({
+      input: [{ type: "text", text: renderProviderTurnPrompt({ prompt: "hei", context }) }],
+    });
+    expect(turn).not.toHaveProperty("additionalContext");
     await acquired.close();
   });
 
