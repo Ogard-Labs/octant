@@ -1,3 +1,4 @@
+import { createDesktopClientLifetime } from "./desktopClientLifetime";
 import { resolvePackagedDesktopLaunch } from "./desktopLaunch";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
@@ -2159,7 +2160,7 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
   },
 });
 
-async function createWindow(): Promise<void> {
+async function createWindow(stillRequested: () => boolean): Promise<void> {
   if (mainWindow !== undefined && !mainWindow.isDestroyed()) return;
   const root = repositoryRoot();
   markHostInteraction("host", "window-create-start");
@@ -2215,6 +2216,7 @@ async function createWindow(): Promise<void> {
       return authority;
     },
     construct: (capability) => {
+      if (!stillRequested()) throw new Error("Octant replaced this local window request.");
       stableWindowCapability = capability;
       const window = new BrowserWindow(
         createMainBrowserWindowOptions({
@@ -2407,7 +2409,8 @@ async function createWindow(): Promise<void> {
           closeAuthority(),
         ]).finally(() => {
           if (!window.isDestroyed()) window.destroy();
-          recoverWindowAfterRendererExit(details.reason);
+          if (desktopClientLifetime.localWindowAdmission()())
+            recoverWindowAfterRendererExit(details.reason);
         });
       });
       window.once("ready-to-show", () => {
@@ -2464,6 +2467,8 @@ async function createWindow(): Promise<void> {
 }
 
 async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<void> {
+  const stillRequested = desktopClientLifetime.localWindowAdmission();
+  if (!stillRequested()) return;
   const serverUrl = activeServerUrl;
   const initialAuthorityInstanceId = serverInstanceId;
   if (serverUrl === undefined || initialAuthorityInstanceId === undefined) {
@@ -2500,6 +2505,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         return authority;
       },
       construct: (capability) => {
+        if (!stillRequested()) throw new Error("Octant replaced this local window request.");
         windowCapability = capability;
         const window = new BrowserWindow(
           createMainBrowserWindowOptions({
@@ -2728,7 +2734,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
     });
   } catch (error) {
     secondaryWindowLifecycles.delete(lifecycle);
-    throw error;
+    if (stillRequested()) throw error;
   }
 }
 
@@ -4360,6 +4366,34 @@ async function flushWindowState(): Promise<void> {
   await flushNativeWindowState(mainWindow, stableWindowId, nativeStateStore);
 }
 
+async function closeLocalWindowsForRetainedHost(): Promise<"closed" | "failed"> {
+  await saveWindowStateWithoutBlocking({ flushWindowState, log: logQuitProblem });
+  const outcomes = await Promise.all(
+    desktopWindows.active().map(
+      ({ window }) =>
+        new Promise<boolean>((resolveClosed) => {
+          let settled = false;
+          const finish = (didClose: boolean) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            window.removeListener("closed", closed);
+            resolveClosed(didClose);
+          };
+          const closed = () => finish(true);
+          const timer = setTimeout(() => finish(window.isDestroyed()), WINDOW_CLOSE_GRACE_MS);
+          window.once("closed", closed);
+          try {
+            window.close();
+          } catch {
+            finish(false);
+          }
+        }),
+    ),
+  );
+  return outcomes.every(Boolean) ? "closed" : "failed";
+}
+
 async function shutdownSecondaryProjectWindows(): Promise<void> {
   const lifecycles = [...secondaryWindowLifecycles];
   await Promise.all(lifecycles.map((lifecycle) => lifecycle.shutdown(async () => undefined)));
@@ -4419,6 +4453,20 @@ function forceExitAfterStalledQuit(owned: {
 
 let desktopPeerStatusOwner: ReturnType<typeof ownDesktopPeerStatus> | undefined;
 let nightlyWindowLeases: ReturnType<typeof ownNightlyWindowLeases> | undefined;
+const desktopClientLifetime = createDesktopClientLifetime({
+  currentNightlyWindows: () => nightlyWindowLeases?.activeWindowCount() ?? 0,
+  closeLocalWindows: closeLocalWindowsForRetainedHost,
+  quitHost: quitHostAfterLastClient,
+});
+
+async function quitHostAfterLastClient(): Promise<"accepted" | "cancelled"> {
+  if (quitPrepared) return "accepted";
+  if (preparingQuit) return "cancelled";
+  quitCanPrompt = true;
+  preparingQuit = true;
+  await prepareToQuit();
+  return quitPrepared ? "accepted" : "cancelled";
+}
 
 async function stopHostForQuit(): Promise<void> {
   const host = (async () => {
@@ -4509,8 +4557,16 @@ async function handleFatalStartup(error: unknown): Promise<void> {
   finishQuit();
 }
 
-const requestWindow = createSingleFlight(createWindow);
+const requestWindow = createSingleFlight(async () => {
+  const stillRequested = desktopClientLifetime.localWindowAdmission();
+  try {
+    await createWindow(stillRequested);
+  } catch (error) {
+    if (stillRequested()) throw error;
+  }
+});
 async function ensureMenuWindow(): Promise<void> {
+  if (!(await desktopClientLifetime.reopen())) throw new Error("Octant is closing.");
   if (mainWindow !== undefined && !mainWindow.isDestroyed()) return;
   if (preparingQuit || quitPrepared) {
     throw new Error("Octant is closing.");
@@ -4518,12 +4574,14 @@ async function ensureMenuWindow(): Promise<void> {
   await requestWindow();
 }
 
-const requestActiveWindow = () =>
+const requestActiveWindow = async () => {
+  if (!(await desktopClientLifetime.reopen())) return;
   requestProjectWindowWhileRunning({
     isTearingDown: () => preparingQuit || quitPrepared,
     request: requestWindow,
     handleFailure: handleFatalStartup,
   });
+};
 
 // An unexpected renderer exit should not leave the running app headless, but a
 // renderer that keeps dying must not reopen forever: allow at most two
@@ -4620,7 +4678,10 @@ function startDesktopInstance(): void {
     .whenReady()
     .then(async () => {
       const withoutWindow = hostOnly(process.argv.slice(1));
-      if (withoutWindow) await startHostFromMenu();
+      if (withoutWindow) {
+        await startHostFromMenu();
+        desktopClientLifetime.waitForFirstNightlyWindow();
+      }
       if (!preparingQuit && !quitPrepared && applicationIdentity.flavor === "stable") {
         const native = loadDesktopPeerStatus({
           packaged: app.isPackaged,
@@ -4641,6 +4702,7 @@ function startDesktopInstance(): void {
                       instanceId: serverInstanceId,
                       desktopBridgeSecret,
                     },
+              onActiveWindowCountChanged: () => desktopClientLifetime.nightlyWindowsChanged(),
               closeOwnerContexts: async (windowId) => {
                 await browserSurfaceHost?.closeOwnerContexts(windowId);
               },
@@ -4683,6 +4745,15 @@ app.on("before-quit", (event) => {
   if (quitPrepared) return;
   event.preventDefault();
   if (preparingQuit) return;
+  if (quitCanPrompt) {
+    quitCanPrompt = false;
+    void desktopClientLifetime.requestLocalQuit().then((result) => {
+      if (result === "quit-required") return quitHostAfterLastClient();
+      if (result === "failed") logQuitProblem("Octant could not finish closing its local windows.");
+    });
+    return;
+  }
   preparingQuit = true;
   void prepareToQuit();
 });
+app.on("will-quit", () => desktopClientLifetime.dispose());
