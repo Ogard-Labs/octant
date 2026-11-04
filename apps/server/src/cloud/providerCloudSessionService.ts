@@ -59,7 +59,9 @@ export class ProviderCloudSessionService {
   readonly #input: ProviderCloudSessionServiceInput;
   readonly #busy = new Set<string>();
   readonly #watchdogs = new Map<string, ReturnType<typeof setTimeout>>();
+  readonly #requests = new Set<Promise<ProviderCloudResponse>>();
   #closed = false;
+  #closing: Promise<void> | undefined;
 
   constructor(input: ProviderCloudSessionServiceInput) {
     this.#input = input;
@@ -74,10 +76,19 @@ export class ProviderCloudSessionService {
     }
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.#closing !== undefined) return this.#closing;
     this.#closed = true;
     for (const timer of this.#watchdogs.values()) clearTimeout(timer);
     this.#watchdogs.clear();
+    this.#closing = this.#closeActive();
+    return this.#closing;
+  }
+
+  async #closeActive(): Promise<void> {
+    // A dispatched create can return an identity after shutdown starts. Keep
+    // the journal alive until its receipt and cancellation path have settled.
+    await Promise.allSettled(this.#requests);
     await Promise.allSettled(
       this.#input.store.active().map(async (job) => {
         const instance = this.#input
@@ -94,10 +105,15 @@ export class ProviderCloudSessionService {
     signal?: AbortSignal,
     callerIsCurrent: () => boolean = () => true,
   ): Promise<ProviderCloudResponse> {
+    if (this.#closed) return { status: "refused", reason: "unavailable" };
+    const request = this.#execute(windowId, command, signal, callerIsCurrent);
+    this.#requests.add(request);
     try {
-      return await this.#execute(windowId, command, signal, callerIsCurrent);
+      return await request;
     } catch {
       return { status: "refused", reason: "journal-unavailable" };
+    } finally {
+      this.#requests.delete(request);
     }
   }
 

@@ -1,5 +1,8 @@
 import { Schema } from "effect";
-import { openAiCloudSessionRequests } from "@octant/provider-sdk/openai-cloud-session-protocol";
+import {
+  openAiCloudSessionRequests,
+  isOpenAiCloudSessionBaseUrl,
+} from "@octant/provider-sdk/openai-cloud-session-protocol";
 import { CloudSessionRequestRefused } from "@octant/provider-sdk/cloud-sessions";
 import type { ProviderInstance } from "@octant/contracts";
 import {
@@ -164,7 +167,7 @@ export function supportsOpenAiCloudSessions(instance: ProviderInstance): boolean
     instance.enabled &&
     configuration.authentication === "bearer" &&
     configuration.oauthDescriptorId === undefined &&
-    configuration.baseUrl.replace(/\/+$/, "") === "https://api.openai.com/v1"
+    isOpenAiCloudSessionBaseUrl(configuration.baseUrl)
   );
 }
 

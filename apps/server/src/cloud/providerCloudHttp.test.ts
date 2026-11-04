@@ -18,6 +18,28 @@ const planned = openAiCloudSessionRequests(intent)[0];
 if (planned === undefined) throw new Error("Missing cloud fixture request.");
 
 describe("cloud request dispatch", () => {
+  it("settles an interrupted key unlock without waiting for the credential dialog or dispatching HTTP", async () => {
+    const abort = new AbortController();
+    let calls = 0;
+    const ports = makeProviderCloudPorts({
+      intent,
+      instanceId: decodeProviderInstanceId("a7550000-0000-4000-8000-000000000001"),
+      credentialResolver: {
+        has: async () => true,
+        resolve: () => new Promise<string>(() => undefined),
+      },
+      admission: () => true,
+      fetch: async () => {
+        calls += 1;
+        return Response.json({});
+      },
+    });
+    const pending = ports.request({ ...planned, signal: abort.signal });
+    abort.abort();
+    await expect(pending).rejects.toThrow("refused before dispatch");
+    expect(calls).toBe(0);
+  }, 1000);
+
   it("does not dispatch or record billable uncertainty when the configured key pool has no usable key", async () => {
     let calls = 0;
     let usage = 0;

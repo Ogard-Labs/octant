@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decodeCodeBootstrap,
@@ -69,6 +69,50 @@ afterEach(() => {
 });
 
 describe("startOctantServer", () => {
+  it("finishes server cleanup before persistence when its owning program is interrupted", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-cloud-interrupted-"));
+    directories.push(directory);
+    const stop = vi.fn();
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            serve: () => ({ url: new URL("http://127.0.0.1:13773"), stop }),
+          });
+          return yield* Effect.interrupt;
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") expect(Cause.isInterruptedOnly(exit.cause)).toBe(true);
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it("releases cloud job custody before persistence when HTTP acquisition fails", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-cloud-startup-"));
+    directories.push(directory);
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        startOctantServer({
+          hostname: "127.0.0.1",
+          port: 0,
+          serve: () => {
+            throw new Error("synthetic bind refusal");
+          },
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Array.from(Cause.defects(exit.cause))).toEqual([]);
+      expect(Array.from(Cause.failures(exit.cause))).toMatchObject([
+        { category: "server-unavailable" },
+      ]);
+    }
+  });
+
   it("recovers Chat sessions, attachments, and pending deletions before accepting requests", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-chat-recovery-"));
     directories.push(directory);
@@ -107,8 +151,8 @@ describe("startOctantServer", () => {
               stop: () => undefined,
             };
           },
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
     expect((await queueResponse)?.status).toBe(401);
     recover.mockRestore();
@@ -140,8 +184,8 @@ describe("startOctantServer", () => {
             url: new URL("http://127.0.0.1:13773"),
             stop: () => undefined,
           }),
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
 
     expect(close).toHaveBeenCalledOnce();
@@ -169,8 +213,8 @@ describe("startOctantServer", () => {
               stop: () => undefined,
             };
           },
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
     expect(fetchHandler).toBeTypeOf("function");
     const response = await fetchHandler!(
@@ -208,8 +252,8 @@ describe("startOctantServer", () => {
           });
           expect(server.diagnostics?.().capabilities).toContain("platform:process-inspection");
           return receipt;
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
     expect(started.byteLength).toBeGreaterThan(0);
   });
@@ -827,8 +871,8 @@ describe("startOctantServer", () => {
             ),
           );
           expect(missing.status).toBe(404);
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
 
     expect(stoppedWithActiveConnections).toBe(true);
@@ -975,8 +1019,8 @@ describe("startOctantServer", () => {
             }),
           );
           expect(stale.status).toBe(401);
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -1039,8 +1083,8 @@ describe("startOctantServer", () => {
           );
 
           expect(response.status).toBe(413);
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -1089,8 +1133,8 @@ describe("startOctantServer", () => {
           expect(response?.status).toBe(200);
           const body = yield* Effect.promise(() => Promise.resolve(response?.json()));
           expect(body).toMatchObject({ version: 1, entries: [] });
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -1163,8 +1207,8 @@ describe("startOctantServer", () => {
 
           expect(response.status).toBe(200);
           expect(bootstrap).toHaveBeenCalledWith(windowId);
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -1310,8 +1354,8 @@ describe("startOctantServer", () => {
             threadId,
             items: [],
           });
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
     expect(runtime.close).toHaveBeenCalledOnce();
   });
@@ -1905,8 +1949,8 @@ describe("startOctantServer", () => {
           codeFileHelperPath: "/Applications/Octant/helper",
           createCodeFileHelperTransport,
           serve: () => ({ url: new URL("http://127.0.0.1:13773"), stop: () => undefined }),
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
 
     expect(createCodeFileHelperTransport).toHaveBeenCalledWith("/Applications/Octant/helper");
@@ -1985,8 +2029,8 @@ describe("startOctantServer", () => {
           expect(localServeCalls).toBe(1);
           expect(server.remoteListener).toBeUndefined();
           expect(server.remoteListenerError).toBe("invalid-tls");
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -2051,8 +2095,8 @@ describe("startOctantServer", () => {
               tlsPin: null,
             },
           });
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -2113,8 +2157,8 @@ describe("startOctantServer", () => {
             // Stop while the provided persistence is still open; it is released
             // when this generator ends, before the scope's own server release.
             yield* Effect.promise(() => Promise.resolve(server.stop()));
-          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-        ),
+          }),
+        ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       );
     const statusOf = async (handle: (request: Request) => Promise<Response>) =>
       (
@@ -2225,8 +2269,8 @@ describe("startOctantServer", () => {
             yield* Effect.promise(() => act(handle));
             diagnostics.push(JSON.stringify(server.diagnostics?.()));
             yield* Effect.promise(() => Promise.resolve(server.stop()));
-          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-        ),
+          }),
+        ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       );
     const pinOf = async (response: Response) =>
       ((await response.json()) as { status: { tlsPin: string | null } }).status;
@@ -2382,8 +2426,8 @@ describe("startOctantServer", () => {
               ),
             );
             expect(localStopCalled).toBe(true);
-          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-        ),
+          }),
+        ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       );
     } catch {
       // Scope release also calls server.stop() which retries and fails again.
@@ -2469,8 +2513,8 @@ describe("startOctantServer", () => {
             expect(stopResult).not.toBe("ok");
             // The remote stop must have been called despite the local throw
             expect(remoteStopCalled).toBe(true);
-          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-        ),
+          }),
+        ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       );
     } catch {
       // Scope release may also fail — that's expected
@@ -2509,8 +2553,8 @@ describe("startOctantServer", () => {
               },
             }),
           });
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
     expect(events).toEqual(["http-stop", "runtime-close"]);
   });
@@ -2538,8 +2582,8 @@ describe("startOctantServer", () => {
               events.push("http-stop");
             },
           }),
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
 
     expect(gitEnvironmentPort.close).toHaveBeenCalledOnce();
@@ -2569,8 +2613,8 @@ describe("startOctantServer", () => {
             listening = true;
             return { url: new URL("http://127.0.0.1:13773"), stop };
           },
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
     await vi.waitFor(() => expect(listening).toBe(true), { timeout: 10_000 });
     await vi.waitFor(() => expect(stop).toHaveBeenCalledWith(true));
@@ -2599,8 +2643,8 @@ describe("startOctantServer", () => {
             port: 0,
             providerRuntimeRegistry: runtime,
             serve: () => ({ url: new URL("http://127.0.0.1:13773"), stop }),
-          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-        ),
+          }),
+        ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       );
       expect(exit._tag).toBe("Failure");
       expect(stop).toHaveBeenCalledWith(true);
@@ -2624,8 +2668,8 @@ describe("startOctantServer", () => {
             url: new URL("http://127.0.0.1:13773"),
             stop: () => undefined,
           }),
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
 
     expect(close).toHaveBeenCalledOnce();
@@ -2667,8 +2711,8 @@ describe("startOctantServer", () => {
             ).then(assertResponse),
           );
           expect(response.status).toBe(503);
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -2730,8 +2774,8 @@ describe("startOctantServer", () => {
             category: "unauthorized",
             message: "Context subject is not available to this window.",
           });
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -2836,8 +2880,8 @@ describe("startOctantServer", () => {
             kind: "not-planned",
             subject: { aggregateType: "project", aggregateId: projectId },
           });
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -2904,8 +2948,8 @@ describe("startOctantServer", () => {
             kind: "refused",
             reason: "thread-unavailable",
           });
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -3024,8 +3068,8 @@ describe("startOctantServer", () => {
               ),
             ).resolves.toBeUndefined();
           });
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
     expect(probeVersion).toHaveBeenCalledOnce();
   });
@@ -3167,8 +3211,8 @@ describe("startOctantServer", () => {
             kind: "chat-project-created",
             project: { name: "Research", type: "chat", version: 1 },
           });
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   });
 
@@ -3329,8 +3373,8 @@ describe("startOctantServer", () => {
             // exact window, never a raw projection read.
             expect(workBootstrap).toHaveBeenCalledWith(windowId);
             expect(codeBootstrap).toHaveBeenCalledWith(windowId);
-          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-        ),
+          }),
+        ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       );
     } finally {
       workBootstrap.mockRestore();

@@ -1516,7 +1516,7 @@ export function startOctantServer(
             category: "server-unavailable",
             message: "Octant could not bind the local server.",
           }),
-      }),
+      }).pipe(Effect.onError(() => Effect.promise(() => cloudSessions.service.close()))),
       (server) =>
         Effect.promise(async () => {
           let shutdownFailure: unknown;
@@ -1582,6 +1582,13 @@ export function startOctantServer(
             httpStop = server.stop(true);
           } catch (error) {
             shutdownFailure = error;
+          }
+          try {
+            // Stop admission first, then request owned cloud cancellation while
+            // both the journal and provider transport are still available.
+            await cloudSessions.service.close();
+          } catch (error) {
+            shutdownFailure ??= error;
           }
           try {
             unsubscribeMachineChanges();

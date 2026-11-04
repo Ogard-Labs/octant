@@ -142,6 +142,38 @@ function fixture(
 }
 
 describe("provider cloud tasks", () => {
+  it("keeps its shutdown open until an in-flight create settles and its known remote job is cancelled", async () => {
+    const pending = Promise.withResolvers<CloudSessionObservation>();
+    const f = fixture(() => pending.promise);
+    await f.service.execute(windowId, { kind: "opt-in", instanceId: instance.id, enabled: true });
+    const start = f.service.execute(windowId, f.start);
+    let closed = false;
+    const closing = f.service.close().then(() => {
+      closed = true;
+    });
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(closed).toBe(false);
+    } finally {
+      pending.resolve({
+        status: "observed",
+        remoteId: decodeProviderCloudRemoteId("sess_late"),
+        state: "running",
+        output: "",
+        truncated: false,
+      });
+      await start;
+      await closing;
+    }
+    expect(f.cancels()).toBeGreaterThanOrEqual(1);
+    expect(f.jobs.get(id(2))?.state).toBe("cancel-requested");
+    await expect(f.service.close()).resolves.toBeUndefined();
+    expect(await f.service.execute(windowId, { kind: "list", threadId })).toEqual({
+      status: "refused",
+      reason: "unavailable",
+    });
+  });
+
   it("allows owned status and cancellation in Plan without admitting another remote execution", async () => {
     const f = fixture(async () => ({
       status: "observed",

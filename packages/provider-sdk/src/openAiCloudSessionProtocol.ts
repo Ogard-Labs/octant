@@ -2,6 +2,16 @@ import type { CloudSessionHttpRequest, CloudSessionIntent } from "./cloudSession
 import { ProviderCloudRemoteId } from "@octant/contracts/provider-cloud-sessions";
 import { Schema } from "effect";
 
+/** Exact official endpoint, permitting only a suffix of trailing slashes. */
+export function isOpenAiCloudSessionBaseUrl(value: string): boolean {
+  const base = "https://api.openai.com/v1";
+  if (!value.startsWith(base)) return false;
+  for (let index = base.length; index < value.length; index += 1) {
+    if (value[index] !== "/") return false;
+  }
+  return true;
+}
+
 export function openAiCreatedCloudSessionId(
   body: string,
 ): typeof ProviderCloudRemoteId.Type | undefined {

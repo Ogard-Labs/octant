@@ -38,6 +38,7 @@ import type {
 import { Effect } from "effect";
 import { Schema } from "effect";
 import type { CloudSessionPorts } from "@octant/provider-sdk/cloud-sessions";
+import { isOpenAiCloudSessionBaseUrl } from "@octant/provider-sdk/openai-cloud-session-protocol";
 import {
   ProviderCloudCreateInput,
   ProviderCloudObservation,
@@ -1005,7 +1006,7 @@ export function makeOutsideHarnessEndpointProxy(
         link.stopped === undefined &&
         instance.driverKind === "outside-harness-endpoint" &&
         instance.enabled &&
-        instance.configuration.baseUrl.replace(/\/+$/, "") === "https://api.openai.com/v1" &&
+        isOpenAiCloudSessionBaseUrl(instance.configuration.baseUrl) &&
         instance.configuration.key?.header.toLowerCase() === "authorization" &&
         instance.configuration.key.scheme === "Bearer",
       create: ({ ports }) => {

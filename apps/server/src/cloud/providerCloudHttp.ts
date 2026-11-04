@@ -47,11 +47,21 @@ export function makeProviderCloudPorts(input: {
       const signal =
         command.signal === undefined ? timeout : AbortSignal.any([timeout, command.signal]);
       let credential: string;
+      const interrupted = Promise.withResolvers<never>();
+      const onInterrupted = () => interrupted.reject(new CloudSessionRequestRefused());
+      signal.addEventListener("abort", onInterrupted, { once: true });
+      if (signal.aborted) onInterrupted();
       try {
-        credential = (await acquireProviderCredential(input.credentialResolver, input.instanceId))
-          .credential;
+        credential = (
+          await Promise.race([
+            acquireProviderCredential(input.credentialResolver, input.instanceId),
+            interrupted.promise,
+          ])
+        ).credential;
       } catch {
         throw new CloudSessionRequestRefused();
+      } finally {
+        signal.removeEventListener("abort", onInterrupted);
       }
       // A key unlock can wait. Authority and opt-in must still hold at dispatch.
       if (

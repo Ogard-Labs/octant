@@ -47,8 +47,8 @@ async function withHost(body: (call: Call) => Effect.Effect<void>): Promise<void
             return response;
           });
         yield* body(call);
-      }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-    ),
+      }),
+    ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
   );
 }
 

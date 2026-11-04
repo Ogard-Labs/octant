@@ -6,11 +6,24 @@ import {
 } from "@octant/contracts/provider-cloud-sessions";
 import { makeOpenAiCloudSessionAdapter } from "./openAiCloudSessions";
 import { runCloudSessionConformance } from "@octant/provider-sdk/cloud-session-conformance";
+import { isOpenAiCloudSessionBaseUrl } from "@octant/provider-sdk/openai-cloud-session-protocol";
 
 const jobId = decodeProviderCloudJobId("a7550000-0000-4000-8000-000000000001");
 const remoteId = decodeProviderCloudRemoteId("sess_fixture");
 
 describe("OpenAI hosted cloud sessions", () => {
+  it("admits only the exact official base with an optional trailing slash suffix", () => {
+    expect(isOpenAiCloudSessionBaseUrl("https://api.openai.com/v1")).toBe(true);
+    expect(isOpenAiCloudSessionBaseUrl("https://api.openai.com/v1" + "/".repeat(100_000))).toBe(
+      true,
+    );
+    expect(
+      isOpenAiCloudSessionBaseUrl("https://api.openai.com/v1" + "/".repeat(100_000) + "other"),
+    ).toBe(false);
+    expect(isOpenAiCloudSessionBaseUrl("https://api.openai.com.evil.invalid/v1")).toBe(false);
+    expect(isOpenAiCloudSessionBaseUrl("https://api.openai.com/v10")).toBe(false);
+  });
+
   it("passes the public cloud-session conformance kit without an account", async () => {
     const result = await runCloudSessionConformance({
       createAdapter: (ports) =>
