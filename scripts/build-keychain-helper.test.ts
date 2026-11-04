@@ -6,10 +6,12 @@ import { keychainHelperBuildArgs, shouldBuildKeychainHelper } from "./build-keyc
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
 describe("keychainHelperBuildArgs", () => {
-  it("builds the Security.framework helper deterministically", () => {
+  it("builds the Security.framework helper for Apple Silicon macOS 14 regardless of the builder", () => {
     expect(keychainHelperBuildArgs("/repo/helper.swift", "/repo/dist/helper")).toEqual([
       "swiftc",
       "-O",
+      "-target",
+      "arm64-apple-macos14.0",
       "-framework",
       "Security",
       "-o",

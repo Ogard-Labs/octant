@@ -7,6 +7,7 @@ import type {
 } from "@octant/plugin-api/integration";
 
 export interface IntegrationHostPortDependencies {
+  readonly registerCredentialOperation?: IntegrationHostPort["registerCredentialOperation"];
   readonly fetch?: (input: Request) => Promise<Response>;
   readonly requestCredential?: (scope: string) => Promise<IntegrationCredentialRequestResult>;
   readonly beginPkceAuthorization?: IntegrationHostPort["beginPkceAuthorization"];
@@ -40,6 +41,9 @@ export function createIntegrationHostPort(
   dependencies: IntegrationHostPortDependencies = {},
 ): IntegrationHostPort {
   return {
+    ...(dependencies.registerCredentialOperation === undefined
+      ? {}
+      : { registerCredentialOperation: dependencies.registerCredentialOperation }),
     fetch: dependencies.fetch ?? globalThis.fetch.bind(globalThis),
     requestCredential: dependencies.requestCredential ?? (async () => unavailableCredential),
     beginPkceAuthorization: dependencies.beginPkceAuthorization ?? (async () => refusedPkce),

@@ -2663,6 +2663,23 @@ resending it. Queue controls remain keyboard accessible and wrap at narrow
 widths. A running-turn steering control is separate and appears only where the
 runtime supports it.
 
+A one-use credential request appears inline at the end of the Code conversation.
+It uses a compact rounded card with a small lock mark, the credential label,
+visible destination and one-use scope, followed by one short explanation and a
+masked input. A keyboard-accessible reveal control returns to masked on submit.
+The footer has a quiet privacy disclosure and right-aligned Decline and primary
+action controls, using the shared native-density recipes. At narrow pane widths
+the actions wrap beneath the disclosure, even in a wide application window.
+Submitting once authorizes only the displayed operation; no second confirmation
+repeats it. There is no remember checkbox. Enter in the credential field submits
+this bounded integration request, except during text composition. The input
+clears on submission, decline or cancellation. Accepted submissions stay disabled
+until the host publishes an outcome; busy labels do not resize the action.
+An uncertain response never resends automatically. Host-settled requests collapse
+to a quiet status row; an unavailable status disables entry rather than trusting
+a stale card.
+The card is not an administrator-password dialog and is not a saved sign-in.
+
 Native Code approvals use a compact 216px surface above the composer, with a
 scrollable action and scope description, collapsible authority details, and a
 fixed Cancel/Allow row. Duration remains in the host description; the button

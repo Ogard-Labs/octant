@@ -1,3 +1,4 @@
+import type { CredentialOperation } from "./credentialRequest";
 import type {
   IntegrationCommand,
   IntegrationCredentialRequestResult,
@@ -54,6 +55,10 @@ export type IntegrationRevokeResult = { readonly kind: "revoked" } | { readonly 
  * filesystem handles, and shell access are never handed over.
  */
 export interface IntegrationHostPort {
+  /** Register a fixed one-use operation. Availability never grants consent. */
+  readonly registerCredentialOperation?: (
+    operation: CredentialOperation,
+  ) => { readonly kind: "registered"; readonly release: () => void } | { readonly kind: "refused" };
   readonly fetch: (input: Request) => Promise<Response>;
   readonly requestCredential: (scope: string) => Promise<IntegrationCredentialRequestResult>;
   readonly beginPkceAuthorization: (

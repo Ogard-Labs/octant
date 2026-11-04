@@ -1,5 +1,7 @@
 import {
   decodeAgentMessageEndpointId,
+  decodeAgentMessageReceiptRequest,
+  MAX_AGENT_MESSAGE_RECEIPT_IDS,
   type AgentMessageEndpointId,
   type ProviderExecutionPolicy,
   type ProviderToolDefinition,
@@ -36,10 +38,22 @@ function createRefusalBudget(): AgentMessageRefusalBudget {
 const definition: ProviderToolDefinition = {
   name: AGENT_MESSAGE_TOOL_NAME,
   description:
-    "Send a bounded message to another thread of this Project, addressed by its id. The host admits and journals it, and the recipient reads it as untrusted data, with your thread's id as the source, at the start of its next turn. Use it to hand off findings or leave a sibling thread a question — it never grants you the recipient's authority, starts no turn there, and returns no reply.",
+    "Send a bounded message to another thread of this Project, addressed by its id. The host admits and journals it, and the recipient reads it as untrusted data, with your thread's id as the source, at the start of its next turn. Use it to hand off findings or leave a sibling thread a question — it never grants you the recipient's authority, starts no turn there, and returns no reply. Default action send admits a new message on every call, including a retry. Use action status with your sent messageIds to read queued, provider-delivered, recipient-acknowledged or refused receipts. When a delivered envelope reaches this thread, action acknowledge with its messageIds explicitly reports receipt; it does not prove understanding or action. No message expiry is currently recorded.",
   inputSchema: {
     type: "object",
     properties: {
+      action: {
+        type: "string",
+        enum: ["send", "acknowledge", "status"],
+        description:
+          "Omit for legacy send. Acknowledge only reports receipt of messages delivered to this exact thread; status reads only this thread's sent IDs.",
+      },
+      messageIds: {
+        type: "array",
+        minItems: 1,
+        maxItems: MAX_AGENT_MESSAGE_RECEIPT_IDS,
+        items: { type: "string", format: "uuid" },
+      },
       recipients: {
         type: "array",
         maxItems: 4,
@@ -59,7 +73,7 @@ const definition: ProviderToolDefinition = {
         description: "The bounded message body the recipients will read as data.",
       },
     },
-    required: ["recipients", "message"],
+    required: [],
     additionalProperties: false,
   },
 };
@@ -82,7 +96,10 @@ const PLAN_REFUSAL = "Plan mode is read-only; this thread cannot send an agent m
  * runs. A refused call never reaches the delivery service.
  */
 export function createAgentMessageTools(input: {
-  readonly service: Pick<AgentMessageService, "send" | "recordRefusedSend">;
+  readonly service: Pick<
+    AgentMessageService,
+    "send" | "recordRefusedSend" | "acknowledge" | "statusForSender"
+  >;
   readonly senderThreadId: string;
   readonly senderRunId?: string;
   /** The sender thread's snapshotted profile allowlist; empty permits every tool. */
@@ -96,6 +113,7 @@ export function createAgentMessageTools(input: {
   const senderRunId =
     input.senderRunId === undefined ? undefined : decodeAgentMessageEndpointId(input.senderRunId);
   const refusal = (): string | undefined => {
+    if (senderRunId !== undefined) return "Managed children do not use sibling messaging.";
     const profile = decideProfileToolConstraint({
       toolId: AGENT_MESSAGE_TOOL_NAME,
       toolConstraints: input.toolConstraints,
@@ -144,6 +162,68 @@ export function createAgentMessageTools(input: {
         // the Agents center, so it is journaled when the call names anyone.
         await journalRefusedCall(inputJson);
         return { result: { status: "refused", reason: "policy", message: refused }, isError: true };
+      }
+      try {
+        const raw: unknown = JSON.parse(inputJson);
+        if (typeof raw === "object" && raw !== null && "action" in raw && raw.action !== "send") {
+          const request = decodeAgentMessageReceiptRequest(raw);
+          if (request.action === "status") {
+            try {
+              const receipts = input.service.statusForSender({
+                senderThreadId: String(senderThreadId),
+                messageIds: request.messageIds,
+              });
+              return {
+                result: receipts,
+                ...(receipts.some((receipt) => receipt.status !== "ok") ? { isError: true } : {}),
+              };
+            } catch {
+              return {
+                result: [
+                  { status: "unavailable", message: "The host could not read message receipts." },
+                ],
+                isError: true,
+              };
+            }
+          }
+          const receipts = [];
+          for (const messageId of request.messageIds) {
+            if (signal?.aborted || refusal() !== undefined)
+              receipts.push({
+                status: "refused" as const,
+                reason: "policy" as const,
+                message: "The turn can no longer acknowledge messages.",
+              });
+            else {
+              try {
+                receipts.push(
+                  await input.service.acknowledge({
+                    messageId: String(messageId),
+                    recipientThreadId: String(senderThreadId),
+                  }),
+                );
+              } catch {
+                receipts.push({
+                  status: "unavailable" as const,
+                  message: "The acknowledgement could not be confirmed.",
+                });
+              }
+            }
+          }
+          return {
+            result: receipts,
+            ...(receipts.some((receipt) => receipt.status !== "ok") ? { isError: true } : {}),
+          };
+        }
+      } catch {
+        return {
+          result: {
+            status: "refused",
+            reason: "policy",
+            message: "The receipt request is invalid.",
+          },
+          isError: true,
+        };
       }
       let recipients: ReadonlyArray<{ threadId: string }>;
       let message: string;

@@ -371,7 +371,14 @@ export function createHubOwnerRouteHandler(
     };
 
     try {
-      return await act({ route, body, scope, senderMemberId: senderMember.memberId, principal });
+      return await act({
+        route,
+        body,
+        scope,
+        senderMemberId: senderMember.memberId,
+        principal,
+        freshFull: unlockResult?.status === "fresh",
+      });
     } catch {
       return refused(400, "invalid");
     }
@@ -383,6 +390,7 @@ export function createHubOwnerRouteHandler(
     readonly scope: OwnerScope;
     readonly senderMemberId: HubMemberId;
     readonly principal: AuditActingPrincipal;
+    readonly freshFull: boolean;
   }): Promise<Response> {
     const { route, body, scope, principal } = input;
     const json = (): unknown => JSON.parse(body);
@@ -489,11 +497,22 @@ export function createHubOwnerRouteHandler(
         });
         return Response.json({ status: "opened", session }, { headers: NO_STORE });
       }
-      case HUB_OWNER_ROUTES.postureRead:
-        return outcome(await options.postures.read(decodeOwnerPostureReadRequest(json()).subject));
+      case HUB_OWNER_ROUTES.postureRead: {
+        const subject = decodeOwnerPostureReadRequest(json()).subject;
+        if (subject !== undefined) return outcome(await options.postures.read(subject));
+        return options.postures.list === undefined
+          ? refused(409, "unsupported")
+          : Response.json(
+              { status: "read", targets: await options.postures.list() },
+              { headers: NO_STORE },
+            );
+      }
       case HUB_OWNER_ROUTES.postureChange: {
         const change = decodeOwnerPostureChangeRequest(json());
-        const result = await options.postures.change(change);
+        const result = await options.postures.change(change, {
+          ownerMemberId: String(input.senderMemberId),
+          freshFull: input.freshFull,
+        });
         if (result.status === "changed") {
           options.record({
             change: "owner-posture-changed",
