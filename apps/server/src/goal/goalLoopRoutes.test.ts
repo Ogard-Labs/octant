@@ -22,7 +22,9 @@ const ceiling = {
 } as const;
 
 function authStore(): WindowAuthorityStore {
-  return { authenticate: vi.fn(() => "w1") } as unknown as WindowAuthorityStore;
+  return {
+    authenticateAuthority: vi.fn(() => ({ windowId: "w1" })),
+  } as unknown as WindowAuthorityStore;
 }
 
 function service() {
@@ -118,7 +120,7 @@ describe("steering a goal loop over the API", () => {
     const handle = createGoalLoopRouteHandler({
       service: service(),
       windowAuthorityStore: {
-        authenticate: () => {
+        authenticateAuthority: () => {
           throw new Error("no capability");
         },
       } as unknown as WindowAuthorityStore,

@@ -63,7 +63,7 @@ function service() {
 
 function windowStore(): WindowAuthorityStore {
   return {
-    authenticate: vi.fn(() => windowId),
+    authenticateAuthority: vi.fn(() => ({ windowId })),
   } as unknown as WindowAuthorityStore;
 }
 
@@ -156,7 +156,7 @@ describe("replica store settings routes", () => {
     const route = createReplicaStoreSettingsRouteHandler({
       service: service().instance,
       windowAuthorityStore: {
-        authenticate: vi.fn(() => {
+        authenticateAuthority: vi.fn(() => {
           throw new WindowAuthorityError("unauthorized", "Window capability is invalid.");
         }),
       } as unknown as WindowAuthorityStore,

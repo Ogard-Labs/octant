@@ -8,7 +8,9 @@ const targetId = "00000000-0000-4000-8000-000000000601";
 const threadId = "00000000-0000-4000-8000-000000000602";
 
 function authStore(): WindowAuthorityStore {
-  return { authenticate: vi.fn(() => "w1") } as unknown as WindowAuthorityStore;
+  return {
+    authenticateAuthority: vi.fn(() => ({ windowId: "w1" })),
+  } as unknown as WindowAuthorityStore;
 }
 
 function service() {
@@ -87,7 +89,7 @@ describe("the ship API", () => {
     const unauthenticated = createShipRouteHandler({
       service: service(),
       windowAuthorityStore: {
-        authenticate: () => {
+        authenticateAuthority: () => {
           throw new Error("no capability");
         },
       } as unknown as WindowAuthorityStore,
