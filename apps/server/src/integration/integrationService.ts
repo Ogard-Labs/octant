@@ -1,3 +1,5 @@
+import type { CredentialOperation } from "@octant/plugin-api/credential-request";
+import { IntegrationCredentialOperations } from "./integrationCredentialOperations";
 import type {
   IntegrationAuthenticationCommand,
   IntegrationAuthenticationSnapshot,
@@ -22,6 +24,7 @@ import {
 } from "../plugins/linear/linearIntegration";
 
 export interface IntegrationService {
+  readonly credentialOperations?: () => ReadonlyArray<CredentialOperation>;
   readonly snapshot: (
     pluginSlug: string,
     signal: AbortSignal,
@@ -77,6 +80,7 @@ export function createLinearIntegrationService(options: {
   };
 
   return {
+    credentialOperations: () => ensureBound(LINEAR_SLUG)?.credentialOperations?.() ?? [],
     snapshot: async (pluginSlug, signal) => {
       const service = ensureBound(pluginSlug);
       if (service === undefined) return unavailableAuthentication();
@@ -131,7 +135,9 @@ function constructLinearBoundService(options: {
             startLinearOAuthCallbackListener({ onAuthorize }),
         }),
   });
+  const credentialOperations = new IntegrationCredentialOperations();
   const hostPort = createIntegrationHostPort({
+    registerCredentialOperation: (operation) => credentialOperations.register(operation),
     fetch: oauth.authorizedFetch,
     requestCredential: oauth.requestCredential,
     beginPkceAuthorization: oauth.beginPkceAuthorization,
@@ -146,7 +152,10 @@ function constructLinearBoundService(options: {
   if (loaded.kind !== "loaded") {
     throw new Error("Linear integration failed to load.");
   }
-  return createBoundService(LINEAR_SLUG, loaded.runtime, oauth);
+  return {
+    ...createBoundService(LINEAR_SLUG, loaded.runtime, oauth),
+    credentialOperations: () => credentialOperations.list(),
+  };
 }
 
 function unavailableAuthentication(): IntegrationAuthenticationSnapshot {

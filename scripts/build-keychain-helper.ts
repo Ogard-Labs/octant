@@ -14,6 +14,8 @@ const defaultDestination = resolve(
 export const keychainHelperBuildArgs = (source: string, destination: string) => [
   "swiftc",
   "-O",
+  "-target",
+  "arm64-apple-macos14.0",
   "-framework",
   "Security",
   "-o",
