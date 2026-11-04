@@ -137,6 +137,17 @@ const guard = setTimeout(() => process.exit(2), 9000);
  const admission = await native.inspect();
  assert.equal(admission.kind,'refused');
  assert(['unsigned-build','invalid-peer'].includes(admission.reason));
+ assert.deepEqual(await native.close('unexpected'), {kind:'refused',reason:'invalid-artifact'});
+ assert(['unsigned-build','invalid-peer'].includes((await native.inspect()).reason));
+ if (process.argv[3] === 'cancel-close') {
+  const cancellation = native.cancel();
+  const closing = native.close();
+  assert.deepEqual(await closing, {kind:'failed',reason:'native-unavailable'});
+  assert.equal((await cancellation).kind, 'cancelled');
+  assert.deepEqual(await native.inspect(), {kind:'refused',reason:'closed'});
+  assert.deepEqual(await native.commitInstall(), {kind:'refused',reason:'closed'});
+  clearTimeout(guard); console.log('close during pending cancellation remains terminal'); return;
+ }
  const pending = Array.from({length:8},()=>native.inspect());
  let settled=0; pending.forEach(p=>p.then(()=>settled++));
  const closed=await native.close();
@@ -145,7 +156,7 @@ const guard = setTimeout(() => process.exit(2), 9000);
  assert.equal((await native.cancel()).kind,'cancelled');
  assert.deepEqual(await native.inspect(),{kind:'refused',reason:'closed'});
  clearTimeout(guard); console.log('unsigned and Worker refusal, terminal ownership and actual callback drain passed');
-})().catch(()=>{clearTimeout(guard);process.exitCode=1});
+})().catch(error=>{clearTimeout(guard);console.error(error.message);process.exitCode=1});
 `,
         );
         const result = spawnSync(process.execPath, [runner, binding], {
@@ -157,6 +168,13 @@ const guard = setTimeout(() => process.exit(2), 9000);
         expect(result.stdout).toContain(
           "unsigned and Worker refusal, terminal ownership and actual callback drain passed",
         );
+        const raced = spawnSync(process.execPath, [runner, binding, "cancel-close"], {
+          encoding: "utf8",
+          timeout: 12_000,
+        });
+        expect(raced.error).toBeUndefined();
+        expect(raced.status, raced.stderr).toBe(0);
+        expect(raced.stdout).toContain("close during pending cancellation remains terminal");
       } finally {
         await rm(root, { recursive: true, force: true });
       }

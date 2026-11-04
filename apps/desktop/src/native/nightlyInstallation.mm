@@ -565,11 +565,17 @@ napi_value operation(napi_env env, napi_callback_info info) {
   napi_value argv[2]{};
   napi_get_cb_info(env, info, &argc, argv, nullptr, &tag);
   const bool cleanup_operation = std::string_view(static_cast<const char *>(tag)) == "close" || std::string_view(static_cast<const char *>(tag)) == "cancel";
+  // A valid main-owner close ends admission even if an earlier cancellation
+  // still owns the drain. Worker or malformed calls acquire no such authority.
+  if (pthread_main_np() && std::string_view(static_cast<const char *>(tag)) == "close" && argc == 0) {
+    state->closed = true;
+    state->generation.fetch_add(1);
+  }
   if (!pthread_main_np() || (state->closed && !cleanup_operation) || state->cleaning || (!cleanup_operation && state->pending_jobs != 0)) {
     napi_value promise, result; napi_deferred deferred;
     napi_create_promise(env, &deferred, &promise); napi_create_object(env, &result);
     set(env, result, "kind", cleanup_operation ? "failed" : "refused");
-    set(env, result, "reason", !pthread_main_np() ? "native-unavailable" : state->closed ? "closed" : "busy");
+    set(env, result, "reason", cleanup_operation || !pthread_main_np() ? "native-unavailable" : state->closed ? "closed" : "busy");
     napi_resolve_deferred(env, deferred, result); return promise;
   }
   auto job = std::make_unique<Job>();
@@ -594,8 +600,7 @@ napi_value operation(napi_env env, napi_callback_info info) {
   }
   if (cleanup_operation) state->cleaning = true;
   else state->pending_jobs.fetch_add(1);
-  if (job->operation == "close") state->closed = true;
-  if (job->operation == "cancel" || job->operation == "close") state->generation.fetch_add(1);
+  if (job->operation == "cancel") state->generation.fetch_add(1);
   napi_value name;
   napi_create_string_utf8(env, "Nightly installation", NAPI_AUTO_LENGTH, &name);
   if (napi_create_async_work(env, nullptr, name, execute, complete, job.get(), &job->work) != napi_ok || napi_queue_async_work(env, job->work) != napi_ok) {
