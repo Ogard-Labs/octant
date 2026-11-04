@@ -3,6 +3,11 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export interface HostOAuthBrokerDescriptor {
   readonly descriptorId: string;
   readonly clientId?: string;
+  readonly clientAuthentication?: {
+    readonly method: "client_secret_post" | "client_secret_basic";
+    readonly secretRef: string;
+    readonly tokenEndpoint: string;
+  };
   readonly dialect?:
     | "openrouter-pkce"
     | "chatgpt-plan-siwc"
@@ -115,6 +120,9 @@ export function makeHostOAuthBrokerClient(options: {
             ? {}
             : { clientId: input.descriptor.clientId }),
           ...(input.descriptor.dialect === undefined ? {} : { dialect: input.descriptor.dialect }),
+          ...(input.descriptor.clientAuthentication === undefined
+            ? {}
+            : { clientAuthentication: input.descriptor.clientAuthentication }),
           flow: input.descriptor.flow,
           ...(input.descriptor.tokenEndpoint === undefined
             ? {}

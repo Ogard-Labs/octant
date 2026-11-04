@@ -35,6 +35,68 @@ const Endpoint = Schema.String.pipe(
   }),
 );
 
+const MetadataClientId = Schema.String.pipe(
+  Schema.filter((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        url.protocol === "https:" &&
+        url.username === "" &&
+        url.password === "" &&
+        url.hash === "" &&
+        url.pathname !== "/" &&
+        value.length <= 2048
+      );
+    } catch {
+      return false;
+    }
+  }),
+);
+
+/** A reference in the broker's MCP credential namespace, never the client secret itself. */
+export const McpOAuthClientAuthentication = Schema.Struct({
+  method: Schema.Literal("client_secret_post", "client_secret_basic"),
+  secretRef: Schema.UUID,
+  tokenEndpoint: Endpoint,
+}).annotations(strict);
+export type McpOAuthClientAuthentication = typeof McpOAuthClientAuthentication.Type;
+
+/** Application setup is reusable independently of a person's account grant. */
+export const McpOAuthClientRegistration = Schema.Struct({
+  kind: Schema.Literal("registered", "metadata-document"),
+  resource: Endpoint,
+  issuer: Endpoint,
+  clientId: Schema.Union(ClientId, MetadataClientId),
+  /** Exact http://127.0.0.1:<port>/oauth/callback, retained across host restarts. */
+  redirectPort: Schema.Int.pipe(Schema.between(1024, 65535)),
+  clientAuthentication: Schema.optional(McpOAuthClientAuthentication),
+})
+  .pipe(
+    Schema.filter((value) => {
+      const issuer = new URL(value.issuer);
+      const resource = new URL(value.resource);
+      if (
+        issuer.protocol !== "https:" ||
+        issuer.search !== "" ||
+        issuer.hash !== "" ||
+        resource.protocol !== "https:" ||
+        resource.hash !== ""
+      )
+        return false;
+      return value.kind === "metadata-document"
+        ? Schema.is(MetadataClientId)(value.clientId) && value.clientAuthentication === undefined
+        : Schema.is(ClientId)(value.clientId);
+    }),
+  )
+  .annotations(strict);
+export type McpOAuthClientRegistration = typeof McpOAuthClientRegistration.Type;
+export const decodeMcpOAuthClientRegistration = Schema.decodeUnknownSync(
+  McpOAuthClientRegistration,
+  {
+    onExcessProperty: "error",
+  },
+);
+
 export const HostOAuthFlow = Schema.Literal("authorization-code-pkce", "device-code");
 export type HostOAuthFlow = typeof HostOAuthFlow.Type;
 
@@ -96,7 +158,8 @@ const HttpsOrigin = Schema.String.pipe(
 export const HostOAuthDescriptor = Schema.Struct({
   descriptorId: DescriptorId,
   /** Absent only for a dialect that sends no `client_id`. */
-  clientId: Schema.optional(ClientId),
+  clientId: Schema.optional(Schema.Union(ClientId, MetadataClientId)),
+  clientAuthentication: Schema.optional(McpOAuthClientAuthentication),
   /** A vendor wire dialect. Absent means the standard OAuth runner path. */
   dialect: Schema.optional(HostOAuthDialect),
   flow: HostOAuthFlow,
@@ -135,6 +198,12 @@ export const HostOAuthDescriptor = Schema.Struct({
   .pipe(
     Schema.filter(
       (descriptor) => {
+        if (
+          descriptor.dialect !== "mcp-authorization" &&
+          (descriptor.clientAuthentication !== undefined ||
+            (descriptor.clientId !== undefined && !Schema.is(ClientId)(descriptor.clientId)))
+        )
+          return false;
         // The directory dialect speaks standard device authorization against
         // the tenant's own authority; every other dialect's wire shape is
         // not OAuth's, so none pairs with a device code.
@@ -202,7 +271,12 @@ export const HostOAuthDescriptor = Schema.Struct({
         // The MCP authorization dialect registers its client before the flow,
         // so it names a client id; a server may grant without any scope.
         if (descriptor.dialect === "mcp-authorization") {
-          return descriptor.clientId !== undefined && descriptor.resource !== undefined;
+          return (
+            descriptor.clientId !== undefined &&
+            descriptor.resource !== undefined &&
+            (descriptor.clientAuthentication === undefined ||
+              descriptor.clientAuthentication.tokenEndpoint === descriptor.tokenEndpoint)
+          );
         }
         // A dialect entry declares its own wire shape; every other flow needs
         // a client identity and at least one scope. The ChatGPT plan dialect

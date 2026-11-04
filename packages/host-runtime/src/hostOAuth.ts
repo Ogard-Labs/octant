@@ -153,10 +153,17 @@ export type HostOAuthDialect =
   | "directory-oidc"
   | "issuer-oidc";
 
+export interface McpOAuthClientAuthentication {
+  readonly method: "client_secret_post" | "client_secret_basic";
+  readonly secretRef: string;
+  readonly tokenEndpoint: string;
+}
+
 export interface HostOAuthDescriptor {
   readonly descriptorId: string;
   /** Absent only for a dialect that sends no `client_id`. */
   readonly clientId?: string;
+  readonly clientAuthentication?: McpOAuthClientAuthentication;
   /** A vendor wire dialect. Absent means the standard OAuth runner path. */
   readonly dialect?: HostOAuthDialect;
   readonly flow: HostOAuthFlow;
@@ -392,6 +399,7 @@ interface StoredGrant {
   readonly dialect?: string;
   /** MCP authorization dialect: the resource every refresh names again. */
   readonly resource?: string;
+  readonly clientAuthentication?: McpOAuthClientAuthentication;
   /**
    * ChatGPT plan dialect only: the identity token from the last exchange or
    * refresh. Retained so a reauthorization can send it as `id_token_hint`.
@@ -490,6 +498,8 @@ export function isHostOAuthGrantMaterial(value: string): boolean {
 }
 
 export async function exchangeAuthorizationCode(input: {
+  readonly clientAuthentication?: McpOAuthClientAuthentication;
+  readonly resolveClientSecret?: (secretRef: string) => Promise<string>;
   readonly tokenEndpoint: string;
   readonly clientId: string;
   readonly code: string;
@@ -597,6 +607,12 @@ export async function exchangeAuthorizationCode(input: {
     codeExchange: true,
     ...(input.resource === undefined ? {} : { resource: input.resource }),
     ...(input.dialect === MCP_DIALECT ? { refreshTokenOptional: true } : {}),
+    ...(input.clientAuthentication === undefined
+      ? {}
+      : { clientAuthentication: input.clientAuthentication }),
+    ...(input.resolveClientSecret === undefined
+      ? {}
+      : { resolveClientSecret: input.resolveClientSecret }),
   });
   if (exchanged.kind === "tokens") return exchanged;
   if (exchanged.kind === "transient") return exchanged;
@@ -1865,6 +1881,8 @@ async function fetchJwks(
 
 export function createHostOAuthRuntime(options: {
   readonly store: CredentialStore;
+  /** Broker-local resolution in the MCP secret namespace; no host receives the value. */
+  readonly resolveClientSecret?: (secretRef: string) => Promise<string>;
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
   readonly timeoutMs?: number;
@@ -2265,6 +2283,12 @@ export function createHostOAuthRuntime(options: {
       }
     }
     const exchanged = await exchangeAuthorizationCode({
+      ...(session.descriptor.clientAuthentication === undefined
+        ? {}
+        : { clientAuthentication: session.descriptor.clientAuthentication }),
+      ...(options.resolveClientSecret === undefined
+        ? {}
+        : { resolveClientSecret: options.resolveClientSecret }),
       tokenEndpoint: session.tokenEndpoint,
       clientId: issuedClientId ?? session.descriptor.clientId ?? "",
       code,
@@ -2691,6 +2715,12 @@ export function createHostOAuthRuntime(options: {
       generation,
       codeExchange: false,
       ...(current.resource === undefined ? {} : { resource: current.resource }),
+      ...(current.clientAuthentication === undefined
+        ? {}
+        : { clientAuthentication: current.clientAuthentication }),
+      ...(options.resolveClientSecret === undefined
+        ? {}
+        : { resolveClientSecret: options.resolveClientSecret }),
     });
     if (exchanged.kind === "transient") return { kind: "transient" };
     if (exchanged.kind === "pending") return { kind: "transient" };
@@ -3008,6 +3038,8 @@ type TokenRequestResult =
   | { readonly kind: "pending"; readonly slowDown: boolean };
 
 async function requestTokens(input: {
+  readonly clientAuthentication?: McpOAuthClientAuthentication;
+  readonly resolveClientSecret?: (secretRef: string) => Promise<string>;
   readonly fetch: typeof fetch;
   readonly now: () => number;
   readonly endpoint: string;
@@ -3033,11 +3065,31 @@ async function requestTokens(input: {
   let response: Response;
   let body: Record<string, unknown> | undefined;
   try {
+    const form = new URLSearchParams(input.form);
+    const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded" };
+    if (input.clientAuthentication !== undefined) {
+      if (input.clientAuthentication.tokenEndpoint !== input.endpoint)
+        return { kind: "refused", reason: "exchange-refused" };
+      const secret = await input.resolveClientSecret?.(input.clientAuthentication.secretRef);
+      if (secret === undefined || secret.length === 0 || secret.length > MAX_TOKEN_CHARS) {
+        return input.codeExchange
+          ? { kind: "refused", reason: "unavailable" }
+          : { kind: "transient" };
+      }
+      if (input.clientAuthentication.method === "client_secret_post")
+        form.set("client_secret", secret);
+      else {
+        // RFC 6749 §2.3.1 encodes each component as form data before Basic encoding.
+        const encode = (value: string) => new URLSearchParams({ v: value }).toString().slice(2);
+        headers.authorization = `Basic ${Buffer.from(`${encode(input.clientId)}:${encode(secret)}`).toString("base64")}`;
+        form.delete("client_id");
+      }
+    }
     response = await input.fetch(input.endpoint, {
       method: "POST",
       redirect: "error",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams(input.form).toString(),
+      headers,
+      body: form.toString(),
       signal: issuerRequestDeadline(),
     });
     if (response.status === 429 || response.status >= 500) return { kind: "transient" };
@@ -3093,6 +3145,9 @@ async function requestTokens(input: {
       generation: input.generation + 1,
       ...(idToken === undefined ? {} : { idToken }),
       ...(input.resource === undefined ? {} : { resource: input.resource }),
+      ...(input.clientAuthentication === undefined
+        ? {}
+        : { clientAuthentication: input.clientAuthentication }),
     },
   };
 }
@@ -3165,6 +3220,9 @@ function decodeGrant(raw: string): StoredGrant {
   const email = parsed.email;
   const planUsageEnabled = parsed.planUsageEnabled;
   const resource = parsed.resource;
+  const clientAuthentication = parseClientAuthentication(parsed.clientAuthentication);
+  if (parsed.clientAuthentication !== undefined && clientAuthentication === undefined)
+    throw new CredentialStoreFailure("invalid");
   const tenantId = parsed.tenantId;
   const audience = parsed.audience;
   const endpointOrigin = parsed.endpointOrigin;
@@ -3232,6 +3290,7 @@ function decodeGrant(raw: string): StoredGrant {
     tokenEndpoint,
     generation,
     ...(resource === undefined ? {} : { resource }),
+    ...(clientAuthentication === undefined ? {} : { clientAuthentication }),
     ...(dialect === undefined ? {} : { dialect }),
     ...(idToken === undefined ? {} : { idToken }),
     ...(extAgentHostId === undefined ? {} : { extAgentHostId }),
@@ -3261,6 +3320,13 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   ) {
     return undefined;
   }
+  if (
+    descriptor.clientAuthentication !== undefined &&
+    (dialect !== MCP_DIALECT ||
+      parseClientAuthentication(descriptor.clientAuthentication) === undefined ||
+      descriptor.clientAuthentication.tokenEndpoint !== descriptor.tokenEndpoint)
+  )
+    return undefined;
   if (dialect === DIRECTORY_DIALECT) return validateDirectoryDescriptor(descriptor);
   if (dialect === ISSUER_DIALECT) return validateIssuerDescriptor(descriptor);
   if (
@@ -3274,7 +3340,10 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   if (dialect === MCP_DIALECT) {
     // The MCP authorization flow registered its client before beginning and
     // names the server the token is for; a server may grant with no scope.
-    if (typeof descriptor.clientId !== "string" || !safeClientId(descriptor.clientId)) {
+    if (
+      typeof descriptor.clientId !== "string" ||
+      !(safeClientId(descriptor.clientId) || safeMetadataClientId(descriptor.clientId))
+    ) {
       return undefined;
     }
     if (descriptor.resource === undefined || !allowedEndpoint(descriptor.resource)) {
@@ -3441,6 +3510,9 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
   const flow = value.flow;
   const descriptorId = value.descriptorId;
   const clientId = value.clientId;
+  const clientAuthentication = parseClientAuthentication(value.clientAuthentication);
+  if (value.clientAuthentication !== undefined && clientAuthentication === undefined)
+    return undefined;
   const tokenEndpoint = value.tokenEndpoint;
   const termsId = value.termsId;
   const scopes = value.scopes;
@@ -3491,6 +3563,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
   return validateDescriptor({
     descriptorId,
     ...(typeof clientId === "string" ? { clientId } : {}),
+    ...(clientAuthentication === undefined ? {} : { clientAuthentication }),
     ...(dialect === undefined ? {} : { dialect }),
     flow,
     ...(typeof tokenEndpoint === "string" ? { tokenEndpoint } : {}),
@@ -3561,6 +3634,38 @@ function allowedEndpoint(value: string): boolean {
 
 function safeId(value: string): boolean {
   return /^[a-z0-9][a-z0-9-]{0,63}$/.test(value);
+}
+
+function parseClientAuthentication(value: unknown): McpOAuthClientAuthentication | undefined {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some(
+      (key) => key !== "method" && key !== "secretRef" && key !== "tokenEndpoint",
+    ) ||
+    (value.method !== "client_secret_post" && value.method !== "client_secret_basic") ||
+    typeof value.secretRef !== "string" ||
+    !UUID_PATTERN.test(value.secretRef) ||
+    typeof value.tokenEndpoint !== "string" ||
+    !allowedEndpoint(value.tokenEndpoint)
+  )
+    return undefined;
+  return { method: value.method, secretRef: value.secretRef, tokenEndpoint: value.tokenEndpoint };
+}
+
+function safeMetadataClientId(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      value.length <= 2048 &&
+      url.protocol === "https:" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.hash === "" &&
+      url.pathname !== "/"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function safeClientId(value: string): boolean {

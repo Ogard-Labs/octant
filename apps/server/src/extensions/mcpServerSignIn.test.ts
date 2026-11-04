@@ -30,6 +30,7 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
 function issuerFetch(
   options: {
     readonly registration?: boolean;
+    readonly metadataClient?: boolean;
     readonly scopes?: string[];
     /** What the protected-resource metadata claims to be; the server itself by default. */
     readonly resource?: string;
@@ -62,6 +63,12 @@ function issuerFetch(
         authorization_endpoint: `${ISSUER}/authorize`,
         token_endpoint: `${ISSUER}/token`,
         code_challenge_methods_supported: ["S256"],
+        client_id_metadata_document_supported: options.metadataClient === true,
+        token_endpoint_auth_methods_supported: [
+          "none",
+          "client_secret_post",
+          "client_secret_basic",
+        ],
         ...(options.registration === false ? {} : { registration_endpoint: `${ISSUER}/register` }),
       });
     }
@@ -131,6 +138,150 @@ async function signIn(options: {
 }
 
 describe("signing in to a hosted MCP server", () => {
+  it("reuses a registered client and exact callback after sign-out and a host restart", async () => {
+    const { fetchImpl, calls } = issuerFetch({ registration: false });
+    const { oauth, begun } = fakeOauth();
+    const { service, statePath } = await signIn({ fetchImpl, oauth });
+    expect(
+      await service.configureClient(
+        {
+          kind: "registered",
+          resource: SERVER,
+          issuer: ISSUER,
+          clientId: "owned-client",
+          redirectPort: 43126,
+          clientAuthentication: {
+            method: "client_secret_post",
+            secretRef: CREDENTIAL,
+            tokenEndpoint: `${ISSUER}/token`,
+          },
+        },
+        "local-window",
+      ),
+    ).toEqual({ kind: "configured" });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    await service.signOut(EXTENSION, COMPONENT, "local-window");
+    const restarted = new McpServerSignIn({
+      statePath,
+      oauth,
+      access: async () => ({}),
+      serverUrl: async () => SERVER,
+      fetch: fetchImpl,
+      actorId: CREDENTIAL,
+      pickPort: async () => {
+        throw new Error("must use registered callback");
+      },
+    });
+    expect((await restarted.begin(EXTENSION, COMPONENT, "local-window")).kind).toBe(
+      "awaiting-consent",
+    );
+    expect(begun).toHaveLength(2);
+    expect(begun[1]).toMatchObject({
+      clientId: "owned-client",
+      redirectPort: 43126,
+      clientAuthentication: {
+        method: "client_secret_post",
+        secretRef: CREDENTIAL,
+        tokenEndpoint: `${ISSUER}/token`,
+      },
+    });
+    expect(calls.some((call) => call.url === `${ISSUER}/register`)).toBe(false);
+  });
+
+  it("refuses remote setup, registration bound to another issuer and unadvertised metadata clients", async () => {
+    const { fetchImpl } = issuerFetch({ registration: false });
+    const { oauth } = fakeOauth();
+    const { service } = await signIn({ fetchImpl, oauth });
+    const registration = {
+      kind: "registered",
+      resource: SERVER,
+      issuer: "https://other.example",
+      clientId: "owned-client",
+      redirectPort: 43126,
+    };
+    expect((await service.configureClient(registration, "remote-device")).kind).toBe("refused");
+    expect(await service.configureClient(registration, "local-window")).toEqual({
+      kind: "configured",
+    });
+    expect((await service.begin(EXTENSION, COMPONENT, "local-window")).kind).toBe("refused");
+    expect(
+      await service.configureClient(
+        {
+          ...registration,
+          kind: "metadata-document",
+          issuer: ISSUER,
+          clientId: "https://client.example/oauth.json",
+        },
+        "local-window",
+      ),
+    ).toEqual({ kind: "configured" });
+    expect((await service.begin(EXTENSION, COMPONENT, "local-window")).kind).toBe("refused");
+    expect(oauth.begin).not.toHaveBeenCalled();
+  });
+
+  it("uses advertised metadata client identity without dynamic registration", async () => {
+    const { fetchImpl, calls } = issuerFetch({ registration: false, metadataClient: true });
+    const { oauth, begun } = fakeOauth();
+    const { service } = await signIn({ fetchImpl, oauth });
+    expect(
+      (
+        await service.configureForServer(
+          EXTENSION,
+          COMPONENT,
+          {
+            kind: "metadata-document",
+            resource: SERVER,
+            issuer: ISSUER,
+            clientId: "https://client.example/oauth.json",
+            redirectPort: 43126,
+          },
+          "local-window",
+        )
+      ).kind,
+    ).toBe("signed-out");
+    expect((await service.begin(EXTENSION, COMPONENT, "local-window")).kind).toBe(
+      "awaiting-consent",
+    );
+    expect(begun[0]?.clientId).toBe("https://client.example/oauth.json");
+    expect(calls.some((call) => call.url.endsWith("/register"))).toBe(false);
+  });
+
+  it("refuses mismatched resources, invalid setup and a changed confidential token endpoint", async () => {
+    const { fetchImpl } = issuerFetch({ registration: false });
+    const { oauth } = fakeOauth();
+    const { service } = await signIn({ fetchImpl, oauth });
+    const registration = {
+      kind: "registered" as const,
+      clientId: "owned-client",
+      resource: "https://other.example/mcp",
+      issuer: ISSUER,
+      redirectPort: 43126,
+    };
+    expect(
+      (await service.configureForServer(EXTENSION, COMPONENT, registration, "local-window")).kind,
+    ).toBe("refused");
+    expect(
+      (await service.configureClient({ ...registration, issuer: "invalid" }, "local-window")).kind,
+    ).toBe("refused");
+    expect(
+      await service.configureClient(
+        {
+          ...registration,
+          resource: SERVER,
+          clientAuthentication: {
+            method: "client_secret_post",
+            secretRef: CREDENTIAL,
+            tokenEndpoint: "https://other.example/token",
+          },
+        },
+        "local-window",
+      ),
+    ).toEqual({ kind: "configured" });
+    expect((await service.begin(EXTENSION, COMPONENT, "local-window")).kind).toBe("refused");
+    expect(oauth.begin).not.toHaveBeenCalled();
+  });
+
   it("discovers the issuer, registers Octant with the chosen callback, and begins the host's own flow", async () => {
     const { fetchImpl, calls } = issuerFetch({ scopes: ["mcp:tools"] });
     const { oauth, begun } = fakeOauth();

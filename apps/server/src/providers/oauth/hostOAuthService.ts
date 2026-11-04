@@ -443,6 +443,9 @@ function wireDescriptor(
     ...(descriptor.agentNameHint === undefined ? {} : { agentNameHint: descriptor.agentNameHint }),
     ...(descriptor.resource === undefined ? {} : { resource: descriptor.resource }),
     ...(descriptor.redirectPort === undefined ? {} : { redirectPort: descriptor.redirectPort }),
+    ...(descriptor.clientAuthentication === undefined
+      ? {}
+      : { clientAuthentication: descriptor.clientAuthentication }),
     ...(descriptor.tenantId === undefined ? {} : { tenantId: descriptor.tenantId }),
     ...(descriptor.audience === undefined ? {} : { audience: descriptor.audience }),
     ...(descriptor.endpointOrigin === undefined

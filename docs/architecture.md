@@ -8567,9 +8567,10 @@ instead of the generated slug and "Plugin package". The add's answer names the p
 created (`addedPackage`), and the sign-in starts on that package rather than
 on whichever one a snapshot diff shows. An entry is listed only after a probe showed the address
 behaving as its kind claims (a sign-in server: 401 with resource metadata,
-an authorization server with PKCE S256 and dynamic client registration); a
-vendor whose issuer offers no registration is listed as a key entry or not
-at all, never as a sign-in that would fail. Hide keeps an entry out of
+an authorization server with PKCE S256 and either dynamic registration or
+a verified registered-client setup); a vendor without a supported client
+setup is listed as a key entry or not at all. The shared registered-client
+foundation does not itself add vendor entries or promise their eligibility. Hide keeps an entry out of
 sight on this computer and Show hidden brings every entry back; that
 preference lives in the renderer's storage, since it changes nothing on the
 host. Connecting works only from the Octant window on the host, like Add
@@ -8630,9 +8631,20 @@ server's own canonical address, or a server could obtain a bearer meant for
 another API and receive it on connect; that names the authorization server;
 its metadata (RFC 8414, or the OpenID discovery document) must name that
 same issuer, names the endpoints and must allow PKCE with S256; Octant
-registers itself there as a
-public client (RFC 7591, `token_endpoint_auth_method: none`) naming a
-loopback callback whose port it chose first; then the host OAuth runner runs
+uses the locally configured application registration when one exists for
+that exact resource and issuer. Setup is a local-window-only
+`configure-client` request on the existing `/api/extensions/sign-in` route;
+it accepts only a generated hosted MCP server at that resource, and does not
+begin consent or alter an existing account grant. Safe registration metadata
+lives separately from account grants in the existing MCP sign-in state file,
+so sign-out and ordinary restarts retain the registration. A pre-registered
+client supplies its public client ID and an exact callback
+`http://127.0.0.1:<configured-port>/oauth/callback`. A metadata-document client
+uses an HTTPS document URL as its public client ID only when issuer metadata
+advertises `client_id_metadata_document_supported: true`. If no setup exists,
+Octant registers itself as a public client (RFC 7591,
+`token_endpoint_auth_method: none`) naming a loopback callback whose port it
+chose first. Then the host OAuth runner runs
 its ordinary PKCE flow under the `mcp-authorization` dialect, which sends the
 server's canonical address as `resource` (RFC 8707) on authorize, exchange and
 refresh, binds the chosen port, and accepts an empty scope list. Scopes
@@ -8650,7 +8662,26 @@ out revokes the grant
 where the issuer allows and forgets it either way; uninstalling the package
 does the same for every sign-in it had. An issuer that offers no client
 registration is refused in plain words, since Octant cannot invent a client
-id; a server that never asks for a sign-in is reported as such. The
+id; setup must supply one before consent. A configured callback port is never
+replaced with a random port: if busy, sign-in refuses as unavailable. Stop the
+conflicting listener and retry; changing a registered callback requires
+updating the vendor registration and local setup together. This foundation
+supports vendors accepting that exact loopback callback; other callback
+strategies and vendor-specific setup journeys require their own verified slice.
+
+A user/admin-owned confidential registration may reference a client secret in
+the broker's existing MCP credential namespace, including an existing linked
+secret-store pointer. Setup and persisted descriptors carry only that reference,
+the advertised `client_secret_post` or `client_secret_basic` method and the
+configured token endpoint. Discovery must still name the configured issuer,
+and its token endpoint must exactly match the secret's endpoint binding before
+consent. Only the broker resolves the secret at token exchange and refresh;
+refresh retains the reference and endpoint binding across restart and concurrent
+refresh remains coalesced. A missing or locked secret fails without sending a
+token request or deleting a healthy grant; restore the configured secret before
+retrying. No shared confidential secret ships in the app, and no hosted Octant
+confidential-client service is introduced. GitHub's PAT path remains available.
+A server that never asks for a sign-in is reported as such. The
 person's click on Sign in is the acknowledgment: there is no vendor terms
 text for a server they added themselves. A paired device can read the state
 and nothing more: a status read from a device returns the last known state

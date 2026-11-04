@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeMcpOAuthClientRegistration,
   decodeHostOAuthDescriptor,
   decodeHostOAuthJournalRecord,
   decodeHostOAuthSignInOffer,
@@ -8,6 +9,57 @@ import {
 } from "./hostOAuth";
 
 describe("host OAuth contracts", () => {
+  it("accepts reusable registration metadata and refuses raw secrets or unbound confidential clients", () => {
+    const registration = {
+      kind: "registered",
+      clientId: "owned-client",
+      issuer: "https://auth.example",
+      resource: "https://mcp.example/mcp",
+      redirectPort: 43126,
+    };
+    expect(decodeMcpOAuthClientRegistration(registration)).toEqual(registration);
+    expect(
+      decodeMcpOAuthClientRegistration({
+        ...registration,
+        kind: "metadata-document",
+        clientId: "https://client.example/oauth.json",
+      }).kind,
+    ).toBe("metadata-document");
+    for (const invalid of [
+      { ...registration, clientSecret: "must-not-accept" },
+      { ...registration, kind: "metadata-document", clientId: "plain-client-id" },
+      {
+        ...registration,
+        clientAuthentication: { method: "client_secret_post", secretRef: "not-a-ref" },
+      },
+      {
+        ...registration,
+        clientAuthentication: {
+          method: "client_secret_post",
+          secretRef: "44000000-0000-4000-8000-000000000001",
+        },
+      },
+    ])
+      expect(() => decodeMcpOAuthClientRegistration(invalid)).toThrow();
+    const descriptor = {
+      descriptorId: "registered-mcp",
+      clientId: "owned-client",
+      dialect: "mcp-authorization",
+      flow: "authorization-code-pkce",
+      authorizationEndpoint: "https://auth.example/authorize",
+      tokenEndpoint: "https://auth.example/token",
+      scopes: [],
+      termsId: "terms-1",
+      resource: registration.resource,
+      clientAuthentication: {
+        method: "client_secret_post",
+        secretRef: "44000000-0000-4000-8000-000000000001",
+        tokenEndpoint: "https://other.example/token",
+      },
+    };
+    expect(() => decodeHostOAuthDescriptor(descriptor)).toThrow();
+  });
+
   it("rejects a journal record that carries a token", () => {
     expect(() =>
       decodeHostOAuthJournalRecord({

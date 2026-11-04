@@ -205,6 +205,11 @@ describe("host OAuth service", () => {
       termsId: "mcp-sign-in-terms-1",
       resource: "https://mcp.example/mcp",
       redirectPort: 43125,
+      clientAuthentication: {
+        method: "client_secret_post",
+        secretRef: "44000000-0000-4000-8000-000000000001",
+        tokenEndpoint: "https://auth.example/token",
+      },
     });
     const actorId = randomUUID();
     service.acknowledgeTerms({ principalKind: "local-window", actorId, descriptor: mcp });
@@ -213,6 +218,11 @@ describe("host OAuth service", () => {
       dialect: "mcp-authorization",
       resource: "https://mcp.example/mcp",
       redirectPort: 43125,
+      clientAuthentication: {
+        method: "client_secret_post",
+        secretRef: "44000000-0000-4000-8000-000000000001",
+        tokenEndpoint: "https://auth.example/token",
+      },
     });
   });
 

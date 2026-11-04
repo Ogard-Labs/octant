@@ -977,6 +977,265 @@ async function signIn(
 }
 
 describe("the MCP authorization dialect", () => {
+  it("keeps a registered callback exact when its port is occupied", async () => {
+    const occupied = createServer();
+    await listen(occupied);
+    const address = occupied.address();
+    if (address === null || typeof address === "string") throw new Error("Expected TCP listener");
+    const runtime = createHostOAuthRuntime({ store: memoryStore() });
+    try {
+      expect(
+        await runtime.begin({
+          descriptor: {
+            descriptorId: "registered-mcp",
+            clientId: "owned-client",
+            dialect: "mcp-authorization",
+            flow: "authorization-code-pkce",
+            authorizationEndpoint: "https://issuer.example/authorize",
+            tokenEndpoint: "https://issuer.example/token",
+            scopes: [],
+            termsId: "terms-1",
+            resource: "https://mcp.example/mcp",
+            redirectPort: address.port,
+          },
+          actorId: randomUUID(),
+          termsAcknowledgedAt: new Date().toISOString(),
+        }),
+      ).toEqual({ kind: "refused", reason: "unavailable" });
+    } finally {
+      await runtime.close();
+      await closeServer(occupied);
+    }
+  });
+
+  it("never calls a token endpoint when the referenced secret is missing or the endpoint binding differs", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return Response.json({});
+    }) as typeof fetch;
+    const verifier = "x".repeat(43);
+    const input = {
+      tokenEndpoint: "https://issuer.example/token",
+      clientId: "owned-client",
+      code: "auth-code",
+      redirectUri: "http://127.0.0.1:43126/oauth/callback",
+      verifier,
+      challenge: createHash("sha256").update(verifier).digest("base64url"),
+      fetch: fetchImpl,
+      now: Date.now,
+      dialect: "mcp-authorization" as const,
+      resource: "https://mcp.example/mcp",
+      clientAuthentication: {
+        method: "client_secret_post" as const,
+        secretRef: randomUUID(),
+        tokenEndpoint: "https://issuer.example/token",
+      },
+    };
+    expect(await exchangeAuthorizationCode(input)).toEqual({
+      kind: "refused",
+      reason: "unavailable",
+    });
+    expect(
+      await exchangeAuthorizationCode({
+        ...input,
+        resolveClientSecret: async () => {
+          throw new CredentialStoreFailure("missing");
+        },
+      }),
+    ).toEqual({ kind: "refused", reason: "unavailable" });
+    expect(
+      await exchangeAuthorizationCode({
+        ...input,
+        tokenEndpoint: "https://other.example/token",
+        resolveClientSecret: async () => "must-not-release",
+      }),
+    ).toEqual({ kind: "refused", reason: "exchange-refused" });
+    expect(calls).toBe(0);
+  });
+
+  it.each(["client_secret_post", "client_secret_basic"] as const)(
+    "keeps %s secrets in the broker and refreshes from the registration reference after restart",
+    async (method) => {
+      const store = memoryStore();
+      const secretRef = randomUUID();
+      const secret = "owned secret:+/never-export";
+      let secretAvailable = true;
+      let clientRevoked = false;
+      const calls: Array<{ form: URLSearchParams; authorization: string | null }> = [];
+      const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({
+          form: new URLSearchParams(String(init?.body)),
+          authorization: new Headers(init?.headers).get("authorization"),
+        });
+        if (clientRevoked) return Response.json({ error: "invalid_client" }, { status: 401 });
+        return Response.json({ access_token: ACCESS, refresh_token: REFRESH, expires_in: 1 });
+      }) as typeof fetch;
+      let clock = Date.now();
+      const options = {
+        store,
+        fetch: fetchImpl,
+        now: () => clock,
+        resolveClientSecret: async (reference: string) => {
+          expect(reference).toBe(secretRef);
+          if (!secretAvailable) throw new CredentialStoreFailure("missing");
+          return secret;
+        },
+      };
+      const runtime = createHostOAuthRuntime(options);
+      const restarted = createHostOAuthRuntime(options);
+      try {
+        const started = await runtime.begin({
+          descriptor: {
+            descriptorId: "registered-mcp",
+            clientId: "owned:client",
+            dialect: "mcp-authorization",
+            flow: "authorization-code-pkce",
+            authorizationEndpoint: "https://issuer.example/authorize",
+            tokenEndpoint: "https://issuer.example/token",
+            scopes: [],
+            termsId: "terms-1",
+            resource: "https://mcp.example/mcp",
+            clientAuthentication: {
+              method,
+              secretRef,
+              tokenEndpoint: "https://issuer.example/token",
+            },
+          },
+          actorId: randomUUID(),
+          termsAcknowledgedAt: new Date(clock).toISOString(),
+        });
+        if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce")
+          throw new Error("Expected consent");
+        const authorize = new URL(started.authorizationUrl);
+        expect(authorize.searchParams.has("client_secret")).toBe(false);
+        const callback = new URL(authorize.searchParams.get("redirect_uri") ?? "");
+        callback.searchParams.set("code", "auth-code");
+        callback.searchParams.set("state", authorize.searchParams.get("state") ?? "");
+        expect((await fetch(callback)).ok).toBe(true);
+        const done = runtime.status(started.attemptId);
+        if (done.kind !== "signed-in") throw new Error("Expected signed in");
+        expect(JSON.stringify([...store.values.values()])).not.toContain(secret);
+        expect(JSON.stringify(done)).not.toContain(secret);
+        await runtime.close();
+        clock += 5_000;
+        const results = await Promise.all([
+          restarted.refresh(done.credentialRef),
+          restarted.refresh(done.credentialRef),
+        ]);
+        expect(results.every((result) => result.kind === "refreshed")).toBe(true);
+        expect(calls).toHaveLength(2);
+        for (const call of calls) {
+          expect(call.form.get("resource")).toBe("https://mcp.example/mcp");
+          if (method === "client_secret_post") {
+            expect(call.form.get("client_secret")).toBe(secret);
+            expect(call.authorization).toBeNull();
+          } else {
+            const encode = (value: string) => new URLSearchParams({ v: value }).toString().slice(2);
+            expect(call.authorization).toBe(
+              `Basic ${Buffer.from(`${encode("owned:client")}:${encode(secret)}`).toString("base64")}`,
+            );
+            expect(call.form.has("client_secret")).toBe(false);
+          }
+        }
+        const beforeMissing = await store.resolve(done.credentialRef);
+        clock += 5_000;
+        secretAvailable = false;
+        expect(await restarted.refresh(done.credentialRef)).toEqual({ kind: "transient" });
+        expect(await store.resolve(done.credentialRef)).toBe(beforeMissing);
+        expect(calls).toHaveLength(2);
+        secretAvailable = true;
+        clientRevoked = true;
+        expect(await restarted.refresh(done.credentialRef)).toEqual({
+          kind: "sign-in-again",
+          reason: "revoked",
+        });
+        expect(await store.has(done.credentialRef)).toBe(false);
+      } finally {
+        await runtime.close();
+        await restarted.close();
+      }
+    },
+  );
+
+  it("resolves confidential registration secrets only in the broker's MCP namespace", async () => {
+    const store = memoryStore();
+    const mcpSecrets = memoryStore();
+    const secretRef = randomUUID();
+    await store.set(secretRef, "wrong-provider-namespace");
+    await mcpSecrets.set(secretRef, "owned-client-secret");
+    let tokenCalls = 0;
+    const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const form = new URLSearchParams(String(init?.body));
+      expect(form.get("client_secret")).toBe("owned-client-secret");
+      expect(form.get("code_verifier")).toBeTruthy();
+      expect(form.get("resource")).toBe("https://mcp.example/mcp");
+      tokenCalls++;
+      return Response.json({ access_token: ACCESS, refresh_token: REFRESH, expires_in: 3600 });
+    }) as typeof fetch;
+    const broker = await startCredentialBroker(
+      store,
+      undefined,
+      { fetch: fetchImpl },
+      undefined,
+      undefined,
+      undefined,
+      mcpSecrets,
+    );
+    const call = (path: string, body: unknown) =>
+      broker.fetchForTest(
+        new Request(new URL(path, broker.url), {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-credential-broker-token": broker.token,
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    try {
+      const response = await call("/v1/oauth/begin", {
+        descriptor: {
+          descriptorId: "registered-mcp",
+          clientId: "owned-client",
+          dialect: "mcp-authorization",
+          flow: "authorization-code-pkce",
+          authorizationEndpoint: "https://issuer.example/authorize",
+          tokenEndpoint: "https://issuer.example/token",
+          scopes: [],
+          termsId: "terms-1",
+          resource: "https://mcp.example/mcp",
+          clientAuthentication: {
+            method: "client_secret_post",
+            secretRef,
+            tokenEndpoint: "https://issuer.example/token",
+          },
+        },
+        actorId: randomUUID(),
+        termsAcknowledgedAt: new Date().toISOString(),
+      });
+      const started: unknown = await response.json();
+      if (
+        !isRecord(started) ||
+        typeof started.authorizationUrl !== "string" ||
+        typeof started.attemptId !== "string"
+      )
+        throw new Error("Expected consent");
+      const authorize = new URL(started.authorizationUrl);
+      const callback = new URL(authorize.searchParams.get("redirect_uri") ?? "");
+      callback.searchParams.set("state", authorize.searchParams.get("state") ?? "");
+      callback.searchParams.set("code", "auth-code");
+      expect((await fetch(callback)).ok).toBe(true);
+      const status = await call("/v1/oauth/status", { attemptId: started.attemptId });
+      const text = await status.text();
+      expect(text).toContain('"kind":"signed-in"');
+      expect(text).not.toContain("owned-client-secret");
+      expect(tokenCalls).toBe(1);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("binds the chosen callback port, names the resource on authorize, exchange and refresh, and grants without a scope", async () => {
     const seen: Array<{ readonly step: string; readonly resource: string | null }> = [];
     let redirectSeen = "";

@@ -432,13 +432,24 @@ the package in **Installed** to stop offering its tools. See
 
 A server you added by its address can ask you to sign in instead of taking a
 key. Its component in **Extension packages** then shows **Sign in**. Octant
-reads where the server sends people to sign in, registers itself there,
-opens that page in your browser, and keeps the grant in this computer's
+reads where the server sends people to sign in, uses its configured OAuth
+client or registers a public client there, and opens that page in your browser, and keeps the grant in this computer's
 credential store (the Keychain on a Mac); the row says **Signed in through**
 the issuer, with **Sign out**. If the grant stops working you see **Sign in
 again**. A server whose sign-in needs a client id Octant cannot register for
-itself says so; you can still add that server with a key in a header. Signing
-in and out work only from the Octant window on this host.
+itself needs application setup before account consent; you can still add that
+server with a key in a header. Support for each service's setup and account
+eligibility is added separately. Signing in and out work only from the Octant
+window on this host.
+
+For an integration configured with a registered client, its callback address
+stays the same after restarting Octant or signing out. If another program uses
+that callback port, close the conflicting listener and try again; Octant does
+not silently change the address registered with the service. A confidential
+client's secret stays in the credential broker. If that secret or its linked
+store is unavailable, restore it before retrying. Application setup never
+replaces your account consent or expands what a task may do. GitHub continues
+to accept personal access tokens.
 
 ### Found on this computer
 
