@@ -14,6 +14,9 @@ import type { HostControlClient } from "@octant/client-runtime/host-control-clie
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { HostDataSettingsSection, HostSettingsSection } from "./HostSettingsSection";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
+import { CodeDebugWindowState, codeDebugThreadKey } from "../debug/codeDebugWindowState";
+import { CodeDebugWindowStoreContext } from "../debug/CodeDebugWindowProvider";
+import { decodeCodeProjectFilePath } from "@octant/contracts/code";
 
 const serviceStatus: HostControlStatus = {
   identity: { hostId: "host-1", instanceId: "instance-1", serviceMode: "service" },
@@ -563,36 +566,91 @@ describe("HostSettingsSection", () => {
     expect(screen.getByLabelText("Backup label").tagName).toBe("INPUT");
   });
 
-  it("removes this client's unsent composer draft when a thread purge succeeds", async () => {
-    const user = userEvent.setup();
-    const threadId = "00000000-0000-4000-8000-000000000901";
-    composerThreadDrafts.write("chat", threadId, {
-      text: "do not keep",
-      caretIndex: 0,
-      stagedDropped: false,
-    });
-    render(
-      <HostDataSettingsSection
-        client={makeClient({
-          purgeThreads: async () => ({
-            operation: "purge-threads",
-            scope: { kind: "thread", mode: "chat", threadId: threadId as never },
-            purged: [{ mode: "chat", threadId: threadId as never }],
-            alreadyPurged: [],
-            retained: ["other-threads"],
-            delinked: ["usage-records"],
-            deleted: ["thread-journal"],
-            occurredAt: "2026-08-19T12:00:00.000Z" as never,
-          }),
-        })}
-      />,
-    );
-    await screen.findByText("Thread retention");
-    await user.click(screen.getByRole("checkbox", { name: /permanently erases/i }));
-    await user.click(screen.getByRole("button", { name: "Purge" }));
-    expect(await screen.findByText(/Purged 1 thread/)).toBeInTheDocument();
-    expect(composerThreadDrafts.read("chat", threadId)).toBeUndefined();
-  });
+  it.each([
+    ["chat", false],
+    ["code", false],
+    ["code", true],
+  ] as const)(
+    "removes the exact %s thread configuration, reporting local cleanup failure=%s",
+    async (mode, failCleanup) => {
+      const user = userEvent.setup();
+      const threadId = "00000000-0000-4000-8000-000000000901";
+      composerThreadDrafts.write(mode, threadId, {
+        text: "do not keep",
+        caretIndex: 0,
+        stagedDropped: false,
+      });
+      const records = new Map<string, string>();
+      let failRemoval = false;
+      const storage: Storage = {
+        get length() {
+          return records.size;
+        },
+        key: (index) => [...records.keys()][index] ?? null,
+        clear: () => records.clear(),
+        getItem: (name) => records.get(name) ?? null,
+        setItem: (name, value) => {
+          records.set(name, value);
+        },
+        removeItem: (name) => {
+          if (failRemoval) throw new Error("Storage unavailable");
+          records.delete(name);
+        },
+      };
+      const scope = {
+        origin: "http://127.0.0.1:13773",
+        windowId: "40000000-0000-4000-8000-000000000001",
+        storage,
+      };
+      const breakpoints = new CodeDebugWindowState(scope);
+      const key = codeDebugThreadKey(threadId, "30000000-0000-4000-8000-000000000001");
+      const path = decodeCodeProjectFilePath("src/main.js");
+      breakpoints.toggleBreakpoint(key, path, 3);
+      failRemoval = failCleanup;
+      render(
+        <CodeDebugWindowStoreContext.Provider value={breakpoints}>
+          <HostDataSettingsSection
+            client={makeClient({
+              purgeThreads: async () => ({
+                operation: "purge-threads",
+                scope: { kind: "thread", mode, threadId: threadId as never },
+                purged: [{ mode, threadId: threadId as never }],
+                alreadyPurged: [],
+                retained: ["other-threads"],
+                delinked: ["usage-records"],
+                deleted: ["thread-journal"],
+                occurredAt: "2026-08-19T12:00:00.000Z" as never,
+              }),
+            })}
+          />
+        </CodeDebugWindowStoreContext.Provider>,
+      );
+      await screen.findByText("Thread retention");
+      await user.click(screen.getByRole("checkbox", { name: /permanently erases/i }));
+      await user.click(screen.getByRole("button", { name: "Purge" }));
+      expect(await screen.findByText(/Purged 1 thread/)).toBeInTheDocument();
+      expect(composerThreadDrafts.read(mode, threadId)).toBeUndefined();
+      expect(new CodeDebugWindowState(scope).read(key).breakpoints.get(path)).toEqual(
+        mode === "code" ? undefined : [3],
+      );
+      if (failCleanup) {
+        expect(
+          await screen.findByText(/saved breakpoint configuration could not be removed/),
+        ).toBeVisible();
+        expect(
+          [...records.keys()].some((key) => key.startsWith("octant.debug.breakpoints.v1:")),
+        ).toBe(true);
+        failRemoval = false;
+        await user.click(screen.getByRole("button", { name: "Retry breakpoint cleanup" }));
+        expect(
+          screen.queryByRole("button", { name: "Retry breakpoint cleanup" }),
+        ).not.toBeInTheDocument();
+        expect(
+          [...records.keys()].some((key) => key.startsWith("octant.debug.breakpoints.v1:")),
+        ).toBe(false);
+      }
+    },
+  );
 
   it("states an export refusal in words and lets a titled thread be chosen", async () => {
     const user = userEvent.setup();

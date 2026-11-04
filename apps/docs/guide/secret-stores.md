@@ -107,3 +107,23 @@ Linking a store and pointing a key at it happen in a local Octant window on the
 host computer. A paired phone or browser cannot link a store or change an item.
 A host with no credential store, such as a Linux machine without a keyring,
 shows that **Secret stores** is unavailable.
+
+## One-time token requests in Code
+
+An agent can use `request_credential` to open a private card in its Code
+conversation. Currently this supports a one-time Linear account access check.
+Enter the API token and choose **Check access**, or choose **Decline**. The token
+is sent only to Linear for the displayed check; it does not become a chat
+message or a saved sign-in. The destination and one-use scope are shown above
+the field. Use **Show token** to check your entry, or expand **Not saved or added
+to chat** for handling details.
+
+The request expires after ten minutes and ends when the turn is cancelled or
+loses access. If the connection fails, Octant clears your entry and does not
+retry automatically. A token already sent to Linear cannot be recalled.
+
+This card is available at the originating local window, outside Plan mode, for
+providers that support app-managed tools. It does not accept administrator
+passwords or hand credentials to arbitrary shell commands. Choosing a linked
+1Password item is not yet available in this card; existing Settings bindings
+continue to work separately.

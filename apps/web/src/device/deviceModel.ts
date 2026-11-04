@@ -382,6 +382,8 @@ export function deviceActorWord(actor: EventActor): string {
       return "You";
     case "remote-device":
       return "Remote device";
+    case "owner-unlock":
+      return "Owner device";
     case "system":
       return "Octant";
   }

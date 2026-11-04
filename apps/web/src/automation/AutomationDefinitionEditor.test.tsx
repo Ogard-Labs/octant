@@ -1,4 +1,10 @@
-import type { AutomationDefinitionDraft } from "@octant/contracts";
+import {
+  decodeAgentProfile,
+  decodeAutomationDefinition,
+  decodeProjectSummary,
+  type AutomationDefinitionDraft,
+} from "@octant/contracts";
+import { buildAutomationEditorCatalog } from "./automationEditorCatalog";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -58,6 +64,50 @@ function catalog(overrides: Partial<AutomationEditorCatalog> = {}): AutomationEd
   };
 }
 
+function ordinaryWorkCatalog(): AutomationEditorCatalog {
+  return buildAutomationEditorCatalog({
+    hostId: "local",
+    hostLabel: "This Mac",
+    actorId: AUTOMATION_UI_TEST_IDS.actor,
+    projects: [
+      decodeProjectSummary({
+        id: workDraft.projectId,
+        name: "Docs Project",
+        type: "work",
+        lifecycle: "active",
+        pinned: false,
+        rank: "0/1",
+        version: 1,
+        createdAt: AUTOMATION_UI_TEST_NOW,
+        updatedAt: AUTOMATION_UI_TEST_NOW,
+        binding: { canonicalRoot: "/tmp/docs" },
+        bindingRevisionId: AUTOMATION_UI_TEST_IDS.bindingRevision,
+      }),
+    ],
+    profiles: [
+      decodeAgentProfile({
+        id: AUTOMATION_UI_TEST_IDS.executionProfile,
+        displayName: "Work default",
+        approvedSkillIds: [],
+        toolConstraints: [],
+        modelConstraints: ["approved-model"],
+        defaultExecutionPolicy: "approval-gated",
+        defaultPermissionPersistence: "current-session",
+        compatibleModes: ["work", "code"],
+        version: 1,
+        createdAt: AUTOMATION_UI_TEST_NOW,
+        updatedAt: AUTOMATION_UI_TEST_NOW,
+      }),
+    ],
+    providerChoicesByMode: {
+      work: [
+        { providerInstanceId: AUTOMATION_UI_TEST_IDS.providerInstance, modelId: "approved-model" },
+      ],
+      code: [],
+    },
+  });
+}
+
 async function chooseLabeledOption(label: string, optionName: string): Promise<void> {
   await userEvent.click(screen.getByLabelText(label));
   await userEvent.click(await screen.findByRole("option", { name: optionName }));
@@ -67,7 +117,7 @@ function editorProps(overrides: Record<string, unknown> = {}) {
   return {
     catalog: catalog(),
     onCancel: vi.fn(),
-    onSubmit: vi.fn(async () => undefined),
+    onSubmit: vi.fn(async (_draft: AutomationDefinitionDraft) => undefined),
     now: () => AUTOMATION_UI_TEST_NOW,
     generateId: () => AUTOMATION_UI_TEST_IDS.deliveryTargetRevision,
     ...overrides,
@@ -138,8 +188,33 @@ describe("AutomationDefinitionEditor creation", () => {
     expect(draft.deliveryTarget.confirmed).toBe(true);
     expect(draft.deliveryTarget.revision).toBe(1);
     expect(draft.targetPolicy).toBe("new-thread");
-    // Asking first is the default; running at the Project's mode is opted into.
+    // Asking first is saved explicitly; the Project's mode is opted into.
+    expect(draft.runLevel).toBe("ask-first");
     expect(draft.projectLevel).toBeUndefined();
+  });
+
+  it("creates a Work routine from the real catalog with one ordinary profile", async () => {
+    const props = editorProps({ catalog: ordinaryWorkCatalog() });
+    render(<AutomationDefinitionEditor {...props} />);
+    await userEvent.type(screen.getByLabelText("Name"), "Weekly summary");
+    await userEvent.type(screen.getByLabelText("Task for each run"), "Summarize open work.");
+    await chooseLabeledOption("Project", "Docs Project");
+    await chooseLabeledOption("Execution profile", "Work default");
+    await chooseLabeledOption("Authority profile", "Work default");
+    await chooseLabeledOption("Schedule", "Run once");
+    fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
+    await userEvent.type(screen.getByLabelText("Delivery"), "A weekly summary exists.");
+    await userEvent.click(
+      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
+    );
+    const draft = await savedDraft(props);
+    expect(draft.authorityProfile.effective).toMatchObject({
+      filesystem: true,
+      shell: true,
+      git: true,
+      executionPolicy: "approval-gated",
+    });
+    expect(draft.runLevel).toBe("ask-first");
   });
 
   async function fillWorkRoutine(): Promise<void> {
@@ -250,6 +325,7 @@ describe("AutomationDefinitionEditor creation", () => {
     const draft = (props.onSubmit as ReturnType<typeof vi.fn>).mock
       .calls[0]![0] as AutomationDefinitionDraft;
     expect(draft.agentMerge).toBe("allowed");
+    expect(draft.runLevel).toBe("ask-first");
   });
 
   it("builds a weekly-local trigger with weekdays, wall time, and IANA timezone", async () => {
@@ -401,6 +477,37 @@ describe("AutomationDefinitionEditor editing", () => {
       .calls[0]![0] as AutomationDefinitionDraft;
     expect(draft.deliveryTarget.revision).toBe(definition.deliveryTarget.revision + 1);
     expect(draft.deliveryTarget.confirmedAt).toBe(AUTOMATION_UI_TEST_NOW);
+  });
+
+  it("repairs a Work routine's missing shell and Git only when the person saves it", async () => {
+    const authority = { ...workDraft.authorityProfile.effective, shell: false, git: false };
+    const blocked = decodeAutomationDefinition({
+      ...automationDefinitionFixture(),
+      authorityProfile: {
+        ...workDraft.authorityProfile,
+        profileId: String(workDraft.executionProfile.profileId),
+        requested: authority,
+        effective: authority,
+      },
+    });
+    const props = editorProps({ catalog: ordinaryWorkCatalog(), initial: blocked });
+    render(<AutomationDefinitionEditor {...props} />);
+    expect(screen.getByLabelText("Authority profile")).toHaveTextContent("Work default");
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    expect(blocked.authorityProfile.effective.shell).toBe(false);
+    await userEvent.click(
+      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
+    const [call] = props.onSubmit.mock.calls;
+    expect(call?.[0]).toMatchObject({
+      runLevel: "ask-first",
+      authorityProfile: {
+        effective: { filesystem: true, shell: true, git: true, executionPolicy: "approval-gated" },
+      },
+    });
+    expect(blocked.authorityProfile.effective.shell).toBe(false);
   });
 
   it("shows the server's typed failure message and keeps the form open", async () => {

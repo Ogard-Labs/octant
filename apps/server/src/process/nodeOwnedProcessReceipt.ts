@@ -188,20 +188,171 @@ export async function terminateOwnedProcess(
   processIdentity: (pid: number) => Promise<string | undefined>,
   killProcessGroup: (pid: number, signal: NodeJS.Signals) => void = signalProcessGroup,
   processGroupExists: (pid: number) => Promise<boolean> | boolean = defaultProcessGroupExists,
+  witnesses: ReadonlyArray<ProcessGroupWitness> = [],
+  observeGroup: (
+    pid: number,
+  ) => Promise<ReadonlyArray<ProcessGroupWitness>> = readProcessGroupWitnesses,
 ): Promise<void> {
-  const owns = async () => {
-    const identity = await processIdentity(pid);
-    if (identity === expectedIdentity) return true;
-    // The recorded leader may have exited while descendants remain in its
-    // detached group. Keep ownership of that group and finish termination.
-    return identity === undefined && (await processGroupExists(pid));
-  };
+  // Only a matching live leader can establish new evidence. A persisted
+  // leaderless group may have been reused since the previous host session.
+  const observed = await captureProcessGroupWitnesses(
+    pid,
+    expectedIdentity,
+    processIdentity,
+    observeGroup,
+  );
+  const known = [...witnesses, ...observed];
+  const owns = () =>
+    ownsProcessGroup(
+      pid,
+      expectedIdentity,
+      processIdentity,
+      processGroupExists,
+      known,
+      observeGroup,
+    );
   if (!(await owns())) return;
   killProcessGroup(pid, "SIGTERM");
-  if (await waitUntilReleased(pid, owns, timeoutMs, processGroupExists)) return;
+  if (await waitUntilReleased(owns, timeoutMs)) return;
+  if (!(await owns())) return;
   killProcessGroup(pid, "SIGKILL");
-  if (!(await waitUntilReleased(pid, owns, timeoutMs, processGroupExists)))
+  if (!(await waitUntilReleased(owns, timeoutMs)))
     throw new Error("Owned process did not terminate after SIGKILL.");
+}
+
+export interface ProcessGroupWitness {
+  readonly pid: number;
+  readonly processIdentity: string;
+}
+
+/** Capture members only while the launch leader proves which group this is. */
+export async function captureProcessGroupWitnesses(
+  pid: number,
+  expectedIdentity: string,
+  processIdentity: (pid: number) => Promise<string | undefined>,
+  observeGroup: (
+    pid: number,
+  ) => Promise<ReadonlyArray<ProcessGroupWitness>> = readProcessGroupWitnesses,
+): Promise<ReadonlyArray<ProcessGroupWitness>> {
+  if ((await processIdentity(pid)) !== expectedIdentity) return [];
+  let members: ReadonlyArray<ProcessGroupWitness>;
+  try {
+    members = await observeGroup(pid);
+  } catch {
+    // Descendant evidence is optional while the live leader still proves
+    // ownership. Failure adds no witness; it can never authorize a later
+    // leaderless signal. That path must observe surviving membership itself.
+    return [];
+  }
+  if ((await processIdentity(pid)) !== expectedIdentity) return [];
+  return members.filter((member) => member.pid !== pid);
+}
+
+/** An existing PGID alone never establishes ownership after its leader exits. */
+export async function ownsProcessGroup(
+  pid: number,
+  expectedIdentity: string,
+  processIdentity: (pid: number) => Promise<string | undefined>,
+  processGroupExists: (pid: number) => Promise<boolean> | boolean = defaultProcessGroupExists,
+  witnesses: ReadonlyArray<ProcessGroupWitness> = [],
+  observeGroup: (
+    pid: number,
+  ) => Promise<ReadonlyArray<ProcessGroupWitness>> = readProcessGroupWitnesses,
+): Promise<boolean> {
+  const identity = await processIdentity(pid);
+  if (identity === expectedIdentity) return true;
+  if (identity !== undefined || !(await processGroupExists(pid))) return false;
+  if (witnesses.length > 0) {
+    const members = await observeGroup(pid);
+    if (
+      members.some((member) =>
+        witnesses.some(
+          (witness) =>
+            witness.pid === member.pid && witness.processIdentity === member.processIdentity,
+        ),
+      )
+    )
+      return true;
+  }
+  throw new Error("Process group ownership is uncertain after its leader exited.");
+}
+
+/** No command or environment is requested; every sample rechecks group membership. */
+export async function readProcessGroupWitnesses(
+  pid: number,
+): Promise<ReadonlyArray<ProcessGroupWitness>> {
+  const maxMembers = 256;
+  if (!Number.isSafeInteger(pid) || pid < 1) throw new Error("Invalid process group.");
+  if (process.platform === "darwin") {
+    let stdout: string;
+    try {
+      ({ stdout } = await execFileAsync(
+        "/bin/ps",
+        ["-g", String(pid), "-o", "pid=,pgid=,lstart="],
+        { timeout: 1_000, maxBuffer: 32_768 },
+      ));
+    } catch (error) {
+      if (!defaultProcessGroupExists(pid)) return [];
+      throw error;
+    }
+    const lines = stdout
+      .trim()
+      .split("\n")
+      .filter((line) => line.trim() !== "");
+    if (lines.length > maxMembers) throw new Error("Too many owned process group members.");
+    return lines.map((line) => {
+      const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line);
+      if (match?.[1] === undefined || match[2] !== String(pid) || match[3] === undefined)
+        throw new Error("Process group membership could not be observed.");
+      return {
+        pid: Number(match[1]),
+        processIdentity: hashIdentity(["darwin", match[1], match[2], match[3]]),
+      };
+    });
+  }
+  if (process.platform === "linux") {
+    let stdout: string;
+    try {
+      // procps ps -g selects sessions, unlike BSD ps. pgrep -g selects PGID.
+      ({ stdout } = await execFileAsync("/usr/bin/pgrep", ["-g", String(pid)], {
+        timeout: 1_000,
+        maxBuffer: 4_096,
+      }));
+    } catch (error) {
+      if (!defaultProcessGroupExists(pid)) return [];
+      throw error;
+    }
+    const members = stdout.trim().split(/\s+/);
+    if (members.length > maxMembers) throw new Error("Too many owned process group members.");
+    const bootId = (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim();
+    const witnesses: ProcessGroupWitness[] = [];
+    for (const member of members) {
+      if (!/^[1-9]\d*$/.test(member)) throw new Error("Invalid process group member.");
+      let processStat: string;
+      try {
+        processStat = await readFile(`/proc/${member}/stat`, "utf8");
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ESRCH") continue;
+        throw error;
+      }
+      const end = processStat.lastIndexOf(")");
+      if (end < 0) throw new Error("Process group membership could not be observed.");
+      const fields = processStat
+        .slice(end + 1)
+        .trim()
+        .split(/\s+/);
+      if (fields[2] !== String(pid)) continue;
+      if (fields[19] === undefined)
+        throw new Error("Process group identity could not be observed.");
+      witnesses.push({
+        pid: Number(member),
+        processIdentity: hashIdentity(["linux", member, bootId, fields[19]]),
+      });
+    }
+    return witnesses;
+  }
+  throw new Error("Process group observation is unavailable on this platform.");
 }
 
 function parseReceipt(value: unknown): OwnedProcessReceipt {
@@ -226,13 +377,11 @@ function receiptName(supervisor: string, ownerId: string, pid: number): string {
 }
 
 async function waitUntilReleased(
-  pid: number,
   owns: () => Promise<boolean>,
   timeoutMs: number,
-  processGroupExists?: (pid: number) => Promise<boolean> | boolean,
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  while ((await owns()) || (processGroupExists !== undefined && (await processGroupExists(pid)))) {
+  while (await owns()) {
     if (Date.now() >= deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
