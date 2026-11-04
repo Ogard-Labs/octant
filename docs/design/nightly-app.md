@@ -100,8 +100,8 @@ Native close reports failure while an OS launch completion is still outstanding.
 
 Unsigned native refusal and a synthetic host startup fixture do not establish
 signed installed-app launch, complete host payload, simultaneous-start races or
-coexistence. Full signed quit-one/quit-last acceptance and reconnect remain
-separate work.
+coexistence. Full signed quit-one/quit-last and reconnect acceptance remain
+separate validation.
 
 ## Keeping the host for current clients
 
@@ -147,8 +147,42 @@ uses the same active-work confirmation and current-intent check.
 This lifetime policy is implemented before the existing shutdown callback.
 The independent native-helper and acquired-resource cleanup changes keep their
 own ownership and evidence. An extracted startup or synthetic peer fixture is
-not full signed-app or host-payload acceptance. Reconnect after host replacement
-remains separate work.
+not full signed-app or host-payload acceptance.
+
+## Reconnecting after host loss
+
+An opened Nightly window that loses its native lease destroys its stale renderer
+before recovering. One recovery attempt runs at a time, for at most 30 seconds
+from loss, including cleanup of the old lease. Refused attempts back off from
+250 milliseconds to a two-second maximum. Existing native operation deadlines
+remain three seconds; an exchange already in flight can take its own bounded
+cleanup time. A malformed receipt ends recovery immediately. Exhaustion explains
+the failure and closes Nightly. Ordinary first-launch refusal does not start
+this recovery loop.
+
+Every attempt registers a new native handle and obtains a fresh host instance,
+server-issued window identity, renderer identity and capability. The native
+window protocol independently validates the current peer's audit token and full
+signed identity for each exchange; the one-shot status preflight is not reopened.
+No cached descriptor grants authority, and recovery never launches a host or
+trusts a discovered replacement. Person close or quit cancels the loop and
+destroys/revokes an acquisition that completes late. A pending renderer load
+cannot show a window after cancellation or lease expiry.
+
+Only normal in-memory window bounds carry into the fresh window. Old window
+capabilities, layout and drafts are not migrated to a new server window identity;
+window-state continuity remains separate work. Reconnection never resumes an
+interrupted provider turn implicitly.
+
+An app-managed host restart grants a grace only when Stable is already retaining
+its host for a current authenticated Nightly client. Its restart wait is bounded
+to 30 seconds, spanning the existing bounded host stop and 15-second readiness
+wait. Repeated requests cannot extend that wait. After actual host readiness,
+an absent fresh client receives the existing 30-second first-client grace; a
+fresh current lease cancels it. Failure or expiry uses the normal guarded
+last-client quit. Ordinary reopen invalidates the grace. Ungraceful host loss
+does not receive this restart grant, and an arbitrary restart request cannot
+create retained intent.
 
 ## Embedded Browser
 

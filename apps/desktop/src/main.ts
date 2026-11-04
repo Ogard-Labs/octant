@@ -2127,8 +2127,18 @@ export async function restartDesktopHostAndRefreshWindowAuthorities(options: {
 }
 
 async function restartDesktopHost(): Promise<LocalHostDescriptor> {
+  const finishRestart = desktopClientLifetime.beginHostRestart();
   const outcome = await restartDesktopHostAndRefreshWindowAuthorities({
-    restart: () => hostLifecycle.restart(),
+    restart: async () => {
+      try {
+        const host = await hostLifecycle.restart();
+        finishRestart(true);
+        return host;
+      } catch (error) {
+        finishRestart(false);
+        throw error;
+      }
+    },
     refreshWindowAuthorities: refreshDesktopWindowAuthorities,
   });
   if (outcome.windowAuthorities === "attention-required") {

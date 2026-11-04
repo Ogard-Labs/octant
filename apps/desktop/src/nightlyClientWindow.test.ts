@@ -31,21 +31,26 @@ function fixture() {
     revokeWindow: vi.fn(async () => ({ kind: "revoked" })),
   };
   const load = vi.fn(async () => {});
+  const show = vi.fn();
+  const lost = vi.fn();
   const destroy = vi.fn(() => {
     destroyed = true;
     onClosed();
   });
   const createWindow = vi.fn(() => ({
     load,
+    show,
     destroy,
     isDestroyed: () => destroyed,
     onClosed: (listener: () => void) => {
       onClosed = listener;
     },
   }));
-  const open = () =>
+  const open = (signal?: AbortSignal) =>
     openNightlyClientWindow({
       native,
+      onLeaseLost: lost,
+      ...(signal === undefined ? {} : { signal }),
       createWindow,
       elapsedNow: () => elapsed,
       schedule: (delay, callback) => {
@@ -62,6 +67,8 @@ function fixture() {
     createWindow,
     destroy,
     load,
+    show,
+    lost,
     timers,
     advance: (value: number) => {
       elapsed = value;
@@ -70,6 +77,52 @@ function fixture() {
 }
 
 describe("ordinary Nightly client window", () => {
+  it("reports failed revocation when cancellation refuses a late native registration", async () => {
+    const f = fixture();
+    const controller = new AbortController();
+    vi.mocked(f.native.revokeWindow).mockResolvedValueOnce({ kind: "refused" });
+    controller.abort();
+    expect(await f.open(controller.signal)).toEqual({
+      kind: "refused",
+      reason: "native-unavailable",
+      cleanupFailed: true,
+    });
+    expect(f.createWindow).not.toHaveBeenCalled();
+  });
+  it("cancels a pending renderer load without showing its late completion", async () => {
+    const f = fixture();
+    const controller = new AbortController();
+    let loaded = () => {};
+    f.load.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          loaded = resolve;
+        }),
+    );
+    const pending = f.open(controller.signal);
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalledOnce());
+    controller.abort();
+    expect(await pending).toEqual({ kind: "refused", reason: "deadline-exceeded" });
+    loaded();
+    expect(f.show).not.toHaveBeenCalled();
+    expect(f.destroy).toHaveBeenCalledOnce();
+    expect(f.native.revokeWindow).toHaveBeenCalledOnce();
+    expect(f.lost).not.toHaveBeenCalled();
+  });
+  it("announces lost authority before destroying an opened renderer, but never on person close", async () => {
+    const f = fixture();
+    await f.open();
+    f.destroy.mockImplementationOnce(() => {
+      expect(f.lost).toHaveBeenCalledOnce();
+    });
+    f.advance(15_000);
+    f.timers.find((timer) => timer.delay === 15_000)?.callback();
+    expect(f.lost).toHaveBeenCalledOnce();
+    const ordinary = fixture();
+    const client = await ordinary.open();
+    if (client.kind === "opened") await client.close();
+    expect(ordinary.lost).not.toHaveBeenCalled();
+  });
   it("loads its renderer using the host-issued bootstrap and releases one lease on repeated close", async () => {
     const f = fixture();
     const opened = await f.open();
@@ -103,6 +156,8 @@ describe("ordinary Nightly client window", () => {
       expect(f.destroy).toHaveBeenCalledOnce();
       finishLoad();
       expect(await pending).toEqual({ kind: "refused", reason: "deadline-exceeded" });
+      expect(f.show).not.toHaveBeenCalled();
+      expect(f.lost).not.toHaveBeenCalled();
       expect(f.native.revokeWindow).toHaveBeenCalledOnce();
     } finally {
       finishLoad();

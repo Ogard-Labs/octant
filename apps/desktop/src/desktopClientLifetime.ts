@@ -13,11 +13,13 @@ export function createDesktopClientLifetime(options: {
   let stopped = false;
   let lastCount = options.currentNightlyWindows();
   let grace: ReturnType<typeof setTimeout> | undefined;
+  let restart: { readonly finish: (ready?: boolean) => void } | undefined;
   let pendingQuit: Promise<void> | undefined;
   let pendingClose: Promise<"retained" | "quit-required" | "failed"> | undefined;
   const cancelGrace = () => {
     clearTimeout(grace);
     grace = undefined;
+    restart = undefined;
   };
   const finishIfEmpty = () => {
     if (
@@ -53,6 +55,33 @@ export function createDesktopClientLifetime(options: {
     );
   };
   return Object.freeze({
+    beginHostRestart: (): ((ready?: boolean) => void) => {
+      if (restart !== undefined) return restart.finish;
+      if (stopped || !retaining || closing || options.currentNightlyWindows() <= 0) return () => {};
+      cancelGrace();
+      const arm = () => {
+        const timer = setTimeout(() => {
+          if (grace !== timer) return;
+          grace = undefined;
+          restart = undefined;
+          finishIfEmpty();
+        }, NIGHTLY_FIRST_WINDOW_GRACE_MS);
+        grace = timer;
+        timer.unref();
+      };
+      const ticket = {
+        finish: (ready = true) => {
+          if (restart !== ticket) return;
+          cancelGrace();
+          if (ready && options.currentNightlyWindows() === 0) arm();
+          else finishIfEmpty();
+        },
+      };
+      restart = ticket;
+      // A stalled restart cannot turn retained intent into indefinite headlessness.
+      arm();
+      return ticket.finish;
+    },
     localWindowAdmission: (): (() => boolean) => {
       const admitted = generation;
       return () => !stopped && !finishing && !closing && !retaining && admitted === generation;
@@ -99,7 +128,7 @@ export function createDesktopClientLifetime(options: {
       lastCount = count;
       if (count > 0) {
         if (finishing && retaining) generation++;
-        cancelGrace();
+        if (restart === undefined) cancelGrace();
       } else if (previous > 0) finishIfEmpty();
     },
     waitForFirstNightlyWindow: (): void => {

@@ -269,6 +269,9 @@ Agent observations remain separate;
 Explicit in-app UI quit can retain the host for current authenticated Nightly
 clients; accepted terminal quit closes admission before cleanup. See the owning
 [client lifetime rules](design/nightly-app.md#keeping-the-host-for-current-clients).
+Lease loss destroys the old Nightly renderer before a bounded fresh native
+registration retry; only an already retained current client receives managed
+restart grace. See [reconnect rules](design/nightly-app.md#reconnecting-after-host-loss).
 IME, accessibility, native popups and full lifecycle acceptance remain unfinished. See
 [native client window leases](design/nightly-app.md#native-client-window-leases) and
 [desktop status preflight](design/nightly-app.md#authenticated-desktop-status-preflight).
