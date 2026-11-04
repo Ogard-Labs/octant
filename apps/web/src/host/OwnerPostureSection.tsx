@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type { OwnerPostureTarget, ProviderExecutionPolicy } from "@octant/contracts";
 import {
-  OWNER_POSTURE_LABELS,
   ownerPostureLabel,
   readOwnerPostures,
   changeOwnerPosture,
@@ -9,6 +8,7 @@ import {
   type OwnerSpoke,
 } from "@octant/client-runtime";
 import { SettingsSection, SettingsState } from "../settings/primitives";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray<OwnerSpoke> }) {
@@ -55,6 +55,10 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
     setBusy(false);
   };
   if (spokes.length === 0) return null;
+  const levels: ReadonlyArray<ProviderExecutionPolicy> =
+    selected?.posture.subject.kind === "project"
+      ? ["approval-gated", "full-access"]
+      : ["approval-gated", "auto-accept-edits", "plan", "full-access"];
   return (
     <SettingsSection title="Owner Code recovery">
       <p className="settings-section-line">
@@ -62,19 +66,14 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
         fresh unlock for this choice. Running turns keep their current level.
       </p>
       <label>
-        Computer{" "}
-        <select
+        Computer
+        <OctantSelectField
           aria-label="Code recovery computer"
           disabled={busy}
           value={hostId}
-          onChange={(event) => setHostId(event.target.value)}
-        >
-          {spokes.map((spoke) => (
-            <option key={spoke.memberId} value={spoke.memberId}>
-              {spoke.name}
-            </option>
-          ))}
-        </select>
+          options={spokes.map((spoke) => ({ id: spoke.memberId, label: spoke.name }))}
+          onValueChange={setHostId}
+        />
       </label>
       {host?.openAt === undefined ? (
         <>
@@ -88,13 +87,19 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
           </OctantButton>
           {targets.length === 0 ? null : (
             <label>
-              Code target{" "}
-              <select
+              Code target
+              <OctantSelectField
                 aria-label="Code recovery target"
                 disabled={busy}
                 value={targetKey}
-                onChange={(event) => {
-                  const key = event.target.value;
+                options={[
+                  { id: "", label: "Choose a target" },
+                  ...targets.map((target) => ({
+                    id: JSON.stringify(target.posture.subject),
+                    label: `${target.posture.subject.kind === "project" ? "Project" : "Thread"}: ${target.title}`,
+                  })),
+                ]}
+                onValueChange={(key) => {
                   setTargetKey(key);
                   const target = targets.find(
                     (entry) => JSON.stringify(entry.posture.subject) === key,
@@ -102,45 +107,27 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
                   setRequested(target?.posture.posture ?? "approval-gated");
                   setMessage("");
                 }}
-              >
-                <option value="">Choose a target</option>
-                {targets.map((target) => (
-                  <option
-                    key={JSON.stringify(target.posture.subject)}
-                    value={JSON.stringify(target.posture.subject)}
-                  >
-                    {target.posture.subject.kind === "project" ? "Project" : "Thread"}:{" "}
-                    {target.title}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
           )}
           {selected === undefined ? null : (
             <>
               <p>Current level: {ownerPostureLabel(selected.posture)}</p>
               <label>
-                Requested level{" "}
-                <select
+                Requested level
+                <OctantSelectField
                   aria-label="Requested Code level"
                   disabled={busy}
                   value={requested}
-                  onChange={(event) => {
-                    const policy = Object.keys(OWNER_POSTURE_LABELS).find(
-                      (key) => key === event.target.value,
-                    );
-                    if (policy !== undefined) setRequested(policy as ProviderExecutionPolicy);
+                  options={levels.map((policy) => ({
+                    id: policy,
+                    label: ownerPostureLabel(selected.posture, policy),
+                  }))}
+                  onValueChange={(value) => {
+                    const policy = levels.find((entry) => entry === value);
+                    if (policy !== undefined) setRequested(policy);
                   }}
-                >
-                  {(selected.posture.subject.kind === "project"
-                    ? (["approval-gated", "full-access"] as const)
-                    : (["approval-gated", "auto-accept-edits", "plan", "full-access"] as const)
-                  ).map((policy) => (
-                    <option key={policy} value={policy}>
-                      {ownerPostureLabel(selected.posture, policy)}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
               <OctantButton
                 type="button"
