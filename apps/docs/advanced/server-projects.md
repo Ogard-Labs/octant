@@ -137,3 +137,9 @@ port collision refuses; stop the preview before selecting another port.
 Unknown or changed SSH host keys still require your ordinary SSH trust decision.
 Listening locally means the tunnel is ready to connect; the remote application
 is checked when you open it. Previews are not restored after restarting Octant.
+
+Stop and reconnect wait for the previous listener and SSH connections to close.
+If Octant reports `cleanup-unsettled`, it could not confirm cleanup within three
+seconds. It keeps ownership of the old connection and refuses to replace it.
+You can try Stop again after the process has ended. Shutdown reports this
+failure rather than claiming that all owned resources closed successfully.

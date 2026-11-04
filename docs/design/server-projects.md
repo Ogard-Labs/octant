@@ -463,6 +463,21 @@ remote command or accepting a changed host key. Reusing the local port may fail
 if another process has taken it. Listening locally is not proof the remote app
 has answered; SSH connects when the preview is opened.
 
+Stop, restart, reconnect and host shutdown await the retained receipt for the
+actual listener and SSH child cleanup. A second stop joins the existing cleanup;
+a status change alone is not proof that the owned processes have exited.
+Shutdown also waits for a listen attempt that has not yet published its preview.
+Reconnect keeps the old ownership until cleanup settles, then rechecks the
+original binding and owner before reopening the same endpoint. Stop can cancel
+that pending reconnect.
+
+Cleanup sends SIGTERM and escalates to SIGKILL after one second. If settlement
+cannot be confirmed within three seconds, stop or reopen is refused as
+`cleanup-unsettled`, and host shutdown reports a failure while completing its
+other cleanup. The actual receipt stays retained after that deadline; a later
+attempt must still await it and cannot replace a live owned process. A completed
+stop outcome is journaled only after cleanup settles.
+
 The journal records Project, owner window, selected ports, effective local URL
 and lifecycle outcomes as `server-projects.preview-outcome@1`. It records no
 credentials, stderr, HTTP bodies or page contents. Active listeners are not

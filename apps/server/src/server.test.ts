@@ -1,3 +1,4 @@
+import { ServerPreviewTunnels } from "./serverProjects/serverPreviewTunnel";
 import { createPrivateKey, randomBytes, randomUUID } from "node:crypto";
 import {
   mkdirSync,
@@ -11,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decodeCodeBootstrap,
@@ -2478,6 +2479,44 @@ describe("startOctantServer", () => {
 
     // Verify outside the scope too
     expect(remoteStopCalled).toBe(true);
+  });
+
+  it("reports unconfirmed preview cleanup while still stopping HTTP and provider runtimes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-preview-shutdown-"));
+    directories.push(directory);
+    const runtime = new ProviderRuntimeRegistry();
+    const closeRuntimes = vi.spyOn(runtime, "closeAll");
+    const closePreview = ServerPreviewTunnels.prototype.close;
+    const unconfirmedPreview = vi
+      .spyOn(ServerPreviewTunnels.prototype, "close")
+      .mockImplementation(async function (this: ServerPreviewTunnels) {
+        await closePreview.call(this);
+        return { status: "unsettled" };
+      });
+    const stopHttp = vi.fn();
+    try {
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            providerRuntimeRegistry: runtime,
+            serve: () => ({ url: new URL("http://127.0.0.1:13773"), stop: stopHttp }),
+          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+        ),
+      );
+      expect(exit._tag).toBe("Failure");
+      if (exit._tag === "Failure") {
+        expect(Cause.pretty(exit.cause)).toContain(
+          "Server Project preview cleanup could not be confirmed.",
+        );
+      }
+      expect(stopHttp).toHaveBeenCalledWith(true);
+      expect(closeRuntimes).toHaveBeenCalledOnce();
+    } finally {
+      unconfirmedPreview.mockRestore();
+      closeRuntimes.mockRestore();
+    }
   });
 
   it("stops HTTP acceptance before closing runtimes during an acquisition race", async () => {

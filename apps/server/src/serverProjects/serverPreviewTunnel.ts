@@ -16,6 +16,10 @@ export interface ServerPreviewView {
 export type ServerPreviewResult =
   | { readonly kind: "tunnel"; readonly view: ServerPreviewView }
   | { readonly kind: "refused"; readonly reason: string };
+export type ServerPreviewCleanup = { readonly status: "settled" | "unsettled" };
+
+const CLEANUP_WAIT_MS = 3_000;
+
 interface Preview {
   readonly projectId: string;
   readonly owner: string;
@@ -28,6 +32,20 @@ interface Preview {
   readonly expiresAt: number;
   readonly ownerCurrent: () => boolean;
   status: ServerPreviewView["status"];
+  cleanup?: Promise<void>;
+  recordedStatus?: ServerPreviewView["status"];
+}
+
+interface PreviewOpening {
+  readonly projectId: string;
+  readonly owner: string;
+  readonly remotePort: number;
+  readonly localPort: number;
+  readonly server: ServerAddress;
+  readonly identity: string;
+  readonly ownerCurrent: () => boolean;
+  readonly previous: Preview | undefined;
+  readonly previousStatus: "stopped" | "lost";
 }
 export interface ServerPreviewOptions {
   readonly address: (
@@ -68,7 +86,7 @@ export function serverPreviewSshArguments(
 export class ServerPreviewTunnels {
   readonly #options: ServerPreviewOptions;
   readonly #previews = new Map<string, Preview>();
-  readonly #pending = new Set<string>();
+  readonly #pending = new Map<string, Promise<ServerPreviewResult>>();
   readonly #sweep: ReturnType<typeof setInterval>;
   #closed = false;
   constructor(options: ServerPreviewOptions) {
@@ -106,68 +124,46 @@ export class ServerPreviewTunnels {
     if (this.#pending.has(projectId) || (existing !== undefined && existing.status !== "stopped"))
       return refused("already-owned");
     if (this.#previews.size >= 64 && existing === undefined) return refused("too-many-tunnels");
-    this.#pending.add(projectId);
-    const listener = createServer((socket) => this.#accept(projectId, socket));
-    try {
-      const port = await new Promise<number | undefined>((resolve) => {
-        listener.once("error", () => resolve(undefined));
-        listener.listen(localPort, "127.0.0.1", () => {
-          const bound = listener.address();
-          resolve(bound !== null && typeof bound !== "string" ? bound.port : undefined);
-        });
-      });
-      if (port === undefined) return refused("port-unavailable");
-      const preview: Preview = {
-        projectId,
-        owner,
-        identity: address.identity,
-        server: address.server,
-        remotePort,
-        localPort: port,
-        listener,
-        streams: new Map(),
-        expiresAt: Date.now() + 60 * 60 * 1_000,
-        ownerCurrent,
-        status: "listening",
-      };
-      if (
-        !this.#current(preview) ||
-        this.#closed ||
-        !this.#options.record({ ...this.#view(preview), owner })
-      ) {
-        await new Promise<void>((resolve) => listener.close(() => resolve()));
-        return refused("authority-or-record-unavailable");
-      }
-      this.#previews.set(projectId, preview);
-      return { kind: "tunnel", view: this.#view(preview) };
-    } finally {
-      this.#pending.delete(projectId);
-    }
+    return this.#queueStart({
+      projectId,
+      owner,
+      remotePort,
+      localPort,
+      ownerCurrent,
+      server: address.server,
+      identity: address.identity,
+      previous: existing,
+      previousStatus: "stopped",
+    });
   }
   async stop(projectId: string, owner: string): Promise<ServerPreviewResult> {
     const preview = this.#previews.get(projectId);
     if (preview?.owner !== owner) return refused("not-owned");
-    await this.#end(preview, "stopped");
-    return { kind: "tunnel", view: this.#view(preview) };
+    const cleanup = await this.#end(preview, "stopped");
+    return cleanup.status === "unsettled"
+      ? refused("cleanup-unsettled")
+      : { kind: "tunnel", view: this.#view(preview) };
   }
   async reconnect(projectId: string, owner: string): Promise<ServerPreviewResult> {
     const preview = this.#previews.get(projectId);
     if (preview?.owner !== owner || preview.status !== "lost") return refused("not-reconnectable");
     if (!this.#current(preview)) {
-      await this.#end(preview, "revoked");
-      return refused("binding-changed");
+      const cleanup = await this.#end(preview, "revoked");
+      return refused(cleanup.status === "unsettled" ? "cleanup-unsettled" : "binding-changed");
     }
-    // One explicit attempt at the same local and remote addresses. No automatic retry.
-    this.#previews.delete(projectId);
-    const result = await this.start(
+    // Keep the old ownership visible until its receipt settles and the same
+    // endpoint has reopened. Stop can still cancel this pending reconnect.
+    return this.#queueStart({
       projectId,
       owner,
-      preview.remotePort,
-      preview.localPort,
-      preview.ownerCurrent,
-    );
-    if (result.kind === "refused") this.#previews.set(projectId, preview);
-    return result;
+      remotePort: preview.remotePort,
+      localPort: preview.localPort,
+      ownerCurrent: preview.ownerCurrent,
+      server: preview.server,
+      identity: preview.identity,
+      previous: preview,
+      previousStatus: "lost",
+    });
   }
   async reconcile(): Promise<void> {
     await Promise.all(
@@ -176,10 +172,81 @@ export class ServerPreviewTunnels {
         .map((preview) => this.#end(preview, "revoked")),
     );
   }
-  async close(): Promise<void> {
+  async close(): Promise<ServerPreviewCleanup> {
     this.#closed = true;
     clearInterval(this.#sweep);
-    await Promise.all([...this.#previews.values()].map((preview) => this.#end(preview, "stopped")));
+    const [starting, ending] = await Promise.all([
+      cleanupWithin(Promise.all(this.#pending.values())),
+      Promise.all([...this.#previews.values()].map((preview) => this.#end(preview, "stopped"))),
+    ]);
+    return {
+      status:
+        starting.status === "settled" && ending.every((result) => result.status === "settled")
+          ? "settled"
+          : "unsettled",
+    };
+  }
+  #queueStart(input: PreviewOpening): Promise<ServerPreviewResult> {
+    if (this.#closed) return Promise.resolve(refused("owner-revoked"));
+    if (this.#pending.has(input.projectId)) return Promise.resolve(refused("already-owned"));
+    // Register before listening or awaiting old cleanup, so shutdown owns the
+    // whole opening attempt, including a listener not yet in the catalog.
+    const opening = Promise.resolve()
+      .then(() => this.#open(input))
+      .finally(() => {
+        this.#pending.delete(input.projectId);
+      });
+    this.#pending.set(input.projectId, opening);
+    return opening;
+  }
+  async #open(input: PreviewOpening): Promise<ServerPreviewResult> {
+    if (input.previous?.cleanup !== undefined) {
+      const cleanup = await cleanupWithin(input.previous.cleanup);
+      if (cleanup.status === "unsettled") return refused("cleanup-unsettled");
+    }
+    if (!this.#openingCurrent(input)) return refused("authority-or-record-unavailable");
+    const listener = createServer((socket) => this.#accept(input.projectId, socket));
+    const port = await new Promise<number | undefined>((resolve) => {
+      listener.once("error", () => resolve(undefined));
+      listener.listen(input.localPort, "127.0.0.1", () => {
+        const bound = listener.address();
+        resolve(bound !== null && typeof bound !== "string" ? bound.port : undefined);
+      });
+    });
+    if (port === undefined) return refused("port-unavailable");
+    const preview: Preview = {
+      projectId: input.projectId,
+      owner: input.owner,
+      identity: input.identity,
+      server: input.server,
+      remotePort: input.remotePort,
+      localPort: port,
+      listener,
+      streams: new Map(),
+      expiresAt: Date.now() + 60 * 60 * 1_000,
+      ownerCurrent: input.ownerCurrent,
+      status: "listening",
+    };
+    if (
+      !this.#openingCurrent(input) ||
+      !this.#options.record({ ...this.#view(preview), owner: input.owner })
+    ) {
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+      return refused("authority-or-record-unavailable");
+    }
+    this.#previews.set(input.projectId, preview);
+    return { kind: "tunnel", view: this.#view(preview) };
+  }
+  #openingCurrent(input: PreviewOpening): boolean {
+    return (
+      !this.#closed &&
+      this.#options.ownerCurrent(input.owner) &&
+      input.ownerCurrent() &&
+      this.#options.address(input.projectId)?.identity === input.identity &&
+      (input.previous === undefined ||
+        (this.#previews.get(input.projectId) === input.previous &&
+          input.previous.status === input.previousStatus))
+    );
   }
   #current(preview: Preview): boolean {
     return (
@@ -235,7 +302,7 @@ export class ServerPreviewTunnels {
     socket.on("error", clientEnded);
     socket.on("close", clientEnded);
     child.on("error", () => {
-      void this.#end(preview, "lost");
+      if (preview.status === "listening") void this.#end(preview, "lost");
     });
     child.on("close", (code) => {
       preview.streams.delete(socket);
@@ -246,9 +313,20 @@ export class ServerPreviewTunnels {
     socket.pipe(child.stdin);
     child.stdout.pipe(socket);
   }
-  async #end(preview: Preview, status: ServerPreviewView["status"]): Promise<void> {
-    if (preview.status === status) return;
+  async #end(preview: Preview, status: ServerPreviewView["status"]): Promise<ServerPreviewCleanup> {
     preview.status = status;
+    // A status change is not a cleanup receipt. Retain actual settlement even
+    // when a caller times out, so another stop, restart or shutdown must await it.
+    preview.cleanup ??= Promise.resolve().then(() => this.#cleanup(preview));
+    const cleanup = await cleanupWithin(preview.cleanup);
+    if (cleanup.status === "settled" && preview.recordedStatus !== preview.status) {
+      if (this.#options.record({ ...this.#view(preview), owner: preview.owner })) {
+        preview.recordedStatus = preview.status;
+      }
+    }
+    return cleanup;
+  }
+  async #cleanup(preview: Preview): Promise<void> {
     const exits = [...preview.streams].map(
       ([socket, child]) =>
         new Promise<void>((resolve) => {
@@ -266,9 +344,26 @@ export class ServerPreviewTunnels {
       new Promise<void>((resolve) => preview.listener.close(() => resolve())),
       ...exits,
     ]);
-    this.#options.record({ ...this.#view(preview), owner: preview.owner });
   }
 }
 function refused(reason: string): ServerPreviewResult {
   return { kind: "refused", reason };
+}
+
+/** A deadline reports uncertainty; it never releases the retained resource receipt. */
+async function cleanupWithin(settlement: Promise<unknown>): Promise<ServerPreviewCleanup> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      settlement.then(
+        (): ServerPreviewCleanup => ({ status: "settled" }),
+        (): ServerPreviewCleanup => ({ status: "unsettled" }),
+      ),
+      new Promise<ServerPreviewCleanup>((resolve) => {
+        timer = setTimeout(() => resolve({ status: "unsettled" }), CLEANUP_WAIT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
