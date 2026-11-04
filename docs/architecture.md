@@ -12430,7 +12430,9 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with
   `out/Octant-linux-x64/` kept for inspection). Linux packages skip Darwin
-  helpers. A dogfood AppImage is not code-signed. Its launcher preserves
+  helpers. The macOS Keychain, Code-file, and device Swift helpers explicitly
+  target `arm64-apple-macos14.0`, so a newer compiler host cannot raise their
+  deployment target. A dogfood AppImage is not code-signed. Its launcher preserves
   Chromium's sandbox and lets Chromium refuse when the host cannot establish
   it; it never adds `--no-sandbox`. A separate `unshare` executable has a
   different AppArmor identity and is not a prerequisite probe for Octant.

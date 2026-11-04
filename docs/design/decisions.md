@@ -295,6 +295,7 @@ The first release is the technical preview for Apple-silicon Macs with the provi
 
 - The first release counts as shipped when a maintainer approves the first stable version (a `vMAJOR.MINOR.PATCH` tag, approved in the `stable` environment); daily builds stay previews. That release is the Apple Silicon build, and Linux is not part of it.
 - A local package built without signing credentials a maintainer holds is unsigned.
+- macOS Swift helpers use explicit deployment targets independent of the compiler host ([packaging](../architecture.md#development-loop)).
 - Connectors, a Code thread's own Git and pull-request work, a person's merge from any of their clients, host-local routines, the guardrail levels and the key providers' native features are in scope; Octant Shield is in scope and designed.
 - An agent merge or force-push on its own initiative, cloud scheduling, and an Octant-operated hosted service are out of scope.
 - Physical phones and tablets, and app-store upload, submission and release, are out of scope (maintainer decision, 2026-10-29); Octant drives the simulator only.
