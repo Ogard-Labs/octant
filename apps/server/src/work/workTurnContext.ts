@@ -13,6 +13,7 @@ import {
   type WorkThreadId,
 } from "@octant/contracts";
 import { reduceContextToBudget } from "@octant/domain/context-policy";
+import { CANVAS_TOOL_NAME } from "../canvas/canvasAgentTools";
 import {
   documentDeliveryInstructions,
   offersCanvasTool,
@@ -211,10 +212,12 @@ export function includeWorkToolDefinitions(input: {
               input.artifactToolName === undefined
                 ? "octant-canvas-delivery"
                 : "octant-artifact-delivery",
+            ...(input.artifactToolName === undefined ? { tool: CANVAS_TOOL_NAME } : {}),
           },
         ]),
-    ...appToolHostLines(input.tools).map((text, index) => ({
-      text,
+    ...appToolHostLines(input.tools).map((line, index) => ({
+      text: line.text,
+      tool: line.tool,
       referenceId: `octant-tool-host-line:${index}`,
     })),
   ];
@@ -249,7 +252,11 @@ export function includeWorkToolDefinitions(input: {
     (policy.referenceId.startsWith("octant-tool-host-line:") ? noteEntries : ruleEntries).push(
       entry,
     );
-    blocks.set(String(entry.id), { kind: "instructions", text: policy.text });
+    blocks.set(String(entry.id), {
+      kind: "instructions",
+      text: policy.text,
+      ...(policy.tool === undefined ? {} : { tool: policy.tool }),
+    });
   }
   return reduceWorkContext(
     decodeContextManifest({

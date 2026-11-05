@@ -2658,6 +2658,7 @@ describe("CodeOperationRuntime", () => {
     expect(withCanvas).toContainEqual({
       kind: "instructions",
       text: expect.stringContaining("as a Canvas with the octant_canvas"),
+      tool: "octant_canvas",
     });
     expect(withCanvas.filter((block) => block.text.includes("as a Canvas"))).toHaveLength(1);
     const withoutCanvas = (await turn(false)).context;

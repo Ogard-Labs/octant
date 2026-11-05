@@ -1245,6 +1245,7 @@ describe("Codex thread and turn lifecycle", () => {
     expect(handle.resumeCursor).toEqual({
       driverKind: "codex",
       value: "thread-1",
+      tools: [],
       binding: { instanceId, sessionId, projectRoot, mode: "code", modelId: "gpt-5.4" },
     });
     expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
@@ -1578,6 +1579,92 @@ describe("Codex thread and turn lifecycle", () => {
     // The withdrawing turn replaced the material entry, naming the skill nowhere.
     const withdrawn = recorded[1]?.find(({ key }) => key === "octant_context");
     expect(withdrawn?.value).not.toContain(skill.text);
+  });
+
+  describe("rules about Octant tools on a Codex thread", () => {
+    const canvasRule = {
+      kind: "instructions",
+      tool: "octant_canvas",
+      text: "Deliver kept work as a Canvas.",
+    } as const;
+    const browserNote = {
+      kind: "instructions",
+      tool: "octant_browser",
+      text: "octant_browser opens web pages.",
+    } as const;
+    const plainRule = { kind: "instructions", text: "Offer follow-ups only when useful." } as const;
+    const sentInstructions = (f: ReturnType<typeof fixture>) =>
+      (
+        f.calls.filter(({ method }) => method === "turn/start").at(-1)?.input as {
+          readonly additionalContext?: Record<string, { readonly value: string }>;
+        }
+      ).additionalContext?.octant_instructions?.value;
+    const canvasTool = { name: "octant_canvas", inputSchema: { type: "object" } } as const;
+    const browserTool = { name: "octant_browser", inputSchema: { type: "object" } } as const;
+
+    it("leaves out a rule for a tool the thread did not start with, since Codex cannot add it later", async () => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()));
+      const handle = await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "approval-gated",
+          tools: [canvasTool],
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "hei",
+          context: [plainRule, canvasRule, browserNote],
+          attachments: [],
+          tools: [canvasTool, browserTool],
+        }),
+      );
+      expect(sentInstructions(f)).toBe(`${plainRule.text}\n\n${canvasRule.text}`);
+      expect(handle.resumeCursor).toMatchObject({ tools: ["octant_canvas"] });
+      await acquired.close();
+    });
+
+    it("remembers the thread's tools across a resume, and keeps every rule when the cursor does not say", async () => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()));
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: {
+            driverKind: "codex",
+            value: "thread-existing",
+            tools: ["octant_browser"],
+          },
+          executionPolicy: "approval-gated",
+          modelId: "gpt-5.4" as never,
+        }),
+      );
+      const context = [canvasRule, browserNote];
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
+      );
+      expect(sentInstructions(f)).toBe(browserNote.text);
+
+      const legacy = fixture();
+      const older = await acquireConnection(makeCodexDriver(legacy.options()));
+      await Effect.runPromise(
+        older.connection.resume({
+          sessionId,
+          resumeCursor: { driverKind: "codex", value: "thread-existing" },
+          executionPolicy: "approval-gated",
+          modelId: "gpt-5.4" as never,
+        }),
+      );
+      await Effect.runPromise(
+        older.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
+      );
+      expect(sentInstructions(legacy)).toBe(`${canvasRule.text}\n\n${browserNote.text}`);
+      await acquired.close();
+      await older.close();
+    });
   });
 
   it("frames context inside the request on a Codex too old to take it separately", async () => {
