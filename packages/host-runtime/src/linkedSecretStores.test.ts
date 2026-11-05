@@ -27,6 +27,55 @@ function fixture() {
 
 // Each case starts real child processes, which are slow on a busy machine.
 describe("linked secret stores", { timeout: 30_000 }, () => {
+  it("never consumes a credential from an item read that overlapped unlink and same-time relink", async () => {
+    const item = {
+      store: "onepassword" as const,
+      accountId: "a".repeat(26),
+      vaultId: "v".repeat(26),
+      itemId: "i".repeat(26),
+    };
+    const answer = {
+      status: "described" as const,
+      item,
+      title: "Fixture",
+      version: 1,
+      websiteOrigins: ["https://login.example"],
+    };
+    let finish: (() => void) | undefined;
+    const stores = makeLinkedSecretStores({
+      statePath: join(mkdtempSync(join(tmpdir(), "octant-browser-consume-")), "state.json"),
+      now: () => "2026-11-03T10:00:00.000Z",
+      adapters: [
+        {
+          kind: "onepassword",
+          label: "Fixture",
+          probe: async () => "ready",
+          isValidReference: () => true,
+          read: async () => ({ status: "missing" }),
+          browserMetadata: async () => answer,
+          consumeBrowserCredential: async (_metadata, consume) => {
+            await new Promise<void>((resolve) => {
+              finish = resolve;
+            });
+            await consume({ username: "fixture-user", password: "fixture-private" });
+            return { status: "consumed" };
+          },
+        },
+      ],
+    });
+    await stores.link("onepassword");
+    const metadata = await stores.browserMetadata?.(item);
+    if (metadata?.status !== "described") throw new Error("Expected selected metadata");
+    const use = vi.fn(async () => undefined);
+    const pending = stores.consumeBrowserCredential?.(metadata, use);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    await stores.unlink("onepassword");
+    await stores.link("onepassword");
+    finish?.();
+    expect(await pending).toEqual({ status: "changed" });
+    expect(use).not.toHaveBeenCalled();
+    expect(stores.browserRevisionCurrent?.(metadata.storeRevision)).toBe(false);
+  });
   it("refuses delayed metadata after unlink and relink even at the same recorded link time", async () => {
     const item = {
       store: "onepassword" as const,

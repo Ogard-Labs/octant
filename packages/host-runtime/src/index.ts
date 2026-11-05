@@ -64,7 +64,15 @@ export {
 export { formatHostRuntimeError, redactHostRuntimeText } from "./redaction";
 export { CONFIGURATION_FAILURE_EXIT_CODE, startupFailureExitCode } from "./startupFailure";
 export { redactHostRuntimeValue } from "./redaction";
-export { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
+export {
+  startCredentialBroker,
+  type CredentialBroker,
+  type BrowserCredentialFillHostPort,
+} from "./credentialBroker";
+export type {
+  BrowserCredentialValues,
+  BrowserCredentialConsumption,
+} from "./onePasswordBrowserCredential";
 export {
   decodeLinkedSecretPointer,
   encodeLinkedSecretPointer,

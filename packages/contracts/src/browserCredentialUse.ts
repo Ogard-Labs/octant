@@ -13,6 +13,8 @@ const SelectedItemId = ItemId.pipe(Schema.brand("BrowserCredentialItemId"));
 const GrantId = Schema.UUID.pipe(Schema.brand("BrowserCredentialGrantId"));
 const ReviewId = Schema.UUID.pipe(Schema.brand("BrowserCredentialReviewId"));
 const HostSessionId = Schema.UUID.pipe(Schema.brand("BrowserCredentialHostSessionId"));
+const FillPlanId = Schema.UUID.pipe(Schema.brand("BrowserCredentialFillPlanId"));
+const CustodyId = Schema.UUID.pipe(Schema.brand("BrowserCredentialCustodyId"));
 export const BrowserCredentialItem = Schema.Struct({
   store: Schema.Literal("onepassword"),
   accountId: AccountId,
@@ -96,6 +98,20 @@ const Context = {
 };
 export const BrowserCredentialCommand = Schema.Union(
   Schema.Struct({
+    kind: Schema.Literal("prepare-browser-credential-fill"),
+    ...Context,
+    grantId: GrantId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal(
+      "confirm-browser-credential-fill",
+      "cancel-browser-credential-fill",
+      "submit-browser-credential-fill",
+    ),
+    ...Context,
+    planId: FillPlanId,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("review-browser-credential"),
     ...Context,
     item: BrowserCredentialItem,
@@ -118,6 +134,24 @@ export const BrowserCredentialCommand = Schema.Union(
 export type BrowserCredentialCommand = typeof BrowserCredentialCommand.Type;
 
 export const BrowserCredentialResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("browser-credential-fill-review"),
+    planId: FillPlanId,
+    grantId: GrantId,
+    metadata: BrowserCredentialMetadata,
+    target: BrowserCredentialTarget,
+    usernameLabel: Schema.String.pipe(Schema.maxLength(128)),
+    passwordLabel: Schema.String.pipe(Schema.maxLength(128)),
+    submissionOrigin: BrowserCredentialOrigin,
+    expiresAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("browser-credential-fill-outcome"),
+    planId: FillPlanId,
+    status: Schema.Literal("filled", "authentication-required", "denied", "cancelled", "failed"),
+    effect: Schema.Literal("none", "possible", "completed"),
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("browser-credential-review"),
     reviewId: ReviewId,
@@ -153,7 +187,114 @@ export const BrowserCredentialResult = Schema.Union(
 ).annotations(personDecides);
 export type BrowserCredentialResult = typeof BrowserCredentialResult.Type;
 
+const FillOwner = Schema.Struct({ windowId: WindowId, threadId: BrowserThreadId }).annotations(
+  strict,
+);
+const FillContext = { contextId: BrowserContextId, owner: FillOwner, planId: FillPlanId };
+export const BrowserCredentialNativeCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("prepare"),
+    contextId: BrowserContextId,
+    owner: FillOwner,
+    origin: BrowserCredentialOrigin,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("validate", "cancel"),
+    ...FillContext,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("submit"),
+    ...FillContext,
+    expiresAt: UtcTimestamp,
+  }).annotations(strict),
+);
+export type BrowserCredentialNativeCommand = typeof BrowserCredentialNativeCommand.Type;
+export const BrowserCredentialNativeResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("prepared"),
+    planId: FillPlanId,
+    usernameLabel: Schema.String.pipe(Schema.maxLength(128)),
+    passwordLabel: Schema.String.pipe(Schema.maxLength(128)),
+    submissionOrigin: BrowserCredentialOrigin,
+    expiresAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal("stale", "unavailable", "authentication-required"),
+  }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("validated"), valid: Schema.Boolean }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("filled", "authentication-required", "cancelled", "failed"),
+    effect: Schema.Literal("none", "possible", "completed"),
+  }).annotations(strict),
+);
+export type BrowserCredentialNativeResult = typeof BrowserCredentialNativeResult.Type;
+export type BrowserCredentialFillPreparation = Extract<
+  BrowserCredentialNativeResult,
+  { readonly status: "prepared" | "refused" }
+>;
+export const decodeBrowserCredentialNativeCommand = Schema.decodeUnknownSync(
+  BrowserCredentialNativeCommand,
+);
+export const decodeBrowserCredentialNativeResult = Schema.decodeUnknownSync(
+  BrowserCredentialNativeResult,
+);
+export const BrowserCredentialHostCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("stage-browser-credential-fill"),
+    ...FillContext,
+    metadata: BrowserCredentialMetadata,
+    expiresAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("commit-browser-credential-fill"),
+    ...FillContext,
+    custodyId: CustodyId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("cancel-browser-credential-fill"),
+    ...FillContext,
+  }).annotations(strict),
+);
+export type BrowserCredentialHostCommand = typeof BrowserCredentialHostCommand.Type;
+export const BrowserCredentialHostResult = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("ready"), custodyId: CustodyId }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal(
+      "stale",
+      "unavailable",
+      "locked",
+      "missing",
+      "uncertain",
+      "not-linked",
+      "invalid-item",
+      "changed",
+      "cancelled",
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("filled", "authentication-required", "cancelled", "failed"),
+    effect: Schema.Literal("none", "possible", "completed"),
+  }).annotations(strict),
+);
+export type BrowserCredentialHostResult = typeof BrowserCredentialHostResult.Type;
+export const decodeBrowserCredentialHostCommand = Schema.decodeUnknownSync(
+  BrowserCredentialHostCommand,
+);
+export const decodeBrowserCredentialHostResult = Schema.decodeUnknownSync(
+  BrowserCredentialHostResult,
+);
+
 export const BrowserCredentialJournalRecord = Schema.Union(
+  Schema.Struct({
+    name: Schema.Literal("browser-credential.fill-recorded"),
+    grantId: GrantId,
+    planId: FillPlanId,
+    windowId: WindowId,
+    status: Schema.Literal("filled", "authentication-required", "denied", "cancelled", "failed"),
+    effect: Schema.Literal("none", "possible", "completed"),
+  }).annotations(strict),
   Schema.Struct({
     name: Schema.Literal("browser-credential.granted"),
     grant: BrowserCredentialGrant,

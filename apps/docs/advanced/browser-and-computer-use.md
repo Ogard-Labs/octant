@@ -79,8 +79,9 @@ choose a profile from the control at the left of the address bar:
 | **Project**  | On this Mac, until you sign out | Every page of this Work or Code Project           |
 | **Personal** | On this Mac, until you sign out | Every page, in any Project, that chooses Personal |
 
-- Sign in by typing into the page yourself. Octant saves no passwords and fills
-  none. Choosing another profile opens the same address again as a new page in
+- Sign in manually or approve a selected-item brokered fill through **Login
+  permission**. Fill and submit are separate approvals; neither confirms
+  authentication. Choosing another profile opens the same address again as a new page in
   that profile; the old page closes and nothing it held carries over.
 - The control remembers your last choice for each Project, for pages you open.
   It never changes a page the agent opened.
@@ -670,3 +671,12 @@ profile and Project or task. It fills nothing and includes no iframe or page
 script access. Store unlock, saved permission and website sign-in are distinct.
 See [the secret-store steps](/guide/secret-stores#record-permission-for-a-browser-login-item)
 for scope, expiry, revocation and current limitations.
+
+For saved selected-item permission, **Review login form** gives a fresh field,
+site and profile review before **Fill selected fields**. **Submit sign-in form**
+is a separate approval. The page remains held throughout private read and each
+effect, including overlapping observations. Fill does not confirm sign-in;
+MFA/CAPTCHA and uncertain results remain yours to complete. The website can
+retain or reflect input, so check it before continuing. See
+[Secret stores](../guide/secret-stores.md#record-permission-for-a-browser-login-item)
+for custody, cancellation and exact SSO limits.

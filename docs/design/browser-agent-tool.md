@@ -106,9 +106,10 @@ asking the agent.
 - Rationale: refs are checked by role and name, not by a page revision, so a
   ref survives an action that leaves its element as it was (typing into one
   field, then clicking the button beside it) and is refused only when the
-  element it named changed. Withholding every value on a page with a credential
-  field keeps the rule the rest of the Browser follows, which is to show such a
-  page's structure at most and never what was typed into it.
+  element it named changed. Detected credential fields never expose field
+  values in the outline. This does not prove that the site's own text or
+  callbacks cannot reflect input; brokered use therefore holds observations
+  during the effect and requires a person to check the page before resuming.
 
 ## Results
 
@@ -592,9 +593,12 @@ needed.
   [Page lifetime](#page-lifetime): eleven minutes from the hold, then the later
   of its ordinary idle deadline and two minutes after the card is answered so
   the agent can read it.
-- The person signs in by typing into the page themselves. Octant saves no
-  password and fills none, and the agent never sees what they typed: a
-  credential field never shows a value.
+- The person signs in manually or explicitly approves a selected 1Password
+  binding and reviewed login form. Ordinary agent typing into credential
+  fields still refuses. Brokered filling keeps values in host custody and
+  holds agent actions/observations during private read, fill and submit;
+  overlapping observations cannot publish after release. The website's own
+  code can retain or reflect input, so later page content may disclose it.
 - On **Continue** the agent gets a fresh snapshot of whatever page the person
   left. If that site is unapproved, the refusal says plainly that the person
   left the page on an unapproved site after Continue; it reads nothing there
@@ -610,12 +614,20 @@ needed.
   The review names the exact HTTPS origin and port, top frame, profile and
   Project/task scope before **Allow selected item** records permission.
   **Revoke permission** removes it. This records no authentication result,
-  fills nothing, and grants no iframe or script access. Its reference-only,
-  host-session/eight-hour lifecycle and mandatory future per-use validation
+  grants no iframe or script access. Saving permission fills nothing.
+  **Review login form** names the selected fields and exact submission/return
+  sites before separate **Fill selected fields** and **Submit sign-in form**
+  actions. Filled/authentication-required outcomes do not mean signed-in.
+  MFA, CAPTCHA, passkeys and ambiguous forms remain manual. Cancellation before
+  native commit prevents it; after start, the receipt states possible/completed
+  effect, not undo. Exact approved SSO hops keep the same task/profile with a
+  bounded top-frame/view-only admission, without widening agent origins. Its
+  reference-only host-session/eight-hour lifecycle and per-use validation
   follow [the credential boundary](../architecture.md#linked-secret-stores).
 
-- Rationale: the hand-off fits the rule that a person's sign-ins are never read
-  by an agent. The page keeps its profile; a Private page's sign-in lasts as
+- Rationale: the handoff keeps credential resolution outside the agent and
+  holds its page access during use. The person checks what the site shows
+  before continuing because site code may reflect credentials. The page keeps its profile; a Private page's sign-in lasts as
   long as the page, and a Project or Personal page keeps it for the next page
   in that profile ([Browser profiles](browser-profiles.md#profiles)).
 
@@ -775,8 +787,9 @@ Several threads of one Project may each drive their own page at the same time.
 
 ## What the tool never does
 
-- It saves no password and fills none. The person signs in by typing into the
-  page themselves ([Browser profiles](browser-profiles.md#profiles)).
+- The agent tool never receives or types a password. The person signs in
+  manually or separately approves brokered form fill and submit under the
+  [held sign-in boundary](#asking-the-person-to-sign-in).
 - It runs no script an agent wrote inside the page. Every operation is a fixed
   host action, so authority checks stay on the server and never move into page
   code.

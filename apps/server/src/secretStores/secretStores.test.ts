@@ -1,5 +1,6 @@
 import {
   decodeBrowserCredentialGrant,
+  decodeBrowserCredentialResult,
   decodeBrowserCredentialMetadata,
 } from "@octant/contracts/browser-credential-use";
 import { CommandCredentialBindings } from "./commandCredentialBindings";
@@ -317,10 +318,39 @@ describe("the AWS command line through a linked store", () => {
       grantId: grant.grantId,
       reason: "changed",
     });
-    expect(h.journalNames()).toEqual(["browser-credential.granted", "browser-credential.revoked"]);
+    const outcome = decodeBrowserCredentialResult({
+      kind: "browser-credential-fill-outcome",
+      planId: "00000000-0000-4000-8000-000000000015",
+      status: "filled",
+      effect: "completed",
+      message: "Fields filled; sign-in not confirmed.",
+    });
+    if (outcome.kind !== "browser-credential-fill-outcome")
+      throw new Error("Expected effect receipt");
+    const recorded = {
+      name: "browser-credential.fill-recorded" as const,
+      grantId: grant.grantId,
+      planId: outcome.planId,
+      windowId: WINDOW,
+      status: outcome.status,
+      effect: outcome.effect,
+    };
+    h.records.record(recorded);
+    expect(h.journalNames()).toEqual([
+      "browser-credential.granted",
+      "browser-credential.revoked",
+      "browser-credential.fill-recorded",
+    ]);
     expect(h.journalText()).toContain(grant.metadata.item.accountId);
 
     const registry = createPhase1RuntimeRegistries().events;
+    expect(registry.decodePersisted("secret-store.recorded@1", 1, recorded)).toEqual(recorded);
+    expect(() =>
+      registry.decodePersisted("secret-store.recorded@1", 1, {
+        ...recorded,
+        password: "fixture-secret",
+      }),
+    ).toThrow();
     expect(
       registry.decodePersisted("secret-store.recorded@1", 1, {
         name: "browser-credential.granted",

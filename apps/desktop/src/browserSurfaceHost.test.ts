@@ -61,6 +61,575 @@ function view(): BrowserSurfaceViewPort {
 }
 
 describe("BrowserSurfaceHost", () => {
+  it.each([
+    ["https://example.com"],
+    ["https://identity.example:8443"],
+    ["https://example.com", "https://identity.example"],
+  ])(
+    "refuses native custody unless both exact page and submission origins are saved (%j)",
+    async (...origins) => {
+      const created = view();
+      vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+        async (_world, scripts) =>
+          scripts[0]?.code.includes('"operation":"validate"')
+            ? { status: "valid" }
+            : {
+                status: "prepared",
+                usernameLabel: "Email",
+                passwordLabel: "Password",
+                submissionOrigin: "https://identity.example:8443",
+              },
+      );
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      const owner = { windowId: "window-a", threadId };
+      try {
+        await host.createContext({
+          contextId,
+          owner,
+          policy: {
+            profileMode: "isolated",
+            allowedOrigins: ["https://example.com"],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 1,
+            sessionTimeoutMs: 300_000,
+          },
+        });
+        const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+        if (plan.status !== "prepared") throw new Error("Expected plan");
+        expect(await host.reserveCredentialFill(contextId, owner, plan.planId, origins)).toEqual({
+          status: "refused",
+        });
+        await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+      } finally {
+        await host.closeAll();
+      }
+    },
+  );
+
+  it("releases an expired ready reservation when commit can no longer find an eligible plan", async () => {
+    vi.useFakeTimers();
+    const created = view();
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) =>
+        scripts[0]?.code.includes('"operation":"validate"')
+          ? { status: "valid" }
+          : {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+            },
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    const owner = { windowId: "window-a", threadId };
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expected plan");
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]);
+      await vi.advanceTimersByTimeAsync(180_001);
+      await expect(host.peek(contextId)).rejects.toThrow(/credential fill holds observations/);
+      expect(
+        await host.commitCredentialFill(contextId, owner, plan.planId, {
+          username: "never",
+          password: "never",
+        }),
+      ).toEqual({ status: "cancelled", effect: "none" });
+      await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+    } finally {
+      await host.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps native observation exclusion after a late reservation's plan expires until custody cleanup", async () => {
+    vi.useFakeTimers();
+    const created = view();
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) =>
+        scripts[0]?.code.includes('"operation":"validate"')
+          ? { status: "valid" }
+          : {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+            },
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    const owner = { windowId: "window-a", threadId };
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expected plan");
+      await vi.advanceTimersByTimeAsync(179_900);
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]);
+      await vi.advanceTimersByTimeAsync(101);
+      expect(await host.validateCredentialFill(contextId, owner, plan.planId)).toBe(false);
+      await expect(host.peek(contextId)).rejects.toThrow(/credential fill holds observations/);
+      host.cancelCredentialFill(contextId, owner, plan.planId);
+      await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+    } finally {
+      await host.closeAll();
+      vi.useRealTimers();
+    }
+  });
+  it("refuses submission when the grant deadline passes during final native field validation", async () => {
+    vi.useFakeTimers();
+    const created = view();
+    let defer = false;
+    let finish: ((value: object) => void) | undefined;
+    let submitted = false;
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) => {
+        const code = scripts[0]?.code ?? "";
+        if (code.includes('"operation":"validate"'))
+          return defer
+            ? new Promise((resolve) => {
+                finish = resolve;
+              })
+            : { status: "valid" };
+        if (code.includes('"operation":"submit"')) {
+          submitted = true;
+          return { status: "submitted" };
+        }
+        return code.includes('"operation":"fill"')
+          ? { status: "filled" }
+          : {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://identity.example",
+            };
+      },
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    const owner = { windowId: "window-a", threadId };
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expected plan");
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]);
+      await host.commitCredentialFill(contextId, owner, plan.planId, {
+        username: "fixture",
+        password: "fixture-private",
+      });
+      const expiresAt = new Date(Date.now() + 100).toISOString();
+      defer = true;
+      const pending = host.submitCredentialFill(contextId, owner, plan.planId, expiresAt);
+      await vi.advanceTimersByTimeAsync(101);
+      finish?.({ status: "valid" });
+      expect(await pending).toEqual({ status: "cancelled", effect: "none" });
+      expect(submitted).toBe(false);
+      const guard = vi
+        .mocked(created.webContents.on)
+        .mock.calls.find(([event]) => event === "will-navigate")?.[1];
+      const refused = vi.fn();
+      guard?.({
+        preventDefault: refused,
+        isMainFrame: true,
+        url: "https://identity.example/authorize",
+      });
+      expect(refused).toHaveBeenCalledOnce();
+    } finally {
+      await host.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])(
+    "cancels an unstarted submit and reports possible effect after submit start (%s)",
+    async (started) => {
+      const created = view();
+      let hold = false;
+      let finish: ((value: object) => void) | undefined;
+      let submissions = 0;
+      vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+        async (_world, scripts) => {
+          const code = scripts[0]?.code ?? "";
+          if (code.includes('"operation":"validate"')) {
+            if (hold && !started)
+              return new Promise((resolve) => {
+                finish = resolve;
+              });
+            return { status: "valid" };
+          }
+          if (code.includes('"operation":"submit"')) {
+            submissions += 1;
+            if (hold && started)
+              return new Promise((resolve) => {
+                finish = resolve;
+              });
+            return { status: "submitted" };
+          }
+          return code.includes('"operation":"fill"')
+            ? { status: "filled" }
+            : {
+                status: "prepared",
+                usernameLabel: "Email",
+                passwordLabel: "Password",
+                submissionOrigin: "https://identity.example",
+              };
+        },
+      );
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      const owner = { windowId: "window-a", threadId };
+      try {
+        await host.createContext({
+          contextId,
+          owner,
+          policy: {
+            profileMode: "isolated",
+            allowedOrigins: ["https://example.com"],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 1,
+            sessionTimeoutMs: 300_000,
+          },
+        });
+        const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+        if (plan.status !== "prepared") throw new Error("Expected form");
+        await host.reserveCredentialFill(contextId, owner, plan.planId, [
+          "https://example.com",
+          "https://identity.example",
+          "https://identity.example:8443",
+        ]);
+        await host.commitCredentialFill(contextId, owner, plan.planId, {
+          username: "fixture",
+          password: "fixture-private",
+        });
+        hold = true;
+        const pending = host.submitCredentialFill(
+          contextId,
+          owner,
+          plan.planId,
+          new Date(Date.now() + 180_000).toISOString(),
+        );
+        await vi.waitFor(() => expect(finish).toBeDefined());
+        expect(host.cancelCredentialFill(contextId, owner, plan.planId)).toEqual({
+          status: "cancelled",
+          effect: started ? "possible" : "none",
+        });
+        finish?.(started ? { status: "submitted" } : { status: "valid" });
+        expect(await pending).toEqual(
+          started
+            ? { status: "authentication-required", effect: "completed" }
+            : { status: "cancelled", effect: "none" },
+        );
+        expect(submissions).toBe(started ? 1 : 0);
+      } finally {
+        await host.closeAll();
+      }
+    },
+  );
+
+  it("admits only the reviewed SSO submission and return origins after explicit submit without creating another profile", async () => {
+    const created = view();
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) => {
+        const code = scripts[0]?.code ?? "";
+        return code.includes('"operation":"validate"')
+          ? { status: "valid" }
+          : code.includes('"operation":"fill"')
+            ? { status: "filled" }
+            : code.includes('"operation":"submit"')
+              ? { status: "submitted" }
+              : {
+                  status: "prepared",
+                  usernameLabel: "Email",
+                  passwordLabel: "Password",
+                  submissionOrigin: "https://identity.example:8443",
+                };
+      },
+    );
+    const createView = vi.fn(() => created);
+    const host = createBrowserSurfaceHost({ createView });
+    const owner = { windowId: "window-a", threadId };
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          profile: { kind: "private" },
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const navigate = vi
+        .mocked(created.webContents.on)
+        .mock.calls.find(([event]) => event === "will-navigate")?.[1];
+      if (navigate === undefined) throw new Error("Expected native navigation guard");
+      const before = vi.fn();
+      navigate({ preventDefault: before }, "https://identity.example:8443/authorize");
+      expect(before).toHaveBeenCalledOnce();
+      let plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expected plan");
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]);
+      await host.commitCredentialFill(contextId, owner, plan.planId, {
+        username: "fixture",
+        password: "fixture-private",
+      });
+      const notYet = vi.fn();
+      navigate({ preventDefault: notYet }, "https://identity.example:8443/authorize");
+      expect(notYet).toHaveBeenCalledOnce();
+      vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld)
+        .mockResolvedValueOnce({ status: "valid" })
+        .mockResolvedValueOnce({ status: "refused" });
+      expect(
+        await host.submitCredentialFill(
+          contextId,
+          owner,
+          plan.planId,
+          new Date(Date.now() + 180_000).toISOString(),
+        ),
+      ).toEqual({ status: "cancelled", effect: "none" });
+      const staleAdmission = vi.fn();
+      navigate({ preventDefault: staleAdmission }, "https://identity.example:8443/authorize");
+      expect(staleAdmission).toHaveBeenCalledOnce();
+      plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expected fresh form");
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]);
+      await host.commitCredentialFill(contextId, owner, plan.planId, {
+        username: "fixture",
+        password: "fixture-private",
+      });
+      expect(
+        await host.submitCredentialFill(
+          contextId,
+          owner,
+          plan.planId,
+          new Date(Date.now() + 180_000).toISOString(),
+        ),
+      ).toEqual({
+        status: "authentication-required",
+        effect: "completed",
+      });
+      for (const target of [
+        "https://identity.example:8443/authorize",
+        "https://example.com/callback",
+      ]) {
+        const refused = vi.fn();
+        navigate({ preventDefault: refused }, target);
+        expect(refused).not.toHaveBeenCalled();
+      }
+      for (const target of [
+        "https://identity.example/authorize",
+        "https://unreviewed.example/authorize",
+      ]) {
+        const refused = vi.fn();
+        navigate({ preventDefault: refused }, target);
+        expect(refused).toHaveBeenCalledOnce();
+      }
+      for (const eventName of ["will-frame-navigate", "will-redirect"]) {
+        const guard = vi
+          .mocked(created.webContents.on)
+          .mock.calls.find(([name]) => name === eventName)?.[1];
+        if (guard === undefined) throw new Error("Expected frame-aware guard");
+        const main = vi.fn();
+        guard({
+          preventDefault: main,
+          isMainFrame: true,
+          url: "https://identity.example:8443/authorize",
+        });
+        expect(main).not.toHaveBeenCalled();
+        const frame = vi.fn();
+        guard({
+          preventDefault: frame,
+          isMainFrame: false,
+          url: "https://identity.example:8443/authorize",
+        });
+        expect(frame).toHaveBeenCalledOnce();
+        const unknown = vi.fn();
+        guard({ preventDefault: unknown, url: "https://identity.example:8443/authorize" });
+        expect(unknown).toHaveBeenCalledOnce();
+      }
+      expect(createView).toHaveBeenCalledOnce();
+    } finally {
+      await host.closeAll();
+    }
+  });
+
+  it("expires abandoned form plans and releases reserved ownership after the window disappears", async () => {
+    vi.useFakeTimers();
+    const created = view();
+    let available = true;
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) =>
+        scripts[0]?.code.includes('"operation":"validate"')
+          ? { status: "valid" }
+          : {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+            },
+    );
+    const host = createBrowserSurfaceHost({
+      createView: () => created,
+      isOwnerWindowAvailable: () => available,
+    });
+    const owner = { windowId: "window-a", threadId };
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      for (let i = 0; i < 32; i++)
+        expect(
+          (await host.prepareCredentialFill(contextId, owner, "https://example.com")).status,
+        ).toBe("prepared");
+      expect(
+        (await host.prepareCredentialFill(contextId, owner, "https://example.com")).status,
+      ).toBe("refused");
+      await vi.advanceTimersByTimeAsync(180_001);
+      const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expired plans must release capacity");
+      expect(
+        await host.reserveCredentialFill(contextId, owner, plan.planId, [
+          "https://example.com",
+          "https://identity.example",
+          "https://identity.example:8443",
+        ]),
+      ).toEqual({
+        status: "reserved",
+      });
+      available = false;
+      host.cancelCredentialFill(contextId, owner, plan.planId);
+      available = true;
+      await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+      expect(
+        await host.commitCredentialFill(contextId, owner, plan.planId, {
+          username: "never",
+          password: "never",
+        }),
+      ).toEqual({ status: "cancelled", effect: "none" });
+    } finally {
+      await host.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
+  it("withholds a capture already awaited when credential custody starts", async () => {
+    const created = view();
+    let releaseCapture:
+      | ((value: Awaited<ReturnType<typeof created.webContents.capturePage>>) => void)
+      | undefined;
+    const image = { isEmpty: () => false, toJPEG: () => Uint8Array.from([1, 2, 3]) };
+    vi.mocked(created.webContents.capturePage).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseCapture = resolve;
+        }),
+    );
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) =>
+        scripts[0]?.code.includes('"operation":"validate"')
+          ? { status: "valid" }
+          : {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+            },
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    const owner = { windowId: "window-a", threadId };
+    await host.createContext({
+      contextId,
+      owner,
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+    expect(plan.status).toBe("prepared");
+    if (plan.status !== "prepared") throw new Error("Expected prepared fixture");
+    const capture = host.peek(contextId);
+    await vi.waitFor(() => expect(releaseCapture).toBeDefined());
+    expect(
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]),
+    ).toEqual({
+      status: "reserved",
+    });
+    await expect(host.peek(contextId)).rejects.toThrow(/credential fill holds observations/);
+    await expect(host.act(contextId, { kind: "snapshot" })).rejects.toThrow(
+      /credential fill holds observations/,
+    );
+    host.cancelCredentialFill(contextId, owner, plan.planId);
+    releaseCapture?.(image);
+    await expect(capture).rejects.toThrow(/credential fill holds observations/);
+
+    vi.mocked(created.webContents.capturePage).mockResolvedValue(image);
+    await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+  });
+
   it("refuses certificate acceptance it cannot bind to this surface's one origin", async () => {
     // Local-certificate acceptance is bounded to the exact origin this tab was
     // opened for.
@@ -278,7 +847,11 @@ describe("BrowserSurfaceHost", () => {
     // loadURL rejects with an opaque ERR_ABORTED after the guard has run.
     vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
       // A site's own www host is the same place; a different site is not.
-      redirectGuard?.({ preventDefault: vi.fn() }, { url: "https://login.example.net/" });
+      redirectGuard?.({
+        preventDefault: vi.fn(),
+        isMainFrame: true,
+        url: "https://login.example.net/",
+      });
       throw new Error("ERR_ABORTED (-3) loading 'https://example.com/'");
     });
     await expect(

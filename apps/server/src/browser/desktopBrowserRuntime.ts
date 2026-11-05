@@ -1,3 +1,7 @@
+import {
+  decodeBrowserCredentialNativeResult,
+  type BrowserCredentialFillPreparation,
+} from "@octant/contracts/browser-credential-use";
 import { storedBrowserProfile } from "@octant/domain";
 import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import type {
@@ -147,6 +151,69 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     }
     await this.#request("/v1/contexts/create", { contextId, policy, owner }, signal);
     return "native-live";
+  }
+
+  async prepareCredentialFill(
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    origin: string,
+  ): Promise<BrowserCredentialFillPreparation> {
+    const result = decodeBrowserCredentialNativeResult(
+      await this.#request("/v1/contexts/credential-fill", {
+        kind: "prepare",
+        contextId,
+        owner,
+        origin,
+      }),
+    );
+    return result.status === "prepared" || result.status === "refused"
+      ? result
+      : { status: "refused", reason: "unavailable" };
+  }
+  async validateCredentialFill(
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    planId: string,
+  ): Promise<boolean> {
+    const result = decodeBrowserCredentialNativeResult(
+      await this.#request("/v1/contexts/credential-fill", {
+        kind: "validate",
+        contextId,
+        owner,
+        planId,
+      }),
+    );
+    return result.status === "validated" && result.valid;
+  }
+  async cancelCredentialFill(
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    planId: string,
+  ): Promise<import("@octant/contracts/browser-credential-use").BrowserCredentialNativeResult> {
+    return decodeBrowserCredentialNativeResult(
+      await this.#request("/v1/contexts/credential-fill", {
+        kind: "cancel",
+        contextId,
+        owner,
+        planId,
+      }),
+    );
+  }
+  async submitCredentialFill(
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    planId: string,
+    expiresAt: string,
+  ) {
+    return decodeBrowserCredentialNativeResult(
+      await this.#request("/v1/contexts/credential-fill", {
+        kind: "submit",
+        contextId,
+        owner,
+        planId,
+        expiresAt,
+      }),
+    );
   }
 
   inspectTarget(

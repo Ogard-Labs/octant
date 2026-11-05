@@ -154,18 +154,38 @@ wait for the agent's sign-in handoff before reviewing a new item.
    then **Allow selected item**. Private pages permit task/page scope only.
 4. Use **Revoke permission** to remove a recorded permission.
 
-This step records permission only. Automatic filling is not available yet,
-and no website sign-in result is claimed. Iframes are not included. The item
-must have a verified saved HTTPS website matching this exact origin and port;
+Saving permission fills nothing. To use it, choose **Review login form**,
+check the field labels and exact submission/return sites, then **Fill selected
+fields**. Check the page before separately choosing **Submit sign-in form**.
+No website sign-in result is claimed. Iframes are not included. The item
+must list both the current page and the form destination as verified saved HTTPS
+websites, including each exact port. If either is missing, sign in manually or
+correct the item’s saved websites yourself, then review again. Octant never
+changes them automatically;
 missing, malformed or more than eight saved websites refuse the review.
 
 Permission ends when the host restarts or after eight hours. Cookies and
 1Password unlock do not renew it. Item/link changes are detected on the next
 permission read; clearing the profile also invalidates its permissions.
 A saved snapshot must be checked again before use. No password, OTP or raw
-item JSON is returned to the agent, renderer or journal. The CLI's selected
+item JSON is returned to the agent, Octant UI or journal. The CLI's selected
 item JSON may contain concealed fields inside the adapter; Octant projects
 only the named metadata fields and discards raw output.
+
+Only one clear username/current-password form with an HTTPS POST action in the
+same top frame can be filled. An unsupported or changed form stays manual.
+Complete MFA, CAPTCHA or passkeys yourself. A filled form is not a signed-in
+account. Explicitly approved SSO outbound and return sites keep the same
+Browser task/profile; other destinations and iframe access are not granted.
+
+The agent cannot act on or observe the page during the private credential read,
+fill or submission. Overlapping reads are also withheld. Cancelling before
+native commit prevents the effect; after commit starts, Octant reports that
+it may have run and cannot undo it. Check the page before continuing.
+The website receives the credential and its own scripts can retain or reflect
+it. The hold and credential-free broker results do not prove that a later page
+snapshot is safe or that a reload removed callbacks. Hand the page back only
+when you are ready to share what it shows.
 
 ## One-time token requests in Code
 

@@ -235,6 +235,33 @@ describe("browser automation routes", () => {
       (await login(request("127.0.0.1", true, { ...payload, topOrigin: "https://forged.example" })))
         ?.status,
     ).toBe(400);
+    expect(
+      (
+        await login(
+          request("127.0.0.1", true, {
+            kind: "confirm-browser-credential-fill",
+            contextId,
+            threadId,
+            mode: "work",
+            planId: contextId,
+            password: "fixture-private",
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(
+      (
+        await login(
+          request("127.0.0.1", true, {
+            kind: "stage-browser-credential-fill",
+            contextId,
+            threadId,
+            mode: "work",
+            planId: contextId,
+          }),
+        )
+      )?.status,
+    ).toBe(400);
     expect(execute).not.toHaveBeenCalled();
     const response = await login(request("127.0.0.1"));
     expect(response?.status).toBe(200);

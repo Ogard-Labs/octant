@@ -1,3 +1,4 @@
+import type { BrowserRuntimePort } from "../browser/browserRuntimePort";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -187,7 +188,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     const desktopBrowserRuntime = createDesktopBrowserRuntimeFromEnvironment(process.env, {
       extensionsFor: (profile) => extensionFoldersFor(profile),
     });
-    const browserRuntime =
+    const browserRuntime: BrowserRuntimePort =
       options.browserRuntime ??
       (desktopBrowserRuntime === undefined
         ? headlessBrowserRuntime
@@ -307,6 +308,35 @@ export function wireBrowser(deps: BrowserDependencies) {
       now: () => new Date().toISOString(),
     });
     const browserCredentialUseService = createBrowserCredentialUseService({
+      fill: {
+        prepare: async (windowId, target) =>
+          (await browserRuntime.prepareCredentialFill?.(
+            target.contextId,
+            { windowId, threadId: target.threadId },
+            target.topOrigin,
+          )) ?? { status: "refused", reason: "unavailable" },
+        hold: (windowId, target, planId) =>
+          browserAutomationService.holdCredentialFill(windowId, target, planId),
+        host: async (command) =>
+          (await credentialMetadataBroker?.browserFill?.(command)) ?? {
+            status: "refused",
+            reason: "unavailable",
+          },
+        cancel: async (windowId, target, planId) => {
+          return browserRuntime.cancelCredentialFill?.(
+            target.contextId,
+            { windowId, threadId: target.threadId },
+            planId,
+          );
+        },
+        submit: async (windowId, target, planId, expiresAt) =>
+          (await browserRuntime.submitCredentialFill?.(
+            target.contextId,
+            { windowId, threadId: target.threadId },
+            planId,
+            expiresAt,
+          )) ?? { status: "failed", effect: "none" },
+      },
       currentTarget: (windowId, command, held) =>
         browserAutomationService.credentialUseTarget(windowId, command, held),
       metadata: async (item) =>

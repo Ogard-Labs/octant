@@ -1,3 +1,4 @@
+import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import {
   createDesktopHostLaunch,
   startDesktopHostServer,
@@ -1695,6 +1696,9 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
   if (credentialBroker !== undefined) return credentialBroker;
   const backend = await getCredentialBackend();
   if (backend.store === undefined) return undefined;
+  const linkedStores = makeLinkedSecretStores({
+    statePath: linkedSecretStoresStatePath(desktopDataDirectory),
+  });
   return await startCredentialBroker(
     backend.store,
     backend.purgeStore,
@@ -1705,8 +1709,9 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.mcpServerCredentials,
     backend.desktopProviderCredentials,
     backend.pushPlatformCredentials,
-    makeLinkedSecretStores({ statePath: linkedSecretStoresStatePath(desktopDataDirectory) }),
+    linkedStores,
     backend.sshKeys,
+    createDesktopBrowserCredentialFill({ stores: linkedStores, surface: () => browserSurfaceHost }),
   );
 }
 

@@ -449,6 +449,114 @@ describe.skipIf(chrome === undefined)(
   "the desktop Browser on a real page",
   { timeout: 30_000 },
   () => {
+    it("fills only the reviewed top document's login fields and requires a separate submit without hiding page callbacks", async () => {
+      const { page, view } = await pageView();
+      const site = "https://login.fixture.test";
+      const owner = { windowId: "window-fill", threadId: crypto.randomUUID() };
+      const contextId = crypto.randomUUID();
+      const host = createBrowserSurfaceHost({ createView: () => view });
+      try {
+        await page.route(`${site}/**`, (route) =>
+          route.fulfill({
+            contentType: "text/html",
+            body: `<!doctype html><form method="post" action="/session"><label>Email<input name="email" autocomplete="username"></label><label>Password<input type="password" name="password" autocomplete="current-password"></label><button type="submit">Sign in</button></form><p id="reflection"></p><script>document.querySelector('input[type=password]').addEventListener('input', event => { document.getElementById('reflection').textContent = event.target.value; }); document.querySelector('form').addEventListener('submit', event => { event.preventDefault(); document.title = 'MFA required'; });</script>`,
+          }),
+        );
+        await page.goto(site);
+        const protocol = view.webContents.debugger;
+        protocol.attach("1.3");
+        view.webContents.executeJavaScriptInIsolatedWorld = async (_world, scripts) => {
+          const tree = (await protocol.sendCommand("Page.getFrameTree")) as {
+            frameTree: { frame: { id: string } };
+          };
+          const world = (await protocol.sendCommand("Page.createIsolatedWorld", {
+            frameId: tree.frameTree.frame.id,
+            worldName: "octant-login-fixture",
+          })) as { executionContextId: number };
+          const result = (await protocol.sendCommand("Runtime.evaluate", {
+            contextId: world.executionContextId,
+            expression: scripts[0]?.code,
+            returnByValue: true,
+            awaitPromise: true,
+          })) as { result?: { value?: unknown }; exceptionDetails?: unknown };
+          if (result.exceptionDetails !== undefined)
+            throw new Error("Fixture isolated operation failed.");
+          return result.result?.value;
+        };
+        await host.createContext({
+          contextId,
+          owner,
+          policy: {
+            profileMode: "isolated",
+            profile: { kind: "private" },
+            allowedOrigins: [site],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 1,
+            sessionTimeoutMs: 300_000,
+          },
+        });
+        const plan = await host.prepareCredentialFill(contextId, owner, site);
+        expect(plan.status).toBe("prepared");
+        if (plan.status !== "prepared") throw new Error("Expected login form");
+        expect(await host.reserveCredentialFill(contextId, owner, plan.planId, [site])).toEqual({
+          status: "reserved",
+        });
+        await expect(host.act(contextId, { kind: "snapshot" })).rejects.toThrow(
+          /credential fill holds observations/,
+        );
+        expect(
+          await host.commitCredentialFill(contextId, owner, plan.planId, {
+            username: "fixture-user",
+            password: "fixture-private",
+          }),
+        ).toEqual({ status: "filled", effect: "completed" });
+        expect(await page.locator("input[name=email]").inputValue()).toBe("fixture-user");
+        expect(await page.locator("input[type=password]").inputValue()).toBe("fixture-private");
+        expect(await page.locator("#reflection").textContent()).toBe("fixture-private");
+        expect(await page.evaluate(() => "octantLoginPlans" in globalThis)).toBe(false);
+        expect(await page.title()).not.toBe("MFA required");
+        expect(
+          await host.submitCredentialFill(
+            contextId,
+            owner,
+            plan.planId,
+            new Date(Date.now() + 180_000).toISOString(),
+          ),
+        ).toEqual({
+          status: "authentication-required",
+          effect: "completed",
+        });
+        expect(await page.title()).toBe("MFA required");
+        expect(
+          await host.submitCredentialFill(
+            contextId,
+            owner,
+            plan.planId,
+            new Date(Date.now() + 180_000).toISOString(),
+          ),
+        ).toEqual({
+          status: "authentication-required",
+          effect: "completed",
+        });
+        const changed = await host.prepareCredentialFill(contextId, owner, site);
+        if (changed.status !== "prepared") throw new Error("Expected second form review");
+        await page
+          .locator("input[type=password]")
+          .evaluate((input) => input.setAttribute("autocomplete", "new-password"));
+        expect(await host.reserveCredentialFill(contextId, owner, changed.planId, [site])).toEqual({
+          status: "refused",
+        });
+        expect(
+          await host.commitCredentialFill(contextId, owner, changed.planId, {
+            username: "never",
+            password: "never",
+          }),
+        ).toEqual({ status: "cancelled", effect: "none" });
+      } finally {
+        await host.closeAll();
+        await page.context().close();
+      }
+    });
     it("reads a snapshot with refs and names a password field without its value", async () => {
       const { host, contextId, page } = await surface("/login");
       const observed = await host.act(contextId, { kind: "snapshot" });

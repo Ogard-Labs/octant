@@ -54,6 +54,37 @@ describe("BrowserAutomationClient", () => {
     ).rejects.toMatchObject({ category: "protocol" });
   });
 
+  it("decodes explicit fill receipts without granting authentication or accepting field values", async () => {
+    const planId = "00000000-0000-4000-8000-000000000010";
+    const answer = {
+      kind: "browser-credential-fill-outcome",
+      planId,
+      status: "filled",
+      effect: "completed",
+      message: "Fields filled; sign-in not confirmed.",
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(answer))
+      .mockResolvedValueOnce(Response.json({ ...answer, password: "fixture-private" }));
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    const command = decodeBrowserCredentialCommand({
+      kind: "confirm-browser-credential-fill",
+      contextId,
+      threadId,
+      mode: "work",
+      planId,
+    });
+    expect(await client.manageCredentialUse?.(command)).toEqual(answer);
+    await expect(client.manageCredentialUse?.(command)).rejects.toMatchObject({
+      category: "protocol",
+    });
+  });
+
   it("sends selected-item permission commands through authenticated transport and rejects malformed answers", async () => {
     const fetch = vi
       .fn()
