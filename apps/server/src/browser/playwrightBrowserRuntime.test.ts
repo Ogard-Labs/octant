@@ -672,6 +672,55 @@ describe("PlaywrightBrowserRuntime", () => {
     expect(stopped.recording).toEqual({ status: "empty" });
   });
 
+  it("keeps a recording a bound cut short under the page it showed, not the one the tab moved to", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    recorder.frame();
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+    checks.settle(false);
+    // A frame of another size ends the recording, as a resize does.
+    recorder.frame(2);
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+    checks.settle(false);
+    await vi.waitFor(() => expect(recorder.looked()).toBe(2));
+    await runtime.act(
+      firstId,
+      action("navigate", "https://example.com/next"),
+      new AbortController().signal,
+    );
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+
+    expect(stopped.url).toBe("https://example.com/next");
+    expect(stopped.recording).toMatchObject({
+      status: "recorded",
+      frames: 1,
+      truncated: "viewport-changed",
+      url: "https://example.com/start",
+    });
+  });
+
+  it("labels a recording that ran on across a navigation with the page it stopped on", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    recorder.frame();
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+    checks.settle(false);
+    await vi.waitFor(() => expect(recorder.looked()).toBe(1));
+    await runtime.act(
+      firstId,
+      action("navigate", "https://example.com/next"),
+      new AbortController().signal,
+    );
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+
+    // Still recording at the stop, so its last frame is of the page it stopped on.
+    expect(stopped.recording).toMatchObject({
+      status: "recorded",
+      url: "https://example.com/next",
+    });
+    expect(stopped.recording).not.toHaveProperty("truncated");
+  });
+
   it("reports process death and closes all owned contexts", async () => {
     const { browser, disconnected, runtime } = harness();
     const listener = vi.fn();
@@ -815,9 +864,15 @@ async function recordingHarness() {
   );
   await runtime.act(firstId, action("record-start"), new AbortController().signal);
   const recorder = {
-    frame() {
+    /** Send a frame `width` pixels wide; a different width is a resized page. */
+    frame(width = 1) {
       holdNextCheck = true;
-      frameListener?.({ data: Buffer.from(onePixelPng()).toString("base64"), sessionId: 1 });
+      frameListener?.({ data: Buffer.from(onePixelPng(width)).toString("base64"), sessionId: 1 });
+    },
+    /** How many frames the runtime has finished looking at. */
+    looked() {
+      return session.send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck")
+        .length;
     },
     onStopScreencast(listener: () => void) {
       stopScreencast = listener;
@@ -827,7 +882,7 @@ async function recordingHarness() {
 }
 
 /** A one-pixel RGBA PNG, the shape a page's screencast sends. */
-function onePixelPng(): Uint8Array {
+function onePixelPng(width = 1): Uint8Array {
   const chunk = (type: string, data: Buffer) => {
     const out = Buffer.alloc(12 + data.length);
     out.writeUInt32BE(data.length, 0);
@@ -837,7 +892,7 @@ function onePixelPng(): Uint8Array {
     return out;
   };
   const header = Buffer.alloc(13);
-  header.writeUInt32BE(1, 0);
+  header.writeUInt32BE(width, 0);
   header.writeUInt32BE(1, 4);
   header[8] = 8;
   header[9] = 6;
@@ -845,7 +900,12 @@ function onePixelPng(): Uint8Array {
     Buffer.concat([
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
       chunk("IHDR", header),
-      chunk("IDAT", deflateSync(Buffer.from([0, 255, 0, 0, 255]))),
+      chunk(
+        "IDAT",
+        deflateSync(
+          Buffer.from([0, ...Array.from({ length: width }, () => [255, 0, 0, 255]).flat()]),
+        ),
+      ),
       chunk("IEND", Buffer.alloc(0)),
     ]),
   );

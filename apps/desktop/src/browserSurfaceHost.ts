@@ -404,14 +404,27 @@ interface OwnedSurface {
 interface SurfaceRecording {
   /** The tab the recording started on, and the only one it shows. */
   readonly tab: OwnedTab;
-  /** Set once another tab came to the front: when, and what the recorded tab showed. */
-  left?: RecordedTabFacts & { readonly atMs: number };
+  /** When frame collection stopped, if it has; see `endCollection`. */
+  readonly ended: () => RecordingEnd | undefined;
+  /**
+   * Note that frame collection stopped, for whatever reason: a bound, another
+   * tab in front, or the call's own stop. The recorded tab's address and title
+   * are read now, so a recording cut short is not labelled with a page the
+   * tab moved to after its last frame. The first end wins.
+   */
+  readonly endCollection: (atMs: number, reason?: "tab-changed") => RecordingEnd;
   readonly client: BrowserSurfaceViewPort["webContents"]["debugger"];
   readonly frames: BrowserRecordingFrames;
   readonly listener: SurfaceProtocolListener;
   readonly timer: ReturnType<typeof setTimeout>;
   /** Settles once every frame that arrived so far has been looked at. */
   readonly settled: () => Promise<void>;
+}
+
+interface RecordingEnd extends RecordedTabFacts {
+  readonly atMs: number;
+  /** A reason only the host can see; a bound's own reason is already in the frames. */
+  readonly reason?: "tab-changed";
 }
 
 /**
@@ -3524,6 +3537,11 @@ async function startRecording(owned: OwnedSurface, tab: OwnedTab): Promise<void>
   }
   const frames = new BrowserRecordingFrames(performance.now());
   let tail: Promise<void> = Promise.resolve();
+  let ended: RecordingEnd | undefined;
+  const endCollection = (atMs: number, reason?: "tab-changed"): RecordingEnd => {
+    ended ??= { atMs, ...(reason === undefined ? {} : { reason }), ...recordedTabFacts(tab) };
+    return ended;
+  };
   const listener: SurfaceProtocolListener = (_event, method, params) => {
     if (method !== "Page.screencastFrame") return;
     const frame = (params ?? {}) as { readonly data?: unknown; readonly sessionId?: unknown };
@@ -3551,6 +3569,8 @@ async function startRecording(owned: OwnedSurface, tab: OwnedTab): Promise<void>
           return;
         }
         frames.offer(Uint8Array.from(Buffer.from(frame.data, "base64")), performance.now());
+        // A bound this frame met stopped the frames; the page is the one it showed.
+        if (!frames.recording) endCollection(performance.now());
       } catch {
         frames.leaveOut();
       } finally {
@@ -3579,6 +3599,7 @@ async function startRecording(owned: OwnedSurface, tab: OwnedTab): Promise<void>
   }
   const timer = setTimeout(() => {
     frames.stop(frames.deadlineMs, "duration-limit");
+    endCollection(frames.deadlineMs);
     // The frames wait for the call's stop; the attachment does not, so a
     // recording whose stop never comes (the person took the page over) holds
     // the page's debugger no longer than its duration bound.
@@ -3587,6 +3608,8 @@ async function startRecording(owned: OwnedSurface, tab: OwnedTab): Promise<void>
   timer.unref?.();
   const recording: SurfaceRecording = {
     tab,
+    ended: () => ended,
+    endCollection,
     client,
     frames,
     listener,
@@ -3630,7 +3653,9 @@ async function finishRecording(
   // before the frames stop: stopped first, a frame whose credential check was
   // still running when the stop came would be refused as late, and the
   // recording would lose the page's last state.
-  const ended = recording.left ?? { atMs: performance.now(), ...recordedTabFacts(recording.tab) };
+  // Still collecting at the stop, the recording's last frame is of the page in
+  // the tab now; cut short earlier, it is labelled as it was then.
+  const ended = recording.ended() ?? recording.endCollection(performance.now());
   endScreencast(owned, recording);
   // A page stuck in its own script would hold the credential check of the last
   // frame; the recording ends without that frame rather than waiting.
@@ -3638,7 +3663,7 @@ async function finishRecording(
     recording.settled(),
     new Promise((resolve) => setTimeout(resolve, 1_000).unref?.()),
   ]);
-  recording.frames.stop(ended.atMs, recording.left === undefined ? undefined : "tab-changed");
+  recording.frames.stop(ended.atMs, ended.reason);
   const result = recording.frames.finish(performance.now());
   if (result.status !== "recorded") return result;
   return {
@@ -3662,8 +3687,10 @@ async function finishRecording(
  */
 function leaveRecordedTab(owned: OwnedSurface, front: OwnedTab | undefined): void {
   const recording = owned.recording;
-  if (recording === undefined || recording.left !== undefined || front === recording.tab) return;
-  recording.left = { atMs: performance.now(), ...recordedTabFacts(recording.tab) };
+  if (recording === undefined || recording.ended() !== undefined || front === recording.tab) {
+    return;
+  }
+  recording.endCollection(performance.now(), "tab-changed");
   endScreencast(owned, recording);
 }
 

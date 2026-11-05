@@ -1021,6 +1021,25 @@ describe.skipIf(chrome === undefined)(
       await page.close();
     });
 
+    it("keeps a recording a resize cut short under the page it showed, not the one the tab moved to", async () => {
+      const { host, contextId, page } = await surface("/red");
+      await host.act(contextId, { kind: "record-start" });
+      await page.waitForTimeout(600);
+      await host.act(contextId, { kind: "resize", viewport: { width: 390, height: 844 } });
+      await page.waitForTimeout(600);
+      await host.act(contextId, { kind: "navigate", target: `${origin}/blue` });
+      await page.waitForTimeout(300);
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      expect(stopped.url).toBe(`${origin}/blue`);
+      expect(stopped.recording).toMatchObject({
+        status: "recorded",
+        truncated: "viewport-changed",
+        url: `${origin}/red`,
+        title: "Red",
+      });
+      await page.close();
+    });
+
     it("withholds a recording of a page that holds a credential field", async () => {
       const { host, contextId, page } = await surface("/login");
       await host.act(contextId, { kind: "record-start" });

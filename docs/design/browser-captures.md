@@ -301,7 +301,12 @@ attached the same way.
   frames at whichever it meets first and says which (`duration-limit`,
   `frame-limit`, `size-limit`). A frame of a different size (the page was
   resized) ends it too (`viewport-changed`): an animation has one size. The
-  call goes on; only the recording stops.
+  call goes on; only the recording stops. A capture is labelled with the
+  recorded tab's address and title as they were when frame collection
+  stopped: at the bound, for one cut short, so a later navigation of the same
+  tab does not lend it the name of a page it never showed; at the call's end,
+  for one that ran that long, whose last frame is of that page even when the
+  call navigated on the way.
 - **One tab.** A recording belongs to the tab it started on. When another tab
   comes to the front (the call opens or switches to one, the person switches,
   or the recorded tab closes), the recording stops at that moment

@@ -313,8 +313,15 @@ interface OwnedRuntimeContext {
 interface PlaywrightRecording {
   /** The tab the recording started on, and the only one it shows. */
   readonly page: PlaywrightPagePort;
-  /** Set once another tab came to the front: when, and what the recorded tab showed. */
-  left?: RecordedTabFacts & { readonly atMs: number };
+  /** When frame collection stopped, if it has; see `endCollection`. */
+  readonly ended: () => RecordingEnd | undefined;
+  /**
+   * Note that frame collection stopped, for whatever reason: a bound, another
+   * tab in front, or the call's own stop. The recorded tab's address and title
+   * are read now, so a recording cut short is not labelled with a page the
+   * tab moved to after its last frame. The first end wins.
+   */
+  readonly endCollection: (atMs: number, reason?: "tab-changed") => RecordingEnd;
   readonly frames: BrowserRecordingFrames;
   readonly session: PlaywrightProtocolSessionPort;
   readonly timer: ReturnType<typeof setTimeout>;
@@ -322,6 +329,13 @@ interface PlaywrightRecording {
   readonly settled: () => Promise<void>;
   /** Take no further frame from the screencast; those already received still finish. */
   readonly stopReceiving: () => void;
+}
+
+interface RecordingEnd {
+  readonly atMs: number;
+  /** A reason only the runtime can see; a bound's own reason is already in the frames. */
+  readonly reason?: "tab-changed";
+  readonly facts: Promise<RecordedTabFacts>;
 }
 
 export const DEFAULT_BROWSER_EXECUTABLE_CANDIDATES = [
@@ -869,6 +883,15 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const frames = new BrowserRecordingFrames(performance.now());
     let tail: Promise<void> = Promise.resolve();
     let receiving = true;
+    let ended: RecordingEnd | undefined;
+    const endCollection = (atMs: number, reason?: "tab-changed"): RecordingEnd => {
+      ended ??= {
+        atMs,
+        ...(reason === undefined ? {} : { reason }),
+        facts: recordedTabFacts(page).catch(() => ({})),
+      };
+      return ended;
+    };
     session.on("Page.screencastFrame", (parameters) => {
       if (!receiving) return;
       const frame = parameters as { readonly data?: unknown; readonly sessionId?: unknown };
@@ -895,6 +918,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
             return;
           }
           frames.offer(Uint8Array.from(Buffer.from(frame.data, "base64")), performance.now());
+          // A bound this frame met stopped the frames; the page is the one it showed.
+          if (!frames.recording) endCollection(performance.now());
         } catch {
           frames.leaveOut();
         } finally {
@@ -919,11 +944,14 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     }
     const timer = setTimeout(() => {
       frames.stop(frames.deadlineMs, "duration-limit");
+      endCollection(frames.deadlineMs);
       void session.send("Page.stopScreencast").catch(() => undefined);
     }, MAX_BROWSER_RECORDING_MS);
     timer.unref?.();
     owned.recording = {
       page,
+      ended: () => ended,
+      endCollection,
       frames,
       session,
       timer,
@@ -943,12 +971,12 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     // it already sent were checked: stopped first, a frame whose credential
     // check was still running when the stop came would be refused as late,
     // and the recording would lose the page's last state.
-    const ended = recording.left ?? {
-      atMs: performance.now(),
-      ...(await recordedTabFacts(recording.page)),
-    };
+    // Still collecting at the stop, the recording's last frame is of the page
+    // in the tab now; cut short earlier, it is labelled as it was then.
+    const ended = recording.ended() ?? recording.endCollection(performance.now());
+    const facts = await ended.facts;
     await this.#endScreencast(recording);
-    recording.frames.stop(ended.atMs, recording.left === undefined ? undefined : "tab-changed");
+    recording.frames.stop(ended.atMs, ended.reason);
     const result = recording.frames.finish(performance.now());
     if (result.status !== "recorded") return result;
     return {
@@ -957,8 +985,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       frames: result.frames,
       durationMs: result.durationMs,
       ...(result.truncated === undefined ? {} : { truncated: result.truncated }),
-      ...(ended.url === undefined ? {} : { url: ended.url }),
-      ...(ended.title === undefined ? {} : { title: ended.title }),
+      ...(facts.url === undefined ? {} : { url: facts.url }),
+      ...(facts.title === undefined ? {} : { title: facts.title }),
     };
   }
 
@@ -975,15 +1003,15 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     front: PlaywrightPagePort | undefined,
   ): Promise<void> {
     const recording = owned?.recording;
-    if (recording === undefined || recording.left !== undefined || front === recording.page) {
+    if (recording === undefined || recording.ended() !== undefined || front === recording.page) {
       return;
     }
-    const atMs = performance.now();
-    recording.left = { atMs };
+    const ended = recording.endCollection(performance.now(), "tab-changed");
     recording.stopReceiving();
     clearTimeout(recording.timer);
     void recording.session.send("Page.stopScreencast").catch(() => undefined);
-    recording.left = { atMs, ...(await recordedTabFacts(recording.page)) };
+    // Read before the caller closes the tab: a closed tab has no title.
+    await ended.facts;
   }
 
   /** Drop a recording without building it: its page or context is going away. */
