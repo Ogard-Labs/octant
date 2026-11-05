@@ -22,6 +22,40 @@ const frame = {
 };
 
 describe("sandboxed human Browser protocol", () => {
+  it("keeps source editing menu identities and commands inside main", () => {
+    const menuId = "00000000-0000-4000-8000-000000000704";
+    for (const operation of [
+      { kind: "edit-menu" },
+      { kind: "edit-menu-watch", menuId },
+      { kind: "edit-menu-keyboard", menuId },
+      { kind: "edit-menu-dismiss", menuId },
+      { kind: "edit-menu-action", menuId, action: "copy" },
+    ]) {
+      const request = { ...owner, presentationId, ...operation };
+      expect(decodeHumanBrowserRequest(request)).toEqual(request);
+      expect(() => decodeHumanBrowserIpcRequest(request)).toThrow();
+    }
+    const response = {
+      status: "edit-menu",
+      menuId,
+      flags: { undo: true, redo: false, cut: false, copy: false, paste: false, selectAll: true },
+    };
+    expect(decodeHumanBrowserResult(response)).toEqual(response);
+    expect(() => decodeHumanBrowserIpcResult(response)).toThrow();
+    const pending = { status: "edit-menu-pending", menuId };
+    expect(decodeHumanBrowserResult(pending)).toEqual(pending);
+    expect(() => decodeHumanBrowserIpcResult(pending)).toThrow();
+    expect(() =>
+      decodeHumanBrowserRequest({
+        ...owner,
+        presentationId,
+        kind: "edit-menu-action",
+        menuId,
+        action: "executeScript",
+      }),
+    ).toThrow();
+  });
+
   it("carries each closed operation without importing the runtime schema into preload", () => {
     const requests = [
       { ...owner, kind: "attach" },

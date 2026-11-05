@@ -18,7 +18,7 @@ const Observation = Schema.Struct({
 });
 const decode = Schema.decodeUnknownSync(Observation, { onExcessProperty: "error" });
 interface NativeCaret {
-  readonly read: (offset: number) => unknown;
+  readonly read: (start: number, end: number) => unknown;
   readonly close: () => unknown;
 }
 function nativeCaret(value: unknown): NativeCaret | undefined {
@@ -34,7 +34,7 @@ function nativeCaret(value: unknown): NativeCaret | undefined {
   const read = value.read,
     close = value.close;
   return {
-    read: (offset) => Reflect.apply(read, value, [offset]),
+    read: (start, end) => Reflect.apply(read, value, [start, end]),
     close: () => Reflect.apply(close, value, []),
   };
 }
@@ -59,17 +59,19 @@ export function ownBrowserTextInput(window: BrowserWindow) {
     /* An unpackaged or unsupported build has no native caret capability. */
   }
   return {
-    read(offset: number) {
+    read(start: number, end = start) {
       if (
         window.isDestroyed() ||
         native === undefined ||
-        !Number.isInteger(offset) ||
-        offset < 0 ||
-        offset > 1_048_576
+        !Number.isInteger(start) ||
+        !Number.isInteger(end) ||
+        start < 0 ||
+        end < start ||
+        end > 1_048_576
       )
         return undefined;
       try {
-        const { status: _status, ...caret } = decode(native.read(offset));
+        const { status: _status, ...caret } = decode(native.read(start, end));
         return caret;
       } catch {
         return undefined;

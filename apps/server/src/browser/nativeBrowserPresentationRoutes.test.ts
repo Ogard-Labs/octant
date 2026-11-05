@@ -61,6 +61,44 @@ function fixture(native = true) {
 }
 
 describe("human Browser presentation authority", () => {
+  it("keeps every page editing operation behind the current main-only native authority", async () => {
+    const f = fixture();
+    const owner = {
+      contextId: command.contextId,
+      threadId: command.threadId,
+      presentationId: "00000000-0000-4000-8000-000000000904",
+    };
+    const menuId = "00000000-0000-4000-8000-000000000905";
+    for (const operation of [
+      { kind: "edit-menu" },
+      { kind: "edit-menu-watch", menuId },
+      { kind: "edit-menu-keyboard", menuId },
+      { kind: "edit-menu-dismiss", menuId },
+      { kind: "edit-menu-action", menuId, action: "copy" },
+    ]) {
+      const raw = JSON.stringify({ ...owner, ...operation });
+      const ordinary = f.request(raw);
+      ordinary.headers.set(
+        "x-octant-renderer-identity",
+        ordinary.headers.get("x-octant-human-presentation") ?? "",
+      );
+      ordinary.headers.delete("x-octant-human-presentation");
+      const before = f.humanPresentation.mock.calls.length;
+      expect((await f.handle(ordinary))?.status).toBe(403);
+      expect(f.humanPresentation).toHaveBeenCalledTimes(before);
+      expect((await f.handle(f.request(raw)))?.status).toBe(200);
+    }
+    f.expire();
+    expect(
+      (
+        await f.handle(
+          f.request(JSON.stringify({ ...owner, kind: "edit-menu-action", menuId, action: "copy" })),
+        )
+      )?.status,
+    ).toBe(403);
+    expect(f.humanPresentation).toHaveBeenCalledTimes(5);
+  });
+
   it("dispatches only a current native window's existing owned context", async () => {
     const f = fixture();
     expect((await f.handle(f.request()))?.status).toBe(200);

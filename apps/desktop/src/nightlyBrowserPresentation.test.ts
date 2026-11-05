@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   decodeHumanBrowserRequest,
   decodeBrowserPresentationId,
   decodeBrowserCompositionId,
+  decodeBrowserEditMenuId,
   type HumanBrowserRequest,
   type HumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
@@ -22,6 +23,417 @@ const input = (type: "keyDown" | "keyUp" | "char") => ({
 });
 
 describe("Nightly main human window ownership", () => {
+  it("releases source modifiers before a popup and keeps its new presses out of that source", async () => {
+    const menuId = decodeBrowserEditMenuId("00000000-0000-4000-8000-000000000848");
+    const calls: HumanBrowserRequest[] = [];
+    let dismiss = () => {};
+    let popupCount = 0;
+    let releaseFrame = () => {};
+    const heldFrame = new Promise<void>((done) => {
+      releaseFrame = done;
+    });
+    const main = new NightlyBrowserPresentation({
+      current: () => true,
+      visible: () => true,
+      focused: () => true,
+      popupMenu: async () => {
+        popupCount++;
+        expect(
+          calls.some(
+            (r) => r.kind === "input" && r.input.type === "keyUp" && r.input.keyCode === "Shift",
+          ),
+        ).toBe(true);
+        await new Promise<void>((done) => {
+          dismiss = done;
+        });
+        return { kind: "dismissed" };
+      },
+      execute: async (request, signal) => {
+        calls.push(request);
+        if (request.kind === "frame") {
+          await heldFrame;
+          return { status: "idle" };
+        }
+        if (request.kind === "attach") return { status: "attached", presentationId: id };
+        if (
+          request.kind === "input" &&
+          request.input.type === "keyDown" &&
+          request.input.keyCode === "F10"
+        )
+          return { status: "edit-menu-pending", menuId };
+        if (request.kind === "edit-menu")
+          return {
+            status: "edit-menu",
+            menuId,
+            flags: {
+              undo: false,
+              redo: false,
+              cut: false,
+              copy: false,
+              paste: false,
+              selectAll: true,
+            },
+          };
+        if (request.kind === "edit-menu-watch") {
+          await new Promise<void>((done) => {
+            if (signal.aborted) done();
+            else signal.addEventListener("abort", () => done(), { once: true });
+          });
+          return { status: "refused" };
+        }
+        return { status: "accepted" };
+      },
+    });
+    const key = (type: "keyDown" | "keyUp" | "char", keyCode: string) => ({
+      ...owner,
+      presentationId: id,
+      kind: "input",
+      frameSequence: 1,
+      input: { type, keyCode, modifiers: ["shift"] },
+    });
+    try {
+      await main.invoke({ ...owner, kind: "attach" });
+      await main.invoke(key("keyDown", "Shift"));
+      await main.invoke(key("keyDown", "F10"));
+      await main.invoke(key("keyUp", "F10"));
+      await vi.waitFor(() => expect(popupCount).toBe(1));
+      const before = calls.length;
+      expect(await main.invoke(key("keyDown", "F10"))).toEqual({ status: "refused" });
+      expect(await main.invoke(key("char", "x"))).toEqual({ status: "refused" });
+      expect(calls.slice(before).some((r) => r.kind === "input")).toBe(false);
+      const other = { ...owner, contextId: "00000000-0000-4000-8000-000000000849" };
+      await main.invoke({ ...other, kind: "attach" });
+      expect(await main.invoke({ ...key("keyDown", "a"), ...other })).toEqual({
+        status: "accepted",
+      });
+      const frame = main.invoke({
+        ...owner,
+        presentationId: id,
+        kind: "frame",
+        acknowledgement: 0,
+      });
+      await vi.waitFor(() => expect(calls.some((r) => r.kind === "frame")).toBe(true));
+      const queuedDown = main.invoke(key("keyDown", "F10"));
+      dismiss();
+      await vi.waitFor(() => expect(calls.some((r) => r.kind === "edit-menu-dismiss")).toBe(true));
+      releaseFrame();
+      await frame;
+      expect(await queuedDown).toEqual({ status: "refused" });
+      expect(await main.invoke(key("keyDown", "F10"))).toEqual({ status: "accepted" });
+      await main.releaseInputs();
+      expect(calls.filter((r) => r.kind === "edit-menu-keyboard")).toHaveLength(1);
+    } finally {
+      releaseFrame();
+      dismiss();
+      await main.releaseInputs();
+      await main.close();
+    }
+  });
+
+  it("refuses a menu down queued before a blur and refocus cycle", async () => {
+    const menuId = decodeBrowserEditMenuId("00000000-0000-4000-8000-000000000838");
+    let focused = true;
+    let unblock = () => {};
+    const blocked = new Promise<void>((done) => {
+      unblock = done;
+    });
+    const calls: HumanBrowserRequest[] = [];
+    const main = new NightlyBrowserPresentation({
+      current: () => true,
+      visible: () => true,
+      focused: () => focused,
+      execute: async (request) => {
+        calls.push(request);
+        if (request.kind === "attach") return { status: "attached", presentationId: id };
+        if (request.kind === "frame") {
+          await blocked;
+          return { status: "idle" };
+        }
+        if (request.kind === "input" && request.input.type === "keyDown")
+          return { status: "edit-menu-pending", menuId };
+        return { status: "accepted" };
+      },
+    });
+    try {
+      await main.invoke({ ...owner, kind: "attach" });
+      const frame = main.invoke({
+        ...owner,
+        presentationId: id,
+        kind: "frame",
+        acknowledgement: 0,
+      });
+      await vi.waitFor(() => expect(calls.some((request) => request.kind === "frame")).toBe(true));
+      const down = main.invoke({
+        ...owner,
+        presentationId: id,
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "keyDown", keyCode: "F10", modifiers: ["shift"] },
+      });
+      focused = false;
+      await main.releaseInputs();
+      focused = true;
+      unblock();
+      await frame;
+      expect(await down).toEqual({ status: "refused" });
+      expect(
+        calls.some((request) => request.kind === "input" && request.input.type === "keyDown"),
+      ).toBe(false);
+      expect(calls.some((request) => request.kind === "edit-menu-keyboard")).toBe(false);
+    } finally {
+      unblock();
+      await main.releaseInputs();
+      await main.close();
+    }
+  });
+
+  it("activates one private menu intent on the matching user release without trusting release modifiers", async () => {
+    const pendingId = decodeBrowserEditMenuId("00000000-0000-4000-8000-000000000828");
+    const menuId = decodeBrowserEditMenuId("00000000-0000-4000-8000-000000000829");
+    const calls: HumanBrowserRequest[] = [];
+    const main = new NightlyBrowserPresentation({
+      current: () => true,
+      visible: () => true,
+      focused: () => true,
+      popupMenu: async () => ({ kind: "selected", id: "5" }),
+      execute: async (request, signal) => {
+        calls.push(request);
+        if (request.kind === "attach") return { status: "attached", presentationId: id };
+        if (request.kind === "input" && request.input.type === "keyDown")
+          return { status: "edit-menu-pending", menuId: pendingId };
+        if (request.kind === "edit-menu")
+          return {
+            status: "edit-menu",
+            menuId,
+            flags: {
+              undo: false,
+              redo: false,
+              cut: false,
+              copy: false,
+              paste: false,
+              selectAll: true,
+            },
+          };
+        if (request.kind === "edit-menu-watch") {
+          await new Promise<void>((done) => {
+            if (signal.aborted) done();
+            else signal.addEventListener("abort", () => done(), { once: true });
+          });
+          return { status: "refused" };
+        }
+        return { status: "accepted" };
+      },
+    });
+    await main.invoke({ ...owner, kind: "attach" });
+    expect(
+      await main.invoke({
+        ...owner,
+        presentationId: id,
+        kind: "edit-menu-keyboard",
+        menuId: pendingId,
+      }),
+    ).toEqual({ status: "refused" });
+    expect(
+      await main.invoke({
+        ...owner,
+        presentationId: id,
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "keyDown", keyCode: "F10", modifiers: ["shift"] },
+      }),
+    ).toEqual({ status: "accepted" });
+    expect(
+      await main.invoke({
+        ...owner,
+        presentationId: id,
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "keyUp", keyCode: "F10", modifiers: [] },
+      }),
+    ).toEqual({ status: "accepted" });
+    await vi.waitFor(() =>
+      expect(calls.some((request) => request.kind === "edit-menu-action")).toBe(true),
+    );
+    expect(calls.filter((request) => request.kind === "edit-menu-keyboard")).toEqual([
+      { ...owner, presentationId: id, kind: "edit-menu-keyboard", menuId: pendingId },
+    ]);
+    expect(calls.find((request) => request.kind === "edit-menu-action")).toEqual({
+      ...owner,
+      presentationId: id,
+      kind: "edit-menu-action",
+      menuId,
+      action: "selectAll",
+    });
+    await main.close();
+  });
+
+  it.each([false, true])(
+    "releases and retires a late pending key after focus loss with focus returned %s",
+    async (refocused) => {
+      let focused = true;
+      const menuId = decodeBrowserEditMenuId("00000000-0000-4000-8000-000000000819");
+      let finish: (result: HumanBrowserResult) => void = () => {};
+      const held = new Promise<HumanBrowserResult>((done) => {
+        finish = done;
+      });
+      const calls: HumanBrowserRequest[] = [];
+      const main = new NightlyBrowserPresentation({
+        current: () => true,
+        visible: () => true,
+        focused: () => focused,
+        execute: async (request) => {
+          calls.push(request);
+          if (request.kind === "attach") return { status: "attached", presentationId: id };
+          if (request.kind === "input" && request.input.type === "keyDown") return held;
+          return { status: "accepted" };
+        },
+      });
+      await main.invoke({ ...owner, kind: "attach" });
+      const pending = main.invoke({
+        ...owner,
+        presentationId: id,
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "keyDown", keyCode: "F10", modifiers: ["shift"] },
+      });
+      await vi.waitFor(() => expect(calls.some((request) => request.kind === "input")).toBe(true));
+      focused = false;
+      await main.releaseInputs();
+      focused = refocused;
+      finish({ status: "edit-menu-pending", menuId });
+      expect(await pending).toEqual({ status: "refused" });
+      expect(calls.some((request) => request.kind === "edit-menu-keyboard")).toBe(false);
+      expect(
+        calls.some((request) => request.kind === "edit-menu-dismiss" && request.menuId === menuId),
+      ).toBe(true);
+      expect(
+        calls.some(
+          (request) =>
+            request.kind === "input" &&
+            request.input.type === "keyUp" &&
+            request.input.keyCode === "F10",
+        ),
+      ).toBe(true);
+      await main.close();
+    },
+  );
+
+  it("sanitizes a pending menu key and cleanup sends only releases and exact dismissal", async () => {
+    const menuId = decodeBrowserEditMenuId("00000000-0000-4000-8000-000000000818");
+    const calls: HumanBrowserRequest[] = [];
+    const main = new NightlyBrowserPresentation({
+      current: () => true,
+      visible: () => true,
+      focused: () => true,
+      execute: async (request) => {
+        calls.push(request);
+        if (request.kind === "attach") return { status: "attached", presentationId: id };
+        if (request.kind === "input" && request.input.type === "keyDown")
+          return { status: "edit-menu-pending", menuId };
+        return { status: "accepted" };
+      },
+    });
+    await main.invoke({ ...owner, kind: "attach" });
+    expect(
+      await main.invoke({
+        ...owner,
+        presentationId: id,
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "keyDown", keyCode: "F10", modifiers: ["shift"] },
+      }),
+    ).toEqual({ status: "accepted" });
+    await main.releaseInputs();
+    expect(calls.some((request) => request.kind === "edit-menu-keyboard")).toBe(false);
+    expect(
+      calls.some((request) => request.kind === "edit-menu-dismiss" && request.menuId === menuId),
+    ).toBe(true);
+    expect(
+      calls
+        .filter((request) => request.kind === "input")
+        .map((request) => (request.kind === "input" ? request.input.type : undefined)),
+    ).toEqual(["keyDown", "keyUp"]);
+    await main.close();
+  });
+
+  it("opens a fixed page menu only from accepted pointer intent and cancels on source retirement", async () => {
+    const menuId = decodeBrowserEditMenuId("00000000-0000-4000-8000-000000000809");
+    let retire: (() => void) | undefined;
+    const retired = new Promise<void>((done) => {
+      retire = done;
+    });
+    let popupSignal: AbortSignal | undefined;
+    const requests: HumanBrowserRequest[] = [];
+    const main = new NightlyBrowserPresentation({
+      current: () => true,
+      visible: () => true,
+      focused: () => true,
+      popupMenu: async (_request, signal) => {
+        popupSignal = signal;
+        await new Promise<void>((done) => {
+          if (signal.aborted) done();
+          else signal.addEventListener("abort", () => done(), { once: true });
+        });
+        return { kind: "dismissed" };
+      },
+      execute: async (request) => {
+        requests.push(request);
+        if (request.kind === "attach") return { status: "attached", presentationId: id };
+        if (request.kind === "edit-menu")
+          return {
+            status: "edit-menu",
+            menuId,
+            flags: {
+              undo: true,
+              redo: false,
+              cut: false,
+              copy: false,
+              paste: false,
+              selectAll: true,
+            },
+          };
+        if (request.kind === "edit-menu-watch") {
+          await retired;
+          return { status: "refused" };
+        }
+        return { status: "accepted" };
+      },
+    });
+    await main.invoke({ ...owner, kind: "attach" });
+    expect(
+      await main.invoke({
+        ...owner,
+        presentationId: id,
+        kind: "edit-menu-action",
+        menuId,
+        action: "copy",
+      }),
+    ).toEqual({ status: "refused" });
+    expect(requests).toHaveLength(1);
+    await main.invoke({
+      ...owner,
+      presentationId: id,
+      kind: "input",
+      frameSequence: 1,
+      input: { type: "mouseDown", x: 10, y: 20, button: "right", clickCount: 1 },
+    });
+    await main.invoke({
+      ...owner,
+      presentationId: id,
+      kind: "input",
+      frameSequence: 1,
+      input: { type: "mouseUp", x: 10, y: 20, button: "right", clickCount: 1 },
+    });
+    await vi.waitFor(() => expect(popupSignal).toBeDefined());
+    retire?.();
+    await vi.waitFor(() => expect(popupSignal?.aborted).toBe(true));
+    await vi.waitFor(() =>
+      expect(requests.some((request) => request.kind === "edit-menu-dismiss")).toBe(true),
+    );
+    expect(requests.some((request) => request.kind === "edit-menu-action")).toBe(false);
+    await main.close();
+  });
+
   it("refuses hidden, unfocused or retired owners and renderer-supplied ownership flags before dispatch", async () => {
     let visible = true;
     let focused = false;

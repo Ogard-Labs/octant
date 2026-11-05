@@ -111,10 +111,16 @@ renew the lease. A connected Browser can display Stable-owned page images and
 forward ordinary pointer, text and keyboard input inside the Nightly window.
 Control-Escape leaves the page; Tab moves among its controls. Nightly’s own
 dropdown, context and local text-editing menus use native macOS menus. These
-local menus do not yet provide menus inside the Stable-owned page. Standard text
+local menus act on Nightly itself. An already focused standard text field in the
+Stable-owned page also supports a native editing menu through pointer right-click
+or Shift+F10.
+Its source and lease remain checked while the menu is open; source retirement
+dismisses the menu. Pointer invocation, Select All and Undo have native evidence.
+Keyboard invocation preserves the current field and selection, and menu
+retirement releases held page keys. Live clipboard acceptance remains pending. Standard text
 inputs and textareas support native composition with a caret anchored to the
 Stable-owned field. Password, custom editors, embedded frames and full IME
-reconversion are not supported by that path. Page accessibility, native popups,
+reconversion are not supported by that path. Page accessibility, remaining native popup types,
 other native brokers and full lifecycle acceptance remain
 unfinished, so this is not a usable Nightly release. Installation and
 publication remain pending.

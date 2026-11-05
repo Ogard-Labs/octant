@@ -859,7 +859,19 @@ they cannot supply Electron roles, callbacks, paths, URLs, or native commands.
 The shell returns the selected ID to the same window, which invokes its existing
 renderer action and ordinary server authority checks. Dismissed, refused, closed,
 or navigated windows select no action. Each window owns at most one contributed
-native popup. The desktop's own text editing menu uses Chromium's edit flags and
+native popup. Embedded Nightly page editing menus use the same native presenter,
+with a separate main-only protocol and fixed Stable page editing commands. Their
+host-issued menu identity captures an already focused standard field's
+incarnation; current source, presentation, layout and native lease are checked
+after metadata waits. Source retirement cancels the owned popup without closing
+the Nightly window. No page labels, selection text or clipboard contents cross
+that protocol. Keyboard invocation binds its paired user gesture to a host-issued
+pending identity; main-only activation uses the current field's verified native
+caret and actual viewport. Cleanup releases cannot activate it, and pending IDs
+never reach the renderer. The supported subset and remaining clipboard acceptance
+are owned by [Nightly's page editing menu rules](design/nightly-app.md#standard-page-editing-menus).
+
+The desktop's own text editing menu uses Chromium's edit flags and
 fixed native roles; embedded browser frames cannot contribute workspace menus.
 
 ### Canvas documents, designs, and prototypes

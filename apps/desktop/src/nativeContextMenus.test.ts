@@ -73,6 +73,32 @@ describe("native menu contributions", () => {
     expect(select).not.toHaveBeenCalled();
   });
 
+  it("dismisses only its source-owned popup and retires cancellation listeners", async () => {
+    const webContents = Object.assign(new EventEmitter(), { getZoomFactor: () => 1 });
+    const window = Object.assign(new EventEmitter(), {
+      webContents,
+      isDestroyed: () => false,
+    }) as unknown as BrowserWindow;
+    const closes = [vi.fn(), vi.fn()];
+    let index = 0;
+    nativeMenus.build.mockImplementation((template: MenuItemConstructorOptions[]) => ({
+      items: template,
+      popup: vi.fn(),
+      closePopup: closes[index++],
+    }));
+    const first = new AbortController();
+    const old = popupNativeMenu(window, request, first.signal);
+    first.abort();
+    expect(closes[0]).toHaveBeenCalledTimes(1);
+    const next = popupNativeMenu(window, request);
+    expect(await old).toEqual({ kind: "dismissed" });
+    first.abort();
+    expect(closes[0]).toHaveBeenCalledTimes(1);
+    expect(closes[1]).not.toHaveBeenCalled();
+    window.emit("closed");
+    expect(await next).toEqual({ kind: "dismissed" });
+  });
+
   it("resolves native selection after the close callback and scales the footer anchor", async () => {
     const webContents = Object.assign(new EventEmitter(), { getZoomFactor: () => 2 });
     const window = Object.assign(new EventEmitter(), {

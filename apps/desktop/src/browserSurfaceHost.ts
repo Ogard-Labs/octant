@@ -10,14 +10,17 @@ import type {
   BrowserPageScriptNativeCommand,
   BrowserPageScriptPreparation,
 } from "@octant/contracts/browser-page-script";
+import { BrowserPageEditMenu } from "./browserPageEditMenu";
 import { BrowserTextComposition, type BrowserTextSource } from "./browserTextComposition";
-import { readBrowserEditableTarget } from "./browserEditableTarget";
+import { readBrowserEditableTarget, type BrowserEditableTarget } from "./browserEditableTarget";
 import { BrowserPresentation, type HumanBrowserSource } from "./browserPresentation";
 import {
+  decodeBrowserEditMenuId,
+  type BrowserEditMenuId,
   type HumanBrowserRequest,
   type HumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { BrowserCredentialFill } from "./browserCredentialFill";
 import {
   browserProfileKey,
@@ -251,6 +254,12 @@ export interface BrowserSurfaceViewPort {
       goForward(): void;
     };
     on(event: string, listener: (...args: readonly unknown[]) => void): void;
+    undo?(): void;
+    redo?(): void;
+    cut?(): void;
+    copy?(): void;
+    paste?(): void;
+    selectAll?(): void;
     reload(): void;
     readonly session: BrowserSurfaceSessionPort;
     setWindowOpenHandler(handler: (details: { readonly url: string }) => { action: "deny" }): void;
@@ -289,7 +298,17 @@ interface OwnedTab {
   readonly contentsId: number | undefined;
 }
 
+interface KeyboardEditingMenu {
+  readonly id: BrowserEditMenuId;
+  readonly keyCode: "F10" | "ContextMenu";
+  readonly target: BrowserEditableTarget;
+  readonly view: BrowserSurfaceViewPort;
+  readonly current: () => boolean;
+  phase: "pressed" | "released" | "activating" | "opened";
+}
 interface OwnedSurface {
+  keyboardMenu: KeyboardEditingMenu | undefined;
+  readonly pageEditMenu: BrowserPageEditMenu;
   readonly presentation: BrowserPresentation;
   readonly textComposition: BrowserTextComposition;
   readonly owner: BrowserSurfaceOwner;
@@ -906,11 +925,17 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     owned.shellWindow.webContents.send(stateChannel, readState(contextId, owned));
   };
 
+  const closeEditingMenu = (owned: OwnedSurface): void => {
+    owned.keyboardMenu = undefined;
+    owned.pageEditMenu.close();
+  };
+
   const markGone = (contextId: string, owned: OwnedSurface): void => {
     if (surfaces.get(contextId) !== owned) return;
     credentialFill.forget(owned);
     surfaces.delete(contextId);
     void owned.textComposition.close();
+    closeEditingMenu(owned);
     owned.presentation.close();
     // Emptied before anything is closed: closing a page can report the page
     // gone, and a report that arrives while this list is still being walked
@@ -950,6 +975,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       owned.shellWindow?.contentView.removeChildView(tab.view);
     }
     void owned.textComposition.close();
+    closeEditingMenu(owned);
     owned.presentation.close();
     owned.activeTabId = incoming.tabId;
     if (owned.shellWindow === undefined || owned.shellWindow.isDestroyed()) return;
@@ -1050,6 +1076,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         // A displayed frame belongs to this document, not its navigation successor.
         if (event === "did-start-loading") {
           void owned.textComposition.close();
+          closeEditingMenu(owned);
           owned.presentation.close();
         }
         publish(contextId, owned);
@@ -1107,6 +1134,30 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (details.webContentsId === undefined) return recordHttpError(owned, details);
       const target = surfaceByWebContents.get(details.webContentsId);
       if (target !== undefined) recordHttpError(target, details);
+    });
+    view.webContents.on("context-menu", (_event: unknown, raw?: unknown) => {
+      if (
+        contentsView(owned) !== view ||
+        typeof raw !== "object" ||
+        raw === null ||
+        !("frame" in raw) ||
+        raw.frame !== view.webContents.mainFrame ||
+        !("isEditable" in raw) ||
+        raw.isEditable !== true ||
+        !("editFlags" in raw) ||
+        typeof raw.editFlags !== "object" ||
+        raw.editFlags === null
+      )
+        return;
+      const flags = raw.editFlags;
+      owned.pageEditMenu.offer({
+        undo: "canUndo" in flags && flags.canUndo === true,
+        redo: "canRedo" in flags && flags.canRedo === true,
+        cut: "canCut" in flags && flags.canCut === true,
+        copy: "canCopy" in flags && flags.canCopy === true,
+        paste: "canPaste" in flags && flags.canPaste === true,
+        selectAll: "canSelectAll" in flags && flags.canSelectAll === true,
+      });
     });
     view.webContents.on("focus", () => {
       owned.control = "user";
@@ -1188,6 +1239,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       }
       const firstTabId = `${String(input.contextId)}:1`;
       const owned: OwnedSurface = {
+        keyboardMenu: undefined,
+        pageEditMenu: new BrowserPageEditMenu(),
         presentation: new BrowserPresentation(),
         textComposition: new BrowserTextComposition({
           current: () =>
@@ -1301,6 +1354,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const human = view.human;
       if (human === undefined) return { status: "refused" };
       if (request.kind === "attach") {
+        closeEditingMenu(owned);
         await owned.textComposition.close();
         if (!current() || contentsView(owned) !== view || signal?.aborted)
           return { status: "refused" };
@@ -1330,12 +1384,80 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       }
       if (request.kind === "detach") {
         if (!owned.presentation.current(request.presentationId)) return { status: "refused" };
+        closeEditingMenu(owned);
         await owned.textComposition.close();
         return {
           status: owned.presentation.detach(request.presentationId) ? "accepted" : "refused",
         };
       }
       if (!owned.presentation.current(request.presentationId)) return { status: "refused" };
+      if (request.kind === "edit-menu") {
+        const menu = await owned.pageEditMenu.read();
+        return current() && !signal?.aborted && owned.presentation.current(request.presentationId)
+          ? menu
+          : { status: "refused" };
+      }
+      if (request.kind === "edit-menu-watch") {
+        const live = await owned.pageEditMenu.watch(request.menuId, signal);
+        return { status: live && current() && !signal?.aborted ? "accepted" : "refused" };
+      }
+      if (request.kind === "edit-menu-dismiss") {
+        if (owned.keyboardMenu?.id === request.menuId) {
+          closeEditingMenu(owned);
+          return { status: "accepted" };
+        }
+        return { status: owned.pageEditMenu.dismiss(request.menuId) ? "accepted" : "refused" };
+      }
+      if (request.kind === "edit-menu-keyboard") {
+        const pending = owned.keyboardMenu;
+        if (pending?.id !== request.menuId || pending.phase !== "released")
+          return { status: "refused" };
+        pending.phase = "activating";
+        const live = () =>
+          owned.keyboardMenu === pending &&
+          pending.phase === "activating" &&
+          pending.current() &&
+          current() &&
+          !signal?.aborted &&
+          owned.control !== "agent";
+        const applied = await queueSurfaceAction(owned, async () => {
+          if (!live()) return false;
+          const existing = await owned.pageEditMenu.read();
+          if (!live()) return false;
+          const editor = await pending.view.human?.editor?.();
+          if (
+            editor === undefined ||
+            editor.id !== pending.target.id ||
+            editor.selectionStart !== pending.target.selectionStart ||
+            editor.selectionEnd !== pending.target.selectionEnd ||
+            !live()
+          )
+            return false;
+          const x = Math.floor(
+            editor.caret.x + (editor.selectionEnd > editor.selectionStart ? 1 : 0),
+          );
+          const y = Math.floor(editor.caret.y + editor.caret.height / 2);
+          if (existing.status === "edit-menu") return true;
+          return owned.presentation.contextMenuAtCaret(request.presentationId, { x, y }, live);
+        });
+        const accepted = applied && live();
+        if (owned.keyboardMenu === pending) {
+          if (accepted) pending.phase = "opened";
+          else closeEditingMenu(owned);
+        }
+        return { status: accepted ? "accepted" : "refused" };
+      }
+      if (request.kind === "edit-menu-action") {
+        const applied = await queueSurfaceAction(owned, async () => {
+          if (!current() || signal?.aborted || owned.control === "agent") return false;
+          return owned.pageEditMenu.act(
+            request.menuId,
+            request.action,
+            () => current() && !signal?.aborted && owned.control !== "agent",
+          );
+        });
+        return { status: applied ? "accepted" : "refused" };
+      }
       if (request.kind === "editor") {
         const editor = await owned.textComposition.editor();
         if (!current() || signal?.aborted || !owned.presentation.current(request.presentationId))
@@ -1355,6 +1477,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         return result;
       }
       if (request.kind === "layout") {
+        closeEditingMenu(owned);
         await owned.textComposition.close();
         if (!current() || signal?.aborted) return { status: "refused" };
         return {
@@ -1370,6 +1493,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       // refusing or stalling a release would strand a key held in the page,
       // and the person-input count above already makes the agent re-read it.
       if (request.kind === "input") {
+        let armed: BrowserEditMenuId | undefined;
         const accepted = await queueSurfaceAction(
           owned,
           async () => {
@@ -1380,15 +1504,85 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               request.frameSequence,
             );
             if (dispatch === undefined) return false;
-            if (request.input.type === "mouseDown") await owned.textComposition.close();
+            const scope = owned.presentation.guard(request.presentationId);
+            const keyboard =
+              request.input.type === "keyDown" &&
+              (request.input.keyCode === "ContextMenu" ||
+                (request.input.keyCode === "F10" && request.input.modifiers?.includes("shift")));
+            if (request.input.type === "mouseDown" || keyboard) {
+              closeEditingMenu(owned);
+              const target =
+                keyboard || (request.input.type === "mouseDown" && request.input.button === "right")
+                  ? await readBrowserEditableTarget((world, scripts) =>
+                      view.webContents.executeJavaScriptInIsolatedWorld(world, scripts),
+                    )
+                  : undefined;
+              await owned.textComposition.close();
+              if (!current() || signal?.aborted || contentsView(owned) !== view || !scope())
+                return false;
+              if (target !== undefined) {
+                if (
+                  keyboard &&
+                  request.input.type === "keyDown" &&
+                  (request.input.keyCode === "F10" || request.input.keyCode === "ContextMenu")
+                ) {
+                  const pending: KeyboardEditingMenu = {
+                    id: decodeBrowserEditMenuId(randomUUID()),
+                    keyCode: request.input.keyCode,
+                    target,
+                    view,
+                    current: () => current() && contentsView(owned) === view && scope(),
+                    phase: "pressed",
+                  };
+                  owned.keyboardMenu = pending;
+                  armed = pending.id;
+                }
+                owned.pageEditMenu.arm(target.id, {
+                  current: () => current() && contentsView(owned) === view && scope(),
+                  editor: async () =>
+                    (
+                      await readBrowserEditableTarget((world, scripts) =>
+                        view.webContents.executeJavaScriptInIsolatedWorld(world, scripts),
+                      )
+                    )?.id,
+                  apply: (action) => {
+                    const edit = view.webContents[action];
+                    if (edit === undefined) throw new Error("Native editing command unavailable.");
+                    owned.personInputs++;
+                    owned.control = "user";
+                    for (const listener of personInputListeners) {
+                      try {
+                        listener(request.contextId);
+                      } catch {
+                        /* Isolate input observers. */
+                      }
+                    }
+                    edit.call(view.webContents);
+                  },
+                });
+              }
+            }
             if (!current() || signal?.aborted || contentsView(owned) !== view) return false;
-            return dispatch();
+            const delivered = dispatch();
+            if (
+              delivered &&
+              request.input.type === "keyUp" &&
+              owned.keyboardMenu?.keyCode === request.input.keyCode &&
+              owned.keyboardMenu.phase === "pressed"
+            )
+              owned.keyboardMenu.phase = "released";
+            if (!delivered && armed !== undefined && owned.keyboardMenu?.id === armed)
+              closeEditingMenu(owned);
+            return delivered;
           },
           "humanInputTail",
         );
-        return { status: accepted ? "accepted" : "refused" };
+        return accepted && armed !== undefined && owned.keyboardMenu?.id === armed
+          ? { status: "edit-menu-pending", menuId: armed }
+          : { status: accepted ? "accepted" : "refused" };
       }
       if (request.kind === "command" || request.kind === "tab") {
+        closeEditingMenu(owned);
         await owned.textComposition.close();
         const applied = await queueSurfaceAction(owned, async () => {
           if (signal?.aborted || !current() || !owned.presentation.current(request.presentationId))
@@ -2133,6 +2327,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     credentialFill.forget(owned);
     surfaces.delete(contextId);
     void owned.textComposition.close();
+    closeEditingMenu(owned);
     owned.presentation.close();
     const closing = owned.tabs;
     owned.tabs = [];
