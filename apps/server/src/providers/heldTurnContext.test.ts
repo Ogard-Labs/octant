@@ -125,6 +125,20 @@ describe("HeldTurnContext", () => {
       ledger.forTurn({ sessionId, resumed: true, context: [instructions, skill] }).context,
     ).toEqual([instructions, skill]);
   });
+
+  it("resends a restored status file after a turn that sent a newer version was interrupted", () => {
+    const ledger = new HeldTurnContext();
+    const statusA = { kind: "work-item", key: "STATUS.md", text: "Status A." } as const;
+    const statusB = { kind: "work-item", key: "STATUS.md", text: "Status B." } as const;
+    completeTurn(ledger, false, [instructions, statusA]);
+    expect(
+      ledger.forTurn({ sessionId, resumed: true, context: [instructions, statusB] }).context,
+    ).toEqual([statusB]);
+    ledger.observe(keptUsage);
+    ledger.observe({ ...fields, kind: "interrupted", message: "Stopped by the person." });
+    expect(completeTurn(ledger, true, [instructions, statusA]).context).toEqual([statusA]);
+    expect(completeTurn(ledger, true, [instructions, statusA]).context).toEqual([]);
+  });
 });
 
 describe("HeldTurnContext kept on disk", () => {

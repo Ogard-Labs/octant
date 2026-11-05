@@ -5748,7 +5748,10 @@ prompt is therefore built to be appended, never rewritten:
   failed or interrupted turn that restated the context leaves the session
   holding nothing, because the runtime may still have kept that restatement
   (Claude reports usage before a failed result), and it supersedes what was
-  held. A session opened by `start` holds nothing. A compaction, automatic
+  held. Likewise a failed or interrupted turn that sent a newer version of a
+  keyed block leaves that key unheld, since the runtime may have kept the newer
+  version: were the status file restored to the held text, leaving it out
+  would let the newer one stand. A session opened by `start` holds nothing. A compaction, automatic
   (`context-compacted`, or a usage report with `promptRetention: "compacted"`)
   or requested, drops the record, because the runtime keeps only a share of
   earlier prompts Octant cannot see. The record is kept in the host data

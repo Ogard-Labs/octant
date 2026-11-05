@@ -1123,7 +1123,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Context and usage accou
 
 A provider that keeps its own conversation is sent standing context once, and resume is bound to a durable identity.
 
-- Standing blocks the session already holds are not resent. The record keeps provider session ids and digests, never text, and a compaction or failed restatement drops it.
+- Standing blocks the session already holds are not resent. The record keeps provider session ids and digests, never text, a compaction or failed restatement drops it, and a failed turn that sent a newer version of a keyed block drops that key.
 - Standing text never varies by turn: a one-turn instruction is its own block kind that is never held, and a re-read file is a keyed block whose newer version is appended without restating anything else.
 - Resume refuses as stale-resume when its binding names another instance, session, Project root, mode or native id. At most one process owns a native session per instance.
 - A retained provider runtime after a settled turn is reused only for an identical task, instance, executable, home, root, mode, model, policy, auth mode and tool catalogue. Any mismatch closes it and cold-resumes. _Here only._

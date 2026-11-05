@@ -162,7 +162,8 @@ export class HeldTurnContextFile implements HeldTurnContextStore {
  * same session and reported, on its usage, that the runtime keeps its prompts
  * (`promptRetention: "kept"`): a failed or interrupted turn may never have
  * reached the runtime's history, yet a failed restatement may have, so it
- * leaves the session holding nothing; and an adapter that says nothing about
+ * leaves the session holding nothing, and a failed turn that sent a newer
+ * version of a keyed block leaves that block unheld; and an adapter that says nothing about
  * retention (ACP agents) never reports a compaction either, so a dropped copy
  * there would never be sent again. A session started afresh holds nothing,
  * and a compaction, automatic or requested, drops everything, because the
@@ -243,11 +244,15 @@ export class HeldTurnContext {
       // A failed restatement may still be in the runtime's history (Claude
       // reports usage before its failed result), where it supersedes blocks the
       // record would otherwise call held; holding nothing forces a full send.
-      if (session.restates !== true) this.#sessions.set(key, { held: session.held });
-      else {
-        this.#sessions.set(key, { held: new Map() });
-        if (session.held.size > 0) this.#persist();
-      }
+      // Likewise a newer version of a keyed block may have reached it, so the
+      // held older version no longer stands as the latest: were the file
+      // restored to that older text, leaving it out would let the newer stand.
+      const held =
+        session.restates === true
+          ? new Map<string, string>()
+          : withoutReplaced(session.held, session.sending);
+      this.#sessions.set(key, { held });
+      if (!sameHolding(session.held, held)) this.#persist();
     }
   }
 
@@ -276,6 +281,17 @@ export class HeldTurnContext {
     }
     this.#store.save(records);
   }
+}
+
+/** The holding less every block whose identity `sending` carried at another version. */
+function withoutReplaced(held: Holding, sending: Holding | undefined): Holding {
+  if (sending === undefined) return held;
+  return new Map(
+    [...held].filter(([identity, version]) => {
+      const sent = sending.get(identity);
+      return sent === undefined || sent === version;
+    }),
+  );
 }
 
 function sameHolding(left: Holding, right: Holding): boolean {
