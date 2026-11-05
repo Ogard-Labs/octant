@@ -11589,7 +11589,12 @@ access` agree); a thread's own change is journaled as
     it. Observation exclusion during the operation and credential-free broker
     results do not prove callbacks are gone, that a reload erased them, or that
     later page content cannot reflect credentials. Consent states this limit;
-    arbitrary agent scripts remain disabled here.
+    the separate [bounded Browser script operation](design/browser-agent-tool.md#bounded-page-scripts)
+    explicitly authorizes ordinary DOM/account access only at Full access in
+    its current implementation. It cannot overlap private credential custody,
+    but previously installed callbacks may persist. Fixed-reader redaction and
+    credential-free broker results are not an arbitrary-script password
+    non-observation guarantee.
   - **Named credential commands.** Settings › Secret stores saves a fixed
     reference-only binding for one Code Project: canonical recipient executable
     and SHA-256 digest, bounded fixed arguments, relative Project directory,

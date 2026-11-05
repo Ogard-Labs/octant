@@ -1,4 +1,8 @@
 import type {
+  BrowserPageScriptNativeCommand,
+  BrowserPageScriptPreparation,
+} from "@octant/contracts/browser-page-script";
+import type {
   BrowserProfileClearScope,
   ImportedCookie,
   StoredBrowserProfile,
@@ -236,6 +240,10 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
   };
 
 export interface BrowserRuntimePort {
+  readonly runPageScript?: (
+    command: BrowserPageScriptNativeCommand,
+    signal: AbortSignal,
+  ) => Promise<BrowserPageScriptPreparation>;
   readonly prepareCredentialFill?: (
     contextId: BrowserContextId,
     owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },

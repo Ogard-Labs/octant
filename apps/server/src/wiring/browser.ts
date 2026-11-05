@@ -56,7 +56,11 @@ import type { ProvidersWiring } from "./providers";
 export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
-    "browserCaptures" | "machineChangeFeed" | "onWindowRevoked" | "windowAuthorityStore"
+    | "browserCaptures"
+    | "machineChangeFeed"
+    | "onWindowRevoked"
+    | "windowAuthorityStore"
+    | "codeSessionAuthority"
   > &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
@@ -67,6 +71,7 @@ export function wireBrowser(deps: BrowserDependencies) {
   const {
     browserAuthority,
     browserCaptures,
+    codeSessionAuthority,
     codeEvidence,
     externalContentIngestionStore,
     localPluginImportReceipts,
@@ -258,6 +263,18 @@ export function wireBrowser(deps: BrowserDependencies) {
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeProjectBrowserAuthority));
     const browserAutomationService = new BrowserAutomationService({
       runtime: browserRuntime,
+      pageScriptPolicy: (windowId, threadId, mode) => {
+        if (
+          mode !== "code" ||
+          isRoutineHostScope(windowId) ||
+          !windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId))
+        )
+          return undefined;
+        const thread = persistence.readCodeThread(decodeCodeThreadId(String(threadId)));
+        return thread?.lifecycle === "active"
+          ? codeSessionAuthority.effectiveThread(windowId, thread).executionPolicy
+          : undefined;
+      },
       authority: browserAuthority,
       captures: browserCaptures,
       toolCallAuthority: createBrowserToolCallAuthorityService(

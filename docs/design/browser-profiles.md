@@ -264,9 +264,13 @@ thread made.
   covers the page, not a new controller. A person-switched replacement for the
   same live task/model/authority uses the ordinary site/profile approval policy,
   including a valid remembered pair; its pending identity alone grants nothing.
-- **Credential fields stay protected.** Credential-field protection is always
-  on: the agent never types into, reads, or receives a picture of a password or
-  one-time-code field. A screenshot of a frame that holds one is withheld.
+- **Fixed readers protect credential fields.** Fixed actions never type into
+  or return password/one-time-code values, and a screenshot of a frame that
+  holds one is withheld. Explicit Full-access page scripts have ordinary
+  DOM/account authority and can read populated or reflected values; see
+  [bounded page scripts](browser-agent-tool.md#bounded-page-scripts). Private
+  storage does not prove a page is signed out, so unknown session eligibility
+  refuses scripts below Full access.
 - **Plan mode** refuses every Browser operation on every profile, as it does
   today, except stopping the thread's own Browser.
 - **Paired devices.** A paired device may not open a profile page, switch a page

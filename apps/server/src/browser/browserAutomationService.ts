@@ -1,4 +1,10 @@
 import type {
+  BrowserPageScriptReceipt,
+  BrowserPageScriptRefusalReason,
+} from "@octant/contracts/browser-page-script";
+import type { ProviderExecutionPolicy } from "@octant/contracts";
+import { clampTurnAccessPosture, evaluateBrowserPageScriptPolicy } from "@octant/domain";
+import type {
   BrowserActionRequest,
   BrowserProfile,
   BrowserAutomationFailure,
@@ -106,7 +112,25 @@ export type BrowserTaskProfileSwitchResult =
   | { readonly status: "changed"; readonly browser: BrowserAutomationSnapshot }
   | { readonly status: "refused"; readonly failure: BrowserAutomationFailure };
 
+export interface BrowserPageScriptInput {
+  readonly windowId: WindowId;
+  readonly threadId: BrowserThreadId;
+  readonly contextId: BrowserContextId;
+  readonly source: string;
+  readonly expectedObservationRevision: number;
+  readonly turnExecutionPolicy: ProviderExecutionPolicy;
+  /** A server-owned turn/model binding check; it may only narrow persisted authority. */
+  readonly callerIsCurrent: () => boolean;
+  readonly signal?: AbortSignal;
+}
+
 export interface BrowserAutomationServiceOptions {
+  /** Resolves current local-person thread posture; absent/unknown fails closed. */
+  readonly pageScriptPolicy?: (
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ) => ProviderExecutionPolicy | undefined;
   readonly runtime: BrowserRuntimePort;
   readonly authority: BrowserAuthorityResolver;
   /** Optional override; when omitted, a choke-point service wraps `authority`. */
@@ -308,6 +332,7 @@ const staleRefFailure: BrowserAutomationFailure = {
 
 export class BrowserAutomationService {
   readonly #runtime: BrowserRuntimePort;
+  readonly #pageScriptPolicy: BrowserAutomationServiceOptions["pageScriptPolicy"];
   readonly #authority: BrowserAuthorityResolver;
   readonly #toolCalls: ToolCallAuthorityService;
   readonly #recordExternalContentIngestion:
@@ -337,6 +362,7 @@ export class BrowserAutomationService {
 
   constructor(options: BrowserAutomationServiceOptions) {
     this.#runtime = options.runtime;
+    this.#pageScriptPolicy = options.pageScriptPolicy;
     this.#authority = options.authority;
     this.#toolCalls =
       options.toolCallAuthority ??
@@ -768,6 +794,142 @@ export class BrowserAutomationService {
     } finally {
       if (!committed && staged !== undefined)
         await this.#destroy(staged, "user-requested", "ready");
+    }
+  }
+
+  async runScript(input: BrowserPageScriptInput): Promise<BrowserPageScriptReceipt> {
+    const owned = this.#contexts.get(input.contextId);
+    const native = this.#runtime.runPageScript?.bind(this.#runtime);
+    const refused = (reason: BrowserPageScriptRefusalReason): BrowserPageScriptReceipt => ({
+      status: "refused",
+      effect: "none",
+      reason,
+    });
+    if (
+      owned === undefined ||
+      owned.windowId !== input.windowId ||
+      String(owned.threadId) !== String(input.threadId)
+    )
+      return refused("stale");
+    if (native === undefined || Buffer.byteLength(input.source, "utf8") > 8192)
+      return refused("unavailable");
+    const epoch = owned.credentialEpoch;
+    const current = (): BrowserPageScriptReceipt | undefined => {
+      if (
+        !input.callerIsCurrent() ||
+        input.signal?.aborted ||
+        owned.abort.signal.aborted ||
+        owned.record.state !== "active" ||
+        !this.#authorityIsActive(owned) ||
+        this.#expired(owned) ||
+        owned.observation?.stale !== false ||
+        owned.observation?.revision !== input.expectedObservationRevision ||
+        owned.personInputs > owned.snapshotPersonInputs
+      )
+        return refused("stale");
+      if (
+        owned.waitingForPerson !== undefined ||
+        owned.credentialFill !== undefined ||
+        epoch !== owned.credentialEpoch
+      )
+        return refused("held");
+      const policy = this.#pageScriptPolicy?.(
+        input.windowId,
+        input.threadId,
+        owned.record.authority.mode,
+      );
+      if (policy === undefined) return refused("unavailable");
+      const decision = evaluateBrowserPageScriptPolicy({
+        executionPolicy: clampTurnAccessPosture({
+          requested: input.turnExecutionPolicy,
+          thread: policy,
+        }),
+        caller: this.#isUnattendedScope(input.windowId) ? "unattended" : "person",
+      });
+      if (decision.status === "refused") return refused(decision.reason);
+      const call = this.#toolCalls.authorize({
+        threadId: String(input.threadId),
+        request: owned.action,
+        arguments: owned.record.policy,
+        turnExecutionPolicy: input.turnExecutionPolicy,
+      });
+      return call.kind === "allow" ? undefined : refused("unavailable");
+    };
+    const initial = current();
+    if (initial !== undefined) return initial;
+    owned.agentActions++;
+    let dispatched = false;
+    let needsObservation = false;
+    try {
+      return await this.#queueAction(owned, async () => {
+        const before = current();
+        if (before !== undefined) return before;
+        const expectedUrl = owned.observation?.url;
+        if (expectedUrl === undefined) return refused("stale");
+        const signal =
+          input.signal === undefined
+            ? owned.abort.signal
+            : AbortSignal.any([owned.abort.signal, input.signal]);
+        const owner = { windowId: input.windowId, threadId: input.threadId };
+        const prepared = await native(
+          {
+            operation: "prepare",
+            contextId: input.contextId,
+            owner,
+            source: input.source,
+            expectedUrl,
+          },
+          signal,
+        );
+        if (prepared.status !== "prepared") return prepared;
+        const after = current();
+        if (after !== undefined) {
+          await native(
+            { operation: "cancel", contextId: input.contextId, owner, planId: prepared.planId },
+            owned.abort.signal,
+          ).catch(() => undefined);
+          return after;
+        }
+        // The source is already pinned in the native one-use preparation. No new source travels at commit.
+        dispatched = true;
+        needsObservation = true;
+        const result = await native(
+          { operation: "execute", contextId: input.contextId, owner, planId: prepared.planId },
+          signal,
+        );
+        if (result.status !== "prepared" && result.effect === "none") needsObservation = false;
+        if (result.status === "prepared")
+          return { status: "execution-uncertain", effect: "possible" };
+        const publication = current();
+        if (publication !== undefined) return { ...publication, effect: result.effect };
+        if ("valueJson" in result && result.valueJson !== undefined) {
+          const ingested = this.#recordExternalContentIngestion?.({
+            threadId: owned.threadId,
+            provenance: { origin: "tool-result", sourceLabel: "browser-page-script" },
+            contentReference: `browser-page-script-${this.#uuid()}`,
+            correlationId: owned.action.correlationId,
+            authorized: true,
+          });
+          if (ingested?.kind === "refused")
+            return { status: "refused", effect: result.effect, reason: "unavailable" };
+        }
+        return result;
+      });
+    } catch {
+      return { status: "execution-uncertain", effect: dispatched ? "possible" : "none" };
+    } finally {
+      if (needsObservation) {
+        owned.refs = undefined;
+        owned.contentHash = undefined;
+        if (owned.observation !== undefined)
+          owned.observation = {
+            ...owned.observation,
+            revision: ++owned.observationRevision,
+            stale: true,
+          };
+      }
+      owned.agentActions--;
+      owned.agentActedAt = this.#now();
     }
   }
 

@@ -158,7 +158,8 @@
     "./managed-tooling": "./src/managedTooling.ts",
     "./browser-credential-use": "./src/browserCredentialUse.ts",
     "./credential-request": "./src/credentialRequest.ts",
-    "./command-credentials": "./src/commandCredentials.ts"
+    "./command-credentials": "./src/commandCredentials.ts",
+    "./browser-page-script": "./src/browserPageScript.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

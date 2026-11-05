@@ -867,6 +867,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           );
         },
         browserAutomation: {
+          runScript: (input) => browserAutomationService.runScript(input),
           resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
           inspectThread: (windowId, threadId) =>
             browserAutomationService.inspectThread(windowId, threadId),

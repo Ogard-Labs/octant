@@ -4,12 +4,15 @@ import type {
   BrowserAppManagedToolsOptions,
   BrowserModelBinding,
 } from "../browser/browserAppManagedTools";
+import type { BrowserPageScriptInput } from "../browser/browserAutomationService";
+import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-script";
 import { browserSignInOriginRefusal } from "../browser/browserRecoveryMessages";
 import { browserToolImage } from "../browser/browserToolImage";
 import { admitBrowserUpload, browserUploadSummary } from "../browser/browserUploadFiles";
 import { browserDownloadQuestion } from "@octant/domain";
 import {
   browserToolAction,
+  browserPageScriptToolResult,
   browserDownloadSavedResult,
   browserToolResult,
   browserToolWantsScreenshot,
@@ -489,6 +492,7 @@ export interface CodeAppManagedToolsOptions {
     ) => Promise<CodeOperationTerminalSnapshot>;
   };
   readonly browser?: {
+    readonly runScript?: (input: BrowserPageScriptInput) => Promise<BrowserPageScriptReceipt>;
     readonly resolveAuthority: (
       threadId: BrowserThreadId,
       mode: "code",
@@ -1268,6 +1272,39 @@ async function browserToolOne(
   // While the person signs in, the page is theirs; see Work's tool.
   if (snapshot.waitingForPerson !== undefined) {
     return heldForPersonAnswer(snapshot.waitingForPerson);
+  }
+  if (input.operation === "run-script") {
+    const refusal = currentAuthorityFailure(options);
+    if (refusal !== undefined) return failure(refusal);
+    if (
+      options.browserSignIn === undefined ||
+      options.browserSignIn.refusal(options.windowId) !== undefined
+    )
+      return failure("script-needs-a-local-person");
+    const context = snapshot.context;
+    if (context?.state !== "active" || context.presentation !== "native-live")
+      return failure("script-needs-the-app-browser");
+    const run = options.browser.runScript;
+    if (run === undefined) return failure("script-unavailable");
+    const callerIsCurrent = () =>
+      currentThreadIdentityFailure(options) === undefined &&
+      currentPosture(options) === "full-access" &&
+      options.browserSignIn?.refusal(options.windowId) === undefined;
+    const receipt = await run({
+      windowId: options.windowId,
+      threadId,
+      contextId: context.contextId,
+      source: input.source,
+      expectedObservationRevision: input.expectedObservationRevision,
+      turnExecutionPolicy: currentPosture(options),
+      callerIsCurrent,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    return browserPageScriptToolResult(
+      callerIsCurrent() && !signal?.aborted
+        ? receipt
+        : { status: "refused", effect: receipt.effect, reason: "stale" },
+    );
   }
   if (snapshot.failure?.category === "context-expired" && input.operation !== "navigate") {
     const context = snapshot.context;

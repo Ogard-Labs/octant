@@ -225,3 +225,5 @@ export * from "./hubGuestPolicy";
 export * from "./paperLocalSetup";
 export * from "./unifiedDiff";
 export * from "./browserCredentialUsePolicy";
+
+export * from "./browserPageScriptPolicy";

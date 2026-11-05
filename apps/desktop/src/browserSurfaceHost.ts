@@ -1,3 +1,8 @@
+import { BrowserPageScript, type PageScriptTarget } from "./browserPageScript";
+import type {
+  BrowserPageScriptNativeCommand,
+  BrowserPageScriptPreparation,
+} from "@octant/contracts/browser-page-script";
 import { createHash } from "node:crypto";
 import { BrowserCredentialFill } from "./browserCredentialFill";
 import {
@@ -259,6 +264,9 @@ export interface BrowserSurfaceHostOptions {
 interface OwnedTab {
   readonly tabId: string;
   readonly view: BrowserSurfaceViewPort;
+  /** Electron may remove the view getter before the WebContents destroyed callback. */
+  readonly contents: BrowserSurfaceViewPort["webContents"];
+  readonly contentsId: number | undefined;
 }
 
 interface OwnedSurface {
@@ -498,17 +506,78 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const surfaceByWebContents = new Map<number, OwnedSurface>();
   const guardedSessions = new WeakSet<object>();
   const forgetWebContents = (tab: OwnedTab): void => {
-    const id = tab.view.webContents.id;
+    const id = tab.contentsId;
     if (id !== undefined) surfaceByWebContents.delete(id);
   };
   const goneListeners = new Set<(contextId: string) => void>();
   const personInputListeners = new Set<(contextId: string) => void>();
   const stateChannel = options.stateChannel ?? DESKTOP_IPC_CHANNELS.browserSurfaceState;
+  const pageScripts = new BrowserPageScript();
+  const scriptHolds = new WeakMap<OwnedSurface, object>();
+  const scriptEpochs = new WeakMap<OwnedSurface, number>();
+  const scriptGenerations = new WeakMap<BrowserSurfaceViewPort, number>();
+  const scriptWorlds = new WeakMap<
+    BrowserSurfaceViewPort,
+    {
+      readonly contexts: Map<number, { readonly uniqueId: string; readonly document: object }>;
+      readonly worlds: Map<string, { readonly uniqueId: string; readonly document: object }>;
+      readonly contents: BrowserSurfaceViewPort["webContents"];
+      readonly client: BrowserSurfaceViewPort["webContents"]["debugger"];
+      readonly listener: SurfaceProtocolListener;
+    }
+  >();
+  const retireScriptView = (view: BrowserSurfaceViewPort) => {
+    const state = scriptWorlds.get(view);
+    if (state === undefined || !state.contents.isDestroyed()) return;
+    state.client.removeListener?.("message", state.listener);
+    for (const world of state.worlds.values()) pageScripts.documentDestroyed(world.document);
+    scriptWorlds.delete(view);
+  };
+  const watchScriptWorld = (view: BrowserSurfaceViewPort) => {
+    let state = scriptWorlds.get(view);
+    if (state !== undefined) return state;
+    const contexts = new Map<number, { readonly uniqueId: string; readonly document: object }>();
+    const worlds = new Map<string, { readonly uniqueId: string; readonly document: object }>();
+    const listener: SurfaceProtocolListener = (_event, method, params) => {
+      if (!scriptRecord(params)) return;
+      if (method === "Runtime.executionContextCreated" && scriptRecord(params.context)) {
+        const context = params.context;
+        if (
+          context.name !== "octant-page-scripts" ||
+          typeof context.id !== "number" ||
+          typeof context.uniqueId !== "string"
+        )
+          return;
+        const known = worlds.get(context.uniqueId);
+        if (known === undefined && worlds.size >= 32) return;
+        const world = known ?? { uniqueId: context.uniqueId, document: {} };
+        worlds.set(context.uniqueId, world);
+        for (const [id, previous] of contexts) if (previous === world) contexts.delete(id);
+        contexts.set(context.id, world);
+      }
+      if (
+        method === "Runtime.executionContextDestroyed" &&
+        typeof params.executionContextUniqueId === "string"
+      ) {
+        const world = worlds.get(params.executionContextUniqueId);
+        if (world === undefined) return;
+        pageScripts.documentDestroyed(world.document);
+        worlds.delete(world.uniqueId);
+        for (const [id, known] of contexts) if (known === world) contexts.delete(id);
+      }
+    };
+    const contents = view.webContents;
+    state = { contexts, worlds, listener, contents, client: contents.debugger };
+    scriptWorlds.set(view, state);
+    state.client.on?.("message", listener);
+    return state;
+  };
   const credentialFill = new BrowserCredentialFill({
     page: (contextId, owner) => {
       const owned = surfaces.get(contextId);
       if (
         owned === undefined ||
+        scriptHolds.has(owned) ||
         owned.owner.windowId !== owner.windowId ||
         String(owned.owner.threadId) !== String(owner.threadId) ||
         options.isOwnerWindowAvailable?.(owner.windowId) === false ||
@@ -525,6 +594,123 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     },
     execute: (view, code) => execute(view, code, true),
   });
+
+  const observation = (owned: OwnedSurface) => {
+    const fill = credentialFill.observation(owned);
+    const epoch = scriptEpochs.get(owned) ?? 0;
+    const check = () => {
+      fill();
+      if (scriptHolds.has(owned) || (scriptEpochs.get(owned) ?? 0) !== epoch)
+        throw new Error("Browser page script holds agent observations.");
+    };
+    check();
+    return check;
+  };
+  const scriptOwnerKey = (command: BrowserPageScriptNativeCommand) =>
+    JSON.stringify([command.contextId, command.owner.windowId, command.owner.threadId]);
+  const runPageScript = async (
+    command: BrowserPageScriptNativeCommand,
+    signal: AbortSignal,
+  ): Promise<BrowserPageScriptPreparation> => {
+    const ownerKey = scriptOwnerKey(command);
+    if (command.operation === "cancel") return pageScripts.cancel(command.planId, ownerKey);
+    const owned = surfaces.get(command.contextId);
+    if (
+      owned === undefined ||
+      owned.owner.windowId !== command.owner.windowId ||
+      String(owned.owner.threadId) !== String(command.owner.threadId) ||
+      options.isOwnerWindowAvailable?.(owned.owner.windowId) === false
+    )
+      return { status: "refused", effect: "none", reason: "stale" };
+    return queueSurfaceAction(owned, async () => {
+      const view = contentsView(owned);
+      const contents = owned.tabs.find((tab) => tab.view === view)?.contents;
+      if (contents === undefined) return { status: "refused", effect: "none", reason: "stale" };
+      const inputs = owned.personInputs;
+      const generation = scriptGenerations.get(view) ?? 0;
+      // The server's expected address comes from an observation, which drops the
+      // fragment and redacts sensitive query values; comparing it to the raw address
+      // refused every hash-routed page. Compare like with like, then hold the raw
+      // address so any later change still refuses the script.
+      if (command.operation === "prepare" && observedUrl(contents) !== command.expectedUrl)
+        return { status: "refused", effect: "none", reason: "stale" };
+      const expectedUrl = contents.getURL();
+      const current = () =>
+        surfaces.get(command.contextId) === owned &&
+        options.isOwnerWindowAvailable?.(owned.owner.windowId) !== false &&
+        !contents.isDestroyed() &&
+        contentsView(owned) === view &&
+        (scriptGenerations.get(view) ?? 0) === generation &&
+        owned.personInputs === inputs &&
+        owned.personInputs <= owned.snapshotPersonInputs &&
+        contents.getURL() === expectedUrl &&
+        originAllowed(expectedUrl, owned.policy.allowedOrigins) &&
+        !signal.aborted;
+      if (!current()) return { status: "refused", effect: "none", reason: "stale" };
+      return withDebugger(view, async (send) => {
+        if (view.webContents.debugger.on === undefined)
+          return { status: "refused", effect: "none", reason: "unavailable" };
+        const state = watchScriptWorld(view);
+        await send("Runtime.enable");
+        // Detachment may hide destruction events. Keep unknown old worlds and refuse at the cap.
+        if (state.worlds.size >= 32)
+          return { status: "refused", effect: "none", reason: "unavailable" };
+        const tree = await send("Page.getFrameTree");
+        if (
+          !scriptRecord(tree) ||
+          !scriptRecord(tree.frameTree) ||
+          !scriptRecord(tree.frameTree.frame) ||
+          typeof tree.frameTree.frame.id !== "string" ||
+          !current()
+        )
+          return { status: "refused", effect: "none", reason: "stale" };
+        const created = await send("Page.createIsolatedWorld", {
+          frameId: tree.frameTree.frame.id,
+          worldName: "octant-page-scripts",
+          grantUniveralAccess: false,
+        });
+        const world =
+          scriptRecord(created) && typeof created.executionContextId === "number"
+            ? state.contexts.get(created.executionContextId)
+            : undefined;
+        if (world === undefined || !current())
+          return { status: "refused", effect: "none", reason: "stale" };
+        const target: PageScriptTarget = {
+          document: world.document,
+          uniqueContextId: world.uniqueId,
+          send,
+          current: () => current() && state.worlds.get(world.uniqueId) === world,
+          reserve: () => {
+            try {
+              credentialFill.observation(owned)();
+            } catch {
+              return undefined;
+            }
+            if (!current() || scriptHolds.has(owned)) return undefined;
+            const hold = {};
+            scriptHolds.set(owned, hold);
+            scriptEpochs.set(owned, (scriptEpochs.get(owned) ?? 0) + 1);
+            owned.control = "agent";
+            publish(command.contextId, owned);
+            return () => {
+              if (scriptHolds.get(owned) !== hold) return;
+              scriptHolds.delete(owned);
+              if (owned.control === "agent") owned.control = "idle";
+              if (
+                !contents.isDestroyed() &&
+                surfaces.get(command.contextId) === owned &&
+                owned.tabs.length > 0
+              )
+                publish(command.contextId, owned);
+            };
+          },
+        };
+        return command.operation === "prepare"
+          ? pageScripts.prepare(target, command.source, ownerKey, signal)
+          : pageScripts.execute(command.planId, target, ownerKey, signal);
+      });
+    });
+  };
 
   const surface = (contextId: string): OwnedSurface => {
     const owned = surfaces.get(contextId);
@@ -550,7 +736,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tab.view.setVisible(false);
       owned.shellWindow?.contentView.removeChildView(tab.view);
       forgetWebContents(tab);
-      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+      if (!tab.contents.isDestroyed()) tab.contents.close();
     }
     owned.shellWindow = undefined;
     void owned.downloads.dispose();
@@ -596,7 +782,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     tab.view.setVisible(false);
     owned.shellWindow?.contentView.removeChildView(tab.view);
     forgetWebContents(tab);
-    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+    if (!tab.contents.isDestroyed()) tab.contents.close();
     if (owned.tabs.length === 0) return markGone(contextId, owned);
     const successor = owned.tabs[Math.min(index, owned.tabs.length - 1)];
     if (owned.activeTabId === tab.tabId && successor !== undefined) showTab(owned, successor);
@@ -673,7 +859,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       (event: unknown, ...details: readonly unknown[]) => {
         const target = navigationUrl(event, details);
         const top = navigationMainFrame(event, details, knownMainFrame);
-        if (typeof target === "string" && admitNavigation(owned, target, top ? view : undefined))
+        if (
+          typeof target === "string" &&
+          admitNavigation(owned, target, top ? view : undefined, !scriptHolds.has(owned))
+        )
           return;
         (event as { preventDefault?: () => void }).preventDefault?.();
         if (top && typeof target === "string") owned.blockedNavigationUrl = target;
@@ -736,10 +925,21 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     };
     view.webContents.on("before-input-event", gateUserInput);
     view.webContents.on("before-mouse-event", gateUserInput);
-    const tab: OwnedTab = { tabId, view };
+    const tab: OwnedTab = {
+      tabId,
+      view,
+      contents: view.webContents,
+      contentsId: view.webContents.id,
+    };
     owned.tabs.push(tab);
     view.webContents.on("render-process-gone", () => forgetTab(String(contextId), owned, tab));
-    view.webContents.on("destroyed", () => forgetTab(String(contextId), owned, tab));
+    view.webContents.on("did-start-navigation", () => {
+      scriptGenerations.set(view, (scriptGenerations.get(view) ?? 0) + 1);
+    });
+    view.webContents.on("destroyed", () => {
+      retireScriptView(view);
+      forgetTab(String(contextId), owned, tab);
+    });
     return tab;
   };
 
@@ -848,6 +1048,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       }
       owned.shellWindow = undefined;
     },
+    runPageScript,
     prepareCredentialFill: (contextId: string, owner: BrowserSurfaceOwner, origin: string) =>
       credentialFill.prepare(contextId, owner, origin),
     reserveCredentialFill: (
@@ -899,7 +1100,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       credentialFill.cancel(contextId, owner, planId),
     inspectTarget: async (contextId: BrowserContextId | string, selector: string) => {
       const owned = surface(contextId);
-      const checkObservation = credentialFill.observation(owned);
+      const checkObservation = observation(owned);
       // A field the host cannot reach, in a frame or out of one, counts as
       // sensitive: the check fails closed.
       const result = await inTargetDocument(contentsView(owned), owned.policy, selector, (target) =>
@@ -919,7 +1120,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       signal?: AbortSignal,
     ): Promise<BrowserSurfaceRuntimeObservation> => {
       const owned = surface(contextId);
-      const checkObservation = credentialFill.observation(owned);
+      const checkObservation = observation(owned);
       return queueSurfaceAction(owned, async () => {
         checkObservation();
         throwIfAborted(signal);
@@ -1225,7 +1426,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       contextId: BrowserContextId | string,
     ): Promise<BrowserSurfaceRuntimeObservation> => {
       const owned = surface(contextId);
-      const checkObservation = credentialFill.observation(owned);
+      const checkObservation = observation(owned);
       const contents = contentsView(owned).webContents;
       // A context that has not navigated yet has no document to inspect and
       // no painted frame to capture; both probes below would never resolve.
@@ -1454,7 +1655,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (browserProfileKey(owned.policy.profile) !== key) continue;
       const shown = owned.shellWindow !== undefined && !owned.shellWindow.isDestroyed();
       for (const tab of owned.tabs) {
-        const id = tab.view.webContents.id;
+        const id = tab.contentsId;
         if (id === undefined) continue;
         tabs.push({
           id,
@@ -1480,7 +1681,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tab.view.setVisible(false);
       owned.shellWindow?.contentView.removeChildView(tab.view);
       forgetWebContents(tab);
-      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+      if (!tab.contents.isDestroyed()) tab.contents.close();
     }
     await owned.downloads.dispose();
   }
@@ -1571,6 +1772,7 @@ function admitNavigation(
   owned: OwnedSurface,
   target: string,
   credentialSubmitView?: BrowserSurfaceViewPort,
+  allowPersonOriginGrant = true,
 ): boolean {
   const temporary = owned.credentialSubmitOrigins;
   if (temporary !== undefined && temporary.expires <= Date.now())
@@ -1587,7 +1789,7 @@ function admitNavigation(
   // Only while the person is demonstrably driving. "idle" is nobody's action:
   // a surface nobody has touched must not grant itself an origin because a
   // page redirected on load.
-  if (owned.control !== "user" || owned.extensionLoads > 0) return false;
+  if (!allowPersonOriginGrant || owned.control !== "user" || owned.extensionLoads > 0) return false;
   const origin = originOf(target);
   if (origin === undefined) return false;
   if (owned.userGrantedOrigins.length >= MAX_USER_GRANTED_ORIGINS) {
@@ -2937,4 +3139,8 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
   } finally {
     if (!ours && client.isAttached()) client.detach();
   }
+}
+
+function scriptRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
