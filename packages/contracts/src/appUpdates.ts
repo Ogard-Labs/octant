@@ -209,6 +209,55 @@ export const AppUpdateState = Schema.Struct({
 export type AppUpdateState = typeof AppUpdateState.Type;
 
 /**
+ * Why the Octant Nightly row did not install, open or remove Nightly.
+ *
+ * Each names the check that refused, so the row can say which one it was. The
+ * feed and artifact reasons mean what they mean for Octant's own updates.
+ */
+export const NightlyInstallRefusal = Schema.Literal(
+  "unreachable",
+  "malformed",
+  "untrusted-signature",
+  "wrong-platform",
+  "wrong-ring",
+  "corrupt-artifact",
+  /** The preview feed holds no published Nightly build. */
+  "no-release",
+  /** The downloaded app is not Nightly signed by Octant's own Developer ID team. */
+  "code-signature",
+  /** The code-signature check could not run or ran out of time; nothing was changed. */
+  "check-unavailable",
+  /** Something other than Octant Nightly already sits at the install location. */
+  "occupied",
+  /** Octant cannot write beside itself. */
+  "not-writable",
+  /** This copy of Octant is not where Nightly can be placed beside it. */
+  "unsupported-install",
+  /** Only packaged macOS Octant places Nightly beside itself. */
+  "unsupported-platform",
+  /** Installing is offered only while Octant follows Preview. */
+  "not-on-preview",
+  /** Nightly is not installed, so there is nothing to open or remove. */
+  "not-installed",
+);
+export type NightlyInstallRefusal = typeof NightlyInstallRefusal.Type;
+
+/**
+ * The Octant Nightly row in Octant's Settings › Updates.
+ *
+ * `unavailable` hides the row: Nightly itself, a development build, or Octant
+ * on Stable with no Nightly installed. `not-installed` offers the install,
+ * which only Octant on Preview does; `installed` offers open and remove on
+ * either ring.
+ */
+export const NightlyInstallState = Schema.Struct({
+  status: Schema.Literal("unavailable", "not-installed", "installing", "installed", "removing"),
+  refusal: Schema.optional(NightlyInstallRefusal),
+  message: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+}).annotations(strict);
+export type NightlyInstallState = typeof NightlyInstallState.Type;
+
+/**
  * Everything an update check discloses, in the words the user guide uses.
  *
  * Kept in the contract rather than only in prose so the claim and the code
@@ -241,3 +290,4 @@ export const decodeAppReleaseRing = Schema.decodeUnknownSync(AppReleaseRing);
 export const decodeAppUpdateFeed = Schema.decodeUnknownSync(AppUpdateFeed);
 export const decodeAppUpdateRelease = Schema.decodeUnknownSync(AppUpdateRelease);
 export const decodeAppUpdateState = Schema.decodeUnknownSync(AppUpdateState);
+export const decodeNightlyInstallState = Schema.decodeUnknownSync(NightlyInstallState);

@@ -161,9 +161,21 @@ It cannot start or migrate that host data.
 Packaged Octant follows the stable ring or, when you choose Preview, the
 candidate ring, and refuses a feed signed for preview. The Nightly identity
 follows only preview and refuses stable and candidate feeds. Development runs
-keep their existing behavior. The stable-host connection, full Nightly command,
-installer, Nightly labels and coexistence remain required before Nightly can
-be offered as a usable download. The release workflow's scheduled Nightly run
+keep their existing behavior. The stable-host connection, full Nightly command
+and coexistence remain required before Nightly can be offered as a usable
+download.
+
+While packaged Octant on macOS follows Preview, Settings › Updates shows an
+Octant Nightly row below the release ring. Octant downloads Nightly only when
+you choose Install Octant Nightly. Before placing it beside Octant as
+`Octant Nightly.app`, it checks the Nightly feed's signature, the download's
+hash, and that the app is Octant Nightly signed by Octant's own developer. If
+a check fails, the row says which one and nothing is installed. Octant never
+replaces another app with that name. Once Nightly is installed, the row offers
+Open Octant Nightly and Remove Octant Nightly. Remove moves the app to the
+Trash and leaves your data alone. After you switch back to Stable, the row
+stays while Nightly is installed. Octant on Linux does not install Nightly;
+download it from octant.sh instead. The release workflow's scheduled Nightly run
 has an explicit preflight stop until that functional client is implemented and
 verified. Its dispatched run builds Octant on the candidate ring and is not
 held by that stop; stable releases and local packaging have no such stop

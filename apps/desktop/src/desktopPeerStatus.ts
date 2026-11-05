@@ -30,6 +30,10 @@ export interface NativeDesktopPeerStatus {
   readonly start: () => Promise<unknown>;
   readonly status: () => Promise<unknown>;
   readonly launchStableHost?: () => Promise<unknown>;
+  /** Stable only: check a Nightly bundle at an exact path against Nightly's requirement. */
+  readonly verifyNightly?: (path: string) => Promise<unknown>;
+  /** Stable only: check that bundle again, then open it through Launch Services. */
+  readonly openNightly?: (path: string) => Promise<unknown>;
   readonly close: () => Promise<unknown>;
 }
 
@@ -185,6 +189,8 @@ export function loadDesktopPeerStatus(input: {
       !("status" in candidate) ||
       typeof candidate.status !== "function" ||
       ("launchStableHost" in candidate && typeof candidate.launchStableHost !== "function") ||
+      ("verifyNightly" in candidate && typeof candidate.verifyNightly !== "function") ||
+      ("openNightly" in candidate && typeof candidate.openNightly !== "function") ||
       !("close" in candidate) ||
       typeof candidate.close !== "function"
     )

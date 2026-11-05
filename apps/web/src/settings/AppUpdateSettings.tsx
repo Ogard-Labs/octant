@@ -1,4 +1,8 @@
-import type { AppReleaseRing, AppUpdateState } from "@octant/contracts/app-updates";
+import type {
+  AppReleaseRing,
+  AppUpdateState,
+  NightlyInstallState,
+} from "@octant/contracts/app-updates";
 import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
@@ -245,6 +249,8 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         </SettingRow>
       ) : null}
 
+      {localPreferences ? null : <NightlyInstallRow bridge={bridge} ring={state?.ring} />}
+
       <SettingRow
         description={`Turning this off stops ${productName} contacting the update service; you can still check by hand.`}
         label="Automatic checks"
@@ -304,4 +310,108 @@ function describeWaiting(work: Extract<AppUpdateInstallOutcome, { kind: "wait" }
     return `Octant will not relaunch while ${work.activeAgentCount} ${work.activeAgentCount === 1 ? "agent is" : "agents are"} still working. Let the work finish or checkpoint it, then relaunch.`;
   }
   return "Octant could not check what is running, so it did not relaunch. Try again in a moment.";
+}
+
+/**
+ * The Octant Nightly row below the ring switch.
+ *
+ * The host decides whether it shows: Octant on Preview offers the install,
+ * either ring keeps open and remove while Nightly is installed, and Nightly
+ * itself has no such row. Read again whenever the ring changes, because the
+ * answer depends on it.
+ */
+function NightlyInstallRow(props: {
+  readonly bridge: OctantHostBridge | undefined;
+  readonly ring: AppReleaseRing | undefined;
+}) {
+  const read = props.bridge?.readNightlyInstall;
+  const installNightly = props.bridge?.installNightly;
+  const openNightly = props.bridge?.openNightly;
+  const removeNightly = props.bridge?.removeNightly;
+  const [nightly, setNightly] = useState<NightlyInstallState>();
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+
+  useEffect(() => {
+    if (read === undefined || props.ring === undefined) return;
+    let active = true;
+    void read().then(
+      (next) => {
+        if (active) setNightly(next);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [read, props.ring]);
+
+  if (nightly === undefined || nightly.status === "unavailable") return null;
+
+  async function act(action: (() => Promise<NightlyInstallState>) | undefined): Promise<void> {
+    if (action === undefined) return;
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      setNightly(await action());
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : "Octant could not reach Octant Nightly.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const installed = nightly.status === "installed" || nightly.status === "removing";
+  const working = busy || nightly.status === "installing" || nightly.status === "removing";
+  const alert = failure ?? nightly.message;
+  return (
+    <>
+      <SettingRow
+        description={
+          installed
+            ? "Installed beside Octant and sharing its data. Removing it moves the app to the Trash and leaves that data alone."
+            : "A second app with builds of what has been merged, beside Octant and sharing its data. It is checked against Octant's own signature before it is placed."
+        }
+        label="Octant Nightly"
+        scope="app"
+        settingId="app-update-nightly"
+      >
+        <div className="app-update__actions">
+          {installed ? (
+            <>
+              <OctantButton
+                disabled={working}
+                onClick={() => void act(openNightly)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Open Octant Nightly
+              </OctantButton>
+              <OctantButton
+                disabled={working}
+                onClick={() => void act(removeNightly)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                {nightly.status === "removing" ? "Removing…" : "Remove Octant Nightly"}
+              </OctantButton>
+            </>
+          ) : (
+            <OctantButton
+              disabled={working}
+              onClick={() => void act(installNightly)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              {working ? "Installing…" : "Install Octant Nightly"}
+            </OctantButton>
+          )}
+        </div>
+      </SettingRow>
+      {alert === undefined ? null : <OctantAlert tone="danger">{alert}</OctantAlert>}
+    </>
+  );
 }

@@ -82,6 +82,8 @@ import type {
   AppUpdateState,
   AppUpdateStatus,
   AppVersion,
+  NightlyInstallRefusal,
+  NightlyInstallState,
 } from "@octant/contracts/app-updates";
 import type { UtcTimestamp } from "@octant/contracts";
 
@@ -259,6 +261,14 @@ export interface OctantHostBridge {
   readonly setAutomaticAppUpdateChecks: (enabled: boolean) => Promise<AppUpdateState>;
   readonly subscribeAppUpdateState: (listener: (state: AppUpdateState) => void) => () => void;
   readonly appUpdatePreferenceScope?: "local";
+  /**
+   * Octant's Nightly row. Absent in Nightly itself; the desktop main process
+   * decides every install, open and remove.
+   */
+  readonly readNightlyInstall?: () => Promise<NightlyInstallState>;
+  readonly installNightly?: () => Promise<NightlyInstallState>;
+  readonly openNightly?: () => Promise<NightlyInstallState>;
+  readonly removeNightly?: () => Promise<NightlyInstallState>;
   /** Local application display only; never a host or capability identity. */
   readonly applicationIdentity?: Readonly<{
     readonly flavor: "nightly";
@@ -765,6 +775,20 @@ export function createHostBridge(
     cancelCodeOperationApproval: () => invoke(IPC_CHANNELS.cancelCodeOperationApproval),
     ...(applicationIdentity === undefined ? {} : { applicationIdentity }),
     ...(localUpdatePreferences ? { appUpdatePreferenceScope: "local" as const } : {}),
+    // Nightly never offers to install, open or remove itself, so its bridge
+    // carries none of the row's requests.
+    ...(localUpdatePreferences || applicationIdentity !== undefined
+      ? {}
+      : {
+          readNightlyInstall: async () =>
+            decodeNightlyInstallState(await ipc.invoke(IPC_CHANNELS.nightlyInstallState)),
+          installNightly: async () =>
+            decodeNightlyInstallState(await ipc.invoke(IPC_CHANNELS.nightlyInstall)),
+          openNightly: async () =>
+            decodeNightlyInstallState(await ipc.invoke(IPC_CHANNELS.nightlyInstallOpen)),
+          removeNightly: async () =>
+            decodeNightlyInstallState(await ipc.invoke(IPC_CHANNELS.nightlyInstallRemove)),
+        }),
     projectWindowCapability,
     subscribeProjectWindowCapability: (listener: (capability: string) => void) => {
       let active = true;
@@ -2178,6 +2202,34 @@ function decodeAppUpdateState(value: unknown): AppUpdateState {
     ...(value.refusal === undefined ? {} : { refusal: value.refusal as AppUpdateRefusal }),
     ...(value.message === undefined ? {} : { message: value.message }),
     ...(value.checkedAt === undefined ? {} : { checkedAt: value.checkedAt as UtcTimestamp }),
+  });
+}
+
+const NIGHTLY_INSTALL_STATUSES = [
+  "unavailable",
+  "not-installed",
+  "installing",
+  "installed",
+  "removing",
+] as const;
+
+/** Hand-validated for the same reason as the update state: no runtime imports here. */
+function decodeNightlyInstallState(value: unknown): NightlyInstallState {
+  if (
+    !isRecord(value) ||
+    typeof value.status !== "string" ||
+    !(NIGHTLY_INSTALL_STATUSES as ReadonlyArray<string>).includes(value.status) ||
+    (value.refusal !== undefined &&
+      (typeof value.refusal !== "string" || value.refusal.length > 64)) ||
+    (value.message !== undefined &&
+      (typeof value.message !== "string" || value.message.length > 512))
+  ) {
+    throw new TypeError("Invalid Octant Nightly state.");
+  }
+  return Object.freeze({
+    status: value.status as NightlyInstallState["status"],
+    ...(value.refusal === undefined ? {} : { refusal: value.refusal as NightlyInstallRefusal }),
+    ...(value.message === undefined ? {} : { message: value.message }),
   });
 }
 

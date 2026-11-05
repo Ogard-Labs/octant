@@ -402,4 +402,86 @@ describe("AppUpdateSettings", () => {
     expect(screen.queryByRole("note")).toBeNull();
     expect(screen.getByRole("button", { name: "What's new" })).toBeTruthy();
   });
+
+  describe("the Octant Nightly row", () => {
+    const onRing = (ring: AppUpdateState["ring"]) => ({
+      subscribeAppUpdateState: (listener: (state: AppUpdateState) => void) => {
+        listener({ ...ready, status: "idle", ring, allowedRings: ["stable", "candidate"] });
+        return () => {};
+      },
+    });
+
+    it("offers to install Nightly while Octant follows Preview, and only on a click", async () => {
+      const installNightly = vi.fn(async () => ({ status: "installed" as const }));
+      const readNightlyInstall = vi.fn(async () => ({ status: "not-installed" as const }));
+      view({ ...onRing("candidate"), readNightlyInstall, installNightly });
+
+      const install = await screen.findByRole("button", { name: "Install Octant Nightly" });
+      expect(installNightly).not.toHaveBeenCalled();
+      fireEvent.click(install);
+      expect(await screen.findByRole("button", { name: "Open Octant Nightly" })).toBeTruthy();
+      expect(installNightly).toHaveBeenCalledWith();
+    });
+
+    it("names the check that refused an install", async () => {
+      view({
+        ...onRing("candidate"),
+        readNightlyInstall: vi.fn(async () => ({ status: "not-installed" as const })),
+        installNightly: vi.fn(async () => ({
+          status: "not-installed" as const,
+          refusal: "code-signature" as const,
+          message: "The downloaded app is not Octant Nightly signed by Octant's own developer.",
+        })),
+      });
+
+      fireEvent.click(await screen.findByRole("button", { name: "Install Octant Nightly" }));
+      expect(
+        await screen.findByText(/not Octant Nightly signed by Octant's own developer/),
+      ).toBeTruthy();
+    });
+
+    it("hides the row on Stable when Nightly is not installed", async () => {
+      const readNightlyInstall = vi.fn(async () => ({ status: "unavailable" as const }));
+      view({ ...onRing("stable"), readNightlyInstall });
+
+      await waitFor(() => expect(readNightlyInstall).toHaveBeenCalled());
+      expect(screen.queryByText("Octant Nightly")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Install Octant Nightly" })).toBeNull();
+    });
+
+    it("keeps open and remove on Stable while Nightly is installed", async () => {
+      const removeNightly = vi.fn(async () => ({ status: "unavailable" as const }));
+      const openNightly = vi.fn(async () => ({ status: "installed" as const }));
+      view({
+        ...onRing("stable"),
+        readNightlyInstall: vi.fn(async () => ({ status: "installed" as const })),
+        openNightly,
+        removeNightly,
+      });
+
+      fireEvent.click(await screen.findByRole("button", { name: "Open Octant Nightly" }));
+      await waitFor(() => expect(openNightly).toHaveBeenCalled());
+      expect(screen.queryByRole("button", { name: "Install Octant Nightly" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Remove Octant Nightly" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Open Octant Nightly" })).toBeNull(),
+      );
+    });
+
+    it("never shows the row in Nightly, even if asked", async () => {
+      const readNightlyInstall = vi.fn(async () => ({ status: "installed" as const }));
+      view({
+        appUpdatePreferenceScope: "local",
+        subscribeAppUpdateState: (listener) => {
+          listener({ ...ready, ring: "preview", allowedRings: ["preview"] });
+          return () => {};
+        },
+        readNightlyInstall,
+      });
+
+      await screen.findByRole("switch", { name: "Check for updates automatically" });
+      expect(readNightlyInstall).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Open Octant Nightly" })).toBeNull();
+    });
+  });
 });

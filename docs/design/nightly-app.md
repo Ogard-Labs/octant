@@ -20,8 +20,7 @@ second app.
 
 The remaining delivery includes complete embedded browsing parity,
 full lifecycle acceptance, shared sign-in operations, the complete
-`octant-nightly` command, the installer and removal controls,
-and the functional release preflight. Coexistence and rollback
+`octant-nightly` command and the functional release preflight. Coexistence and rollback
 still need their remaining implementation and packaged evidence. Bounded native
 lease reconnect is implemented; full signed lifecycle acceptance remains separate. The
 preview workflow selects each run's flavor, artifact and payload-smoke paths
@@ -35,8 +34,10 @@ Nothing in this foundation authorizes installation or publication.
 The two-binary channel split below (2026-11-05) is built: Octant follows
 `stable` or `candidate`, Nightly follows only `preview`, packaging and the
 release workflow stamp the flavor from the ring, and the scheduled Nightly run
-alone is held by the functional-client preflight. The install row is not yet
-offered from Preview, and Nightly cannot yet run its own test-data host.
+alone is held by the functional-client preflight. The Octant Nightly row in
+Octant's Settings › Updates is built for packaged macOS Octant, including its
+three checks; a signed install from a published Nightly build has not yet been
+exercised. Nightly cannot yet run its own test-data host.
 
 ## Two apps, one set of data
 
@@ -621,6 +622,25 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
     Nightly", which moves the app to the Trash and leaves the shared data alone.
     Installing is a download the person starts; Octant never installs Nightly by
     itself.
+  - The desktop main process decides every step; the renderer only asks, with
+    no arguments. The location is fixed: `Octant Nightly.app` in the folder
+    that holds the running `Octant.app` (normally `/Applications`). A launch
+    that is not a plain `Octant.app` bundle, or that macOS translocated,
+    refuses. The download is written to a private temporary folder and
+    extracted with `ditto` into a staging folder beside the target, the
+    requirement is checked on that extracted bundle, and only then is it
+    renamed into place. Something other than Octant Nightly at the location
+    (by its Info.plist bundle id) is left alone and refuses; an installed
+    Nightly is replaced by rename, and restored if the new copy cannot be
+    moved in. No quarantine attribute is set or cleared: the file is written
+    by Octant itself, as Octant's own updater does. "Installed" means that
+    location holds a bundle whose id is Nightly's. Open checks the requirement
+    again and opens the bundle through Launch Services. Each refusal names the
+    check that refused.
+  - Linux has no code-signature check to bind the download to Octant's
+    publisher, so packaged Linux Octant does not offer the row and refuses an
+    install as not supported on this platform; Linux Nightly comes from the
+    website.
 - **From the website.** octant.sh offers both downloads. The Nightly download
   says it works with Octant and needs it installed.
 - Switching Octant back to Stable leaves an installed Nightly in place; the
