@@ -451,6 +451,16 @@ store is unavailable, restore it before retrying. Application setup never
 replaces your account consent or expands what a task may do. GitHub continues
 to accept personal access tokens.
 
+For a manually added Slack MCP server, application setup is not yet a working
+connection: this host cannot yet offer Slack's documented localhost callback,
+so Sign in refuses before consent. Its dedicated metadata advertises a
+registered client with a secret sent by POST; general public-PKCE guidance is
+not proof that a public client works through this endpoint. The closed wire
+support selects only `search:read.public`, and refuses when it is not
+advertised. It requests no write permission and adds no Slack Library entry.
+A vendor-compatible retained callback is the next implementation step; real
+app eligibility, consent and tool access still need verification.
+
 ### Found on this computer
 
 Below the extension packages, **Found on this computer** (**Found on this

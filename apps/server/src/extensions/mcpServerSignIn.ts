@@ -10,6 +10,11 @@ import type {
   HostOAuthSignInAgainReason,
   HostOAuthSignInState,
 } from "@octant/contracts/host-oauth";
+import {
+  SLACK_MCP_USER_OAUTH,
+  mcpOAuthResourceForTransport,
+  isSlackMcpUserDescriptorBinding,
+} from "@octant/host-runtime";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import type { HostOAuthService } from "../providers/oauth/hostOAuthService";
 
@@ -56,6 +61,8 @@ type Discovered =
   | {
       readonly kind: "discovered";
       readonly resource: string;
+      readonly transportUrl: string;
+      readonly mcpDialect: "mcp-authorization" | "slack-mcp-user";
       readonly issuer: string;
       readonly authorizationEndpoint: string;
       readonly tokenEndpoint: string;
@@ -111,9 +118,21 @@ export class McpServerSignIn {
       return refused("local-host-required", "Set up the client on this host.");
     const url = await this.#options.serverUrl(extensionId, componentId);
     if (url === undefined) return { kind: "not-applicable" };
-    if (canonicalResource(registration.resource) !== canonicalResource(url)) {
+    const transportUrl = canonicalResource(url);
+    if (canonicalResource(registration.resource) !== mcpOAuthResourceForTransport(transportUrl)) {
       return refused("invalid", "This client setup names a different MCP server.");
     }
+    if (
+      transportUrl === SLACK_MCP_USER_OAUTH.transportUrl &&
+      (registration.issuer !== SLACK_MCP_USER_OAUTH.issuer ||
+        registration.kind !== "registered" ||
+        registration.clientAuthentication?.method !== "client_secret_post" ||
+        registration.clientAuthentication.tokenEndpoint !== SLACK_MCP_USER_OAUTH.tokenEndpoint)
+    )
+      return refused(
+        "issuer-unsupported",
+        "This server advertises a registered client using client_secret_post; public-client compatibility is not established.",
+      );
     const result = await this.configureClient(registration, principalKind);
     if (result.kind !== "configured") return result;
     const key = signInKey(extensionId, componentId);
@@ -222,6 +241,20 @@ export class McpServerSignIn {
         "Set up a registered OAuth client for this server before signing in.",
       );
     }
+    if (discovered.mcpDialect === SLACK_MCP_USER_OAUTH.dialect) {
+      if (
+        setup?.clientAuthentication?.method !== "client_secret_post" ||
+        !discovered.tokenAuthenticationMethods.includes("client_secret_post")
+      )
+        return refused(
+          "issuer-unsupported",
+          "This authorization server does not advertise public-client authentication. Use its supported registered-client setup.",
+        );
+      return refused(
+        "issuer-unsupported",
+        "Slack sign-in needs its documented localhost callback. This host cannot yet offer that callback; application setup can be retained.",
+      );
+    }
     let port: number;
     try {
       port = setup?.redirectPort ?? (await (this.#options.pickPort ?? pickFreePort)());
@@ -241,7 +274,7 @@ export class McpServerSignIn {
     const descriptor: HostOAuthDescriptor = {
       descriptorId: `mcp-${digest(key)}` as HostOAuthDescriptor["descriptorId"],
       clientId: registered.clientId as HostOAuthDescriptor["clientId"],
-      dialect: "mcp-authorization",
+      dialect: discovered.mcpDialect,
       flow: "authorization-code-pkce",
       authorizationEndpoint:
         discovered.authorizationEndpoint as HostOAuthDescriptor["authorizationEndpoint"],
@@ -395,6 +428,18 @@ export class McpServerSignIn {
     const key = signInKey(extensionId, componentId);
     const record = this.#signIns.get(key);
     if (record === undefined) return launch;
+    const transportUrl = canonicalResource(launch.url);
+    if (record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect) {
+      if (
+        !isSlackMcpUserDescriptorBinding(record.descriptor) ||
+        transportUrl !== SLACK_MCP_USER_OAUTH.transportUrl
+      )
+        return launch;
+    } else if (
+      record.descriptor.resource !== transportUrl ||
+      transportUrl === SLACK_MCP_USER_OAUTH.transportUrl
+    )
+      return launch;
     let answer: unknown;
     try {
       answer = await this.#options.access(record.credentialRef);
@@ -412,6 +457,11 @@ export class McpServerSignIn {
     }
     if (answer.kind !== "granted" || typeof answer.accessToken !== "string") return launch;
     const tokenType = typeof answer.tokenType === "string" ? answer.tokenType : "Bearer";
+    if (
+      record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect &&
+      tokenType.toLowerCase() !== "bearer"
+    )
+      return launch;
     return {
       ...launch,
       headers: { ...launch.headers, Authorization: `${tokenType} ${answer.accessToken}` },
@@ -475,7 +525,8 @@ export class McpServerSignIn {
     // RFC 9728 §3.3: the metadata must name this very server. Accepting
     // another resource would let a server obtain a bearer meant for a
     // different API and then receive it on connect.
-    const resource = canonicalResource(serverUrl);
+    const transportUrl = canonicalResource(serverUrl);
+    const resource = mcpOAuthResourceForTransport(transportUrl);
     if (
       typeof metadata.resource !== "string" ||
       !isAbsoluteUrl(metadata.resource) ||
@@ -521,16 +572,49 @@ export class McpServerSignIn {
         message: "The authorization server does not support PKCE with S256.",
       };
     }
+    const slack = transportUrl === SLACK_MCP_USER_OAUTH.transportUrl;
+    const reserved =
+      slack ||
+      new URL(transportUrl).origin === SLACK_MCP_USER_OAUTH.resource ||
+      issuer === SLACK_MCP_USER_OAUTH.issuer ||
+      authorizationEndpoint === SLACK_MCP_USER_OAUTH.authorizationEndpoint ||
+      tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint;
+    if (
+      reserved &&
+      (!slack ||
+        resource !== SLACK_MCP_USER_OAUTH.resource ||
+        issuer !== SLACK_MCP_USER_OAUTH.issuer ||
+        authorizationEndpoint !== SLACK_MCP_USER_OAUTH.authorizationEndpoint ||
+        tokenEndpoint !== SLACK_MCP_USER_OAUTH.tokenEndpoint)
+    )
+      return {
+        kind: "issuer-unsupported",
+        message:
+          "The server's authorization metadata does not match its reviewed resource, issuer and endpoints.",
+      };
+    if (
+      slack &&
+      (!Array.isArray(metadata.scopes_supported) ||
+        !metadata.scopes_supported.includes(SLACK_MCP_USER_OAUTH.readScope))
+    )
+      return {
+        kind: "issuer-unsupported",
+        message: "The server does not advertise the selected read permission.",
+      };
     const registration = issuerMetadata.registration_endpoint;
-    const scopes = Array.isArray(metadata.scopes_supported)
-      ? metadata.scopes_supported
-          .filter((entry): entry is string => typeof entry === "string")
-          .filter((entry) => SCOPE_TOKEN_PATTERN.test(entry))
-          .slice(0, 16)
-      : [];
+    const scopes = slack
+      ? [SLACK_MCP_USER_OAUTH.readScope]
+      : Array.isArray(metadata.scopes_supported)
+        ? metadata.scopes_supported
+            .filter((entry): entry is string => typeof entry === "string")
+            .filter((entry) => SCOPE_TOKEN_PATTERN.test(entry))
+            .slice(0, 16)
+        : [];
     return {
       kind: "discovered",
       resource,
+      transportUrl,
+      mcpDialect: slack ? SLACK_MCP_USER_OAUTH.dialect : "mcp-authorization",
       issuer: issuerUrl.host,
       issuerUrl: issuer,
       metadataClientSupported: issuerMetadata.client_id_metadata_document_supported === true,

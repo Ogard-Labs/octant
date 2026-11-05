@@ -221,3 +221,10 @@ export {
   type DesktopFlavor,
   type DesktopIdentity,
 } from "./desktopIdentity";
+
+export {
+  SLACK_MCP_USER_OAUTH,
+  mcpOAuthResourceForTransport,
+  isSlackMcpUserGrantBinding,
+  isSlackMcpUserDescriptorBinding,
+} from "./slackMcpOAuth";

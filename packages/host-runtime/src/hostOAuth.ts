@@ -11,12 +11,18 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 import { issuerRequestDeadline } from "./issuerRequest";
+import {
+  SLACK_MCP_USER_OAUTH,
+  isSlackMcpUserGrantBinding,
+  isSlackMcpUserDescriptorBinding,
+} from "./slackMcpOAuth";
 
 const GRANT_KIND = "host-oauth-grant";
 const CALLBACK_PATH = "/oauth/callback";
 const OPENROUTER_DIALECT = "openrouter-pkce";
 const CHATGPT_PLAN_DIALECT = "chatgpt-plan-siwc";
 const MCP_DIALECT = "mcp-authorization";
+const SLACK_MCP_DIALECT = SLACK_MCP_USER_OAUTH.dialect;
 const DIRECTORY_DIALECT = "directory-oidc";
 // The one directory authority the directory dialect signs in against. The
 // broker builds every authority URL from this host and the tenant GUID, so no
@@ -150,6 +156,7 @@ export type HostOAuthDialect =
   | "openrouter-pkce"
   | "chatgpt-plan-siwc"
   | "mcp-authorization"
+  | "slack-mcp-user"
   | "directory-oidc"
   | "issuer-oidc";
 
@@ -189,6 +196,8 @@ export interface HostOAuthDescriptor {
    * and refresh so the issuer binds the token to that server.
    */
   readonly resource?: string;
+  readonly mcpTransportUrl?: string;
+  readonly mcpIssuer?: string;
   /**
    * MCP authorization dialect only: the loopback port the callback listens
    * on. The client registration had to name the redirect address before the
@@ -399,6 +408,8 @@ interface StoredGrant {
   readonly dialect?: string;
   /** MCP authorization dialect: the resource every refresh names again. */
   readonly resource?: string;
+  readonly mcpTransportUrl?: string;
+  readonly mcpIssuer?: string;
   readonly clientAuthentication?: McpOAuthClientAuthentication;
   /**
    * ChatGPT plan dialect only: the identity token from the last exchange or
@@ -511,6 +522,8 @@ export async function exchangeAuthorizationCode(input: {
   readonly dialect?: HostOAuthDialect;
   /** MCP authorization dialect: the resource the exchange names (RFC 8707). */
   readonly resource?: string;
+  readonly mcpTransportUrl?: string;
+  readonly mcpIssuer?: string;
   /** ChatGPT plan dialect: the OIDC nonce bound to the identity token. */
   readonly nonce?: string;
   /** ChatGPT plan dialect: the issued client id captured from the callback. */
@@ -531,6 +544,16 @@ export async function exchangeAuthorizationCode(input: {
     }
   | { readonly kind: "transient" }
 > {
+  if (
+    input.dialect !== SLACK_MCP_DIALECT &&
+    (input.mcpTransportUrl !== undefined ||
+      input.mcpIssuer !== undefined ||
+      input.resource === SLACK_MCP_USER_OAUTH.resource ||
+      input.tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint)
+  )
+    return { kind: "refused", reason: "exchange-refused" };
+  if (input.dialect === SLACK_MCP_DIALECT && !isSlackMcpUserGrantBinding(input))
+    return { kind: "refused", reason: "exchange-refused" };
   if (!codeVerifierMatchesChallenge(input.verifier, input.challenge)) {
     return { kind: "refused", reason: "verifier-mismatch" };
   }
@@ -606,7 +629,12 @@ export async function exchangeAuthorizationCode(input: {
     generation: 0,
     codeExchange: true,
     ...(input.resource === undefined ? {} : { resource: input.resource }),
-    ...(input.dialect === MCP_DIALECT ? { refreshTokenOptional: true } : {}),
+    ...(input.dialect === MCP_DIALECT || input.dialect === SLACK_MCP_DIALECT
+      ? { refreshTokenOptional: true }
+      : {}),
+    ...(input.dialect === SLACK_MCP_DIALECT ? { tokenDialect: SLACK_MCP_DIALECT } : {}),
+    ...(input.mcpTransportUrl === undefined ? {} : { mcpTransportUrl: input.mcpTransportUrl }),
+    ...(input.mcpIssuer === undefined ? {} : { mcpIssuer: input.mcpIssuer }),
     ...(input.clientAuthentication === undefined
       ? {}
       : { clientAuthentication: input.clientAuthentication }),
@@ -2301,6 +2329,12 @@ export function createHostOAuthRuntime(options: {
       ...(session.descriptor.resource === undefined
         ? {}
         : { resource: session.descriptor.resource }),
+      ...(session.descriptor.mcpTransportUrl === undefined
+        ? {}
+        : { mcpTransportUrl: session.descriptor.mcpTransportUrl }),
+      ...(session.descriptor.mcpIssuer === undefined
+        ? {}
+        : { mcpIssuer: session.descriptor.mcpIssuer }),
       ...(session.nonce === "" ? {} : { nonce: session.nonce }),
       ...(issuedClientId === undefined ? {} : { issuedClientId }),
       ...(session.descriptor.extAgentHostId === undefined
@@ -2715,6 +2749,11 @@ export function createHostOAuthRuntime(options: {
       generation,
       codeExchange: false,
       ...(current.resource === undefined ? {} : { resource: current.resource }),
+      ...(current.dialect === SLACK_MCP_DIALECT ? { tokenDialect: SLACK_MCP_DIALECT } : {}),
+      ...(current.mcpTransportUrl === undefined
+        ? {}
+        : { mcpTransportUrl: current.mcpTransportUrl }),
+      ...(current.mcpIssuer === undefined ? {} : { mcpIssuer: current.mcpIssuer }),
       ...(current.clientAuthentication === undefined
         ? {}
         : { clientAuthentication: current.clientAuthentication }),
@@ -3051,8 +3090,11 @@ async function requestTokens(input: {
   readonly codeExchange: boolean;
   /** MCP authorization dialect: kept on the grant so a refresh names it again. */
   readonly resource?: string;
+  readonly mcpTransportUrl?: string;
+  readonly mcpIssuer?: string;
   /** MCP authorization dialect: an issuer may grant an access token alone. */
   readonly refreshTokenOptional?: boolean;
+  readonly tokenDialect?: typeof SLACK_MCP_DIALECT;
   /**
    * Directory and issuer refresh: read the refusal's error code the way that
    * dialect documents it, never its description.
@@ -3062,6 +3104,8 @@ async function requestTokens(input: {
     body: Readonly<Record<string, unknown>>,
   ) => TokenRequestResult;
 }): Promise<TokenRequestResult> {
+  if (input.tokenDialect === SLACK_MCP_DIALECT && !isSlackMcpUserGrantBinding(input))
+    return { kind: "refused", reason: "exchange-refused" };
   let response: Response;
   let body: Record<string, unknown> | undefined;
   try {
@@ -3106,6 +3150,16 @@ async function requestTokens(input: {
   }
   const error = stringField(body, "error");
   if (error !== undefined) {
+    if (input.tokenDialect === SLACK_MCP_DIALECT) {
+      if (error === "ratelimited" || error === "service_unavailable") return { kind: "transient" };
+      if (
+        error === "token_revoked" ||
+        error === "invalid_client_id" ||
+        error === "bad_client_secret" ||
+        error === "bad_redirect_uri"
+      )
+        return { kind: "refused", reason: "exchange-refused", error };
+    }
     if (input.refreshErrors !== undefined && ERROR_PATTERN.test(error)) {
       return input.refreshErrors(error, body);
     }
@@ -3118,7 +3172,15 @@ async function requestTokens(input: {
   }
   const accessToken = stringField(body, "access_token");
   const refreshToken = stringField(body, "refresh_token") ?? input.previousRefresh;
-  const tokenType = stringField(body, "token_type") ?? "Bearer";
+  const reportedTokenType = stringField(body, "token_type");
+  if (
+    input.tokenDialect === SLACK_MCP_DIALECT &&
+    (body.ok !== true ||
+      (reportedTokenType !== "user" && reportedTokenType?.toLowerCase() !== "bearer"))
+  )
+    return { kind: "refused", reason: "exchange-refused" };
+  const tokenType =
+    input.tokenDialect === SLACK_MCP_DIALECT ? "Bearer" : (reportedTokenType ?? "Bearer");
   const expiresIn = numberField(body, "expires_in") ?? 3_600;
   const idToken = stringField(body, "id_token");
   if (
@@ -3145,6 +3207,9 @@ async function requestTokens(input: {
       generation: input.generation + 1,
       ...(idToken === undefined ? {} : { idToken }),
       ...(input.resource === undefined ? {} : { resource: input.resource }),
+      ...(input.tokenDialect === SLACK_MCP_DIALECT ? { dialect: SLACK_MCP_DIALECT } : {}),
+      ...(input.mcpTransportUrl === undefined ? {} : { mcpTransportUrl: input.mcpTransportUrl }),
+      ...(input.mcpIssuer === undefined ? {} : { mcpIssuer: input.mcpIssuer }),
       ...(input.clientAuthentication === undefined
         ? {}
         : { clientAuthentication: input.clientAuthentication }),
@@ -3221,6 +3286,23 @@ function decodeGrant(raw: string): StoredGrant {
   const planUsageEnabled = parsed.planUsageEnabled;
   const resource = parsed.resource;
   const clientAuthentication = parseClientAuthentication(parsed.clientAuthentication);
+  const mcpTransportUrl = parsed.mcpTransportUrl;
+  const mcpIssuer = parsed.mcpIssuer;
+  if (
+    dialect === SLACK_MCP_DIALECT
+      ? !isSlackMcpUserGrantBinding({
+          resource,
+          tokenEndpoint,
+          mcpTransportUrl,
+          mcpIssuer,
+          clientAuthentication,
+        })
+      : mcpTransportUrl !== undefined ||
+        mcpIssuer !== undefined ||
+        resource === SLACK_MCP_USER_OAUTH.resource ||
+        tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint
+  )
+    throw new CredentialStoreFailure("invalid");
   if (parsed.clientAuthentication !== undefined && clientAuthentication === undefined)
     throw new CredentialStoreFailure("invalid");
   const tenantId = parsed.tenantId;
@@ -3290,6 +3372,8 @@ function decodeGrant(raw: string): StoredGrant {
     tokenEndpoint,
     generation,
     ...(resource === undefined ? {} : { resource }),
+    ...(typeof mcpTransportUrl === "string" ? { mcpTransportUrl } : {}),
+    ...(typeof mcpIssuer === "string" ? { mcpIssuer } : {}),
     ...(clientAuthentication === undefined ? {} : { clientAuthentication }),
     ...(dialect === undefined ? {} : { dialect }),
     ...(idToken === undefined ? {} : { idToken }),
@@ -3315,6 +3399,7 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
     dialect !== OPENROUTER_DIALECT &&
     dialect !== CHATGPT_PLAN_DIALECT &&
     dialect !== MCP_DIALECT &&
+    dialect !== SLACK_MCP_DIALECT &&
     dialect !== DIRECTORY_DIALECT &&
     dialect !== ISSUER_DIALECT
   ) {
@@ -3322,9 +3407,19 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   }
   if (
     descriptor.clientAuthentication !== undefined &&
-    (dialect !== MCP_DIALECT ||
+    ((dialect !== MCP_DIALECT && dialect !== SLACK_MCP_DIALECT) ||
       parseClientAuthentication(descriptor.clientAuthentication) === undefined ||
       descriptor.clientAuthentication.tokenEndpoint !== descriptor.tokenEndpoint)
+  )
+    return undefined;
+  if (
+    dialect === SLACK_MCP_DIALECT
+      ? !isSlackMcpUserDescriptorBinding(descriptor)
+      : descriptor.mcpTransportUrl !== undefined ||
+        descriptor.mcpIssuer !== undefined ||
+        descriptor.resource === SLACK_MCP_USER_OAUTH.resource ||
+        descriptor.authorizationEndpoint === SLACK_MCP_USER_OAUTH.authorizationEndpoint ||
+        descriptor.tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint
   )
     return undefined;
   if (dialect === DIRECTORY_DIALECT) return validateDirectoryDescriptor(descriptor);
@@ -3337,7 +3432,7 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   ) {
     return undefined;
   }
-  if (dialect === MCP_DIALECT) {
+  if (dialect === MCP_DIALECT || dialect === SLACK_MCP_DIALECT) {
     // The MCP authorization flow registered its client before beginning and
     // names the server the token is for; a server may grant with no scope.
     if (
@@ -3535,6 +3630,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     dialect !== OPENROUTER_DIALECT &&
     dialect !== CHATGPT_PLAN_DIALECT &&
     dialect !== MCP_DIALECT &&
+    dialect !== SLACK_MCP_DIALECT &&
     dialect !== DIRECTORY_DIALECT &&
     dialect !== ISSUER_DIALECT
   ) {
@@ -3543,6 +3639,8 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
   const extAgentHostId = value.extAgentHostId;
   const agentNameHint = value.agentNameHint;
   const resource = value.resource;
+  const mcpTransportUrl = value.mcpTransportUrl;
+  const mcpIssuer = value.mcpIssuer;
   const redirectPort = value.redirectPort;
   const tenantId = value.tenantId;
   const audience = value.audience;
@@ -3556,6 +3654,8 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     (extAgentHostId !== undefined && typeof extAgentHostId !== "string") ||
     (agentNameHint !== undefined && typeof agentNameHint !== "string") ||
     (resource !== undefined && typeof resource !== "string") ||
+    (mcpTransportUrl !== undefined && typeof mcpTransportUrl !== "string") ||
+    (mcpIssuer !== undefined && typeof mcpIssuer !== "string") ||
     (redirectPort !== undefined && typeof redirectPort !== "number")
   ) {
     return undefined;
@@ -3574,6 +3674,8 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     ...(typeof extAgentHostId === "string" ? { extAgentHostId } : {}),
     ...(typeof agentNameHint === "string" ? { agentNameHint } : {}),
     ...(typeof resource === "string" ? { resource } : {}),
+    ...(typeof mcpTransportUrl === "string" ? { mcpTransportUrl } : {}),
+    ...(typeof mcpIssuer === "string" ? { mcpIssuer } : {}),
     ...(typeof redirectPort === "number" ? { redirectPort } : {}),
     ...(typeof tenantId === "string" ? { tenantId } : {}),
     ...(typeof audience === "string" ? { audience } : {}),

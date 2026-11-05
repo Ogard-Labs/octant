@@ -8647,7 +8647,40 @@ Octant registers itself as a public client (RFC 7591,
 chose first. Then the host OAuth runner runs
 its ordinary PKCE flow under the `mcp-authorization` dialect, which sends the
 server's canonical address as `resource` (RFC 8707) on authorize, exchange and
-refresh, binds the chosen port, and accepts an empty scope list. Scopes
+refresh, binds the chosen port, and accepts an empty scope list.
+
+The closed `slack-mcp-user` wire dialect is one explicit exception to transport
+and OAuth-resource equality: only `https://mcp.slack.com/mcp` maps to resource
+`https://mcp.slack.com`. Its issuer is exactly `https://mcp.slack.com`, its
+authorization endpoint is `https://slack.com/oauth/v2_user/authorize`, and its
+token endpoint is `https://slack.com/api/oauth.v2.user.access`. Configuration,
+discovery, broker descriptors and persisted grants retain and check the
+transport/issuer/resource/endpoints independently; the origin is never a
+wildcard for bearer delivery. The dedicated endpoints cannot fall back to a
+generic dialect for another transport or resource. Every other MCP server
+keeps exact transport/resource equality.
+
+The observed dedicated metadata advertises `client_secret_post`, not public
+`none`, Basic or dynamic registration. A supplied registered app therefore uses
+its broker-held secret with that advertised method; general public-PKCE docs
+do not establish public-client compatibility for this metadata. Only
+`search:read.public` is selected, and it must be advertised: no read/write scope
+union or implicit write grant is requested. The broker independently checks
+that selected request scope. The dedicated response's `token_type: user`
+describes the grant identity; this dialect interprets it as the HTTP Bearer
+scheme. It checks `ok`, refuses malformed/non-user success, keeps only bounded
+error categories, and retains the closed dialect and its binding across
+refresh and ordinary restart. Documented revoked/expired/invalid-refresh
+errors ask for sign-in again, while rate limits and service outages retain the
+grant for a later attempt. Ordinary MCP token interpretation is unchanged.
+
+This is wire support, not a supported Slack connection or a catalog entry.
+The high-level Slack Begin action refuses until the documented exact retained
+localhost callback is expressible; the existing `127.0.0.1` callback is not
+claimed compatible. That callback is a concrete remaining implementation,
+while eligible app registration, consent and a permitted tool read require the
+separate live verification. No app is registered or shared secret shipped by
+this dialect. Scopes
 follow the RFC 6749 scope-token grammar, so a URL-shaped scope survives. An
 issuer may grant an access token without a refresh token; such a grant lasts
 as long as the access token and then asks for a new sign-in. Every issuer

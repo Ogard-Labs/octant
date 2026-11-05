@@ -12,6 +12,7 @@ export interface HostOAuthBrokerDescriptor {
     | "openrouter-pkce"
     | "chatgpt-plan-siwc"
     | "mcp-authorization"
+    | "slack-mcp-user"
     | "directory-oidc"
     | "issuer-oidc";
   readonly flow: "authorization-code-pkce" | "device-code";
@@ -27,6 +28,8 @@ export interface HostOAuthBrokerDescriptor {
   readonly agentNameHint?: string;
   /** MCP authorization dialect: the server the token is for, and the callback port. */
   readonly resource?: string;
+  readonly mcpTransportUrl?: string;
+  readonly mcpIssuer?: string;
   readonly redirectPort?: number;
   /** Directory dialect: the tenant, the one audience, and the endpoint origin the grant binds. */
   readonly tenantId?: string;
@@ -144,6 +147,12 @@ export function makeHostOAuthBrokerClient(options: {
           ...(input.descriptor.resource === undefined
             ? {}
             : { resource: input.descriptor.resource }),
+          ...(input.descriptor.mcpTransportUrl === undefined
+            ? {}
+            : { mcpTransportUrl: input.descriptor.mcpTransportUrl }),
+          ...(input.descriptor.mcpIssuer === undefined
+            ? {}
+            : { mcpIssuer: input.descriptor.mcpIssuer }),
           ...(input.descriptor.redirectPort === undefined
             ? {}
             : { redirectPort: input.descriptor.redirectPort }),
