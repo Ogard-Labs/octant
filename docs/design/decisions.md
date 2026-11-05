@@ -488,7 +488,8 @@ Status: Built. Since: —. Detail: [Architecture: Device transport and evidence]
 
 Input rides the workbench control channel with actor attribution. Agent device tools follow the thread's posture per operation rather than a Full-access gate on the whole tool.
 
-- Reads (discover, status, screenshot, opening an already booted destination) run under every posture, Plan included; every other operation is an effect that Plan refuses, Full access sends, and other postures ask for.
+- Reads (discover, status, screenshot, logs, Android's describe-ui, opening an already booted destination) run under every posture, Plan included; every other operation is an effect that Plan refuses, Full access sends, and other postures ask for.
+- An agent reads a device as text: Android describe-ui lists labelled on-screen elements with centres in tap pixels, an Android tap may name an element matched exactly by resource-id, then content-desc, then text (none or several matches are refused with the count), and both tools' logs return a bounded tail kept from the newest end, with crashes on request. The text returns in the tool result and is kept as a log artifact; evidence keeps only a note. iOS describe-ui and tap by element are not built: they need the native device helper. Checks on a real emulator and a real Mac are still owed.
 - Allow input opens a destination to input for fifteen minutes for that window, thread and destination, and only a delivered input renews it. _Here only._
 - The grant lives in host memory, so a restart asks again. It ends with the window's authority, a successful shutdown or a discovery that finds the destination no longer booted. It never covers boot, shutdown, Open URL or Rotate. _Here only._
 - Open URL and Rotate are effects confirmed on their own; an input whose delivery is unknown is reported interrupted, and an off-screen point is refused, never clamped.

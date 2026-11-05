@@ -183,7 +183,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. discover, status, screenshot, and open of a running Simulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
+    "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. discover, status, screenshot, logs, and open of a running Simulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -199,6 +199,7 @@ const appleDefinition = {
           "open",
           "shutdown",
           "screenshot",
+          "logs",
           "tap",
           "swipe",
           "type-text",
@@ -219,6 +220,8 @@ const appleDefinition = {
       durationMs: { type: "number" },
       text: { type: "string" },
       key: { type: "string" },
+      sinceSeconds: { type: "number" },
+      includeCrashes: { type: "boolean" },
     },
     required: ["operation"],
   },
@@ -227,7 +230,7 @@ const appleDefinition = {
 const androidDefinition = {
   name: CODE_ANDROID_TOOL_NAME,
   description:
-    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and reuse the returned AVD names; never start an external emulator window as the place to look. discover, status, screenshot, and open of a running emulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and reuse the returned AVD names; never start an external emulator window as the place to look. discover, status, screenshot, describe-ui, logs, and open of a running emulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -240,6 +243,8 @@ const androidDefinition = {
           "boot",
           "shutdown",
           "screenshot",
+          "describe-ui",
+          "logs",
           "tap",
           "swipe",
           "type-text",
@@ -250,6 +255,7 @@ const androidDefinition = {
         ],
       },
       emulatorId: { type: "string" },
+      target: { type: "string" },
       x: { type: "number" },
       y: { type: "number" },
       toX: { type: "number" },
@@ -259,6 +265,8 @@ const androidDefinition = {
       key: { type: "string" },
       apkPath: { type: "string" },
       packageName: { type: "string" },
+      sinceSeconds: { type: "number" },
+      includeCrashes: { type: "boolean" },
     },
     required: ["operation"],
   },
@@ -276,9 +284,9 @@ const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   [CODE_TERMINAL_TOOL_NAME]:
     "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
-    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. discover, build, test, and run take projectPath: an .xcodeproj or .xcworkspace inside this thread's checkout, either relative to the checkout root (App/App.xcodeproj) or absolute under it; a path outside the checkout is refused. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. discover, build, test, and run take projectPath: an .xcodeproj or .xcworkspace inside this thread's checkout, either relative to the checkout root (App/App.xcodeproj) or absolute under it; a path outside the checkout is refused. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Tapping an element by name (target) and describing the UI are Android-only for now: on a Simulator, read the screen from a screenshot and tap a point. logs takes simulatorId and bundleIdentifier and returns the app's unified-log lines as text in the result, the newest 500 lines or 32 KiB, with truncated set when cut; sinceSeconds (at most 600, rounded up to whole minutes) sets how far back, five minutes by default, and includeCrashes adds the start of the app's newest three crash reports. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, logs, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   [CODE_ANDROID_TOOL_NAME]:
-    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. describe-ui lists the labelled elements on screen as text in the result, one line each with its class, text, desc (content-desc), id (resource-id), center, and bounds, in the pixels tap takes; at most 300 elements, with truncated set when cut. tap takes either a point (x, y) in the pixels of the live screen or a target: an element's resource-id, content-desc, or text, matched exactly in that order, and it taps that element's center; a target that no element or several elements carry is refused with the count. swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. logs takes packageName and returns that running app's log lines as text in the result, the newest 500 lines or 32 KiB, with truncated set when cut; sinceSeconds (at most 600) sets how far back, and includeCrashes adds the device's crash buffer, which also answers for an app that is no longer running. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, describe-ui, logs, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
 };
 
 /**
@@ -289,7 +297,7 @@ const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
  * decides. The tool takes no shortcut a person operating the workbench could
  * not take, and mints no destination of its own.
  */
-interface CodeDeviceScreenshotPort {
+interface CodeDeviceEvidencePort {
   readonly readScreenshot: (
     windowId: WindowId,
     scope: {
@@ -299,9 +307,19 @@ interface CodeDeviceScreenshotPort {
     },
     reference: string,
   ) => Promise<Uint8Array | undefined>;
+  /** The text a read's log artifact holds, through the same thread and checkout authority. */
+  readonly readLog: (
+    windowId: WindowId,
+    scope: {
+      readonly authority: ToolActionAuthority;
+      readonly threadId: CodeThread["id"];
+      readonly checkoutId: CodeThread["checkoutId"];
+    },
+    reference: string,
+  ) => Promise<string | undefined>;
 }
 
-export interface CodeAppleToolPort extends CodeDeviceScreenshotPort {
+export interface CodeAppleToolPort extends CodeDeviceEvidencePort {
   readonly resolveAuthority: (
     windowId: WindowId,
     thread: CodeThread,
@@ -343,7 +361,7 @@ export interface CodeAppleToolPort extends CodeDeviceScreenshotPort {
   ) => boolean;
 }
 
-export interface CodeAndroidToolPort extends CodeDeviceScreenshotPort {
+export interface CodeAndroidToolPort extends CodeDeviceEvidencePort {
   readonly resolveAuthority: (
     windowId: WindowId,
     thread: CodeThread,
@@ -1746,6 +1764,14 @@ async function appleTool(
   const evidence = await apple.execute(options.windowId, request);
   if (evidence === undefined) return failure("apple-unavailable");
   const result = appleEvidenceResult(evidence, opensPane);
+  if (input.operation === "logs" && evidence.outcome === "succeeded") {
+    if (signal?.aborted) return failure("tool-interrupted");
+    const reference = evidence.artifacts.find((artifact) => artifact.kind === "log")?.reference;
+    const text =
+      reference === undefined ? undefined : await apple.readLog(options.windowId, scope, reference);
+    if (signal?.aborted) return failure("tool-interrupted");
+    return deviceTextResult(result, evidence.truncated === true, text);
+  }
   if (input.operation !== "screenshot" || evidence.outcome !== "succeeded") return result;
   if (signal?.aborted) return failure("tool-interrupted");
   const reference = evidence.artifacts.find(
@@ -1899,6 +1925,19 @@ async function androidTool(
   const evidence = await android.execute(options.windowId, request);
   if (evidence === undefined) return failure("android-unavailable");
   const result = androidEvidenceResult(evidence, opensPane);
+  if (
+    (input.operation === "describe-ui" || input.operation === "logs") &&
+    evidence.outcome === "succeeded"
+  ) {
+    if (signal?.aborted) return failure("tool-interrupted");
+    const reference = evidence.artifacts.find((artifact) => artifact.kind === "log")?.reference;
+    const text =
+      reference === undefined
+        ? undefined
+        : await android.readLog(options.windowId, scope, reference);
+    if (signal?.aborted) return failure("tool-interrupted");
+    return deviceTextResult(result, evidence.truncated === true, text);
+  }
   if (input.operation !== "screenshot" || evidence.outcome !== "succeeded") return result;
   if (signal?.aborted) return failure("tool-interrupted");
   const reference = evidence.artifacts.find(
@@ -1970,10 +2009,21 @@ function androidActionRequest(
     case "boot":
     case "shutdown":
     case "screenshot":
+    case "describe-ui":
       return {
         ...base,
         kind: input.operation,
         timeoutMs: input.operation === "boot" ? ANDROID_BOOT_TIMEOUT_MS : ANDROID_ACTION_TIMEOUT_MS,
+      };
+    case "logs":
+      if (input.packageName === undefined) return undefined;
+      return {
+        ...base,
+        kind: "logs",
+        packageName: input.packageName as AndroidEmulatorRequest["packageName"],
+        ...(input.sinceSeconds === undefined ? {} : { sinceSeconds: input.sinceSeconds }),
+        ...(input.includeCrashes === undefined ? {} : { includeCrashes: input.includeCrashes }),
+        timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
       };
     case "install":
       if (input.apkPath === undefined) return undefined;
@@ -2021,6 +2071,18 @@ function androidActionRequest(
         };
       }
       if (input.operation === "tap") {
+        // A named element or a point, never both: the host would not know
+        // which one the agent meant.
+        if (input.target !== undefined) {
+          if (input.x !== undefined || input.y !== undefined) return undefined;
+          return {
+            ...base,
+            kind: "tap",
+            requestedBy,
+            target: input.target,
+            timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+          };
+        }
         if (input.x === undefined || input.y === undefined) return undefined;
         return {
           ...base,
@@ -2135,6 +2197,20 @@ function appleActionRequest(
         kind: input.operation,
         simulatorId: input.simulatorId as never,
         timeoutMs: input.operation === "boot" ? APPLE_BOOT_TIMEOUT_MS : APPLE_SIMULATOR_TIMEOUT_MS,
+      } as AppleActionRequest;
+    }
+    case "logs": {
+      if (input.simulatorId === undefined || input.bundleIdentifier === undefined) {
+        return undefined;
+      }
+      return {
+        ...base,
+        kind: "logs",
+        simulatorId: input.simulatorId as never,
+        bundleIdentifier: input.bundleIdentifier,
+        ...(input.sinceSeconds === undefined ? {} : { sinceSeconds: input.sinceSeconds }),
+        ...(input.includeCrashes === undefined ? {} : { includeCrashes: input.includeCrashes }),
+        timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
       } as AppleActionRequest;
     }
     case "tap":
@@ -2348,6 +2424,7 @@ interface AppleToolInput {
     | "open"
     | "shutdown"
     | "screenshot"
+    | "logs"
     | "tap"
     | "swipe"
     | "type-text"
@@ -2365,6 +2442,8 @@ interface AppleToolInput {
   readonly durationMs?: number;
   readonly text?: string;
   readonly key?: string;
+  readonly sinceSeconds?: number;
+  readonly includeCrashes?: boolean;
 }
 
 interface AndroidToolInput {
@@ -2375,6 +2454,8 @@ interface AndroidToolInput {
     | "boot"
     | "shutdown"
     | "screenshot"
+    | "describe-ui"
+    | "logs"
     | "tap"
     | "swipe"
     | "type-text"
@@ -2382,6 +2463,7 @@ interface AndroidToolInput {
     | "install"
     | "launch";
   readonly emulatorId?: string;
+  readonly target?: string;
   readonly x?: number;
   readonly y?: number;
   readonly toX?: number;
@@ -2391,6 +2473,8 @@ interface AndroidToolInput {
   readonly key?: string;
   readonly apkPath?: string;
   readonly packageName?: string;
+  readonly sinceSeconds?: number;
+  readonly includeCrashes?: boolean;
 }
 
 interface ProposeThreadToolInput {
@@ -2571,6 +2655,8 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
       "durationMs",
       "text",
       "key",
+      "sinceSeconds",
+      "includeCrashes",
     ]),
   );
   if (parsed === undefined) return undefined;
@@ -2585,6 +2671,7 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     operation !== "open" &&
     operation !== "shutdown" &&
     operation !== "screenshot" &&
+    operation !== "logs" &&
     operation !== "tap" &&
     operation !== "swipe" &&
     operation !== "type-text" &&
@@ -2621,6 +2708,7 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
   ) {
     return undefined;
   }
+  if (!validLogWindow(parsed)) return undefined;
   return parsed as unknown as AppleToolInput;
 }
 
@@ -2630,6 +2718,7 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
     new Set([
       "operation",
       "emulatorId",
+      "target",
       "x",
       "y",
       "toX",
@@ -2639,6 +2728,8 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
       "key",
       "apkPath",
       "packageName",
+      "sinceSeconds",
+      "includeCrashes",
     ]),
   );
   if (parsed === undefined) return undefined;
@@ -2650,6 +2741,8 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
     operation !== "boot" &&
     operation !== "shutdown" &&
     operation !== "screenshot" &&
+    operation !== "describe-ui" &&
+    operation !== "logs" &&
     operation !== "tap" &&
     operation !== "swipe" &&
     operation !== "type-text" &&
@@ -2659,7 +2752,7 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
   ) {
     return undefined;
   }
-  for (const field of ["emulatorId", "text", "key", "apkPath", "packageName"] as const) {
+  for (const field of ["emulatorId", "target", "text", "key", "apkPath", "packageName"] as const) {
     if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
   }
   for (const field of ["x", "y", "toX", "toY", "durationMs"] as const) {
@@ -2674,7 +2767,32 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
   ) {
     return undefined;
   }
+  // The contract's own bound on the element name; past it the host would
+  // refuse the request as unreachable rather than say why.
+  if (
+    typeof parsed.target === "string" &&
+    (parsed.target.trim() === "" || parsed.target.length > 512)
+  ) {
+    return undefined;
+  }
+  if (!validLogWindow(parsed)) return undefined;
   return parsed as unknown as AndroidToolInput;
+}
+
+/**
+ * A log read's window and crash choice, checked here against the contract's
+ * bounds: left to the host's decoder, a window past ten minutes came back as
+ * the host being unreachable.
+ */
+function validLogWindow(parsed: Readonly<Record<string, unknown>>): boolean {
+  const since = parsed.sinceSeconds;
+  if (
+    since !== undefined &&
+    !(Number.isInteger(since) && Number(since) >= 1 && Number(since) <= 600)
+  ) {
+    return false;
+  }
+  return parsed.includeCrashes === undefined || typeof parsed.includeCrashes === "boolean";
 }
 
 function profileToolConstraintFailure(thread: CodeThread, toolName: string): string | undefined {
@@ -2784,7 +2902,13 @@ async function askPersonForDevice(
 
 /** Whether an operation only reads the toolchain, the runtime, or a screen. */
 function isDeviceRead(operation: string): boolean {
-  return operation === "status" || operation === "discover" || operation === "screenshot";
+  return (
+    operation === "status" ||
+    operation === "discover" ||
+    operation === "screenshot" ||
+    operation === "describe-ui" ||
+    operation === "logs"
+  );
 }
 
 /**
@@ -2900,6 +3024,30 @@ function postureRefusal(error: string) {
 
 function defaultWait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/**
+ * A `describe-ui` or `logs` result carries the text the host kept, so the
+ * agent reads the screen or the log in the result itself; an artifact
+ * reference alone tells it nothing it can act on.
+ */
+function deviceTextResult<T extends { readonly result: object; readonly isError: boolean }>(
+  evidence: T,
+  truncated: boolean,
+  text: string | undefined,
+) {
+  if (text === undefined) {
+    return {
+      result: {
+        ...evidence.result,
+        error: "device-text-unavailable",
+        message:
+          "The host kept no readable text for this read. Do not infer the screen or the log from the artifact reference.",
+      },
+      isError: true,
+    };
+  }
+  return { ...evidence, result: { ...evidence.result, truncated, text } };
 }
 
 function deviceScreenshotResult<T extends { readonly result: object; readonly isError: boolean }>(

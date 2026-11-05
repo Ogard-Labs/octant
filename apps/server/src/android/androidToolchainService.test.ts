@@ -1993,6 +1993,319 @@ describe("AndroidToolchainService", () => {
     }
   });
 
+  describe("reading the screen and the app's log", () => {
+    const screenXml =
+      "<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>" +
+      '<hierarchy rotation="0">' +
+      '<node index="0" text="" resource-id="" class="android.widget.FrameLayout" content-desc="" clickable="false" enabled="true" bounds="[0,0][1080,2400]">' +
+      '<node index="0" text="Sign in" resource-id="com.example:id/sign_in" class="android.widget.Button" content-desc="" clickable="true" enabled="true" bounds="[100,1000][980,1100]" />' +
+      '<node index="1" text="Terms &amp; conditions" resource-id="" class="android.widget.TextView" content-desc="" clickable="false" enabled="false" bounds="[100,1200][980,1300]" />' +
+      '<node index="2" text="Scrolled away" resource-id="" class="android.widget.TextView" content-desc="" clickable="false" enabled="true" bounds="[100,2500][980,2600]" />' +
+      '<node index="3" text="Collapsed" resource-id="" class="android.widget.TextView" content-desc="" clickable="false" enabled="true" bounds="[100,100][100,200]" />' +
+      '<node index="4" text="" resource-id="" class="android.widget.LinearLayout" content-desc="" clickable="false" enabled="true" bounds="[0,0][1080,900]">' +
+      '<node index="0" text="" resource-id="" class="android.widget.ImageButton" content-desc="Back" clickable="true" enabled="true" bounds="[0,-40][100,60]" />' +
+      "</node></node></hierarchy>";
+
+    function inspectionService(
+      answer: (argv: ReadonlyArray<string>) => ReturnType<typeof processResult> | undefined,
+      executionContext: ExecutionContext = context,
+    ) {
+      const discovery = discoveryExecutor();
+      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        return answer(input.argv) ?? (await discovery(input));
+      });
+      const artifacts = new Map<string, Uint8Array>();
+      const service = new AndroidToolchainService({
+        execute,
+        access: async () => undefined,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async (reference: string, bytes: Uint8Array) => {
+          artifacts.set(reference, bytes);
+        },
+        readArtifact: async (reference: string) => artifacts.get(reference),
+        realpath: async (path: string) => path,
+        now: () => "2026-11-05T10:00:00.000Z",
+        newId: () => ids.action,
+      });
+      // Only what the action under test sends, not what discovery sent first.
+      let discovered = 0;
+      const commands = () =>
+        execute.mock.calls.slice(discovered).map(([input]) => input.argv.slice(1));
+      const ready = service.discover(discoveryRequest, executionContext).then(() => {
+        discovered = execute.mock.calls.length;
+      });
+      return { service, commands, artifacts, ready };
+    }
+
+    function uiDump(xml: string) {
+      return (argv: ReadonlyArray<string>) => {
+        if (argv.includes("uiautomator")) {
+          return processResult("UI hierchary dumped to: /data/local/tmp/octant-ui.xml\n");
+        }
+        if (argv.includes("cat")) return processResult(xml);
+        if (argv.includes("rm") || argv.includes("input")) return processResult("");
+        return undefined;
+      };
+    }
+
+    const dumpPath = `/data/local/tmp/octant-ui-${ids.action}.xml`;
+
+    it("lists each labelled element on screen once, with a centre a tap can use, under Plan", async () => {
+      const plan = { ...context, executionPolicy: "plan" as const, approvalValid: false };
+      const { service, commands, ready } = inspectionService(uiDump(screenXml), plan);
+      try {
+        await ready;
+        const evidence = await service.execute(action("describe-ui"), plan);
+        expect(evidence).toMatchObject({ outcome: "succeeded", truncated: false });
+        expect(commands()).toEqual([
+          ["-s", "emulator-5554", "shell", "uiautomator", "dump", dumpPath],
+          ["-s", "emulator-5554", "exec-out", "cat", dumpPath],
+          ["-s", "emulator-5554", "shell", "rm", "-f", dumpPath],
+        ]);
+        const reference = evidence.artifacts.find(
+          (artifact: { readonly kind: string }) => artifact.kind === "log",
+        )?.reference;
+        const listing = await (service as any).readLogArtifact(reference, plan);
+        expect(listing.trim().split("\n")).toEqual([
+          'Button text="Sign in" id="com.example:id/sign_in" center=(540,1050) bounds=[100,1000][980,1100] clickable',
+          'TextView text="Terms & conditions" center=(540,1250) bounds=[100,1200][980,1300] disabled',
+          'ImageButton desc="Back" center=(50,30) bounds=[0,-40][100,60] clickable',
+        ]);
+        expect(evidence.diagnostics).toEqual([
+          { severity: "note", message: "describe-ui listed 3 elements" },
+        ]);
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("lists at most 300 elements and marks the listing truncated", async () => {
+      const crowded =
+        '<hierarchy rotation="0"><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">' +
+        Array.from(
+          { length: 350 },
+          (_unused, index) =>
+            `<node text="Row ${index}" class="android.widget.TextView" bounds="[0,${index * 6}][1080,${index * 6 + 6}]" />`,
+        ).join("") +
+        "</node></hierarchy>";
+      const { service, ready } = inspectionService(uiDump(crowded));
+      try {
+        await ready;
+        const evidence = await service.execute(action("describe-ui"), context);
+        expect(evidence.truncated).toBe(true);
+        expect(evidence.diagnostics[0].message).toBe("describe-ui listed 300 of 350 elements");
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("reports a screen that never settles as a failure worth retrying, and still removes the dump", async () => {
+      const { service, commands, ready } = inspectionService((argv) => {
+        if (argv.includes("uiautomator"))
+          return processResult("ERROR: could not get idle state.\n");
+        if (argv.includes("rm")) return processResult("");
+        return undefined;
+      });
+      try {
+        await ready;
+        const evidence = await service.execute(action("describe-ui"), context);
+        expect(evidence.outcome).toBe("failed");
+        expect(evidence.diagnostics[0].message).toMatch(/^ui-not-idle: .*try again/);
+        expect(commands()).toContainEqual(["-s", "emulator-5554", "shell", "rm", "-f", dumpPath]);
+        expect(commands().some((argv) => argv.includes("cat"))).toBe(false);
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("taps the centre of the element a target names, preferring its content-desc to another's text", async () => {
+      const labelled =
+        '<hierarchy rotation="0"><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">' +
+        '<node text="Sign in" class="android.widget.TextView" bounds="[0,200][100,300]" />' +
+        '<node content-desc="Sign in" class="android.widget.Button" clickable="true" bounds="[0,0][100,100]" />' +
+        "</node></hierarchy>";
+      const { service, commands, ready } = inspectionService(uiDump(labelled));
+      try {
+        await ready;
+        const evidence = await service.execute(
+          action("tap", { requestedBy: actor, target: "Sign in" }),
+          context,
+        );
+        expect(evidence.outcome).toBe("succeeded");
+        expect(commands()).toContainEqual([
+          "-s",
+          "emulator-5554",
+          "shell",
+          "input",
+          "tap",
+          "50",
+          "50",
+        ]);
+        expect(evidence.diagnostics[0].message).toBe("tap completed (target=Sign in, x=50, y=50)");
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("refuses a target several elements carry, or none does, naming the count and tapping nothing", async () => {
+      const repeated =
+        '<hierarchy rotation="0"><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">' +
+        '<node text="Item" class="android.widget.TextView" bounds="[0,0][100,100]" />' +
+        '<node text="Item" class="android.widget.TextView" bounds="[0,200][100,300]" />' +
+        "</node></hierarchy>";
+      const { service, commands, ready } = inspectionService(uiDump(repeated));
+      try {
+        await ready;
+        const ambiguous = await service.execute(
+          action("tap", { requestedBy: actor, target: "Item" }),
+          context,
+        );
+        expect(ambiguous.outcome).toBe("failed");
+        expect(ambiguous.diagnostics[0].message).toMatch(/^target-ambiguous: 2 elements/);
+        const missing = await service.execute(
+          action("tap", {
+            actionId: "30000000-0000-4000-8000-000000000301",
+            requestedBy: actor,
+            target: "Checkout",
+          }),
+          context,
+        );
+        expect(missing.outcome).toBe("failed");
+        expect(missing.diagnostics[0].message).toMatch(/^target-not-found: .*\(0 matches\)/);
+        expect(commands().some((argv) => argv.includes("input"))).toBe(false);
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("reads an app's own log by its process and the crash buffer, keeping the newest lines", async () => {
+      const appLog = Array.from(
+        { length: 400 },
+        (_unused, index) => `11-05 10:00:00.000  1234  1234 I Example: line ${index}`,
+      ).join("\n");
+      const { service, commands, ready } = inspectionService((argv) => {
+        if (argv.includes("pidof")) return processResult("1234\n");
+        if (argv.includes("crash")) {
+          return processResult(
+            "11-05 09:59:59.000  1234  1234 E AndroidRuntime: FATAL EXCEPTION: main\n",
+          );
+        }
+        if (argv.includes("logcat")) return processResult(appLog);
+        return undefined;
+      });
+      try {
+        await ready;
+        const evidence = await service.execute(
+          action("logs", { packageName: "com.example.app", includeCrashes: true }),
+          context,
+        );
+        expect(evidence).toMatchObject({ outcome: "succeeded", truncated: true });
+        expect(commands()).toContainEqual([
+          "-s",
+          "emulator-5554",
+          "shell",
+          "pidof",
+          "-s",
+          "com.example.app",
+        ]);
+        expect(commands()).toContainEqual([
+          "-s",
+          "emulator-5554",
+          "logcat",
+          "-d",
+          "-v",
+          "threadtime",
+          "-t",
+          "500",
+          "--pid=1234",
+        ]);
+        expect(commands()).toContainEqual([
+          "-s",
+          "emulator-5554",
+          "logcat",
+          "-d",
+          "-b",
+          "crash",
+          "-v",
+          "threadtime",
+          "-t",
+          "200",
+        ]);
+        const text = await (service as any).readLogArtifact(`android-log-${ids.action}`, context);
+        const lines = text.trim().split("\n");
+        // Beside crashes the app's own log keeps half the room, from its newest end.
+        expect(lines[0]).toBe("--- com.example.app (pid 1234) ---");
+        expect(lines[1]).toContain("line 150");
+        expect(lines).toContain("--- crash buffer ---");
+        expect(lines.at(-1)).toContain("FATAL EXCEPTION: main");
+        expect(evidence.diagnostics[0].message).toBe(
+          "logs returned 251 lines from com.example.app and the crash buffer",
+        );
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("reads back only the window asked for, by the emulator's own clock", async () => {
+      const { service, commands, ready } = inspectionService((argv) => {
+        if (argv.includes("pidof")) return processResult("1234\n");
+        if (argv.includes("date")) return processResult("1762336800\n");
+        if (argv.includes("logcat")) return processResult("a line\n");
+        return undefined;
+      });
+      try {
+        await ready;
+        await service.execute(
+          action("logs", { packageName: "com.example.app", sinceSeconds: 120 }),
+          context,
+        );
+        expect(commands()).toContainEqual([
+          "-s",
+          "emulator-5554",
+          "logcat",
+          "-d",
+          "-v",
+          "threadtime",
+          "-t",
+          "1762336680.000",
+          "--pid=1234",
+        ]);
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("refuses the log of an app that is not running, unless the crash buffer was asked for", async () => {
+      const { service, commands, ready } = inspectionService((argv) => {
+        if (argv.includes("pidof")) return { ...processResult(""), exitCode: 1 };
+        if (argv.includes("crash")) return processResult("E AndroidRuntime: FATAL EXCEPTION\n");
+        return undefined;
+      });
+      try {
+        await ready;
+        const refused = await service.execute(
+          action("logs", { packageName: "com.example.app" }),
+          context,
+        );
+        expect(refused.outcome).toBe("failed");
+        expect(refused.diagnostics[0].message).toMatch(/^app-not-running: com\.example\.app/);
+        const crashes = await service.execute(
+          action("logs", {
+            actionId: "30000000-0000-4000-8000-000000000302",
+            packageName: "com.example.app",
+            includeCrashes: true,
+          }),
+          context,
+        );
+        expect(crashes.outcome).toBe("succeeded");
+        expect(commands().some((argv) => argv.some((word) => word.startsWith("--pid=")))).toBe(
+          false,
+        );
+      } finally {
+        await service.close();
+      }
+    });
+  });
   it.runIf(process.platform === "darwin")(
     "finds a Homebrew command-line-tools SDK when no SDK variable is set, past a partial Android Studio one",
     async () => {

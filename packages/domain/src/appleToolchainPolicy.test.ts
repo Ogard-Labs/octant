@@ -13,6 +13,8 @@ import {
   isAppleSimulatorOpenInputKind,
   appleActionOpensInputGrant,
   redactedAppleInputDiagnostic,
+  boundedDeviceLogTail,
+  DEVICE_LOG_BUDGET,
 } from "./appleToolchainPolicy";
 import type {
   AppleBuildEvidence,
@@ -383,6 +385,32 @@ describe("a Simulator screenshot", () => {
         [booted],
       ),
     ).toMatchObject({ kind: "denied", reason: "approval-denied" });
+  });
+});
+
+describe("a device log read", () => {
+  it("keeps the newest lines within the line budget and says the rest was left out", () => {
+    const log = Array.from({ length: 600 }, (_unused, index) => `line ${index}`).join("\n");
+    const bounded = boundedDeviceLogTail(log, DEVICE_LOG_BUDGET);
+    expect(bounded.lines).toBe(500);
+    expect(bounded.truncated).toBe(true);
+    expect(bounded.text.split("\n")[0]).toBe("line 100");
+    expect(bounded.text.endsWith("line 599")).toBe(true);
+  });
+
+  it("keeps the newest lines within the byte budget and shortens one overlong line", () => {
+    const long = "x".repeat(5_000);
+    const bounded = boundedDeviceLogTail(`old\n${long}\nnew\n`, { lines: 10, bytes: 2_055 });
+    expect(bounded.text).toBe(`${"x".repeat(2_048)}\nnew`);
+    expect(bounded.truncated).toBe(true);
+  });
+
+  it("returns a short log whole and unmarked", () => {
+    expect(boundedDeviceLogTail("a\r\nb\n", DEVICE_LOG_BUDGET)).toEqual({
+      text: "a\nb",
+      lines: 2,
+      truncated: false,
+    });
   });
 });
 
