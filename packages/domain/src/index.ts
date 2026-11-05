@@ -137,6 +137,7 @@ export * from "./providerPolicy";
 export * from "./providerNativeSetupPolicy";
 export * from "./providerCatalogPolicy";
 export * from "./researchPolicy";
+export * from "./replyDetailPolicy";
 export * from "./shellPolicy";
 export * from "./sidebarThreadStatusPolicy";
 export * from "./speechPolicy";

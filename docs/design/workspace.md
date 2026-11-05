@@ -161,6 +161,16 @@ sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
 
+### Reply detail in the thread in front
+
+The `reply-detail-cycle` keybinding (Mod+Shift+D by default) and the palette's
+Reply detail commands act on the thread in the active pane, setting that
+thread's own level, and only while that thread is on screen: a page or Settings
+covering the workspace leaves no thread in front. The palette also sets the
+default. The levels, the thread
+menu, and where the levels are kept are owned by
+[DESIGN.md: Transcript](../../DESIGN.md#transcript).
+
 ### Jump to the next waiting thread
 
 The `next-waiting-thread` keybinding (Mod+Shift+J by default) and the palette

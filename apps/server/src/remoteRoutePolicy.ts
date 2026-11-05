@@ -665,6 +665,18 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     maxResponseBytes: 4_096,
   },
+  // Reply detail: the presentation level a paired device draws a thread at.
+  // Read only; changing it stays with a window on the host.
+  {
+    id: "reply-detail",
+    match: { kind: "exact", path: "/api/reply-detail" },
+    surface: "authenticated-product",
+    methods: ["GET"],
+    allowQuery: false,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    // 500 threads at the longest id the schema allows fit with room to spare.
+    maxResponseBytes: 128 * 1_024,
+  },
   {
     id: "speech-transcriptions",
     match: { kind: "exact", path: "/api/speech/transcriptions" },
