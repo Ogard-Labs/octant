@@ -19,6 +19,14 @@ describe("native harness instructions", () => {
     expect(nativeHarnessToolGuide([])).toBeUndefined();
   });
 
+  it("tells a lead to run helpers with the octant_agents operations, not a tool it is never offered", () => {
+    const text = chatText();
+    expect(text).toContain("octant_agents");
+    for (const operation of ["delegate", "wait"]) expect(text).toContain(`operation ${operation}`);
+    // `start` and `collect` were the retired harness tool's words for these.
+    expect(text).not.toMatch(/\bcollect\b|\bstart a child\b/);
+  });
+
   it("names the helper-agent tool when the thread is offered it", () => {
     expect(nativeHarnessToolGuide(["octant_agents", "octant_canvas"])).toContain(
       "octant_agents: start, watch, and stop helper agents",

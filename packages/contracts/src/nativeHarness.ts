@@ -18,7 +18,7 @@
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
-import { AgentRunDependencies, AgentRunId, MAX_AGENT_RUN_DEPENDENCIES } from "./agentRun";
+import { AgentRunId } from "./agentRun";
 import { ContextConfidence } from "./context";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import {
@@ -36,7 +36,6 @@ import {
   NativeHarnessSlotId,
 } from "./nativeHarnessRouting";
 import { HarnessRetryNotice } from "./harnessRetry";
-import { HubMemberId } from "./hubAndSpokes";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId, type ProviderToolDefinition } from "./providers";
 import { ShieldDecision } from "./shield";
@@ -74,13 +73,27 @@ export const NATIVE_HARNESS_TOOL_NAMES = [
   "context-remaining",
   "journal-lookup",
   "second-opinion",
-  "delegate",
   "ask-user",
   "goal",
   "goal-check",
 ] as const;
 export const NativeHarnessToolName = Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES);
 export type NativeHarnessToolName = typeof NativeHarnessToolName.Type;
+
+/**
+ * Tools the harness no longer offers whose name a journal written before
+ * still holds. `delegate` started child runs until `octant_agents` became the
+ * one child-run tool every thread is offered; a turn record or approval that
+ * names it must keep replaying.
+ */
+export const NATIVE_HARNESS_RETIRED_TOOL_NAMES = ["delegate"] as const;
+
+/** A tool name as a journaled turn record or approval carries it. */
+export const NativeHarnessRecordedToolName = Schema.Literal(
+  ...NATIVE_HARNESS_TOOL_NAMES,
+  ...NATIVE_HARNESS_RETIRED_TOOL_NAMES,
+);
+export type NativeHarnessRecordedToolName = typeof NativeHarnessRecordedToolName.Type;
 
 /**
  * Every tool result is hard-capped, and a cap is never silent: a truncated
@@ -285,69 +298,6 @@ export const NativeHarnessAskUserArguments = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessAskUserArguments = typeof NativeHarnessAskUserArguments.Type;
 
-/**
- * Delegation to a child run. `start` proposes a bounded task under a role;
- * the server resolves the configured role slot or an explicit eligible target,
- * clamps authority, and admits it under the creation posture. Naming a target
- * never widens the parent's authority.
- */
-export const MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS = 120_000;
-
-export const NativeHarnessDelegateArguments = Schema.Union(
-  Schema.Struct({ operation: Schema.Literal("capabilities") }).annotations(strict),
-  Schema.Struct({
-    operation: Schema.Literal("start"),
-    role: Schema.Literal("research", "implementation", "review", "custom"),
-    task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
-    providerInstanceId: Schema.optional(ProviderInstanceId),
-    modelId: Schema.optional(ProviderModelId),
-    reasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-    includeParentContext: Schema.optional(Schema.Boolean),
-    /**
-     * A roster member of the person's hub that runs the child instead of this
-     * host. Work threads only; the member's own grant decides what it may do.
-     */
-    targetMemberId: Schema.optional(HubMemberId),
-    /**
-     * The Project to run in on that member. Projects have their own ids on each
-     * host, so this is the member's id for it, never this host's; the member
-     * checks it against the grant it holds for this host.
-     */
-    targetProjectId: Schema.optional(ProjectId),
-    /**
-     * Runs this child waits for. It starts only once all of them completed,
-     * receives their replies, and never runs if one failed or was cancelled.
-     */
-    after: Schema.optional(AgentRunDependencies),
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (input) => (input.providerInstanceId === undefined) === (input.modelId === undefined),
-      ),
-    ),
-  Schema.Struct({ operation: Schema.Literal("status") }).annotations(strict),
-  Schema.Struct({
-    operation: Schema.Literal("follow-up"),
-    runId: Schema.UUID,
-    expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
-  }).annotations(strict),
-  Schema.Struct({
-    operation: Schema.Literal("collect"),
-    runId: Schema.UUID,
-  }).annotations(strict),
-  /** Blocks until the named children (or all of them) finished, or the time runs out. */
-  Schema.Struct({
-    operation: Schema.Literal("wait"),
-    runIds: Schema.optional(AgentRunDependencies),
-    timeoutMs: Schema.optional(
-      Schema.Int.pipe(Schema.between(0, MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS)),
-    ),
-  }).annotations(strict),
-);
-export type NativeHarnessDelegateArguments = typeof NativeHarnessDelegateArguments.Type;
-
 export const NativeHarnessSecondOpinionArguments = Schema.Struct({
   question: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
 }).annotations(strict);
@@ -394,7 +344,6 @@ const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unkno
   "context-remaining": Schema.decodeUnknownSync(NativeHarnessContextRemainingArguments),
   "journal-lookup": Schema.decodeUnknownSync(NativeHarnessJournalLookupArguments),
   "second-opinion": Schema.decodeUnknownSync(NativeHarnessSecondOpinionArguments),
-  delegate: Schema.decodeUnknownSync(NativeHarnessDelegateArguments),
   "ask-user": Schema.decodeUnknownSync(NativeHarnessAskUserArguments),
   goal: Schema.decodeUnknownSync(NativeHarnessGoalArguments),
   "goal-check": Schema.decodeUnknownSync(NativeHarnessGoalCheckArguments),
@@ -565,65 +514,6 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
     },
   },
   {
-    name: "delegate",
-    description:
-      "Run work as a graph of child agents. capabilities reports eligible targets and supported reasoning values. Omit providerInstanceId and modelId to use the configured role slot, or supply both for an explicit target. start hands one bounded task to a child (a standalone brief: objective, expected output, boundaries) and returns its runId. Independent tasks run in parallel; give a task that needs others' output `after` with their runIds, and it starts only when they all completed, with their replies in front of it. If one of those fails or is cancelled, it never runs. status lists your children with what each waits on; wait blocks until the named children (or all) finish; collect reads a finished child's reply and current version/generation. follow-up continues that completed child with runId, its expectedVersion, and a nonempty message (at most 4096 characters); genuine saved-session resume must be supported. An accepted start is not completion: collect and assess results before relying on them. At most a few children run at once, so keep graphs small. Use second-opinion, when offered, for advice that needs no separate task.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        operation: {
-          type: "string",
-          enum: ["capabilities", "start", "status", "collect", "wait", "follow-up"],
-        },
-        role: { type: "string", enum: ["research", "implementation", "review", "custom"] },
-        task: {
-          type: "string",
-          description: "A standalone brief: objective, output format, boundaries.",
-        },
-        providerInstanceId: {
-          type: "string",
-          description: "Eligible provider from capabilities; requires modelId.",
-        },
-        modelId: {
-          type: "string",
-          description: "Model on the explicit provider; requires providerInstanceId.",
-        },
-        reasoning: {
-          type: "string",
-          maxLength: 128,
-          description: "Supported reasoning value for the selected model.",
-        },
-        includeParentContext: { type: "boolean" },
-        after: {
-          type: "array",
-          items: { type: "string" },
-          maxItems: MAX_AGENT_RUN_DEPENDENCIES,
-          description: "runIds this task must wait for (start only).",
-        },
-        runId: { type: "string" },
-        expectedVersion: {
-          type: "integer",
-          minimum: 1,
-          description: "Current child version from status or collect; required for follow-up.",
-        },
-        message: {
-          type: "string",
-          minLength: 1,
-          maxLength: 4096,
-          description: "Explicit message for the completed child; required for follow-up.",
-        },
-        runIds: {
-          type: "array",
-          items: { type: "string" },
-          maxItems: MAX_AGENT_RUN_DEPENDENCIES,
-          description: "Children to wait for (wait only); omit to wait for all.",
-        },
-        timeoutMs: { type: "integer", minimum: 0, maximum: MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS },
-      },
-      required: ["operation"],
-    },
-  },
-  {
     name: "ask-user",
     description:
       "Ask the person a question and wait for the answer. Offer options when there are natural choices; the answer may still be free text.",
@@ -770,7 +660,7 @@ export const MAX_NATIVE_HARNESS_TOOL_DETAIL = 4_096;
 
 /** One tool call as the lead made it: what it asked for, how it ended, how long it took. */
 export const NativeHarnessToolCall = Schema.Struct({
-  name: NativeHarnessToolName,
+  name: NativeHarnessRecordedToolName,
   summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(240)),
   status: Schema.Literal("ok", "refused", "failed"),
   durationMs: NonNegativeInt,
@@ -1079,7 +969,7 @@ export type NativeHarnessCommandHostChoice = typeof NativeHarnessCommandHostChoi
  */
 export const NativeHarnessApproval = Schema.Struct({
   id: NativeHarnessApprovalId,
-  toolName: Schema.Union(NativeHarnessToolName, Schema.Literal("provider-action")),
+  toolName: Schema.Union(NativeHarnessRecordedToolName, Schema.Literal("provider-action")),
   source: Schema.optional(NativeHarnessInteractionSource),
   summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(240)),
   approvalClass: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),

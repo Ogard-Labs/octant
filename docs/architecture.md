@@ -465,11 +465,15 @@ may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
 audited like a harness command's launch
 ([Repository tooling](design/language-services.md#repository-tooling)).
-Agents read the same servers through two read-only app-managed tools in the
-closed catalog, `code-diagnostics` and `code-definition`, offered on every Code
-turn (Plan included) whose provider carries Octant's tools; they read the saved
-file, never an editor's draft, and never start or read through a server that
-runs repository tooling, approved or not
+Agents read the same servers through one read-only app-managed tool,
+`octant_code` (`code-language` in the closed catalog), whose `diagnostics`,
+`definition`, and `references` operations are allowed in Plan and ask nothing.
+It is offered on a Code turn whose provider carries Octant's tools only when a
+server an agent may start (`static` and effective, so the Settings switch is
+honoured) covers a file a bounded scan finds in the turn's checkout or extra
+folders. It reads the saved file, never an editor's draft, returns at most
+200 references, and never starts or reads through a server that runs
+repository tooling, approved or not
 ([agent read rules](design/language-services.md#agent-read-rules)).
 The debugger's seam and session host are built: the `debug-adapter`
 component kind (Code only, quarantined like any executable component), the
@@ -1896,11 +1900,26 @@ conversation changes nothing but the thread's own record, so it is gated as a
 read (it runs in Plan and asks for no approval); any rewind that puts files
 back is gated as the in-place restore it performs.
 
-A child AgentRun starts only when the thread's agent delegates through the
-Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.
-Both entry points use the same host admission, routing, workspace, and lifecycle
-services. Either parent harness can target either child harness; provider-owned
-hidden subagents remain disabled. The host's AgentRun routes read and control
+A child AgentRun starts only when the thread's agent delegates through
+`octant_agents`, the one child-run tool, offered to an Octant Harness lead and
+to a provider runtime's agent alike. Its operations are `capabilities`,
+`delegate`, `status`, `wait`, `cancel`, and `follow-up`; `wait` with a zero
+timeout reads a finished reply without blocking. Either parent harness can
+target either child harness; provider-owned hidden subagents remain disabled.
+Every child appears in the Agents surface, where the person can watch, stop,
+or resume it, and `cancel` is the agent's way to stop one it started.
+
+Rationale: the harness once offered its own `delegate` tool beside
+`octant_agents`, with different words (`start`, `collect`) for the same
+actions over the same admission, so a Harness lead saw two tools that did
+one job. `octant_agents` was kept because it alone could cancel a child, and
+because its `wait` answers at once for a child that is waiting for a free
+request slot or on a provider limit, where the harness tool blocked until its
+timeout and held the slot the child needed. What the harness tool had that
+`octant_agents` lacks, a `wait` over several children at once, is a wait per
+child in turn. A journal that names the retired tool still replays: its name
+stays readable in turn records and approvals
+(`NATIVE_HARNESS_RETIRED_TOOL_NAMES`). The host's AgentRun routes read and control
 existing runs but create none. Reads, the Agents center list, acknowledgements,
 and cancellation are authorized per window: the window's own workspace must
 currently hold the parent thread on the matching Project, so the center lists
@@ -2090,7 +2109,9 @@ child cannot continue, and unsupported continuation never becomes a silent
 fresh start. The prior result must first reach its parent or be explicitly
 collected; a refused follow-up keeps that result available. Status reads do not
 consume replies. Only complete replies that fit the tool response bound are
-consumed by explicit collection or single-child wait.
+consumed, by `wait`. A reply `wait` hands back marks the parent as having read
+outside content first, as a delivered reply does, because the child may relay
+what it fetched; a mark that cannot be recorded keeps the reply owed.
 
 Managed Claude children persist the identity written by the adapter in private,
 purgeable child content, bound to the admitted child and saved session. This
@@ -2108,7 +2129,8 @@ pure `decideAgentRunDependencies`. When every dependency completed, the run
 starts (or joins the capacity queue if no slot is free) and receives each
 dependency's reply as a context block; a reply that is gone fails the start
 closed. A ready run is held instead while its parent's harness session is
-paused or `recovery-required` (the same rule that refuses a new `delegate`),
+paused or `recovery-required` (the same rule that refuses a new `delegate`
+operation),
 and a restart never starts one on its own: every run already parked when the
 host boots stays parked, even once its dependencies complete, until a person
 resumes it or resumes the parent's session; a person's resume of the run
@@ -4934,7 +4956,7 @@ and a sentence that names what is full and, when known, how long until it frees
 A managed child the scheduler refuses for a limit that frees, whether slots in
 use, a request or token allowance, or a rate limit, waits instead of ending. It
 is recorded as Waiting under "Waiting for a free request slot", which the Agents
-tab, the terminal and the lead's `delegate`, `status` and `wait` results show,
+tab, the terminal and the agent's `delegate`, `status` and `wait` results show,
 and it holds no run slot, no provider slot and no session while it waits. The
 host recognises a waiting helper by its own record of the wait, never by that
 text, so a provider's own `waiting` message that reads the same is not one.
@@ -6498,7 +6520,10 @@ the model at another size.
   the lead's written question to the `advisor` slot's model as a one-shot,
   tool-less request, so it answers nothing while that slot is empty. A thread
   that has taken in outside content cannot send it (`second-opinion-tainted`),
-  the rule `delegate` follows. A child is offered neither.
+  the rule `octant_agents` delegation follows. A child is offered neither.
+  The harness has no child-run tool of its own: a lead delegates through
+  `octant_agents`, which each mode adds beside the harness set as it does for
+  every runtime (see the AgentRun rules above).
   A tool that was not offered refuses as `tool-unavailable` if the model calls
   it anyway. Every call decodes its
   arguments, wraps a `ToolActionRequest` under the thread's current authority,
@@ -6566,11 +6591,11 @@ the model at another size.
   authority use the ordinary one. The tool process environment carries only `PATH`, `HOME`, the temporary
   and locale variables, and what the harness sets, never a provider
   credential. Only a harness tool result that brings in outside content taints
-  the thread: `web-fetch`, `web-search`, and a `delegate` `collect` that
-  returns a finished child's reply (it may relay what the child fetched). A
-  child's reply delivered to its parent as a new turn taints the parent the
-  same way, journaled before the turn is admitted; a delivery whose taint
-  cannot be recorded waits. Local `read`, `grep`, `glob`, `bash`,
+  the thread: `web-fetch` and `web-search`. A finished child's reply taints
+  its parent however it arrives (it may relay what the child fetched): handed
+  back by an `octant_agents` `wait`, which records the mark before it returns
+  the reply, or delivered as a new turn, journaled before the turn is
+  admitted; a reply whose taint cannot be recorded stays owed. Local `read`, `grep`, `glob`, `bash`,
   `edit`, `write`, and `goal-check` results do not, so local work keeps its
   ordinary approvals; the catalog's `resultTaintsThread` marks each tool and
   `nativeHarnessResultTaintsThread` decides, failing closed for a name it does
@@ -6787,7 +6812,7 @@ the model at another size.
   (`native-harness-turn-started`) and closed by its completed record or a
   `native-harness-turn-settled` frame, which every mode's turn path writes
   however the turn ended. A person's pause drains: the running turn and the
-  helpers it started finish, while the next turn, a new `delegate`, and the
+  helpers it started finish, while the next turn, a new delegation, and the
   thread's goal loop are refused or paused. Replay keeps whatever status the
   journal last set — a completed turn never clears a pause. A session whose
   replayed journal still holds an open turn or a pending approval or
@@ -6939,15 +6964,16 @@ the model at another size.
      `write`, `bash`, and `goal-check` in Work and Code;
      `journal-lookup` in every mode when the host supplies the journal (and,
      in Code, the turn's secret list). Offered
-     when the host supplies the port: `delegate`, `ask-user`, and `goal`
-     (every mode), and `web-fetch` and `web-search` (Work and Code; Chat only
-     while its research is on, and `web-search` only with a search
-     endpoint). A Side Chat is the exception: a side conversation about
+     when the host supplies the port: `ask-user` and `goal` (every mode),
+     and `web-fetch` and `web-search` (Work and Code; Chat only while its
+     research is on, and `web-search` only with a search endpoint). Its one
+     child-run tool is `octant_agents`, added beside the harness set in
+     every mode, so a lead is never offered two. A Side Chat is the
+     exception: a side conversation about
      another thread is not the lead of a thread the person is steering, so it
      is offered only `context-remaining`, `second-opinion`, and (while its
-     research is on) the web tools, never `todo-write`, `delegate`,
-     `ask-user`, or `goal`, and not the `octant_agents` child-agent
-     tool either. A Code thread in Plan is offered only what Plan allows:
+     research is on) the web tools, never `todo-write`, `ask-user`, or
+     `goal`, and not the `octant_agents` child-run tool either. A Code thread in Plan is offered only what Plan allows:
      `read`, `grep`, and `glob`, the web tools, and the rest of the lead
      set above, with no `edit`, `write`, `bash`, or `goal-check`. Plan does
      not refuse `web-fetch` (a tainted thread still confirms it afresh), so
@@ -6965,11 +6991,12 @@ the model at another size.
      posture: the parent's live grant is its thread (with the window's session
      grant) clamped to the posture its running turn holds, so a turn narrowed to
      Plan delegates only Plan children, and a turn narrowed to approval-gated
-     only approval-gated ones, whichever route starts them (`delegate` or the
-     `agents` tool). A posture that cannot be read counts as Plan. A managed
+     only approval-gated ones, whichever runtime the parent runs on. A
+     posture that cannot be read counts as Plan. A managed
      child admitted in Plan is offered the same reduced set.
      `nativeHarnessComposition.test.ts` pins the full
-     set per mode with every port supplied, the Code set under each access
+     set per mode with every port supplied, that a lead's final set holds
+     exactly one child-run tool, the Code set under each access
      posture, the Side Chat set, the reduced set without them, and that the
      composition call site still supplies each port.
   2. **Approval and question attention.** A pending approval, and the lead's

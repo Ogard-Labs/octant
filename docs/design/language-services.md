@@ -26,8 +26,9 @@ Slice 4 (ship the binary) is built: packages carry the server, and a signed
 Apple Silicon package awaits the maintainer. Slice 5 (user-added `static`
 servers), slice 6 (repository-tooling servers, started only after a local
 window's approval and networked under the Project's egress rules), and slice 7
-(read-only agent tools for diagnostics and definitions, which never start or
-read through a repository-tooling server) are also built; slice 7's
+(one read-only agent tool, `octant_code`, for diagnostics, definitions, and
+references, which never starts or reads through a repository-tooling server)
+are also built; slice 7's
 real-provider smoke awaits the maintainer. Slice 8's [Debugger addendum](#debugger-addendum) was accepted by the
 maintainer on 2026-10-27; its sub-slices 8a (seam and policy) and 8b (session
 host) are built: the host installs a reviewed adapter, records a local
@@ -134,12 +135,13 @@ behind its own approval and confinement rules.
   `languageServerEgress.ts` gives each start its own `proxied` egress proxy
   under the Project's rules, and the editor offers **Allow in this checkout**
   and **Allow in this Project** when the host answers `approval-required`.
-- **Agent read tools (slice 7).** `apps/server/src/code/codeLanguageAgentTools.ts`
-  offers `octant_code_diagnostics` and `octant_code_definition` to every Code
-  turn whose provider carries Octant's tools, and
-  `CodeLanguageService.readForAgent` answers them for the saved file through
-  the same checks and per-request launch decision as an editor's read, as a
-  start the person at the machine did not make.
+- **Agent read tool (slice 7).** `apps/server/src/code/codeLanguageAgentTools.ts`
+  offers `octant_code` to a Code turn whose provider carries Octant's tools
+  when `CodeLanguageService.servesAgentsIn` finds a server an agent may start
+  for a file of the checkout (`codeLanguageCoverage.ts` bounds the scan), and
+  `CodeLanguageService.readForAgent` answers each operation for the saved file
+  through the same checks and per-request launch decision as an editor's read,
+  as a start the person at the machine did not make.
 - **Network levels.** `apps/server/src/process/threadEgressPolicy.ts` resolves
   `none`, `provider-endpoints-only`, and `unrestricted`. The
   [harness tool egress rules](../architecture.md#harness-tool-egress-rules)
@@ -410,7 +412,9 @@ design left a choice open.
   connection and capability are checked across awaited boundaries and before
   publication. A local route revalidates the original window capability after
   reading the body and after the service answer; paired reads retain existing
-  remote scope and transport cancellation. No new remote rights or agent tool.
+  remote scope and transport cancellation. No new remote rights. An agent
+  reaches references only through `octant_code`'s `references` operation, for
+  the saved file ([Agent read rules](#agent-read-rules)).
 - The renderer allows 15 seconds total and checks absolute elapsed time after
   every awaited boundary, aborts optional transport, and ignores late or
   superseded results. The companion's existing 10-second request bound remains.
@@ -758,15 +762,37 @@ design left a choice open.
 Slice 7 settled these details, taking the more restrictive option where the
 design left a choice open.
 
-- **Tools.** `octant_code_diagnostics` and `octant_code_definition` are the
-  closed catalog's `code-diagnostics` and `code-definition`
-  (`packages/contracts/src/toolCatalog.ts`); their argument schemas and
-  definitions are in `@octant/contracts/code-language`. Both are Code only,
-  `filesystem`, and `project-file-reads`, so Plan keeps them, no posture asks,
-  and a marked thread is not asked afresh: they read only what the thread can
-  already read, through a server that cannot write, run other programs, or
-  reach the network. Their results mark nothing, as a file read marks
-  nothing. A profile allowlist names them by these tool names.
+- **Tool.** One tool, `octant_code`, with an `operation`: `diagnostics` (the
+  file's errors and warnings), `definition` (where the name at a line and
+  column is defined), and `references` (where it is used across the checkout,
+  with `includeDeclaration` off unless asked). It is the closed catalog's
+  `code-language` (`packages/contracts/src/toolCatalog.ts`); its argument
+  schema and definition are in `@octant/contracts/code-language`. It is Code
+  only, `filesystem`, and `project-file-reads`, so Plan keeps every
+  operation, no posture asks, and a marked thread is not asked afresh: it
+  reads only what the thread can already read, through a server that cannot
+  write, run other programs, or reach the network. Its results mark nothing,
+  as a file read marks nothing. A profile allowlist names it `octant_code`,
+  all operations together. Rationale: every other Octant capability family
+  is one tool with an operation, and these reads share one authority, one
+  input, and one refusal vocabulary. Two tools (`octant_code_diagnostics`,
+  `octant_code_definition`) preceded it and were removed with no alias; a
+  profile that named them now allows nothing here until it names
+  `octant_code`.
+- **Offered only where it can answer.** A Code turn is offered `octant_code`
+  only when a server an agent may start covers a file of the turn's checkout
+  or extra folders: an effective `static` server (so a bundled server the
+  Settings switch turned off counts for nothing, and a `repo-tooling` server
+  never counts, since an agent never starts or reads through one) on macOS or
+  Linux, and a file whose name maps to one of that server's languages. The
+  host knows this when it composes the turn's tools from a bounded scan
+  (`codeLanguageCoverage.ts`): names only, breadth first, at most 2,000
+  entries and six folders deep, skipping hidden folders and `node_modules`,
+  never following a link, stopping at the first covered file. A scan that
+  runs out of bounds offers nothing. Reason: before this rule a Python or Rust
+  checkout was offered two tools that could only answer `no-language-server`
+  or `turned-off`. The offer is not the boundary: each call is still checked
+  as it runs, and a file no server reads is still refused.
 - **Transport.** They travel through the provider SDK's ordinary app-managed
   tool transport (`apps/server/src/code/codeLanguageAgentTools.ts`, added to
   every Code turn through the runtime's contributed tools), so every runtime
@@ -805,8 +831,15 @@ design left a choice open.
   at the machine (D4), and an agent's call is not that act. An agent's read
   never resets the crash budget either; reopening the file in the editor stays
   the person's retry.
-- **Answers.** Results keep the editor's bounds, and a definition outside the
-  checkout is only its label. `starting`, `crashed`, `timed-out`, `too-large`,
+- **Answers.** Results keep the editor's bounds, and a definition or
+  reference outside the checkout is only its label. `references` returns at
+  most 200 places, fewer than the editor's 1,000, so a result always fits the
+  provider's tool result budget whole; `truncated` says when there were more.
+  An agent holds no acknowledged revision, so its `references` read is
+  answered for the saved text it just brought the server up to, never through
+  the editor's revision-staged path; a server that does not report
+  references answers `references-unsupported`, and one whose support is not
+  yet known asks the agent to try again. `starting`, `crashed`, `timed-out`, `too-large`,
   `unsaved-edits`, and each refusal come back as a tool error with one
   sentence saying what to do next. Slice 7 adds no journal events.
 
@@ -2054,22 +2087,27 @@ accounts or hardware.
      2026-10-27 ([job][macos-ci-2026-10-27]). The rules are under
      [Repository tooling](#repository-tooling).
 7. **Agent read tools** (D5; after the editor slices ship). Container: yes.
-   - Add read-only `code-diagnostics` and `code-definition` app-managed tools
-     to the closed catalog, through the provider SDK's tool transport, for
+   - Add the read-only `code-language` app-managed tool (`octant_code`, with
+     `diagnostics`, `definition`, and `references` operations) to the closed
+     catalog, through the provider SDK's tool transport, for
      every provider that supports app-managed tools. Providers without that
      support report it unsupported.
    - _Accepts when:_ the conformance harness passes and Plan threads can use
-     the tools.
+     the tool.
    - _Verify:_ provider-sdk conformance. A real-provider smoke needs the
      maintainer's provider sign-in.
    - _State:_ built; the real-provider smoke is the maintainer's. The provider
-     SDK's chat conformance carries both reads to a Code session in Plan and
-     answers one, proves a provider without app-managed tools refuses them
+     SDK's chat conformance carries `octant_code` to a Code session in Plan and
+     answers one read, proves a provider without app-managed tools refuses them
      before sending, and fails a driver that asks for a tool the turn did not
      offer (`chatConformance.test.ts`); every in-tree adapter's conformance
-     passes with that check. The Code runtime offers a Plan turn both reads
-     and answers one through the language service, and offers neither to a
-     provider without app-managed tools (`codeOperationRuntime.test.ts`). On
+     passes with that check. The Code runtime offers a Plan turn the tool and
+     answers one read through the language service, and offers it to no
+     provider without app-managed tools (`codeOperationRuntime.test.ts`). The
+     tool is left out where no server an agent may start covers the checkout
+     (`codeLanguageCoverage.test.ts`, `codeLanguageAgentTools.test.ts`), and
+     an agent's `references` read is answered for a saved file in a Plan
+     thread and bounded (`codeLanguageReferences.test.ts`). On
      Linux the bundled `tsc --lsp --stdio` under Bubblewrap answered an
      agent's diagnostics and cross-file definition for a saved file in a Plan
      thread, and its next read saw a saved fix
@@ -2078,8 +2116,8 @@ accounts or hardware.
      even while a local approval covers it and the editor runs it, an editor's
      draft left in place, a file too large, and the crash budget. Still to
      run: one Code turn in Plan on a signed-in Claude Code and a signed-in
-     Codex provider, asking the agent to read a type error and a definition
-     through the two tools. The rules are under
+     Codex provider, asking the agent to read a type error, a definition, and
+     the references through `octant_code`. The rules are under
      [Agent read rules](#agent-read-rules).
 8. **Debugger.** Container: design yes, implementation yes for Linux.
    - First a design addendum in this spec, approved before any code.

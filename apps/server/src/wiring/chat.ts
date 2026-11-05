@@ -534,8 +534,9 @@ export function wireChat(deps: ChatDependencies) {
             createdAt: thread.createdAt,
             windowId,
           }),
-          // Host-internal: its results are Octant's own answers, not external
-          // content, and `delegate` itself refuses while the thread is tainted.
+          // Outside the taint wrapper: only a child's reply is outside content,
+          // and `wait` marks the thread itself before it hands one back;
+          // `delegate` refuses while the thread is marked.
           childAgentTools({
             sideChat,
             tools: () =>

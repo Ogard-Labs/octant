@@ -767,9 +767,7 @@ describe("Pi provider driver", () => {
   });
 
   it("carries a read-only app-managed tool through a Plan turn on a verified Pi release", async () => {
-    const tools = [
-      { name: "octant_code_diagnostics", inputSchema: { type: "object", properties: {} } },
-    ];
+    const tools = [{ name: "octant_code", inputSchema: { type: "object", properties: {} } }];
     const { driver, starts } = fixture("1.1.0");
     const scope = await Effect.runPromise(Scope.make());
     const connection = await Effect.runPromise(

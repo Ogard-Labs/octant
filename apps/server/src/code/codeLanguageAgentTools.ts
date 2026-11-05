@@ -1,15 +1,13 @@
 import {
-  CODE_DEFINITION_TOOL_NAME,
-  CODE_DIAGNOSTICS_TOOL_NAME,
-  CODE_LANGUAGE_TOOL_DEFINITIONS,
-  decodeCodeDefinitionToolArguments,
-  decodeCodeDiagnosticsToolArguments,
+  CODE_LANGUAGE_TOOL_DEFINITION,
+  CODE_LANGUAGE_TOOL_NAME,
+  MAX_CODE_LANGUAGE_AGENT_REFERENCES,
+  decodeCodeLanguageToolArguments,
   decodeToolActionRequest,
-  type CodeDefinitionToolArguments,
-  type CodeDiagnosticsToolArguments,
   type CodeLanguageDefinitionTarget,
   type CodeLanguageDiagnostic,
   type CodeLanguageRange,
+  type CodeLanguageToolArguments,
   type CodeThread,
   type ToolActionAuthority,
   type ToolActionRequest,
@@ -21,16 +19,19 @@ import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { CodeLanguageAgentReadResult, CodeLanguageService } from "./codeLanguageService";
 
 /**
- * The language server's reads as app-managed tools for a Code turn: the
- * diagnostics of one saved file, and where a name in it is defined.
- * Canonical: docs/design/language-services.md (decision D5).
+ * The language server's reads as one app-managed tool for a Code turn,
+ * `octant_code`: the diagnostics of one saved file, where a name in it is
+ * defined, and where that name is used. Canonical:
+ * docs/design/language-services.md (decision D5).
  *
- * Each call is decoded against its closed-catalog argument schema, wrapped as
- * a `ToolActionRequest` under the thread's authority as it stands, and
- * authorized by the tool-call choke point before the language service runs.
- * The service then checks the read as it checks an editor's, on the turn's
- * window. Both reads are `project-file-reads`, so Plan keeps them and no
- * posture asks; nothing here writes, runs, or reaches the network.
+ * It is offered only where a read can be answered: some server an agent may
+ * start covers a file of the turn's checkout. Each call is decoded against
+ * its closed-catalog argument schema, wrapped as a `ToolActionRequest` under
+ * the thread's authority as it stands, and authorized by the tool-call choke
+ * point before the language service runs. The service then checks the read
+ * as it checks an editor's, on the turn's window. Every operation is
+ * `project-file-reads`, so Plan keeps them and no posture asks; nothing here
+ * writes, runs, or reaches the network.
  */
 
 const MAX_TOOL_INPUT_BYTES = 4 * 1024;
@@ -41,24 +42,31 @@ export interface CodeLanguageAgentToolsOptions {
   readonly windowId: WindowId;
   /** The thread as the turn started; its checkout is the one the reads name. */
   readonly thread: CodeThread;
+  /** The turn's checkout root and extra folders, the files the reads can name. */
+  readonly folders: ReadonlyArray<string>;
   /** The thread as the window sees it when a call runs, or undefined once it cannot. */
   readonly readThread: () => CodeThread | undefined;
   /** The authority the thread holds now; undefined means it speaks for nothing. */
   readonly authority: () => ToolActionAuthority | undefined;
   readonly externalContentIngested: () => boolean;
-  readonly language: Pick<CodeLanguageService, "readForAgent">;
+  readonly language: Pick<CodeLanguageService, "readForAgent" | "servesAgentsIn">;
   readonly uuid: () => string;
 }
 
 type ToolOutcome = { readonly result: unknown; readonly isError: boolean };
 
+/**
+ * The tool for one Code turn, or nothing when a profile leaves it out or no
+ * server an agent may start covers a file of the checkout. A repository no
+ * server reads would only ever be answered `no-language-server` or
+ * `turned-off`, so the model is not handed a tool that cannot help it.
+ */
 export function createCodeLanguageAgentTools(
   options: CodeLanguageAgentToolsOptions,
-): AppManagedToolSet {
+): AppManagedToolSet | undefined {
   const allowlist = options.thread.toolConstraints ?? [];
-  const offered = CODE_LANGUAGE_TOOL_DEFINITIONS.filter((definition) =>
-    isToolAllowedByAllowlist(allowlist, definition.name),
-  );
+  if (!isToolAllowedByAllowlist(allowlist, CODE_LANGUAGE_TOOL_NAME)) return undefined;
+  if (!options.language.servesAgentsIn(options.folders)) return undefined;
   const gate = new ToolCallAuthorityService({
     resolveGrantedAuthority: () => options.authority(),
     resolveLiveFacts: () => {
@@ -81,20 +89,20 @@ export function createCodeLanguageAgentTools(
   });
 
   return {
-    definitions: offered,
+    definitions: [CODE_LANGUAGE_TOOL_DEFINITION],
     execute: async ({ name, inputJson, signal }) => {
       if (signal?.aborted === true) return refused("tool-interrupted", "The turn was stopped.");
-      if (!offered.some((definition) => definition.name === name)) {
+      if (name !== CODE_LANGUAGE_TOOL_NAME) {
         return refused("tool-unavailable", `${name} is not offered on this turn.`);
       }
-      const call = parseCall(name, inputJson);
+      const call = parseCall(inputJson);
       if (call === undefined) {
         return refused(
           "invalid-tool-input",
-          "Name a file of the checkout by its path relative to the root, such as src/index.ts, and give a line and column counted from 1.",
+          "Give an operation (diagnostics, definition, or references), a file of the checkout by its path relative to the root, such as src/index.ts, and for definition and references a line and column counted from 1.",
         );
       }
-      const capabilityId = call.kind === "diagnostics" ? "code-diagnostics" : "code-definition";
+      const capabilityId = "code-language";
       const current = options.readThread();
       const authority = options.authority();
       if (current === undefined || authority === undefined) {
@@ -107,7 +115,7 @@ export function createCodeLanguageAgentTools(
           correlationId: options.uuid(),
           capability: { id: capabilityId, version: 1 },
           authority,
-          intent: `${capabilityId}: ${call.args.path}`,
+          intent: `${capabilityId} ${call.operation}: ${call.path}`,
           approval: { kind: "not-required" },
         });
       } catch {
@@ -116,7 +124,7 @@ export function createCodeLanguageAgentTools(
       const decision = gate.authorize({
         threadId: String(options.thread.id),
         request,
-        arguments: call.args,
+        arguments: call,
       });
       // A read never asks, so a prompt here is a policy this tool does not
       // expect; it is refused rather than answered.
@@ -132,37 +140,58 @@ export function createCodeLanguageAgentTools(
         threadId: options.thread.id,
         checkoutId: options.thread.checkoutId,
       };
-      if (call.kind === "diagnostics") {
-        const input = call.args;
+      if (call.operation === "diagnostics") {
         const answer = await options.language.readForAgent(options.windowId, {
           kind: "diagnostics",
           ...scope,
-          path: input.path,
+          path: call.path,
         });
         if (answer.status !== "diagnostics") return unanswered(answer);
         return {
           result: {
-            path: input.path,
+            path: call.path,
             diagnostics: answer.diagnostics.map(agentDiagnostic),
             truncated: answer.truncated,
           },
           isError: false,
         };
       }
-      const input = call.args;
+      const position = { line: call.line - 1, character: call.column - 1 };
+      if (call.operation === "definition") {
+        const answer = await options.language.readForAgent(options.windowId, {
+          kind: "definition",
+          ...scope,
+          path: call.path,
+          position,
+        });
+        if (answer.status !== "definition") return unanswered(answer);
+        return {
+          result: {
+            path: call.path,
+            line: call.line,
+            column: call.column,
+            definitions: answer.targets.map(agentDefinition),
+          },
+          isError: false,
+        };
+      }
       const answer = await options.language.readForAgent(options.windowId, {
-        kind: "definition",
+        kind: "references",
         ...scope,
-        path: input.path,
-        position: { line: input.line - 1, character: input.column - 1 },
+        path: call.path,
+        position,
+        includeDeclaration: call.includeDeclaration === true,
       });
-      if (answer.status !== "definition") return unanswered(answer);
+      if (answer.status !== "references") return unanswered(answer);
       return {
         result: {
-          path: input.path,
-          line: input.line,
-          column: input.column,
-          definitions: answer.targets.map(agentDefinition),
+          path: call.path,
+          line: call.line,
+          column: call.column,
+          references: answer.targets
+            .slice(0, MAX_CODE_LANGUAGE_AGENT_REFERENCES)
+            .map(agentDefinition),
+          truncated: answer.truncated || answer.targets.length > MAX_CODE_LANGUAGE_AGENT_REFERENCES,
         },
         isError: false,
       };
@@ -170,22 +199,11 @@ export function createCodeLanguageAgentTools(
   };
 }
 
-type ParsedCall =
-  | { readonly kind: "diagnostics"; readonly args: CodeDiagnosticsToolArguments }
-  | { readonly kind: "definition"; readonly args: CodeDefinitionToolArguments };
-
 /** The call's arguments under the same schema the closed catalog decodes them with. */
-function parseCall(name: string, inputJson: string): ParsedCall | undefined {
+function parseCall(inputJson: string): CodeLanguageToolArguments | undefined {
   if (Buffer.byteLength(inputJson, "utf8") > MAX_TOOL_INPUT_BYTES) return undefined;
   try {
-    const value: unknown = JSON.parse(inputJson);
-    if (name === CODE_DIAGNOSTICS_TOOL_NAME) {
-      return { kind: "diagnostics", args: decodeCodeDiagnosticsToolArguments(value) };
-    }
-    if (name === CODE_DEFINITION_TOOL_NAME) {
-      return { kind: "definition", args: decodeCodeDefinitionToolArguments(value) };
-    }
-    return undefined;
+    return decodeCodeLanguageToolArguments(JSON.parse(inputJson));
   } catch {
     return undefined;
   }
@@ -218,12 +236,25 @@ function agentDefinition(target: CodeLanguageDefinitionTarget) {
 /** Every answer that is not the read's result, as a refusal the model can act on. */
 function unanswered(answer: CodeLanguageAgentReadResult): ToolOutcome {
   switch (answer.status) {
+    case "unsupported":
+      return answer.support === "unknown"
+        ? refused(
+            "language-server-starting",
+            "The language server has not yet said whether it can find where names are used. Call the tool again in a few seconds.",
+          )
+        : refused(
+            "references-unsupported",
+            "This file's language server cannot find where names are used. Search the checkout for the name instead.",
+          );
+    case "stale":
+      return refused(
+        "file-changed",
+        "The file or its language server changed while the server answered. Call the tool again.",
+      );
     case "diagnostics":
     case "definition":
     case "references":
     case "capabilities":
-    case "unsupported":
-    case "stale":
       return refused("tool-execution-failed", "The language server answered another read.");
     case "too-large":
       return refused("too-large", "The file is too large for the language server.");

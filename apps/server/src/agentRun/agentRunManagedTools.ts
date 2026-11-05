@@ -48,6 +48,11 @@ export interface AgentsManagedToolsOptions {
    * to the occurrence-bound parent check the tool always applies first.
    */
   readonly authorizeCancel: (run: AgentRun) => boolean;
+  /**
+   * Journals that a child's reply is about to enter this thread, which marks
+   * it as having read outside content; false when that could not be recorded.
+   */
+  readonly recordResultIngestion: (run: AgentRun) => boolean;
   readonly uuid: () => string;
   readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 }
@@ -57,7 +62,7 @@ const AGENTS_TOOL_NAME = "octant_agents";
 const AGENTS_TOOL_DEFINITION = {
   name: AGENTS_TOOL_NAME,
   description:
-    "Delegate part of this task to a child agent run the host owns and supervises. Use capabilities to see which provider models you may target and the current creation posture. delegate creates one child with a bounded task; it runs asynchronously and appears in the Agents surface. status inspects this thread's children without consuming their replies; wait blocks briefly for one child's terminal state and returns its result when completed; cancel stops one of this thread's children. follow-up continues a completed child in its saved session using runId, expectedVersion from status/wait, and an explicit message (at most 4096 characters); unsupported continuity is refused. Child refs from another parent cannot be used here. Use after to wait for existing siblings and receive their results. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings or the parent is paused.",
+    "Delegate parts of this task to child agent runs the host owns and supervises; each appears in the Agents surface, where the person can watch and stop it. capabilities lists the provider models you may target and whether delegation is open. delegate starts one child with a bounded, standalone task (objective, expected output, boundaries) and returns its runId; independent children run in parallel, and after names existing siblings whose results a child needs, so it starts once they all completed and receives their replies. status lists this thread's children without consuming their replies. wait blocks up to timeoutMs for one child and returns its reply once it completed (timeoutMs 0 reads a finished reply without waiting). A child's reply counts as outside content, so after one this thread cannot delegate again until a person reviews it. cancel stops one of this thread's children. follow-up continues a completed child in its saved session using runId, expectedVersion from status or wait, and an explicit message (at most 4096 characters); unsupported continuity is refused. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings, the thread has read outside content, or it is paused.",
   inputSchema: {
     type: "object",
     properties: {
@@ -410,7 +415,12 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
             if (run.lifecycleStatus === "completed" && run.result !== undefined) {
               const text = options.persistence.resultText(run.id);
               if (text === undefined) return failure("result-unavailable");
-              const collected = collectAgentRunResult(options.persistence, run, text);
+              const collected = collectAgentRunResult(
+                options.persistence,
+                run,
+                text,
+                options.recordResultIngestion,
+              );
               return collected.status === "refused"
                 ? failure(collected.reason, collected.message)
                 : answer(collected);

@@ -500,7 +500,6 @@ describe("native harness composition", () => {
     const productionPorts = {
       goals: { read: async () => undefined, execute: async () => undefined } as never,
       questions: { ask: async () => undefined } as never,
-      delegate: () => ({}) as never,
       webFetch: (async () => undefined) as never,
       resolveWebSearch: () => (async () => undefined) as never,
     };
@@ -538,7 +537,6 @@ describe("native harness composition", () => {
         "context-remaining",
         "journal-lookup",
         "second-opinion",
-        "delegate",
         "ask-user",
         "goal",
       ];
@@ -571,14 +569,7 @@ describe("native harness composition", () => {
         );
         const readOnly = ["read", "grep", "glob"];
         const web = ["web-fetch", "web-search"];
-        const lead = [
-          "todo-write",
-          "context-remaining",
-          "second-opinion",
-          "delegate",
-          "ask-user",
-          "goal",
-        ];
+        const lead = ["todo-write", "context-remaining", "second-opinion", "ask-user", "goal"];
         expect(code).toEqual(
           writes
             ? [...readOnly, "bash", "edit", "write", ...web, ...lead, "goal-check"]
@@ -664,21 +655,46 @@ describe("native harness composition", () => {
       ]);
     });
 
-    it("gives a Side Chat no delegation in the tool set it finally receives", () => {
+    it("gives every Harness thread exactly one child-run tool, octant_agents, and a Side Chat none", () => {
       const { composition } = harness(false, productionPorts);
       const agents = (): AppManagedToolSet => ({
         definitions: [{ name: "octant_agents" } as never],
         execute: async () => ({ result: {} }),
       });
-      const finalSet = (sideChat: boolean) =>
+      const chatSet = (sideChat: boolean) =>
         combineAppManagedToolSets(
           composition.forChat({ thread: chatThread, windowId: "window-1", sideChat }),
           childAgentTools({ sideChat, tools: agents }),
         );
-      expect(names(finalSet(true))).not.toContain("delegate");
-      expect(names(finalSet(true))).not.toContain("octant_agents");
-      // An ordinary Chat thread keeps both.
-      expect(names(finalSet(false))).toEqual(expect.arrayContaining(["delegate", "octant_agents"]));
+      const childRunTools = (set: AppManagedToolSet | undefined) =>
+        names(set!).filter((name) => name === "octant_agents" || name === "delegate");
+      expect(childRunTools(chatSet(false))).toEqual(["octant_agents"]);
+      expect(childRunTools(chatSet(true))).toEqual([]);
+      // Work and Code add `octant_agents` beside the harness set the same way,
+      // so the harness set itself must carry no child-run tool of its own.
+      for (const set of [
+        composition.forWork({ thread: workThread, projectRoot: "/nonexistent", windowId: "w" }),
+        composition.forCode({ thread: codeThread, checkoutRoot: "/nonexistent", windowId: "w" }),
+      ]) {
+        expect(childRunTools(combineAppManagedToolSets(set, agents()))).toEqual(["octant_agents"]);
+      }
+    });
+
+    it("leaves a provider runtime's Chat thread with octant_agents and no harness tools", () => {
+      const { composition } = harness(false, {
+        ...productionPorts,
+        isHarnessProvider: () => false,
+      });
+      const agents = (): AppManagedToolSet => ({
+        definitions: [{ name: "octant_agents" } as never],
+        execute: async () => ({ result: {} }),
+      });
+      expect(composition.forChat({ thread: chatThread, windowId: "window-1" })).toBeUndefined();
+      const finalSet = combineAppManagedToolSets(
+        composition.forChat({ thread: chatThread, windowId: "window-1" }),
+        childAgentTools({ sideChat: false, tools: agents }),
+      );
+      expect(names(finalSet!)).toEqual(["octant_agents"]);
     });
 
     it("keeps the composition call site supplying every port the offered set depends on", () => {
@@ -700,7 +716,6 @@ describe("native harness composition", () => {
         "goals:",
         "questions:",
         "secondOpinion:",
-        "delegate:",
         "shell:",
         "resolveWebSearch:",
         "webFetch:",

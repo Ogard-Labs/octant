@@ -1,4 +1,4 @@
-import { CODE_DIAGNOSTICS_TOOL_NAME, CODE_LANGUAGE_TOOL_DEFINITIONS } from "@octant/contracts";
+import { CODE_LANGUAGE_TOOL_DEFINITION, CODE_LANGUAGE_TOOL_NAME } from "@octant/contracts";
 import type {
   CorrelationId,
   ProviderCapabilities,
@@ -473,7 +473,7 @@ describe("runProviderChatConformance", () => {
 
   const languageReads = {
     executionPolicy: "plan",
-    tools: CODE_LANGUAGE_TOOL_DEFINITIONS,
+    tools: [CODE_LANGUAGE_TOOL_DEFINITION],
     answerJson: JSON.stringify({
       path: "src/b.ts",
       diagnostics: [
@@ -497,8 +497,8 @@ describe("runProviderChatConformance", () => {
         makeChatFixture({
           codeTurn: languageReads,
           toolRequest: {
-            toolName: CODE_DIAGNOSTICS_TOOL_NAME,
-            inputJson: JSON.stringify({ path: "src/b.ts" }),
+            toolName: CODE_LANGUAGE_TOOL_NAME,
+            inputJson: JSON.stringify({ operation: "diagnostics", path: "src/b.ts" }),
           },
         }),
       ),
