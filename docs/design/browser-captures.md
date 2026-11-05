@@ -83,8 +83,23 @@ the Browser pane
 ## Retention
 
 - A thread keeps its newest 32 captures, screenshots and recordings together.
+- At most 8 of them are recordings. Keeping a ninth recording drops the
+  thread's oldest recording, never a screenshot: within the window, every
+  screenshot is kept and only the newest 8 recordings are.
 - Retention is a rule over the journal: the newest 32 aggregate versions
-  survive, and listing reads exactly that window.
+  survive, of those the recordings past the newest 8 do not, and listing reads
+  exactly what remains (`browserRetainedCaptures`). Reading, the export
+  records, a Canvas design asset, and recovery all go through that listing, so
+  a dropped recording is not found by any of them. No event records the drop;
+  its bytes are removed when the recording that replaced it is kept, and
+  otherwise by the next recovery pass.
+- Rationale for the recording cap: a recording may be 2 MiB, about fifty
+  screenshots, so 32 recordings could hold about 64 MiB per thread. Eight hold
+  about 16 MiB, enough for the checks a pull request shows. Dropping the
+  oldest recording rather than the oldest capture keeps a new recording from
+  pushing out the screenshots the proof's steps name; the 32-version window
+  still ages out the oldest capture of either kind as before, so screenshots
+  keep exactly the room they had.
 - Removing the bytes of an older capture is repeatable cleanup. `recover` at host
   start removes any finalized bytes the journal does not retain and any staged
   leftovers, so a crash between the append and the removal loses nothing.
@@ -355,8 +370,9 @@ attached the same way.
   size, so joining them is framing, not encoding. Tying a recording to one call
   bounds it by that call as well as by its own limits, so it cannot outlive a
   turn or be left running by an agent that forgot to stop it. The 2 MiB bound
-  keeps a recording below a Canvas design asset's cap and keeps a thread's 32
-  captures within 64 MiB; screen-sized PNG frames of an ordinary page are tens
+  keeps a recording below a Canvas design asset's cap, and with at most 8
+  recordings per thread ([Retention](#retention)) keeps a thread's recordings
+  within about 16 MiB; screen-sized PNG frames of an ordinary page are tens
   of kilobytes, so the bound holds a few dozen distinct frames, and a waiting
   page costs none.
 - **Privacy.** A recording follows every capture rule: it stays on this
@@ -371,4 +387,4 @@ attached the same way.
 `browserAutomationService.test.ts`, `browserAutomationRoutes.test.ts`,
 `threadPurge.test.ts`, `threadExportService.test.ts`, `canvasDesignAssets.test.ts`, `BrowserCaptureList.test.tsx`, and `BrowserWorkspace.test.tsx`.
 Proof adds `browserProofPolicy.test.ts`, the steps cases of `browserCaptureService.test.ts`, `browserAutomationService.test.ts`, and `browserAutomationRoutes.test.ts`, `CodePullRequestPane.test.tsx`, and the desktop `browserProofSaver.test.ts` and `preload.test.ts`.
-Recordings add `browserRecording.test.ts` (an animated PNG read back by a parser in the test: frame count, delays, size, CRCs, the still frame, every bound, and which frames may be kept), the recording cases of `browserCapture.test.ts`, `browserCapturePolicy.test.ts`, `browserAutomationPolicy.test.ts`, `browserProofPolicy.test.ts`, `browserCaptureService.test.ts`, `browserAutomationService.test.ts`, `browserAppManagedTools.test.ts`, `browserAutomationRoutes.test.ts`, `desktopBrowserRuntime.test.ts`, `BrowserCaptureList.test.tsx`, and the desktop `browserRuntimeBroker.test.ts` and `browserProofSaver.test.ts`; and real Chromium pages in `browserAgentTool.smoke.test.ts` (headless) and `browserSurfaceHost.realPage.test.ts` (the desktop Browser's code), which read the pixels of every kept frame to show that no page off the approved origin, and no blank or error page, was recorded.
+Recordings add `browserRecording.test.ts` (an animated PNG read back by a parser in the test: frame count, delays, size, CRCs, the still frame, every bound, and which frames may be kept), the recording cases of `browserCapture.test.ts`, `browserCapturePolicy.test.ts` (the recording cap: newest eight kept, screenshots never dropped), `browserCaptureService.test.ts` (a ninth recording drops the oldest one and its bytes, recovery finishes the removal), `browserAutomationPolicy.test.ts`, `browserProofPolicy.test.ts`, `browserAutomationService.test.ts`, `browserAppManagedTools.test.ts`, `browserAutomationRoutes.test.ts`, `desktopBrowserRuntime.test.ts`, `BrowserCaptureList.test.tsx`, and the desktop `browserRuntimeBroker.test.ts` and `browserProofSaver.test.ts`; and real Chromium pages in `browserAgentTool.smoke.test.ts` (headless) and `browserSurfaceHost.realPage.test.ts` (the desktop Browser's code), which read the pixels of every kept frame to show that no page off the approved origin, and no blank or error page, was recorded.

@@ -1,5 +1,8 @@
 import type { BrowserActionKind, BrowserCapture, ThreadExportAttachment } from "@octant/contracts";
-import { MAX_BROWSER_CAPTURES_PER_THREAD } from "@octant/contracts";
+import {
+  MAX_BROWSER_CAPTURES_PER_THREAD,
+  MAX_BROWSER_RECORDINGS_PER_THREAD,
+} from "@octant/contracts";
 import { imageFileExtension } from "./imageGenerationInvocationPolicy";
 
 /** Who asked for the screenshot: the model through the tool, or the person in the pane. */
@@ -43,6 +46,26 @@ export function browserCaptureRetention(
   limit: number = MAX_BROWSER_CAPTURES_PER_THREAD,
 ): { readonly firstRetainedVersion: number } {
   return { firstRetainedVersion: Math.max(1, headVersion - limit + 1) };
+}
+
+/**
+ * The captures a thread keeps out of its retained window (newest first): every
+ * screenshot, and only the newest `MAX_BROWSER_RECORDINGS_PER_THREAD`
+ * recordings. Like the window itself this is a rule over the journal, so a
+ * listing, a read, an export, and a recovery pass all apply it the same way;
+ * an older recording is gone the moment a newer one takes its place, and its
+ * bytes are only cleanup. A recording never pushes out a screenshot.
+ */
+export function browserRetainedCaptures(
+  window: ReadonlyArray<BrowserCapture>,
+  maxRecordings: number = MAX_BROWSER_RECORDINGS_PER_THREAD,
+): ReadonlyArray<BrowserCapture> {
+  let recordings = 0;
+  return window.filter((capture) => {
+    if (capture.recording === undefined) return true;
+    recordings += 1;
+    return recordings <= maxRecordings;
+  });
 }
 
 /**

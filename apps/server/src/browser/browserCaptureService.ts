@@ -30,6 +30,7 @@ import {
 import {
   browserCapturePageOrigin,
   browserCaptureRetention,
+  browserRetainedCaptures,
   browserStepRecord,
   browserStepRetention,
   type BrowserStepFacts,
@@ -174,6 +175,9 @@ export class BrowserCaptureService {
     // The capture is journaled from here on. Dropping the oldest one is
     // cleanup that recovery repeats, so a failure must not undo this capture.
     await this.#dropOlderThan(input.threadId, version).catch(() => undefined);
+    if (input.recording !== undefined) {
+      await this.#dropRecordingsPastCap(input.threadId).catch(() => undefined);
+    }
     return {
       status: "kept",
       captureId,
@@ -220,6 +224,11 @@ export class BrowserCaptureService {
 
   /** The thread's retained captures, newest first. */
   list(threadId: BrowserThreadId): ReadonlyArray<BrowserCapture> {
+    return browserRetainedCaptures(this.#window(threadId));
+  }
+
+  /** Every capture in the thread's retained window, recordings past the cap included. */
+  #window(threadId: BrowserThreadId): ReadonlyArray<BrowserCapture> {
     const aggregateId = String(threadId);
     const head = readAggregateVersion(
       this.#connection,
@@ -350,5 +359,19 @@ export class BrowserCaptureService {
     await this.#store
       .remove(threadId, decodeBrowserCapture(dropped.payload).captureId)
       .catch(() => undefined);
+  }
+
+  /**
+   * Remove the bytes of the recordings the cap no longer retains: those in the
+   * window past the newest eight. As with `#dropOlderThan`, the journal has
+   * already stopped retaining them, so a removal that fails here is finished by
+   * the next recovery pass, which asks `list`.
+   */
+  async #dropRecordingsPastCap(threadId: BrowserThreadId): Promise<void> {
+    const retained = new Set(this.list(threadId).map((capture) => String(capture.captureId)));
+    for (const capture of this.#window(threadId)) {
+      if (retained.has(String(capture.captureId))) continue;
+      await this.#store.remove(threadId, capture.captureId).catch(() => undefined);
+    }
   }
 }

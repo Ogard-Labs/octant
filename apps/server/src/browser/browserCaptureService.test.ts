@@ -8,6 +8,7 @@ import {
   MAX_BROWSER_CAPTURE_BYTES,
   MAX_BROWSER_CAPTURES_PER_THREAD,
   MAX_BROWSER_RECORDING_BYTES,
+  MAX_BROWSER_RECORDINGS_PER_THREAD,
   MAX_BROWSER_STEPS_PER_THREAD,
   type BrowserCaptureOutcome,
   type BrowserThreadId,
@@ -278,6 +279,49 @@ describe("BrowserCaptureService", () => {
       await service.keep(request({ dataUrl: "data:image/jpeg;base64,/9j/4AAQ", recording: facts })),
     ).toEqual({ status: "not-kept", reason: "not-an-image" });
     expect(journalRows(connection)).toHaveLength(1);
+  });
+
+  it("keeps a thread's newest eight recordings, dropping the oldest recording and its bytes, never a screenshot", async () => {
+    const { connection, directory, service } = open();
+    const facts = { frames: 4, durationMs: 1_000 };
+    const firstShot = kept(await service.keep(request()));
+    const recordings: string[] = [];
+    for (let index = 0; index < MAX_BROWSER_RECORDINGS_PER_THREAD; index += 1) {
+      recordings.push(kept(await service.keep(request({ recording: facts }))));
+    }
+    const lastShot = kept(await service.keep(request()));
+    expect(service.list(threadA)).toHaveLength(MAX_BROWSER_RECORDINGS_PER_THREAD + 2);
+
+    const ninth = kept(await service.keep(request({ recording: facts })));
+    const listed = service.list(threadA).map((capture) => String(capture.captureId));
+    // The oldest recording is gone; every screenshot, older ones included, stays.
+    expect(listed).not.toContain(recordings[0]);
+    expect(listed).toEqual([ninth, lastShot, ...recordings.slice(1).reverse(), firstShot]);
+    expect(service.list(threadA).filter((capture) => capture.recording !== undefined)).toHaveLength(
+      MAX_BROWSER_RECORDINGS_PER_THREAD,
+    );
+    expect(await service.read(threadA, decodeBrowserCaptureId(recordings[0]))).toBeUndefined();
+    expect(
+      existsSync(join(captureDirectory(directory, threadA, recordings[0] ?? ""), "finalized.bin")),
+    ).toBe(false);
+    expect(await service.read(threadA, decodeBrowserCaptureId(firstShot))).toBeDefined();
+    // The journal keeps every event: the cap is a rule over it, not an event.
+    expect(journalRows(connection)).toHaveLength(MAX_BROWSER_RECORDINGS_PER_THREAD + 3);
+  });
+
+  it("finishes removing an evicted recording's bytes on recovery", async () => {
+    const { directory, service } = open();
+    const facts = { frames: 4, durationMs: 1_000 };
+    const oldest = kept(await service.keep(request({ recording: facts })));
+    for (let index = 0; index < MAX_BROWSER_RECORDINGS_PER_THREAD; index += 1) {
+      await service.keep(request({ recording: facts }));
+    }
+    // Put the bytes back, as if the host stopped before removing them.
+    const folder = captureDirectory(directory, threadA, oldest);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "finalized.bin"), PNG);
+    await service.recover();
+    expect(existsSync(join(folder, "finalized.bin"))).toBe(false);
   });
 
   it("refuses a page with no web origin", async () => {

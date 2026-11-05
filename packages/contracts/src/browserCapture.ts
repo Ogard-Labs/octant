@@ -22,6 +22,12 @@ const ContentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
  * envelope; a recording has its own bound, `MAX_BROWSER_RECORDING_BYTES`.
  */
 export const MAX_BROWSER_CAPTURES_PER_THREAD = 32;
+/**
+ * How many of those captures may be recordings. A recording is up to 2 MiB,
+ * fifty times a screenshot, so eight bound a thread's recordings at about
+ * 16 MiB; past eight the oldest recording goes, never a screenshot.
+ */
+export const MAX_BROWSER_RECORDINGS_PER_THREAD = 8;
 export const MAX_BROWSER_CAPTURE_BYTES = Math.floor(
   (MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS * 3) / 4,
 );
