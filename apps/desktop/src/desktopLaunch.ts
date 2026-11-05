@@ -7,6 +7,9 @@ export async function launchDesktopApplication(
   identity: DesktopIdentity,
   loadHostOwningDesktop: () => Promise<unknown>,
   readStatus?: () => Promise<DesktopPeerPreflight>,
+  openClient?: () => Promise<
+    { readonly kind: "started" } | { readonly kind: "refused"; readonly message: string }
+  >,
 ): Promise<
   | { readonly kind: "started" }
   | { readonly kind: "client-bridge-required"; readonly message: string }
@@ -17,6 +20,18 @@ export async function launchDesktopApplication(
       status = await readStatus?.();
     } catch {
       status = { kind: "refused", reason: "native-unavailable" };
+    }
+    if (status?.kind === "ready" && openClient !== undefined) {
+      try {
+        const client = await openClient();
+        if (client.kind === "started") return client;
+        return { kind: "client-bridge-required", message: client.message };
+      } catch {
+        return {
+          kind: "client-bridge-required",
+          message: "Octant Nightly could not register its window with Octant.",
+        };
+      }
     }
     let message =
       "Needs a newer Octant. The stable desktop client bridge is not available in this build of Octant Nightly.";

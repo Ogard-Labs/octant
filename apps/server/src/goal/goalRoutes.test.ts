@@ -10,14 +10,10 @@ const ids = {
   thread: "00000000-0000-4000-8000-000000000208",
 } as const;
 
-// `WindowAuthorityStore.authenticate` returns the WindowId itself. The fake used
-// to answer `{ windowId: "w1" }`, so the route saw `[object Object]` as the
-// authenticated window — harmless while nothing read the value, and exactly the
-// fixture drift that would have hidden the authorization bug this file now
-// covers.
+// Local principals use the authenticated authority record, including its window identity.
 function authStore(): WindowAuthorityStore {
   return {
-    authenticate: vi.fn(() => "w1"),
+    authenticateAuthority: vi.fn(() => ({ windowId: "w1" })),
   } as unknown as WindowAuthorityStore;
 }
 

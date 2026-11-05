@@ -14,7 +14,9 @@ const ids = {
 const capability = "C".repeat(43);
 
 function authStore(): WindowAuthorityStore {
-  return { authenticate: vi.fn(() => "w1") } as unknown as WindowAuthorityStore;
+  return {
+    authenticateAuthority: vi.fn(() => ({ windowId: "w1" })),
+  } as unknown as WindowAuthorityStore;
 }
 
 function handler(authorizeThread: () => boolean) {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createGithubRouteHandler } from "./githubRoutes";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 
-const store = { authenticate: vi.fn() } as any;
+const store = { authenticateAuthority: vi.fn() } as any;
 const service = {
   snapshot: vi.fn(async () => ({ state: "unauthorized", capabilities: [] })),
   execute: vi.fn(),

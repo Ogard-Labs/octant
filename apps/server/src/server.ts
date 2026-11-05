@@ -1660,6 +1660,11 @@ export function startOctantServer(
         Effect.promise(async () => {
           let shutdownFailure: unknown;
           try {
+            windowAuthorityStore.revokeNativeLeases();
+          } catch (error) {
+            shutdownFailure = error;
+          }
+          try {
             const previewCleanup = await serverPreviewTunnels.close();
             if (previewCleanup.status === "unsettled") {
               shutdownFailure = new Error("Server Project preview cleanup could not be confirmed.");

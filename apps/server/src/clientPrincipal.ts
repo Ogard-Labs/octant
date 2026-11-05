@@ -41,9 +41,9 @@ export function resolveLocalWindowPrincipal(
 ): Extract<ClientPrincipal, { kind: "local-window" }> {
   assertNoPrincipalIdentityInPayload(input.request, input.body);
   const capability = input.request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "";
-  let windowId: WindowId;
+  let authority: ReturnType<WindowAuthorityStore["authenticateAuthority"]>;
   try {
-    windowId = input.store.authenticate(capability, input.now);
+    authority = input.store.authenticateAuthority(capability, input.now);
   } catch (error) {
     if (error instanceof WindowAuthorityError) {
       throw new ClientPrincipalError(
@@ -55,8 +55,8 @@ export function resolveLocalWindowPrincipal(
   }
   return Object.freeze({
     kind: "local-window",
-    windowId: String(windowId),
-    capabilityGeneration: input.capabilityGeneration ?? 0,
+    windowId: String(authority.windowId),
+    capabilityGeneration: authority.generation ?? input.capabilityGeneration ?? 0,
   });
 }
 

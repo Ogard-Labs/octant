@@ -857,7 +857,7 @@ describe("secret store routes", () => {
     const handler = createSecretStoresRouteHandler({
       service,
       windowAuthorityStore: {
-        authenticate: vi.fn(() => WINDOW),
+        authenticateAuthority: vi.fn(() => ({ windowId: WINDOW })),
       } as unknown as WindowAuthorityStore,
     });
     return { service, handler };

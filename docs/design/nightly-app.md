@@ -8,13 +8,15 @@ one host per data folder, how updates are verified, and which rings exist
 [current release boundary](../architecture.md#current-release-boundary)).
 DESIGN.md owns Settings presentation.
 
-Status: identity, packaging, inverted icons and update-ring foundations are
-implemented. The functional stable-host desktop client bridge is not built.
-A packaged Nightly launch therefore refuses before importing the host-owning
-desktop module, which prevents credential initialization, host startup and
-migrations.
+Status: identity, packaging, inverted icons, update-ring and authenticated window-bootstrap
+foundations are implemented. A compatible authenticated Stable app can register
+an ordinary Nightly window and give its own bundled renderer a short-lived host
+capability. Development, ad-hoc and incompatible builds refuse. Nightly never
+imports the host-owning desktop module, initializes host credentials, starts a
+host or migrates shared data. Embedded Browser and other native broker parity
+remain unfinished; this is not yet a usable second app.
 
-The remaining delivery includes the typed per-window native broker connection,
+The remaining delivery includes the embedded per-window native presentation,
 stable host-only launch and retention, shared sign-in operations, the complete
 `octant-nightly` command, the installer and removal controls, Nightly labels,
 and the functional release preflight. Coexistence, reconnect and rollback
@@ -139,9 +141,9 @@ These restrictions are a prerequisite for native peer admission. A signature on
 an interpreter that also accepts arbitrary JavaScript would not identify trusted
 Nightly application code. Fixed-entry packaging alone does not authenticate a
 peer, grant a window capability, establish same-Team signed-app acceptance or
-complete the stable-host bridge. The functional launch and publication gates
-remain until those requirements and embedded Browser parity are implemented and
-verified.
+complete the stable-host bridge. Opening the renderer requires the authenticated
+window protocol below. Publication remains gated until the full lifecycle,
+native brokers and embedded Browser parity are implemented and verified.
 
 ## Authenticated desktop status preflight
 
@@ -172,12 +174,13 @@ must be on a local volume.
 The fixed protocol returns only its version and the authenticated app version;
 it conveys no host URL, secret, credential, window registration or lease.
 Missing status cannot distinguish a closed Stable app from an older app without
-this endpoint, so startup says so. Even an authenticated status response leaves
-Nightly's unfinished desktop-bridge gate in force. It does not establish usable
-Nightly, shared native surfaces or Browser parity.
+this endpoint, so startup says so. An authenticated status response alone cannot register a window. The separate
+window protocol below must succeed before Nightly opens its renderer. Neither
+result establishes usable Nightly, shared native surfaces or Browser parity.
 
-The binding exports only `start`, `status` and `close`, with no arbitrary Mach
-operation or renderer IPC. Queue and message sizes are fixed, send/receive and
+The status operations are `start`, `status` and `close`. A separate closed
+window protocol shares the binding; neither offers an arbitrary Mach operation
+or renderer access to the native binding. Queue and message sizes are fixed, send/receive and
 validation decisions have deadlines, and expensive Security/filesystem work
 runs off the main loop. OS validation calls cannot be forcibly cancelled: an
 expired observation is refused, and shutdown reports failure rather than claiming
@@ -194,6 +197,59 @@ the existing JavaScript archive/unpack policy intact. Same-Team Developer ID
 positive acceptance, active authenticated-owner teardown and full production
 package validation still need their own evidence; unsigned fixture refusal does
 not satisfy those cases.
+
+## Native client window leases
+
+Ordinary Nightly uses a separate mutually authenticated window protocol after
+status. Its main process creates an opaque client handle for its real window.
+Stable issues a fresh server window ID, capability and renderer identity; the
+client cannot choose another window's server identity. The reply includes only
+that scope, the validated literal-loopback host origin and current host instance.
+Stable's administrative bridge secret stays in Stable. Runtime, helper, terminal
+and Canvas roles cannot register these windows.
+
+Each registration binds the actual kernel audit-token process incarnation and
+login scope to its process registration, client handle and window generation.
+Native process-exit observation checks the audit incarnation after installing
+its process watch. A reused PID or transferred messaging right cannot stand in
+for the exited owner. The status protocol continues to return no URL or lease.
+
+The server grants a 15-second native lease, renewed every five seconds. It
+checks expiry on both window and renderer authentication and takes native
+generation from the stored authority. An ordinary local registration cannot
+refresh a live native lease into its normal 24-hour capability. Native leases
+also use suspend-aware elapsed time. The existing server authority clock derives
+its epoch from elapsed time and ignores later caller wall-clock readings; no
+wall-clock recovery mode is implied by this protocol.
+
+Expiry first revokes state and aborts held requests, then notifies every owner
+of the window. One failing cleanup cannot skip sibling owners or resurrect the
+lease. Native held responses discard queued bytes with an abort error; late
+producer reads and late completed JSON responses cannot publish after expiry.
+Renewal preserves the current abort lifetime, while re-registration gets a new
+one. Existing local and remote request semantics remain unchanged.
+
+Stable's main also holds a conservative local deadline and rejects an owner
+whose host instance changed. It reserves a closing client handle until cleanup
+settles, and cleans only its host-issued server ID and generation. A failed
+registration does not establish ownership of Browser contexts. Close waits for
+pending acquisition and attempts server revocation and owned-context cleanup;
+failure remains observable. This does not implement host retention when Stable
+quits or reconnect after a host replacement.
+
+Nightly sets its separate window storage before Electron is ready, loads its
+own existing renderer/preload and installs the trusted renderer-header registry
+for the returned host origin. Its administrative secret is never a renderer
+argument. Window creation, navigation guards, expiry and renewal use the real
+client path. Native contributions that are not connected to their owning broker
+refuse explicitly; live Browser and device panes remain unavailable in this
+bootstrap slice. The required next step is the stable-owned embedded Browser,
+not a companion window or a second opening of persistent profiles.
+
+Unsigned native refusal and mechanical lifecycle tests are separate from
+Developer ID same-Team admission. Actual signed-pair registration, active-owner
+process exit, full-payload renderer/native acceptance and retained-host behavior
+still need their evidence. The functional publication gate stays in force.
 
 ## Identity
 
