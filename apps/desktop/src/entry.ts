@@ -8,6 +8,11 @@ import {
   desktopWindowStorageDirectory,
 } from "@octant/host-runtime";
 import { launchDesktopApplication, resolvePackagedDesktopLaunch } from "./desktopLaunch";
+import {
+  closeDesktopPeerStatus,
+  desktopPeerPreflight,
+  loadDesktopPeerStatus,
+} from "./desktopPeerStatus";
 
 // Identity and launch-role checks precede imports of the host-owning desktop.
 const identity = app.isPackaged
@@ -45,6 +50,17 @@ async function launchDesktop(): Promise<void> {
   const outcome = await launchDesktopApplication(
     identity,
     () => import(new URL("./main.mjs", import.meta.url).href),
+    async () => {
+      const native = loadDesktopPeerStatus({
+        packaged: app.isPackaged,
+        platform: process.platform,
+        resourcesPath: process.resourcesPath,
+      });
+      if (native === undefined) return { kind: "refused", reason: "native-unavailable" };
+      const status = await desktopPeerPreflight(native);
+      const closed = await closeDesktopPeerStatus(native);
+      return closed.kind === "closed" ? status : { kind: "refused", reason: closed.reason };
+    },
   );
   if (outcome.kind === "client-bridge-required") {
     app.setName(identity.productName);

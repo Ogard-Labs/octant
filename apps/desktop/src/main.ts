@@ -1,4 +1,5 @@
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
+import { loadDesktopPeerStatus, ownDesktopPeerStatus } from "./desktopPeerStatus";
 import {
   createDesktopHostLaunch,
   startDesktopHostServer,
@@ -4444,6 +4445,8 @@ function forceExitAfterStalledQuit(): () => void {
   };
 }
 
+let desktopPeerStatusOwner: ReturnType<typeof ownDesktopPeerStatus> | undefined;
+
 async function stopHostForQuit(): Promise<void> {
   const prototypesStopped = canvasPrototypeSurface?.stop();
   const hostStopped = (async () => {
@@ -4455,7 +4458,17 @@ async function stopHostForQuit(): Promise<void> {
       if (retained !== undefined) await closeDesktopHostLaunch(retained);
     });
   })();
-  const [hostResult, prototypeResult] = await Promise.allSettled([hostStopped, prototypesStopped]);
+  const native = desktopPeerStatusOwner?.close();
+  const [hostResult, prototypeResult, nativeResult] = await Promise.allSettled([
+    hostStopped,
+    prototypesStopped,
+    native,
+  ]);
+  if (
+    nativeResult.status === "rejected" ||
+    (nativeResult.value !== undefined && nativeResult.value.kind === "failed")
+  )
+    logQuitProblem("Octant could not finish closing its desktop status endpoint.");
   if (hostResult.status === "rejected") throw hostResult.reason;
   if (prototypeResult.status === "rejected") throw prototypeResult.reason;
   if (prototypeResult.value?.status === "failed") {
@@ -4637,6 +4650,14 @@ function startDesktopInstance(): void {
   void app
     .whenReady()
     .then(() => {
+      if (!preparingQuit && !quitPrepared && applicationIdentity.flavor === "stable") {
+        const native = loadDesktopPeerStatus({
+          packaged: app.isPackaged,
+          platform: process.platform,
+          resourcesPath: process.resourcesPath,
+        });
+        if (native !== undefined) desktopPeerStatusOwner = ownDesktopPeerStatus(native);
+      }
       installApplicationMenu();
       return requestActiveWindow();
     })
