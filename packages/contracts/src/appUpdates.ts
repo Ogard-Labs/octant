@@ -225,6 +225,10 @@ export const NightlyInstallRefusal = Schema.Literal(
   "no-release",
   /** The downloaded app is not Nightly signed by Octant's own Developer ID team. */
   "code-signature",
+  /** The installed Nightly is the same build or newer; installing would not move it forward. */
+  "not-newer",
+  /** The installed Nightly's version could not be read, so no build can be shown to be newer. */
+  "installed-version-unreadable",
   /** The code-signature check could not run or ran out of time; nothing was changed. */
   "check-unavailable",
   /** Something other than Octant Nightly already sits at the install location. */

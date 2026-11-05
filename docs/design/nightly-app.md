@@ -630,9 +630,14 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
     extracted with `ditto` into a staging folder beside the target, the
     requirement is checked on that extracted bundle, and only then is it
     renamed into place. Something other than Octant Nightly at the location
-    (by its Info.plist bundle id) is left alone and refuses; an installed
-    Nightly is replaced by rename, and restored if the new copy cannot be
-    moved in. No quarantine attribute is set or cleared: the file is written
+    (by its Info.plist bundle id) is left alone and refuses. An installed
+    Nightly is replaced only by a strictly newer build, by the updater's own
+    version ordering against its `CFBundleShortVersionString`: an equal or
+    older offer (a replayed feed, say) refuses as not newer, and an installed
+    version that cannot be read refuses rather than allowing a downgrade. With
+    no Nightly installed, any verified preview build may install. The
+    replacement is a rename, and the old copy is restored if the new one cannot
+    be moved in. No quarantine attribute is set or cleared: the file is written
     by Octant itself, as Octant's own updater does. "Installed" means that
     location holds a bundle whose id is Nightly's. Open checks the requirement
     again and opens the bundle through Launch Services. Each refusal names the

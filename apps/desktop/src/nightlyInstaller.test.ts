@@ -55,10 +55,11 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-/** A bundle on disk whose Info.plist stand-in names one bundle id. */
-async function bundle(path: string, identifier: string): Promise<void> {
+/** A bundle on disk whose Info.plist stand-ins name one bundle id and, optionally, a version. */
+async function bundle(path: string, identifier: string, version?: string): Promise<void> {
   await mkdir(join(path, "Contents"), { recursive: true });
   await writeFile(join(path, "Contents", "Info.plist"), identifier);
+  if (version !== undefined) await writeFile(join(path, "Contents", "version"), version);
 }
 
 function installer(
@@ -92,6 +93,7 @@ function installer(
     await bundle(
       join(destination, options.extracts ?? "Octant Nightly.app"),
       NIGHTLY_BUNDLE_IDENTIFIER,
+      nightlyRelease.version,
     );
   });
   const trash = vi.fn(async (path: string) => {
@@ -120,6 +122,13 @@ function installer(
     readBundleIdentifier: async (path) => {
       try {
         return await readFile(join(path, "Contents", "Info.plist"), "utf8");
+      } catch {
+        return undefined;
+      }
+    },
+    readBundleVersion: async (path) => {
+      try {
+        return await readFile(join(path, "Contents", "version"), "utf8");
       } catch {
         return undefined;
       }
@@ -315,13 +324,45 @@ describe("installing Octant Nightly", () => {
     );
   });
 
-  it("replaces an installed Nightly with the verified one", async () => {
+  it("replaces an installed Nightly with a strictly newer verified one", async () => {
     const { subject, nightlyPath } = installer();
-    await bundle(nightlyPath, NIGHTLY_BUNDLE_IDENTIFIER);
+    await bundle(nightlyPath, NIGHTLY_BUNDLE_IDENTIFIER, "0.3.0-preview.20261104.9");
     await writeFile(join(nightlyPath, "old-build"), "");
 
     expect(await subject.install()).toEqual({ status: "installed" });
     expect(await readdir(nightlyPath)).toEqual(["Contents"]);
+    expect(await readFile(join(nightlyPath, "Contents", "version"), "utf8")).toBe(
+      nightlyRelease.version,
+    );
+  });
+
+  it("never downgrades or reinstalls an installed Nightly from a replayed feed", async () => {
+    for (const installed of ["0.3.0-preview.20261105.2", "0.3.0-preview.20261106.1", "0.4.0"]) {
+      const { subject, nightlyPath, extract } = installer();
+      await bundle(nightlyPath, NIGHTLY_BUNDLE_IDENTIFIER, installed);
+
+      expect(await subject.install()).toMatchObject({
+        status: "installed",
+        refusal: "not-newer",
+      });
+      expect(extract).not.toHaveBeenCalled();
+      expect(await readFile(join(nightlyPath, "Contents", "version"), "utf8")).toBe(installed);
+      await rm(nightlyPath, { recursive: true });
+    }
+  });
+
+  it("refuses to replace an installed Nightly whose version cannot be read", async () => {
+    for (const installed of [undefined, "", "nightly"]) {
+      const { subject, nightlyPath, extract } = installer();
+      await bundle(nightlyPath, NIGHTLY_BUNDLE_IDENTIFIER, installed);
+
+      expect(await subject.install()).toMatchObject({
+        status: "installed",
+        refusal: "installed-version-unreadable",
+      });
+      expect(extract).not.toHaveBeenCalled();
+      await rm(nightlyPath, { recursive: true });
+    }
   });
 });
 

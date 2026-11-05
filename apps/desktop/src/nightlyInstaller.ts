@@ -8,7 +8,8 @@ import type {
   NightlyInstallRefusal,
   NightlyInstallState,
 } from "@octant/contracts/app-updates";
-import { resolveNightlyInstallRelease } from "@octant/domain";
+import { decodeAppVersion } from "@octant/contracts/app-updates";
+import { compareAppVersions, resolveNightlyInstallRelease } from "@octant/domain";
 import {
   createFeedVerifier,
   fetchUpdateFeed,
@@ -99,6 +100,7 @@ export interface NightlyInstallerOptions {
   readonly maxArtifactBytes?: number;
   readonly extract?: (archive: string, destination: string) => Promise<void>;
   readonly readBundleIdentifier?: (bundle: string) => Promise<string | undefined>;
+  readonly readBundleVersion?: (bundle: string) => Promise<string | undefined>;
 }
 
 async function dittoExtract(archive: string, destination: string): Promise<void> {
@@ -107,17 +109,39 @@ async function dittoExtract(archive: string, destination: string): Promise<void>
   await run("/usr/bin/ditto", ["-x", "-k", archive, destination], { timeout: 120_000 });
 }
 
-async function plistBundleIdentifier(bundle: string): Promise<string | undefined> {
+async function plistValue(bundle: string, key: string): Promise<string | undefined> {
   try {
     const { stdout } = await run(
       "/usr/bin/plutil",
-      ["-extract", "CFBundleIdentifier", "raw", "-o", "-", join(bundle, "Contents", "Info.plist")],
+      ["-extract", key, "raw", "-o", "-", join(bundle, "Contents", "Info.plist")],
       { timeout: 5_000 },
     );
     return stdout.trim();
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Refuse an offer that would not move an installed Nightly forward.
+ *
+ * A signed feed can be replayed, so an older genuine build verifies as well as
+ * the newest one. With Nightly installed, the offer must be strictly newer by
+ * the updater's own ordering; an installed version that cannot be read proves
+ * nothing and refuses, never downgrades. With no Nightly installed there is
+ * nothing to downgrade.
+ */
+export function nightlyVersionRefusal(
+  installed: string | undefined,
+  offered: AppVersion,
+): "not-newer" | "installed-version-unreadable" | undefined {
+  let current: AppVersion;
+  try {
+    current = decodeAppVersion(installed);
+  } catch {
+    return "installed-version-unreadable";
+  }
+  return compareAppVersions(offered, current) > 0 ? undefined : "not-newer";
 }
 
 async function bounded(operation: () => Promise<unknown> | undefined): Promise<unknown> {
@@ -168,7 +192,10 @@ function nativeRefusal(value: unknown): NightlyInstallRefusal {
 export function createNightlyInstaller(options: NightlyInstallerOptions) {
   const verifier = options.verifier ?? createFeedVerifier();
   const extract = options.extract ?? dittoExtract;
-  const readBundleIdentifier = options.readBundleIdentifier ?? plistBundleIdentifier;
+  const readBundleIdentifier =
+    options.readBundleIdentifier ?? ((bundle) => plistValue(bundle, "CFBundleIdentifier"));
+  const readBundleVersion =
+    options.readBundleVersion ?? ((bundle) => plistValue(bundle, "CFBundleShortVersionString"));
   let operation: "installing" | "removing" | undefined;
   // Claimed before the first await, so a second click cannot start a second
   // install, or a remove, while the first is still checking the location.
@@ -253,6 +280,14 @@ export function createNightlyInstaller(options: NightlyInstallerOptions) {
           verifySignature: verifier.verify,
         });
         if (offer.kind === "refuse") return offer.refusal;
+        // Checked before downloading, and again at the move below.
+        if ((await occupant(location.nightly)) === "nightly") {
+          const stale = nightlyVersionRefusal(
+            await readBundleVersion(location.nightly),
+            offer.release.version,
+          );
+          if (stale !== undefined) return stale;
+        }
         const artifact = await fetchVerifiedArtifact(
           {
             url: offer.release.url,
@@ -287,6 +322,13 @@ export function createNightlyInstaller(options: NightlyInstallerOptions) {
         // while the download ran.
         const current = await occupant(location.nightly);
         if (current === "other") return "occupied";
+        if (current === "nightly") {
+          const stale = nightlyVersionRefusal(
+            await readBundleVersion(location.nightly),
+            offer.release.version,
+          );
+          if (stale !== undefined) return stale;
+        }
         const previous = join(staging, "previous.app");
         if (current === "nightly") await rename(location.nightly, previous);
         try {
@@ -387,6 +429,10 @@ function refusalMessage(refusal: NightlyInstallRefusal): string {
       return "No Nightly build is published yet.";
     case "code-signature":
       return "The downloaded app is not Octant Nightly signed by Octant's own developer, so it was not installed.";
+    case "not-newer":
+      return "The installed Octant Nightly is already this build or newer, so it was left in place.";
+    case "installed-version-unreadable":
+      return "Octant could not read the installed Octant Nightly's version, so it did not replace it.";
     case "check-unavailable":
       return "Octant could not finish checking Octant Nightly's code signature, so nothing was changed. Try again.";
     case "occupied":
