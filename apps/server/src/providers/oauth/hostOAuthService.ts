@@ -446,6 +446,9 @@ function wireDescriptor(
       ? {}
       : { mcpTransportUrl: descriptor.mcpTransportUrl }),
     ...(descriptor.mcpIssuer === undefined ? {} : { mcpIssuer: descriptor.mcpIssuer }),
+    ...(descriptor.redirectHostname === undefined
+      ? {}
+      : { redirectHostname: descriptor.redirectHostname }),
     ...(descriptor.redirectPort === undefined ? {} : { redirectPort: descriptor.redirectPort }),
     ...(descriptor.clientAuthentication === undefined
       ? {}

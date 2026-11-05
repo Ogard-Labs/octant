@@ -31,6 +31,7 @@ function descriptor() {
     mcpIssuer: slack.issuer,
     mcpTransportUrl: slack.transportUrl,
     redirectPort: 43125,
+    redirectHostname: "localhost",
     scopes: [slack.readScope],
     termsId: "mcp-terms-fixture",
     clientAuthentication: {
@@ -124,7 +125,7 @@ async function fixture(
 }
 
 describe("closed Slack MCP transport and OAuth resource", () => {
-  it("accepts the exact origin registration but refuses consent until the documented localhost callback is expressible", async () => {
+  it("keeps legacy callback setup refused until localhost is explicitly saved", async () => {
     const { service, oauth, calls } = await fixture();
     expect(
       await service.configureForServer(extension, component, registration(), "local-window"),
@@ -138,6 +139,59 @@ describe("closed Slack MCP transport and OAuth resource", () => {
     expect(oauth.acknowledgeTerms).not.toHaveBeenCalled();
     expect(calls).not.toContain(slack.authorizationEndpoint);
     expect(calls).not.toContain(slack.tokenEndpoint);
+  });
+  it("retains the explicit localhost registration through restart and starts only its closed read descriptor", async () => {
+    const { service, statePath, oauth } = await fixture();
+    const configured = { ...registration(), redirectHostname: "localhost" } as const;
+    expect(
+      await service.configureForServer(extension, component, configured, "local-window"),
+    ).toEqual({ kind: "signed-out" });
+    expect(oauth.begin).not.toHaveBeenCalled();
+    const restarted = new McpServerSignIn({
+      statePath,
+      oauth: oauth as never,
+      serverUrl: async () => slack.transportUrl,
+      fetch: metadataFetch().fetchImpl,
+      access: async () => ({ kind: "unavailable" }),
+      actorId: credentialRef,
+      pickPort: async () => {
+        throw new Error("A retained callback must not choose another port");
+      },
+    });
+    const awaiting = {
+      kind: "awaiting-consent",
+      flow: "authorization-code-pkce",
+      attemptId: credentialRef,
+      authorizationUrl: slack.authorizationEndpoint,
+      expiresAt: "2026-11-02T01:00:00.000Z",
+    };
+    oauth.acknowledgeTerms.mockReturnValue({ kind: "recorded" });
+    oauth.begin.mockResolvedValue(awaiting);
+    expect(await restarted.begin(extension, component, "remote-device")).toMatchObject({
+      kind: "refused",
+      reason: "local-host-required",
+    });
+    expect(oauth.begin).not.toHaveBeenCalled();
+    expect(await restarted.begin(extension, component, "local-window")).toMatchObject({
+      kind: "awaiting-consent",
+    });
+    expect(oauth.begin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        descriptor: expect.objectContaining({
+          dialect: slack.dialect,
+          resource: slack.resource,
+          mcpIssuer: slack.issuer,
+          mcpTransportUrl: slack.transportUrl,
+          redirectHostname: "localhost",
+          redirectPort: 43125,
+          scopes: [slack.readScope],
+          clientAuthentication: configured.clientAuthentication,
+        }),
+      }),
+    );
+    expect(JSON.parse(await readFile(statePath, "utf8")).registrations[slack.resource]).toEqual(
+      configured,
+    );
   });
   it("does not infer support for public none or Basic from general PKCE documentation", async () => {
     const { service } = await fixture();

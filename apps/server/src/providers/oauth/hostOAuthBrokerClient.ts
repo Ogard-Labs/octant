@@ -31,6 +31,7 @@ export interface HostOAuthBrokerDescriptor {
   readonly mcpTransportUrl?: string;
   readonly mcpIssuer?: string;
   readonly redirectPort?: number;
+  readonly redirectHostname?: "localhost";
   /** Directory dialect: the tenant, the one audience, and the endpoint origin the grant binds. */
   readonly tenantId?: string;
   readonly audience?: string;
@@ -153,6 +154,9 @@ export function makeHostOAuthBrokerClient(options: {
           ...(input.descriptor.mcpIssuer === undefined
             ? {}
             : { mcpIssuer: input.descriptor.mcpIssuer }),
+          ...(input.descriptor.redirectHostname === undefined
+            ? {}
+            : { redirectHostname: input.descriptor.redirectHostname }),
           ...(input.descriptor.redirectPort === undefined
             ? {}
             : { redirectPort: input.descriptor.redirectPort }),

@@ -15,6 +15,7 @@ import {
   SLACK_MCP_USER_OAUTH,
   isSlackMcpUserGrantBinding,
   isSlackMcpUserDescriptorBinding,
+  isSlackMcpCallbackUri,
 } from "./slackMcpOAuth";
 
 const GRANT_KIND = "host-oauth-grant";
@@ -204,6 +205,8 @@ export interface HostOAuthDescriptor {
    * flow could begin, so the caller chooses the port and the runner binds it.
    */
   readonly redirectPort?: number;
+  /** Closed Slack MCP only: explicit exact retained localhost callback. */
+  readonly redirectHostname?: "localhost";
   /**
    * Directory dialect only: the organization's tenant, as a lowercase GUID.
    * A multi-tenant alias would let an account from any tenant answer.
@@ -480,7 +483,7 @@ interface Attempt {
   readonly descriptorId: string;
   /** When the attempt's consent window or device code runs out, in epoch milliseconds. */
   readonly expiresAt: number;
-  listener: Server | undefined;
+  readonly listeners: Server[];
   timer: ReturnType<typeof setTimeout> | undefined;
   closed: boolean;
   /**
@@ -552,7 +555,10 @@ export async function exchangeAuthorizationCode(input: {
       input.tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint)
   )
     return { kind: "refused", reason: "exchange-refused" };
-  if (input.dialect === SLACK_MCP_DIALECT && !isSlackMcpUserGrantBinding(input))
+  if (
+    input.dialect === SLACK_MCP_DIALECT &&
+    (!isSlackMcpUserGrantBinding(input) || !isSlackMcpCallbackUri(input.redirectUri))
+  )
     return { kind: "refused", reason: "exchange-refused" };
   if (!codeVerifierMatchesChallenge(input.verifier, input.challenge)) {
     return { kind: "refused", reason: "verifier-mismatch" };
@@ -1996,11 +2002,11 @@ export function createHostOAuthRuntime(options: {
   const finishListener = (attempt: Attempt) => {
     if (attempt.timer !== undefined) clearTimeout(attempt.timer);
     attempt.timer = undefined;
-    const listener = attempt.listener;
-    attempt.listener = undefined;
-    if (listener !== undefined) {
-      listener.close();
-      listener.closeAllConnections();
+    for (const listener of attempt.listeners.splice(0)) {
+      if (listener.listening) {
+        listener.close();
+        listener.closeAllConnections();
+      }
     }
   };
 
@@ -2067,7 +2073,7 @@ export function createHostOAuthRuntime(options: {
     const attempt: Attempt = {
       descriptorId: descriptor.descriptorId,
       closed: false,
-      listener: undefined,
+      listeners: [],
       timer: undefined,
       ...(issuedGrant === undefined ? {} : { expectedIssuedClientId: issuedGrant.clientId }),
       status: {
@@ -2083,7 +2089,12 @@ export function createHostOAuthRuntime(options: {
     track(attemptId, attempt);
     let redirectUri = "";
     try {
-      const listener = createServer((request, response) => {
+      const onRequest = (request: IncomingMessage, response: ServerResponse) => {
+        if (redirectUri === "") {
+          response.writeHead(503, { "cache-control": "no-store" });
+          response.end();
+          return;
+        }
         void handleCallback(request, response, {
           attempt,
           attemptId,
@@ -2096,15 +2107,31 @@ export function createHostOAuthRuntime(options: {
           nonce,
           redirectUri,
         });
-      });
-      await listen(listener, descriptor.redirectPort);
+      };
+      const bindListener = async (listener: Server, port?: number, host?: string) => {
+        attempt.listeners.push(listener);
+        await listen(listener, port, host);
+        // Host close can run while a bind is pending. That late listener still belongs here.
+        if (attempt.closed) {
+          listener.close();
+          listener.closeAllConnections();
+          throw new Error("Sign-in closed while binding its callback.");
+        }
+      };
+      const listener = createServer(onRequest);
+      await bindListener(listener, descriptor.redirectPort);
       const address = listener.address() as AddressInfo | null;
       if (address === null) {
-        listener.close();
+        finishListener(attempt);
         publish(attemptId, refused(attemptId, descriptor.descriptorId, "unavailable"));
         return { kind: "refused", reason: "unavailable" };
       }
-      redirectUri = `http://127.0.0.1:${address.port}${CALLBACK_PATH}`;
+      if (descriptor.redirectHostname === "localhost") {
+        // Own both loopback resolutions. A partial bind must never advertise a callback.
+        const ipv6 = createServer(onRequest);
+        await bindListener(ipv6, address.port, "::1");
+      }
+      redirectUri = `http://${descriptor.redirectHostname ?? "127.0.0.1"}:${address.port}${CALLBACK_PATH}`;
       let authorizationUrl: string;
       if (descriptor.dialect === OPENROUTER_DIALECT) {
         authorizationUrl = openRouterAuthorizationRequest(authorizationEndpoint, {
@@ -2154,7 +2181,6 @@ export function createHostOAuthRuntime(options: {
         authorizationUrl,
         expiresAt: new Date(expiresAt).toISOString(),
       };
-      attempt.listener = listener;
       attempt.status = awaiting;
       attempt.timer = setTimeout(() => {
         if (attempt.closed || attempt.status.kind !== "awaiting-consent") return;
@@ -2164,6 +2190,8 @@ export function createHostOAuthRuntime(options: {
       }, timeoutMs);
       return awaiting;
     } catch {
+      attempt.closed = true;
+      finishListener(attempt);
       publish(attemptId, refused(attemptId, descriptor.descriptorId, "unavailable"));
       return { kind: "refused", reason: "unavailable" };
     }
@@ -2221,7 +2249,26 @@ export function createHostOAuthRuntime(options: {
       response.end("forbidden");
       return;
     }
-    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (
+      session.descriptor.redirectHostname === "localhost" &&
+      (request.headers.host !== new URL(session.redirectUri).host ||
+        !request.url?.startsWith("/") ||
+        request.url.startsWith("//") ||
+        request.url.includes("\\"))
+    ) {
+      response.writeHead(400, { "cache-control": "no-store" });
+      response.end();
+      return;
+    }
+    const url = new URL(request.url ?? "/", session.redirectUri);
+    if (
+      session.descriptor.redirectHostname === "localhost" &&
+      url.origin !== new URL(session.redirectUri).origin
+    ) {
+      response.writeHead(400, { "cache-control": "no-store" });
+      response.end();
+      return;
+    }
     if (request.method !== "GET" || url.pathname !== CALLBACK_PATH) {
       response.writeHead(404, { "cache-control": "no-store" });
       response.end();
@@ -2242,6 +2289,20 @@ export function createHostOAuthRuntime(options: {
       publish(
         session.attemptId,
         refused(session.attemptId, session.descriptor.descriptorId, "state-mismatch"),
+      );
+      replyCallback(response, 400);
+      finishListener(session.attempt);
+      return;
+    }
+    // A reported authorization-server identity may not switch the closed Slack issuer.
+    if (
+      session.descriptor.dialect === SLACK_MCP_DIALECT &&
+      (params.getAll("iss").length > 1 ||
+        (params.has("iss") && params.get("iss") !== session.descriptor.mcpIssuer))
+    ) {
+      publish(
+        session.attemptId,
+        refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
       );
       replyCallback(response, 400);
       finishListener(session.attempt);
@@ -2432,7 +2493,7 @@ export function createHostOAuthRuntime(options: {
     const attempt: Attempt = {
       descriptorId: descriptor.descriptorId,
       closed: false,
-      listener: undefined,
+      listeners: [],
       timer: undefined,
       status: awaiting,
       expiresAt,
@@ -2477,7 +2538,7 @@ export function createHostOAuthRuntime(options: {
     const attempt: Attempt = {
       descriptorId: descriptor.descriptorId,
       closed: false,
-      listener: undefined,
+      listeners: [],
       timer: undefined,
       status: awaiting,
       expiresAt,
@@ -3415,7 +3476,8 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   if (
     dialect === SLACK_MCP_DIALECT
       ? !isSlackMcpUserDescriptorBinding(descriptor)
-      : descriptor.mcpTransportUrl !== undefined ||
+      : descriptor.redirectHostname !== undefined ||
+        descriptor.mcpTransportUrl !== undefined ||
         descriptor.mcpIssuer !== undefined ||
         descriptor.resource === SLACK_MCP_USER_OAUTH.resource ||
         descriptor.authorizationEndpoint === SLACK_MCP_USER_OAUTH.authorizationEndpoint ||
@@ -3642,6 +3704,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
   const mcpTransportUrl = value.mcpTransportUrl;
   const mcpIssuer = value.mcpIssuer;
   const redirectPort = value.redirectPort;
+  const redirectHostname = value.redirectHostname;
   const tenantId = value.tenantId;
   const audience = value.audience;
   const endpointOrigin = value.endpointOrigin;
@@ -3656,6 +3719,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     (resource !== undefined && typeof resource !== "string") ||
     (mcpTransportUrl !== undefined && typeof mcpTransportUrl !== "string") ||
     (mcpIssuer !== undefined && typeof mcpIssuer !== "string") ||
+    (redirectHostname !== undefined && redirectHostname !== "localhost") ||
     (redirectPort !== undefined && typeof redirectPort !== "number")
   ) {
     return undefined;
@@ -3677,6 +3741,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     ...(typeof mcpTransportUrl === "string" ? { mcpTransportUrl } : {}),
     ...(typeof mcpIssuer === "string" ? { mcpIssuer } : {}),
     ...(typeof redirectPort === "number" ? { redirectPort } : {}),
+    ...(redirectHostname === "localhost" ? { redirectHostname } : {}),
     ...(typeof tenantId === "string" ? { tenantId } : {}),
     ...(typeof audience === "string" ? { audience } : {}),
     ...(typeof endpointOrigin === "string" ? { endpointOrigin } : {}),
@@ -3801,7 +3866,7 @@ function isLoopback(address: string): boolean {
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 }
 
-function listen(server: Server, port = 0): Promise<void> {
+function listen(server: Server, port = 0, host = "127.0.0.1"): Promise<void> {
   return new Promise((resolve, reject) => {
     const onError = (error: Error) => {
       server.off("listening", onListening);
@@ -3813,7 +3878,7 @@ function listen(server: Server, port = 0): Promise<void> {
     };
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen(port, "127.0.0.1");
+    server.listen({ port, host, ...(host === "::1" ? { ipv6Only: true } : {}) });
   });
 }
 

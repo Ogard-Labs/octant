@@ -250,10 +250,11 @@ export class McpServerSignIn {
           "issuer-unsupported",
           "This authorization server does not advertise public-client authentication. Use its supported registered-client setup.",
         );
-      return refused(
-        "issuer-unsupported",
-        "Slack sign-in needs its documented localhost callback. This host cannot yet offer that callback; application setup can be retained.",
-      );
+      if (setup.redirectHostname !== "localhost")
+        return refused(
+          "issuer-unsupported",
+          "Update this app setup with its exact retained localhost callback before signing in.",
+        );
     }
     let port: number;
     try {
@@ -261,7 +262,7 @@ export class McpServerSignIn {
     } catch {
       return refused("unavailable", "No loopback port was free for the sign-in callback.");
     }
-    const redirectUri = `http://127.0.0.1:${port}/oauth/callback`;
+    const redirectUri = `http://${setup?.redirectHostname ?? "127.0.0.1"}:${port}/oauth/callback`;
     const registered =
       setup === undefined
         ? await this.#register(
@@ -283,6 +284,13 @@ export class McpServerSignIn {
       termsId: TERMS_ID as HostOAuthDescriptor["termsId"],
       resource: discovered.resource as HostOAuthDescriptor["resource"],
       redirectPort: port,
+      ...(discovered.mcpDialect === SLACK_MCP_USER_OAUTH.dialect
+        ? {
+            redirectHostname: "localhost" as const,
+            mcpIssuer: discovered.issuerUrl,
+            mcpTransportUrl: discovered.transportUrl,
+          }
+        : {}),
       ...(setup?.clientAuthentication === undefined
         ? {}
         : { clientAuthentication: setup.clientAuthentication }),
