@@ -1638,6 +1638,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Projec
 A Side Chat may read its source thread's transcript, state and files but never inherits the source's Work or Code execution authority.
 
 - It gains only list, search and read file tools, re-checked per call against the sidecar link and the window's right to open the source.
+- The host tools an ordinary Chat is offered (side tasks, images, Canvas, past threads, Computer, the `#thread` dialogue and child agents) are withheld from it.
 - Paths are relative and confined, results are bounded and recorded as external content, and it has no write, shell, Git or network tool.
 - The `#thread` dialogue tool is refused for a sidecar in both directions.
 

@@ -96,7 +96,8 @@ thread with the new Canvas attached as whole-canvas context, so the agent
 revises it with its own tools under the thread's existing authority.
 
 Every Chat thread is offered `octant_canvas`, as people expect of an
-assistant that makes documents. A Chat thread in a Chat Project writes into
+assistant that makes documents. A Side Chat is not: it only reads (see
+[Architecture: Side Chat reads](../architecture.md#security-and-authority)). A Chat thread in a Chat Project writes into
 that Project, through the window's active Chat Project as before. A Chat
 thread in no Chat Project owns its Canvas itself: the Canvas's provenance
 names the thread and no Project (`projectId: null`, Canvas schema version 20,

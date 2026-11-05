@@ -21,7 +21,7 @@ import {
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
-import { childAgentTools } from "../chat/sideChatDelegation";
+import { withheldFromSideChat } from "../chat/sideChatToolScope";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { createNativeHarnessAuthority } from "./nativeHarnessAuthority";
@@ -664,7 +664,7 @@ describe("native harness composition", () => {
       const chatSet = (sideChat: boolean) =>
         combineAppManagedToolSets(
           composition.forChat({ thread: chatThread, windowId: "window-1", sideChat }),
-          childAgentTools({ sideChat, tools: agents }),
+          withheldFromSideChat({ sideChat, tools: agents }),
         );
       const childRunTools = (set: AppManagedToolSet | undefined) =>
         names(set!).filter((name) => name === "octant_agents" || name === "delegate");
@@ -680,6 +680,53 @@ describe("native harness composition", () => {
       }
     });
 
+    it("gives a Side Chat only the advice tools and its file reads in the tool set it finally receives", () => {
+      const { composition } = harness(false, { ...productionPorts, journal: noJournal });
+      const offered = (...toolNames: ReadonlyArray<string>): AppManagedToolSet => ({
+        definitions: toolNames.map((name) => ({ name }) as never),
+        execute: async () => ({ result: {} }),
+      });
+      // The same sources a Chat turn is composed from, in the order it uses.
+      const finalSet = (sideChat: boolean) =>
+        combineAppManagedToolSets(
+          composition.forChat({ thread: chatThread, windowId: "window-1", sideChat }),
+          sideChat
+            ? offered("octant_side_chat_list_files", "octant_side_chat_read_file")
+            : undefined,
+          withheldFromSideChat({
+            sideChat,
+            tools: () =>
+              offered(
+                "octant_ask_thread",
+                "octant_create_image",
+                "octant_offer_side_task",
+                "octant_canvas",
+                "octant_past_threads",
+                "octant_agents",
+                "octant_computer",
+              ),
+          }),
+        );
+      expect(names(finalSet(true))).toEqual([
+        "context-remaining",
+        "second-opinion",
+        "octant_side_chat_list_files",
+        "octant_side_chat_read_file",
+      ]);
+      // An ordinary Chat thread keeps every one of them.
+      expect(names(finalSet(false))).toEqual(
+        expect.arrayContaining([
+          "octant_ask_thread",
+          "octant_create_image",
+          "octant_offer_side_task",
+          "octant_canvas",
+          "octant_past_threads",
+          "octant_agents",
+          "octant_computer",
+        ]),
+      );
+    });
+
     it("leaves a provider runtime's Chat thread with octant_agents and no harness tools", () => {
       const { composition } = harness(false, {
         ...productionPorts,
@@ -692,7 +739,7 @@ describe("native harness composition", () => {
       expect(composition.forChat({ thread: chatThread, windowId: "window-1" })).toBeUndefined();
       const finalSet = combineAppManagedToolSets(
         composition.forChat({ thread: chatThread, windowId: "window-1" }),
-        childAgentTools({ sideChat: false, tools: agents }),
+        withheldFromSideChat({ sideChat: false, tools: agents }),
       );
       expect(names(finalSet!)).toEqual(["octant_agents"]);
     });
