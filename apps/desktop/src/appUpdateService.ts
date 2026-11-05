@@ -126,6 +126,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     currentVersion: options.app.version,
     automaticChecks,
     ring,
+    ...(options.allowedRings === undefined ? {} : { allowedRings: options.allowedRings }),
   };
   let staged: { readonly feedUrl: string; readonly close: () => void } | undefined;
   let stagedImage: { readonly bytes: Uint8Array; readonly sha256: string } | undefined;
@@ -322,7 +323,8 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     async check(signal?: AbortSignal): Promise<AppUpdateState> {
       const requestedGeneration = ++generation;
       const requestedRing = ring;
-      publish({ status: "checking" });
+      // A successful retry must not keep the old failure beside its new offer.
+      publishWithoutOffer({ status: "checking" });
       const blocked = await linuxLaunchRefusal();
       if (requestedGeneration !== generation) return state;
       if (blocked !== undefined) return blocked;

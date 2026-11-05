@@ -184,6 +184,15 @@ describe("update verification", () => {
     await updates.check();
     expect(updates.state().status).toBe("up-to-date");
     expect(updates.state().message).toBeUndefined();
+    vi.mocked(fetchImpl).mockRejectedValueOnce(new Error("offline"));
+    expect((await updates.check()).refusal).toBe("unreachable");
+    expect(updates.state().message).toBeDefined();
+    vi.mocked(fetchImpl).mockResolvedValueOnce(
+      new Response(JSON.stringify(signedFeed()), { status: 200 }),
+    );
+    expect((await updates.check()).status).toBe("available");
+    expect(updates.state().message).toBeUndefined();
+    expect(updates.state().refusal).toBeUndefined();
   });
 
   it("does not treat a release disguised as an empty channel as an empty response", async () => {

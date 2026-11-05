@@ -4,10 +4,32 @@ import {
   readBottomPanelPresentation,
   readSidebarCollapsed,
   useBackgroundImageLibrary,
+  useAutomaticUpdateCheckSync,
+  useReleaseRingSync,
   useSidebarBackgroundFetcher,
   writeBottomPanelPresentation,
   writeSidebarCollapsed,
 } from "./useShellPresentation";
+
+it("never forwards shared host update preferences into an application that owns its local choices", () => {
+  const setAutomaticAppUpdateChecks = vi.fn(async () => {
+    throw new Error("Unexpected shared preference");
+  });
+  const setAppUpdateRing = vi.fn(async () => {
+    throw new Error("Unexpected shared preference");
+  });
+  const host = {
+    appUpdatePreferenceScope: "local" as const,
+    setAutomaticAppUpdateChecks,
+    setAppUpdateRing,
+  };
+  renderHook(() => {
+    useAutomaticUpdateCheckSync(host, true);
+    useReleaseRingSync(host, "stable");
+  });
+  expect(setAutomaticAppUpdateChecks).not.toHaveBeenCalled();
+  expect(setAppUpdateRing).not.toHaveBeenCalled();
+});
 
 const windowCapability = `${"C".repeat(42)}A`;
 const httpsServerUrl = "https://host.example:8443";
