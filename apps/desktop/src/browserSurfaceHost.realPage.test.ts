@@ -101,10 +101,15 @@ const pages: Record<string, string> = {
     <p>See <a id="empty" href="/form"></a> and our <a href="/form">deals</a> today.</p>
     <input id="unlabelled"><label for="mail">Email</label><input id="mail"><input placeholder="Search">
     <p class="faint">Faint words</p><p>Plain words</p><div class="hero">Over a gradient</div>
+    <div style="opacity:0.1"><p style="color:#000;background:#fff">Ghost words</p></div>
     <div aria-hidden="true"><a href="/form">Hidden link</a><a href="/form" tabindex="-1">Skipped</a></div>
     <span id="hint">Hint</span><span id="hint">Again</span><input aria-describedby="hint" aria-label="Code">
     <div><button id="tiny-a" style="width:16px;height:16px;padding:0;border:0">A</button><button id="tiny-b" style="width:16px;height:16px;padding:0;border:0;margin-left:2px">B</button></div>
     <iframe title="Ad" srcdoc="<p>Ad</p>"></iframe></body></html>`,
+  // More elements than the audit reads, with a referenced duplicate id past the end.
+  "/audit-large": `<!doctype html><html lang="en"><title>Large</title><body>
+    ${"<div></div>".repeat(6_100)}
+    <span id="far">Far</span><span id="far">Again</span><input aria-describedby="far" aria-label="Late"></body></html>`,
   "/perf": `<!doctype html><html lang="en"><title>Perf</title>
     <div id="above"></div>
     <h1 style="font-size:64px">Fast enough</h1>
@@ -942,7 +947,8 @@ describe.skipIf(chrome === undefined)(
         text: "Faint words",
         detail: { ratio: 2.32, required: 4.5, foreground: "#aaaaaa", background: "#ffffff" },
       });
-      expect(reading.contrastNotMeasured).toBe(1);
+      // The gradient, and the text inside a nearly transparent container.
+      expect(reading.contrastNotMeasured).toBe(2);
       expect(reading.frames).toBe(1);
       expect(reading.touch).toBe(false);
       expect(count("target-size")).toBeUndefined();
@@ -962,6 +968,15 @@ describe.skipIf(chrome === undefined)(
           .map((each) => each.selector),
       ).toEqual(expect.arrayContaining(["#tiny-a", "#tiny-b"]));
       await host.act(contextId, { kind: "resize" });
+      await page.close();
+    });
+
+    it("audits only the elements it reads on a page larger than its bound", async () => {
+      const { host, contextId, page } = await surface("/audit-large");
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      expect(observed.audit.reading.truncated).toBe(true);
+      expect(observed.audit.reading.found).toEqual([]);
       await page.close();
     });
 

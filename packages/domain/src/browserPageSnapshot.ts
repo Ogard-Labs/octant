@@ -734,7 +734,10 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     }
 
     // An id a label or an aria attribute points at must be unique in its root:
-    // the reference reaches only the first element that holds it.
+    // the reference reaches only the first element that holds it. Both the
+    // references and the ids are read from the audited elements alone, so a
+    // page larger than the bound costs no more than one at it, and no finding
+    // names an element the audit did not read.
     const referencing = [
       "aria-labelledby",
       "aria-describedby",
@@ -745,20 +748,32 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       "aria-errormessage",
       "aria-flowto",
     ];
-    for (const root of roots) {
-      const referenced = new Set<string>();
-      for (const element of Array.from(root.querySelectorAll("*"))) {
-        for (const attribute of referencing) {
-          for (const id of (element.getAttribute(attribute) ?? "").split(/\s+/)) {
-            if (id !== "") referenced.add(id);
-          }
-        }
-        if (element instanceof HTMLLabelElement && element.htmlFor !== "") {
-          referenced.add(element.htmlFor);
+    const referencedIn = new Map<Document | ShadowRoot, Set<string>>();
+    const heldIn = new Map<Document | ShadowRoot, Map<string, Element[]>>();
+    for (const element of audited) {
+      const root = rootOf(element);
+      const id = element.getAttribute("id");
+      if (id !== null && id !== "") {
+        const held = heldIn.get(root) ?? new Map<string, Element[]>();
+        heldIn.set(root, held);
+        const holders = held.get(id);
+        if (holders === undefined) held.set(id, [element]);
+        else holders.push(element);
+      }
+      const referenced = referencedIn.get(root) ?? new Set<string>();
+      referencedIn.set(root, referenced);
+      for (const attribute of referencing) {
+        for (const each of (element.getAttribute(attribute) ?? "").split(/\s+/)) {
+          if (each !== "") referenced.add(each);
         }
       }
+      if (element instanceof HTMLLabelElement && element.htmlFor !== "") {
+        referenced.add(element.htmlFor);
+      }
+    }
+    for (const [root, referenced] of referencedIn) {
       for (const id of referenced) {
-        const holders = root.querySelectorAll(`#${CSS.escape(id)}`);
+        const holders = heldIn.get(root)?.get(id) ?? [];
         const second = holders[1];
         if (second !== undefined) {
           report("duplicate-id-aria", second, { id: clip(id, 64), count: holders.length });
@@ -781,8 +796,11 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
 
     // Contrast is judged only where the colours behind the text are known:
     // solid backgrounds, composited up the ancestors. Text over an image, a
-    // gradient, a filter, partial opacity, or a layered element whose backdrop
-    // is another element is counted as not measured rather than guessed.
+    // gradient, or a layered element whose backdrop is another element is
+    // counted as not measured rather than guessed, and so is text under a
+    // filter, blend mode, or partial opacity anywhere above it: an ancestor's
+    // opacity fades the text and its own opaque background together, so where
+    // the search for a background stops says nothing about it.
     type Color = readonly [number, number, number, number];
     const parseColor = (value: string): Color | undefined => {
       const match =
@@ -811,13 +829,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       const style = window.getComputedStyle(element);
       const own = parseColor(style.backgroundColor);
       let result: Color | null;
-      if (
-        own === undefined ||
-        style.backgroundImage !== "none" ||
-        style.filter !== "none" ||
-        style.mixBlendMode !== "normal" ||
-        Number.parseFloat(style.opacity) < 1
-      ) {
+      if (own === undefined || style.backgroundImage !== "none") {
         result = null;
       } else if (own[3] >= 1) {
         result = own;
@@ -832,6 +844,24 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
         result = below === null ? null : own[3] > 0 ? over(own, below) : below;
       }
       backdrops.set(element, result);
+      return result;
+    };
+    // Whether the element or any ancestor is drawn through a filter, a blend
+    // mode, or partial opacity, which change the colours a person sees.
+    const compositing = new Map<Element, boolean>();
+    const composited = (element: Element): boolean => {
+      const known = compositing.get(element);
+      if (known !== undefined) return known;
+      const style = window.getComputedStyle(element);
+      const parentNode: ParentNode | null = element.parentNode;
+      const parent =
+        element.parentElement ?? (parentNode instanceof ShadowRoot ? parentNode.host : null);
+      const result =
+        style.filter !== "none" ||
+        style.mixBlendMode !== "normal" ||
+        Number.parseFloat(style.opacity) < 1 ||
+        (parent !== null && composited(parent));
+      compositing.set(element, result);
       return result;
     };
     const luminance = (color: Color): number => {
@@ -867,7 +897,12 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       );
       if (foreground !== undefined && foreground[3] === 0) continue;
       const behind = backdrop(element);
-      if (foreground === undefined || behind === null || style.textShadow !== "none") {
+      if (
+        foreground === undefined ||
+        behind === null ||
+        style.textShadow !== "none" ||
+        composited(element)
+      ) {
         contrastNotMeasured += 1;
         continue;
       }

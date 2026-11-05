@@ -875,14 +875,19 @@ frames are not recovered after host restart.
   and radios are exempt from target size, as WCAG 2.5.8 exempts them.
 - Contrast is judged only where the colours are known: solid background
   colours composited up the element's ancestors onto the white page. Text over
-  a background image or gradient, under a filter, blend mode, partial opacity,
-  or text shadow, inside a positioned element with no background of its own,
-  on a dark page canvas, or with colours in a space other than sRGB is counted
-  in `contrastNotMeasured` and not judged. Disabled controls are exempt.
+  a background image or gradient, with a text shadow, inside a positioned
+  element with no background of its own, on a dark page canvas, or with
+  colours in a space other than sRGB is counted in `contrastNotMeasured` and
+  not judged. So is text under a filter, blend mode, or partial opacity on
+  itself or on any ancestor, even when its own background is opaque: the
+  effect changes text and background together.
+  Disabled controls are exempt.
 - `target-size` runs only while the page reports a coarse pointer; otherwise
   `notRun` names it with how to run it (`resize` with `preset` `phone` or
   `touch` true).
-- **Bounds.** The reader reads at most 6,000 elements. At most 10 findings per
+- **Bounds.** The reader reads at most 6,000 elements, in tree order, and
+  every rule looks only at those: an id or reference past the bound is not
+  read, so `duplicate-id-aria` counts holders among the elements read. At most 10 findings per
   rule and 25 in all are listed, serious rules first; `found` counts every
   rule's findings, listed or not, and `truncated` says when more exist or the
   page was larger than the reader reads.
