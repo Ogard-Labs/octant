@@ -29,6 +29,7 @@ import {
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
 import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
+import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -440,6 +441,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   return Effect.gen(function* () {
     // A host started with its own runtime uses it; otherwise it is built below.
     let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
+    let pullRequestWatchService: PullRequestWatchPort | undefined;
     // Areas built after this one add tools to a Code turn here, as they do to
     // a Chat thread, so the runtime never holds the services behind them.
     const codeToolContributors: Array<
@@ -1287,6 +1289,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 : persistence.automationProjection.getDefinition(run.automationId),
           });
         },
+        // The switch service wakes threads through this runtime, so it is
+        // built after it; a watch asked for before then is unavailable.
+        pullRequestWatch: {
+          watch: async (input) =>
+            pullRequestWatchService === undefined
+              ? { status: "unavailable", reason: "unavailable" }
+              : pullRequestWatchService.watch(input),
+          unwatch: async (input) =>
+            pullRequestWatchService === undefined
+              ? { status: "not-watching" }
+              : pullRequestWatchService.unwatch(input),
+        },
         reviewFiles: {
           resolve: (input) => {
             const reference = persistence.readCodeFileReference(input.fileId);
@@ -1558,10 +1572,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 ),
           };
         },
-        markOutsideContent: (threadId, contentReference) => {
+        markOutsideContent: (threadId, contentReference, sourceLabel) => {
           const marked = externalContentIngestionStore.record({
             threadId,
-            provenance: { origin: "external-content", sourceLabel: "pull-request-auto-fix" },
+            provenance: { origin: "external-content", sourceLabel },
             contentReference,
             correlationId: randomUUID(),
             authorized: true,
@@ -1610,7 +1624,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       journal: persistence.journal,
       uuid: randomUUID,
     });
-    // Host-local and idle-free: the forge is read only while a switch is on.
+    pullRequestWatchService = pullRequestSwitchService;
+    // Host-local and idle-free: the forge is read only while a switch or a watch is on.
     const pullRequestSwitchAbort = new AbortController();
     const pullRequestSwitchTimer = setInterval(() => {
       if (!pullRequestSwitchService.watching) return;

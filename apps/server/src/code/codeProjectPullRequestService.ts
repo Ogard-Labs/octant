@@ -18,7 +18,9 @@ import type {
   CodeProjectPullRequestRefreshCommand,
   CodeProjectPullRequestRow,
   CodeProjectPullRequestStaleReason,
+  CodeProjectPullRequestSwitchTarget,
   CodeProjectPullRequestView,
+  CodeThreadId,
   ConnectedGitHubRepository,
   ProjectId,
   UtcTimestamp,
@@ -540,6 +542,30 @@ export class CodeProjectPullRequestService {
       threads: await this.#threads.list(),
     });
     return { status: "authorized", linkedThreadIds: linked.map((thread) => thread.threadId) };
+  }
+
+  /**
+   * The pull requests this window can see that are linked to one Code thread
+   * and not known to be merged or closed: the board's own join, so the thread
+   * watches the pull request its card shows. Never reaches GitHub.
+   */
+  async linkedPullRequests(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+  ): Promise<ReadonlyArray<CodeProjectPullRequestSwitchTarget>> {
+    const snapshot = await this.boardSnapshot(windowId);
+    return snapshot.rows
+      .filter(
+        (row) =>
+          (row.state === "open" || row.state === "unknown") &&
+          row.linkedThreads.some((thread) => String(thread.threadId) === String(threadId)),
+      )
+      .map((row) => ({
+        projectId: row.projectId,
+        repositoryOwner: row.repositoryOwner,
+        repositoryName: row.repositoryName,
+        number: row.number,
+      }));
   }
 
   async merge(

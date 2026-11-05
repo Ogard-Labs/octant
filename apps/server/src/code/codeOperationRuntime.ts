@@ -56,6 +56,7 @@ import {
   type ShieldDecision,
   type ComputerUseDestinationSelection,
   type CodeMergeStandingSource,
+  type CodeProjectPullRequestSwitchTarget,
   type CodeThreadId,
   type EventActor,
   type PendingRequest,
@@ -65,6 +66,8 @@ import {
   type ProviderResumeCursor,
   type ProviderProbeResult,
   type WindowId,
+  CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS,
+  CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
@@ -145,6 +148,7 @@ import {
   type CodeTurnPendingRequest,
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
+import type { PullRequestWatchPort } from "./pullRequestWatchPort";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import type {
   NativeHarnessTurnAdmission,
@@ -352,6 +356,8 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<GhDeliveryTarget | undefined>;
   /** The standing merge permissions the person has stored for a thread; absent reads none. */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
+  /** A thread's watch on its own pull request; absent, the tool refuses watch and unwatch. */
+  readonly pullRequestWatch?: PullRequestWatchPort;
   readonly reviewFiles: ReviewFindingFilePort;
   readonly evidence: CodeOperationEvidencePort;
   /** The images Code threads have staged for their next turn. */
@@ -3897,6 +3903,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
+   * One watch the thread's agent asked for, asked of the person in the thread
+   * with the pull request and the watch's bounds named. Nothing is minted: the
+   * watch turns on inside this same tool call, right after the answer, and the
+   * switch service checks the window and the thread again before it does.
+   */
+  #askPullRequestWatchApproval(
+    active: ActiveTurn,
+    target: CodeProjectPullRequestSwitchTarget,
+    signal?: AbortSignal,
+  ): Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable"> {
+    const summary = boundProviderSummary(
+      `Let this thread's agent watch pull request #${target.number} in ${target.repositoryOwner}/${target.repositoryName}? Octant will start a new turn here when its checks finish, a review or comment arrives, or a merge conflict appears: at most ${CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES} times, for up to ${CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS / 86_400_000} days, ending when it merges or closes. Each turn runs at this thread's access level.`,
+    );
+    return summary === undefined
+      ? Promise.resolve("unavailable")
+      : this.#askToolApproval(active, summary, undefined, signal);
+  }
+
+  /**
    * The wording and binding context of one device approval. A Simulator,
    * emulator, or device effect is asked only while the turn's posture decides
    * effects by approval; a device lease is asked under every posture, Full
@@ -4236,6 +4261,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const service = this.#service;
     if (supportsAppManagedTools && service !== undefined) {
       const browserProfiles = this.#options.browserProfiles;
+      const pullRequestWatch = this.#options.pullRequestWatch;
       sets.push(
         this.#options.computerUseTools?.({
           windowId: active.windowId,
@@ -4271,6 +4297,27 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               ? undefined
               : this.#options.standingMergeAllowance?.(current)[0];
           },
+          ...(pullRequestWatch === undefined
+            ? {}
+            : {
+                pullRequestWatch: {
+                  watch: (ask, signal) =>
+                    pullRequestWatch.watch({
+                      windowId: active.windowId,
+                      threadId: active.thread.id,
+                      providerInstanceId: String(active.thread.providerInstanceId),
+                      ask,
+                      signal: signal ?? active.abort.signal,
+                    }),
+                  unwatch: () =>
+                    pullRequestWatch.unwatch({
+                      threadId: active.thread.id,
+                      providerInstanceId: String(active.thread.providerInstanceId),
+                    }),
+                  request: (target, signal) =>
+                    this.#askPullRequestWatchApproval(active, target, signal),
+                },
+              }),
           terminalApproval: {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),
           },
