@@ -53,12 +53,25 @@ function callback(
     outgoing.end();
   });
 }
-function fixture(timeoutMs = 2_000) {
+function fixture(
+  timeoutMs = 2_000,
+  hooks: {
+    readonly set?: () => Promise<void>;
+    readonly remove?: () => Promise<void>;
+    readonly reply?: () => Promise<void>;
+  } = {},
+) {
   const values = new Map<string, string>();
   const store: CredentialStore = {
-    set: async (id, value) => void values.set(id, value),
+    set: async (id, value) => {
+      await hooks.set?.();
+      values.set(id, value);
+    },
     has: async (id) => values.has(id),
-    delete: async (id) => void values.delete(id),
+    delete: async (id) => {
+      await hooks.remove?.();
+      values.delete(id);
+    },
     resolve: async (id) => {
       const value = values.get(id);
       if (value === undefined) throw new CredentialStoreFailure("missing");
@@ -70,6 +83,7 @@ function fixture(timeoutMs = 2_000) {
     async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       expect(String(input)).toBe(slack.tokenEndpoint);
       forms.push(new URLSearchParams(String(init?.body)));
+      await hooks.reply?.();
       return Response.json({
         ok: true,
         token_type: "user",
@@ -112,9 +126,10 @@ function descriptor(port: number): HostOAuthDescriptor {
   };
 }
 async function begin(runtime: ReturnType<typeof createHostOAuthRuntime>, port: number) {
+  const actorId = randomUUID();
   const started = await runtime.begin({
     descriptor: descriptor(port),
-    actorId: randomUUID(),
+    actorId,
     termsAcknowledgedAt: "2026-11-02T00:00:00.000Z",
   });
   expect(started.kind).toBe("awaiting-consent");
@@ -131,7 +146,7 @@ async function begin(runtime: ReturnType<typeof createHostOAuthRuntime>, port: n
     state: authorization.searchParams.get("state") ?? "",
     iss: slack.issuer,
   });
-  return { started, authorization, path: `/oauth/callback?${params}`, params };
+  return { started, actorId, authorization, path: `/oauth/callback?${params}`, params };
 }
 
 describe("Slack retained localhost callback", () => {
@@ -276,5 +291,238 @@ describe("Slack retained localhost callback", () => {
       await second.runtime.close();
     }
     await released(port);
+  });
+});
+
+function deferred() {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+function cancelInput(session: Awaited<ReturnType<typeof begin>>) {
+  return {
+    attemptId: session.started.attemptId,
+    descriptorId: "slack-localhost-fixture",
+    actorId: session.actorId,
+  };
+}
+describe("host-owned pending MCP cancellation", () => {
+  it("does not store a late token response after host close", async () => {
+    const entered = deferred();
+    const release = deferred();
+    let writes = 0;
+    const { runtime, values } = fixture(2_000, {
+      reply: async () => {
+        entered.resolve();
+        await release.promise;
+      },
+      set: async () => {
+        writes++;
+      },
+    });
+    const port = await availablePort();
+    try {
+      const session = await begin(runtime, port);
+      const response = callback("127.0.0.1", port, session.path).catch(() => 0);
+      await entered.promise;
+      await runtime.close();
+      release.resolve();
+      await response;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(writes).toBe(0);
+      expect(values.size).toBe(0);
+      await released(port);
+    } finally {
+      release.resolve();
+      await runtime.close();
+    }
+  });
+  it("owns cleanup of a held grant write on host close while preserving a published grant", async () => {
+    const entered = deferred();
+    const release = deferred();
+    let deletes = 0;
+    const { runtime, values } = fixture(2_000, {
+      set: async () => {
+        entered.resolve();
+        await release.promise;
+      },
+      remove: async () => {
+        deletes++;
+      },
+    });
+    const port = await availablePort();
+    try {
+      const session = await begin(runtime, port);
+      const response = callback("127.0.0.1", port, session.path).catch(() => 0);
+      await entered.promise;
+      let settled = false;
+      const closing = runtime.close().then(() => {
+        settled = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+      expect(deletes).toBe(0);
+      release.resolve();
+      await closing;
+      await response;
+      expect(deletes).toBe(1);
+      expect(values.size).toBe(0);
+      await released(port);
+    } finally {
+      release.resolve();
+      await runtime.close();
+    }
+    const completed = fixture();
+    try {
+      const session = await begin(completed.runtime, port);
+      expect(await callback("127.0.0.1", port, session.path)).toBe(200);
+      await completed.runtime.close();
+      expect(completed.values.size).toBe(1);
+    } finally {
+      await completed.runtime.close();
+    }
+  });
+  it("rejects another actor or descriptor and cancels only the owned attempt", async () => {
+    const firstPort = await availablePort();
+    const secondPort = await availablePort();
+    const { runtime, forms } = fixture();
+    try {
+      const first = await begin(runtime, firstPort);
+      const second = await begin(runtime, secondPort);
+      expect(await runtime.cancel({ ...cancelInput(first), actorId: randomUUID() })).toEqual({
+        kind: "refused",
+      });
+      expect(
+        await runtime.cancel({ ...cancelInput(first), descriptorId: "another-descriptor" }),
+      ).toEqual({ kind: "refused" });
+      expect(await runtime.cancel(cancelInput(first))).toEqual({ kind: "cancelled" });
+      await released(firstPort);
+      expect(forms).toHaveLength(0);
+      expect(await callback("::1", secondPort, second.path)).toBe(200);
+      expect(forms).toHaveLength(1);
+    } finally {
+      await runtime.close();
+    }
+  });
+  it("never stores a late successful token response after cancellation", async () => {
+    const entered = deferred();
+    const release = deferred();
+    let writes = 0;
+    const { runtime, values } = fixture(2_000, {
+      reply: async () => {
+        entered.resolve();
+        await release.promise;
+      },
+      set: async () => {
+        writes++;
+      },
+    });
+    const port = await availablePort();
+    try {
+      const session = await begin(runtime, port);
+      const response = callback("127.0.0.1", port, session.path).catch(() => 0);
+      await entered.promise;
+      expect(await runtime.cancel(cancelInput(session))).toEqual({ kind: "cancelled" });
+      release.resolve();
+      await response;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(writes).toBe(0);
+      expect(values.size).toBe(0);
+      await released(port);
+    } finally {
+      release.resolve();
+      await runtime.close();
+    }
+  });
+  it("waits for an already issued grant write before deleting that exact original grant", async () => {
+    const entered = deferred();
+    const release = deferred();
+    let deletes = 0;
+    const { runtime, values } = fixture(2_000, {
+      set: async () => {
+        entered.resolve();
+        await release.promise;
+      },
+      remove: async () => {
+        deletes++;
+      },
+    });
+    const port = await availablePort();
+    try {
+      const session = await begin(runtime, port);
+      const response = callback("127.0.0.1", port, session.path).catch(() => 0);
+      await entered.promise;
+      let settled = false;
+      const cancelling = runtime.cancel(cancelInput(session)).then((result) => {
+        settled = true;
+        return result;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+      expect(deletes).toBe(0);
+      release.resolve();
+      expect(await cancelling).toEqual({ kind: "cancelled" });
+      await response;
+      expect(deletes).toBe(1);
+      expect(values.size).toBe(0);
+      await released(port);
+    } finally {
+      release.resolve();
+      await runtime.close();
+    }
+  });
+  it("bounds cancellation wait while an original write is held and cleans only after that write settles", async () => {
+    const entered = deferred();
+    const release = deferred();
+    let deletes = 0;
+    const { runtime, values } = fixture(2_000, {
+      set: async () => {
+        entered.resolve();
+        await release.promise;
+      },
+      remove: async () => {
+        deletes++;
+      },
+    });
+    const port = await availablePort();
+    try {
+      const session = await begin(runtime, port);
+      const response = callback("127.0.0.1", port, session.path).catch(() => 0);
+      await entered.promise;
+      expect(await runtime.cancel(cancelInput(session))).toEqual({ kind: "unavailable" });
+      expect(deletes).toBe(0);
+      release.resolve();
+      await response;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(deletes).toBe(1);
+      expect(values.size).toBe(0);
+      expect(await runtime.cancel(cancelInput(session))).toEqual({ kind: "cancelled" });
+    } finally {
+      release.resolve();
+      await runtime.close();
+    }
+  }, 15_000);
+  it("keeps an unpolled completed grant owned when deletion fails and allows explicit cancellation retry", async () => {
+    let fail = true;
+    const { runtime, values } = fixture(2_000, {
+      remove: async () => {
+        if (fail) throw new CredentialStoreFailure("unavailable");
+      },
+    });
+    const port = await availablePort();
+    try {
+      const session = await begin(runtime, port);
+      expect(await callback("127.0.0.1", port, session.path)).toBe(200);
+      expect(values.size).toBe(1);
+      expect(await runtime.cancel(cancelInput(session))).toEqual({ kind: "unavailable" });
+      expect(values.size).toBe(1);
+      fail = false;
+      expect(await runtime.cancel(cancelInput(session))).toEqual({ kind: "cancelled" });
+      expect(values.size).toBe(0);
+    } finally {
+      await runtime.close();
+    }
   });
 });

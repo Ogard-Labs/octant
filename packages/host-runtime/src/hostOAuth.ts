@@ -135,6 +135,7 @@ const TRANSIENT_POLL_MAX_MS = 60_000;
 // the server follows one, so a late status read still learns how it ended;
 // after that the broker forgets it, so abandoned attempts do not pile up.
 const ATTEMPT_RETENTION_MS = 5 * 60_000;
+const CANCELLATION_WAIT_MS = 10_000;
 const MAX_TOKEN_CHARS = 4_096;
 const MAX_RESPONSE_CHARS = 16 * 1_024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -355,6 +356,13 @@ export interface HostOAuthRuntime {
      */
     readonly credentialRef?: string;
   }) => Promise<HostOAuthBeginResult>;
+  readonly cancel: (input: {
+    readonly attemptId: string;
+    readonly descriptorId: string;
+    readonly actorId: string;
+  }) => Promise<
+    { readonly kind: "cancelled" } | { readonly kind: "unavailable" } | { readonly kind: "refused" }
+  >;
   readonly status: (attemptId: string) => HostOAuthPublicState;
   readonly refresh: (credentialRef: string) => Promise<HostOAuthRefreshResult>;
   /**
@@ -486,6 +494,12 @@ interface Attempt {
   readonly listeners: Server[];
   timer: ReturnType<typeof setTimeout> | undefined;
   closed: boolean;
+  /** Present only for host-owned MCP PKCE attempts. */
+  readonly cancelActorId?: string;
+  cancelRequested?: boolean;
+  issuedCredentialRef?: string;
+  grantWrite?: Promise<void>;
+  cleanup?: Promise<boolean>;
   /**
    * Issued client id the authorize request used, when this attempt is a
    * ChatGPT plan reauthorization. The callback may omit client_id; this is
@@ -1990,6 +2004,7 @@ export function createHostOAuthRuntime(options: {
   const track = (attemptId: string, attempt: Attempt) => {
     for (const [id, prior] of attempts) {
       if (
+        !(prior.cancelRequested && prior.issuedCredentialRef !== undefined) &&
         prior.status.kind !== "awaiting-consent" &&
         now() > prior.expiresAt + ATTEMPT_RETENTION_MS
       ) {
@@ -2010,6 +2025,68 @@ export function createHostOAuthRuntime(options: {
     }
   };
 
+  const cleanupCancelledGrant = (attempt: Attempt): Promise<boolean> => {
+    if (attempt.cleanup !== undefined) return attempt.cleanup;
+    const run = (async () => {
+      try {
+        await attempt.grantWrite;
+      } catch {
+        /* Delete the original id even if its write failed. */
+      }
+      const credentialRef = attempt.issuedCredentialRef;
+      if (credentialRef === undefined) return true;
+      try {
+        await options.store.delete(credentialRef);
+        if (attempt.issuedCredentialRef === credentialRef) delete attempt.issuedCredentialRef;
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    attempt.cleanup = run;
+    void run.then((cleaned) => {
+      if (!cleaned && attempt.cleanup === run) delete attempt.cleanup;
+    });
+    return run;
+  };
+
+  const cancel = async (input: {
+    readonly attemptId: string;
+    readonly descriptorId: string;
+    readonly actorId: string;
+  }): Promise<
+    { readonly kind: "cancelled" } | { readonly kind: "unavailable" } | { readonly kind: "refused" }
+  > => {
+    const attempt = attempts.get(input.attemptId);
+    if (
+      !UUID_PATTERN.test(input.actorId) ||
+      attempt?.cancelActorId !== input.actorId ||
+      attempt.descriptorId !== input.descriptorId
+    )
+      return { kind: "refused" };
+    attempt.cancelRequested = true;
+    attempt.closed = true;
+    finishListener(attempt);
+    const cleaned = await waitForCancelledCleanup(attempt);
+    if (!cleaned) return { kind: "unavailable" };
+    publish(input.attemptId, refused(input.attemptId, attempt.descriptorId, "denied"));
+    return { kind: "cancelled" };
+  };
+
+  const waitForCancelledCleanup = async (attempt: Attempt): Promise<boolean> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        cleanupCancelledGrant(attempt),
+        new Promise<false>((resolve) => {
+          timer = setTimeout(() => resolve(false), CANCELLATION_WAIT_MS);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
+
   const begin = async (input: {
     readonly descriptor: HostOAuthDescriptor;
     readonly actorId: string;
@@ -2023,12 +2100,13 @@ export function createHostOAuthRuntime(options: {
     const descriptor = validateDescriptor(input.descriptor);
     if (descriptor === undefined) return { kind: "refused", reason: "invalid" };
     if (descriptor.flow === "device-code") return beginDevice(descriptor);
-    return beginPkce(descriptor, input.credentialRef);
+    return beginPkce(descriptor, input.credentialRef, input.actorId);
   };
 
   const beginPkce = async (
     descriptor: HostOAuthDescriptor,
     credentialRef: string | undefined,
+    actorId: string,
   ): Promise<HostOAuthBeginResult> => {
     // The directory dialect's descriptor names no URL: the broker builds the
     // tenant's authority from the closed issuer host. The issuer dialect's
@@ -2072,6 +2150,9 @@ export function createHostOAuthRuntime(options: {
     const expiresAt = now() + timeoutMs;
     const attempt: Attempt = {
       descriptorId: descriptor.descriptorId,
+      ...(descriptor.dialect === MCP_DIALECT || descriptor.dialect === SLACK_MCP_DIALECT
+        ? { cancelActorId: actorId }
+        : {}),
       closed: false,
       listeners: [],
       timer: undefined,
@@ -2405,10 +2486,26 @@ export function createHostOAuthRuntime(options: {
       issuer: siwcIssuer,
       ...(session.directory === undefined ? {} : { directory: session.directory }),
     });
+    if (session.attempt.cancelRequested) {
+      replyCallback(response, 400);
+      finishListener(session.attempt);
+      return;
+    }
     if (exchanged.kind === "tokens") {
       const credentialRef = randomUUID();
+      session.attempt.issuedCredentialRef = credentialRef;
       try {
-        await options.store.set(credentialRef, JSON.stringify(exchanged.grant));
+        session.attempt.grantWrite = options.store.set(
+          credentialRef,
+          JSON.stringify(exchanged.grant),
+        );
+        await session.attempt.grantWrite;
+        if (session.attempt.cancelRequested) {
+          await cleanupCancelledGrant(session.attempt);
+          replyCallback(response, 400);
+          finishListener(session.attempt);
+          return;
+        }
         publish(session.attemptId, {
           kind: "signed-in",
           attemptId: session.attemptId,
@@ -2845,6 +2942,7 @@ export function createHostOAuthRuntime(options: {
 
   return Object.freeze({
     begin,
+    cancel,
     status: (attemptId: string): HostOAuthPublicState => {
       const attempt = attempts.get(attemptId);
       return attempt === undefined ? { kind: "unknown" } : attempt.status;
@@ -2916,10 +3014,18 @@ export function createHostOAuthRuntime(options: {
     },
     close: async () => {
       closed = true;
+      const cleanups: Promise<boolean>[] = [];
       for (const attempt of attempts.values()) {
         attempt.closed = true;
+        // A completed grant may already belong to the host; ordinary close preserves it.
+        if (attempt.cancelActorId !== undefined && attempt.status.kind === "awaiting-consent") {
+          attempt.cancelRequested = true;
+          cleanups.push(waitForCancelledCleanup(attempt));
+        }
         finishListener(attempt);
       }
+      if ((await Promise.all(cleanups)).some((cleaned) => !cleaned))
+        throw new CredentialStoreFailure("unavailable");
     },
   });
 }
@@ -2934,6 +3040,7 @@ export async function handleHostOAuthBrokerRoute(
   if (decoded.kind === "invalid")
     return Response.json({ error: "invalid-request" }, { status: 400 });
   if (pathname === "/v1/oauth/begin") return beginRoute(decoded.value, runtime);
+  if (pathname === "/v1/oauth/cancel") return cancelRoute(decoded.value, runtime);
   if (pathname === "/v1/oauth/status") return statusRoute(decoded.value, runtime);
   if (pathname === "/v1/oauth/refresh") return refreshRoute(decoded.value, runtime);
   if (pathname === "/v1/oauth/access") return accessRoute(decoded.value, runtime);
@@ -2967,6 +3074,29 @@ async function beginRoute(
     ...(typeof credentialRef === "string" ? { credentialRef } : {}),
   });
   return Response.json(publicBegin(started), { headers: { "cache-control": "no-store" } });
+}
+
+async function cancelRoute(
+  value: Record<string, unknown>,
+  runtime: HostOAuthRuntime,
+): Promise<Response> {
+  if (
+    Object.keys(value).length !== 3 ||
+    typeof value.attemptId !== "string" ||
+    !UUID_PATTERN.test(value.attemptId) ||
+    typeof value.actorId !== "string" ||
+    !UUID_PATTERN.test(value.actorId) ||
+    typeof value.descriptorId !== "string"
+  )
+    return Response.json({ error: "invalid-request" }, { status: 400 });
+  return Response.json(
+    await runtime.cancel({
+      attemptId: value.attemptId,
+      actorId: value.actorId,
+      descriptorId: value.descriptorId,
+    }),
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 function statusRoute(value: Record<string, unknown>, runtime: HostOAuthRuntime): Response {

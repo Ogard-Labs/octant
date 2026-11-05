@@ -99,6 +99,7 @@ const ROUTES = new Set([
   "/v1/cloud-cli/aws/clear",
   "/v1/cloud-cli/aws/session",
   "/v1/oauth/begin",
+  "/v1/oauth/cancel",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
   "/v1/oauth/access",
@@ -320,16 +321,22 @@ export async function startCredentialBroker(
     if (closing !== undefined) return closing;
     closing = (async () => {
       linked?.googleCli.forget();
-      await runtime.close();
-      await cloudIam.close();
-      await new Promise<void>((resolve, reject) => {
-        if (!server.listening) {
-          resolve();
-          return;
+      try {
+        await runtime.close();
+      } finally {
+        try {
+          await cloudIam.close();
+        } finally {
+          await new Promise<void>((resolve, reject) => {
+            if (!server.listening) {
+              resolve();
+              return;
+            }
+            server.close((error) => (error === undefined ? resolve() : reject(error)));
+            server.closeAllConnections();
+          });
         }
-        server.close((error) => (error === undefined ? resolve() : reject(error)));
-        server.closeAllConnections();
-      });
+      }
     })();
     return closing;
   };
