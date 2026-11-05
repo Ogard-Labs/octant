@@ -133,6 +133,36 @@ const pages: Record<string, string> = {
   "/audit-targets": `<!doctype html><html lang="en"><title>Targets</title><body>
     <div style="display:flex;flex-wrap:wrap;gap:8px">${'<button style="width:32px;height:32px">x</button>'.repeat(1_100)}</div>
     <div><button id="late-a" style="width:16px;height:16px;padding:0;border:0">A</button><button id="late-b" style="width:16px;height:16px;padding:0;border:0;margin-left:2px">B</button></div></body></html>`,
+  // Every native control the audit names, named and unnamed, to hold against the browser's own names.
+  "/audit-names": `<!doctype html><html lang="en"><title>Names</title><body>
+    <input data-control id="sub" type="submit"><input data-control id="sube" type="submit" value=""><input data-control id="subs" type="submit" value=" ">
+    <input data-control id="res" type="reset"><input data-control id="rese" type="reset" value="">
+    <input data-control id="btn" type="button"><input data-control id="btnt" type="button" title="Tip">
+    <button data-control id="b"></button><label for="bl">Labelled</label><button data-control id="bl"></button><button data-control id="bt" title="Tip"></button>
+    <details><summary data-control id="sum"></summary>More</details><details><summary data-control id="sumt">Open</summary>More</details>
+    <input data-control id="img" type="image" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E">
+    <input data-control id="imgv" type="image" value="Go" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E">
+    <img data-control id="im" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E">
+    <img data-control id="imt" title="Tip" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E">
+    <input data-control id="file" type="file"><label>Upload <input data-control id="filel" type="file"></label>
+    <select data-control id="sel"><option>One</option></select><select data-control id="selp" placeholder="Pick"><option>One</option></select><select data-control id="selt" title="Tip"><option>One</option></select>
+    <textarea data-control id="ta"></textarea><textarea data-control id="tap" placeholder="Write"></textarea>
+    <input data-control id="txt"><input data-control id="txtp" placeholder="Search"><input data-control id="txtt" title="Tip">
+    <input data-control id="lb" aria-labelledby="missing"><input data-control id="al" aria-label="  "><input data-control id="chk" type="checkbox">
+    <a data-control id="a" href="/form"></a><a data-control id="at" href="/form" title="Tip"></a></body></html>`,
+  // Text over backgrounds the browser does not paint, and over ones it paints in ways a colour cannot say.
+  "/audit-paint": `<!doctype html><html lang="en"><head><title>Paint</title>
+    <style>.overlay::before { content: ""; position: absolute; inset: 0; background: #000; z-index: -1 }</style></head>
+    <body style="background:#fff">
+    <p style="color:#000;background:#fff"><span style="display:contents;background:#000">Readable contents</span></p>
+    <div style="visibility:hidden;background:#000"><p style="visibility:visible;color:#000">Readable visible</p></div>
+    <p style="color:#fff;background:linear-gradient(#000, #000)">Gradient</p>
+    <p style="color:transparent;background:#fff;background-clip:text;-webkit-background-clip:text">Clipped</p>
+    <p class="overlay" style="position:relative;color:#fff">Pseudo backdrop</p>
+    <div style="backdrop-filter:invert(1)"><p style="color:#eee">Backdrop filtered</p></div>
+    <div style="-webkit-mask-image:linear-gradient(#000, transparent);mask-image:linear-gradient(#000, transparent)"><p style="color:#000">Masked</p></div>
+    <p style="mix-blend-mode:difference;color:#fff">Blended</p>
+    <p style="filter:invert(1);color:#fff">Filtered</p></body></html>`,
   // More elements than the audit reads, with a referenced duplicate id past the end.
   "/audit-large": `<!doctype html><html lang="en"><title>Large</title><body>
     ${"<div></div>".repeat(6_100)}
@@ -1065,6 +1095,71 @@ describe.skipIf(chrome === undefined)(
         reading.findings.filter((each) => each.rule === "target-size").map((each) => each.selector),
       ).toEqual(["#late-a", "#late-b"]);
       await host.act(contextId, { kind: "resize" });
+      await page.close();
+    });
+
+    it("finds an unnamed control exactly where the browser computes no accessible name", async () => {
+      const { host, contextId, page } = await surface("/audit-names");
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      const naming = new Set(["button-name", "link-name", "field-name", "image-alt"]);
+      const flagged = observed.audit.reading.findings
+        .filter((each) => naming.has(each.rule))
+        .map((each) => each.selector.replace(/^#/, ""));
+      const cdp = await page.context().newCDPSession(page);
+      const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
+      const { nodeIds } = await cdp.send("DOM.querySelectorAll", {
+        nodeId: root.nodeId,
+        selector: "[data-control]",
+      });
+      const unnamed: string[] = [];
+      for (const nodeId of nodeIds) {
+        const { node } = await cdp.send("DOM.describeNode", { nodeId });
+        const id = node.attributes?.[(node.attributes?.indexOf("id") ?? 0) + 1] ?? "";
+        const { nodes } = await cdp.send("Accessibility.getPartialAXTree", {
+          nodeId,
+          fetchRelatives: false,
+        });
+        const name: unknown = nodes[0]?.name?.value;
+        if (typeof name !== "string" || name.trim() === "") unnamed.push(id);
+      }
+      await cdp.detach();
+      // The browser's own "Submit" for an image button and "Choose File" for a
+      // file field name the action, not the image or the field, so the audit
+      // still asks the author for one.
+      expect(flagged.toSorted()).toEqual([...unnamed, "img", "file"].toSorted());
+      expect(unnamed.toSorted()).toEqual(
+        [
+          "sube",
+          "subs",
+          "rese",
+          "btn",
+          "b",
+          "sum",
+          "im",
+          "sel",
+          "selp",
+          "ta",
+          "txt",
+          "lb",
+          "al",
+          "chk",
+          "a",
+        ].toSorted(),
+      );
+      await page.close();
+    });
+
+    it("measures text only against a background the browser paints, and counts the rest as not measured", async () => {
+      const { host, contextId, page } = await surface("/audit-paint");
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      const { reading } = observed.audit;
+      // A `display: contents` or hidden wrapper paints nothing behind the readable text.
+      expect(reading.findings.filter((each) => each.rule === "color-contrast")).toEqual([]);
+      // The gradient, the clipped, pseudo-element, backdrop-filtered, masked,
+      // blended, and filtered text.
+      expect(reading.contrastNotMeasured).toBe(7);
       await page.close();
     });
 

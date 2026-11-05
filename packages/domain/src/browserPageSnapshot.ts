@@ -674,7 +674,8 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       if (
         element instanceof HTMLInputElement ||
         element instanceof HTMLSelectElement ||
-        element instanceof HTMLTextAreaElement
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLButtonElement
       ) {
         if (
           Array.from(element.labels ?? []).some((label) =>
@@ -683,8 +684,13 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
         ) {
           return true;
         }
-        if (filled(element.getAttribute("placeholder"))) return true;
-        if (tag === "input" && (type === "submit" || type === "reset")) return true;
+        // Chromium names a field from its placeholder but never a select.
+        if (tag !== "select" && filled(element.getAttribute("placeholder"))) return true;
+        // Without a value the browser names a submit or reset button itself
+        // ("Submit", "Reset"); an empty value takes that name away.
+        if (tag === "input" && (type === "submit" || type === "reset")) {
+          return !element.hasAttribute("value") || filled(element.getAttribute("value"));
+        }
         if (tag === "input" && type === "button") return filled(element.getAttribute("value"));
         if (tag === "input" && type === "image") {
           return filled(element.getAttribute("alt")) || filled(element.getAttribute("value"));
@@ -723,7 +729,14 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
         }
         continue;
       }
-      if (tag === "button" || (tag === "input" && type === "button") || role === "button") {
+      // A details element's summary is its toggle button.
+      const toggle = tag === "summary" && element.parentElement?.localName === "details";
+      if (
+        tag === "button" ||
+        (tag === "input" && ["button", "submit", "reset"].includes(type)) ||
+        toggle ||
+        role === "button"
+      ) {
         if (exposed(element) && !hasName(element, true)) report("button-name", element);
         continue;
       }
@@ -861,13 +874,26 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       const known = backdrops.get(element);
       if (known !== undefined) return known;
       const style = window.getComputedStyle(element);
-      const own = parseColor(style.backgroundColor);
+      // A `display: contents` element has no box to paint its background in,
+      // and a `visibility: hidden` one paints none, though a visible child of
+      // it still shows: both are passed through to what lies behind them.
+      const contents = style.display === "contents";
+      const paints = !contents && style.visibility === "visible";
+      const own: Color | undefined = paints ? parseColor(style.backgroundColor) : [0, 0, 0, 0];
+      // A `::before` or `::after` that draws a background may lie behind the
+      // text or over it; which, the computed style does not say.
+      const pseudoPaints = (["::before", "::after"] as const).some((which) => {
+        const pseudo = window.getComputedStyle(element, which);
+        if (pseudo.content === "none" || pseudo.content === "normal") return false;
+        const fill = parseColor(pseudo.backgroundColor);
+        return pseudo.backgroundImage !== "none" || fill === undefined || fill[3] > 0;
+      });
       let result: Color | null;
-      if (own === undefined || style.backgroundImage !== "none") {
+      if (own === undefined || pseudoPaints || (paints && style.backgroundImage !== "none")) {
         result = null;
       } else if (own[3] >= 1) {
         result = own;
-      } else if (["absolute", "fixed", "sticky"].includes(style.position)) {
+      } else if (!contents && ["absolute", "fixed", "sticky"].includes(style.position)) {
         result = null;
       } else {
         const parent = renderedParent(element);
@@ -878,8 +904,10 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       backdrops.set(element, result);
       return result;
     };
-    // Whether the element or any ancestor is drawn through a filter, a blend
-    // mode, or partial opacity, which change the colours a person sees.
+    // Whether the element or any ancestor is drawn through a filter, a
+    // backdrop filter, a blend mode, a mask, or partial opacity, which change
+    // the colours a person sees, or clips its background to the text, which
+    // then shows the background through the letters.
     const compositing = new Map<Element, boolean>();
     const composited = (element: Element): boolean => {
       const known = compositing.get(element);
@@ -888,7 +916,13 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       const parent = renderedParent(element);
       const result =
         style.filter !== "none" ||
+        (style.getPropertyValue("backdrop-filter") || "none") !== "none" ||
+        (style.getPropertyValue("mask-image") || "none") !== "none" ||
+        (style.getPropertyValue("-webkit-mask-image") || "none") !== "none" ||
         style.mixBlendMode !== "normal" ||
+        /\btext\b/.test(
+          `${style.backgroundClip} ${style.getPropertyValue("-webkit-background-clip")}`,
+        ) ||
         Number.parseFloat(style.opacity) < 1 ||
         (parent !== null && composited(parent));
       compositing.set(element, result);
@@ -935,7 +969,8 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       const foreground = parseColor(
         style.getPropertyValue("-webkit-text-fill-color") || style.color,
       );
-      if (foreground !== undefined && foreground[3] === 0) continue;
+      // Transparent text is not drawn, unless a background shows through it.
+      if (foreground !== undefined && foreground[3] === 0 && !composited(element)) continue;
       const behind = backdrop(element);
       if (
         foreground === undefined ||
