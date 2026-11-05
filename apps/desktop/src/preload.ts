@@ -259,6 +259,11 @@ export interface OctantHostBridge {
   readonly setAutomaticAppUpdateChecks: (enabled: boolean) => Promise<AppUpdateState>;
   readonly subscribeAppUpdateState: (listener: (state: AppUpdateState) => void) => () => void;
   readonly appUpdatePreferenceScope?: "local";
+  /** Local application display only; never a host or capability identity. */
+  readonly applicationIdentity?: Readonly<{
+    readonly flavor: "nightly";
+    readonly productName: "Octant Nightly";
+  }>;
   readonly readBundledWhatsNew: () => Promise<BundledWhatsNew>;
   readonly acknowledgeWhatsNew: () => Promise<void>;
   readonly openBrowserExternal: (url: string) => Promise<void>;
@@ -444,6 +449,7 @@ export function createHostBridge(
   platform: NodeJS.Platform = process.platform,
   windowId?: string,
   localUpdatePreferences = false,
+  applicationIdentity?: OctantHostBridge["applicationIdentity"],
 ): OctantHostBridge {
   const invoke = async (channel: string, ...args: readonly unknown[]): Promise<void> =>
     void (await ipc.invoke(channel, ...args));
@@ -757,6 +763,7 @@ export function createHostBridge(
       return invoke(IPC_CHANNELS.updateCodeOperationApprovalAnchor, anchor);
     },
     cancelCodeOperationApproval: () => invoke(IPC_CHANNELS.cancelCodeOperationApproval),
+    ...(applicationIdentity === undefined ? {} : { applicationIdentity }),
     ...(localUpdatePreferences ? { appUpdatePreferenceScope: "local" as const } : {}),
     projectWindowCapability,
     subscribeProjectWindowCapability: (listener: (capability: string) => void) => {
@@ -2525,6 +2532,22 @@ export function decodeInitialProjectTarget(
   return Object.freeze({ kind: "project-thread", projectId, mode, threadId });
 }
 
+function applicationIdentityArgument(
+  argv: ReadonlyArray<string>,
+): OctantHostBridge["applicationIdentity"] {
+  const flavors = argv.filter((argument) => argument.startsWith("--octant-application-flavor="));
+  const names = argv.filter((argument) => argument.startsWith("--octant-application-name="));
+  const productName = names[0]?.slice("--octant-application-name=".length);
+  if (
+    flavors.length !== 1 ||
+    flavors[0] !== "--octant-application-flavor=nightly" ||
+    names.length !== 1 ||
+    productName !== "Octant Nightly"
+  )
+    return undefined;
+  return Object.freeze({ flavor: "nightly", productName });
+}
+
 export function installHostBridge(
   context: ContextBridgePort,
   ipc: IpcRendererPort,
@@ -2533,6 +2556,7 @@ export function installHostBridge(
   platform: NodeJS.Platform = process.platform,
   windowId?: string,
   localUpdatePreferences = process.argv.includes("--octant-local-update-preferences"),
+  applicationIdentity = applicationIdentityArgument(process.argv),
 ): void {
   context.exposeInMainWorld(
     HOST_BRIDGE_KEY,
@@ -2543,6 +2567,7 @@ export function installHostBridge(
       platform,
       windowId,
       localUpdatePreferences,
+      applicationIdentity,
     ),
   );
 }

@@ -20,6 +20,78 @@ const projectWindowCapability = "C".repeat(43);
 const projectId = "00000000-0000-4000-8000-000000000203";
 
 describe("desktop preload bridge", () => {
+  it.each([
+    {
+      arguments: [
+        "--octant-application-flavor=nightly",
+        "--octant-application-name=Octant Nightly",
+      ],
+      expected: { flavor: "nightly", productName: "Octant Nightly" },
+    },
+    { arguments: [], expected: undefined },
+    { arguments: ["--octant-application-flavor=nightly"], expected: undefined },
+    { arguments: ["--octant-application-name=Octant Nightly"], expected: undefined },
+    {
+      arguments: ["--octant-application-flavor=stable", "--octant-application-name=Octant Nightly"],
+      expected: undefined,
+    },
+    {
+      arguments: ["--octant-application-flavor=other", "--octant-application-name=Octant Nightly"],
+      expected: undefined,
+    },
+    {
+      arguments: ["--octant-application-flavor=nightly", "--octant-application-name=Other"],
+      expected: undefined,
+    },
+    {
+      arguments: [
+        "--octant-application-flavor=nightly",
+        "--octant-application-flavor=nightly",
+        "--octant-application-name=Octant Nightly",
+      ],
+      expected: undefined,
+    },
+    {
+      arguments: [
+        "--octant-application-flavor=nightly",
+        "--octant-application-name=Octant Nightly",
+        "--octant-application-name=Octant Nightly",
+      ],
+      expected: undefined,
+    },
+    {
+      arguments: [
+        "--octant-application-flavor=nightly",
+        "--octant-application-name=Octant Nightly",
+        "--octant-application-name=Other",
+      ],
+      expected: undefined,
+    },
+  ])(
+    "exposes application identity only from one closed matching name and flavor pair: $arguments",
+    ({ arguments: arguments_, expected }) => {
+      const argv = process.argv;
+      try {
+        process.argv = ["fixture", ...arguments_];
+        const exposeInMainWorld = vi.fn();
+        installHostBridge(
+          { exposeInMainWorld },
+          { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() },
+          projectWindowCapability,
+          undefined,
+          "darwin",
+        );
+        expect(exposeInMainWorld.mock.calls[0]?.[1]).toHaveProperty(
+          "projectWindowCapability",
+          projectWindowCapability,
+        );
+        expect(exposeInMainWorld.mock.calls[0]?.[1]?.applicationIdentity).toEqual(expected);
+      } finally {
+        process.argv = argv;
+      }
+    },
+  );
+
   it("surfaces an allowlisted remote-device failure without the wrapper, and refuses anything else", async () => {
     const known = "Octant local device controls are unavailable.";
     const wrapped = new Error(

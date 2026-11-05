@@ -165,6 +165,11 @@ be offered as a usable download. The preview/candidate release workflow has an
 explicit preflight stop until that functional client is implemented and
 verified. Stable releases and local packaging have no such temporary stop.
 
+Nightly identifies its local window with a neutral "Nightly" label beside
+"Octant" below the sidebar's native controls. Collapsing the sidebar moves the
+label into the title bar; Settings keeps the same identity visible. The label
+is a local display cue, not permission to access a host or shared data.
+
 ## Desktop host shutdown
 
 Closing the last window keeps the desktop-owned host available. Quitting

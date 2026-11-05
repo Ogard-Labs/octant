@@ -1,3 +1,4 @@
+import { DESKTOP_FLAVOR_IDENTITIES } from "@octant/host-runtime";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
@@ -210,6 +211,40 @@ function deferred() {
 }
 
 describe("Project window BrowserWindow construction", () => {
+  it("labels only a Nightly application window through its local preload bootstrap", () => {
+    const input: Parameters<typeof createMainBrowserWindowOptions>[0] = {
+      bounds: { x: 10, y: 20, width: 1000, height: 720 },
+      capability: "A".repeat(43),
+      windowId: "00000000-0000-4000-8000-000000000201",
+      preloadPath: "/app/preload.mjs",
+      browserWindow: { backgroundColor: "#101013", frame: true },
+    };
+    expect(
+      createMainBrowserWindowOptions({
+        ...input,
+        applicationFlavor: "nightly",
+        productName: DESKTOP_FLAVOR_IDENTITIES.nightly.productName,
+      }).webPreferences?.additionalArguments,
+    ).toContain("--octant-application-flavor=nightly");
+    expect(
+      createMainBrowserWindowOptions({
+        ...input,
+        applicationFlavor: "nightly",
+        productName: DESKTOP_FLAVOR_IDENTITIES.nightly.productName,
+      }).webPreferences?.additionalArguments,
+    ).toContain("--octant-application-name=Octant Nightly");
+    expect(
+      createMainBrowserWindowOptions({
+        ...input,
+        applicationFlavor: "nightly",
+        productName: "Other",
+      }).webPreferences?.additionalArguments,
+    ).not.toContain("--octant-application-flavor=nightly");
+    expect(createMainBrowserWindowOptions(input).webPreferences?.additionalArguments).not.toContain(
+      "--octant-application-flavor=nightly",
+    );
+  });
+
   it("consumes the resolved native presentation without overriding the frameless contract", () => {
     const options = createMainBrowserWindowOptions({
       bounds: { x: 10, y: 20, width: 1000, height: 720 },
