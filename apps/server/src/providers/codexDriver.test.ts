@@ -15,6 +15,7 @@ import {
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, Scope, Stream } from "effect";
 import {
+  PROVIDER_CONTEXT_RESTATED,
   renderProviderContextSections,
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
@@ -46,6 +47,7 @@ import {
   type CodexDriverOptions,
   type CodexThreadResumeInput,
   type CodexThreadStartInput,
+  type CodexTurnStartInput,
 } from "./codexDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -1524,6 +1526,58 @@ describe("Codex thread and turn lifecycle", () => {
       },
     });
     await acquired.close();
+  });
+
+  it("delivers a skill selected again after a turn that withdrew it", async () => {
+    const f = fixture();
+    const driver = makeCodexDriver(f.options());
+    const rule = { kind: "instructions", text: "Offer follow-ups only when useful." } as const;
+    const skill = { kind: "skill-instructions", text: "Review as a skeptic." } as const;
+    // The contexts the held record gives three turns: the skill is selected,
+    // deselected (so everything is restated), then selected again.
+    const turns = [
+      [rule, skill],
+      [{ kind: "instructions", text: PROVIDER_CONTEXT_RESTATED }, rule],
+      [skill],
+    ] as const;
+    // Each turn resumes the same Codex thread, as a held session's turns do.
+    for (const context of turns) {
+      const acquired = await acquireConnection(driver);
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: { driverKind: "codex", value: "thread-existing" },
+          executionPolicy: "approval-gated",
+          modelId: "gpt-5.4" as never,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
+      );
+      await acquired.close();
+    }
+
+    // Codex records an entry only when its value differs from the last one
+    // under its key. Were the withdrawing turn to send no material entry, the
+    // skill's value on the third turn would match the first and be dropped,
+    // leaving the skill withdrawn.
+    const last = new Map<string, string>();
+    const recorded = f.calls
+      .filter(({ method }) => method === "turn/start")
+      .map(({ input }) => {
+        const entries = (input as CodexTurnStartInput).additionalContext ?? {};
+        return Object.entries(entries).flatMap(([key, entry]) => {
+          if (last.get(key) === entry.value) return [];
+          last.set(key, entry.value);
+          return [{ key, value: entry.value }];
+        });
+      });
+    expect(recorded[2]).toEqual([
+      { key: "octant_context", value: renderProviderContextSections([skill]) },
+    ]);
+    // The withdrawing turn replaced the material entry, naming the skill nowhere.
+    const withdrawn = recorded[1]?.find(({ key }) => key === "octant_context");
+    expect(withdrawn?.value).not.toContain(skill.text);
   });
 
   it("frames context inside the request on a Codex too old to take it separately", async () => {

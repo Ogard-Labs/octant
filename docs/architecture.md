@@ -5921,7 +5921,11 @@ prompt is therefore built to be appended, never rewritten:
     text keeps the user-level authority it had inside the request. Codex sends
     an entry only when its value changed, which can skip only a value that is
     already the latest of its kind in the thread; a compaction clears both the
-    entries and that memory. 0.130.0 accepted the field and dropped it, so an
+    entries and that memory. A turn that restates the context always sends the
+    material entry, headed by the revision of the whole context and saying it
+    replaces earlier material entries, even when no material remains: a
+    restatement that left it out kept the withdrawn copy as the latest value,
+    so a skill deselected and then selected again matched it and was skipped. 0.130.0 accepted the field and dropped it, so an
     older install keeps the context inside the request.
   - _Claude Code_ 2.1.211 and later: the `UserPromptSubmit` hook, carrying
     Octant's instructions as plain paragraphs and the rest as sections. Claude

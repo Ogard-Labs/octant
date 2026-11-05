@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   decodeProviderFailure,
@@ -9,6 +10,7 @@ import {
   type ProviderFailure,
   type ProviderAccountAuthentication,
   type ProviderCapabilities,
+  type ProviderContextBlock,
   type ProviderInstanceId,
   type ProviderModel,
   type ProviderModelOptionValues,
@@ -33,6 +35,7 @@ import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-fa
 import {
   attachmentMediaTypeToModality,
   isOctantInstructionContext,
+  PROVIDER_CONTEXT_RESTATED,
   renderOctantInstructions,
   renderProviderContextSections,
   renderProviderTurnPrompt,
@@ -590,6 +593,14 @@ function codexTurnRequest(
   if (!separate) return { input: items };
   const instructions = context.filter(isOctantInstructionContext);
   const material = context.filter((block) => !isOctantInstructionContext(block));
+  const restated = context.some(
+    (block) => block.kind === "instructions" && block.text === PROVIDER_CONTEXT_RESTATED,
+  );
+  const materialValue = restated
+    ? codexRestatedMaterial(context, material)
+    : material.length === 0
+      ? undefined
+      : renderProviderContextSections(material);
   return {
     input: items,
     additionalContext: {
@@ -601,16 +612,32 @@ function codexTurnRequest(
               value: renderOctantInstructions(instructions),
             },
           }),
-      ...(material.length === 0
+      ...(materialValue === undefined
         ? {}
-        : {
-            [CODEX_MATERIAL_KEY]: {
-              kind: "untrusted",
-              value: renderProviderContextSections(material),
-            },
-          }),
+        : { [CODEX_MATERIAL_KEY]: { kind: "untrusted", value: materialValue } }),
     },
   };
+}
+
+/**
+ * The material entry of a turn that restates Octant's context. Codex skips an
+ * entry whose value matches the last one under its key, so a restatement that
+ * left the entry out, or sent the same material again, left the earlier copy
+ * as the latest; that copy came before the restatement, which withdrew it, so
+ * a skill deselected and then selected again was never delivered a second
+ * time. The entry is therefore always sent, and it names the revision of the
+ * whole context, which differs between any two restatements because each one
+ * withdraws something the previous held.
+ */
+function codexRestatedMaterial(
+  context: ReadonlyArray<ProviderContextBlock>,
+  material: ReadonlyArray<ProviderContextBlock>,
+): string {
+  const revision = createHash("sha256").update(JSON.stringify(context)).digest("hex").slice(0, 12);
+  const heading = `Octant's context changed (revision ${revision}). This replaces every earlier ${CODEX_MATERIAL_KEY} entry in this conversation.`;
+  return material.length === 0
+    ? `${heading} No other Octant context applies.`
+    : `${heading}\n\n${renderProviderContextSections(material)}`;
 }
 
 function codexDynamicTools(
