@@ -106,8 +106,11 @@ capability refuses. Nightly reports a missing installation and never starts its
 own host. A successful status check
 is followed by separate authenticated window registration. A compatible host
 issues only that window's short-lived capability; Nightly loads its own screens
-without owning host data or credentials. Its renderer closes when it cannot
-renew the lease. A connected Browser can display Stable-owned page images and
+without owning host data or credentials. If renewal fails, its old renderer
+closes and Nightly tries fresh authenticated registration for up to 30 seconds.
+Quitting cancels recovery; failure explains why Nightly closed. A recovered window
+keeps its normal bounds, but does not transfer unsaved layout or drafts to its
+new window identity. A connected Browser can display Stable-owned page images and
 forward ordinary pointer, text and keyboard input inside the Nightly window.
 Control-Escape leaves the page; Tab moves among its controls. Nightly’s own
 dropdown, context and local text-editing menus use native macOS menus. These
@@ -132,7 +135,9 @@ leaves, the host uses its normal active-work confirmation before stopping.
 Cancelling keeps the host running. Signals, logout and update restart keep their
 existing shutdown behavior. A headless launch waits up to 30 seconds after
 host-ready for its first Nightly window, then follows that same guarded quit.
-This does not yet prove signed coexistence or reconnect after a host restart.
+An already retained current Nightly client receives bounded recovery grace during
+an app-managed host restart. This does not yet prove full signed coexistence or
+reconnect acceptance.
 
 A local desktop package defaults to Octant. An explicitly selected
 `OCTANT_PACKAGE_FLAVOR=nightly` requires a matching dated preview or candidate

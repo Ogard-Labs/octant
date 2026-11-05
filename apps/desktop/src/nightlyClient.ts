@@ -12,6 +12,7 @@ import {
 } from "./desktopWindowBootstrap";
 import { createRendererNavigationPolicy } from "./rendererNavigationPolicy";
 import { openNightlyClientWindow } from "./nightlyClientWindow";
+import { createNightlyClientRecovery } from "./nightlyClientRecovery";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
 import { DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
@@ -129,15 +130,13 @@ export async function runNightlyClient(
   }
   let acceptedQuit = false;
   let quitRequested = false;
-  let clientPromise: ReturnType<typeof openNightlyClientWindow> | undefined;
   app.on("before-quit", (event) => {
     if (acceptedQuit) return;
     event.preventDefault();
     if (quitRequested) return;
     quitRequested = true;
     void (async () => {
-      const client = await clientPromise;
-      const result = client?.kind === "opened" ? await client.close() : { kind: "closed" };
+      const result = await recovery.stop();
       if (result.kind !== "closed")
         dialog.showErrorBox(
           identity.productName,
@@ -151,100 +150,123 @@ export async function runNightlyClient(
       app.quit();
     })();
   });
-  app.on("window-all-closed", () => app.quit());
-  clientPromise = openNightlyClientWindow({
-    native: protocol,
-    isClosing: () => quitRequested,
-    createWindow: (bootstrap) => {
-      const window = new BrowserWindow(
-        createMainBrowserWindowOptions({
-          bounds: { x: 100, y: 100, width: 1200, height: 800 },
-          productName: identity.productName,
-          capability: bootstrap.capability,
-          windowId: bootstrap.windowId,
-          preloadPath: resolve(dirname(fileURLToPath(import.meta.url)), DESKTOP_PRELOAD_FILENAME),
-          browserWindow: { backgroundColor: "#101013", frame: true },
-        }),
-      );
-      const id = window.webContents.id;
-      installNativeEditingMenus(window);
-      const browserClient = createBrowserPresentationClient({
-        baseUrl: bootstrap.hostOrigin,
-        windowCapability: bootstrap.capability,
-        rendererIdentity: bootstrap.rendererIdentity,
-        fetch: globalThis.fetch,
-      });
-      const presentation = new NightlyBrowserPresentation({
-        current: () => windows.get(id) === window && !window.isDestroyed(),
-        visible: () => !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
-        focused: () => !window.isDestroyed() && window.isFocused(),
-        popupMenu: (request, signal) => {
-          if (window.isDestroyed()) return Promise.resolve({ kind: "refused" });
-          const point = screen.getCursorScreenPoint();
-          const bounds = window.getContentBounds();
-          return popupNativeMenu(
-            window,
-            {
-              ...request,
-              x: (point.x - bounds.x) / window.webContents.getZoomFactor(),
-              y: (point.y - bounds.y) / window.webContents.getZoomFactor(),
-            },
-            signal,
-          );
-        },
-        execute: browserClient.execute,
-      });
-      presentations.set(id, presentation);
-      window.on("blur", () => {
-        void presentation.releaseInputs();
-      });
-      window.on("focus", () => {
-        void presentation.releaseInputs();
-      });
-      window.on("show", () => presentation.show());
-      window.on("restore", () => presentation.show());
-      window.on("hide", () => {
-        void presentation.hide();
-      });
-      window.on("minimize", () => {
-        void presentation.hide();
-      });
-      windows.set(id, window);
-      capabilities.set(id, bootstrap.capability);
-      trusted.set(id, {
-        serverOrigin: bootstrap.hostOrigin,
-        rendererIdentity: bootstrap.rendererIdentity,
-      });
-      const guard = (event: { preventDefault(): void }, url: string) => {
-        if (!allowed.allows(url)) event.preventDefault();
-      };
-      window.webContents.on("will-navigate", (event, url) => guard(event, url));
-      window.webContents.on("will-redirect", (event, url) => guard(event, url));
-      window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-      window.webContents.once("render-process-gone", () => {
-        if (!window.isDestroyed()) window.destroy();
-      });
-      window.once("closed", () => {
-        windows.delete(id);
-        presentations.delete(id);
-        const closing = presentation.close();
-        closingPresentations.add(closing);
-        void closing.finally(() => closingPresentations.delete(closing));
-        capabilities.delete(id);
-        trusted.remove(id);
-      });
-      return {
-        load: async () => {
-          await window.loadFile(rendererPath, { query: { serverUrl: bootstrap.hostOrigin } });
-          if (!window.isDestroyed()) window.show();
-        },
-        destroy: () => window.destroy(),
-        isDestroyed: () => window.isDestroyed(),
-        onClosed: (listener) => window.once("closed", listener),
-      };
-    },
+  app.on("window-all-closed", () => {
+    if (!recovery.recovering()) app.quit();
   });
-  const client = await clientPromise;
+  let bounds = { x: 100, y: 100, width: 1200, height: 800 };
+  const recovery = createNightlyClientRecovery({
+    exhausted: () => {
+      dialog.showErrorBox(
+        identity.productName,
+        "Octant Nightly could not reconnect to its matching signed Octant host. Reopen Nightly after Octant is available. Unsaved window layout and drafts were not transferred.",
+      );
+      app.quit();
+    },
+    open: (signal, onLeaseLost) =>
+      openNightlyClientWindow({
+        native: protocol,
+        signal,
+        onLeaseLost,
+        isClosing: () => quitRequested,
+        createWindow: (bootstrap) => {
+          const window = new BrowserWindow(
+            createMainBrowserWindowOptions({
+              bounds,
+              productName: identity.productName,
+              capability: bootstrap.capability,
+              windowId: bootstrap.windowId,
+              preloadPath: resolve(
+                dirname(fileURLToPath(import.meta.url)),
+                DESKTOP_PRELOAD_FILENAME,
+              ),
+              browserWindow: { backgroundColor: "#101013", frame: true },
+            }),
+          );
+          const id = window.webContents.id;
+          installNativeEditingMenus(window);
+          const rememberBounds = () => {
+            if (!window.isDestroyed()) bounds = window.getNormalBounds();
+          };
+          window.on("resize", rememberBounds);
+          window.on("move", rememberBounds);
+          const browserClient = createBrowserPresentationClient({
+            baseUrl: bootstrap.hostOrigin,
+            windowCapability: bootstrap.capability,
+            rendererIdentity: bootstrap.rendererIdentity,
+            fetch: globalThis.fetch,
+          });
+          const presentation = new NightlyBrowserPresentation({
+            current: () => windows.get(id) === window && !window.isDestroyed(),
+            visible: () => !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
+            focused: () => !window.isDestroyed() && window.isFocused(),
+            popupMenu: (request, signal) => {
+              if (window.isDestroyed()) return Promise.resolve({ kind: "refused" });
+              const point = screen.getCursorScreenPoint();
+              const bounds = window.getContentBounds();
+              return popupNativeMenu(
+                window,
+                {
+                  ...request,
+                  x: (point.x - bounds.x) / window.webContents.getZoomFactor(),
+                  y: (point.y - bounds.y) / window.webContents.getZoomFactor(),
+                },
+                signal,
+              );
+            },
+            execute: browserClient.execute,
+          });
+          presentations.set(id, presentation);
+          window.on("blur", () => {
+            void presentation.releaseInputs();
+          });
+          window.on("focus", () => {
+            void presentation.releaseInputs();
+          });
+          window.on("show", () => presentation.show());
+          window.on("restore", () => presentation.show());
+          window.on("hide", () => {
+            void presentation.hide();
+          });
+          window.on("minimize", () => {
+            void presentation.hide();
+          });
+          windows.set(id, window);
+          capabilities.set(id, bootstrap.capability);
+          trusted.set(id, {
+            serverOrigin: bootstrap.hostOrigin,
+            rendererIdentity: bootstrap.rendererIdentity,
+          });
+          const guard = (event: { preventDefault(): void }, url: string) => {
+            if (!allowed.allows(url)) event.preventDefault();
+          };
+          window.webContents.on("will-navigate", (event, url) => guard(event, url));
+          window.webContents.on("will-redirect", (event, url) => guard(event, url));
+          window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+          window.webContents.once("render-process-gone", () => {
+            if (!window.isDestroyed()) window.destroy();
+          });
+          window.once("closed", () => {
+            windows.delete(id);
+            presentations.delete(id);
+            const closing = presentation.close();
+            closingPresentations.add(closing);
+            void closing.finally(() => closingPresentations.delete(closing));
+            capabilities.delete(id);
+            trusted.remove(id);
+          });
+          return {
+            load: async () => {
+              await window.loadFile(rendererPath, { query: { serverUrl: bootstrap.hostOrigin } });
+            },
+            show: () => window.show(),
+            destroy: () => window.destroy(),
+            isDestroyed: () => window.isDestroyed(),
+            onClosed: (listener) => window.once("closed", listener),
+          };
+        },
+      }),
+  });
+  const client = await recovery.start();
   if (client.kind !== "opened")
     return {
       kind: "refused",
