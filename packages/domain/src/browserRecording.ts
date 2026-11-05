@@ -122,7 +122,7 @@ export function encodeBrowserRecordingApng(
     writeUint32(fctl, 12, 0);
     writeUint32(fctl, 16, 0);
     // Delay as a fraction of a second: milliseconds over 1000.
-    writeUint16(fctl, 20, Math.min(0xffff, Math.max(1, Math.round(delayMs))));
+    writeUint16(fctl, 20, wholeFrameDelayMs(delayMs));
     writeUint16(fctl, 22, 1000);
     // Dispose none, blend source: each frame is a whole picture of the page.
     fctl[24] = 0;
@@ -366,15 +366,19 @@ export class BrowserRecordingFrames {
     const endMs = Math.max(0, (this.#stoppedAtMs ?? atMs) - this.#startedAtMs);
     const frames = this.#frames.map((kept, index): BrowserRecordingAnimationFrame => {
       const next = this.#frames[index + 1];
-      const delayMs =
+      const elapsedMs =
         next === undefined
           ? Math.max(this.#limits.frameIntervalMs, endMs - kept.atMs)
           : next.atMs - kept.atMs;
-      return { frame: kept.frame, delayMs };
+      // Both runtimes time frames with performance.now(), which is fractional,
+      // while the file stores whole milliseconds and the capture contract takes
+      // an integer length: round here, once, so the two always agree.
+      return { frame: kept.frame, delayMs: wholeFrameDelayMs(elapsedMs) };
     });
-    const last = this.#frames.at(-1) ?? first;
-    const lastDelay = frames.at(-1)?.delayMs ?? 0;
-    const durationMs = Math.min(this.#limits.maxDurationMs, last.atMs + lastDelay - first.atMs);
+    const durationMs = Math.min(
+      this.#limits.maxDurationMs,
+      frames.reduce((sum, frame) => sum + frame.delayMs, 0),
+    );
     return {
       status: "recorded",
       bytes: encodeBrowserRecordingApng(frames),
@@ -383,6 +387,11 @@ export class BrowserRecordingFrames {
       ...(this.#truncated === undefined ? {} : { truncated: this.#truncated }),
     };
   }
+}
+
+/** A frame delay as the file stores it: whole milliseconds from 1 to 65535. */
+function wholeFrameDelayMs(delayMs: number): number {
+  return Math.min(0xffff, Math.max(1, Math.round(delayMs)));
 }
 
 function chunk(type: string, data: Uint8Array): Uint8Array {

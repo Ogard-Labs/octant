@@ -232,6 +232,17 @@ describe("BrowserRecordingFrames", () => {
     expect(result).not.toHaveProperty("truncated");
   });
 
+  it("reports whole milliseconds that match the frame delays when the clock is fractional", () => {
+    const recording = new BrowserRecordingFrames(100.125, LIMITS);
+    recording.offer(png(4, 4, RED), 100.125);
+    recording.offer(png(4, 4, BLUE), 600.5);
+    const result = recording.finish(1_100.75);
+    if (result.status !== "recorded") throw new Error(result.status);
+    const delays = parseApng(result.bytes).frames.map((frame) => frame.delayMs);
+    expect(Number.isInteger(result.durationMs)).toBe(true);
+    expect(result.durationMs).toBe(delays.reduce((sum, delay) => sum + delay, 0));
+  });
+
   it("skips a frame that shows the page exactly as before", () => {
     const recording = new BrowserRecordingFrames(0, LIMITS);
     recording.offer(png(4, 4, RED), 0);
