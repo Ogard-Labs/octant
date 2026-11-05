@@ -18,6 +18,7 @@ export function CodeTurnChangedFilesCard(props: {
   readonly changedFiles: CodeTurnChangedFiles;
   readonly onReviewFile?: (path: string) => void;
   readonly reviewUnavailable?: string;
+  readonly comparison?: "current-checkout" | "captured-turn";
 }) {
   const { files, total, truncated } = props.changedFiles;
   const [open, setOpen] = useState(false);
@@ -107,7 +108,9 @@ export function CodeTurnChangedFilesCard(props: {
         <p className="code-turn-files__note" role="status">
           {files.length === 0
             ? "More changed than could be listed here. Review shows the current checkout comparison."
-            : `Showing ${files.length} of ${total}. Review shows the current checkout comparison.`}
+            : props.comparison === "captured-turn"
+              ? `Showing ${files.length} of ${total}. Some captured paths are omitted.`
+              : `Showing ${files.length} of ${total}. Review shows the current checkout comparison.`}
         </p>
       ) : null}
     </section>

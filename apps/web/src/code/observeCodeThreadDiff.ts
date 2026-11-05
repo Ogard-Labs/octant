@@ -30,7 +30,7 @@ export async function observeCodeThreadDiff(
   nextUuid: () => string,
   scope: CodeDiffScope,
   options: CodeDiffReadOptions = {},
-): Promise<CodeDiffProjection> {
+): Promise<Exclude<CodeDiffProjection, { readonly state: "turn" }>> {
   try {
     const checkout = await client.executeOperation({
       kind: "observe-git",

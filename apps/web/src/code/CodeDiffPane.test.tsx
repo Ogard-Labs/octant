@@ -1,5 +1,10 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
+import {
+  decodeCodeTurnReviewCapture,
+  decodeCodeThreadId,
+  decodeCodeOperationId,
+} from "@octant/contracts";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,6 +55,94 @@ describe("CodeDiffPane", () => {
     ]);
     expect(screen.getByRole("region", { name: "README.md" })).toBeVisible();
     expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the selected captured path and editor identity across reordered versions, and explicitly refuses to retarget a missing path", async () => {
+    const code = client();
+    const fixture = runtime();
+    const selected = vi.fn();
+    const turn = (text: string, version: number, paths: string[]): CodeDiffProjection => {
+      const capture = decodeCodeTurnReviewCapture({
+        checkoutId: ids.checkout,
+        cursor: version * 10,
+        version,
+        baseline: "a".repeat(40),
+        tree: "b".repeat(40),
+        diff: {
+          contentId: ids.content,
+          digest: "c".repeat(64),
+          byteLength: new TextEncoder().encode(text).byteLength,
+        },
+        changedFiles: {
+          files: paths.map((path) => ({ path, insertions: 1, deletions: 1 })),
+          total: paths.length,
+          truncated: false,
+        },
+        capturedAt: "2026-11-03T00:00:00.000Z",
+        final: false,
+      });
+      return {
+        state: "turn",
+        checkoutId: capture.checkoutId,
+        threadId: decodeCodeThreadId(ids.thread),
+        operationId: decodeCodeOperationId(ids.operation),
+        capture,
+        text,
+      };
+    };
+    const readmeAt = DIFF.indexOf("diff --git a/README.md");
+    const index = DIFF.slice(0, readmeAt);
+    const readme = DIFF.slice(readmeAt);
+    const mounted = render(
+      <CodeDiffPane
+        client={code}
+        diff={turn(DIFF, 1, ["src/index.ts", "README.md"])}
+        loadRuntime={fixture.loadRuntime}
+        onSelectReviewLine={selected}
+      />,
+    );
+    await chooseSideBySide();
+    await userEvent.setup().click(screen.getByRole("button", { name: "README.mdadded+1−0" }));
+    await waitFor(() => expect(fixture.options?.modelUriBase).toContain("README.md"));
+    const loads = fixture.loadRuntime.mock.calls.length;
+    mounted.rerender(
+      <CodeDiffPane
+        client={code}
+        diff={turn(readme + index, 2, ["README.md", "src/index.ts"])}
+        loadRuntime={fixture.loadRuntime}
+        onSelectReviewLine={selected}
+        ignoreWhitespace={{ value: true, onChange: vi.fn() }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "README.mdadded+1−0" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(fixture.loadRuntime).toHaveBeenCalledTimes(loads);
+    expect(fixture.session?.setIgnoreTrimWhitespace).toHaveBeenCalledWith(true);
+    mounted.rerender(
+      <CodeDiffPane
+        client={code}
+        diff={turn(index, 3, ["src/index.ts"])}
+        loadRuntime={fixture.loadRuntime}
+        onSelectReviewLine={selected}
+      />,
+    );
+    expect(screen.getByText(/previously selected file is absent/)).toBeVisible();
+    const chooser = screen.getByRole("navigation", { name: "Choose a captured file" });
+    await userEvent.setup().click(within(chooser).getByRole("button", { name: "src/index.ts" }));
+    await waitFor(() =>
+      expect(fixture.options?.modelUriBase).toContain(encodeURIComponent("src/index.ts")),
+    );
+    fixture.options?.onSelectLine?.({ side: "original", line: 1 });
+    expect(selected).toHaveBeenLastCalledWith({
+      reviewOperationId: ids.operation,
+      captureCursor: 30,
+      path: "src/index.ts",
+      side: "original",
+      line: 12,
+    });
+    expect(code.operationContent).not.toHaveBeenCalled();
   });
 
   it("offers Ignore whitespace only when the owner can reread the diff, and reports the choice", async () => {
@@ -602,6 +695,7 @@ function runtime() {
           setRenderSideBySide: vi.fn(),
           setTypography: vi.fn(),
           setValues: vi.fn(),
+          setIgnoreTrimWhitespace: vi.fn(),
         };
         return session;
       },

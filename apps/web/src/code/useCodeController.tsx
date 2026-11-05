@@ -1488,6 +1488,22 @@ export function useCodeController(options: CodeControllerOptions) {
                     noteProviderRequest(event);
                     noteActivity(operationId, event);
                     noteUsage(operationId, event);
+                    if (event.kind === "conversation-turn-review-preview") {
+                      const preview = event.preview;
+                      setConversation((current) =>
+                        current.map((message) => {
+                          if (message.id !== `${operationId}:assistant`) return message;
+                          const capture = preview.capture ?? message.reviewPreview?.capture;
+                          return {
+                            ...message,
+                            reviewPreview: {
+                              ...preview,
+                              ...(capture === undefined ? {} : { capture }),
+                            },
+                          };
+                        }),
+                      );
+                    }
                     if (event.kind === "conversation-turn-changed-files") {
                       const changedFiles = event.changedFiles;
                       setConversation((current) =>
@@ -2841,6 +2857,19 @@ export function useCodeController(options: CodeControllerOptions) {
               }
               // The host journals the change list just before the turn settles,
               // so the reply gains its files here rather than on the next reopen.
+              if (event.kind === "conversation-turn-review-preview") {
+                const preview = event.preview;
+                setConversation((current) =>
+                  current.map((message) => {
+                    if (message.id !== `${operationId}:assistant`) return message;
+                    const capture = preview.capture ?? message.reviewPreview?.capture;
+                    return {
+                      ...message,
+                      reviewPreview: { ...preview, ...(capture === undefined ? {} : { capture }) },
+                    };
+                  }),
+                );
+              }
               if (event.kind === "conversation-turn-changed-files") {
                 const changedFiles = event.changedFiles;
                 setConversation((current) =>

@@ -54,6 +54,7 @@ const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
  * hostile stream's decode work.
  */
 const MAX_STREAM_SCAN_EVENTS = 100_000;
+const MAX_REMEMBERED_REVIEW_SOURCES = 32;
 /**
  * How many decoded frames, across threads, the stores on one journal keep between history
  * reads. The board, the sidebar's pull-request join, and child observations
@@ -220,6 +221,18 @@ export class CodeOperationEventStore {
   readonly #clock: () => string;
   readonly #actor: typeof EventActor.Type;
   readonly #histories: RememberedHistories;
+  /** Compact metadata for a few open turn comparisons, never their streamed text. */
+  readonly #reviewSources = new Map<
+    string,
+    {
+      startSequence: number;
+      cursor: number;
+      source: Pick<
+        CodeConversationTurn,
+        "operationId" | "checkoutId" | "checkpoint" | "status" | "reviewPreview"
+      >;
+    }
+  >();
 
   constructor(options: CodeOperationEventStoreOptions) {
     this.#journal = options.journal;
@@ -235,6 +248,24 @@ export class CodeOperationEventStore {
   }
 
   append(input: AppendCodeOperationEventInput): typeof CodeOperationEventFrame.Type {
+    if (
+      input.event.kind === "conversation-turn-review-preview" &&
+      input.event.preview.capture !== undefined
+    ) {
+      const capture = input.event.preview.capture;
+      const source = this.reviewSource(input.threadId, input.operationId);
+      if (
+        source === undefined ||
+        source.checkoutId !== capture.checkoutId ||
+        source.checkpoint?.worktree !== capture.baseline ||
+        capture.cursor !== input.expectedCursor + 1 ||
+        capture.version !== (source.reviewPreview?.capture?.version ?? 0) + 1
+      )
+        throw new CodeOperationEventStoreError(
+          "invalid",
+          "Turn capture does not match its recorded starting identity.",
+        );
+    }
     let frame: typeof CodeOperationEventFrame.Type;
     let aggregateId: typeof AggregateId.Type;
     let expectedVersion: typeof AggregateVersion.Type;
@@ -1013,6 +1044,111 @@ export class CodeOperationEventStore {
     });
   }
 
+  /** Incremental capture/status metadata; passive refresh does not repeatedly decode a long turn. */
+  reviewSource(
+    threadId: CodeThreadId,
+    operationId: CodeOperationId,
+  ):
+    | Pick<
+        CodeConversationTurn,
+        "operationId" | "checkoutId" | "checkpoint" | "status" | "reviewPreview"
+      >
+    | undefined {
+    const key = `${threadId}:${operationId}`;
+    const envelope = this.#journal.firstAggregateEvent({
+      aggregateType: "code-operation",
+      aggregateId: String(operationId),
+      kind: "conversation-turn-started",
+    });
+    const start = envelope === undefined ? undefined : ownFrame(envelope, threadId);
+    if (
+      envelope === undefined ||
+      start?.event.kind !== "conversation-turn-started" ||
+      this.#rewoundTurns(threadId)(envelope.globalSequence)
+    ) {
+      this.#reviewSources.delete(key);
+      return undefined;
+    }
+    let remembered = this.#reviewSources.get(key);
+    if (remembered === undefined || remembered.startSequence !== envelope.globalSequence) {
+      remembered = {
+        startSequence: envelope.globalSequence,
+        cursor: start.cursor,
+        source: {
+          operationId,
+          checkoutId: start.event.checkoutId,
+          checkpoint: start.event.checkpoint,
+          status: "incomplete",
+        },
+      };
+    }
+    let scanned = 0;
+    for (;;) {
+      const rows = this.#journal.replayAggregate({
+        aggregateType: "code-operation",
+        aggregateId: String(operationId),
+        afterVersion: remembered.cursor,
+        limit: JOURNAL_REPLAY_BATCH_SIZE,
+      });
+      scanned += rows.length;
+      if (scanned > MAX_STREAM_SCAN_EVENTS) {
+        this.#reviewSources.delete(key);
+        return undefined;
+      }
+      for (const row of rows) {
+        const frame = ownFrame(row, threadId);
+        if (frame === undefined || frame.operationId !== operationId) {
+          this.#reviewSources.delete(key);
+          return undefined;
+        }
+        remembered.cursor = frame.cursor;
+        const event = frame.event;
+        if (event.kind === "conversation-turn-started")
+          remembered.source = {
+            operationId,
+            checkoutId: event.checkoutId,
+            checkpoint: event.checkpoint,
+            status: "incomplete",
+          };
+        else if (event.kind === "conversation-turn-review-preview") {
+          const before = remembered.source.reviewPreview?.capture;
+          const next = event.preview.capture;
+          if (
+            next !== undefined &&
+            (next.cursor !== frame.cursor ||
+              next.checkoutId !== remembered.source.checkoutId ||
+              next.baseline !== remembered.source.checkpoint?.worktree ||
+              next.version !== (before?.version ?? 0) + 1)
+          ) {
+            this.#reviewSources.delete(key);
+            return undefined;
+          }
+          const capture = next ?? before;
+          remembered.source = {
+            ...remembered.source,
+            reviewPreview: { ...event.preview, ...(capture === undefined ? {} : { capture }) },
+          };
+        } else if (event.kind === "operation-state")
+          remembered.source = { ...remembered.source, status: conversationStatus(event.state) };
+        else if (event.kind === "operation-result" && event.result.kind === "provider-turn-state")
+          remembered.source = {
+            ...remembered.source,
+            status: conversationStatus(event.result.state),
+          };
+      }
+      if (rows.length < JOURNAL_REPLAY_BATCH_SIZE) break;
+    }
+    this.#reviewSources.delete(key);
+    this.#reviewSources.set(key, remembered);
+    // Each entry holds one bounded path list and references; evict older views, not journal evidence.
+    while (this.#reviewSources.size > MAX_REMEMBERED_REVIEW_SOURCES) {
+      const oldest = this.#reviewSources.keys().next().value;
+      if (oldest === undefined) break;
+      this.#reviewSources.delete(oldest);
+    }
+    return remembered.source;
+  }
+
   /**
    * One page of a thread's own turns for a client that opens on its newest
    * turns: the newest `limit`, or those just `before` a turn, or the page that
@@ -1400,6 +1536,13 @@ function foldTurnFrame(
       builder.forkMergeBacks.push(mergeBack);
   } else if (frame.event.kind === "conversation-turn-changed-files") {
     builder.changedFiles = frame.event.changedFiles;
+  } else if (frame.event.kind === "conversation-turn-review-preview") {
+    const previous = builder.reviewPreview?.capture;
+    const capture = frame.event.preview.capture ?? previous;
+    builder.reviewPreview = {
+      ...frame.event.preview,
+      ...(capture === undefined ? {} : { capture }),
+    };
   } else if (frame.event.kind === "operation-state") {
     builder.status = conversationStatus(frame.event.state);
     if (frame.event.failure !== undefined) builder.failure = frame.event.failure;
@@ -1569,6 +1712,7 @@ type CodeConversationBuilder = {
   status: CodeConversationTurn["status"];
   failure?: CodeConversationTurn["failure"];
   changedFiles?: CodeConversationTurn["changedFiles"];
+  reviewPreview?: CodeConversationTurn["reviewPreview"];
   startedAt: CodeConversationTurn["startedAt"];
   updatedAt: CodeConversationTurn["updatedAt"];
 };

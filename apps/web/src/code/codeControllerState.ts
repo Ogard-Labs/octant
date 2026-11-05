@@ -12,6 +12,7 @@ import type {
 import {
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   type CodeConversationTurn,
+  type CodeTurnReviewPreview,
   type CodeConversationTurnHandoff,
   type CodeConversationTurnUsage,
   type CodeConversationUsageTotals,
@@ -85,6 +86,7 @@ export interface CodeConversationMessage {
    * is not the same as "nothing changed".
    */
   readonly changedFiles?: CodeTurnChangedFiles;
+  readonly reviewPreview?: CodeTurnReviewPreview;
   /**
    * The text handoff this reply's turn started its new provider session
    * with, as the host journaled it. Present only on the reply of a turn that
@@ -564,6 +566,7 @@ async function projectConversationTurns(
       startedAt: String(turn.startedAt),
       at: String(turn.updatedAt),
       ...(turn.changedFiles === undefined ? {} : { changedFiles: turn.changedFiles }),
+      ...(turn.reviewPreview === undefined ? {} : { reviewPreview: turn.reviewPreview }),
       ...(turn.handoff === undefined ? {} : { handoff: turn.handoff }),
       ...(turn.forkMergeBacks === undefined ? {} : { forkMergeBacks: turn.forkMergeBacks }),
     });

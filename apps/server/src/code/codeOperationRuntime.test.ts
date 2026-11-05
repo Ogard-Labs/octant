@@ -1,19 +1,35 @@
+import { createExistingWorktreeCodeFileRootAuthority } from "../wiring/code";
 import { withCodeOperationRuntime } from "../wiring/codeRuntime";
 import { createCodeRouteHandler } from "../codeRoutes";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { createRemoteDevicePrincipal } from "../clientPrincipal";
 import type { CodeOperationPullRequestActions } from "./codeOperationService";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  renameSync,
+  statSync,
+  realpathSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { execFileSync } from "node:child_process";
+import { GitMutationPort } from "./gitMutationPort";
+import { CodeEvidenceStore } from "./codeEvidenceStore";
+import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import {
   ActorId,
   decodeAgentMessageEndpointId,
   CODE_DEFINITION_TOOL_NAME,
   CODE_DIAGNOSTICS_TOOL_NAME,
   decodeCodeFileId,
+  decodeCodeRelativePath,
   CodeOperationEventFrame,
   CodeRuntimeWorkUpdated,
   CodeReviewFindingUpdated,
@@ -128,10 +144,10 @@ import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
-import type {
+import {
   GitObservationPort,
-  GitObservationResult,
-  GitScopedDiffResult,
+  type GitObservationResult,
+  type GitScopedDiffResult,
 } from "./gitObservationPort";
 
 const now = "2026-07-21T13:00:00.000Z";
@@ -7585,6 +7601,8 @@ function runtimeFixture(options: {
   credentialResolver?: Parameters<typeof createCodeOperationRuntime>[0]["credentialResolver"];
   credentialReferences?: readonly { environmentName: string; reference: string }[];
   gitObservation?: GitObservationResult;
+  checkoutIdentity?: ReturnType<typeof decodeCodeCheckoutIdentity>;
+  resolveCheckoutRoot?: Parameters<typeof createCodeOperationRuntime>[0]["resolveCheckoutRoot"];
   hunkCurrent?: () => boolean;
   hunkApply?: NonNullable<
     NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["applyHunks"]
@@ -7597,6 +7615,8 @@ function runtimeFixture(options: {
   gitReadDiff?: (
     input: Parameters<GitObservationPort["readDiff"]>[0],
   ) => Promise<GitScopedDiffResult>;
+  gitTreeDiff?: GitObservationPort["readTreeDiff"];
+  liveGit?: { readonly observation: GitObservationPort; readonly mutation: GitMutationPort };
   /**
    * What differs between a turn's starting capture and the checkout when it
    * settles. Setting it also lets the checkout be captured; left out, the
@@ -7612,12 +7632,14 @@ function runtimeFixture(options: {
   /** Where the runtime keeps its running turns, as the host passes it. */
   activeTurns?: CodeActiveTurns;
   /** Whether a window may access a Project; a function answers per Project. */
-  projectAccess?: boolean | ((projectId: string) => boolean);
+  projectAccess?: boolean | ((projectId: string) => boolean | Promise<boolean>);
   /**
    * The host's own request-scoped Project access, in place of `projectAccess`:
    * a check sees whichever request, if any, its async chain started in.
    */
   codeProjectAccess?: CodeProjectAccess;
+  waitProjectAccess?: () => Promise<void>;
+  projectAccessCurrent?: () => boolean;
   planner?: Parameters<typeof createCodeOperationRuntime>[0]["planner"];
   managedThreadCreation?: Parameters<typeof createCodeOperationRuntime>[0]["managedThreadCreation"];
   failRuntimeWorkJournal?: boolean;
@@ -7705,28 +7727,35 @@ function runtimeFixture(options: {
     });
   }
   let activeThread = thread();
+  let threadPurged = false;
+  let releasedCheckpoints = 0;
   const snapshotPolicies: Array<string | undefined> = [];
   let restoredTrees = 0;
-  let checkout = decodeCodeCheckoutIdentity({
-    id: checkoutId,
-    repositoryId: activeThread.repositoryId,
-    kind: "existing-worktree",
-    availability: "available",
-    head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
-    observedAt: now,
-  });
+  let checkout =
+    options.checkoutIdentity ??
+    decodeCodeCheckoutIdentity({
+      id: checkoutId,
+      repositoryId: activeThread.repositoryId,
+      kind: "existing-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
+      observedAt: now,
+    });
   const hostAccess = options.codeProjectAccess;
-  const access = vi.fn(async (accessWindowId: WindowId, projectId: string) =>
-    hostAccess !== undefined
-      ? hostAccess.canAccessProject(accessWindowId, decodeProjectId(projectId))
-      : typeof options.projectAccess === "function"
-        ? options.projectAccess(String(projectId))
-        : (options.projectAccess ?? true),
-  );
+  const access = vi.fn(async (accessWindowId: WindowId, projectId: string) => {
+    const granted =
+      hostAccess !== undefined
+        ? hostAccess.canAccessProject(accessWindowId, decodeProjectId(projectId))
+        : typeof options.projectAccess === "function"
+          ? options.projectAccess(String(projectId))
+          : (options.projectAccess ?? true);
+    if (options.waitProjectAccess !== undefined) await options.waitProjectAccess();
+    return granted;
+  });
   // Threads other than the one under test, such as the source a fork reads.
   const otherThreads = new Map<string, CodeThread>();
   const readThread = (id: CodeThreadId) =>
-    id === threadId ? activeThread : otherThreads.get(String(id));
+    id === threadId ? (threadPurged ? undefined : activeThread) : otherThreads.get(String(id));
   const prompt = evidence(40);
   const response = evidence(41);
   const evidenceValues =
@@ -7767,7 +7796,7 @@ function runtimeFixture(options: {
   let exitTerminal: (() => void) | undefined;
   const conversationReader = new CodeOperationEventStore({
     journal,
-    uuid: () => "",
+    uuid: randomUUID,
     clock: () => now,
     actor,
   });
@@ -7856,22 +7885,36 @@ function runtimeFixture(options: {
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
     windowAccess: {
       canAccessProject: access,
-      ...(options.hunkCurrent === undefined ? {} : { currentProjectAccess: options.hunkCurrent }),
+      currentProjectAccess: (scope, project) => {
+        if (options.hunkCurrent !== undefined) return options.hunkCurrent();
+        if (hostAccess !== undefined)
+          return hostAccess.standingAuthority(() => hostAccess.canAccessProject(scope, project));
+        if (options.projectAccessCurrent !== undefined) return options.projectAccessCurrent();
+        const granted =
+          typeof options.projectAccess === "function"
+            ? options.projectAccess(String(project))
+            : (options.projectAccess ?? true);
+        if (typeof granted === "boolean") return granted;
+        void granted.catch(() => {});
+        return false;
+      },
       standingAuthority: (run) =>
         hostAccess === undefined ? run() : hostAccess.standingAuthority(run),
     },
     ...(options.acpTerminalConfinement === undefined
       ? {}
       : { acpTerminalConfinement: options.acpTerminalConfinement }),
-    resolveCheckoutRoot: async () => ({
-      checkoutRoot: options.checkoutRoot ?? "/private/exact",
-      ...(options.hunkCurrent === undefined
-        ? {}
-        : { rootCurrent: options.hunkCurrent, rootIdentity: { device: "1", inode: "1" } }),
-      shell: "/bin/zsh",
-      credentialReferences: options.credentialReferences ?? [],
-      environment: {},
-    }),
+    resolveCheckoutRoot:
+      options.resolveCheckoutRoot ??
+      (async () => ({
+        checkoutRoot: options.checkoutRoot ?? "/private/exact",
+        ...(options.hunkCurrent === undefined
+          ? {}
+          : { rootCurrent: options.hunkCurrent, rootIdentity: { device: "1", inode: "1" } }),
+        shell: "/bin/zsh",
+        credentialReferences: options.credentialReferences ?? [],
+        environment: {},
+      })),
     resolveProviderDriver: options.resolveProviderDriver ?? (async () => options.provider),
     ...(options.threadDesktopDestination === undefined
       ? {}
@@ -8050,13 +8093,14 @@ function runtimeFixture(options: {
       readArtifact: async () => undefined,
     },
     ...(options.pullRequestPort === undefined ? {} : { pullRequestPort: options.pullRequestPort }),
-    gitObservationPort: {
+    gitObservationPort: options.liveGit?.observation ?? {
       observe: async () =>
         gitObservationReadHook === undefined
           ? (options.gitObservation ?? { status: "unavailable" as const })
           : await gitObservationReadHook(),
       observeRemotes: async () => options.gitRemotes ?? [],
       ...(options.gitReadDiff === undefined ? {} : { readDiff: options.gitReadDiff }),
+      ...(options.gitTreeDiff === undefined ? {} : { readTreeDiff: options.gitTreeDiff }),
       ...(options.gitTreeChanges === undefined
         ? {}
         : {
@@ -8066,7 +8110,7 @@ function runtimeFixture(options: {
             }),
           }),
     },
-    gitMutationPort: {
+    gitMutationPort: options.liveGit?.mutation ?? {
       ...(options.hunkApply === undefined ? {} : { applyHunks: options.hunkApply }),
       stage: async () => ({ status: "failed" as const }),
       unstage: async () => ({ status: "failed" as const }),
@@ -8088,7 +8132,9 @@ function runtimeFixture(options: {
         restoredTrees += 1;
         return { status: "failed" as const };
       },
-      releaseCheckpoint: async () => {},
+      releaseCheckpoint: async () => {
+        releasedCheckpoints += 1;
+      },
     },
   });
   return {
@@ -8111,9 +8157,17 @@ function runtimeFixture(options: {
     selectForkMergeBack,
     conversation: (of: CodeThreadId = threadId) =>
       conversationReader.conversation({ threadId: of, afterCursor: 0, limit: 100 }),
+    spyJournalReplay: () => vi.spyOn(journal, "replayAggregate"),
+    appendOperationEvent: (input: Parameters<CodeOperationEventStore["append"]>[0]) =>
+      conversationReader.append(input),
     setThread: (next: CodeThread) => {
       activeThread = next;
+      threadPurged = false;
     },
+    purgeThread: () => {
+      threadPurged = true;
+    },
+    releasedCheckpoints: () => releasedCheckpoints,
     /** Make the thread's checkout a remote root, a folder on another machine. */
     bindCheckoutToRemoteFolder: () => {
       checkout = decodeCodeCheckoutIdentity({
@@ -10399,6 +10453,1157 @@ it("forwards Side Chat return validation through the actual Code runtime-to-serv
   }
 });
 
+it("requests a preview through the actual app-managed terminal write composition while a terminal read remains passive", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  const readTreeDiff = vi.fn(async () => ({
+    status: "ready" as const,
+    paths: ["src/app.ts"],
+    diff: {
+      text: "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-before\n+after\n",
+      byteLength: 109,
+      truncated: false,
+    },
+  }));
+  const f = runtimeFixture({
+    terminalExit: { exitCode: 0 },
+    provider: providerDriver(provider),
+    supportsAppManagedTools: true,
+    gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+    gitTreeDiff: readTreeDiff,
+  });
+  f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+  try {
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "start-terminal",
+        operationId: operationId(1800),
+        terminalId: decodeCodeTerminalId(threadId),
+        threadId,
+        checkoutId,
+        columns: 80,
+        rows: 24,
+        credentialRefs: [],
+      }),
+    ).toMatchObject({ kind: "terminal-state", state: "running" });
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(1801),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "terminal-read",
+          toolName: "octant_terminal",
+          inputJson: JSON.stringify({ operation: "read" }),
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledOnce());
+    expect(readTreeDiff).not.toHaveBeenCalled();
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "terminal-write",
+          sequence: 2,
+          toolName: "octant_terminal",
+          inputJson: JSON.stringify({ operation: "write", command: "echo changed\n" }),
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledTimes(2));
+    await vi.waitFor(
+      () => expect(f.conversation().turns[0]?.reviewPreview?.capture?.version).toBe(1),
+      { timeout: 3_000 },
+    );
+    expect(readTreeDiff).toHaveBeenCalledOnce();
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it("keeps real Git previews on the original start tree through other writers, then sends an exact older finding under ordinary Plan authority", async () => {
+  const root = mkdtempSync(join(tmpdir(), "octant-live-review-git-"));
+  directories.push(root);
+  const confinement = createFakeSandboxConfinement("octant-live-review-confinement-");
+  directories.push(confinement.root);
+  const gitExecutable = (process.env.PATH ?? "")
+    .split(delimiter)
+    .map((entry) => resolve(entry, "git"))
+    .find((candidate) => existsSync(candidate));
+  if (gitExecutable === undefined) throw new Error("Configured Git is unavailable.");
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", root, ...args], { encoding: "utf8", timeout: 5_000 });
+  git("init", "-b", "main");
+  git("config", "user.name", "Review fixture");
+  git("config", "user.email", "review@example.invalid");
+  mkdirSync(join(root, "src"));
+  writeFileSync(join(root, "src/app.ts"), "original boundary\n");
+  git("add", ".");
+  git("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", "commit", "-m", "baseline");
+  const head = git("rev-parse", "HEAD").trim();
+  const options = {
+    confinement: confinement.confinement,
+    temporaryDirectory: confinement.temporaryDirectory,
+    gitExecutable,
+  };
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  const record = vi.fn(() => ({
+    kind: "recorded" as const,
+    taint: { externalContentIngested: true, ingestedSources: ["Local Code review correction"] },
+  }));
+  const f = runtimeFixture({
+    checkoutRoot: root,
+    provider: providerDriver(provider),
+    recordExternalContentIngestion: record,
+    liveGit: {
+      observation: new GitObservationPort(options),
+      mutation: new GitMutationPort(undefined, options),
+    },
+  });
+  f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+  const turn = operationId(1700);
+  try {
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    const baseline = f.conversation().turns[0]?.checkpoint?.worktree;
+    expect(baseline).toMatch(/^[a-f0-9]{40}$/);
+    const retainedRefs = git(
+      "for-each-ref",
+      "--format=%(refname)",
+      `refs/octant/checkpoints/${checkoutId}`,
+    );
+    expect(retainedRefs.trim()).not.toBe("");
+    let first: import("@octant/contracts").CodeTurnReviewCapture | undefined;
+    for (let i = 0; i < 8; i++) {
+      writeFileSync(join(root, "src/app.ts"), `agent edit ${i}\n`);
+      if (i === 3) writeFileSync(join(root, "person.txt"), "independent person edit\n");
+      const result = await f.runtime.execute(windowId, {
+        kind: "observe-turn-review",
+        operationId: operationId(1710 + i),
+        threadId,
+        checkoutId,
+        turnOperationId: turn,
+        refresh: true,
+      });
+      expect(result.kind).toBe("turn-review-preview");
+      if (result.kind !== "turn-review-preview" || result.preview.capture === undefined)
+        throw new Error("capture unavailable");
+      const capture = result.preview.capture;
+      first ??= capture;
+      expect(capture.baseline).toBe(baseline);
+      expect(capture.version).toBe(i + 1);
+      const text = f.evidenceValues.get(capture.diff.contentId) ?? "";
+      expect(text).toContain(`agent edit ${i}`);
+      if (i >= 3) expect(text).toContain("independent person edit");
+      expect(
+        git("for-each-ref", "--format=%(refname)", `refs/octant/checkpoints/${checkoutId}`),
+      ).toBe(retainedRefs);
+      expect(git("diff", "--cached", "--name-only")).toBe("");
+    }
+    if (first === undefined) throw new Error("capture missing");
+    const target = await f.runtime.execute(windowId, {
+      kind: "prepare-review-target",
+      operationId: operationId(1720),
+      threadId,
+      checkoutId,
+      reviewOperationId: turn,
+      captureCursor: first.cursor,
+      path: "src/app.ts",
+      side: "original",
+      line: 1,
+    });
+    expect(target).toMatchObject({ kind: "review-target-state", anchorState: "outdated" });
+    if (target.kind !== "review-target-state") throw new Error("target unavailable");
+    const findingId = randomUUID();
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "create-review-finding",
+        operationId: operationId(1721),
+        threadId,
+        checkoutId,
+        findingId,
+        ...target.target,
+        severity: "warning",
+        summary: "Preserve the original boundary.",
+      }),
+    ).toMatchObject({ kind: "review-finding-state" });
+    const prepared = await f.runtime.execute(windowId, {
+      kind: "prepare-review-correction",
+      operationId: operationId(1722),
+      threadId,
+      checkoutId,
+      findings: [{ findingId, expectedVersion: 1 }],
+    });
+    if (prepared.kind !== "review-correction-prepared") throw new Error("correction unavailable");
+    expect(prepared.prepared.text).toContain("original boundary");
+    expect(prepared.prepared.text).not.toContain("agent edit 7");
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+    await vi.waitFor(() =>
+      expect(f.conversation().turns[0]?.reviewPreview?.capture?.final).toBe(true),
+    );
+    f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    const prompt = storedEvidence(1723, prepared.prepared.text);
+    f.evidenceValues.set(prompt.contentId, prepared.prepared.text);
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1724),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt,
+        reviewFindingReferences: prepared.prepared.references,
+      }),
+    ).toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledTimes(2));
+    expect(record).toHaveBeenCalledOnce();
+    expect(f.conversation().turns.at(-1)).toMatchObject({
+      executionPolicy: "plan",
+      reviewFindingReferences: prepared.prepared.references,
+    });
+    expect(f.reviewFindings()[0]).toMatchObject({
+      state: "open",
+      version: 1,
+      anchor: { revision: { kind: "turn-capture", captureCursor: first.cursor, baseline } },
+    });
+    expect(git("rev-parse", "HEAD").trim()).toBe(head);
+    expect(git("diff", "--cached", "--name-only")).toBe("");
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it.each([
+  "Project binding replaced",
+  "physical root replaced",
+  "Project binding replaced during final root stat",
+  "window authority revoked during final root stat",
+  "Project binding replaced during final access",
+  "physical root replaced during final access",
+  "window authority revoked during final access",
+] as const)(
+  "suppresses held native preview evidence after same-ID %s through the production root authority",
+  async (change) => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "octant-preview-root-proof-")));
+    directories.push(directory);
+    const repositoryRoot = join(directory, "repository");
+    const worktreeRoot = join(directory, "worktree");
+    mkdirSync(repositoryRoot);
+    mkdirSync(worktreeRoot);
+    const source = thread();
+    const nativeRepositoryId: `repo_${string}` = `repo_${"a".repeat(64)}`;
+    expect(String(source.repositoryId)).toBe(nativeRepositoryId);
+    let bindingRevision: string = source.bindingRevisionId;
+    const receiptId = operationId(1950);
+    const checkout = decodeCodeCheckoutIdentity({
+      id: checkoutId,
+      repositoryId: source.repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
+      ownershipReceiptId: receiptId,
+      observedAt: now,
+    });
+    let holdFinalStat = false;
+    let finalStatChecks = 0;
+    let holdFinalAccess = false;
+    let finalAccessStats = 0;
+    let accessReady = false;
+    const accessEntered = Promise.withResolvers<void>();
+    const accessHeld = Promise.withResolvers<void>();
+    const statEntered = Promise.withResolvers<void>();
+    const statHeld = Promise.withResolvers<void>();
+    const roots = createExistingWorktreeCodeFileRootAuthority({
+      projects: {
+        bootstrap: async () =>
+          ({
+            active: [
+              { id: source.projectId, type: "code", binding: { canonicalRoot: repositoryRoot } },
+            ],
+            archived: [],
+            availability: [],
+            memory: [],
+          }) as never,
+      },
+      readProject: () =>
+        ({
+          id: source.projectId,
+          type: "code",
+          lifecycle: "active",
+          binding: { canonicalRoot: repositoryRoot },
+          bindingHistory: [
+            { revisionId: bindingRevision, currentBinding: { canonicalRoot: repositoryRoot } },
+          ],
+        }) as never,
+      managedReceipts: {
+        load: async () =>
+          ({
+            receiptId,
+            state: "ready",
+            threadId,
+            checkoutId,
+            repositoryId: source.repositoryId,
+            canonicalRepositoryPath: repositoryRoot,
+            canonicalWorktreePath: worktreeRoot,
+          }) as never,
+      },
+      repository: {
+        observe: async () => ({
+          status: "available",
+          repositoryId: nativeRepositoryId,
+          repositoryRoot,
+          commonDirectory: join(repositoryRoot, ".git"),
+          objectDirectory: join(repositoryRoot, ".git/objects"),
+          checkout: {
+            status: "present",
+            canonicalPath: repositoryRoot,
+            reportedPath: repositoryRoot,
+            head: "a".repeat(40),
+            detached: false,
+            branch: "refs/heads/main",
+          },
+          worktrees: [
+            {
+              status: "present",
+              canonicalPath: worktreeRoot,
+              reportedPath: worktreeRoot,
+              head: "a".repeat(40),
+              detached: false,
+              branch: "refs/heads/feature/runtime",
+            },
+          ],
+        }),
+      },
+      currentIdentity: (path) => {
+        const stat = statSync(path);
+        return {
+          canonicalPath: realpathSync(path),
+          device: String(stat.dev),
+          inode: String(stat.ino),
+        };
+      },
+      statIdentity: async (path) => {
+        if (holdFinalAccess && ++finalAccessStats === 2) accessReady = true;
+        if (holdFinalStat && ++finalStatChecks === 2) {
+          holdFinalStat = false;
+          statEntered.resolve();
+          await statHeld.promise;
+        }
+        const stat = statSync(path);
+        return { device: String(stat.dev), inode: String(stat.ino) };
+      },
+    });
+    let windowLive = true;
+    const access = new CodeProjectAccess({
+      readWorkspace: () => ({ contextByMode: { code: { projectId: source.projectId } } }) as never,
+      hasActiveCodeProject: (id) => id === source.projectId,
+      isWindowLive: () => windowLive,
+    });
+    const entered = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<void>();
+    let hold = false;
+    const patch =
+      "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+original capture\n";
+    const late = patch.replace("original capture", "late private root content");
+    const provider = providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()));
+    const f = runtimeFixture({
+      provider: providerDriver(provider),
+      codeProjectAccess: access,
+      waitProjectAccess: async () => {
+        if (accessReady) {
+          accessReady = false;
+          accessEntered.resolve();
+          await accessHeld.promise;
+        }
+      },
+      checkoutIdentity: checkout,
+      resolveCheckoutRoot: async (window, currentThread, currentCheckout) => {
+        const root = await roots.resolve(
+          window,
+          currentThread,
+          currentCheckout,
+          decodeCodeRelativePath("src/app.ts"),
+        );
+        return root === undefined
+          ? undefined
+          : {
+              checkoutRoot: root.rootPath,
+              rootIdentity: root.rootIdentity,
+              ...(root.current === undefined ? {} : { rootCurrent: root.current }),
+              shell: "/bin/sh",
+              credentialReferences: [],
+              environment: {},
+            };
+      },
+      gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+      gitTreeDiff: async () => {
+        if (hold) {
+          entered.resolve();
+          await held.promise;
+        }
+        const text = hold ? late : patch;
+        return {
+          status: "ready",
+          paths: ["src/app.ts"],
+          diff: { text, byteLength: Buffer.byteLength(text), truncated: false },
+        };
+      },
+    });
+    const turn = operationId(1951);
+    const refresh = (id: number) =>
+      f.runtime.execute(windowId, {
+        kind: "observe-turn-review",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        turnOperationId: turn,
+        refresh: true,
+      });
+    try {
+      await f.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: turn,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: f.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      expect(await refresh(1952)).toMatchObject({
+        kind: "turn-review-preview",
+        preview: { capture: { version: 1 } },
+      });
+      const first = f.conversation().turns[0]?.reviewPreview?.capture;
+      const released = f.releasedCheckpoints();
+      hold = true;
+      const pending = refresh(1953);
+      await entered.promise;
+      if (change === "Project binding replaced") bindingRevision = operationId(1954);
+      else if (change.endsWith("during final root stat")) holdFinalStat = true;
+      else if (change.endsWith("during final access")) holdFinalAccess = true;
+      else {
+        renameSync(worktreeRoot, join(directory, "retired-worktree"));
+        mkdirSync(worktreeRoot);
+      }
+      // Same active Project/window/thread/checkout IDs still pass this real production access check.
+      expect(
+        access.standingAuthority(() => access.canAccessProject(windowId, source.projectId)),
+      ).toBe(true);
+      held.resolve();
+      if (change.endsWith("during final root stat")) {
+        await statEntered.promise;
+        if (change === "window authority revoked during final root stat") windowLive = false;
+        else bindingRevision = operationId(1954);
+        statHeld.resolve();
+      }
+      if (change.endsWith("during final access")) {
+        await accessEntered.promise;
+        if (change.startsWith("window authority")) windowLive = false;
+        else if (change.startsWith("physical root")) {
+          renameSync(worktreeRoot, join(directory, "retired-worktree"));
+          mkdirSync(worktreeRoot);
+        } else bindingRevision = operationId(1954);
+        accessHeld.resolve();
+      }
+      const result = await pending;
+      if (change.startsWith("physical root replaced")) {
+        expect(result).toMatchObject({
+          kind: "turn-review-preview",
+          preview: { status: "unavailable", capture: { version: 1 } },
+        });
+        if (first === undefined) throw new Error("Original capture missing");
+        await expect(
+          f.runtime.readEvidence(windowId, threadId, turn, first.diff.contentId),
+        ).resolves.toMatchObject({
+          bytes: new TextEncoder().encode(patch),
+          digest: first.diff.digest,
+        });
+      }
+      expect(f.conversation().turns[0]?.reviewPreview?.capture).toEqual(first);
+      expect([...f.evidenceValues.values()]).not.toContain(late);
+      expect(f.releasedCheckpoints()).toBe(released + 1);
+    } finally {
+      held.resolve();
+      statHeld.resolve();
+      accessHeld.resolve();
+      await f.runtime.close();
+      f.close();
+    }
+  },
+);
+
+it("keeps a newer successful preview when an older failure authority read completes late", async () => {
+  const entered = Promise.withResolvers<void>();
+  const held = Promise.withResolvers<boolean>();
+  let holdNext = false;
+  let oldReadFinished = false;
+  let rejectStorage = false;
+  let text = "first";
+  let evidenceId = 1960;
+  const patch = () =>
+    `diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+${text}\n`;
+  const provider = providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()));
+  const f = runtimeFixture({
+    provider: providerDriver(provider),
+    projectAccessCurrent: () => true,
+    projectAccess: () => {
+      if (holdNext) {
+        holdNext = false;
+        entered.resolve();
+        return held.promise.then((value) => {
+          oldReadFinished = true;
+          return value;
+        });
+      }
+      return true;
+    },
+    evidencePut: (body) => {
+      if (rejectStorage) {
+        rejectStorage = false;
+        holdNext = true;
+        throw new Error("bounded evidence unavailable");
+      }
+      return storedEvidence(++evidenceId, body);
+    },
+    gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+    gitTreeDiff: async () => {
+      const body = patch();
+      return {
+        status: "ready",
+        paths: ["src/app.ts"],
+        diff: { text: body, byteLength: Buffer.byteLength(body), truncated: false },
+      };
+    },
+  });
+  const turn = operationId(1970);
+  const refresh = (id: number) =>
+    f.runtime.execute(windowId, {
+      kind: "observe-turn-review",
+      operationId: operationId(id),
+      threadId,
+      checkoutId,
+      turnOperationId: turn,
+      refresh: true,
+    });
+  try {
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    expect(await refresh(1971)).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { capture: { version: 1 } },
+    });
+    rejectStorage = true;
+    text = "failed older attempt";
+    const failed = refresh(1972);
+    await entered.promise;
+    expect(await failed).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { status: "unavailable", capture: { version: 1 } },
+    });
+    text = "new successful attempt";
+    expect(await refresh(1973)).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { status: "ready", capture: { version: 2 } },
+    });
+    held.resolve(true);
+    await vi.waitFor(() => expect(oldReadFinished).toBe(true));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.conversation().turns[0]?.reviewPreview).toMatchObject({
+      status: "ready",
+      capture: { version: 2 },
+    });
+  } finally {
+    held.resolve(true);
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it("retains the last readable preview when bounded evidence storage is full, including final capture failure", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "octant-preview-capacity-"));
+  directories.push(directory);
+  const connection = openSqlite(join(directory, "evidence.sqlite3"));
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const patch =
+    "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+first\n";
+  const evidence = new CodeEvidenceStore({
+    connection,
+    maxStoredBytes: Buffer.byteLength(patch),
+    maxEntries: 1,
+  });
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  let text = patch;
+  const f = runtimeFixture({
+    provider: providerDriver(provider),
+    evidencePut: (body, metadata) => evidence.put(body, metadata),
+    gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+    gitTreeDiff: async () => ({
+      status: "ready",
+      paths: ["src/app.ts"],
+      diff: { text, byteLength: Buffer.byteLength(text), truncated: false },
+    }),
+  });
+  const turn = operationId(1910);
+  const refresh = (id: number) =>
+    f.runtime.execute(windowId, {
+      kind: "observe-turn-review",
+      operationId: operationId(id),
+      threadId,
+      checkoutId,
+      turnOperationId: turn,
+      refresh: true,
+    });
+  try {
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    const first = await refresh(1911);
+    expect(first).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { capture: { version: 1 } },
+    });
+    if (first.kind !== "turn-review-preview" || first.preview.capture === undefined)
+      throw new Error("First capture missing");
+    text = patch.replace("first", "later content cannot be stored");
+    expect(await refresh(1912)).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { status: "unavailable", capture: { version: 1 } },
+    });
+    expect(evidence.read(first.preview.capture.diff)).toBe(patch);
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed", sequence: 1 })));
+    await vi.waitFor(() => expect(f.conversation().turns[0]?.status).toBe("completed"));
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "observe-turn-review",
+        operationId: operationId(1913),
+        threadId,
+        checkoutId,
+        turnOperationId: turn,
+        refresh: false,
+      }),
+    ).toMatchObject({
+      kind: "turn-review-preview",
+      preview: {
+        status: "unavailable",
+        settled: true,
+        capture: { version: 1, final: false },
+        explanation: expect.stringContaining("final comparison was not captured"),
+      },
+    });
+    expect(evidence.read(first.preview.capture.diff)).toBe(patch);
+    expect(
+      connection.prepare("SELECT COUNT(*) AS count FROM code_evidence_content_store").get(),
+    ).toEqual({ count: 1 });
+  } finally {
+    await f.runtime.close();
+    f.close();
+    connection.close();
+  }
+});
+
+it("refuses a native preview completed past its elapsed deadline when the timer callback was delayed", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  const held = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const patch =
+    "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+first\n";
+  const late = patch.replace("first", "late private bytes");
+  let waiting = false;
+  let nowValue = performance.now();
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => nowValue);
+  const f = runtimeFixture({
+    provider: providerDriver(provider),
+    gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+    gitTreeDiff: async () => {
+      if (waiting) {
+        entered.resolve();
+        await held.promise;
+      }
+      const text = waiting ? late : patch;
+      return {
+        status: "ready",
+        paths: ["src/app.ts"],
+        diff: { text, byteLength: Buffer.byteLength(text), truncated: false },
+      };
+    },
+  });
+  try {
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(1900),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    const refresh = (id: number) =>
+      f.runtime.execute(windowId, {
+        kind: "observe-turn-review",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        turnOperationId: operationId(1900),
+        refresh: true,
+      });
+    expect(await refresh(1901)).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { capture: { version: 1 } },
+    });
+    waiting = true;
+    const pending = refresh(1902);
+    await entered.promise;
+    nowValue += 20_001;
+    held.resolve();
+    const result = await pending;
+    expect(result).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { status: "unavailable", capture: { version: 1 } },
+    });
+    expect([...f.evidenceValues.values()]).not.toContain(late);
+  } finally {
+    held.resolve();
+    await f.runtime.close();
+    f.close();
+    clock.mockRestore();
+  }
+});
+
+it.each([
+  "project revoked",
+  "checkout rebound",
+  "model changed",
+  "task purged",
+  "owner closed",
+] as const)(
+  "suppresses a held preview after %s and releases its temporary checkpoint",
+  async (retired) => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const patch =
+      "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+first capture\n";
+    const late = patch.replace("first capture", "late private capture");
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    let hold = false;
+    let allowed = true;
+    const readTreeDiff = async () => {
+      if (hold) {
+        entered.resolve();
+        await finish.promise;
+      }
+      const text = hold ? late : patch;
+      return {
+        status: "ready" as const,
+        paths: ["src/app.ts"],
+        diff: { text, byteLength: Buffer.byteLength(text), truncated: false },
+      };
+    };
+    const f = runtimeFixture({
+      provider: providerDriver(connection),
+      projectAccess: () => allowed,
+      gitObservation: readyGitObservation([]),
+      gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+      gitTreeDiff: readTreeDiff,
+    });
+    const turn = operationId(1600);
+    const refresh = (id: number) =>
+      f.runtime.execute(windowId, {
+        kind: "observe-turn-review",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        turnOperationId: turn,
+        refresh: true,
+      });
+    try {
+      await f.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: turn,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: f.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      expect(await refresh(1601)).toMatchObject({
+        kind: "turn-review-preview",
+        preview: { capture: { version: 1 } },
+      });
+      const retained = f.conversation().turns[0]?.reviewPreview?.capture;
+      const released = f.releasedCheckpoints();
+      hold = true;
+      const pending = refresh(1602);
+      await entered.promise;
+      if (retired === "project revoked") allowed = false;
+      else if (retired === "checkout rebound")
+        f.setThread(decodeCodeThread({ ...thread(), checkoutId: operationId(1603) }));
+      else if (retired === "model changed")
+        f.setThread(decodeCodeThread({ ...thread(), modelId: "other-model" }));
+      else if (retired === "task purged") f.purgeThread();
+      else await f.runtime.close();
+      finish.resolve();
+      await pending;
+      await vi.waitFor(() => expect(f.releasedCheckpoints()).toBe(released + 1));
+      expect(f.conversation().turns[0]?.reviewPreview?.capture).toEqual(retained);
+      expect([...f.evidenceValues.values()]).not.toContain(late);
+      if (retired === "task purged") {
+        expect(
+          await f.runtime.execute(windowId, {
+            kind: "observe-turn-review",
+            operationId: operationId(1604),
+            threadId,
+            checkoutId,
+            turnOperationId: turn,
+            refresh: false,
+          }),
+        ).toMatchObject({ kind: "operation-failed" });
+        if (retained !== undefined)
+          await expect(
+            f.runtime.readEvidence(windowId, threadId, turn, retained.diff.contentId),
+          ).rejects.toBeDefined();
+      }
+    } finally {
+      finish.resolve();
+      await f.runtime.close();
+      f.close();
+    }
+  },
+);
+
+it("captures typed edit bursts during a running turn, never on text or metadata polls, then retains the final version", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const patch =
+    "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n";
+  const readTreeDiff = vi.fn(async () => ({
+    status: "ready" as const,
+    paths: ["src/app.ts"],
+    diff: { text: patch, byteLength: Buffer.byteLength(patch), truncated: false },
+  }));
+  const f = runtimeFixture({
+    provider: providerDriver(connection),
+    gitObservation: readyGitObservation([]),
+    gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+    gitTreeDiff: readTreeDiff,
+  });
+  const turn = operationId(1500);
+  const read = (id: number) =>
+    f.runtime.execute(windowId, {
+      kind: "observe-turn-review",
+      operationId: operationId(id),
+      threadId,
+      checkoutId,
+      turnOperationId: turn,
+      refresh: false,
+    });
+  try {
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    for (let i = 0; i < 10; i++)
+      await Effect.runPromise(
+        Queue.offer(queue, providerEvent({ kind: "text-delta", text: "working", sequence: i + 1 })),
+      );
+    await read(1501);
+    expect(readTreeDiff).not.toHaveBeenCalled();
+    for (let i = 0; i < 20; i++)
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "file-change",
+            path: "src/app.ts",
+            change: "modified",
+            sequence: i + 11,
+          }),
+        ),
+      );
+    await vi.waitFor(
+      () => expect(f.conversation().turns[0]?.reviewPreview?.capture?.version).toBe(1),
+      { timeout: 3_000 },
+    );
+    expect(readTreeDiff).toHaveBeenCalledOnce();
+    const first = f.conversation().turns[0]?.reviewPreview?.capture;
+    expect(first).toMatchObject({ baseline: "d".repeat(40), final: false });
+    for (let i = 0; i < 5; i++)
+      expect(await read(1502 + i)).toMatchObject({
+        kind: "turn-review-preview",
+        preview: { capture: { version: 1 } },
+      });
+    expect(readTreeDiff).toHaveBeenCalledOnce();
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed", sequence: 40 })));
+    await vi.waitFor(
+      () =>
+        expect(f.conversation().turns[0]?.reviewPreview?.capture).toMatchObject({
+          version: 2,
+          final: true,
+        }),
+      { timeout: 3_000 },
+    );
+    expect(readTreeDiff).toHaveBeenCalledTimes(2);
+    expect(f.conversation().turns[0]?.reviewPreview?.capture?.baseline).toBe(first?.baseline);
+    expect(await read(1508)).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { capture: { version: 2, final: true } },
+    });
+    expect(readTreeDiff).toHaveBeenCalledTimes(2);
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it("resolves an exact preview beyond the first replay page and retains its finding across newer captures", async () => {
+  const f = runtimeFixture({ approvalValidator: false });
+  f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+  const turnId = operationId(1400);
+  let cursor = 0;
+  const append = (input: unknown) => {
+    const event = decodeCodeOperationEvent(input);
+    const frame = f.appendOperationEvent({
+      threadId,
+      operationId: turnId,
+      expectedCursor: cursor,
+      event,
+    });
+    cursor = frame.cursor;
+    return frame;
+  };
+  const patch =
+    "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -4 +4 @@\n-old value\n+new value\n";
+  const first = storedEvidence(1401, patch);
+  const second = storedEvidence(1402, patch.replace("new value", "later value"));
+  f.evidenceValues.set(first.contentId, patch);
+  f.evidenceValues.set(second.contentId, patch.replace("new value", "later value"));
+  try {
+    append({
+      kind: "conversation-turn-started",
+      providerInstanceId: thread().providerInstanceId,
+      modelId: "model-a",
+      sessionId,
+      prompt: f.prompt,
+      checkoutId,
+      checkpoint: { worktree: "a".repeat(40), index: "b".repeat(40) },
+    });
+    for (let i = 0; i < 300; i++) append({ kind: "operation-state", state: "running" });
+    const capturedCursor = cursor + 1;
+    const capture = {
+      checkoutId,
+      cursor: capturedCursor,
+      version: 1,
+      baseline: "a".repeat(40),
+      tree: "b".repeat(40),
+      diff: first,
+      changedFiles: {
+        files: [{ path: "src/example.ts", insertions: 1, deletions: 1 }],
+        total: 1,
+        truncated: false,
+      },
+      capturedAt: now,
+      final: false,
+    };
+    append({
+      kind: "conversation-turn-review-preview",
+      preview: {
+        status: "ready",
+        capture,
+        explanation: "Captured checkout changes, not exclusive authorship.",
+      },
+    });
+    append({
+      kind: "conversation-turn-review-preview",
+      preview: {
+        status: "capturing",
+        explanation: "A newer comparison is being captured; later writes may be uncaptured.",
+      },
+    });
+    expect(f.conversation().turns[0]?.reviewPreview).toMatchObject({
+      status: "capturing",
+      capture: { cursor: capturedCursor, version: 1 },
+    });
+    append({
+      kind: "conversation-turn-review-preview",
+      preview: {
+        status: "ready",
+        capture: { ...capture, cursor: cursor + 1, version: 2, tree: "c".repeat(40), diff: second },
+        explanation: "Latest captured comparison.",
+      },
+    });
+    const target = await f.runtime.execute(windowId, {
+      kind: "prepare-review-target",
+      operationId: operationId(1403),
+      threadId,
+      checkoutId,
+      reviewOperationId: turnId,
+      captureCursor: capturedCursor,
+      path: "src/example.ts",
+      side: "modified",
+      line: 4,
+    });
+    expect(target).toMatchObject({
+      kind: "review-target-state",
+      anchorState: "outdated",
+      target: {
+        anchor: {
+          diff: first,
+          revision: {
+            kind: "turn-capture",
+            operationId: turnId,
+            captureCursor: capturedCursor,
+            version: 1,
+            baseline: "a".repeat(40),
+            tree: "b".repeat(40),
+          },
+        },
+      },
+    });
+    if (target.kind !== "review-target-state") throw new Error("target unavailable");
+    const replay = f.spyJournalReplay();
+    for (let i = 0; i < 3; i++)
+      expect(
+        await f.runtime.execute(windowId, {
+          kind: "observe-turn-review",
+          operationId: operationId(1420 + i),
+          threadId,
+          checkoutId,
+          turnOperationId: turnId,
+          refresh: false,
+        }),
+      ).toMatchObject({ kind: "turn-review-preview", preview: { capture: { version: 2 } } });
+    const repeated = replay.mock.calls.filter(
+      ([query]) => String(query.aggregateId) === String(turnId),
+    );
+    expect(repeated.length).toBeGreaterThan(0);
+    expect(repeated.every(([query]) => query.afterVersion === cursor)).toBe(true);
+    replay.mockRestore();
+    const note = await f.runtime.execute(windowId, {
+      kind: "create-review-finding",
+      operationId: operationId(1404),
+      threadId,
+      checkoutId,
+      findingId: operationId(1405),
+      ...target.target,
+      severity: "warning",
+      summary: "Correct the first captured version.",
+    });
+    expect(note.kind).toBe("review-finding-state");
+    const prepared = await f.runtime.execute(windowId, {
+      kind: "prepare-review-correction",
+      operationId: operationId(1406),
+      threadId,
+      checkoutId,
+      findings: [{ findingId: operationId(1405), expectedVersion: 1 }],
+    });
+    expect(prepared.kind).toBe("review-correction-prepared");
+    if (prepared.kind !== "review-correction-prepared") throw new Error("correction unavailable");
+    expect(prepared.prepared.text).toContain("4: new value");
+    expect(prepared.prepared.text).not.toContain("later value");
+    const otherThread = decodeCodeThread({
+      ...thread(),
+      id: operationId(1410),
+      executionPolicy: "plan",
+    });
+    f.setOtherThread(otherThread);
+    const otherOperation = operationId(1411);
+    f.appendOperationEvent({
+      threadId,
+      operationId: otherOperation,
+      expectedCursor: 0,
+      event: { kind: "operation-state", state: "running" },
+    });
+    for (const crossed of [
+      { threadId: otherThread.id, reviewOperationId: turnId },
+      { threadId, reviewOperationId: otherOperation },
+    ]) {
+      const rejected = await f.runtime.execute(windowId, {
+        kind: "prepare-review-target",
+        operationId: randomUUID(),
+        checkoutId,
+        captureCursor: capturedCursor,
+        path: "src/example.ts",
+        side: "modified",
+        line: 4,
+        ...crossed,
+      });
+      expect(rejected.kind).toBe("operation-failed");
+    }
+    f.setThread(
+      decodeCodeThread({ ...thread(), checkoutId: operationId(1412), executionPolicy: "plan" }),
+    );
+    const rebound = await f.runtime.execute(windowId, {
+      kind: "prepare-review-target",
+      operationId: operationId(1413),
+      threadId,
+      checkoutId,
+      reviewOperationId: turnId,
+      captureCursor: capturedCursor,
+      path: "src/example.ts",
+      side: "modified",
+      line: 4,
+    });
+    expect(rebound.kind).toBe("operation-failed");
+    f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    f.evidenceValues.set(first.contentId, "replaced bytes with the same claimed content id");
+    const changedBytes = await f.runtime.execute(windowId, {
+      kind: "prepare-review-target",
+      operationId: operationId(1414),
+      threadId,
+      checkoutId,
+      reviewOperationId: turnId,
+      captureCursor: capturedCursor,
+      path: "src/example.ts",
+      side: "modified",
+      line: 4,
+    });
+    expect(changedBytes.kind).toBe("operation-failed");
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
 it("turns a retained diff line into a Plan-safe local finding and an unsent correction without changing its anchor", async () => {
   const patch =
     "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -4,2 +4,2 @@\n-old value\n+new value\n context\n";
@@ -10858,12 +12063,13 @@ it("keeps an outdated finding on its captured source after checkout edits, witho
 });
 
 it.each(
-  (["body", "diff", "assessment", "typed-send", "content", "content-batch"] as const).flatMap(
-    (phase) =>
-      (["revoke", "expire", "rotate", "remote-abort"] as const).map((revoked) => ({
-        phase,
-        revoked,
-      })),
+  (
+    ["body", "diff", "assessment", "typed-send", "content", "content-batch", "capture"] as const
+  ).flatMap((phase) =>
+    (["revoke", "expire", "rotate", "remote-abort"] as const).map((revoked) => ({
+      phase,
+      revoked,
+    })),
   ),
 )(
   "refuses a bound request revoked during review $phase/$revoked before notes/source return",
@@ -10890,7 +12096,25 @@ it.each(
       kind: "recorded" as const,
       taint: { externalContentIngested: true, ingestedSources: ["Local Code review correction"] },
     }));
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
     const f = await capturedReviewFixture({
+      ...(phase === "capture"
+        ? {
+            gitTreeChanges: [
+              { path: "src/example.ts", insertions: 1, deletions: 1, binary: false },
+            ],
+            gitTreeDiff: async () => {
+              entered.resolve();
+              await finish.promise;
+              return {
+                status: "ready" as const,
+                paths: ["src/example.ts"],
+                diff: { text: "late private capture", byteLength: 20, truncated: false },
+              };
+            },
+          }
+        : {}),
       codeProjectAccess: access,
       provider: providerDriver(provider),
       recordExternalContentIngestion: record,
@@ -10945,32 +12169,39 @@ it.each(
     });
     const base = { threadId, checkoutId, operationId: operationId(1200) };
     const command =
-      phase === "typed-send"
+      phase === "capture"
         ? {
             ...base,
-            kind: "start-provider-turn",
-            sessionId,
-            prompt: f.prompt,
-            reviewFindingReferences: f.prepared.references,
+            kind: "observe-turn-review",
+            turnOperationId: operationId(1220),
+            refresh: true,
           }
-        : phase === "assessment"
+        : phase === "typed-send"
           ? {
               ...base,
-              kind: "prepare-review-correction",
-              findings: [{ findingId: f.finding.id, expectedVersion: 1 }],
+              kind: "start-provider-turn",
+              sessionId,
+              prompt: f.prompt,
+              reviewFindingReferences: f.prepared.references,
             }
-          : {
-              ...base,
-              kind: "create-review-finding",
-              findingId: "90000000-0000-4000-8000-000000001201",
-              fileId: f.finding.fileId,
-              path: f.finding.path,
-              fileDigest: f.finding.fileDigest,
-              location: f.finding.location,
-              anchor: f.finding.anchor,
-              severity: "warning",
-              summary: "Do not save after revocation",
-            };
+          : phase === "assessment"
+            ? {
+                ...base,
+                kind: "prepare-review-correction",
+                findings: [{ findingId: f.finding.id, expectedVersion: 1 }],
+              }
+            : {
+                ...base,
+                kind: "create-review-finding",
+                findingId: "90000000-0000-4000-8000-000000001201",
+                fileId: f.finding.fileId,
+                path: f.finding.path,
+                fileDigest: f.finding.fileDigest,
+                location: f.finding.location,
+                anchor: f.finding.anchor,
+                severity: "warning",
+                summary: "Do not save after revocation",
+              };
     const body = new TextEncoder().encode(JSON.stringify(command));
     const request =
       phase === "content-batch"
@@ -10993,8 +12224,6 @@ it.each(
               body,
             });
     bindPrincipalRouteContext(request, context);
-    const entered = Promise.withResolvers<void>();
-    const finish = Promise.withResolvers<void>();
     if (phase === "body")
       vi.spyOn(request, "arrayBuffer").mockImplementation(async () => {
         entered.resolve();
@@ -11019,6 +12248,18 @@ it.each(
         return readyGitObservation([]);
       });
     try {
+      if (phase === "capture") {
+        f.setThread(thread());
+        await f.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(1220),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: f.prompt,
+        });
+        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      }
       const response = access.run(context, () => route(request));
       await entered.promise;
       if (revoked === "remote-abort") aborted.abort();
@@ -11040,10 +12281,14 @@ it.each(
           ? { category: "unauthorized" }
           : { kind: "operation-failed", failure: { category: "unauthorized" } },
       );
-      expect(provider.start).not.toHaveBeenCalled();
-      expect(provider.send).not.toHaveBeenCalled();
+      expect(provider.start).toHaveBeenCalledTimes(phase === "capture" ? 1 : 0);
+      expect(provider.send).toHaveBeenCalledTimes(phase === "capture" ? 1 : 0);
       expect(record).not.toHaveBeenCalled();
       expect(f.reviewFindings()).toHaveLength(1);
+      if (phase === "capture") {
+        expect([...f.evidenceValues.values()]).not.toContain("late private capture");
+        expect(f.conversation().turns[0]?.reviewPreview?.capture).toBeUndefined();
+      }
     } finally {
       finish.resolve();
       await f.runtime.close();

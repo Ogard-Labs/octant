@@ -182,6 +182,7 @@ describe("Code app-managed tools", () => {
   });
 
   it("waits for a terminal completion marker instead of returning a timed partial transcript", async () => {
+    const checkoutActivity = vi.fn();
     let marker = "";
     let readsAfterWrite = 0;
     const executeOperation = vi.fn(async (_windowId: WindowId, command: CodeOperationCommand) => {
@@ -200,6 +201,7 @@ describe("Code app-managed tools", () => {
       thread: thread(),
       readThread: () => thread(),
       uuid: uuidFactory(),
+      onCheckoutActivity: checkoutActivity,
       executeOperation,
       terminal: {
         read: async () => {
@@ -228,6 +230,7 @@ describe("Code app-managed tools", () => {
     });
 
     expect(readsAfterWrite).toBe(2);
+    expect(checkoutActivity).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
       isError: false,
       result: {
@@ -239,6 +242,7 @@ describe("Code app-managed tools", () => {
   });
 
   it("interrupts the shared foreground command when its provider turn is cancelled", async () => {
+    const checkoutActivity = vi.fn();
     const controller = new AbortController();
     let marker = "";
     const executeOperation = vi.fn(async (_windowId: WindowId, command: CodeOperationCommand) => {
@@ -266,6 +270,7 @@ describe("Code app-managed tools", () => {
       thread: thread(),
       readThread: () => thread(),
       uuid: uuidFactory(),
+      onCheckoutActivity: checkoutActivity,
       executeOperation,
       terminal: {
         interrupt,
@@ -287,6 +292,7 @@ describe("Code app-managed tools", () => {
       signal: controller.signal,
     });
 
+    expect(checkoutActivity).toHaveBeenCalledTimes(0);
     expect(result).toEqual({ result: { error: "tool-interrupted" }, isError: true });
     expect(interrupt).toHaveBeenCalledWith(
       windowId,
@@ -355,6 +361,7 @@ describe("Code app-managed tools", () => {
   });
 
   it("interrupts a command before returning a terminal timeout", async () => {
+    const checkoutActivity = vi.fn();
     let now = 0;
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
     let marker = "";
@@ -372,6 +379,7 @@ describe("Code app-managed tools", () => {
       thread: thread(),
       readThread: () => thread(),
       uuid: uuidFactory(),
+      onCheckoutActivity: checkoutActivity,
       executeOperation: vi.fn(async (_windowId, command) => {
         if (command.kind === "write-terminal") {
           marker = command.data.match(/octant=([^;]+);/)?.[1] ?? "";
@@ -402,6 +410,7 @@ describe("Code app-managed tools", () => {
         name: CODE_TERMINAL_TOOL_NAME,
         inputJson: JSON.stringify({ operation: "run", command: "long-command" }),
       });
+      expect(checkoutActivity).toHaveBeenCalledTimes(1);
       expect(result).toMatchObject({
         result: { error: "terminal-command-timeout", commandCompleted: false },
         isError: true,
@@ -413,12 +422,14 @@ describe("Code app-managed tools", () => {
   });
 
   it("reads an existing terminal without replacing the user-visible output observer", async () => {
+    const checkoutActivity = vi.fn();
     const executeOperation = vi.fn();
     const tools = createCodeAppManagedTools({
       windowId,
       thread: thread(),
       readThread: () => thread(),
       uuid: uuidFactory(),
+      onCheckoutActivity: checkoutActivity,
       executeOperation: executeOperation as never,
       terminal: {
         read: async () => ({
@@ -440,6 +451,7 @@ describe("Code app-managed tools", () => {
       inputJson: JSON.stringify({ operation: "read" }),
     });
 
+    expect(checkoutActivity).toHaveBeenCalledTimes(0);
     expect(result).toMatchObject({ result: { transcript: "shared transcript" }, isError: false });
     expect(executeOperation).not.toHaveBeenCalled();
   });

@@ -282,6 +282,9 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
                   ? `line ${finding.location.line}`
                   : `lines ${finding.location.startLine}–${finding.location.endLine}`}{" "}
                 · {finding.severity} · {finding.state}
+                {finding.anchor?.revision.kind === "turn-capture"
+                  ? ` · turn capture ${finding.anchor.revision.version}`
+                  : ""}
               </span>
               <p>
                 {props.assessments?.find((item) => item.finding.id === finding.id)?.explanation ??
@@ -352,6 +355,9 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
                 {" "}
                 · captured {props.target.anchor.capturedAt}; compared regions only, not the full
                 file
+                {props.target.anchor.revision.kind === "turn-capture"
+                  ? ` · turn capture ${props.target.anchor.revision.version}`
+                  : ""}
               </>
             )}
           </p>

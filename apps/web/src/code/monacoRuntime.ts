@@ -458,6 +458,9 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
     readOnly: true,
     originalEditable: false,
     renderSideBySide: options.renderSideBySide,
+    ...(options.ignoreTrimWhitespace === undefined
+      ? {}
+      : { ignoreTrimWhitespace: options.ignoreTrimWhitespace }),
     fontFamily: typography.fontFamily,
     fontSize: typography.fontSize,
     fontWeight: `${typography.fontWeight}`,
@@ -495,6 +498,7 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
       modified.dispose();
     },
     setRenderSideBySide: (sideBySide) => editor.updateOptions({ renderSideBySide: sideBySide }),
+    setIgnoreTrimWhitespace: (ignore) => editor.updateOptions({ ignoreTrimWhitespace: ignore }),
     setColors: applyEditorColors,
     setTypography: (next) => {
       editor.updateOptions({
@@ -506,8 +510,10 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
       });
     },
     setValues: (values) => {
+      const viewState = editor.saveViewState();
       if (original.getValue() !== values.original) original.setValue(values.original);
       if (modified.getValue() !== values.modified) modified.setValue(values.modified);
+      if (viewState !== null) editor.restoreViewState(viewState);
     },
   } satisfies MonacoDiffSession;
 };

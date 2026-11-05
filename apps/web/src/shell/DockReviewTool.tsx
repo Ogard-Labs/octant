@@ -1,4 +1,5 @@
 import { CodeLocalReview, type CodeReviewLineSelection } from "../code/CodeLocalReview";
+import { CodeTurnReviewTool } from "../code/CodeTurnReviewTool";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -65,6 +66,22 @@ export function DockReviewTool(props: DockReviewToolProps) {
         state="warning"
         title="Receipt checkout unavailable"
         message="This receipt belongs to an earlier checkout binding. Open its original checkout to review it; its files cannot be retargeted here."
+      />
+    );
+  if (props.requestedCodeReviewFile?.turnCapture !== undefined)
+    return (
+      <CodeTurnReviewTool
+        client={props.client}
+        view={view}
+        threadId={props.threadId}
+        request={props.requestedCodeReviewFile}
+        capture={props.requestedCodeReviewFile.turnCapture}
+        {...(props.defaultDiffLayout === undefined
+          ? {}
+          : { defaultDiffLayout: props.defaultDiffLayout })}
+        {...(props.createUuid === undefined ? {} : { createUuid: props.createUuid })}
+        {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
+        {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
       />
     );
   return (

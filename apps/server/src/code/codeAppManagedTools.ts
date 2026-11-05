@@ -394,6 +394,8 @@ export interface CodeAppManagedToolsOptions {
     readonly rememberBinding: (contextId: string, binding: BrowserModelBinding) => void;
     readonly forgetBinding: (contextId: string) => void;
   };
+  /** Host-only notification after an admitted checkout command completes or times out; never mutation proof. */
+  readonly onCheckoutActivity?: () => void;
   readonly browserApproval?: {
     readonly isApproved: (contextId: string) => boolean;
     /** Identity-only receipts for expiry recovery; these never satisfy an approval. */
@@ -1085,9 +1087,16 @@ async function terminalTool(
     });
     if (written.kind === "operation-failed") return operationResult(written, options, scope);
     if (marker !== undefined) {
-      return waitForTerminalCommand(options, scope, marker, signal);
+      try {
+        return await waitForTerminalCommand(options, scope, marker, signal);
+      } finally {
+        if (!signal?.aborted && terminalAuthorityFailure(options) === undefined)
+          options.onCheckoutActivity?.();
+      }
     }
     await (options.wait ?? defaultWait)(200);
+    if (!signal?.aborted && terminalAuthorityFailure(options) === undefined)
+      options.onCheckoutActivity?.();
   }
   return terminalSnapshot(await options.terminal.read(options.windowId, scope));
 }

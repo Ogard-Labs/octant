@@ -107,12 +107,21 @@ export function reviewFindingAnchorDigest(
               revision:
                 anchor.revision.kind === "working-tree"
                   ? { kind: anchor.revision.kind, stateToken: anchor.revision.stateToken }
-                  : {
-                      kind: anchor.revision.kind,
-                      head: anchor.revision.head,
-                      base: anchor.revision.base,
-                      baseRef: anchor.revision.baseRef,
-                    },
+                  : anchor.revision.kind === "branch"
+                    ? {
+                        kind: anchor.revision.kind,
+                        head: anchor.revision.head,
+                        base: anchor.revision.base,
+                        baseRef: anchor.revision.baseRef,
+                      }
+                    : {
+                        kind: anchor.revision.kind,
+                        operationId: anchor.revision.operationId,
+                        captureCursor: anchor.revision.captureCursor,
+                        version: anchor.revision.version,
+                        baseline: anchor.revision.baseline,
+                        tree: anchor.revision.tree,
+                      },
               side: anchor.side,
               capturedAt: anchor.capturedAt,
             },
@@ -125,7 +134,8 @@ export function reviewFindingLabel(finding: CodeReviewFinding): string {
     finding.location.kind === "line"
       ? `line ${finding.location.line}`
       : `lines ${finding.location.startLine}–${finding.location.endLine}`;
-  return `${finding.path} · ${finding.anchor?.side ?? "legacy file"} ${location}`;
+  const revision = finding.anchor?.revision;
+  return `${finding.path} · ${finding.anchor?.side ?? "legacy file"} ${location}${revision?.kind === "turn-capture" ? ` · turn capture ${revision.version}, start tree ${revision.baseline}` : ""}`;
 }
 
 export function boundReviewText(

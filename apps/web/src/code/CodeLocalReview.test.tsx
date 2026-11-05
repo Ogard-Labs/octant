@@ -1,9 +1,11 @@
+import { createHash, webcrypto } from "node:crypto";
 import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   decodeCodeBootstrap,
+  decodeCodeOperationId,
   decodeCodeThreadView,
   decodeCodeOperationResult,
   decodeCodeOperationEventFrame,
@@ -11,6 +13,8 @@ import {
   decodeCodeReviewCorrectionPrepared,
   decodeCodeConversationTurn,
   decodeCodeConversationPage,
+  decodeCodeTurnReviewCapture,
+  type CodeTurnReviewCapture,
   type CodeReviewFinding,
 } from "@octant/contracts";
 import { codeClient, ids, scope } from "./CodeDeliveryPane.test-fixtures";
@@ -79,15 +83,18 @@ const bootstrap = decodeCodeBootstrap({
 });
 
 beforeEach(() => {
+  if (globalThis.crypto.subtle === undefined) vi.stubGlobal("crypto", webcrypto);
   composerThreadDrafts.clearAll();
   localStorage.clear();
 });
 afterEach(() => {
+  vi.unstubAllGlobals();
   composerThreadDrafts.clearAll();
 });
 
-function fixture(busy: boolean) {
-  const client = codeClient({ evidence: patch });
+function fixture(busy: boolean, captured = false) {
+  const text = captured ? patch + "@@ -12 +12 @@\n-  same edge text  \n+same edge text\n" : patch;
+  const client = codeClient({ evidence: text });
   const queue = queueTestHost();
   let finding: CodeReviewFinding | undefined;
   const anchor = {
@@ -95,14 +102,35 @@ function fixture(busy: boolean) {
     reviewOperationId: ids.operation,
     diff: {
       contentId: ids.content,
-      digest: "a".repeat(64),
-      byteLength: patch.length,
+      digest: createHash("sha256").update(text).digest("hex"),
+      byteLength: Buffer.byteLength(text),
       truncated: false,
     },
     revision: { kind: "working-tree", stateToken: "b".repeat(64) },
     side: "original",
     capturedAt: now,
   };
+  const firstCapture = decodeCodeTurnReviewCapture({
+    checkoutId: ids.checkout,
+    version: 1,
+    cursor: 10,
+    baseline: "c".repeat(40),
+    tree: "d".repeat(40),
+    diff: anchor.diff,
+    changedFiles: {
+      files: [{ path: "src/app.ts", insertions: 2, deletions: 2 }],
+      total: 1,
+      truncated: false,
+    },
+    capturedAt: now,
+    final: false,
+  });
+  let latestCapture = firstCapture;
+  const capturedTexts = new Map([[String(anchor.diff.contentId), text]]);
+  if (captured)
+    client.operationContent = vi.fn(async (_thread, _operation, contentId) =>
+      new TextEncoder().encode(capturedTexts.get(String(contentId)) ?? "unavailable"),
+    );
   let prepared = decodeCodeReviewCorrectionPrepared({
     threadId: ids.thread,
     checkoutId: ids.checkout,
@@ -126,7 +154,16 @@ function fixture(busy: boolean) {
     sessionId: ids.git,
     prompt: anchor.diff,
     assistant: [],
-    status: "completed",
+    status: captured ? "incomplete" : "completed",
+    ...(captured
+      ? {
+          reviewPreview: {
+            status: "ready",
+            capture: firstCapture,
+            explanation: "Later edits may be uncaptured.",
+          },
+        }
+      : {}),
     startedAt: now,
     updatedAt: now,
     changedFiles: {
@@ -144,9 +181,20 @@ function fixture(busy: boolean) {
     decodeCodeConversationPage({
       version: 3,
       threadId: scope.threadId,
-      turns: busy
-        ? [completed, { ...prior, operationId: ids.git, status: "incomplete" }]
-        : [completed],
+      turns: captured
+        ? [
+            {
+              ...completed,
+              reviewPreview: {
+                status: "ready",
+                capture: latestCapture,
+                explanation: "Later edits may be uncaptured.",
+              },
+            },
+          ]
+        : busy
+          ? [completed, { ...prior, operationId: ids.git, status: "incomplete" }]
+          : [completed],
       nextCursor: 0,
       hasMore: false,
     }),
@@ -162,6 +210,19 @@ function fixture(busy: boolean) {
       });
   });
   client.executeOperation = vi.fn(async (command) => {
+    if (command.kind === "observe-turn-review")
+      return decodeCodeOperationResult({
+        kind: "turn-review-preview",
+        operationId: command.operationId,
+        turnOperationId: command.turnOperationId,
+        ...scope,
+        preview: {
+          status: "ready",
+          capture: latestCapture,
+          settled: false,
+          explanation: "Later edits may be uncaptured; this is not exclusive authorship.",
+        },
+      });
     if (command.kind === "observe-git")
       return decodeCodeOperationResult({
         kind: "git-observed",
@@ -186,8 +247,23 @@ function fixture(busy: boolean) {
           fileId: ids.file,
           path: "src/app.ts",
           fileDigest: "d".repeat(64),
-          location: { kind: "line", line: 4 },
-          anchor: { ...anchor, reviewOperationId: command.reviewOperationId },
+          location: { kind: "line", line: command.line },
+          anchor: {
+            ...anchor,
+            reviewOperationId: command.reviewOperationId,
+            ...(captured
+              ? {
+                  revision: {
+                    kind: "turn-capture",
+                    operationId: ids.operation,
+                    captureCursor: command.captureCursor,
+                    version: 1,
+                    baseline: firstCapture.baseline,
+                    tree: firstCapture.tree,
+                  },
+                }
+              : {}),
+          },
         },
         anchorState: "current",
         explanation: "This captured revision still matches.",
@@ -281,6 +357,12 @@ function fixture(busy: boolean) {
   return {
     client,
     queue,
+    firstCapture,
+    text,
+    publishCapture: (capture: CodeTurnReviewCapture, capturedText: string) => {
+      latestCapture = capture;
+      capturedTexts.set(String(capture.diff.contentId), capturedText);
+    },
     get prepared() {
       return prepared;
     },
@@ -356,6 +438,203 @@ it.each([false, true])(
     }
   },
 );
+
+it.each(["timeout", "client changed", "bad bytes"] as const)(
+  "does not publish an unavailable or retired captured body after %s",
+  async (reason) => {
+    const first = fixture(true, true);
+    const held = Promise.withResolvers<Uint8Array>();
+    const entered = Promise.withResolvers<void>();
+    let readSignal: AbortSignal | undefined;
+    first.client.operationContent = vi.fn(async (_thread, _operation, _content, signal) => {
+      readSignal = signal;
+      entered.resolve();
+      return reason === "bad bytes"
+        ? new TextEncoder().encode(first.text.replace("new value", "bad value"))
+        : held.promise;
+    });
+    const originalRequest = {
+      checkoutId: scope.checkoutId,
+      path: "src/app.ts",
+      receiptOperationId: decodeCodeOperationId(ids.operation),
+      turnCapture: first.firstCapture,
+    };
+    const mounted = render(
+      <DockReviewTool
+        client={first.client}
+        view={view}
+        threadId={scope.threadId}
+        requestedCodeReviewFile={originalRequest}
+      />,
+    );
+    try {
+      await entered.promise;
+      if (reason === "timeout") {
+        // Reopen under the controlled clock so the real read boundary owns this deadline.
+        mounted.unmount();
+        vi.useFakeTimers();
+        const controlled = render(
+          <DockReviewTool
+            client={first.client}
+            view={view}
+            threadId={scope.threadId}
+            requestedCodeReviewFile={originalRequest}
+          />,
+        );
+        try {
+          await act(async () => vi.advanceTimersByTimeAsync(20_000));
+          expect(screen.getByText(/captured version could not be read/)).toBeVisible();
+          expect(screen.getByRole("button", { name: "Retry captured view" })).toBeEnabled();
+          await act(async () => held.resolve(new TextEncoder().encode(first.text)));
+          expect(screen.queryByRole("heading", { name: "Turn capture 1" })).not.toBeInTheDocument();
+        } finally {
+          controlled.unmount();
+          vi.useRealTimers();
+        }
+      } else if (reason === "client changed") {
+        const second = fixture(true, true);
+        const text = second.text.replace("new value", "new owner");
+        const capture = decodeCodeTurnReviewCapture({
+          ...second.firstCapture,
+          version: 2,
+          cursor: 20,
+          diff: {
+            contentId: ids.git,
+            byteLength: Buffer.byteLength(text),
+            digest: createHash("sha256").update(text).digest("hex"),
+          },
+        });
+        second.publishCapture(capture, text);
+        mounted.rerender(
+          <DockReviewTool
+            client={second.client}
+            view={view}
+            threadId={scope.threadId}
+            requestedCodeReviewFile={{ ...originalRequest, turnCapture: capture }}
+          />,
+        );
+        await screen.findByRole("heading", { name: "Turn capture 2" });
+        expect(readSignal?.aborted).toBe(true);
+        await act(async () => held.resolve(new TextEncoder().encode(first.text)));
+        expect(screen.queryByRole("heading", { name: "Turn capture 1" })).not.toBeInTheDocument();
+        expect(screen.getByText("new owner")).toBeVisible();
+      } else {
+        await screen.findByText(/captured version could not be read/);
+        expect(screen.queryByRole("heading", { name: "Turn capture 1" })).not.toBeInTheDocument();
+        expect(
+          vi
+            .mocked(first.client.executeOperation)
+            .mock.calls.some(([command]) => command.kind === "observe-git"),
+        ).toBe(false);
+      }
+      expect(first.queue.execute).not.toHaveBeenCalled();
+    } finally {
+      held.resolve(new TextEncoder().encode(first.text));
+      mounted.unmount();
+    }
+  },
+);
+
+it("keeps a live captured version and its selected anchor through metadata reconnect and edge-whitespace filtering before explicitly viewing a newer version", async () => {
+  const f = fixture(true, true);
+  composerThreadDrafts.write("code", ids.thread, {
+    text: "A",
+    caretIndex: 1,
+    stagedDropped: false,
+  });
+  const mounted = render(<f.Surface />);
+  const user = userEvent.setup();
+  try {
+    const composer = await screen.findByRole("textbox", { name: "Follow-up message" });
+    fireEvent.change(composer, { target: { value: "AB", selectionStart: 1 } });
+    await selectFinding(user);
+    await screen.findByRole("heading", { name: /^Turn capture 1$/ });
+    expect(
+      vi
+        .mocked(f.client.executeOperation)
+        .mock.calls.some(([command]) => command.kind === "observe-git"),
+    ).toBe(false);
+    const selected = vi
+      .mocked(f.client.executeOperation)
+      .mock.calls.filter(([command]) => command.kind === "prepare-review-target");
+    expect(selected.at(-1)?.[0]).toMatchObject({
+      reviewOperationId: ids.operation,
+      captureCursor: 10,
+      side: "original",
+      line: 4,
+    });
+    const stack = mounted.container.querySelector<HTMLElement>(".unified-diff");
+    if (stack === null) throw new Error("captured diff missing");
+    stack.scrollTop = 47;
+    expect(stack.querySelectorAll('tr[data-kind="removed"]')).toHaveLength(2);
+    await user.click(screen.getByRole("checkbox", { name: "Ignore edge whitespace" }));
+    expect(stack.querySelectorAll('tr[data-kind="removed"]')).toHaveLength(1);
+    expect(
+      vi
+        .mocked(f.client.executeOperation)
+        .mock.calls.filter(([command]) => command.kind === "prepare-review-target"),
+    ).toHaveLength(selected.length);
+    const contentReads = vi.mocked(f.client.operationContent).mock.calls.length;
+    const nextText = f.text.replace("new value", "later edit");
+    const next = decodeCodeTurnReviewCapture({
+      ...f.firstCapture,
+      cursor: 20,
+      version: 2,
+      tree: "e".repeat(40),
+      diff: {
+        contentId: ids.git,
+        digest: createHash("sha256").update(nextText).digest("hex"),
+        byteLength: Buffer.byteLength(nextText),
+        truncated: false,
+      },
+    });
+    f.publishCapture(next, nextText);
+    await user.click(screen.getByRole("button", { name: "Reconnect updates" }));
+    await screen.findByRole("button", { name: "View newer capture" });
+    expect(screen.getByRole("heading", { name: /^Turn capture 1$/ })).toBeVisible();
+    expect(stack.scrollTop).toBe(47);
+    expect(vi.mocked(f.client.operationContent).mock.calls).toHaveLength(contentReads);
+    expect(
+      vi
+        .mocked(f.client.executeOperation)
+        .mock.calls.filter(([command]) => command.kind === "prepare-review-target"),
+    ).toHaveLength(selected.length);
+    expect(
+      vi
+        .mocked(f.client.executeOperation)
+        .mock.calls.find(([command]) => command.kind === "create-review-finding")?.[0],
+    ).toMatchObject({
+      anchor: { revision: { kind: "turn-capture", captureCursor: 10, version: 1 } },
+    });
+    await user.click(screen.getByRole("button", { name: "View newer capture" }));
+    await screen.findByRole("heading", { name: /^Turn capture 2$/ });
+    expect(vi.mocked(f.client.operationContent).mock.calls).toHaveLength(contentReads + 1);
+    expect(screen.getByRole("checkbox", { name: "Ignore edge whitespace" })).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Select finding: Keep the original behavior." }),
+    ).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Prepare correction draft" }));
+    await waitFor(() =>
+      expect(composerThreadDrafts.read("code", ids.thread)?.reviewFindingReferences).toEqual(
+        f.prepared.references,
+      ),
+    );
+    expect(composerThreadDrafts.read("code", ids.thread)?.text).toBe(`AB\n\n${f.prepared.text}`);
+    expect(f.queue.execute).not.toHaveBeenCalled();
+    expect(
+      vi
+        .mocked(f.client.executeOperation)
+        .mock.calls.some(([command]) => command.kind === "start-provider-turn"),
+    ).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    expect(f.queue.execute.mock.calls[0]?.[0]).toMatchObject({
+      kind: "enqueue",
+      payload: { reviewFindingReferences: f.prepared.references },
+    });
+  } finally {
+    mounted.unmount();
+  }
+});
 
 async function selectFinding(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "Review src/app.ts" }));

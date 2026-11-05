@@ -20,6 +20,7 @@ import { CodeReviewPane } from "./CodeReviewPane";
 
 export interface CodeReviewLineSelection {
   readonly reviewOperationId: CodeOperationId;
+  readonly captureCursor?: number;
   readonly path: string;
   readonly side: "original" | "modified";
   readonly line: number;

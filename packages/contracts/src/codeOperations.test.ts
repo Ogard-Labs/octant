@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODE_OPERATION_COMMAND_KINDS,
   decodeCodeConversationPage,
+  decodeCodeTurnReviewPreview,
   decodeCodeConversationWindow,
   decodeCodeConversationWindowRequest,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
@@ -430,6 +431,7 @@ describe("Code operation contracts", () => {
         side: "original",
         line: 4,
       },
+      { kind: "observe-turn-review", ...scope, turnOperationId: ids.operation, refresh: false },
       { kind: "list-review-findings", ...scope },
       {
         kind: "prepare-review-correction",
@@ -1710,4 +1712,52 @@ it("decodes scoped local review selection and bounded original finding reference
       location: { kind: "line", line: 4 },
     }),
   ).toThrow();
+});
+
+it("decodes bounded live capture identity and refuses an apparently ready preview without evidence", () => {
+  const capture = {
+    checkoutId: ids.checkout,
+    version: 1,
+    cursor: 301,
+    baseline: "a".repeat(40),
+    tree: "b".repeat(40),
+    diff: { contentId: ids.content, digest: "c".repeat(64), byteLength: 90 },
+    changedFiles: {
+      files: [{ path: "src/app.ts", insertions: 1, deletions: 1 }],
+      total: 1,
+      truncated: false,
+    },
+    capturedAt: "2026-11-03T00:00:00.000Z",
+    final: false,
+  };
+  const ready = {
+    status: "ready",
+    capture,
+    explanation: "Compared captured checkout trees; later writes may be uncaptured.",
+  };
+  expect(decodeCodeTurnReviewPreview(ready)).toEqual(ready);
+  expect(decodeCodeTurnReviewPreview({ ...ready, status: "unavailable" }).capture).toEqual(capture);
+  expect(() =>
+    decodeCodeTurnReviewPreview({ status: "ready", explanation: "No evidence" }),
+  ).toThrow();
+  expect(() =>
+    decodeCodeTurnReviewPreview({ ...ready, capture: { ...capture, cursor: 0 } }),
+  ).toThrow();
+  expect(() =>
+    decodeCodeTurnReviewPreview({ ...ready, capture: { ...capture, version: 0 } }),
+  ).toThrow();
+  expect(() =>
+    decodeCodeTurnReviewPreview({
+      ...ready,
+      capture: { ...capture, label: "untrusted extra identity" },
+    }),
+  ).toThrow();
+  const frame = {
+    threadId: ids.thread,
+    operationId: ids.operation,
+    cursor: 301,
+    occurredAt: capture.capturedAt,
+    event: { kind: "conversation-turn-review-preview", preview: ready },
+  };
+  expect(decodeCodeOperationEventFrame(frame)).toEqual(frame);
 });
