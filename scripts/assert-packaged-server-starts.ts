@@ -12,8 +12,9 @@ import {
   stagePackagedAppBundle,
 } from "./packaged-smoke-process";
 
-import { validateNightlyRuntimeFuses } from "./desktop-client-runtime";
-import { NIGHTLY_TERMINAL_SWITCH } from "../apps/desktop/src/desktopLaunch";
+import { validateDesktopRuntimeFuses } from "./desktop-client-runtime";
+import { resolveDesktopNodeRuntime } from "../apps/desktop/src/runtimePaths";
+import { DESKTOP_TERMINAL_SWITCH } from "../apps/desktop/src/desktopLaunch";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -83,12 +84,12 @@ export async function assertPackagedServerStarts(input: {
   if (identity.flavor === "nightly") {
     if (!existsSync(resolve(appBundle, "Contents/Resources/app.asar")))
       throw new Error("Nightly is missing its sealed application archive.");
-    await validateNightlyRuntimeFuses(appBundle);
+    await validateDesktopRuntimeFuses(appBundle);
     const dataDirectory = await mkdtemp(resolve(tmpdir(), "octant-packaged-client-start."));
     try {
       const output = await runBoundedCommand(
         executable,
-        [NIGHTLY_TERMINAL_SWITCH, "mcp", "--help"],
+        [DESKTOP_TERMINAL_SWITCH, "mcp", "--help"],
         packagedServerEnvironment(process.env, dataDirectory),
         20_000,
       );
@@ -114,7 +115,12 @@ export async function assertPackagedServerStarts(input: {
     OCTANT_SERVER_PORT: String(port),
   };
   const { child, outputTail } = spawnPackagedApplication({
-    executable,
+    executable: resolveDesktopNodeRuntime({
+      packaged: true,
+      platform: "darwin",
+      resourcesPath: resolve(appBundle, "Contents/Resources"),
+      execPath: executable,
+    }),
     args: [serverEntry],
     env,
   });

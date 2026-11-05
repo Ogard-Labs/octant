@@ -17,7 +17,12 @@ import {
   createComputerUseDesktopService,
   type ComputerUseDesktopService,
 } from "./computerUseDesktopService";
-import { CUA_DRIVER_FILENAME, DEVICE_HELPER_FILENAME } from "./runtimePaths";
+import {
+  CUA_DRIVER_FILENAME,
+  DEVICE_HELPER_FILENAME,
+  resolveDesktopNodeRuntime,
+  resolveDesktopHostRoot,
+} from "./runtimePaths";
 import { createWindowCapture } from "./windowCapture";
 import { grabWindowFrame } from "./windowFrameGrab";
 import { createManagedToolService, type ManagedToolService } from "./managedToolService";
@@ -1880,7 +1885,12 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         moduleUrl: import.meta.url,
       }),
       dataDirectory: desktopDataDirectory,
-      execPath: process.execPath,
+      execPath: resolveDesktopNodeRuntime({
+        packaged: app.isPackaged,
+        platform: process.platform,
+        resourcesPath: process.resourcesPath,
+        execPath: process.execPath,
+      }),
     });
     launch.acquired({ managedTools: nextManagedToolService });
     const deviceHelperPath = resolveDesktopNativeHelperPath(
@@ -1954,12 +1964,22 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
                 credentialBrokerUrl: broker.url,
               }),
           desktopBridgeSecret,
-          root,
+          root: resolveDesktopHostRoot({
+            packaged: app.isPackaged,
+            platform: process.platform,
+            resourcesPath: process.resourcesPath,
+            appRoot: root,
+          }),
           port,
           instanceId,
           packaged: app.isPackaged,
           ...(app.isPackaged ? { appVersion: app.getVersion() } : {}),
-          execPath: process.execPath,
+          execPath: resolveDesktopNodeRuntime({
+            packaged: app.isPackaged,
+            platform: process.platform,
+            resourcesPath: process.resourcesPath,
+            execPath: process.execPath,
+          }),
           env: { ...process.env, OCTANT_DATA_DIR: desktopDataDirectory },
         });
         return spawn(spec.command, spec.args, {

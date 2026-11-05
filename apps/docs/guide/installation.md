@@ -87,11 +87,12 @@ AppRun preserves Chromium's sandbox and lets Chromium refuse when it cannot esta
 
 ## Nightly development foundation
 
-On macOS, a packaged Nightly uses a sealed bundled entry and refuses arbitrary
-script paths, runtime loader options and remote-debugging flags. Its terminal
-Browser command, `octant mcp`, runs through a fixed bundled role and accepts only
-its existing MCP/help commands. Octant's stable host and terminal launcher keep
-their existing runtime behavior. This does not yet provide the full
+On macOS, both packaged desktop apps use a sealed bundled entry and refuse arbitrary
+script paths, runtime loader options and remote-debugging flags. Their terminal
+Browser command, `octant mcp`, accepts only its existing MCP/help commands.
+Stable runs its fixed scoped CLI script through a separately identified bundled
+Node runtime, preserving Code confinement without GUI-service permissions.
+Octant's host and approved executable tools use that same separate runtime. This does not yet provide the full
 `octant-nightly` command or a functional Nightly desktop bridge.
 
 Nightly's separate application identity and packaging foundation are available

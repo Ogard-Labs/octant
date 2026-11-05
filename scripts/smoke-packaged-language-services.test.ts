@@ -91,7 +91,8 @@ describe("packaged language services smoke", () => {
         "/bin/bun",
       ),
     ).toEqual({
-      executable: "/tmp/x/Octant.app/Contents/MacOS/Octant",
+      executable:
+        "/tmp/x/Octant.app/Contents/Frameworks/Octant Runtime.app/Contents/MacOS/Octant Runtime",
       args: ["/tmp/x/Octant.app/Contents/Resources/app/apps/server/dist/main.mjs"],
       env: { ELECTRON_RUN_AS_NODE: "1" },
       languageServerPackage:

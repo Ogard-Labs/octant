@@ -54,3 +54,38 @@ export function resolveTerminalLauncherDirectory(
     ? resolve(options.resourcesPath, TERMINAL_LAUNCHER_DIRECTORY_NAME)
     : undefined;
 }
+
+export const DESKTOP_NODE_RUNTIME_NAME = "Octant Runtime";
+export const DESKTOP_NODE_RUNTIME_BUNDLE_ID = "app.octant.desktop.runtime";
+export const DESKTOP_NODE_RUNTIME_APP = `Contents/Frameworks/${DESKTOP_NODE_RUNTIME_NAME}.app`;
+
+/** Executable scripts remain workers; their identity must never attest a desktop main. */
+export function resolveDesktopNodeRuntime(options: {
+  readonly packaged: boolean;
+  readonly platform: NodeJS.Platform;
+  readonly resourcesPath: string;
+  readonly execPath: string;
+}): string {
+  return options.packaged && options.platform === "darwin"
+    ? resolve(
+        options.resourcesPath,
+        "..",
+        "Frameworks",
+        `${DESKTOP_NODE_RUNTIME_NAME}.app`,
+        "Contents/MacOS",
+        DESKTOP_NODE_RUNTIME_NAME,
+      )
+    : options.execPath;
+}
+
+/** Node-mode workers read physical host files, not Electron's ASAR filesystem. */
+export function resolveDesktopHostRoot(options: {
+  readonly packaged: boolean;
+  readonly platform: NodeJS.Platform;
+  readonly resourcesPath: string;
+  readonly appRoot: string;
+}): string {
+  return options.packaged && options.platform === "darwin"
+    ? resolve(options.resourcesPath, "app")
+    : options.appRoot;
+}

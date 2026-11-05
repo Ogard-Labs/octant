@@ -1,3 +1,4 @@
+import { resolveDesktopNodeRuntime } from "../apps/desktop/src/runtimePaths";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { decodeAgentRunId, type AgentRun } from "@octant/contracts/agent-run";
@@ -81,7 +82,12 @@ export async function runPackagedChildSupervision(): Promise<void> {
   );
   const port = createNodeAgentRunProcessPort({
     command: () => ({
-      command: packagedExecutable,
+      command: resolveDesktopNodeRuntime({
+        packaged: true,
+        platform: process.platform,
+        resourcesPath: resolve(packagedBundle, "Contents/Resources"),
+        execPath: packagedExecutable,
+      }),
       args: [
         "-e",
         "const timer=setInterval(()=>{},1000); process.once('SIGTERM',()=>{clearInterval(timer); process.exit(0)});",

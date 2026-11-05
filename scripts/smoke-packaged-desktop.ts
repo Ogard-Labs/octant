@@ -1,3 +1,4 @@
+import { resolveDesktopNodeRuntime } from "../apps/desktop/src/runtimePaths";
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
@@ -29,6 +30,12 @@ import {
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const appBundle = stagePackagedAppBundle(resolve(repositoryRoot, "out/Octant.app"));
 const executable = resolve(appBundle, "Contents/MacOS/Octant");
+const nodeExecutable = resolveDesktopNodeRuntime({
+  packaged: true,
+  platform: "darwin",
+  resourcesPath: resolve(appBundle, "Contents/Resources"),
+  execPath: executable,
+});
 const packagedRoot = resolve(appBundle, "Contents/Resources/app");
 const serverEntry = resolve(packagedRoot, "apps/server/dist/main.mjs");
 const serverPackage = resolve(packagedRoot, "apps/server/package.json");
@@ -133,7 +140,7 @@ async function probePackagedSqlite(env: NodeJS.ProcessEnv): Promise<void> {
     "database.close();",
     'if (value !== 43) throw new Error("Octant SQLite ABI probe returned the wrong value.");',
   ].join(" ");
-  await runCommand(executable, ["-e", probe, serverPackage], {
+  await runCommand(nodeExecutable, ["-e", probe, serverPackage], {
     ...env,
     ELECTRON_RUN_AS_NODE: "1",
   });
@@ -143,7 +150,7 @@ async function probePackagedSqlite(env: NodeJS.ProcessEnv): Promise<void> {
 async function smokePackagedNodeServer(env: NodeJS.ProcessEnv): Promise<void> {
   const port = 13_774;
   const serverUrl = `http://127.0.0.1:${port}`;
-  const child = spawn(executable, [serverEntry], {
+  const child = spawn(nodeExecutable, [serverEntry], {
     detached: true,
     env: {
       ...env,
@@ -248,7 +255,7 @@ async function withPackagedNodeServer<T>(
 ): Promise<T> {
   const port = 13_776;
   const serverUrl = `http://127.0.0.1:${port}`;
-  const child = spawn(executable, [serverEntry], {
+  const child = spawn(nodeExecutable, [serverEntry], {
     detached: true,
     env: {
       ...env,

@@ -1,11 +1,16 @@
 import { packager, type Options as PackagerOptions } from "@electron/packager";
 import {
-  prepareNightlyRuntimeFuses,
-  readNightlyArchive,
-  NIGHTLY_UNPACKED_FILES,
+  packageDesktopNodeRuntime,
+  validateRuntimeFrameworkIndependence,
+} from "./desktop-node-runtime";
+import {
+  prepareDesktopRuntimeFuses,
+  readDesktopArchive,
   packagedNativePath,
+  desktopUnpackedFiles,
+  validateNodeRuntimeFuses,
 } from "./desktop-client-runtime";
-import { NIGHTLY_TERMINAL_SWITCH } from "../apps/desktop/src/desktopLaunch";
+import { DESKTOP_TERMINAL_SWITCH } from "../apps/desktop/src/desktopLaunch";
 import { rebuild, type RebuildOptions } from "@electron/rebuild";
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -31,6 +36,9 @@ import {
   CODE_APPROVAL_PRELOAD_FILENAME,
   DESKTOP_PRELOAD_FILENAME,
   TERMINAL_LAUNCHER_DIRECTORY_NAME,
+  DESKTOP_NODE_RUNTIME_APP,
+  DESKTOP_NODE_RUNTIME_NAME,
+  DESKTOP_NODE_RUNTIME_BUNDLE_ID,
 } from "../apps/desktop/src/runtimePaths";
 import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildDeviceHelper } from "./build-device-helper";
@@ -335,8 +343,9 @@ export const REQUIRED_DARWIN_MANAGED_TOOL_FILES = [
 
 /**
  * The terminal's `octant` (only `octant mcp`): a shell launcher and the one-file
- * bundle Stable runs in Node mode. Nightly uses a fixed sealed entry role,
- * so it needs only the shell launcher. The host puts this
+ * scoped implementation. Stable uses its separate Node worker because Code's
+ * confinement refuses GUI registration; Nightly retains its fixed app role.
+ * The host puts this
  * folder on a Code thread terminal's `PATH` while the terminal holds a Browser
  * grant, so nothing else may be added to it.
  */
@@ -371,45 +380,36 @@ export const PACKAGED_EXECUTABLE_FILES = [
   `${TERMINAL_LAUNCHER_DIRECTORY_NAME}/octant`,
 ] as const;
 
-/**
- * The terminal launcher. A terminal's own `octant mcp` cannot rely on a
- * JavaScript runtime the person installed, and a Bun started inside the
- * terminal's confinement failed before loading anything (it lists the home
- * directory, which the profile denies). The app's executable in Node mode is
- * the runtime the packaged host already runs on, and it starts there once the
- * terminal may read it. The paths are relative to this script, because the app
- * can be moved or translocated; the host grants the terminal read access to the
- * same folder and runtime.
- */
+/** The moved app's scoped command never accepts a caller-selected script. */
 export function terminalLauncherScript(identity: DesktopIdentity): string {
   return [
     "#!/bin/sh",
     "# The Octant app's `octant` for a Code thread terminal that may use the Browser.",
     "# It runs only the scoped terminal command with the app's own runtime.",
     'launcher_directory=$(dirname -- "$0")',
-    ...(identity.flavor === "nightly"
+    ...(identity.flavor === "stable"
       ? [
-          "unset ELECTRON_RUN_AS_NODE",
-          `exec "$launcher_directory/../../MacOS/${identity.productName}" ${NIGHTLY_TERMINAL_SWITCH} "$@"`,
+          "export ELECTRON_RUN_AS_NODE=1",
+          'exec "$launcher_directory/../../Frameworks/Octant Runtime.app/Contents/MacOS/Octant Runtime" "$launcher_directory/octant.mjs" "$@"',
         ]
       : [
-          "export ELECTRON_RUN_AS_NODE=1",
-          `exec "$launcher_directory/../../MacOS/${identity.productName}" "$launcher_directory/octant.mjs" "$@"`,
+          "unset ELECTRON_RUN_AS_NODE",
+          `exec "$launcher_directory/../../MacOS/${identity.productName}" ${DESKTOP_TERMINAL_SWITCH} "$@"`,
         ]),
     "",
   ].join("\n");
 }
 
-/** Writes the launcher folder; its whole content is these two files. */
+/** Writes only the scoped command; it is not a desktop peer or full CLI. */
 export async function installTerminalLauncher(
   repositoryRoot: string,
   directory: string,
   identity: DesktopIdentity = desktopIdentity("stable"),
 ): Promise<void> {
   const bundle = "packages/cli/dist/terminalLauncherMain.mjs";
-  if (identity.flavor === "stable" && !existsSync(resolve(repositoryRoot, bundle))) {
-    throw new Error(`Required built output is missing: ${bundle}. Run bun run build first.`);
-  }
+  const required = identity.flavor === "stable" ? bundle : "apps/desktop/dist/entry.mjs";
+  if (!existsSync(resolve(repositoryRoot, required)))
+    throw new Error(`Required built output is missing: ${required}. Run bun run build first.`);
   await rm(directory, { recursive: true, force: true });
   await mkdir(directory, { recursive: true });
   if (identity.flavor === "stable") {
@@ -728,9 +728,12 @@ export function createPackagerOptions(
     appVersion: version,
     arch: target.arch,
     asar:
-      target.platform === "darwin" && identity.flavor === "nightly"
-        ? { unpack: `**/{${NIGHTLY_UNPACKED_FILES.join(",")}}` }
+      target.platform === "darwin"
+        ? { unpack: `**/{${desktopUnpackedFiles(identity).join(",")}}` }
         : false,
+    ...(target.platform === "darwin" && identity.flavor === "stable"
+      ? { ignore: /^\/apps\/server(?:\/|$)/ }
+      : {}),
     dir,
     electronVersion: ELECTRON_VERSION,
     // macOS terminates a process that opens the microphone without this
@@ -1169,6 +1172,19 @@ async function packageDarwinDesktop(
   const packagedApp = join(packagedDirectories[0]!, `${identity.productName}.app`);
   await rename(packagedApp, finalApp);
   await rm(packagerRoot, { recursive: true, force: true });
+  if (identity.flavor === "stable") {
+    await packageDesktopNodeRuntime({
+      primaryApp: finalApp,
+      temporaryRoot: join(outRoot, ".node-runtime"),
+      version,
+      electronVersion: ELECTRON_VERSION,
+    });
+    await stageStableHostPayload(stageRoot, finalApp);
+    await validateBundleIdentity(join(finalApp, DESKTOP_NODE_RUNTIME_APP), {
+      bundleId: DESKTOP_NODE_RUNTIME_BUNDLE_ID,
+      productName: DESKTOP_NODE_RUNTIME_NAME,
+    });
+  }
 
   const nativeResources = join(finalApp, "Contents/Resources/native");
   await prepareComputerUseDriver(repositoryRoot, join(nativeResources, "cua-driver"));
@@ -1210,42 +1226,46 @@ async function packageDarwinDesktop(
 
   const packagedPayload = join(finalApp, "Contents/Resources/app");
   const archive = join(finalApp, "Contents/Resources/app.asar");
-  const sealed = identity.flavor === "nightly";
-  if (sealed && existsSync(packagedPayload))
+  if (identity.flavor === "nightly" && existsSync(packagedPayload))
     throw new Error("Nightly contains an unsealed application directory.");
-  const archiveEntries = sealed
-    ? readNightlyArchive(
-        archive,
-        JSON.parse(
-          execFileSync(
-            "/usr/bin/plutil",
-            [
-              "-extract",
-              "ElectronAsarIntegrity",
-              "json",
-              "-o",
-              "-",
-              join(finalApp, "Contents/Info.plist"),
-            ],
-            { encoding: "utf8" },
+  if (existsSync(join(packagedPayload, "apps/desktop")))
+    throw new Error("Physical host payload contains a loose desktop entry.");
+  const archiveEntries = readDesktopArchive(
+    archive,
+    JSON.parse(
+      execFileSync(
+        "/usr/bin/plutil",
+        [
+          "-extract",
+          "ElectronAsarIntegrity",
+          "json",
+          "-o",
+          "-",
+          join(finalApp, "Contents/Info.plist"),
+        ],
+        { encoding: "utf8" },
+      ),
+    ),
+    identity,
+  );
+  const payloadEntries =
+    identity.flavor === "stable"
+      ? [
+          ...archiveEntries,
+          ...(await collectPayloadEntries(packagedPayload)).filter((entry) =>
+            entry.path.startsWith("apps/server/"),
           ),
-        ),
-      )
-    : [];
-  const payloadEntries = sealed ? archiveEntries : await collectPayloadEntries(packagedPayload);
+        ]
+      : archiveEntries;
   validatePackagedPayload(payloadEntries, target, identity);
   const bundleEntries = await collectPayloadEntries(outRoot);
   const bundlePaths = new Set([
     ...bundleEntries.map((entry) => {
-      if (
-        sealed &&
-        entry.path.startsWith(`${identity.productName}.app/Contents/Resources/app.asar.unpacked/`)
-      ) {
-        const payload = entry.path.slice(
-          `${identity.productName}.app/Contents/Resources/app.asar.unpacked/`.length,
-        );
-        if (!new Set<string>(NIGHTLY_UNPACKED_FILES).has(payload))
-          throw new Error(`Unexpected loose Nightly native payload: ${payload}.`);
+      const prefix = `${identity.productName}.app/Contents/Resources/app.asar.unpacked/`;
+      if (entry.path.startsWith(prefix)) {
+        const payload = entry.path.slice(prefix.length);
+        if (!new Set(desktopUnpackedFiles(identity)).has(payload))
+          throw new Error(`Unexpected loose desktop native payload: ${payload}.`);
         return entry.path.replace("/app.asar.unpacked/", "/app/");
       }
       return entry.path;
@@ -1256,22 +1276,25 @@ async function packageDarwinDesktop(
   ]);
   validateNativePayloadAllowlist(selectFinalBundlePaths([...bundlePaths], identity), identity);
   for (const requiredPath of REQUIRED_PACKAGED_FILES) {
-    if (sealed && requiredPath.endsWith("/terminal-launcher/octant.mjs")) continue;
-    if (!bundlePaths.has(packagedBundlePath(flavorIconPath(requiredPath, identity), identity))) {
+    if (identity.flavor === "nightly" && requiredPath.endsWith("/terminal-launcher/octant.mjs"))
+      continue;
+    if (!bundlePaths.has(packagedBundlePath(flavorIconPath(requiredPath, identity), identity)))
       throw new Error(`Packaged bundle is missing ${requiredPath}.`);
-    }
   }
   for (const forbiddenPath of FORBIDDEN_PACKAGED_FILES) {
-    if (bundlePaths.has(packagedBundlePath(forbiddenPath, identity))) {
+    if (bundlePaths.has(packagedBundlePath(forbiddenPath, identity)))
       throw new Error(`Packaged bundle contains duplicate helper path ${forbiddenPath}.`);
-    }
   }
   validatePackagedRendererPolicy(
-    sealed
-      ? (payloadEntries.find((entry) => entry.path === "apps/web/dist/index.html")?.content ?? "")
-      : await readFile(join(packagedPayload, "apps/web/dist/index.html"), "utf8"),
+    archiveEntries.find((entry) => entry.path === "apps/web/dist/index.html")?.content ?? "",
   );
-  await prepareNightlyRuntimeFuses(finalApp, identity);
+  if (identity.flavor === "stable")
+    await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
+  await prepareDesktopRuntimeFuses(finalApp);
+  if (identity.flavor === "stable") {
+    await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
+    await validateNodeRuntimeFuses(join(finalApp, DESKTOP_NODE_RUNTIME_APP));
+  }
   await validateBundleIdentity(finalApp, identity);
   return finalApp;
 }
@@ -1899,7 +1922,10 @@ function containsForbiddenIdentity(content: string): boolean {
   return forbidden.test(content);
 }
 
-export function validateDarwinBundleIdentity(value: unknown, identity: DesktopIdentity): void {
+export function validateDarwinBundleIdentity(
+  value: unknown,
+  identity: Pick<DesktopIdentity, "bundleId" | "productName">,
+): void {
   const metadata =
     typeof value === "object" && value !== null && !Array.isArray(value)
       ? (value as Readonly<Record<string, unknown>>)
@@ -1917,7 +1943,7 @@ export function validateDarwinBundleIdentity(value: unknown, identity: DesktopId
 
 export async function validateBundleIdentity(
   appPath: string,
-  identity: DesktopIdentity,
+  identity: Pick<DesktopIdentity, "bundleId" | "productName">,
 ): Promise<void> {
   const metadata: unknown = JSON.parse(
     execFileSync(
@@ -2010,4 +2036,13 @@ async function runCommandForOutput(argv: ReadonlyArray<string>): Promise<{
   if (stdout !== "") process.stdout.write(stdout);
   if (stderr !== "") process.stderr.write(stderr);
   return { exitCode, stdout, stderr };
+}
+
+/** Keep Node consumers on physical files; no loose desktop module may be staged here. */
+export async function stageStableHostPayload(stageRoot: string, appPath: string): Promise<void> {
+  const root = join(appPath, "Contents/Resources/app");
+  await mkdir(join(root, "apps"), { recursive: true });
+  for (const app of ["server", "web"])
+    await cp(join(stageRoot, "apps", app), join(root, "apps", app), { recursive: true });
+  await cp(join(stageRoot, "package.json"), join(root, "package.json"));
 }

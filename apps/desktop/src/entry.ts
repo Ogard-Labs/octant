@@ -7,7 +7,7 @@ import {
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
 } from "@octant/host-runtime";
-import { launchDesktopApplication, resolveNightlyLaunch } from "./desktopLaunch";
+import { launchDesktopApplication, resolvePackagedDesktopLaunch } from "./desktopLaunch";
 
 // Identity and launch-role checks precede imports of the host-owning desktop.
 const identity = app.isPackaged
@@ -16,11 +16,13 @@ const identity = app.isPackaged
     )
   : desktopIdentity("stable");
 
-if (identity.flavor === "nightly") {
-  const role = resolveNightlyLaunch(process.argv.slice(1));
+if (identity.flavor === "nightly" || (app.isPackaged && process.platform === "darwin")) {
+  const role = resolvePackagedDesktopLaunch(identity, process.argv.slice(1));
   if (role.kind === "refused") {
     process.stderr.write(`${role.message}\n`);
     app.exit(1);
+  } else if (role.kind === "canvas") {
+    void runCanvasPrototypeHost();
   } else if (role.kind === "terminal") {
     const { runTerminalLauncher } = await import("@octant/cli/terminal-launcher");
     const code = await runTerminalLauncher(role.args, {
