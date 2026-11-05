@@ -191,6 +191,7 @@ const BoundedProviderToolDescription = Schema.NonEmptyTrimmedString.pipe(Schema.
 const BoundedProviderAttachmentId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
 const BoundedProviderDisplayName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
 const BoundedProviderMediaType = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
+const BoundedProviderContextKey = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
 
 /**
  * One answer a provider offers for a question it asked: what the person picks,
@@ -1617,6 +1618,10 @@ export type ProviderToolDefinition = typeof ProviderToolDefinition.Type;
 export const ProviderContextBlock = Schema.Struct({
   kind: Schema.Literal(
     "instructions",
+    // Octant's instructions for this turn alone, such as asking a task to take
+    // stock when it opens. Never held, so the standing instructions stay
+    // byte-stable and a provider's prompt cache is never invalidated by them.
+    "turn-instructions",
     "user-message",
     "assistant-message",
     // What Octant remembers about the person from earlier threads, framed as
@@ -1629,6 +1634,12 @@ export const ProviderContextBlock = Schema.Struct({
     "conversation-summary",
   ),
   text: ProviderPromptText,
+  /**
+   * Names standing context Octant re-reads every turn, such as a Project's
+   * status file. A session holding an older version under the same key gets
+   * the newer one appended; it is not a withdrawal, so nothing is restated.
+   */
+  key: Schema.optional(BoundedProviderContextKey),
 }).annotations(strict);
 export type ProviderContextBlock = typeof ProviderContextBlock.Type;
 

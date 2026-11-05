@@ -46,7 +46,7 @@ describe("planWorkTurnContext", () => {
     expect(planned.kind).toBe("ok");
     if (planned.kind !== "ok") return;
     expect(planned.context).toEqual([
-      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "instructions", text: expect.stringContaining("Octant Work task") },
       { kind: "user-message", text: "Summarize the brief" },
       { kind: "assistant-message", text: "Here is the summary." },
     ]);
@@ -95,7 +95,7 @@ describe("planWorkTurnContext", () => {
     expect(planned.kind).toBe("ok");
     if (planned.kind !== "ok") return;
     expect(planned.context).toEqual([
-      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "instructions", text: expect.stringContaining("Octant Work task") },
       { kind: "conversation-summary", text: "The brief asks for a revised launch plan." },
     ]);
     expect(
@@ -214,7 +214,7 @@ describe("planWorkTurnContext", () => {
       uuid,
       safeInputBudget: 500,
       tools: [
-        { name: "required_tool", description: "t".repeat(800), inputSchema: { type: "object" } },
+        { name: "required_tool", description: "t".repeat(1200), inputSchema: { type: "object" } },
       ],
     });
     expect(final.kind).toBe("ok");
@@ -253,7 +253,7 @@ describe("planWorkTurnContext", () => {
     if (withCanvas.kind !== "ok") throw new Error("The instructions fit their budget");
     expect(withCanvas.context).toEqual([
       { kind: "instructions", text: expect.stringContaining("as a Canvas with the octant_canvas") },
-      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "instructions", text: expect.stringContaining("Octant Work task") },
     ]);
     expect(withCanvas.manifest.entries).toContainEqual(
       expect.objectContaining({
@@ -273,7 +273,7 @@ describe("planWorkTurnContext", () => {
     if (withoutCanvas.kind !== "ok") throw new Error("The instructions fit their budget");
     expect(withoutCanvas.context).toEqual([
       { kind: "instructions", text: BROWSER_TOOL_HOST_LINE },
-      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "instructions", text: expect.stringContaining("Octant Work task") },
     ]);
     expect(JSON.stringify(withoutCanvas.context)).not.toContain("octant_canvas");
   });

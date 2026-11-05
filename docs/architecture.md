@@ -1519,10 +1519,19 @@ already holds a `STATUS.md`, starts off. The default-folder Project refuses it
 on the server: it holds what nobody gave a home, so there is no single piece of
 work for a status to describe. Enabling seeds `STATUS.md` if it is missing.
 While enabled, the file is read into every Work turn ahead of the thread's
-transcript with a standing instruction to keep it current; a completed turn
-that changed files without touching it gets a `Recent changes` line appended
-from the turn's observed-changes record; and a stale status or a near or passed date makes the next
-task open by taking stock and asking for an update. The Work Project page, the
+transcript with a standing instruction to update it when the turn changes where
+the work stands and to leave it unchanged for questions and conversation; a
+completed turn that changed files without touching it gets a `Recent changes`
+line appended from the turn's observed-changes record; and a stale status or a
+near or passed date makes the next task open by taking stock and asking for an
+update, unless its request is a greeting or unrelated to the work, which is
+answered first with the update offered at the end. An unconditional "update
+before you finish" rule asked the model to rewrite the file after a one-word
+greeting. The file reaches the model as keyed standing context, so a runtime
+that keeps its own conversation receives it again only when it changed; the
+take-stock request is a one-turn instruction on the task's first turn, so the
+standing rule's text never changes (see
+[Held standing context](#held-standing-context)). The Work Project page, the
 Work board's follow-up mark, and the inbox's `follow-up-due` attention signal
 read the same file on demand; nothing about its content is journaled. While
 disabled, Octant reads nothing from the folder for this purpose, adds no
@@ -5810,13 +5819,25 @@ prompt is therefore built to be appended, never rewritten:
 - **Only what is new.** Standing blocks (`instructions`, which carry Octant's
   instructions and skills, `project-memory` and `work-item`) that the session
   already holds are left out of the turn; per-turn blocks (messages, summaries,
-  mentions, issue context, handoffs) are always sent. A new session, including
-  one started afresh after a refused resume, gets everything once. When a held
-  standing block is no
-  longer part of the turn's context (a deselected skill), the whole context is
-  sent again behind a fixed note that it replaces all earlier Octant context, so
-  a stale copy never stands alone. The rule is `providerTurnContextDelta` in
+  mentions, issue context, handoffs, and `turn-instructions`, Octant's
+  instructions for one turn alone) are always sent. A new session, including
+  one started afresh after a refused resume, gets everything once. A standing
+  block that Octant re-reads every turn, such as a Work Project's status file,
+  carries a `key`: a newer version under the same key is sent and appended
+  after the older one, which counts as a revision rather than a withdrawal, so
+  nothing else is restated. When a held standing block is no longer part of
+  the turn's context at all (a deselected skill), the whole context is sent
+  again behind a fixed note that it replaces all earlier Octant context, so a
+  stale copy never stands alone. The rule is `providerTurnContextDelta` in
   `@octant/provider-sdk/chat-conformance`.
+- **Standing text stays fixed.** Anything that varies from turn to turn is a
+  `turn-instructions` block or a keyed block, never a change to a standing
+  instruction's text. Changing that text withdraws the held block, which
+  restates the whole context, and in Octant Harness, where instructions form
+  the system prompt, it invalidates the provider's cached prefix for the whole
+  conversation. The status file's take-stock request once lived inside its
+  standing rule and changed it whenever the status crossed a staleness or date
+  threshold.
 - **When a block counts as held.** The server keeps one record per provider
   session id (`apps/server/src/providers/heldTurnContext.ts`), which the Chat,
   Work, and Code turn runners consult before sending. A block counts as held only
@@ -5829,12 +5850,15 @@ prompt is therefore built to be appended, never rewritten:
   failed or interrupted turn that restated the context leaves the session
   holding nothing, because the runtime may still have kept that restatement
   (Claude reports usage before a failed result), and it supersedes what was
-  held. A session opened by `start` holds nothing. A compaction, automatic
+  held. Likewise a failed or interrupted turn that sent a newer version of a
+  keyed block leaves that key unheld, since the runtime may have kept the newer
+  version: were the status file restored to the held text, leaving it out
+  would let the newer one stand. A session opened by `start` holds nothing. A compaction, automatic
   (`context-compacted`, or a usage report with `promptRetention: "compacted"`)
   or requested, drops the record, because the runtime keeps only a share of
   earlier prompts Octant cannot see. The record is kept in the host data
   directory (`providers/held-turn-context.json`, owner-only): provider session
-  ids and SHA-256 digests of standing blocks, never their text, for at most the
+  ids and SHA-256 digests of standing blocks and their keys, never their text, for at most the
   256 most recently changed sessions. A resumed session's first turn after a
   restart therefore sends only what is new, as the runtime's own history
   survived the restart too. Every change that drops a holding (a fresh start, a

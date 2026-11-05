@@ -2,6 +2,7 @@ import { CODE_DIAGNOSTICS_TOOL_NAME, CODE_LANGUAGE_TOOL_DEFINITIONS } from "@oct
 import type {
   CorrelationId,
   ProviderCapabilities,
+  ProviderContextBlock,
   ProviderFailure,
   ProviderInstanceId,
   ProviderModel,
@@ -15,6 +16,8 @@ import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   PROVIDER_CONTEXT_RESTATED,
+  isStandingProviderContext,
+  providerContextIdentity,
   providerTurnContextDelta,
   renderProviderTurnPrompt,
   runProviderChatConformance,
@@ -107,10 +110,15 @@ describe("providerTurnContextDelta", () => {
   const instructions = { kind: "instructions", text: "Stay concise." } as const;
   const skill = { kind: "instructions", text: "Review as a skeptic." } as const;
   const mention = { kind: "user-message", text: "Mentioned thread." } as const;
-  const holding = (blocks: ReadonlyArray<{ readonly kind: string; readonly text: string }>) => ({
-    holds: (block: { readonly kind: string; readonly text: string }) =>
-      blocks.some((held) => held.kind === block.kind && held.text === block.text),
-    heldCount: blocks.length,
+  const holding = (blocks: ReadonlyArray<ProviderContextBlock>) => ({
+    holds: (block: ProviderContextBlock) =>
+      blocks.some(
+        (held) =>
+          providerContextIdentity(held) === providerContextIdentity(block) &&
+          held.text === block.text,
+      ),
+    heldIdentities: new Set(blocks.map(providerContextIdentity)),
+    identify: providerContextIdentity,
   });
 
   it("sends the whole context to a session that holds nothing yet", () => {
@@ -134,8 +142,32 @@ describe("providerTurnContextDelta", () => {
 
   it("always resends per-turn blocks even when their text repeats", () => {
     expect(
-      providerTurnContextDelta({ context: [mention], holds: () => true, heldCount: 0 }).context,
+      providerTurnContextDelta({
+        context: [mention],
+        holds: () => true,
+        heldIdentities: new Set(),
+        identify: providerContextIdentity,
+      }).context,
     ).toEqual([mention]);
+  });
+
+  it("sends a newer version of a keyed block without restating what the session holds", () => {
+    const status = { kind: "project-memory", key: "work-status", text: "Draft sent." } as const;
+    const revised = { ...status, text: "Draft signed." } as const;
+    expect(
+      providerTurnContextDelta({
+        context: [instructions, revised, mention],
+        ...holding([instructions, status]),
+      }),
+    ).toEqual({ kind: "appended", context: [revised, mention], held: [instructions] });
+  });
+
+  it("never holds a one-turn instruction, so a later turn without it restates nothing", () => {
+    const nudge = { kind: "turn-instructions", text: "Take stock first." } as const;
+    expect(isStandingProviderContext(nudge)).toBe(false);
+    expect(
+      providerTurnContextDelta({ context: [instructions], ...holding([instructions]) }).kind,
+    ).toBe("appended");
   });
 
   it("restates all standing context when a held block was withdrawn", () => {
