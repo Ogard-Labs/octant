@@ -2346,9 +2346,15 @@ Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Prof
 Browser selected-item permission records an explicitly reviewed account/vault/
 item and exact HTTPS top-frame/profile/Project-or-task scope. It is a
 host-session permission snapshot with an eight-hour maximum, distinct from
-store unlock, OAuth identity and cookies. This binding adds no credential fill
-or iframe/script execution; later use requires fresh broker validation under
-the protected lifecycle. Detail: [Browser sign-in](browser-agent-tool.md#asking-the-person-to-sign-in)
+store unlock, OAuth identity and cookies. Each brokered fill needs a fresh
+held-page form review and explicit approval; submit is separate. Values stay
+between the private host consumer and native form. Pending observations are
+excluded by reservation epochs. Native commit-start receipts distinguish no,
+possible and completed effect without undo; fill does not mean authenticated.
+Approved SSO hops are temporary, exact-view/top-frame and keep the task/profile
+without widening agent origins. The website can retain/reflect credentials;
+MFA/CAPTCHA and uncertain results remain manual. No iframe or arbitrary script
+execution is added. Detail: [Browser sign-in](browser-agent-tool.md#asking-the-person-to-sign-in)
 and [the credential boundary](../architecture.md#linked-secret-stores).
 
 ### Terminal Browser grant

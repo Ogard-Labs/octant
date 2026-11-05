@@ -100,6 +100,7 @@ function harness(
     createContext: vi.fn(async (contextId) => void contexts.add(contextId)),
     inspectTarget: vi.fn(async () => ({ sensitive: false })),
     ...(options.describePoint === undefined ? {} : { describePoint: options.describePoint }),
+    validateCredentialFill: vi.fn(async () => true),
     act: vi.fn(async (contextId, input) => {
       if (!contexts.has(contextId)) throw new Error("missing context");
       return {
@@ -185,6 +186,65 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it("withholds a peek that overlaps a fill epoch even after release and defers handing the page back", async () => {
+    const f = harness();
+    vi.mocked(f.runtime.createContext).mockImplementation(async (id) => {
+      f.contexts.add(id);
+      return "native-live";
+    });
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    await f.service.act({ windowId, request: request() });
+    const releasePerson = f.service.holdForPerson(windowId, threadOne);
+    const target = await f.service.credentialUseTarget(
+      windowId,
+      decodeBrowserCredentialCommand({
+        kind: "list-browser-credential-grants",
+        contextId: contextOne,
+        threadId: threadOne,
+        mode: "work",
+      }),
+      true,
+    );
+    if (target.kind !== "browser-credential-target") throw new Error("Expected native held target");
+    const peek = f.runtime.peek;
+    if (peek === undefined) throw new Error("Expected peek");
+    let finish:
+      | ((value: {
+          readonly url: string;
+          readonly title: string;
+          readonly screenshotDataUrl: string;
+        }) => void)
+      | undefined;
+    vi.mocked(peek).mockImplementation(
+      async () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    f.advance(10_000);
+    const pending = f.service.peekThread(windowId, threadOne);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    const held = f.service.holdCredentialFill(
+      windowId,
+      target.target,
+      "00000000-0000-4000-8000-000000000099",
+    );
+    if (held.kind !== "held") throw new Error("Expected fill hold");
+    releasePerson?.();
+    expect(held.signal.aborted).toBe(true);
+    expect(f.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("sign-in");
+    held.release();
+    finish?.({
+      url: "https://example.com",
+      title: "overlapping-private-observation",
+      screenshotDataUrl: "data:image/jpeg;base64,PRIVATE",
+    });
+    const result = await pending;
+    expect(JSON.stringify(result)).not.toContain("overlapping-private-observation");
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    expect(result.waitingForPerson).toBeUndefined();
+  });
+
   it.each([false, true])(
     "refuses credential metadata for headless or unattended contexts",
     async (unattended) => {

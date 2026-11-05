@@ -8,6 +8,18 @@ function host() {
   const personInput: Array<(contextId: string) => void> = [];
   return {
     personInput,
+    prepareCredentialFill: vi.fn(async () => ({
+      status: "prepared",
+      planId: contextId,
+      usernameLabel: "Email",
+      passwordLabel: "Password",
+      submissionOrigin: "https://example.com",
+      expiresAt: new Date(Date.now() + 180000).toISOString(),
+    })),
+    submitCredentialFill: vi.fn(async () => ({
+      status: "authentication-required",
+      effect: "completed",
+    })),
     onPersonInput: vi.fn((listener: (contextId: string) => void) => {
       personInput.push(listener);
       return () => undefined;
@@ -31,6 +43,63 @@ function host() {
 }
 
 describe("BrowserRuntimeBroker", () => {
+  it("authenticates and strictly decodes reference-only credential form requests", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    const command = {
+      kind: "prepare",
+      contextId,
+      owner: { windowId: contextId, threadId: contextId },
+      origin: "https://example.com",
+    };
+    try {
+      const path = "v1/contexts/credential-fill";
+      expect((await broker.fetchForTest(request(broker.url, "wrong", command, path))).status).toBe(
+        401,
+      );
+      expect(
+        (
+          await broker.fetchForTest(
+            request(broker.url, broker.token, { ...command, password: "must-not-cross" }, path),
+          )
+        ).status,
+      ).toBe(400);
+      expect(surface.prepareCredentialFill).not.toHaveBeenCalled();
+      const response = await broker.fetchForTest(request(broker.url, broker.token, command, path));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        status: "prepared",
+        submissionOrigin: "https://example.com",
+      });
+      expect(surface.prepareCredentialFill).toHaveBeenCalledWith(
+        contextId,
+        command.owner,
+        command.origin,
+      );
+      const expiresAt = new Date(Date.now() + 180000).toISOString();
+      const submitted = await broker.fetchForTest(
+        request(
+          broker.url,
+          broker.token,
+          { kind: "submit", contextId, owner: command.owner, planId: contextId, expiresAt },
+          path,
+        ),
+      );
+      expect(await submitted.json()).toEqual({
+        status: "authentication-required",
+        effect: "completed",
+      });
+      expect(surface.submitCredentialFill).toHaveBeenCalledWith(
+        contextId,
+        command.owner,
+        contextId,
+        expiresAt,
+      );
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("reports the pages the person used once, to the server that asks", async () => {
     const surface = host();
     const broker = await startBrowserRuntimeBroker(surface as never);

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { BrowserCredentialFill } from "./browserCredentialFill";
 import {
   browserProfileKey,
   browserProfilePartition,
@@ -286,6 +287,14 @@ interface OwnedSurface {
    * action is authorized.
    */
   userGrantedOrigins: string[];
+  credentialSubmitOrigins:
+    | {
+        readonly planId: string;
+        readonly view: BrowserSurfaceViewPort;
+        readonly origins: ReadonlyArray<string>;
+        readonly expires: number;
+      }
+    | undefined;
   /**
    * Page loads an extension asked for that are still under way. A redirect during
    * one must not grant its destination as the person's own browsing would: the
@@ -495,6 +504,27 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const goneListeners = new Set<(contextId: string) => void>();
   const personInputListeners = new Set<(contextId: string) => void>();
   const stateChannel = options.stateChannel ?? DESKTOP_IPC_CHANNELS.browserSurfaceState;
+  const credentialFill = new BrowserCredentialFill({
+    page: (contextId, owner) => {
+      const owned = surfaces.get(contextId);
+      if (
+        owned === undefined ||
+        owned.owner.windowId !== owner.windowId ||
+        String(owned.owner.threadId) !== String(owner.threadId) ||
+        options.isOwnerWindowAvailable?.(owner.windowId) === false ||
+        owned.tabs.length === 0
+      )
+        return undefined;
+      return {
+        identity: owned,
+        generation: owned.personInputs,
+        owner: owned.owner,
+        profile: owned.policy.profile ?? { kind: "private" },
+        view: contentsView(owned),
+      };
+    },
+    execute: (view, code) => execute(view, code, true),
+  });
 
   const surface = (contextId: string): OwnedSurface => {
     const owned = surfaces.get(contextId);
@@ -509,6 +539,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
 
   const markGone = (contextId: string, owned: OwnedSurface): void => {
     if (surfaces.get(contextId) !== owned) return;
+    credentialFill.forget(owned);
     surfaces.delete(contextId);
     // Emptied before anything is closed: closing a page can report the page
     // gone, and a report that arrives while this list is still being walked
@@ -637,21 +668,20 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     ]) {
       view.webContents.on(event, () => publish(contextId, owned));
     }
-    const guardNavigation = (event: unknown, ...details: readonly unknown[]) => {
-      const target = navigationUrl(event, details);
-      if (typeof target === "string" && admitNavigation(owned, target)) return;
-      (event as { preventDefault?: () => void }).preventDefault?.();
-      return target;
-    };
-    // Only a refused top-level move explains a failed navigate action to the
-    // user; a cancelled frame navigation is the allowlist working as intended.
-    const guardTopLevelNavigation = (event: unknown, ...details: readonly unknown[]) => {
-      const refused = guardNavigation(event, ...details);
-      if (typeof refused === "string") owned.blockedNavigationUrl = refused;
-    };
-    view.webContents.on("will-navigate", guardTopLevelNavigation);
-    view.webContents.on("will-redirect", guardTopLevelNavigation);
-    view.webContents.on("will-frame-navigate", guardNavigation);
+    const guardNavigation =
+      (knownMainFrame: boolean) =>
+      (event: unknown, ...details: readonly unknown[]) => {
+        const target = navigationUrl(event, details);
+        const top = navigationMainFrame(event, details, knownMainFrame);
+        if (typeof target === "string" && admitNavigation(owned, target, top ? view : undefined))
+          return;
+        (event as { preventDefault?: () => void }).preventDefault?.();
+        if (top && typeof target === "string") owned.blockedNavigationUrl = target;
+      };
+    // Electron emits will-frame-navigate for the main frame too. Redirects can be subframes.
+    view.webContents.on("will-navigate", guardNavigation(true));
+    view.webContents.on("will-redirect", guardNavigation(false));
+    view.webContents.on("will-frame-navigate", guardNavigation(false));
     view.webContents.on("login", (event: unknown, ...details: readonly unknown[]) => {
       (event as { preventDefault?: () => void }).preventDefault?.();
       const callback = details.find((detail): detail is () => void => typeof detail === "function");
@@ -754,6 +784,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         nextTabOrdinal: 2,
         lastBounds: undefined,
         userGrantedOrigins: [],
+        credentialSubmitOrigins: undefined,
         extensionLoads: 0,
         actionTail: Promise.resolve(),
         control: "idle",
@@ -817,8 +848,58 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       }
       owned.shellWindow = undefined;
     },
+    prepareCredentialFill: (contextId: string, owner: BrowserSurfaceOwner, origin: string) =>
+      credentialFill.prepare(contextId, owner, origin),
+    reserveCredentialFill: (
+      contextId: string,
+      owner: BrowserSurfaceOwner,
+      planId: string,
+      websiteOrigins: ReadonlyArray<string>,
+    ) => credentialFill.reserve(contextId, owner, planId, websiteOrigins),
+    validateCredentialFill: (contextId: string, owner: BrowserSurfaceOwner, planId: string) =>
+      credentialFill.valid(contextId, owner, planId),
+    commitCredentialFill: (
+      contextId: string,
+      owner: BrowserSurfaceOwner,
+      planId: string,
+      values: { readonly username: string; readonly password: string },
+      canCommit?: () => boolean,
+      onCommitStart?: () => void,
+    ) => credentialFill.commit(contextId, owner, planId, values, canCommit, onCommitStart),
+    submitCredentialFill: async (
+      contextId: string,
+      owner: BrowserSurfaceOwner,
+      planId: string,
+      expiresAt: string,
+    ) => {
+      const owned = surface(contextId);
+      let previous = owned.credentialSubmitOrigins;
+      const result = await credentialFill.submit(
+        contextId,
+        owner,
+        planId,
+        Date.parse(expiresAt),
+        (origins, view) => {
+          previous = owned.credentialSubmitOrigins;
+          owned.control = "idle";
+          owned.credentialSubmitOrigins = {
+            planId,
+            view,
+            origins,
+            expires: Date.now() + 10 * 60_000,
+          };
+        },
+      );
+      // A final DOM refusal grants nothing. Restore only this attempt's temporary admission.
+      if (result.effect === "none" && owned.credentialSubmitOrigins?.planId === planId)
+        owned.credentialSubmitOrigins = previous;
+      return result;
+    },
+    cancelCredentialFill: (contextId: string, owner: BrowserSurfaceOwner, planId: string) =>
+      credentialFill.cancel(contextId, owner, planId),
     inspectTarget: async (contextId: BrowserContextId | string, selector: string) => {
       const owned = surface(contextId);
+      const checkObservation = credentialFill.observation(owned);
       // A field the host cannot reach, in a frame or out of one, counts as
       // sensitive: the check fails closed.
       const result = await inTargetDocument(contentsView(owned), owned.policy, selector, (target) =>
@@ -829,6 +910,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         return element.type === "password" || /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token)/.test(hint);
       })()`),
       ).catch(() => true);
+      checkObservation();
       return { sensitive: result === true };
     },
     act: async (
@@ -837,7 +919,9 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       signal?: AbortSignal,
     ): Promise<BrowserSurfaceRuntimeObservation> => {
       const owned = surface(contextId);
+      const checkObservation = credentialFill.observation(owned);
       return queueSurfaceAction(owned, async () => {
+        checkObservation();
         throwIfAborted(signal);
         // The check the server's poll cannot make in time: the person's key
         // is known here the moment it lands. An action that sends a key or a
@@ -1110,6 +1194,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // with how the fixed policy answered it; so is every download.
           if (request.downloads === "hold") await owned.downloads.finish();
           const downloads = owned.downloads.takeReports();
+          checkObservation();
           return {
             ...observed,
             ...(dialogs.length === 0 ? {} : { dialogs: dialogs.slice(0, 8) }),
@@ -1140,6 +1225,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       contextId: BrowserContextId | string,
     ): Promise<BrowserSurfaceRuntimeObservation> => {
       const owned = surface(contextId);
+      const checkObservation = credentialFill.observation(owned);
       const contents = contentsView(owned).webContents;
       // A context that has not navigated yet has no document to inspect and
       // no painted frame to capture; both probes below would never resolve.
@@ -1151,6 +1237,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const screenshotDataUrl = sensitiveDocument
         ? undefined
         : await captureScreenshot(contentsView(owned));
+      checkObservation();
       return {
         ...(contents.getURL() === ""
           ? {}
@@ -1385,6 +1472,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   async function closeContext(contextId: BrowserContextId | string): Promise<void> {
     const owned = surfaces.get(contextId);
     if (owned === undefined) return;
+    credentialFill.forget(owned);
     surfaces.delete(contextId);
     const closing = owned.tabs;
     owned.tabs = [];
@@ -1462,7 +1550,38 @@ function extensionMayReach(owned: OwnedSurface, target: string): boolean {
  * allowlist is exactly what approval made it and a page cannot widen it by
  * navigating itself.
  */
-function admitNavigation(owned: OwnedSurface, target: string): boolean {
+function navigationMainFrame(
+  event: unknown,
+  details: ReadonlyArray<unknown>,
+  knownMainFrame: boolean,
+): boolean {
+  if (
+    typeof event === "object" &&
+    event !== null &&
+    "isMainFrame" in event &&
+    typeof event.isMainFrame === "boolean"
+  )
+    return event.isMainFrame;
+  // Deprecated positional fields remain documented for installed Electron versions.
+  if (typeof details[2] === "boolean") return details[2];
+  return knownMainFrame;
+}
+
+function admitNavigation(
+  owned: OwnedSurface,
+  target: string,
+  credentialSubmitView?: BrowserSurfaceViewPort,
+): boolean {
+  const temporary = owned.credentialSubmitOrigins;
+  if (temporary !== undefined && temporary.expires <= Date.now())
+    owned.credentialSubmitOrigins = undefined;
+  if (
+    credentialSubmitView !== undefined &&
+    temporary?.view === credentialSubmitView &&
+    temporary.expires > Date.now() &&
+    originAllowed(target, temporary.origins)
+  )
+    return true;
   if (originAllowed(target, owned.policy.allowedOrigins)) return true;
   if (originAllowed(target, owned.userGrantedOrigins)) return true;
   // Only while the person is demonstrably driving. "idle" is nobody's action:

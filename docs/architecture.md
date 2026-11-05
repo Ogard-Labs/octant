@@ -11492,11 +11492,11 @@ access` agree); a thread's own change is journaled as
     origin, including port, from a live native context. Review and save need
     its sign-in or take-over hold. This first binding supports only the top
     frame; iframe targets, paired clients, unattended callers and headless
-    contexts are refused. It adds no fill or page-script operation.
+    contexts are refused. Arbitrary page scripts remain a separate capability.
     The broker requests only the selected item with explicit `--account` and
     `--vault` IDs. CLI item JSON may contain concealed values; the adapter
     projects only IDs, bounded title, item version and saved HTTPS origins.
-    No field values, OTPs, raw JSON or tool diagnostics leave it. Missing,
+    Metadata responses contain no field values, OTPs, raw JSON or diagnostics. Missing,
     malformed, non-HTTPS or more than eight saved websites refuse uncertainty;
     excess URLs are never silently dropped. A separate broker-session/link
     revision prevents a relink from matching earlier metadata. Legacy
@@ -11512,10 +11512,55 @@ access` agree); a thread's own change is journaled as
     atomic transaction. Changed account/item version, link revision, site,
     frame or profile refuses matching on the next read; changed matching
     metadata removes and journals the grant. No immediate background
-    invalidation is promised. A later fill must revalidate every pin, current
-    page/frame, revocation and lifetime through the broker immediately before
-    its effect, while holding agent actions and observations. This binding
-    slice neither implements nor bypasses that per-use check.
+    invalidation is promised.
+    Every fill revalidates the grant, selected account/item version, link
+    revision, current held owner, profile and exact top document/form before
+    use. The person reviews the username/current-password labels and exact
+    submission/return origins, then approves **Fill selected fields**. Both
+    exact origins, including ports, must appear in fresh selected-item metadata
+    before the native reservation admits a private read. Missing sites require
+    manual sign-in or the person correcting the item’s saved websites; Octant
+    does not change metadata automatically.
+    **Submit sign-in form** is a separate explicit action. Only one unambiguous
+    top-frame form with fixed username/password fields, HTTPS action, POST
+    method and same-tab target is supported. Changed fields, document, owner,
+    profile or item refuse; MFA, CAPTCHA, passkeys and ambiguous forms remain
+    manual.
+    The broker's private consumer resolves only the selected Login item's fixed
+    username/password fields from the same versioned result. Values stay in
+    host memory between that consumer and the native form effect, never in a
+    server runtime port, broker HTTP response, app UI, journal, workflow or diagnostic.
+    A short-lived native one-shot reservation holds actions, snapshots, peek
+    and diagnostics throughout private read and effect. Reservation epochs
+    discard an overlapping read even if it finishes after release. The server
+    applies the same publication fence to point descriptions/crops; native
+    point implementations must preserve it when integrated. A cancelled read
+    retains exclusion until it settles, including when the prepared plan
+    expires during that read. The native effect checks the earlier of the grant
+    and plan deadlines after final DOM validation. Expiry invalidates eligibility
+    without releasing custody-owned observation exclusion. Point selection cannot release the
+    independent fill hold.
+    Native commit start consumes the validated plan once. Cancellation or
+    revocation before start invalidates it; after start, a receipt reports
+    possible/completed effect without claiming undo. Submission has its own
+    validation, cancellation and receipt, independent of the earlier fill.
+    Final DOM refusal with no effect leaves no added navigation permission.
+    Explicit SSO submission may temporarily admit only its exact HTTPS outbound
+    and original return origins, for the submitting view's top frame, for at
+    most ten minutes. It changes neither the agent allowlist nor permanent
+    person-origin grants; subframes and other tabs do not inherit it. No
+    credential use on an unmatching SSO site is authorized. Unexpected hops
+    refuse, while approved hops keep the same task/profile. Electron's frame
+    navigation/redirect events must provide main-frame evidence; unknown frame
+    identity receives no temporary permission.
+    A filled form is not authentication. Outcomes distinguish filled,
+    authentication-required, denied, cancelled and failed. Resuming requires
+    the person's existing handoff after the protected operation ends. The
+    website receives the credential and its own scripts can retain or reflect
+    it. Observation exclusion during the operation and credential-free broker
+    results do not prove callbacks are gone, that a reload erased them, or that
+    later page content cannot reflect credentials. Consent states this limit;
+    arbitrary agent scripts remain disabled here.
   - **Named credential commands.** Settings › Secret stores saves a fixed
     reference-only binding for one Code Project: canonical recipient executable
     and SHA-256 digest, bounded fixed arguments, relative Project directory,

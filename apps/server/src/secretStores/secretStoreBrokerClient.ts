@@ -27,6 +27,9 @@ import {
   decodeBrowserCredentialMetadata,
   type BrowserCredentialItem,
   type BrowserCredentialMetadata,
+  decodeBrowserCredentialHostResult,
+  type BrowserCredentialHostCommand,
+  type BrowserCredentialHostResult,
 } from "@octant/contracts/browser-credential-use";
 
 export type BrowserMetadataAnswer =
@@ -133,6 +136,9 @@ export interface SecretStoreBrokerClient {
   readonly googleCliSession?: (
     signal?: AbortSignal,
   ) => Promise<GoogleCliSessionAnswer | SecretStoreBrokerDown>;
+  readonly browserFill?: (
+    command: BrowserCredentialHostCommand,
+  ) => Promise<BrowserCredentialHostResult>;
   readonly browserMetadata?: (item: BrowserCredentialItem) => Promise<BrowserMetadataAnswer>;
   readonly commandUse?: (
     request: CommandCredentialHostRequest,
@@ -383,6 +389,14 @@ export function makeSecretStoreBrokerClient(
         status === "invalid-reference"
         ? { status }
         : DOWN;
+    },
+    browserFill: async (command) => {
+      const answer = await post("browser-fill", command, undefined, 32 * 1024);
+      try {
+        return decodeBrowserCredentialHostResult(answer);
+      } catch {
+        return { status: "refused", reason: "unavailable" };
+      }
     },
     browserMetadata: async (item) => {
       const answer = await post("browser-metadata", item, undefined, 32 * 1024);

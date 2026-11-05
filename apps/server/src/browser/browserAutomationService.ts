@@ -25,10 +25,12 @@ import type {
 import {
   decodeBrowserCredentialTarget,
   type BrowserCredentialCommand,
+  type BrowserCredentialTarget,
 } from "@octant/contracts/browser-credential-use";
 import {
   browserCredentialRefusal,
   type BrowserCredentialCurrentTarget,
+  type BrowserCredentialFillLease,
 } from "./browserCredentialUseService";
 import {
   MAX_BROWSER_HELD_DOWNLOADS,
@@ -195,6 +197,15 @@ interface OwnedContext {
   peekedAt: number | undefined;
   /** Agent actions queued or running on this page. */
   agentActions: number;
+  credentialEpoch: number;
+  credentialFill:
+    | {
+        readonly planId: string;
+        readonly target: BrowserCredentialTarget;
+        readonly abort: AbortController;
+        pendingPersonRelease: (() => void) | undefined;
+      }
+    | undefined;
   /** When an agent's action on this page last finished. */
   agentActedAt: number | undefined;
   /**
@@ -452,6 +463,8 @@ export class BrowserAutomationService {
       contentHash: undefined,
       peekedAt: undefined,
       agentActions: 0,
+      credentialEpoch: 0,
+      credentialFill: undefined,
       agentActedAt: undefined,
       waitingForPerson: undefined,
       releaseTakeOver: undefined,
@@ -827,6 +840,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    const credentialEpoch = owned.credentialEpoch;
     const byAgent = (input.activityBy ?? input.capturedBy) === "agent";
     if (byAgent) owned.agentActions += 1;
     try {
@@ -838,6 +852,15 @@ export class BrowserAutomationService {
           title: owned.observation?.title,
           contentHash: owned.contentHash,
         };
+        if (owned.credentialFill !== undefined || credentialEpoch !== owned.credentialEpoch)
+          return this.#failure(
+            owned,
+            {
+              category: "unavailable",
+              message: "The login fill holds Browser actions and observations.",
+            },
+            owned.status,
+          );
         const result = await this.#actOwned(owned, input);
         if (input.capturedBy === "agent") {
           this.#recordStep(owned, input.request, element, before, result);
@@ -1055,6 +1078,16 @@ export class BrowserAutomationService {
     const meaningful = activityBy !== undefined || PERSON_PAGE_ACTIONS.has(input.request.kind);
     if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
     try {
+      const credentialEpoch = owned.credentialEpoch;
+      if (owned.credentialFill !== undefined)
+        return this.#failure(
+          owned,
+          {
+            category: "unavailable",
+            message: "The login fill holds Browser actions and observations.",
+          },
+          owned.status,
+        );
       const { files: _named, ...action } = resolved.request;
       const effect = await waitForBrowserRuntime(
         this.#runtime.act(
@@ -1086,6 +1119,15 @@ export class BrowserAutomationService {
         await this.#expireContext(owned);
         return snapshot(owned);
       }
+      if (owned.credentialFill !== undefined || credentialEpoch !== owned.credentialEpoch)
+        return this.#failure(
+          owned,
+          {
+            category: "unavailable",
+            message: "The login fill withheld an overlapping observation.",
+          },
+          owned.status,
+        );
       if (owned.abort.signal.aborted || owned.record.state !== "active") {
         return this.#failure(
           owned,
@@ -1671,6 +1713,82 @@ export class BrowserAutomationService {
     return snapshot(owned);
   }
 
+  holdCredentialFill(
+    windowId: WindowId,
+    target: BrowserCredentialTarget,
+    planId: string,
+  ):
+    | BrowserCredentialFillLease
+    | (BrowserCredentialCurrentTarget & { readonly kind: "browser-credential-refused" }) {
+    const owned = this.#contexts.get(target.contextId);
+    if (
+      owned === undefined ||
+      String(owned.windowId) !== String(windowId) ||
+      String(owned.threadId) !== String(target.threadId) ||
+      !this.#authorityIsActive(owned) ||
+      this.#isUnattendedScope(windowId) ||
+      owned.waitingForPerson === undefined ||
+      owned.agentActions > 0 ||
+      owned.credentialFill !== undefined ||
+      owned.record.presentation !== "native-live" ||
+      owned.record.authority.mode !== target.mode ||
+      String(owned.record.authority.projectId) !== String(target.projectId) ||
+      browserProfileKey(owned.record.policy.profile) !== browserProfileKey(target.profile)
+    )
+      return browserCredentialRefusal(
+        "hold-required",
+        "This page needs its current person-held sign-in context.",
+      );
+    const record = owned.record;
+    const held: NonNullable<OwnedContext["credentialFill"]> = {
+      planId,
+      target,
+      abort: new AbortController(),
+      pendingPersonRelease: undefined,
+    };
+    owned.credentialFill = held;
+    owned.credentialEpoch += 1;
+    owned.observation = undefined;
+    owned.refs = undefined;
+    owned.contentHash = undefined;
+    const abort = () => held.abort.abort();
+    owned.abort.signal.addEventListener("abort", abort, { once: true });
+    const current = async (): Promise<BrowserCredentialCurrentTarget> => {
+      const validOwner = () =>
+        this.#contexts.get(target.contextId) === owned &&
+        owned.record === record &&
+        owned.credentialFill === held &&
+        owned.waitingForPerson !== undefined &&
+        !held.abort.signal.aborted &&
+        !owned.abort.signal.aborted &&
+        this.#authorityIsActive(owned);
+      if (!validOwner() || this.#runtime.validateCredentialFill === undefined)
+        return browserCredentialRefusal("stale", "The held login form changed.");
+      const valid = await this.#runtime.validateCredentialFill(
+        target.contextId,
+        { windowId, threadId: target.threadId },
+        planId,
+      );
+      return valid && validOwner()
+        ? { kind: "browser-credential-target", target }
+        : browserCredentialRefusal("stale", "The held login form changed.");
+    };
+    return {
+      kind: "held",
+      signal: held.abort.signal,
+      current,
+      release: () => {
+        owned.abort.signal.removeEventListener("abort", abort);
+        if (owned.credentialFill !== held) return;
+        owned.credentialFill = undefined;
+        owned.observation = undefined;
+        owned.refs = undefined;
+        owned.peekedAt = undefined;
+        held.pendingPersonRelease?.();
+      },
+    };
+  }
+
   async credentialUseTarget(
     windowId: WindowId,
     command: BrowserCredentialCommand,
@@ -1700,10 +1818,23 @@ export class BrowserAutomationService {
         "Take over the page or wait for its sign-in handoff before reviewing an item.",
       );
     const record = owned.record;
+    const credentialEpoch = owned.credentialEpoch;
+    if (holdRequired && owned.credentialFill !== undefined)
+      return browserCredentialRefusal("hold-required", "A login fill already holds this page.");
     try {
-      const observed = await this.#runtime.peek(command.contextId, owned.abort.signal);
+      const observed =
+        owned.credentialFill !== undefined
+          ? await this.#runtime
+              .validateCredentialFill?.(
+                command.contextId,
+                { windowId, threadId: owned.threadId },
+                owned.credentialFill.planId,
+              )
+              .then((valid) => (valid ? { url: owned.credentialFill?.target.topOrigin } : {}))
+          : await this.#runtime.peek(command.contextId, owned.abort.signal);
       if (
         this.#contexts.get(command.contextId) !== owned ||
+        owned.credentialEpoch !== credentialEpoch ||
         owned.record !== record ||
         !this.#authorityIsActive(owned) ||
         owned.abort.signal.aborted ||
@@ -1713,7 +1844,7 @@ export class BrowserAutomationService {
           "stale",
           "The Browser page changed while its site was being checked.",
         );
-      if (record.authority.mode === "chat" || observed.url === undefined)
+      if (record.authority.mode === "chat" || observed?.url === undefined)
         return browserCredentialRefusal(
           "unsupported",
           "This page has no eligible task and HTTPS site.",
@@ -1818,6 +1949,8 @@ export class BrowserAutomationService {
     ) {
       return { status: "unavailable" };
     }
+    if (owned.credentialFill !== undefined) return { status: "unavailable" };
+    const credentialEpoch = owned.credentialEpoch;
     const describe = this.#runtime.describePoint;
     if (describe === undefined) return { status: "unavailable" };
     return this.#queueAction(owned, async () => {
@@ -1832,6 +1965,8 @@ export class BrowserAutomationService {
         return { status: "unavailable" as const };
       }
       try {
+        if (owned.credentialFill !== undefined || credentialEpoch !== owned.credentialEpoch)
+          return { status: "unavailable" as const };
         const observed = await waitForBrowserRuntime(
           describe(input.contextId, input.point, owned.abort.signal),
           owned.abort.signal,
@@ -1846,7 +1981,9 @@ export class BrowserAutomationService {
           void this.#expireContext(owned);
           return { status: "unavailable" as const };
         }
-        return observed.value;
+        return owned.credentialFill !== undefined || credentialEpoch !== owned.credentialEpoch
+          ? { status: "unavailable" as const }
+          : observed.value;
       } catch {
         return { status: "unavailable" as const };
       }
@@ -2055,12 +2192,14 @@ export class BrowserAutomationService {
     // own state, and a bare reference to it arrived there with no `this`.
     const runtime = this.#runtime;
     if (
+      owned.credentialFill === undefined &&
       runtime.peek !== undefined &&
       // A live context is "running" for as long as it exists; "waiting" is one
       // still being created, whose page is not there to look at yet.
       owned.status === "running" &&
       !this.#pictureFresh(owned)
     ) {
+      const credentialEpoch = owned.credentialEpoch;
       owned.peekedAt = this.#now();
       try {
         const readSignal =
@@ -2080,6 +2219,7 @@ export class BrowserAutomationService {
           return;
         }
         const observed = peeked.value;
+        if (owned.credentialFill !== undefined || credentialEpoch !== owned.credentialEpoch) return;
         // A fresh picture of the same page is not a new page: keeping the
         // revision lets an agent's next action, which names the revision its
         // last action returned, still run while a preview is open.
@@ -2259,12 +2399,18 @@ export class BrowserAutomationService {
     // after Continue to read it.
     owned.keptUntil = this.#now() + HAND_OFF_KEEP_MS;
     this.#scheduleExpiry(owned);
-    return () => {
+    const release = () => {
+      if (owned.credentialFill !== undefined) {
+        owned.credentialFill.pendingPersonRelease = release;
+        owned.credentialFill.abort.abort();
+        return;
+      }
       owned.waitingForPerson = undefined;
       owned.releaseTakeOver = undefined;
       owned.keptUntil = this.#now() + AFTER_HAND_OFF_KEEP_MS;
       if (owned.record.state === "active") this.#scheduleExpiry(owned);
     };
+    return release;
   }
 
   /**

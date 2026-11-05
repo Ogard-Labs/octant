@@ -1,9 +1,14 @@
+import { decodeBrowserCredentialHostResult } from "@octant/contracts/browser-credential-use";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
+import {
+  startCredentialBroker,
+  type CredentialBroker,
+  type BrowserCredentialFillHostPort,
+} from "./credentialBroker";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 import { makeFakeOnePassword, type FakeOnePassword } from "./fakeOnePassword.test-support";
 import {
@@ -47,7 +52,10 @@ afterEach(async () => {
   await Promise.all(brokers.splice(0).map((broker) => broker.close()));
 });
 
-async function harness(adapter?: LinkedSecretStoreAdapter): Promise<Harness> {
+async function harness(
+  adapter?: LinkedSecretStoreAdapter,
+  fill?: BrowserCredentialFillHostPort,
+): Promise<Harness> {
   const op = makeFakeOnePassword();
   op.addItem(REFERENCE, VALUE);
   const provider = memoryStore();
@@ -70,6 +78,8 @@ async function harness(adapter?: LinkedSecretStoreAdapter): Promise<Harness> {
     others,
     others,
     linked,
+    undefined,
+    fill,
   );
   brokers.push(broker);
   return {
@@ -103,6 +113,39 @@ const point = (id = instanceId, namespace = "provider", reference = REFERENCE) =
 
 // Each case starts real child processes, which are slow on a busy machine.
 describe("credential broker linked secret stores", { timeout: 30_000 }, () => {
+  it("authenticates fixed fill commands and refuses secret-bearing requests and responses", async () => {
+    const ready = decodeBrowserCredentialHostResult({ status: "ready", custodyId: randomUUID() });
+    const execute = vi.fn(async () => ready);
+    const h = await harness(undefined, { execute, close: () => undefined });
+    const command = {
+      kind: "cancel-browser-credential-fill",
+      contextId: randomUUID(),
+      planId: randomUUID(),
+      owner: { windowId: randomUUID(), threadId: randomUUID() },
+    };
+    const unauthenticated = await h.broker.fetchForTest(
+      new Request(new URL("/v1/secret-stores/browser-fill", h.broker.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      }),
+    );
+    expect(unauthenticated.status).toBe(401);
+    expect(
+      (await h.post("/v1/secret-stores/browser-fill", { ...command, password: "fixture-private" }))
+        .status,
+    ).toBe(400);
+    expect(execute).not.toHaveBeenCalled();
+    expect(await h.post("/v1/secret-stores/browser-fill", command)).toEqual({
+      status: 200,
+      text: JSON.stringify(ready),
+    });
+    execute.mockImplementationOnce(async () => ({ ...ready, password: "fixture-private" }));
+    const refused = await h.post("/v1/secret-stores/browser-fill", command);
+    expect(JSON.parse(refused.text)).toEqual({ status: "refused", reason: "unavailable" });
+    expect(refused.text).not.toContain("fixture-private");
+  });
+
   it("returns selected-item metadata through the authenticated broker without changing legacy pointers", async () => {
     const item = {
       store: "onepassword" as const,

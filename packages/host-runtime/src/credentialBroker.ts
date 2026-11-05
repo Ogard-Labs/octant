@@ -1,5 +1,11 @@
 import { decodeCommandCredentialHostRequest } from "@octant/contracts/command-credentials";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  decodeBrowserCredentialHostCommand,
+  decodeBrowserCredentialHostResult,
+  type BrowserCredentialHostCommand,
+  type BrowserCredentialHostResult,
+} from "@octant/contracts/browser-credential-use";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { ensureSshKey, signSshLogin, sshPublicKey } from "./sshKeyBroker";
@@ -86,6 +92,7 @@ const ROUTES = new Set([
   "/v1/secret-stores/unlink",
   "/v1/secret-stores/check",
   "/v1/secret-stores/browser-metadata",
+  "/v1/secret-stores/browser-fill",
   "/v1/secret-stores/point",
   "/v1/secret-stores/reference",
   "/v1/secret-stores/clear",
@@ -136,6 +143,12 @@ interface LinkedBrokerStores {
   readonly stores: LinkedSecretStores;
   readonly awsCli: AwsCliSessions;
   readonly googleCli: GoogleCliSessions;
+  readonly browserFill?: BrowserCredentialFillHostPort;
+}
+
+export interface BrowserCredentialFillHostPort {
+  readonly execute: (command: BrowserCredentialHostCommand) => Promise<BrowserCredentialHostResult>;
+  readonly close: () => void;
 }
 
 export interface CredentialBroker {
@@ -212,6 +225,7 @@ export async function startCredentialBroker(
    * public line and signs a login request for that key, nothing else.
    */
   sshKeys?: CredentialStore,
+  browserFill?: BrowserCredentialFillHostPort,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -256,6 +270,7 @@ export async function startCredentialBroker(
             ...(oauth?.now === undefined ? {} : { now: oauth.now }),
             ...(oauth?.timeoutMs === undefined ? {} : { timeoutMs: oauth.timeoutMs }),
           }),
+          ...(browserFill === undefined ? {} : { browserFill }),
           awsCli: createAwsCliSessions({
             linked: linkedSecretStores,
             ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
@@ -323,6 +338,7 @@ export async function startCredentialBroker(
     if (closing !== undefined) return closing;
     closing = (async () => {
       linked?.googleCli.forget();
+      browserFill?.close();
       try {
         await runtime.close();
       } finally {
@@ -520,6 +536,26 @@ async function handleBrokerRequest(
   if (url.pathname.startsWith(SECRET_STORE_PREFIX)) {
     if (url.pathname === `${SECRET_STORE_PREFIX}unlink`) linked?.googleCli.forget();
     if (linked === undefined) return failure("not-found", 404);
+    if (url.pathname === "/v1/secret-stores/browser-fill") {
+      const body = await readJsonRecord(request);
+      if (body.kind === "too-large") return failure("too-large", 413);
+      if (body.kind === "invalid") return failure("invalid-request", 400);
+      let command: BrowserCredentialHostCommand;
+      try {
+        command = decodeBrowserCredentialHostCommand(body.value);
+      } catch {
+        return failure("invalid-request", 400);
+      }
+      if (linked.browserFill === undefined)
+        return Response.json({ status: "refused", reason: "unavailable" });
+      try {
+        return Response.json(
+          decodeBrowserCredentialHostResult(await linked.browserFill.execute(command)),
+        );
+      } catch {
+        return Response.json({ status: "refused", reason: "unavailable" });
+      }
+    }
     return handleSecretStoreRoute(
       url.pathname.slice(SECRET_STORE_PREFIX.length),
       request,

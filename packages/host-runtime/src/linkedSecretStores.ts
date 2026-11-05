@@ -20,6 +20,11 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  consumeOnePasswordBrowserCredential,
+  type BrowserCredentialValues,
+  type BrowserCredentialConsumption,
+} from "./onePasswordBrowserCredential";
+import {
   readOnePasswordBrowserMetadata,
   type BrowserCredentialItemPin,
   type BrowserItemMetadata,
@@ -66,6 +71,10 @@ export interface LinkedSecretStoreAdapter {
   readonly probe: () => Promise<LinkedSecretToolState>;
   readonly read: (reference: string) => Promise<LinkedSecretRead>;
   readonly browserMetadata?: (item: BrowserCredentialItemPin) => Promise<BrowserItemMetadata>;
+  readonly consumeBrowserCredential?: (
+    metadata: Omit<Extract<BrowserItemMetadata, { readonly status: "described" }>, "status">,
+    consume: (values: BrowserCredentialValues) => Promise<void>,
+  ) => Promise<BrowserCredentialConsumption>;
 }
 
 export interface LinkedSecretStoreStatus {
@@ -84,6 +93,13 @@ export type LinkSecretStoreResult =
 
 export interface LinkedSecretStores {
   readonly commandLinkRevision?: () => Promise<string | undefined>;
+  readonly consumeBrowserCredential?: (
+    metadata: Omit<Extract<BrowserItemMetadata, { readonly status: "described" }>, "status"> & {
+      readonly storeRevision: string;
+    },
+    consume: (values: BrowserCredentialValues) => Promise<void>,
+  ) => Promise<BrowserCredentialConsumption>;
+  readonly browserRevisionCurrent?: (revision: string) => boolean;
   readonly status: () => Promise<ReadonlyArray<LinkedSecretStoreStatus>>;
   readonly link: (kind: LinkedSecretStoreKind) => Promise<LinkSecretStoreResult>;
   readonly unlink: (kind: LinkedSecretStoreKind) => Promise<void>;
@@ -336,6 +352,15 @@ export function makeOnePasswordAdapter(
         timeoutMs,
       });
     },
+    consumeBrowserCredential: async (metadata, consume) => {
+      const file = await executable();
+      if (file === undefined) return { status: "unavailable" };
+      return consumeOnePasswordBrowserCredential(
+        metadata,
+        { executable: file, run, env: environment(), timeoutMs },
+        consume,
+      );
+    },
     isValidReference: (reference) =>
       isPlainReference(reference) && ONE_PASSWORD_REFERENCE.test(reference),
     probe: async () => {
@@ -395,6 +420,7 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
   const now = options.now ?? (() => new Date().toISOString());
   const browserSession = randomUUID();
   let browserRevision = 0;
+  let lastBrowserRevision: string | undefined;
   const adapterFor = (kind: LinkedSecretStoreKind): LinkedSecretStoreAdapter | undefined =>
     adapters.find((adapter) => adapter.kind === kind);
 
@@ -439,6 +465,33 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
   };
 
   return {
+    browserRevisionCurrent: (revision) =>
+      lastBrowserRevision === revision &&
+      revision.startsWith(`${browserSession}:${browserRevision}:`),
+    consumeBrowserCredential: async (metadata, consume) => {
+      const adapter = adapterFor(metadata.item.store);
+      if (adapter?.consumeBrowserCredential === undefined) return { status: "unavailable" };
+      const before = (await load()).stores[metadata.item.store];
+      const revision = browserRevision;
+      if (before === undefined) return { status: "not-linked" };
+      if (metadata.storeRevision !== `${browserSession}:${revision}:${before.linkedAt}`)
+        return { status: "changed" };
+      let refused = false;
+      const result = await adapter.consumeBrowserCredential(metadata, async (values) => {
+        const after = (await load()).stores[metadata.item.store];
+        if (
+          after === undefined ||
+          after.linkedAt !== before.linkedAt ||
+          browserRevision !== revision
+        ) {
+          refused = true;
+          return;
+        }
+        lastBrowserRevision = metadata.storeRevision;
+        await consume(values);
+      });
+      return refused ? { status: "changed" } : result;
+    },
     status: async () => {
       const state = await load();
       return Promise.all(
@@ -496,6 +549,7 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       const after = (await load()).stores[item.store];
       if (after === undefined || after.linkedAt !== before.linkedAt || revision !== browserRevision)
         return { status: "changed" };
+      lastBrowserRevision = `${browserSession}:${revision}:${before.linkedAt}`;
       return result.status === "described"
         ? { ...result, storeRevision: `${browserSession}:${revision}:${before.linkedAt}` }
         : result;

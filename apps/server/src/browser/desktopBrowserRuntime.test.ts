@@ -11,6 +11,50 @@ const policy = {
 };
 
 describe("DesktopBrowserRuntime", () => {
+  it("sends only scoped form references and the finite deadline to native credential operations", async () => {
+    const sent: Array<Readonly<Record<string, unknown>>> = [];
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      sent.push(body);
+      return Response.json(
+        body.kind === "prepare"
+          ? {
+              status: "prepared",
+              planId: contextId,
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+              expiresAt: "2026-11-03T10:03:00.000Z",
+            }
+          : { status: "authentication-required", effect: "completed" },
+      );
+    });
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch,
+    });
+    const owner = { windowId: contextId, threadId: contextId };
+    const expiresAt = "2026-11-03T10:03:00.000Z";
+    expect(
+      await runtime.prepareCredentialFill(contextId, owner, "https://example.com"),
+    ).toMatchObject({ status: "prepared" });
+    expect(await runtime.submitCredentialFill(contextId, owner, contextId, expiresAt)).toEqual({
+      status: "authentication-required",
+      effect: "completed",
+    });
+    expect(sent).toEqual([
+      { kind: "prepare", contextId, owner, origin: "https://example.com" },
+      { kind: "submit", contextId, owner, planId: contextId, expiresAt },
+    ]);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:41234/v1/contexts/credential-fill",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "x-octant-browser-broker-token": "broker-token" }),
+      }),
+    );
+  });
+
   it("authenticates every loopback broker request and forwards the exact context owner", async () => {
     const fetch = vi.fn(async () => Response.json({ ok: true }));
     const runtime = new DesktopBrowserRuntime({

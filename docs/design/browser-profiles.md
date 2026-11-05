@@ -43,8 +43,10 @@ and service workers in. There are three kinds:
   [Importing from another browser](#importing-from-another-browser).
 - Chat has no Browser, so it has no profile. A Chat Project has no Project
   profile.
-- The person signs in by typing into the page themselves. Octant saves no
-  passwords and fills none.
+- The person signs in manually or approves a selected-item brokered fill under
+  the [held Browser sign-in boundary](browser-agent-tool.md#asking-the-person-to-sign-in).
+  Octant keeps credential references rather than a password vault. Fill and
+  submit are separate approvals, and neither proves authentication.
 
 ### Choosing a profile
 
@@ -469,3 +471,19 @@ Each refusal is a value the pane shows in words; none is a silent no-op.
   is safe because a Private page carries no sign-in. The same origin in a
   profile acts as the person's account, so the grant has to name the profile it
   covers, and a grant for one profile cannot spill into another.
+
+### Brokered fill and SSO
+
+A saved selected-item permission never supplies a credential automatically.
+Every fill needs the current person-held page, reviewed top-frame form and
+fresh account/item/revision, origin, profile and grant checks. Fill and submit
+are separate approvals; neither asserts successful authentication. Both the
+page origin and form destination, including ports, must appear in fresh item
+metadata before native custody reads any credential. An unlisted destination
+requires manual sign-in or a person correcting the item’s saved websites. Approved
+SSO outbound/return hops preserve the task/profile with a bounded temporary
+permission for that view's top frame. They grant no iframe, other-tab,
+agent-origin or credential use on the SSO site. Cookies do not renew the grant.
+MFA, CAPTCHA, passkeys and unsupported forms remain manual. See the
+[credential boundary](../architecture.md#linked-secret-stores) for custody,
+cancellation, observation exclusion and the site's ability to reflect inputs.

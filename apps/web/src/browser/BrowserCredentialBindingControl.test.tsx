@@ -62,6 +62,72 @@ async function enterItem() {
 }
 
 describe("Browser selected-item consent", () => {
+  it("reviews the exact form and SSO submission site before separate fill and submit approvals", async () => {
+    const manageCredentialUse = vi.fn(async (command: BrowserCredentialCommand) =>
+      decodeBrowserCredentialResult(
+        command.kind === "prepare-browser-credential-fill"
+          ? {
+              kind: "browser-credential-fill-review",
+              planId: id(8),
+              grantId: grant.grantId,
+              metadata,
+              target,
+              usernameLabel: "Email",
+              passwordLabel: "Current password",
+              submissionOrigin: "https://identity.example",
+              expiresAt: "2026-11-03T10:03:00.000Z",
+            }
+          : command.kind === "confirm-browser-credential-fill"
+            ? {
+                kind: "browser-credential-fill-outcome",
+                planId: id(8),
+                status: "filled",
+                effect: "completed",
+                message: "The selected fields were filled. Sign-in is not confirmed.",
+              }
+            : command.kind === "submit-browser-credential-fill"
+              ? {
+                  kind: "browser-credential-fill-outcome",
+                  planId: id(8),
+                  status: "authentication-required",
+                  effect: "completed",
+                  message: "Complete MFA or CAPTCHA in the page. Sign-in is not confirmed.",
+                }
+              : { kind: "browser-credential-grants", grants: [grant] },
+      ),
+    );
+    render(
+      <BrowserCredentialBindingControl
+        client={{ manageCredentialUse }}
+        context={target}
+        profile={target.profile}
+        held
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Login permission" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Review login form" }));
+    expect(await screen.findByText("Submit to: https://identity.example")).toBeTruthy();
+    expect(screen.getByText(`Return site: ${target.topOrigin}`)).toBeTruthy();
+    expect(
+      manageCredentialUse.mock.calls.some(
+        ([command]) => command.kind === "confirm-browser-credential-fill",
+      ),
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Fill selected fields" }));
+    expect(
+      await screen.findByText("The selected fields were filled. Sign-in is not confirmed."),
+    ).toBeTruthy();
+    expect(
+      manageCredentialUse.mock.calls.some(
+        ([command]) => command.kind === "submit-browser-credential-fill",
+      ),
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Submit sign-in form" }));
+    expect(
+      await screen.findByText("Complete MFA or CAPTCHA in the page. Sign-in is not confirmed."),
+    ).toBeTruthy();
+  });
+
   it("does not keep an earlier permission visible when reopening finds the store unlinked", async () => {
     let reads = 0;
     const manageCredentialUse = vi.fn(async () =>
@@ -122,7 +188,7 @@ describe("Browser selected-item consent", () => {
     fireEvent.click(screen.getByRole("button", { name: "Allow selected item" }));
     expect(
       await screen.findByText(
-        "Login permission recorded. It must be checked again before use. Automatic filling is not available yet.",
+        "Login permission recorded. It must be checked again before use. Review the login form to approve a fill.",
       ),
     ).toBeTruthy();
     expect(manageCredentialUse).toHaveBeenLastCalledWith(

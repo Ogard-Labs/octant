@@ -64,6 +64,29 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
     }
   }
 
+  prepareCredentialFill: NonNullable<BrowserRuntimePort["prepareCredentialFill"]> = async (
+    ...args
+  ) =>
+    this.#owned(args[0]).prepareCredentialFill?.(...args) ?? {
+      status: "refused",
+      reason: "unavailable",
+    };
+  validateCredentialFill: NonNullable<BrowserRuntimePort["validateCredentialFill"]> = async (
+    ...args
+  ) => this.#owned(args[0]).validateCredentialFill?.(...args) ?? false;
+  cancelCredentialFill: NonNullable<BrowserRuntimePort["cancelCredentialFill"]> = async (
+    ...args
+  ) => {
+    return (
+      (await this.#owned(args[0]).cancelCredentialFill?.(...args)) ?? {
+        status: "cancelled",
+        effect: "none",
+      }
+    );
+  };
+  submitCredentialFill: NonNullable<BrowserRuntimePort["submitCredentialFill"]> = async (...args) =>
+    this.#owned(args[0]).submitCredentialFill?.(...args) ?? { status: "failed", effect: "none" };
+
   inspectTarget(...args: Parameters<BrowserRuntimePort["inspectTarget"]>) {
     return this.#owned(args[0]).inspectTarget(...args);
   }

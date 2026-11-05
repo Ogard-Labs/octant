@@ -13,6 +13,10 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantField, OctantFieldLabel, OctantFieldDescription } from "../ui/base/OctantField";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
+type FillReview = Extract<
+  BrowserCredentialResult,
+  { readonly kind: "browser-credential-fill-review" }
+>;
 type Review = Extract<BrowserCredentialResult, { readonly kind: "browser-credential-review" }>;
 export interface BrowserCredentialBindingControlProps {
   readonly client: Pick<BrowserAutomationClient, "manageCredentialUse">;
@@ -34,30 +38,114 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
     props.profile.kind === "private" ? "task" : "project",
   );
   const [review, setReview] = useState<Review>();
+  const [fillReview, setFillReview] = useState<FillReview>();
+  const [fillState, setFillState] = useState<"review" | "filled" | "done">("review");
+  const [progress, setProgress] = useState("Checking the selected item…");
+  const fillPlan = useRef<string | undefined>(undefined);
   const [grants, setGrants] = useState<ReadonlyArray<BrowserCredentialGrant>>([]);
   const [message, setMessage] = useState<string>();
   const trigger = useRef<HTMLButtonElement>(null);
   const request = useRef<AbortController | undefined>(undefined);
-  useEffect(() => () => request.current?.abort(), []);
+  const cancelling = useRef(false);
+  useEffect(
+    () => () => {
+      request.current?.abort();
+      if (fillPlan.current !== undefined)
+        void props.client
+          .manageCredentialUse?.(
+            decodeBrowserCredentialCommand({
+              kind: "cancel-browser-credential-fill",
+              contextId: props.context.contextId,
+              threadId: props.context.threadId,
+              mode: props.context.mode,
+              planId: fillPlan.current,
+            }),
+          )
+          .catch(() => undefined);
+    },
+    [],
+  );
 
   const manage = props.client.manageCredentialUse;
   if (manage === undefined) return null;
   const validIds = [accountId, vaultId, itemId].every((id) => /^[a-z0-9]{26}$/i.test(id));
   const close = () => {
+    if (cancelling.current) return;
     request.current?.abort();
+    const planId = fillPlan.current;
+    if (planId !== undefined) {
+      fillPlan.current = undefined;
+      cancelling.current = true;
+      const cancelController = new AbortController();
+      request.current = cancelController;
+      setPending(true);
+      setProgress("Cancelling the selected fill…");
+      void manage
+        .call(
+          props.client,
+          decodeBrowserCredentialCommand({
+            kind: "cancel-browser-credential-fill",
+            contextId: props.context.contextId,
+            threadId: props.context.threadId,
+            mode: props.context.mode,
+            planId,
+          }),
+          cancelController.signal,
+        )
+        .then((result) => {
+          setPending(false);
+          setFillState("done");
+          if (result.kind !== "browser-credential-fill-outcome") {
+            setMessage(
+              "Cancellation could not be confirmed. Check the page; a credential effect may already have started.",
+            );
+            return;
+          }
+          if (result.effect !== "none") {
+            setMessage(result.message);
+            return;
+          }
+          setFillReview(undefined);
+          setOpen(false);
+        })
+        .catch(() => {
+          setPending(false);
+          setFillState("done");
+          setMessage(
+            "Cancellation could not be confirmed. Check the page; a credential effect may already have started.",
+          );
+        })
+        .finally(() => {
+          cancelling.current = false;
+        });
+      return;
+    }
+    setFillReview(undefined);
     setPending(false);
     setLoading(false);
     setReview(undefined);
     setMessage(undefined);
     setOpen(false);
   };
-  const send = async (kind: "review" | "allow" | "list" | "revoke", grantId?: string) => {
+  const send = async (
+    kind: "review" | "allow" | "list" | "revoke" | "prepare-fill" | "confirm-fill" | "submit-fill",
+    grantId?: string,
+  ) => {
     if (pending) return;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
     setPending(true);
     setMessage(undefined);
+    setProgress(
+      kind === "prepare-fill"
+        ? "Reviewing the selected login form…"
+        : kind === "confirm-fill"
+          ? "Filling the reviewed fields…"
+          : kind === "submit-fill"
+            ? "Submitting the reviewed form…"
+            : "Checking the selected item…",
+    );
     if (kind === "list") setGrants([]);
     try {
       const context = {
@@ -66,30 +154,57 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
         mode: props.context.mode,
       };
       const command =
-        kind === "review"
-          ? {
-              kind: "review-browser-credential",
-              ...context,
-              item: { store: "onepassword", accountId, vaultId, itemId },
-            }
-          : kind === "allow"
-            ? { kind: "allow-browser-credential", ...context, reviewId: review?.reviewId, scope }
-            : kind === "revoke"
-              ? { kind: "revoke-browser-credential", ...context, grantId }
-              : { kind: "list-browser-credential-grants", ...context };
+        kind === "prepare-fill"
+          ? { kind: "prepare-browser-credential-fill", ...context, grantId }
+          : kind === "confirm-fill" || kind === "submit-fill"
+            ? {
+                kind:
+                  kind === "confirm-fill"
+                    ? "confirm-browser-credential-fill"
+                    : "submit-browser-credential-fill",
+                ...context,
+                planId: fillPlan.current,
+              }
+            : kind === "review"
+              ? {
+                  kind: "review-browser-credential",
+                  ...context,
+                  item: { store: "onepassword", accountId, vaultId, itemId },
+                }
+              : kind === "allow"
+                ? {
+                    kind: "allow-browser-credential",
+                    ...context,
+                    reviewId: review?.reviewId,
+                    scope,
+                  }
+                : kind === "revoke"
+                  ? { kind: "revoke-browser-credential", ...context, grantId }
+                  : { kind: "list-browser-credential-grants", ...context };
       const result = await manage.call(
         props.client,
         decodeBrowserCredentialCommand(command),
         controller.signal,
       );
       if (controller.signal.aborted) return;
-      if (result.kind === "browser-credential-review") setReview(result);
+      if (result.kind === "browser-credential-fill-review") {
+        setFillReview(result);
+        fillPlan.current = result.planId;
+        setFillState("review");
+        setReview(undefined);
+      } else if (result.kind === "browser-credential-fill-outcome") {
+        setMessage(result.message);
+        setFillState(
+          result.status === "filled" && result.effect === "completed" ? "filled" : "done",
+        );
+        if (result.status !== "filled") fillPlan.current = undefined;
+      } else if (result.kind === "browser-credential-review") setReview(result);
       else if (result.kind === "browser-credential-grants") {
         setGrants(result.grants);
         setReview(undefined);
         if (kind === "allow")
           setMessage(
-            "Login permission recorded. It must be checked again before use. Automatic filling is not available yet.",
+            "Login permission recorded. It must be checked again before use. Review the login form to approve a fill.",
           );
         if (kind === "revoke") setMessage("Login permission revoked.");
       } else {
@@ -129,16 +244,31 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
         <OctantConfirmDialog
           title="Browser login permission"
           restoreFocus={trigger}
-          confirmLabel={review === undefined ? "Review item" : "Allow selected item"}
-          confirmDisabled={pending || loading || !props.held || (!review && !validIds)}
+          confirmLabel={
+            fillReview !== undefined
+              ? fillState === "review"
+                ? "Fill selected fields"
+                : fillState === "filled"
+                  ? "Submit sign-in form"
+                  : "Close"
+              : review === undefined
+                ? "Review item"
+                : "Allow selected item"
+          }
+          confirmDisabled={
+            pending || loading || !props.held || (!review && !fillReview && !validIds)
+          }
           onCancel={close}
-          onConfirm={() => void send(review === undefined ? "review" : "allow")}
+          onConfirm={() => {
+            if (fillReview !== undefined) {
+              if (fillState === "done") close();
+              else void send(fillState === "review" ? "confirm-fill" : "submit-fill");
+            } else void send(review === undefined ? "review" : "allow");
+          }}
           details={
             <div className="host-settings__controls">
               {pending ? (
-                <p role="status">
-                  {loading ? "Checking current login permissions…" : "Checking the selected item…"}
-                </p>
+                <p role="status">{loading ? "Checking current login permissions…" : progress}</p>
               ) : null}
               {message === undefined ? null : <OctantAlert>{message}</OctantAlert>}
               {!props.held ? (
@@ -146,15 +276,24 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
                   Take over this page or wait for the agent's sign-in handoff to review an item.
                 </p>
               ) : null}
-              {grants.length === 0 && !loading ? (
+              {fillReview === undefined && grants.length === 0 && !loading ? (
                 <p>No current login permission for this page.</p>
               ) : null}
-              {grants.map((grant) => (
+              {(fillReview === undefined ? grants : []).map((grant) => (
                 <div key={grant.grantId}>
                   <p className="break-all">
                     {grant.metadata.title} · {grant.target.topOrigin} ·{" "}
                     {grant.scope.kind === "project" ? "This Project" : "This task"}
                   </p>
+                  <OctantButton
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    disabled={pending || !props.held}
+                    onClick={() => void send("prepare-fill", grant.grantId)}
+                  >
+                    Review login form
+                  </OctantButton>
                   <OctantButton
                     size="sm"
                     type="button"
@@ -166,7 +305,39 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
                   </OctantButton>
                 </div>
               ))}
-              {review === undefined ? (
+              {fillReview !== undefined ? (
+                <div>
+                  <p className="break-all">Selected item: {fillReview.metadata.title}</p>
+                  <p className="break-all">Account: {fillReview.metadata.item.accountId}</p>
+                  <p className="break-all">Vault: {fillReview.metadata.item.vaultId}</p>
+                  <p className="break-all">Item: {fillReview.metadata.item.itemId}</p>
+                  <p>
+                    Profile:{" "}
+                    {fillReview.target.profile.kind === "project"
+                      ? "Project"
+                      : fillReview.target.profile.kind === "personal"
+                        ? "Personal"
+                        : "Private"}
+                  </p>
+                  <p className="break-all">Exact site: {fillReview.target.topOrigin}</p>
+                  <p>Top frame only. Iframes are not included.</p>
+                  <p>
+                    Fields: {fillReview.usernameLabel} and {fillReview.passwordLabel}
+                  </p>
+                  <p className="break-all">Submit to: {fillReview.submissionOrigin}</p>
+                  <p>
+                    Both sites must be saved on this item. If either is missing, sign in manually or
+                    correct the item’s saved websites, then review again.
+                  </p>
+                  <p className="break-all">Return site: {fillReview.target.topOrigin}</p>
+                  <p>
+                    The website receives this credential and can retain or reflect it. Browser
+                    observations are paused during fill and submission. Fill does not confirm
+                    sign-in. Complete MFA or CAPTCHA yourself, then check the page before handing it
+                    back.
+                  </p>
+                </div>
+              ) : review === undefined ? (
                 <>
                   <OctantField>
                     <OctantFieldLabel htmlFor={`${fieldId}-account`}>
@@ -259,7 +430,8 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
         >
           Review an item before saving permission for this exact website and Browser profile.
           Permission lasts up to eight hours, ends when the host restarts, and does not renew from
-          website cookies. Store unlock and website sign-in are separate. This step fills nothing.
+          website cookies. Store unlock and website sign-in are separate. Saving permission fills
+          nothing; filling and submitting each need your separate approval.
         </OctantConfirmDialog>
       ) : null}
     </>

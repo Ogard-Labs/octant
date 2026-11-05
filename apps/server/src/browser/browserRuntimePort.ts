@@ -14,6 +14,10 @@ import type {
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
 import type { BrowserPageSnapshotRef } from "@octant/domain";
+import type {
+  BrowserCredentialFillPreparation,
+  BrowserCredentialNativeResult,
+} from "@octant/contracts/browser-credential-use";
 
 export interface BrowserRuntimeObservation {
   readonly url?: string;
@@ -232,6 +236,27 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
   };
 
 export interface BrowserRuntimePort {
+  readonly prepareCredentialFill?: (
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    origin: string,
+  ) => Promise<BrowserCredentialFillPreparation>;
+  readonly validateCredentialFill?: (
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    planId: string,
+  ) => Promise<boolean>;
+  readonly cancelCredentialFill?: (
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    planId: string,
+  ) => Promise<BrowserCredentialNativeResult>;
+  readonly submitCredentialFill?: (
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    planId: string,
+    expiresAt: string,
+  ) => Promise<BrowserCredentialNativeResult>;
   readonly available: () => Promise<boolean>;
   /**
    * Whether the desktop app's own Browser can hold a page right now. Absent on a

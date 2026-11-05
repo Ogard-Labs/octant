@@ -1,3 +1,7 @@
+import {
+  decodeBrowserCredentialNativeCommand,
+  decodeBrowserCredentialNativeResult,
+} from "@octant/contracts/browser-credential-use";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -33,6 +37,7 @@ const ROUTES = new Set([
   "/v1/contexts/person-input",
   "/v1/contexts/act",
   "/v1/contexts/peek",
+  "/v1/contexts/credential-fill",
   "/v1/contexts/download-claim",
   "/v1/contexts/download-discard",
   "/v1/contexts/close",
@@ -206,6 +211,50 @@ async function handleBrokerRequest(
       const cookies = importedCookiesOf(body.cookies);
       if (target === undefined || cookies === undefined) return failure("invalid-request", 400);
       return Response.json(await profiles.importCookies(target, cookies));
+    }
+    if (url.pathname === "/v1/contexts/credential-fill") {
+      const command = (() => {
+        try {
+          return decodeBrowserCredentialNativeCommand(body);
+        } catch {
+          return undefined;
+        }
+      })();
+      if (command === undefined) return failure("invalid-request", 400);
+      if (command.kind === "prepare")
+        return Response.json(
+          decodeBrowserCredentialNativeResult(
+            await host.prepareCredentialFill(command.contextId, command.owner, command.origin),
+          ),
+        );
+      if (command.kind === "validate")
+        return Response.json({
+          status: "validated",
+          valid: await host.validateCredentialFill(
+            command.contextId,
+            command.owner,
+            command.planId,
+          ),
+        });
+      if (command.kind === "cancel") {
+        return Response.json(
+          decodeBrowserCredentialNativeResult(
+            host.cancelCredentialFill(command.contextId, command.owner, command.planId),
+          ),
+        );
+      }
+      if (command.kind === "submit")
+        return Response.json(
+          decodeBrowserCredentialNativeResult(
+            await host.submitCredentialFill(
+              command.contextId,
+              command.owner,
+              command.planId,
+              command.expiresAt,
+            ),
+          ),
+        );
+      return failure("invalid-request", 400);
     }
     if (url.pathname === "/v1/contexts/create") {
       if (!isUuid(body.contextId) || !isOwner(body.owner) || !isPolicy(body.policy)) {

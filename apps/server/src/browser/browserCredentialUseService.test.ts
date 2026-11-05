@@ -5,8 +5,14 @@ import {
   decodeBrowserCredentialMetadata,
   decodeBrowserCredentialTarget,
   type BrowserCredentialResult,
+  decodeBrowserCredentialNativeResult,
+  decodeBrowserCredentialHostResult,
+  type BrowserCredentialHostCommand,
 } from "@octant/contracts/browser-credential-use";
-import { createBrowserCredentialUseService } from "./browserCredentialUseService";
+import {
+  createBrowserCredentialUseService,
+  type BrowserCredentialUseOptions,
+} from "./browserCredentialUseService";
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const windowId = decodeWindowId(id(1));
@@ -17,7 +23,15 @@ const item = {
   vaultId: "v".repeat(26),
   itemId: "i".repeat(26),
 };
-function fixture() {
+function fixture(
+  fill?: (
+    readTarget: () => Promise<{
+      readonly kind: "browser-credential-target";
+      readonly target: ReturnType<typeof decodeBrowserCredentialTarget>;
+    }>,
+  ) => NonNullable<BrowserCredentialUseOptions["fill"]>,
+  additionalOrigins: ReadonlyArray<string> = [],
+) {
   let now = Date.parse("2026-11-03T10:00:00Z");
   let sequence = 10;
   let target = decodeBrowserCredentialTarget({
@@ -31,7 +45,7 @@ function fixture() {
     item,
     title: "Fixture login",
     version: 1,
-    websiteOrigins: [target.topOrigin],
+    websiteOrigins: [target.topOrigin, ...additionalOrigins],
     storeRevision: "link-1",
   });
   const record = vi.fn();
@@ -39,6 +53,7 @@ function fixture() {
   const readTarget = vi.fn(async () => ({ kind: "browser-credential-target" as const, target }));
   const service = createBrowserCredentialUseService({
     currentTarget: readTarget,
+    ...(fill === undefined ? {} : { fill: fill(readTarget) }),
     metadata: readMetadata,
     record,
     now: () => now,
@@ -89,6 +104,304 @@ function reviewId(result: BrowserCredentialResult): string {
   if (result.kind !== "browser-credential-review") throw new Error("Expected review");
   return result.reviewId;
 }
+
+describe("explicit Browser credential filling", () => {
+  it("refuses an unlisted form destination before private custody even after permission was saved", async () => {
+    const host = vi.fn();
+    const cancel = vi.fn(async () => undefined);
+    const f = fixture(
+      (readTarget) => ({
+        prepare: async () => {
+          const result = decodeBrowserCredentialNativeResult({
+            status: "prepared",
+            planId: id(99),
+            usernameLabel: "Email",
+            passwordLabel: "Password",
+            submissionOrigin: "https://identity.example:8443",
+            expiresAt: "2026-11-03T10:03:00.000Z",
+          });
+          if (result.status !== "prepared") throw new Error("Expected form");
+          return result;
+        },
+        hold: () => ({
+          kind: "held",
+          current: readTarget,
+          signal: new AbortController().signal,
+          release: () => undefined,
+        }),
+        host,
+        cancel,
+        submit: async () => ({ status: "authentication-required", effect: "completed" }),
+      }),
+      ["https://identity.example"],
+    );
+    const reviewed = await f.review();
+    const allowed = await f.allow(reviewId(reviewed));
+    if (allowed.kind !== "browser-credential-grants" || allowed.grants[0] === undefined)
+      throw new Error("Expected grant");
+    expect(
+      await f.service.execute(
+        windowId,
+        decodeBrowserCredentialCommand({
+          kind: "prepare-browser-credential-fill",
+          ...context,
+          grantId: allowed.grants[0].grantId,
+        }),
+      ),
+    ).toMatchObject({ kind: "browser-credential-refused", reason: "site-mismatch" });
+    expect(host).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each(["revoke", "cancel"])(
+    "invalidates a submit still awaiting native validation when the person chooses %s",
+    async (action) => {
+      let finish: (() => void) | undefined;
+      let cancelled = false;
+      const cancel = vi.fn(async () => {
+        cancelled = true;
+        return { status: "cancelled" as const, effect: "none" as const };
+      });
+      const f = fixture(
+        (readTarget) => ({
+          prepare: async () => {
+            const result = decodeBrowserCredentialNativeResult({
+              status: "prepared",
+              planId: id(99),
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://identity.example",
+              expiresAt: "2026-11-03T10:03:00.000Z",
+            });
+            if (result.status !== "prepared") throw new Error("Expected form");
+            return result;
+          },
+          hold: () => ({
+            kind: "held",
+            current: readTarget,
+            signal: new AbortController().signal,
+            release: () => undefined,
+          }),
+          host: async (command) =>
+            decodeBrowserCredentialHostResult(
+              command.kind === "stage-browser-credential-fill"
+                ? { status: "ready", custodyId: id(90) }
+                : { status: "filled", effect: "completed" },
+            ),
+          cancel,
+          submit: async () => {
+            await new Promise<void>((resolve) => {
+              finish = resolve;
+            });
+            return cancelled
+              ? { status: "cancelled", effect: "none" }
+              : { status: "authentication-required", effect: "completed" };
+          },
+        }),
+        ["https://identity.example"],
+      );
+      const reviewed = await f.review();
+      if (reviewed.kind !== "browser-credential-review") throw new Error("Expected review");
+      const allowed = await f.allow(reviewed.reviewId);
+      if (allowed.kind !== "browser-credential-grants" || allowed.grants[0] === undefined)
+        throw new Error("Expected grant");
+      const grantId = allowed.grants[0].grantId;
+      const plan = await f.service.execute(
+        windowId,
+        decodeBrowserCredentialCommand({
+          kind: "prepare-browser-credential-fill",
+          ...context,
+          grantId,
+        }),
+      );
+      if (plan.kind !== "browser-credential-fill-review") throw new Error("Expected form plan");
+      await f.service.execute(
+        windowId,
+        decodeBrowserCredentialCommand({
+          kind: "confirm-browser-credential-fill",
+          ...context,
+          planId: plan.planId,
+        }),
+      );
+      const pending = f.service.execute(
+        windowId,
+        decodeBrowserCredentialCommand({
+          kind: "submit-browser-credential-fill",
+          ...context,
+          planId: plan.planId,
+        }),
+      );
+      await vi.waitFor(() => expect(finish).toBeDefined());
+      const result = await f.service.execute(
+        windowId,
+        decodeBrowserCredentialCommand(
+          action === "revoke"
+            ? { kind: "revoke-browser-credential", ...context, grantId }
+            : { kind: "cancel-browser-credential-fill", ...context, planId: plan.planId },
+        ),
+      );
+      if (action === "cancel")
+        expect(result).toMatchObject({ status: "cancelled", effect: "none" });
+      expect(cancel).toHaveBeenCalled();
+      finish?.();
+      expect(await pending).toMatchObject({ status: "cancelled", effect: "none" });
+    },
+  );
+
+  it("requires a current form review and a separate submit while reporting no authentication success", async () => {
+    const host = vi.fn(async (command: BrowserCredentialHostCommand) =>
+      decodeBrowserCredentialHostResult(
+        command.kind === "stage-browser-credential-fill"
+          ? { status: "ready", custodyId: id(90) }
+          : command.kind === "commit-browser-credential-fill"
+            ? { status: "filled", effect: "completed" }
+            : { status: "cancelled", effect: "none" },
+      ),
+    );
+    const release = vi.fn();
+    const f = fixture(
+      (readTarget) => ({
+        prepare: async () => {
+          const result = decodeBrowserCredentialNativeResult({
+            status: "prepared",
+            planId: id(99),
+            usernameLabel: "Email",
+            passwordLabel: "Password",
+            submissionOrigin: "https://identity.example",
+            expiresAt: "2026-11-03T10:03:00.000Z",
+          });
+          if (result.status !== "prepared") throw new Error("Expected plan");
+          return result;
+        },
+        hold: () => ({
+          kind: "held",
+          current: readTarget,
+          signal: new AbortController().signal,
+          release,
+        }),
+        host,
+        cancel: async () => undefined,
+        submit: async () => ({ status: "authentication-required", effect: "completed" }),
+      }),
+      ["https://identity.example"],
+    );
+    const reviewed = await f.review();
+    if (reviewed.kind !== "browser-credential-review") throw new Error("Expected review");
+    const allowed = await f.allow(reviewed.reviewId);
+    if (allowed.kind !== "browser-credential-grants" || allowed.grants[0] === undefined)
+      throw new Error("Expected grant");
+    const plan = await f.service.execute(
+      windowId,
+      decodeBrowserCredentialCommand({
+        kind: "prepare-browser-credential-fill",
+        ...context,
+        grantId: allowed.grants[0].grantId,
+      }),
+    );
+    expect(plan).toMatchObject({
+      kind: "browser-credential-fill-review",
+      submissionOrigin: "https://identity.example",
+    });
+    expect(host).not.toHaveBeenCalled();
+    if (plan.kind !== "browser-credential-fill-review") throw new Error("Expected form review");
+    const filled = await f.service.execute(
+      windowId,
+      decodeBrowserCredentialCommand({
+        kind: "confirm-browser-credential-fill",
+        ...context,
+        planId: plan.planId,
+      }),
+    );
+    expect(filled).toMatchObject({
+      kind: "browser-credential-fill-outcome",
+      status: "filled",
+      effect: "completed",
+    });
+    expect(JSON.stringify(filled)).not.toContain("signed-in");
+    expect(host.mock.calls.map(([command]) => command.kind)).toEqual([
+      "stage-browser-credential-fill",
+      "commit-browser-credential-fill",
+    ]);
+    const submitted = await f.service.execute(
+      windowId,
+      decodeBrowserCredentialCommand({
+        kind: "submit-browser-credential-fill",
+        ...context,
+        planId: plan.planId,
+      }),
+    );
+    expect(submitted).toMatchObject({ status: "authentication-required", effect: "completed" });
+    expect(release).toHaveBeenCalledTimes(2);
+  });
+  it("cancels a private read when permission is revoked and never commits its late receipt", async () => {
+    let finish: (() => void) | undefined;
+    const host = vi.fn(async (command: BrowserCredentialHostCommand) => {
+      if (command.kind === "stage-browser-credential-fill") {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return decodeBrowserCredentialHostResult({ status: "ready", custodyId: id(90) });
+      }
+      return decodeBrowserCredentialHostResult({ status: "cancelled", effect: "none" });
+    });
+    const f = fixture((readTarget) => ({
+      prepare: async () => {
+        const result = decodeBrowserCredentialNativeResult({
+          status: "prepared",
+          planId: id(99),
+          usernameLabel: "Email",
+          passwordLabel: "Password",
+          submissionOrigin: "https://login.example:8443",
+          expiresAt: "2026-11-03T10:03:00.000Z",
+        });
+        if (result.status !== "prepared") throw new Error("Expected plan");
+        return result;
+      },
+      hold: () => ({
+        kind: "held",
+        current: readTarget,
+        signal: new AbortController().signal,
+        release: () => undefined,
+      }),
+      host,
+      cancel: async () => undefined,
+      submit: async () => ({ status: "authentication-required", effect: "completed" }),
+    }));
+    const review = await f.review();
+    if (review.kind !== "browser-credential-review") throw new Error("Expected review");
+    const allowed = await f.allow(review.reviewId);
+    if (allowed.kind !== "browser-credential-grants" || allowed.grants[0] === undefined)
+      throw new Error("Expected grant");
+    const grantId = allowed.grants[0].grantId;
+    const plan = await f.service.execute(
+      windowId,
+      decodeBrowserCredentialCommand({
+        kind: "prepare-browser-credential-fill",
+        ...context,
+        grantId,
+      }),
+    );
+    if (plan.kind !== "browser-credential-fill-review") throw new Error("Expected plan");
+    const pending = f.service.execute(
+      windowId,
+      decodeBrowserCredentialCommand({
+        kind: "confirm-browser-credential-fill",
+        ...context,
+        planId: plan.planId,
+      }),
+    );
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    await f.service.execute(
+      windowId,
+      decodeBrowserCredentialCommand({ kind: "revoke-browser-credential", ...context, grantId }),
+    );
+    finish?.();
+    expect(await pending).toMatchObject({ status: "cancelled", effect: "none" });
+    expect(
+      host.mock.calls.some(([command]) => command.kind === "commit-browser-credential-fill"),
+    ).toBe(false);
+  });
+});
 
 describe("selected Browser login permission", () => {
   it("reviews the exact metadata before journaling and reuses the Project permission across threads", async () => {
