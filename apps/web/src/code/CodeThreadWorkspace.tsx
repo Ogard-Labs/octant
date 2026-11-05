@@ -1,3 +1,4 @@
+import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { CredentialRequests } from "../credentials/CredentialRequests";
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import type { AutoReview } from "./autoReview";
@@ -472,7 +473,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     hostId: props.hostId,
     draft: {
       text: draft,
-      revision: draftRevisionRef.current,
+      revision: props.controller.draftRevision ?? draftRevisionRef.current,
       clear: () => {
         setDraft("");
         props.controller.setPendingDraft?.("");
@@ -850,8 +851,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
   async function submitFollowUp() {
+    if (props.controller.draftSideChatReturnsInvalid) {
+      setSendNotice(
+        "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
+      );
+      return;
+    }
+    const sideChatReturns = props.controller.draftSideChatReturns ?? [];
     if (!canSend || queuePreparingRef.current) return;
-    const draftRevision = draftRevisionRef.current;
+    const draftRevision = props.controller.draftRevision ?? draftRevisionRef.current;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
@@ -875,13 +883,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             prompt: draft,
             attachmentIds: captured.map((entry) => entry.reference.attachmentId),
             threadMentionIds,
+            ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
             fileMentionPaths,
             extensionSelections,
           },
           () => {
             attachments.acceptQueueClaim(captured);
             if (!mountedRef.current || activeThreadKeyRef.current !== originThreadKey) return;
-            if (draftRevisionRef.current === draftRevision) {
+            if (
+              (props.controller.readDraftRevision?.(originThreadKey) ??
+                draftRevisionRef.current) === draftRevision
+            ) {
               setDraft("");
               props.controller.setPendingDraft?.("");
               threadMentions.clear();
@@ -913,6 +925,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       thread.executionPolicy,
     ];
     if (extensionSelections.length > 0) sendArguments[7] = extensionSelections;
+    if (sideChatReturns.length > 0) sendArguments[8] = sideChatReturns;
+    if (props.controller.draftRevision !== undefined)
+      sendArguments[9] = props.controller.draftRevision;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
       attachments.takeForSend();
@@ -921,7 +936,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       // draft per thread and hands it back whenever the composer re-syncs, so
       // the sent message came back into the box until the stored copy was
       // cleared as well.
-      if (draftRevisionRef.current === draftRevision) {
+      if (
+        (props.controller.readDraftRevision?.(originThreadKey) ?? draftRevisionRef.current) ===
+        draftRevision
+      ) {
         setDraft("");
         props.controller.setPendingDraft?.("");
         threadMentions.clear();
@@ -2095,6 +2113,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 )}
               </div>
             )}
+            <SideChatDraftNotice
+              count={props.controller.draftSideChatReturns?.length ?? 0}
+              invalid={props.controller.draftSideChatReturnsInvalid === true}
+              onClear={() => {
+                setDraft("");
+                props.controller.setPendingDraft?.("");
+              }}
+            />
             {props.controller.draftStagedDropped === true ? (
               <p className="code-thread-workspace__hint" role="status">
                 {COMPOSER_STAGED_DROPPED_NOTE}

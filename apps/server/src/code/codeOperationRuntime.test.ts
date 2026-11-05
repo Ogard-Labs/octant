@@ -7520,6 +7520,9 @@ function runtimeFixture(options: {
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
   browserProfiles?: Parameters<typeof createCodeOperationRuntime>[0]["browserProfiles"];
+  resolveSideChatReturns?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolveSideChatReturns"];
   appleToolchain?: Parameters<typeof createCodeOperationRuntime>[0]["appleToolchain"];
   computerUseTools?: Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"];
   threadDesktopDestination?: Parameters<
@@ -7825,6 +7828,9 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.resolveSideChatReturns === undefined
+      ? {}
+      : { resolveSideChatReturns: options.resolveSideChatReturns }),
     ...(options.activeTurns === undefined ? {} : { activeTurns: options.activeTurns }),
     persistence: {
       journal,
@@ -10327,6 +10333,46 @@ async function functionCallingEndpoint(
   };
   return { driver, bodies, answers };
 }
+
+it("forwards Side Chat return validation through the actual Code runtime-to-service composition before launching a provider", async () => {
+  const resolveSideChatReturns = vi.fn(async () => {
+    throw new Error("purged reference");
+  });
+  const fixture = runtimeFixture({ approvalValidator: false, resolveSideChatReturns });
+  try {
+    const sideChatReturns = [
+      {
+        sidecarThreadId: checkoutId,
+        sourceThreadId: threadId,
+        sourceMode: "code",
+        turnId: operationId(901),
+        attemptId: operationId(902),
+        answerDigest: "a".repeat(64),
+      },
+    ];
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(903),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+      sideChatReturns,
+    });
+    expect(resolveSideChatReturns).toHaveBeenCalledWith({
+      references: sideChatReturns,
+      readerThreadId: String(threadId),
+      mode: "code",
+      windowId,
+    });
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable" },
+    });
+  } finally {
+    fixture.close();
+  }
+});
 
 it.each(["stage-git-hunks", "unstage-git-hunks", "reverse-git-hunks"] as const)(
   "prepares exact retained %s approval and applies it through the production runtime adapter",

@@ -710,7 +710,10 @@ A `#thread` mention is a bounded, read-only view of a thread the sender can alre
 
 - `@file` completes only a path inside the thread's bound root, and the host refuses an outside path before reading.
 - An `@` or `/` picker chip never installs, trusts, enables or elevates anything; the host re-resolves it at send.
-- A Side Chat has no inherited Work or Code authority and no path that messages, approves, steers or appends to its source.
+- A Side Chat has no inherited Work or Code authority and no agent path that messages, approves, steers or appends to its source.
+- A person may return one finished reply to its linked source’s editable unsent draft. Append preserves existing text/caret and busy work; it never sends, queues, steers or approves.
+- Typed reply/digest/source references persist with the draft and ordinary send, queue delivery, retry and resume revalidate them and inherit outside-content provenance before provider reads. Missing or corrupt provenance refuses admission; clearing the entire draft is explicit recovery.
+- New replies retain a bounded receipt of actual host source-read versions/context digest, independent read range and omissions; older replies honestly say the original snapshot was not recorded.
 - In Chat, an explicit mention also lets one bounded tool send one instruction to the mentioned Chat thread, one hop, failing closed.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).

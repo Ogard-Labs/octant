@@ -1,3 +1,4 @@
+import { SideChatSourceReceipt, SideChatDraftReturnReferences } from "./sideChatReturn";
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
@@ -298,6 +299,7 @@ export const ChatAttempt = Schema.Struct({
   providerSessionId: ProviderSessionId,
   modelId: ProviderModelId,
   contextManifestId: ContextManifestId,
+  sideChatSourceReceipt: Schema.optional(SideChatSourceReceipt),
   outcome: ChatAttemptOutcome,
   responseRefs: Schema.Array(ChatContentReference),
   researchRef: Schema.optional(ChatContentReference),
@@ -385,6 +387,7 @@ export const ChatTurn = Schema.Struct({
   submissionId: Schema.optional(ChatSubmissionId),
   sequence: PositiveInt,
   userMessageRef: ChatContentReference,
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   attachmentIds: Schema.Array(ChatAttachmentId),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   attempts: Schema.Array(ChatAttempt),
@@ -660,6 +663,7 @@ export const SendChatTurnCommand = Schema.Struct({
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
 }).annotations(strict);
 
 /**

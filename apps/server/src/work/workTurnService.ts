@@ -1,3 +1,4 @@
+import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import {
   coveredAgentResultDeliveryMembers,
@@ -241,6 +242,7 @@ export interface ServerWorkTurns {
 }
 
 export interface WorkTurnServiceDependencies {
+  readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
   readonly pinnedExtensionIds?: (projectId: string) => ReadonlyArray<string>;
@@ -520,6 +522,7 @@ export class WorkTurnService {
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #projectStatusFiles: WorkProjectStatusFiles | undefined;
   readonly #statusStaleAfterDays: number;
+  readonly #resolveSideChatReturns: SideChatReturnResolver | undefined;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
   readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
   readonly #takeIssueContextFramed: WorkTurnServiceDependencies["takeIssueContextFramed"];
@@ -571,6 +574,7 @@ export class WorkTurnService {
     this.#statusStaleAfterDays =
       dependencies.statusStaleAfterDays ?? DEFAULT_WORK_STATUS_STALE_AFTER_DAYS;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
+    this.#resolveSideChatReturns = dependencies.resolveSideChatReturns;
     this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
     if (dependencies.takeIssueContextFramed !== undefined) {
       this.#takeIssueContextFramed = dependencies.takeIssueContextFramed;
@@ -1158,6 +1162,11 @@ export class WorkTurnService {
                 block,
               }),
             )),
+        ...(await this.#sideChatReturnContributions(
+          command.threadId,
+          command.sideChatReturns,
+          authenticatedWindowId,
+        )),
         ...(await this.#threadMentionContributions(
           command.threadId,
           command.threadMentionIds,
@@ -1278,6 +1287,9 @@ export class WorkTurnService {
           ...(handoff === undefined ? {} : { handoff: handoff.record }),
           ...(externalInput === undefined ? {} : { externalInput }),
           prompt: command.prompt,
+          ...(command.sideChatReturns === undefined
+            ? {}
+            : { sideChatReturns: command.sideChatReturns }),
           ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
           ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
             ? {}
@@ -2369,6 +2381,38 @@ export class WorkTurnService {
     );
   }
 
+  async #sideChatReturnContributions(
+    threadId: WorkThreadId,
+    references: ReadonlyArray<import("@octant/contracts").SideChatDraftReturnReference> | undefined,
+    windowId: WindowId,
+  ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
+    if ((references?.length ?? 0) === 0) return [];
+    if (this.#resolveSideChatReturns === undefined)
+      throw this.#failure("unavailable", SIDE_CHAT_RETURN_UNAVAILABLE);
+    let text: string;
+    try {
+      text = await this.#resolveSideChatReturns({
+        references: references ?? [],
+        readerThreadId: String(threadId),
+        mode: "work",
+        windowId,
+      });
+    } catch {
+      throw this.#failure("unavailable", SIDE_CHAT_RETURN_UNAVAILABLE);
+    }
+    if (text.trim().length === 0) throw this.#failure("unavailable", SIDE_CHAT_RETURN_UNAVAILABLE);
+    return [
+      {
+        text,
+        sourceKind: "message",
+        referenceId: `side-chat-return:${threadId}`,
+        category: "workspace-context",
+        posture: "required",
+        block: { kind: "user-message", text },
+      },
+    ];
+  }
+
   async #threadMentionContributions(
     readerThreadId: WorkThreadId,
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
@@ -2603,6 +2647,8 @@ export class WorkTurnService {
       JSON.stringify(existing.delivery ?? null) !== JSON.stringify(command.delivery ?? null) ||
       JSON.stringify(existing.extensionSelections ?? []) !==
         JSON.stringify(command.extensionSelections ?? []) ||
+      JSON.stringify(existing.sideChatReturns ?? []) !==
+        JSON.stringify(command.sideChatReturns ?? []) ||
       !sameAttachmentIds(existing.attachments, command.attachmentIds)
     ) {
       throw this.#failure("stale", "Work turn request identity conflict.");

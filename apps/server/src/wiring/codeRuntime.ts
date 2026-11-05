@@ -59,6 +59,7 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
   createCodeThreadMentionDirectory,
   threadMentionContextResolver,
+  sideChatReturnContextResolver,
   ThreadMentionService,
 } from "../chat/threadMentionService";
 import { fileMentionContextBlocks, FileMentionService } from "../fileMentionService";
@@ -1070,6 +1071,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             }),
         },
         credentialResolver: { resolve: async () => undefined },
+        resolveSideChatReturns: sideChatReturnContextResolver(
+          () => threadMentionService(),
+          threadOutsideContentMarks,
+        ),
         resolveThreadMentionContext: threadMentionContextResolver(
           () => threadMentionService(),
           threadOutsideContentMarks,

@@ -52,6 +52,8 @@ import type { ChatTranscriptWindowState, ChatWindowPageState } from "./chatTrans
 export interface ChatTranscriptProps {
   /** The decoded, authoritative transcript projection. */
   readonly view: ChatThreadView;
+  readonly onReturnSideChatReply?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
+  readonly sideChatReturnPending?: boolean;
   /** What the thread places after a turn, such as a Canvas that turn wrote. */
   readonly afterTurn?: (turn: ChatThreadView["turns"][number]) => ReactNode;
   /**
@@ -463,18 +465,33 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           checkpointBusy: checkpoints?.busy === true,
           marked: marked !== undefined,
         });
-        const replyActions = chatTurnActions({
-          role: "assistant",
-          busy: props.busy === true,
-          canFork: forkFromReply !== undefined,
-          canRewind:
-            props.onRewindTurn !== undefined && nextTurn !== undefined && detached === undefined,
-          canCopyMarkdown: false,
-          checkpointsAvailable: false,
-          checkpointBusy: false,
-          marked: false,
-        });
+        const replyActions = [
+          ...chatTurnActions({
+            role: "assistant",
+            busy: props.busy === true,
+            canFork: forkFromReply !== undefined,
+            canRewind:
+              props.onRewindTurn !== undefined && nextTurn !== undefined && detached === undefined,
+            canCopyMarkdown: false,
+            checkpointsAvailable: false,
+            checkpointBusy: false,
+            marked: false,
+          }),
+        ];
+        const returnAttempt = chatTurnAnsweredAttempt(turn);
+        if (props.onReturnSideChatReply !== undefined && returnAttempt?.outcome === "completed") {
+          replyActions.push({
+            value: "source-draft",
+            label: "Use in source draft",
+            disabled: props.sideChatReturnPending === true,
+          });
+        }
         const onAction = (value: string) => {
+          if (value === "source-draft") {
+            if (!props.sideChatReturnPending && returnAttempt?.outcome === "completed")
+              props.onReturnSideChatReply?.(turn.id, returnAttempt.id);
+            return;
+          }
           if (value === "fork-message") {
             if (forkFromMessage !== undefined) props.onBranchTurn?.(forkFromMessage.id);
           } else if (value === "fork-reply") props.onBranchTurn?.(turn.id);

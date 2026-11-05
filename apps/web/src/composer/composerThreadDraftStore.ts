@@ -1,4 +1,10 @@
 import {
+  decodeSideChatDraftReturnReferences,
+  MAX_SIDE_CHAT_DRAFT_RETURNS,
+  type SideChatDraftPrepared,
+  type SideChatDraftReturnReference,
+} from "@octant/contracts";
+import {
   asQueueReceiptStorage,
   markQueueDraftChanged,
   purgeQueueReceipts,
@@ -30,6 +36,8 @@ export interface ComposerThreadDraft {
   readonly text: string;
   readonly caretIndex: number;
   readonly stagedDropped: boolean;
+  readonly sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
+  readonly sideChatReturnsInvalid?: true;
 }
 
 export type ComposerDraftPersistResult =
@@ -40,6 +48,9 @@ export type ComposerDraftPersistResult =
     };
 
 export interface ComposerThreadDraftStore {
+  readonly appendSideChatReturn: (
+    prepared: SideChatDraftPrepared,
+  ) => ComposerDraftPersistResult | { readonly status: "refused"; readonly message: string };
   readonly read: (
     mode: ComposerDraftMode,
     threadId: string | undefined,
@@ -125,6 +136,8 @@ export function createComposerThreadDraftStore(
   let snapshot: ReadonlyMap<string, ComposerThreadDraft> = loadSnapshot(storage);
   let persistError: string | undefined;
   let unpersisted = false;
+  // Keys whose latest local edit has not reached storage, including clears.
+  const unpersistedKeys = new Set<string>();
   let listenVersion = 0;
   const revisions = new Map<string, number>();
   const listeners = new Set<() => void>();
@@ -159,15 +172,18 @@ export function createComposerThreadDraftStore(
 
   function persistMerged(
     mutate: (next: Map<string, ComposerThreadDraft>) => ReadonlyArray<string>,
+    forceRead = false,
   ): ComposerDraftPersistResult {
     const now = Date.now();
-    const reread = unpersisted || now - lastStorageMergeAt >= STORAGE_REREAD_WINDOW_MS;
+    const reread = forceRead || unpersisted || now - lastStorageMergeAt >= STORAGE_REREAD_WINDOW_MS;
     const next = reread ? new Map(loadSnapshot(storage)) : new Map(snapshot);
     if (reread) {
       lastStorageMergeAt = now;
       if (unpersisted) {
-        for (const [key, draft] of snapshot) {
-          if (!next.has(key)) next.set(key, draft);
+        for (const key of unpersistedKeys) {
+          const draft = snapshot.get(key);
+          if (draft === undefined) next.delete(key);
+          else next.set(key, draft);
         }
       }
     }
@@ -182,9 +198,11 @@ export function createComposerThreadDraftStore(
     snapshot = next.size === 0 ? EMPTY_SNAPSHOT : next;
     if (persist.status === "ok") {
       unpersisted = false;
+      unpersistedKeys.clear();
       persistError = undefined;
     } else {
       unpersisted = true;
+      for (const key of changedKeys) unpersistedKeys.add(key);
       persistError =
         persist.reason === "remove-failed"
           ? COMPOSER_DRAFT_REMOVE_FAILED_NOTE
@@ -198,8 +216,10 @@ export function createComposerThreadDraftStore(
     const incoming = loadSnapshot(storage);
     const next = new Map(incoming);
     if (unpersisted) {
-      for (const [key, draft] of snapshot) {
-        if (!next.has(key)) next.set(key, draft);
+      for (const key of unpersistedKeys) {
+        const draft = snapshot.get(key);
+        if (draft === undefined) next.delete(key);
+        else next.set(key, draft);
       }
     }
     if (snapshotsEqual(snapshot, next)) return;
@@ -211,7 +231,10 @@ export function createComposerThreadDraftStore(
         current === undefined ||
         previous.text !== current.text ||
         previous.caretIndex !== current.caretIndex ||
-        previous.stagedDropped !== current.stagedDropped
+        previous.stagedDropped !== current.stagedDropped ||
+        JSON.stringify(previous.sideChatReturns ?? []) !==
+          JSON.stringify(current.sideChatReturns ?? []) ||
+        previous.sideChatReturnsInvalid !== current.sideChatReturnsInvalid
       ) {
         bump(key);
       }
@@ -233,12 +256,70 @@ export function createComposerThreadDraftStore(
   }
 
   return {
+    appendSideChatReturn: (prepared) => {
+      const { destination, reference } = prepared;
+      if (
+        destination.threadId !== reference.sourceThreadId ||
+        destination.mode !== reference.sourceMode
+      )
+        return {
+          status: "refused",
+          message: "The Side Chat destination changed. Open it again from its source.",
+        };
+      const key = composerDraftRecordKey(destination.mode, destination.threadId);
+      let refusal: string | undefined;
+      let receiptSaved = true;
+      const result = persistMerged((next) => {
+        const current = next.get(key);
+        if (current?.sideChatReturnsInvalid) {
+          refusal =
+            "This draft has an unavailable Side Chat reference. Resolve or remove it before adding another.";
+          return [];
+        }
+        const references = current?.sideChatReturns ?? [];
+        if (references.some((item) => JSON.stringify(item) === JSON.stringify(reference))) {
+          refusal = "This reply is already in the source draft. Edit the existing excerpt there.";
+          return [];
+        }
+        if (references.length >= MAX_SIDE_CHAT_DRAFT_RETURNS) {
+          refusal =
+            "The source draft already has the maximum number of Side Chat replies. Send or clear that draft first.";
+          return [];
+        }
+        receiptSaved = markQueueDraftChanged(
+          destination.mode,
+          destination.threadId,
+          asQueueReceiptStorage(storage),
+        );
+        const text =
+          current !== undefined && current.text.length > 0
+            ? `${current.text}\n\n${prepared.text}`
+            : prepared.text;
+        next.set(key, {
+          text,
+          caretIndex: current?.caretIndex ?? text.length,
+          stagedDropped: current?.stagedDropped ?? false,
+          sideChatReturns: [...references, reference],
+        });
+        return [key];
+      }, true);
+      if (refusal !== undefined) return { status: "refused", message: refusal };
+      if (!receiptSaved) {
+        persistError = COMPOSER_DRAFT_WRITE_FAILED_NOTE;
+        notify();
+        return { status: "unpersisted", reason: "write-failed" };
+      }
+      return result;
+    },
     read: (mode, threadId) => snapshot.get(composerDraftRecordKey(mode, threadId)),
     write: (mode, threadId, draft) => {
       const key = composerDraftRecordKey(mode, threadId);
       const normalized = normalizeDraft(draft);
       const receiptSaved =
-        snapshot.get(key)?.text === normalized?.text ||
+        (snapshot.get(key)?.text === normalized?.text &&
+          JSON.stringify(snapshot.get(key)?.sideChatReturns ?? []) ===
+            JSON.stringify(normalized?.sideChatReturns ?? []) &&
+          snapshot.get(key)?.sideChatReturnsInvalid === normalized?.sideChatReturnsInvalid) ||
         markQueueDraftChanged(mode, threadId, asQueueReceiptStorage(storage));
       const result = persistMerged((next) => {
         if (normalized === undefined) {
@@ -251,7 +332,10 @@ export function createComposerThreadDraftStore(
           previous !== undefined &&
           previous.text === normalized.text &&
           previous.caretIndex === normalized.caretIndex &&
-          previous.stagedDropped === normalized.stagedDropped
+          previous.stagedDropped === normalized.stagedDropped &&
+          JSON.stringify(previous.sideChatReturns ?? []) ===
+            JSON.stringify(normalized.sideChatReturns ?? []) &&
+          previous.sideChatReturnsInvalid === normalized.sideChatReturnsInvalid
         ) {
           return [];
         }
@@ -358,11 +442,13 @@ export function purgeComposerThreadDrafts(
 
 function normalizeDraft(draft: ComposerThreadDraft): ComposerThreadDraft | undefined {
   const text = draft.text;
-  if (text.trim() === "") return undefined;
+  if (text.length === 0) return undefined;
   return {
     text,
     caretIndex: clampComposerCaret(draft.caretIndex, text.length),
     stagedDropped: draft.stagedDropped,
+    ...(draft.sideChatReturns?.length ? { sideChatReturns: draft.sideChatReturns } : {}),
+    ...(draft.sideChatReturnsInvalid ? { sideChatReturnsInvalid: true } : {}),
   };
 }
 
@@ -400,13 +486,23 @@ function persistSnapshot(
       storage.removeItem(COMPOSER_THREAD_DRAFTS_STORAGE_KEY);
       return { status: "ok" };
     }
-    const payload: Record<string, { text: string; caretIndex: number; stagedDropped?: boolean }> =
-      {};
+    const payload: Record<
+      string,
+      {
+        text: string;
+        caretIndex: number;
+        stagedDropped?: boolean;
+        sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
+        sideChatReturnsInvalid?: true;
+      }
+    > = {};
     for (const [key, draft] of snapshot) {
       payload[key] = {
         text: draft.text,
         caretIndex: draft.caretIndex,
         ...(draft.stagedDropped ? { stagedDropped: true } : {}),
+        ...(draft.sideChatReturns?.length ? { sideChatReturns: draft.sideChatReturns } : {}),
+        ...(draft.sideChatReturnsInvalid ? { sideChatReturnsInvalid: true } : {}),
       };
     }
     storage.setItem(COMPOSER_THREAD_DRAFTS_STORAGE_KEY, JSON.stringify(payload));
@@ -427,10 +523,21 @@ function decodeDraft(value: unknown): ComposerThreadDraft | undefined {
       ? value.caretIndex
       : value.text.length;
   const stagedDropped = "stagedDropped" in value && value.stagedDropped === true ? true : false;
+  let sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> | undefined;
+  let invalid = "sideChatReturnsInvalid" in value && value.sideChatReturnsInvalid === true;
+  if ("sideChatReturns" in value) {
+    try {
+      sideChatReturns = decodeSideChatDraftReturnReferences(value.sideChatReturns);
+    } catch {
+      invalid = true;
+    }
+  }
   return normalizeDraft({
     text: value.text,
     caretIndex,
     stagedDropped,
+    ...(sideChatReturns?.length ? { sideChatReturns } : {}),
+    ...(invalid ? { sideChatReturnsInvalid: true } : {}),
   });
 }
 
@@ -452,7 +559,9 @@ function snapshotsEqual(
       other === undefined ||
       other.text !== draft.text ||
       other.caretIndex !== draft.caretIndex ||
-      other.stagedDropped !== draft.stagedDropped
+      other.stagedDropped !== draft.stagedDropped ||
+      JSON.stringify(other.sideChatReturns ?? []) !== JSON.stringify(draft.sideChatReturns ?? []) ||
+      other.sideChatReturnsInvalid !== draft.sideChatReturnsInvalid
     ) {
       return false;
     }

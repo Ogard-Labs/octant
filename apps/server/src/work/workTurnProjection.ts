@@ -77,6 +77,9 @@ export class WorkTurnProjection {
         ...(accepted.carriedFrom === undefined ? {} : { carriedFrom: accepted.carriedFrom }),
         status: "accepted",
         prompt: accepted.prompt,
+        ...(accepted.sideChatReturns === undefined
+          ? {}
+          : { sideChatReturns: accepted.sideChatReturns }),
         transcript: [{ role: "user", text: accepted.prompt }],
         ...(accepted.attachments === undefined || accepted.attachments.length === 0
           ? {}

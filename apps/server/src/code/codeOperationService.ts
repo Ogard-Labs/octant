@@ -1,3 +1,4 @@
+import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import type { GitService } from "./gitService";
 import {
   coveredAgentResultDeliveryMembers,
@@ -1059,6 +1060,7 @@ export interface CodeOperationExecuteOptions {
 }
 
 export interface CodeOperationServiceOptions {
+  readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
   readonly pinnedExtensionIds?: (projectId: string) => ReadonlyArray<string>;
@@ -4849,9 +4851,37 @@ export class CodeOperationService {
       instructions: profileContext.sent.instructions,
       skills: [...skillContext, ...profileContext.sent.skills],
     };
+    let sideChatReturnContext: ReadonlyArray<ProviderContextBlock> = [];
+    if ((command.sideChatReturns?.length ?? 0) > 0) {
+      if (this.#options.resolveSideChatReturns === undefined)
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          SIDE_CHAT_RETURN_UNAVAILABLE,
+          "refused",
+        );
+      try {
+        const text = await this.#options.resolveSideChatReturns({
+          references: command.sideChatReturns ?? [],
+          readerThreadId: String(thread.id),
+          mode: "code",
+          windowId,
+        });
+        if (text.trim().length === 0) throw new Error(SIDE_CHAT_RETURN_UNAVAILABLE);
+        sideChatReturnContext = [{ kind: "user-message", text }];
+      } catch {
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          SIDE_CHAT_RETURN_UNAVAILABLE,
+          "refused",
+        );
+      }
+    }
     const context = [
       ...skillContext,
       ...profileContext.blocks,
+      ...sideChatReturnContext,
       ...(await this.#resolveThreadMentions(thread.id, command.threadMentionIds, windowId)),
       ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
       ...(issueContext === undefined

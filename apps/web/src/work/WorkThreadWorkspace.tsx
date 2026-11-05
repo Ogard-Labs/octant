@@ -1,3 +1,4 @@
+import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -1703,6 +1704,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
         receipt.selection === undefined ? [] : [receipt.selection],
       );
+      if (composerDraft.sideChatReturnsInvalid) {
+        setErrorMessage(
+          "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
+        );
+        return false;
+      }
+      const sideChatReturns = composerDraft.sideChatReturns;
       const promptText = composerDraft.text;
       if (promptText.length === 0) return false;
       const sendingThreadId = String(thread.id);
@@ -1745,6 +1753,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               prompt: promptText,
               attachmentIds,
               threadMentionIds,
+              ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
               fileMentionPaths,
               extensionSelections,
             },
@@ -1781,6 +1790,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           },
           ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
           ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
+          ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
           ...(fileMentionPaths.length === 0 ? {} : { fileMentionPaths: [...fileMentionPaths] }),
         });
         if (started.kind !== "accepted") {
@@ -2521,6 +2531,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 {turnActionMessage}
               </p>
             )}
+            <SideChatDraftNotice
+              count={composerDraft.sideChatReturns.length}
+              invalid={composerDraft.sideChatReturnsInvalid}
+              onClear={composerDraft.clear}
+            />
             {composerDraft.stagedDropped === true ? (
               <p className="work-thread-workspace__hint" role="status">
                 {COMPOSER_STAGED_DROPPED_NOTE}

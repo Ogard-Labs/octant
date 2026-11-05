@@ -1,3 +1,4 @@
+import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import type { ProviderModelOptionValues } from "@octant/contracts";
 import {
   decodeChatAttachmentId,
@@ -99,6 +100,8 @@ import {
 
 export interface ChatWorkspaceProps {
   readonly controller: ChatController;
+  readonly onReturnSideChatReply?: import("./ChatTranscript").ChatTranscriptProps["onReturnSideChatReply"];
+  readonly sideChatReturnPending?: boolean;
   readonly extensionClient?: ExtensionClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly narrow?: boolean;
@@ -303,7 +306,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     hostId: props.hostId,
     draft: {
       text: props.controller.pendingDraft,
-      revision: draftEditRevisionRef.current,
+      revision: props.controller.draftRevision ?? draftEditRevisionRef.current,
       clear: () => props.controller.setPendingDraft(""),
     },
     onRecoveredRefused: async (command) => {
@@ -856,6 +859,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   }
 
   const submitTurn = async (draft: string): Promise<boolean> => {
+    if (props.controller.draftSideChatReturnsInvalid) {
+      setSendNotice(
+        "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
+      );
+      return false;
+    }
+    const sideChatReturns = props.controller.draftSideChatReturns ?? [];
+    const sendingDraftRevision = props.controller.draftRevision;
     const extensionReceiptsForSend = pendingExtensionRef.current;
     setSendNotice(undefined);
     const claimedAttachments = pendingAttachmentsRef.current;
@@ -894,8 +905,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       // version the earlier command reached travels with the send, since
       // this closure still holds the view from the render that made it.
       // The turn moves the version itself, so it carries no base forward.
-      sent = await enqueueThreadCommand(async (previous) => ({
-        value: await props.controller.sendTurn(
+      sent = await enqueueThreadCommand(async (previous) => {
+        const args: Parameters<typeof props.controller.sendTurn> = [
           outgoing,
           attachmentIds,
           previewSelectionsForSend,
@@ -904,14 +915,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             item.selection === undefined ? [] : [item.selection],
           ),
           threadMentionIds,
-          // Only a send that follows one of this composer's own commands
-          // knows a newer version; every other send leaves the
-          // controller's own rendered version alone.
-          ...(previous !== undefined && previous.threadId === String(thread.id)
-            ? ([previous.version] as const)
-            : ([] as const)),
-        ),
-      }));
+        ];
+        if (previous !== undefined && previous.threadId === String(thread.id))
+          args[6] = previous.version;
+        if (sendingDraftRevision !== undefined)
+          args[7] = { composerDraft: "consume", draftRevision: sendingDraftRevision };
+        if (sideChatReturns.length > 0) args[8] = sideChatReturns;
+        return { value: await props.controller.sendTurn(...args) };
+      });
     } catch (error) {
       {
         recoverClaimedAttachments(
@@ -1133,6 +1144,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             />
           )}
           <ChatTranscript
+            {...(props.onReturnSideChatReply === undefined
+              ? {}
+              : { onReturnSideChatReply: props.onReturnSideChatReply })}
+            {...(props.sideChatReturnPending === undefined
+              ? {}
+              : { sideChatReturnPending: props.sideChatReturnPending })}
             {...(canvasClient === undefined
               ? {}
               : {
@@ -1364,6 +1381,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           open={rewind !== undefined}
           removedTurns={rewind?.removedTurns}
         />
+        <SideChatDraftNotice
+          count={props.controller.draftSideChatReturns?.length ?? 0}
+          invalid={props.controller.draftSideChatReturnsInvalid === true}
+          onClear={() => props.controller.setPendingDraft("")}
+        />
         <ChatComposer
           key={String(thread.id)}
           attachment={attachmentCapability}
@@ -1548,7 +1570,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             if (!queueFollowUp) return await submitTurn(draft);
             if (!messageQueue.available || messageQueue.busy || messageQueue.uncertain)
               return false;
-            const revision = draftEditRevisionRef.current;
+            const revision = props.controller.draftRevision ?? draftEditRevisionRef.current;
             const origin = String(view.thread.id);
             const claimed = [...pendingAttachmentsRef.current];
             const context = {
@@ -1578,6 +1600,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               );
             };
             try {
+              if (props.controller.draftSideChatReturnsInvalid)
+                throw new Error("The saved Side Chat reference is unreadable.");
+              const sideChatReturns = props.controller.draftSideChatReturns ?? [];
               const threadMentionIds = await threadMentions.resolveForSend();
               if (!mountedRef.current || activeThreadIdRef.current !== origin) {
                 restoreClaim();
@@ -1594,12 +1619,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     receipt.selection === undefined ? [] : [receipt.selection],
                   ),
                   threadMentionIds,
+                  ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
                 },
                 () => {
                   releaseClaim();
                   if (!mountedRef.current || activeThreadIdRef.current !== origin) return;
                   consumeContext({ ...context, threadMentionIds });
-                  if (draftEditRevisionRef.current === revision)
+                  if (
+                    (props.controller.readDraftRevision?.(origin) ??
+                      draftEditRevisionRef.current) === revision
+                  )
                     props.controller.setPendingDraft("");
                 },
                 restoreClaim,

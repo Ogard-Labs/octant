@@ -1,3 +1,4 @@
+import type { SideChatDraftReturnReference } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
@@ -2161,6 +2162,7 @@ export function useCodeController(options: CodeControllerOptions) {
        * the journal records as the message.
        */
       readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
+      readonly sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
       /**
        * Images this turn carries. Ids only: the host holds the bytes it
        * accepted and reads them itself, so the renderer never re-sends an
@@ -2199,6 +2201,9 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
           ? {}
           : { threadMentionIds: [...input.threadMentionIds] }),
+        ...(input.sideChatReturns === undefined || input.sideChatReturns.length === 0
+          ? {}
+          : { sideChatReturns: [...input.sideChatReturns] }),
         ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
           ? {}
           : { attachmentIds: [...input.attachmentIds] }),
@@ -2604,6 +2609,8 @@ export function useCodeController(options: CodeControllerOptions) {
       delayed?: boolean,
       computerUseSelection?: ExtensionSelection,
       extensionSelections?: ReadonlyArray<ExtensionSelection>,
+      sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> = [],
+      expectedDraftRevision?: number,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -2616,7 +2623,8 @@ export function useCodeController(options: CodeControllerOptions) {
       setLatestProviderTurnOperationId(undefined);
       setTurnStatus("sending");
       const sendingThreadId = String(view.thread.id);
-      const draftRevisionAtDispatch = composerDraftRef.current.revisionFor(sendingThreadId);
+      const draftRevisionAtDispatch =
+        expectedDraftRevision ?? composerDraftRef.current.revisionFor(sendingThreadId);
       const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
       let internalClearRan = false;
       const restoreFailedPrompt = () => {
@@ -2628,6 +2636,7 @@ export function useCodeController(options: CodeControllerOptions) {
           return;
         }
         composerDraftRef.current.restoreFor(sendingThreadId, {
+          ...previousDraft,
           text: trimmed,
           caretIndex: previousDraft?.caretIndex ?? trimmed.length,
           stagedDropped: previousDraft?.stagedDropped === true,
@@ -2655,6 +2664,7 @@ export function useCodeController(options: CodeControllerOptions) {
           checkoutId: view.checkout.id,
           prompt: trimmed,
           threadMentionIds,
+          sideChatReturns,
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
           fileMentionPaths,
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
@@ -3063,6 +3073,17 @@ export function useCodeController(options: CodeControllerOptions) {
   }, [activateThread, loadBootstrap, options.activeThreadId]);
   // One identity while nothing in it moved, so the surfaces that take the
   // controller whole can bail out of a render that changed none of it.
+  const returnedDraftFacts: {
+    readonly draftSideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
+    readonly draftSideChatReturnsInvalid?: boolean;
+    readonly draftRevision?: number;
+    readonly readDraftRevision?: (threadId: string) => number;
+  } = {
+    draftSideChatReturns: composerDraft.sideChatReturns,
+    draftSideChatReturnsInvalid: composerDraft.sideChatReturnsInvalid,
+    draftRevision: composerDraft.revisionFor(String(options.activeThreadId ?? "")),
+    readDraftRevision: composerDraft.revisionFor,
+  };
   return useRetainedRecord({
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
     accessNotice,
@@ -3100,6 +3121,7 @@ export function useCodeController(options: CodeControllerOptions) {
     pendingDraft,
     pendingDraftCaret: composerDraft.caretIndex,
     draftStagedDropped: composerDraft.stagedDropped,
+    ...returnedDraftFacts,
     draftPersistError: composerDraft.persistError,
     markDraftStagedDropped: composerDraft.markStagedDropped,
     purgeThreadDraft: composerDraft.purge,

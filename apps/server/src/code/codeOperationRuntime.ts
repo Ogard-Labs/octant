@@ -660,6 +660,7 @@ export interface CodeOperationRuntimeOptions {
   readonly resolveProviderNativeSetup?: (thread: CodeThread) => ProviderNativeSetup | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
+  readonly resolveSideChatReturns?: CodeOperationServiceOptions["resolveSideChatReturns"];
   /** Reads the `@file` mentions a turn names against this thread's bound root. */
   readonly resolveFileMentionContext?: CodeOperationServiceOptions["resolveFileMentionContext"];
   /** Takes the notes the user pointed at the running product into the next turn. */
@@ -1191,6 +1192,9 @@ export function createCodeOperationRuntime(
       ? {}
       : { supportsSessionRollback: options.supportsSessionRollback }),
     events,
+    ...(options.resolveSideChatReturns === undefined
+      ? {}
+      : { resolveSideChatReturns: options.resolveSideChatReturns }),
     ...(options.resolveThreadMentionContext === undefined
       ? {}
       : { resolveThreadMentionContext: options.resolveThreadMentionContext }),

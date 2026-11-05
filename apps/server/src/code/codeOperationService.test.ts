@@ -3334,6 +3334,7 @@ function providerTurnFixture(
   options: Partial<
     Pick<
       CodeOperationServiceOptions,
+      | "resolveSideChatReturns"
       | "resolveThreadMentionContext"
       | "resolveProfileSkills"
       | "resolveSelectedExtensions"
@@ -4720,4 +4721,50 @@ describe("CodeOperationService live terminal output", () => {
       vi.useRealTimers();
     }
   });
+});
+
+it("revalidates a returned Side Chat reference at the Code turn boundary and refuses missing or purged provenance", async () => {
+  const sideChatReturns = [
+    {
+      sidecarThreadId: ids.checkout,
+      sourceThreadId: ids.thread,
+      sourceMode: "code",
+      turnId: ids.operation,
+      attemptId: ids.operation,
+      answerDigest: "a".repeat(64),
+    },
+  ];
+  const missing = providerTurnFixture();
+  expect(
+    await missing.service.execute(ids.window, { ...startProviderTurn, sideChatReturns }),
+  ).toMatchObject({ kind: "operation-failed", failure: { category: "unavailable" } });
+  expect(missing.turns.start).not.toHaveBeenCalled();
+  let allowed = true;
+  const resolveSideChatReturns = vi.fn(async () => {
+    if (!allowed) throw new Error("purged");
+    return "Original reply/source digest; editable reference, not approval.";
+  });
+  const valid = providerTurnFixture({ resolveSideChatReturns });
+  expect(
+    await valid.service.execute(ids.window, { ...startProviderTurn, sideChatReturns }),
+  ).toMatchObject({ kind: "provider-turn-state" });
+  expect(resolveSideChatReturns).toHaveBeenCalledWith({
+    references: sideChatReturns,
+    readerThreadId: String(ids.thread),
+    mode: "code",
+    windowId: ids.window,
+  });
+  expect(valid.turns.start.mock.calls[0]![0].context).toContainEqual({
+    kind: "user-message",
+    text: "Original reply/source digest; editable reference, not approval.",
+  });
+  allowed = false;
+  expect(
+    await valid.service.execute(ids.window, {
+      ...startProviderTurn,
+      operationId: decodeCodeOperationId("49494949-4949-4494-8494-494949494949"),
+      sideChatReturns,
+    }),
+  ).toMatchObject({ kind: "operation-failed", failure: { category: "unavailable" } });
+  expect(valid.turns.start).toHaveBeenCalledTimes(1);
 });

@@ -4823,6 +4823,7 @@ function serviceFixture(
     readonly contextFacts?: ProviderDriver["contextFacts"];
     readonly safeInputBudgetTokens?: number;
     readonly resolveSelectedExtensions?: WorkTurnServiceDependencies["resolveSelectedExtensions"];
+    readonly resolveSideChatReturns?: WorkTurnServiceDependencies["resolveSideChatReturns"];
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
     readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
@@ -4973,6 +4974,9 @@ function serviceFixture(
   };
   const workingDirectories = { resolve: vi.fn(async (root: string) => root) };
   const service = new WorkTurnService({
+    ...(options.resolveSideChatReturns === undefined
+      ? {}
+      : { resolveSideChatReturns: options.resolveSideChatReturns }),
     ...(options.serverProjects === undefined ? {} : { serverProjects: options.serverProjects }),
     ...(options.contextHarness === undefined ? {} : { contextHarness: options.contextHarness }),
     persistence: persistence as never,
@@ -5228,3 +5232,38 @@ function summaryDriver(summary: string): ProviderDriver {
   };
   return { acquire: () => Effect.succeed(connection) } as never;
 }
+
+it("requires returned Side Chat provenance before Work runtime admission and retains the exact selected reference", async () => {
+  const sideChatReturns = [
+    {
+      sidecarThreadId: ids.project,
+      sourceThreadId: ids.thread,
+      sourceMode: "work",
+      turnId: ids.turn,
+      attemptId: ids.request,
+      answerDigest: "a".repeat(64),
+    },
+  ];
+  const missing = serviceFixture();
+  await expect(
+    missing.service.startFirstTurn(ids.window, { ...startCommand(), sideChatReturns }),
+  ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+  expect(missing.projection.listForThread(ids.thread)).toHaveLength(0);
+  const resolveSideChatReturns = vi.fn(
+    async () => "Original selected answer reference; no execution approval.",
+  );
+  const run = vi
+    .fn<WorkTurnRuntimePort["run"]>()
+    .mockResolvedValue({ kind: "completed", response: "reply" });
+  const valid = serviceFixture({ resolveSideChatReturns, turnRuntime: { run } });
+  await valid.service.startFirstTurn(ids.window, { ...startCommand(), sideChatReturns });
+  await valid.waitForIdle();
+  expect(resolveSideChatReturns).toHaveBeenCalledWith({
+    references: sideChatReturns,
+    readerThreadId: String(ids.thread),
+    mode: "work",
+    windowId: ids.window,
+  });
+  expect(valid.projection.listForThread(ids.thread)[0]?.sideChatReturns).toEqual(sideChatReturns);
+  expect(run).toHaveBeenCalledOnce();
+});
