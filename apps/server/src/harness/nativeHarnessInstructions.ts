@@ -57,14 +57,26 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
     "have the person authorize a credential for a registered operation or saved command; not a command runner",
   octant_github: "read the repository's issues, pull requests, and projects",
   octant_offer_side_task: "offer the user a separate task for work outside this request",
+  octant_past_threads: "search what Octant remembers of the user's earlier threads",
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",
   octant_pull_request:
     "open or change this thread's own pull request (draft, stacked, ready) when the user asks, or watch it to be woken when checks finish or reviews arrive instead of polling",
   octant_routines:
     "see this Project's routines, ask the user to pause or archive one this thread started, or report a routine run's result",
+  octant_side_chat_list_files: "list the files of the thread this side chat is about",
+  octant_side_chat_read_file: "read one file of the thread this side chat is about",
+  octant_side_chat_search_files: "search the files of the Code thread this side chat is about",
   octant_terminal: "run long-lived processes such as dev servers and read their output",
   octant_threads:
     "see this Project's other threads (list, read, wait); its operation list names anything more this turn may do",
+  octant_web_research: "search the web when an answer needs current or outside information",
+  octant_zen_create_widget: "add a Notes, Checklist, or Timer widget to this Zen space",
+  octant_zen_list_widgets: "list the widget kinds this Zen space offers",
+  octant_zen_pin_thread: "pin a thread into this Zen space as a card",
+  octant_zen_place_element: "move, resize, focus, minimize, restore, or remove a Zen element",
+  octant_zen_preview_recipe: "propose a custom widget; it exists only once the user confirms it",
+  octant_zen_search_threads: "find threads to pin into this Zen space",
+  octant_zen_update_appearance: "change this Zen space's dimming and element opacity",
 };
 
 /**
