@@ -9,6 +9,7 @@ import { createFeedVerifier } from "./appUpdateFeed";
 import {
   createNightlyInstaller,
   NIGHTLY_BUNDLE_IDENTIFIER,
+  nativeRefusal,
   nightlyInstallerAuthority,
   nightlyInstallLocation,
   type NightlyInstallerRole,
@@ -69,11 +70,20 @@ function installer(
     readonly serves?: Buffer;
     readonly executablePath?: string;
     readonly verdict?: unknown;
+    readonly openAnswer?: unknown;
+    readonly running?: unknown;
     readonly extracts?: string;
+    readonly stallDownloads?: boolean;
   } = {},
 ) {
   const nightlyPath = join(root, "Applications", "Octant Nightly.app");
-  const fetchImpl = vi.fn(async (input: string) => {
+  const fetchImpl = vi.fn(async (input: string, init?: RequestInit) => {
+    if (options.stallDownloads === true) {
+      // A server that never finishes: only the deadline's abort ends it.
+      return await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+      });
+    }
     if (input.includes("/preview/darwin-arm64.preview-key.json")) {
       return Response.json(options.document ?? signedBy(previewKeys));
     }
@@ -87,7 +97,8 @@ function installer(
   }) as unknown as typeof globalThis.fetch;
   const native = {
     verifyNightly: vi.fn(async (_path: string) => options.verdict ?? { kind: "verified" }),
-    openNightly: vi.fn(async (_path: string) => ({ kind: "started" })),
+    openNightly: vi.fn(async (_path: string) => options.openAnswer ?? { kind: "started" }),
+    nightlyRunning: vi.fn(async () => options.running ?? { kind: "not-running" }),
   };
   const extract = vi.fn(async (_archive: string, destination: string) => {
     await bundle(
@@ -114,6 +125,7 @@ function installer(
     feedBaseUrl: "https://updates.example.test",
     app: { version: "0.2.0-candidate.20261101.1" as AppVersion, platform: "darwin", arch: "arm64" },
     temporaryDirectory: join(root, "tmp"),
+    downloadDeadlineMs: 50,
     native: () => native,
     trash,
     verifier: createFeedVerifier(trust),
@@ -397,5 +409,89 @@ describe("the Octant Nightly row after install", () => {
     expect(await subject.remove()).toMatchObject({ refusal: "not-installed" });
     expect(native.openNightly).not.toHaveBeenCalled();
     expect(trash).not.toHaveBeenCalled();
+  });
+});
+
+describe("native answers", () => {
+  it("blames the signature only when the check ran and refused", () => {
+    expect(nativeRefusal({ kind: "refused", reason: "invalid-peer" })).toBe("code-signature");
+    expect(nativeRefusal({ kind: "refused", reason: "unsigned-build" })).toBe("code-signature");
+    expect(nativeRefusal({ kind: "refused", reason: "incompatible-host" })).toBe("code-signature");
+    expect(nativeRefusal({ kind: "refused", reason: "launch-failed" })).toBe("launch-failed");
+    expect(nativeRefusal({ kind: "refused", reason: "not-installed" })).toBe("not-installed");
+    for (const value of [
+      { kind: "refused", reason: "deadline-exceeded" },
+      { kind: "refused", reason: "native-unavailable" },
+      undefined,
+    ])
+      expect(nativeRefusal(value)).toBe("check-unavailable");
+  });
+});
+
+describe("protecting an installed Nightly", () => {
+  it("moves the previous copy to the Trash after an upgrade instead of deleting it", async () => {
+    const { subject, nightlyPath, trash } = installer();
+    await bundle(nightlyPath, NIGHTLY_BUNDLE_IDENTIFIER, "0.3.0-preview.20261104.9");
+
+    expect(await subject.install()).toEqual({ status: "installed" });
+    const [trashed] = trash.mock.calls[0] as [string];
+    expect(trashed.endsWith("/previous.app")).toBe(true);
+  });
+
+  it("refuses to replace or remove Nightly while it is running", async () => {
+    const replace = installer({ running: { kind: "running" } });
+    await bundle(replace.nightlyPath, NIGHTLY_BUNDLE_IDENTIFIER, "0.3.0-preview.20261104.9");
+    expect(await replace.subject.install()).toMatchObject({
+      status: "installed",
+      refusal: "nightly-running",
+      message: expect.stringContaining("Quit Octant Nightly first"),
+    });
+    expect(replace.extract).not.toHaveBeenCalled();
+    expect(await replace.subject.remove()).toMatchObject({ refusal: "nightly-running" });
+    expect(replace.trash).not.toHaveBeenCalled();
+  });
+
+  it("refuses to remove when it cannot tell whether Nightly is running", async () => {
+    const { subject, nightlyPath, trash } = installer({
+      running: { kind: "refused", reason: "native-unavailable" },
+    });
+    await bundle(nightlyPath, NIGHTLY_BUNDLE_IDENTIFIER);
+
+    expect(await subject.remove()).toMatchObject({ refusal: "check-unavailable" });
+    expect(trash).not.toHaveBeenCalled();
+  });
+
+  it("trashes only a bundle that verifies as Nightly", async () => {
+    const { subject, nightlyPath, trash } = installer({
+      verdict: { kind: "refused", reason: "invalid-peer" },
+    });
+    await bundle(nightlyPath, NIGHTLY_BUNDLE_IDENTIFIER);
+
+    expect(await subject.remove()).toMatchObject({
+      status: "installed",
+      refusal: "remove-unverified",
+    });
+    expect(trash).not.toHaveBeenCalled();
+  });
+
+  it("says macOS did not open Nightly rather than blaming its signature", async () => {
+    const { subject, nightlyPath } = installer({
+      openAnswer: { kind: "refused", reason: "launch-failed" },
+    });
+    await bundle(nightlyPath, NIGHTLY_BUNDLE_IDENTIFIER);
+
+    expect(await subject.open()).toMatchObject({ refusal: "launch-failed" });
+  });
+
+  it("stops a download that does not finish within its deadline", async () => {
+    const { subject, extract } = installer({ stallDownloads: true });
+
+    expect(await subject.install()).toMatchObject({
+      status: "not-installed",
+      refusal: "timed-out",
+    });
+    expect(extract).not.toHaveBeenCalled();
+    // The claim is released, so the person can try again.
+    expect(await subject.state()).toEqual({ status: "not-installed" });
   });
 });

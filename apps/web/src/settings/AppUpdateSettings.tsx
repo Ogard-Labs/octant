@@ -7,7 +7,7 @@ import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -312,6 +312,9 @@ function describeWaiting(work: Extract<AppUpdateInstallOutcome, { kind: "wait" }
   return "Octant could not check what is running, so it did not relaunch. Try again in a moment.";
 }
 
+const NIGHTLY_IN_FLIGHT_READ_MS = 2_000;
+const NIGHTLY_IN_FLIGHT_READS = 600;
+
 /**
  * The Octant Nightly row below the ring switch.
  *
@@ -345,6 +348,34 @@ function NightlyInstallRow(props: {
       active = false;
     };
   }, [read, props.ring]);
+
+  // A row mounted while main is installing or removing (Settings reopened
+  // mid-install) has no pending request of its own to settle it, so it reads
+  // again until main finishes. Bounded by the download deadline main applies,
+  // plus room for extraction and the signature check.
+  const inFlightReads = useRef(0);
+  const inFlight = nightly?.status === "installing" || nightly?.status === "removing";
+  useEffect(() => {
+    if (!inFlight) {
+      inFlightReads.current = 0;
+      return;
+    }
+    if (busy || read === undefined || inFlightReads.current >= NIGHTLY_IN_FLIGHT_READS) return;
+    let active = true;
+    const timer = setTimeout(() => {
+      inFlightReads.current += 1;
+      void read().then(
+        (next) => {
+          if (active) setNightly(next);
+        },
+        () => undefined,
+      );
+    }, NIGHTLY_IN_FLIGHT_READ_MS);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [nightly, inFlight, busy, read]);
 
   if (nightly === undefined || nightly.status === "unavailable") return null;
 

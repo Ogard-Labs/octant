@@ -81,8 +81,11 @@ std::atomic<bool> start_pending = false, status_pending = false,
                   close_pending = false, launch_pending = false,
                   nightly_pending = false;
 constexpr auto nightly_operation_bound = std::chrono::seconds(20);
-bool nightly_operation(const std::string &operation) {
+bool nightly_path_operation(const std::string &operation) {
   return operation == "verifyNightly" || operation == "openNightly";
+}
+bool nightly_operation(const std::string &operation) {
+  return nightly_path_operation(operation) || operation == "nightlyRunning";
 }
 std::atomic<unsigned> validations = 0, launches = 0;
 
@@ -745,6 +748,10 @@ Result verify_nightly_at(const std::string &path, Deadline deadline,
   if (!url.value || SecStaticCodeCreateWithPath(url.value, kSecCSDefaultFlags,
                                                 &disk.value) != errSecSuccess)
     return {"refused", "invalid-peer", {}};
+  // Several validation exits (an unsigned Mach-O has no signing flags) name
+  // no reason. For a download they all mean the bundle is not a signed
+  // Nightly, so only the deadline and busy paths keep their own reasons.
+  result.reason = "invalid-peer";
   if (!validate_artifact(disk.value, nullptr, false, self.team, installed,
                          deadline, result.reason))
     return result;
@@ -763,7 +770,18 @@ Result open_nightly_at(const std::string &path, Deadline deadline) {
   if (verified.kind != "verified")
     return verified;
   return open_validated_application(installed.root, false, deadline,
-                                    {"refused", "native-unavailable", {}});
+                                    {"refused", "launch-failed", {}});
+}
+
+// Replacing or trashing a bundle that is running would pull it out from under
+// the person's windows, so the installer asks first.
+Result nightly_running() {
+  @autoreleasepool {
+    NSArray<NSRunningApplication *> *running = [NSRunningApplication
+        runningApplicationsWithBundleIdentifier:@(nightly_id)];
+    return running.count == 0 ? Result{"not-running", {}, {}}
+                              : Result{"running", {}, {}};
+  }
 }
 
 Result close_status(Deadline deadline) {
@@ -805,6 +823,8 @@ void execute(napi_env, void *data) {
       job.result = verify_nightly_at(job.path, job.deadline, installed);
     } else if (job.operation == "openNightly")
       job.result = open_nightly_at(job.path, job.deadline);
+    else if (job.operation == "nightlyRunning")
+      job.result = nightly_running();
     else
       job.result = close_status(job.deadline);
   } catch (...) {
@@ -866,8 +886,9 @@ napi_value operation(napi_env env, napi_callback_info info) {
   job->deadline = Clock::now() + (nightly ? nightly_operation_bound : operation_bound);
   napi_value promise;
   napi_create_promise(env, &job->deferred, &promise);
-  bool busy = !pthread_main_np() || argc != (nightly ? 1 : 0);
-  if (!busy && nightly) {
+  const bool with_path = nightly_path_operation(job->operation);
+  bool busy = !pthread_main_np() || argc != (with_path ? 1 : 0);
+  if (!busy && with_path) {
     napi_valuetype type = napi_undefined;
     char buffer[PATH_MAX]{};
     size_t length = 0;
@@ -931,7 +952,8 @@ napi_value operation(napi_env env, napi_callback_info info) {
 napi_value initialize(napi_env env, napi_value exports) {
   install_window_exports(env, exports);
   for (const char *name : {"start", "status", "launchStableHost",
-                           "verifyNightly", "openNightly", "close"}) {
+                           "verifyNightly", "openNightly", "nightlyRunning",
+                           "close"}) {
     napi_value function;
     napi_create_function(env, name, NAPI_AUTO_LENGTH, operation,
                          const_cast<char *>(name), &function);

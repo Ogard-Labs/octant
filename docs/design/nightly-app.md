@@ -626,7 +626,9 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
     no arguments. The location is fixed: `Octant Nightly.app` in the folder
     that holds the running `Octant.app` (normally `/Applications`). A launch
     that is not a plain `Octant.app` bundle, or that macOS translocated,
-    refuses. The download is written to a private temporary folder and
+    refuses. The feed and artifact downloads together must finish within 15
+    minutes, or the install stops as timed out. The download is written to a
+    private temporary folder and
     extracted with `ditto` into a staging folder beside the target, the
     requirement is checked on that extracted bundle, and only then is it
     renamed into place. Something other than Octant Nightly at the location
@@ -636,12 +638,19 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
     older offer (a replayed feed, say) refuses as not newer, and an installed
     version that cannot be read refuses rather than allowing a downgrade. With
     no Nightly installed, any verified preview build may install. The
-    replacement is a rename, and the old copy is restored if the new one cannot
-    be moved in. No quarantine attribute is set or cleared: the file is written
-    by Octant itself, as Octant's own updater does. "Installed" means that
-    location holds a bundle whose id is Nightly's. Open checks the requirement
-    again and opens the bundle through Launch Services. Each refusal names the
-    check that refused.
+    replacement is a rename; the old copy is restored if the new one cannot be
+    moved in, and otherwise goes to the Trash, since it was never verified
+    here. Replacing and removing refuse while Octant Nightly is running (or
+    when that cannot be told), asking the person to quit it first, and check
+    again just before the move. No quarantine attribute is set or cleared: the
+    file is written by Octant itself, as Octant's own updater does.
+    "Installed" means that location holds a bundle whose id is Nightly's;
+    that decides whether the row shows. Open and Remove act only on a bundle
+    that also verifies against Nightly's requirement: Open then opens it
+    through Launch Services, and Remove moves it to the Trash. A bundle that
+    is installed but does not verify is left alone. Each refusal names the
+    check that refused, and a check that could not run says so instead of
+    blaming the signature.
   - Linux has no code-signature check to bind the download to Octant's
     publisher, so packaged Linux Octant does not offer the row and refuses an
     install as not supported on this platform; Linux Nightly comes from the

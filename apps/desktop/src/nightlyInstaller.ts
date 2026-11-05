@@ -29,6 +29,10 @@ const MAX_ARTIFACT_BYTES = 600 * 1024 * 1024;
 // The native side bounds itself at 20 seconds; this only stops a lost answer
 // from holding the row in "installing".
 const NATIVE_BOUND_MS = 25_000;
+// The feed and the artifact together. A release is at most 600 MB, so 15
+// minutes allows about 0.7 MB/s; a server that trickles slower than that is
+// refused rather than allowed to hold the install claim indefinitely.
+const DOWNLOAD_DEADLINE_MS = 15 * 60 * 1000;
 
 /**
  * Where Nightly goes: beside the running Octant, and nowhere a caller chooses.
@@ -93,7 +97,9 @@ export interface NightlyInstallerOptions {
   readonly app: { readonly version: AppVersion; readonly platform: string; readonly arch: string };
   /** A private directory for the download; never the install location. */
   readonly temporaryDirectory: string;
-  readonly native: () => Pick<NativeDesktopPeerStatus, "verifyNightly" | "openNightly"> | undefined;
+  readonly native: () =>
+    | Pick<NativeDesktopPeerStatus, "verifyNightly" | "openNightly" | "nightlyRunning">
+    | undefined;
   readonly trash: (path: string) => Promise<void>;
   readonly verifier?: FeedVerifier;
   readonly fetchImpl?: typeof globalThis.fetch;
@@ -101,6 +107,8 @@ export interface NightlyInstallerOptions {
   readonly extract?: (archive: string, destination: string) => Promise<void>;
   readonly readBundleIdentifier?: (bundle: string) => Promise<string | undefined>;
   readonly readBundleVersion?: (bundle: string) => Promise<string | undefined>;
+  /** The bound on the feed and artifact downloads together. */
+  readonly downloadDeadlineMs?: number;
 }
 
 async function dittoExtract(archive: string, destination: string): Promise<void> {
@@ -160,7 +168,10 @@ async function bounded(operation: () => Promise<unknown> | undefined): Promise<u
   }
 }
 
-function answered(value: unknown, kind: "verified" | "started"): boolean {
+function answered(
+  value: unknown,
+  kind: "verified" | "started" | "running" | "not-running",
+): boolean {
   return typeof value === "object" && value !== null && "kind" in value && value.kind === kind;
 }
 
@@ -169,10 +180,11 @@ function answered(value: unknown, kind: "verified" | "started"): boolean {
  * did not match is `code-signature`; a check that ran out of time or could not
  * run says so, rather than blaming the publisher.
  */
-function nativeRefusal(value: unknown): NightlyInstallRefusal {
+export function nativeRefusal(value: unknown): NightlyInstallRefusal {
   const reason =
     typeof value === "object" && value !== null && "reason" in value ? value.reason : undefined;
   if (reason === "not-installed") return "not-installed";
+  if (reason === "launch-failed") return "launch-failed";
   if (reason === "invalid-peer" || reason === "unsigned-build" || reason === "incompatible-host")
     return "code-signature";
   return "check-unavailable";
@@ -197,6 +209,16 @@ export function createNightlyInstaller(options: NightlyInstallerOptions) {
   const readBundleVersion =
     options.readBundleVersion ?? ((bundle) => plistValue(bundle, "CFBundleShortVersionString"));
   let operation: "installing" | "removing" | undefined;
+
+  /** Replacing or trashing a running Nightly would pull it out from under its windows. */
+  async function runningRefusal(
+    native: ReturnType<NightlyInstallerOptions["native"]>,
+  ): Promise<NightlyInstallRefusal | undefined> {
+    const answer = await bounded(() => native?.nightlyRunning?.());
+    if (answered(answer, "not-running")) return undefined;
+    if (answered(answer, "running")) return "nightly-running";
+    return "check-unavailable";
+  }
   // Claimed before the first await, so a second click cannot start a second
   // install, or a remove, while the first is still checking the location.
   let claimed = false;
@@ -255,6 +277,7 @@ export function createNightlyInstaller(options: NightlyInstallerOptions) {
     operation = "installing";
     let download: string | undefined;
     let staging: string | undefined;
+    const deadline = AbortSignal.timeout(options.downloadDeadlineMs ?? DOWNLOAD_DEADLINE_MS);
     try {
       const refusal = await (async (): Promise<NightlyInstallRefusal | undefined> => {
         if (!verifier.configured("preview")) return "untrusted-signature";
@@ -270,7 +293,9 @@ export function createNightlyInstaller(options: NightlyInstallerOptions) {
             arch: options.app.arch,
           },
           options.fetchImpl,
+          deadline,
         );
+        if (deadline.aborted) return "timed-out";
         if (fetched.kind !== "fetched") return fetched.kind;
         if (isEmptyFeedMarker(fetched.document)) return "no-release";
         const offer = resolveNightlyInstallRelease({
@@ -287,6 +312,8 @@ export function createNightlyInstaller(options: NightlyInstallerOptions) {
             offer.release.version,
           );
           if (stale !== undefined) return stale;
+          const running = await runningRefusal(native);
+          if (running !== undefined) return running;
         }
         const artifact = await fetchVerifiedArtifact(
           {
@@ -295,7 +322,9 @@ export function createNightlyInstaller(options: NightlyInstallerOptions) {
             maxBytes: options.maxArtifactBytes ?? MAX_ARTIFACT_BYTES,
           },
           options.fetchImpl,
+          deadline,
         );
+        if (deadline.aborted) return "timed-out";
         if (artifact.kind === "corrupt") return "corrupt-artifact";
         if (artifact.kind !== "verified") return "unreachable";
 
@@ -328,6 +357,8 @@ export function createNightlyInstaller(options: NightlyInstallerOptions) {
             offer.release.version,
           );
           if (stale !== undefined) return stale;
+          const running = await runningRefusal(native);
+          if (running !== undefined) return running;
         }
         const previous = join(staging, "previous.app");
         if (current === "nightly") await rename(location.nightly, previous);
@@ -344,6 +375,16 @@ export function createNightlyInstaller(options: NightlyInstallerOptions) {
             }
           }
           return "not-writable";
+        }
+        if (current === "nightly") {
+          // The previous copy was never checked against Nightly's requirement
+          // here, so it goes to the Trash rather than being deleted.
+          try {
+            await options.trash(previous);
+          } catch {
+            // Never delete it instead: leave the staging folder in place.
+            staging = undefined;
+          }
         }
         return undefined;
       })();
@@ -390,8 +431,24 @@ export function createNightlyInstaller(options: NightlyInstallerOptions) {
     if (location.kind === "refused" || (await occupant(location.nightly)) !== "nightly") {
       return state("not-installed");
     }
+    const native = options.native();
+    const running = await runningRefusal(native);
+    if (running !== undefined) return state(running);
+    // Only an app that verifies as Nightly signed by Octant's own team is
+    // trashed; a bundle that merely carries Nightly's id is left alone.
+    const verdict = await bounded(() => native?.verifyNightly?.(location.nightly));
+    if (!answered(verdict, "verified")) {
+      const refusal = nativeRefusal(verdict);
+      return state(refusal === "code-signature" ? "remove-unverified" : refusal);
+    }
     operation = "removing";
     try {
+      // Checked again just before the move: Nightly may have been opened.
+      const reopened = await runningRefusal(native);
+      if (reopened !== undefined) {
+        operation = undefined;
+        return await state(reopened);
+      }
       // The Trash, not a delete: the person can take it back. Shared data lives
       // outside the bundle and is left alone.
       await options.trash(location.nightly);
@@ -434,7 +491,15 @@ function refusalMessage(refusal: NightlyInstallRefusal): string {
     case "installed-version-unreadable":
       return "Octant could not read the installed Octant Nightly's version, so it did not replace it.";
     case "check-unavailable":
-      return "Octant could not finish checking Octant Nightly's code signature, so nothing was changed. Try again.";
+      return "Octant could not finish checking Octant Nightly, so nothing was changed. Try again.";
+    case "remove-unverified":
+      return "The app at Octant Nightly's location is not Octant Nightly signed by Octant's own developer, so Octant did not move it to the Trash.";
+    case "nightly-running":
+      return "Octant Nightly is open. Quit Octant Nightly first, then try again.";
+    case "launch-failed":
+      return "macOS did not open Octant Nightly. Try again, or open it from Applications.";
+    case "timed-out":
+      return "The Nightly download took too long, so it was stopped and nothing was changed.";
     case "occupied":
       return "Another app is already named Octant Nightly beside Octant, so Octant left it alone.";
     case "not-writable":

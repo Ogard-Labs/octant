@@ -483,5 +483,27 @@ describe("AppUpdateSettings", () => {
       expect(readNightlyInstall).not.toHaveBeenCalled();
       expect(screen.queryByRole("button", { name: "Open Octant Nightly" })).toBeNull();
     });
+
+    it("settles a row that opened while main was still installing", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        const readNightlyInstall = vi
+          .fn<() => Promise<{ readonly status: "installing" | "installed" }>>()
+          .mockResolvedValueOnce({ status: "installing" })
+          .mockResolvedValue({ status: "installed" });
+        view({ ...onRing("candidate"), readNightlyInstall });
+
+        const installing = await screen.findByRole("button", { name: "Installing…" });
+        expect(installing).toBeDisabled();
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(await screen.findByRole("button", { name: "Open Octant Nightly" })).toBeTruthy();
+        expect(readNightlyInstall).toHaveBeenCalledTimes(2);
+        // Settled: no further reads.
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(readNightlyInstall).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

@@ -229,6 +229,14 @@ export const NightlyInstallRefusal = Schema.Literal(
   "not-newer",
   /** The installed Nightly's version could not be read, so no build can be shown to be newer. */
   "installed-version-unreadable",
+  /** The app at Nightly's location did not verify as Nightly, so Remove left it alone. */
+  "remove-unverified",
+  /** Octant Nightly is running; replacing or removing it waits until it is quit. */
+  "nightly-running",
+  /** macOS did not open the verified Nightly. */
+  "launch-failed",
+  /** The download did not finish within its deadline; nothing was changed. */
+  "timed-out",
   /** The code-signature check could not run or ran out of time; nothing was changed. */
   "check-unavailable",
   /** Something other than Octant Nightly already sits at the install location. */

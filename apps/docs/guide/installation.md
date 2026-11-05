@@ -173,7 +173,9 @@ hash, and that the app is Octant Nightly signed by Octant's own developer. If
 a check fails, the row says which one and nothing is installed. Octant never
 replaces another app with that name. Once Nightly is installed, the row offers
 Open Octant Nightly and Remove Octant Nightly. Remove moves the app to the
-Trash and leaves your data alone. After you switch back to Stable, the row
+Trash and leaves your data alone. Installing a newer Nightly over an installed
+one moves the old copy to the Trash. Quit Octant Nightly before you replace or
+remove it; the row asks you to if it is still open. After you switch back to Stable, the row
 stays while Nightly is installed. Octant on Linux does not install Nightly;
 download it from octant.sh instead. The release workflow's scheduled Nightly run
 has an explicit preflight stop until that functional client is implemented and
