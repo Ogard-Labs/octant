@@ -11453,7 +11453,29 @@ access` agree); a thread's own change is journaled as
     boundary above is unchanged: the new route sits behind the same bridge
     secret, window capability, no-`Origin`, and loopback checks.
 
-- **One-use credential cards.** The app-managed `request_credential` tool can
+- **The credential tool.** An agent reaches both person-held credential paths
+  below, one-use cards and named credential commands, through one app-managed
+  Code tool, `octant_credential`. Its operations are `help`; `list`, which
+  returns the registered operations (id, label, reason) and the saved commands
+  (id, label, executable, arguments, Project directory) this thread can use,
+  never a destination request, account, vault reference or value; `request`,
+  which opens a one-use card for a registered operation; and `run-saved`, which
+  asks the person to review one run of a saved command. Each side keeps its own
+  authority check, unchanged from the two tools it replaces, and `list` shows
+  only the sides that pass theirs. The tool is offered only when at least one
+  side passes its check and has something to use: a registered operation, or a
+  command saved for this Code Project. Both are host-memory facts, so the
+  decision is taken when the turn's tools are composed; a command saved during
+  a turn is offered from the next turn, and a side that was not offered stays
+  refused for the whole turn, so the schema a provider sees lists exactly the
+  operations it can call. The profile allowlist names `octant_credential` for
+  both sides; a stored allowlist that names only a former tool name admits
+  neither side, so it fails closed. The description says values are never returned and that the tool
+  is not a general command runner: ordinary commands stay with the terminal and
+  shell. The verbs follow the repository's tool families (`help`, `list`);
+  `request` matches the card's own name, and `run-saved` says in the name that
+  only a command the person already saved can run, which `run` alone did not.
+- **One-use credential cards.** The credential tool's `request` operation can
   ask a person at the owning local window to authorize one supported integration
   operation. The first consumer is `linear-account-check`, a fixed read-only
   `viewer { id }` request to `https://api.linear.app/graphql`. It is available
@@ -11466,8 +11488,7 @@ access` agree); a thread's own change is journaled as
   `IntegrationHostPort.registerCredentialOperation`. The host snapshots bounded
   descriptors, rejects duplicate identifiers and unsafe destinations, and returns
   an idempotent release function. The tool lists only the currently effective
-  registrations and rechecks that the same registration still exists at use.
-  The bundled consumer registers from its plugin factory through this same port;
+  registrations and rechecks that the same registration still exists at use. The bundled consumer registers from its plugin factory through this same port;
   server startup does not import its descriptor or name its operation.
   - The card submits privately to `/api/credential-requests`, authenticated to
     its originating window. Paired clients are refused. It neither submits a
@@ -11665,8 +11686,9 @@ access` agree); a thread's own change is journaled as
     Reserved process, loader, Git, SSH, credential-tool and Octant environment
     names cannot become mappings; this is not an exhaustive defence against
     arbitrary runtimes or a hostile recipient at Full access.
-    A normal Code task's `octant_command` tool selects only a binding ID;
-    the Code conversation offers the same review/run service to the person.
+    A normal Code task's credential tool `run-saved` operation selects only a
+    binding ID; the Code conversation offers the same review/run service to the
+    person.
     Every run needs a separate one-use credential approval within three minutes,
     the originating registered local window, and ordinary Code command policy.
     Ask for approvals and Auto-accept edits keep the recipient OS-confined;
