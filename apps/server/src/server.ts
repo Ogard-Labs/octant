@@ -631,6 +631,7 @@ export function startOctantServer(
       workThreadProjection,
     });
     const {
+      browserCredentialUseService,
       browserAutomationService,
       browserExtensionService,
       browserFlowService,
@@ -1009,6 +1010,7 @@ export function startOctantServer(
       });
     const { agentMessageRoutes, browserAutomationRoutes, contextRoutes, windowCanOpenThread } =
       wireContext({
+        browserCredentialUseService,
         agentMessageProjection,
         browserModelBindings,
         browserAuthority,

@@ -51,6 +51,7 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<ProvidersWiring, "configuredDriverOptions"> &
   Pick<
     BrowserWiring,
+    | "browserCredentialUseService"
     | "browserAutomationService"
     | "browserExtensionService"
     | "browserFlowService"
@@ -72,6 +73,7 @@ export function wireContext(deps: ContextDependencies) {
     agentMessageProjection,
     browserAuthority,
     browserAutomationService,
+    browserCredentialUseService,
     browserCaptures,
     browserModelBindings,
     browserToolApprovalService,
@@ -584,6 +586,7 @@ export function wireContext(deps: ContextDependencies) {
           approval: "pending",
         }),
     },
+    credentialUse: browserCredentialUseService,
     captures: browserCaptures,
     windowCanOpenThread: windowCanOpenThreadById,
     projectBrowsers: liveProjectBrowsers,

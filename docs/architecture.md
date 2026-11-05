@@ -11335,6 +11335,40 @@ access` agree); a thread's own change is journaled as
     admission. This is the person's exact consent, not proof that the broker
     committed a change. An unknown reply tells the person to read the current
     account; it is never reported as an unchanged or confirmed selection.
+  - **Browser credential-use permission.** Vendor partner autofill access for
+    Octant is unverified and is not assumed or required by this CLI-backed
+    binding. No partner signup or extension compatibility is implied.
+    A local window may review a selected
+    1Password account/vault/item and record a distinct
+    `browser-credential-grant`, never an OAuth identity or a store unlock.
+    The Browser derives the owning task, Project, profile and exact HTTPS
+    origin, including port, from a live native context. Review and save need
+    its sign-in or take-over hold. This first binding supports only the top
+    frame; iframe targets, paired clients, unattended callers and headless
+    contexts are refused. It adds no fill or page-script operation.
+    The broker requests only the selected item with explicit `--account` and
+    `--vault` IDs. CLI item JSON may contain concealed values; the adapter
+    projects only IDs, bounded title, item version and saved HTTPS origins.
+    No field values, OTPs, raw JSON or tool diagnostics leave it. Missing,
+    malformed, non-HTTPS or more than eight saved websites refuse uncertainty;
+    excess URLs are never silently dropped. A separate broker-session/link
+    revision prevents a relink from matching earlier metadata. Legacy
+    two-field credential pointers retain their strict decoder and behavior.
+    Permission is scoped to one Project's eligible threads, or the stricter
+    task/context. Private permits only task/context; Personal remains
+    Project-bound. The reference-only grant and revocations are journaled;
+    live grants are memory-only, expire at host restart or after eight hours,
+    and are never restored from journal history. Website cookies do not renew
+    them. Clearing a profile invalidates its reviews and grants.
+    A saved grant is a permission snapshot, not executable credential
+    authority. Metadata and page reads are separate observations, not an
+    atomic transaction. Changed account/item version, link revision, site,
+    frame or profile refuses matching on the next read; changed matching
+    metadata removes and journals the grant. No immediate background
+    invalidation is promised. A later fill must revalidate every pin, current
+    page/frame, revocation and lifetime through the broker immediately before
+    its effect, while holding agent actions and observations. This binding
+    slice neither implements nor bypasses that per-use check.
   - **AWS command line.** Settings › Secret stores › AWS command line points
     the AWS command line at the two items that hold the person's access key
     pair (`point-aws-cli-key`; the broker proves both resolve now, as for a

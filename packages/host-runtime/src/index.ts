@@ -228,3 +228,5 @@ export {
   isSlackMcpUserGrantBinding,
   isSlackMcpUserDescriptorBinding,
 } from "./slackMcpOAuth";
+
+export type { BrowserCredentialItemPin, BrowserItemMetadata } from "./onePasswordBrowserMetadata";

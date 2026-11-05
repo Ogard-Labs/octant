@@ -13,6 +13,7 @@ import {
   decodeWindowId,
   MAX_BROWSER_THREAD_CONTEXTS,
 } from "@octant/contracts";
+import { decodeBrowserCredentialCommand } from "@octant/contracts/browser-credential-use";
 import { decodeToolActionRequest } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -184,6 +185,67 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it.each([false, true])(
+    "refuses credential metadata for headless or unattended contexts",
+    async (unattended) => {
+      const f = harness({ unattended });
+      if (unattended)
+        vi.mocked(f.runtime.createContext).mockImplementation(async (id) => {
+          f.contexts.add(id);
+          return "native-live";
+        });
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      f.service.holdForPerson(windowId, threadOne);
+      const command = decodeBrowserCredentialCommand({
+        kind: "list-browser-credential-grants",
+        contextId: contextOne,
+        threadId: threadOne,
+        mode: "work",
+      });
+      expect(await f.service.credentialUseTarget(windowId, command, true)).toMatchObject({
+        reason: unattended ? "unauthorized" : "unsupported",
+      });
+    },
+  );
+
+  it("verifies a held native target after its address await and refuses stale ownership", async () => {
+    const f = harness();
+    vi.mocked(f.runtime.createContext).mockImplementation(async (id) => {
+      f.contexts.add(id);
+      return "native-live";
+    });
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const command = decodeBrowserCredentialCommand({
+      kind: "list-browser-credential-grants",
+      contextId: contextOne,
+      threadId: threadOne,
+      mode: "work",
+    });
+    expect(await f.service.credentialUseTarget(windowId, command, true)).toMatchObject({
+      reason: "hold-required",
+    });
+    f.service.holdForPerson(windowId, threadOne);
+    expect(await f.service.credentialUseTarget(otherWindowId, command, true)).toMatchObject({
+      reason: "unauthorized",
+    });
+    expect(await f.service.credentialUseTarget(windowId, command, true)).toMatchObject({
+      kind: "browser-credential-target",
+      target: {
+        topOrigin: "https://example.com",
+        frame: { kind: "top", origin: "https://example.com" },
+      },
+    });
+    const peek = f.runtime.peek;
+    if (peek === undefined) throw new Error("Missing fixture peek");
+    vi.mocked(peek).mockImplementation(async () => {
+      f.revoke(threadOne);
+      return { url: "https://example.com" };
+    });
+    expect(await f.service.credentialUseTarget(windowId, command, true)).toMatchObject({
+      reason: "stale",
+    });
+  });
+
   it("refuses to create a context when the window is not scoped to the thread", async () => {
     const fixture = harness({ access: false });
     const result = await fixture.service.create({

@@ -83,6 +83,7 @@ const ROUTES = new Set([
   "/v1/secret-stores/link",
   "/v1/secret-stores/unlink",
   "/v1/secret-stores/check",
+  "/v1/secret-stores/browser-metadata",
   "/v1/secret-stores/point",
   "/v1/secret-stores/reference",
   "/v1/secret-stores/clear",
@@ -779,6 +780,34 @@ async function handleSecretStoreRoute(
   const value = body.value;
   const keys = Object.keys(value).sort().join(",");
   const store = value.store;
+
+  if (operation === "browser-metadata") {
+    if (
+      keys !== "accountId,itemId,store,vaultId" ||
+      store !== "onepassword" ||
+      typeof value.accountId !== "string" ||
+      typeof value.vaultId !== "string" ||
+      typeof value.itemId !== "string" ||
+      ![value.accountId, value.vaultId, value.itemId].every((id) => /^[a-z0-9]{26}$/i.test(id))
+    )
+      return failure("invalid-request", 400);
+    const result = await linked.browserMetadata?.({
+      store,
+      accountId: value.accountId,
+      vaultId: value.vaultId,
+      itemId: value.itemId,
+    });
+    if (result?.status !== "described")
+      return Response.json({ status: result?.status ?? "unavailable" });
+    return Response.json({
+      status: "described",
+      item: result.item,
+      title: result.title,
+      version: result.version,
+      websiteOrigins: result.websiteOrigins,
+      storeRevision: result.storeRevision,
+    });
+  }
 
   if (operation === "status") {
     if (keys !== "") return failure("invalid-request", 400);

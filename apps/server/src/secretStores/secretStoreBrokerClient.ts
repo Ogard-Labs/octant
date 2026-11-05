@@ -17,6 +17,24 @@ import {
   decodeGoogleCliAccountReference,
   decodeGoogleCliAccountIdentity,
 } from "@octant/contracts/secret-stores";
+import {
+  decodeBrowserCredentialMetadata,
+  type BrowserCredentialItem,
+  type BrowserCredentialMetadata,
+} from "@octant/contracts/browser-credential-use";
+
+export type BrowserMetadataAnswer =
+  | { readonly status: "described"; readonly metadata: BrowserCredentialMetadata }
+  | {
+      readonly status:
+        | "invalid-item"
+        | "locked"
+        | "missing"
+        | "unavailable"
+        | "not-linked"
+        | "uncertain"
+        | "changed";
+    };
 
 export type SecretStoreNamespace = "provider" | "mcp-server";
 export type SecretStoreBrokerDown = { readonly status: "broker-unavailable" };
@@ -109,6 +127,7 @@ export interface SecretStoreBrokerClient {
   readonly googleCliSession?: (
     signal?: AbortSignal,
   ) => Promise<GoogleCliSessionAnswer | SecretStoreBrokerDown>;
+  readonly browserMetadata?: (item: BrowserCredentialItem) => Promise<BrowserMetadataAnswer>;
   readonly awsCliReference: () => Promise<AwsCliReferenceAnswer | SecretStoreBrokerDown>;
   /** Points the AWS command line at two items, after the broker proved both resolve now. */
   readonly pointAwsCli: (
@@ -198,6 +217,7 @@ export function makeSecretStoreBrokerClient(
     operation: string,
     body: object,
     signal?: AbortSignal,
+    maxBytes?: number,
   ): Promise<Record<string, unknown> | undefined> => {
     try {
       const response = await fetchPort(
@@ -217,7 +237,25 @@ export function makeSecretStoreBrokerClient(
         },
       );
       if (!response.ok) return undefined;
-      const parsed: unknown = await response.json();
+      let parsed: unknown;
+      if (maxBytes === undefined) parsed = await response.json();
+      else {
+        if (response.body === null) return undefined;
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let length = 0;
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          length += chunk.value.byteLength;
+          if (length > maxBytes) {
+            await reader.cancel();
+            return undefined;
+          }
+          chunks.push(chunk.value);
+        }
+        parsed = JSON.parse(Buffer.concat(chunks, length).toString("utf8"));
+      }
       return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
         ? (parsed as Record<string, unknown>)
         : undefined;
@@ -336,6 +374,33 @@ export function makeSecretStoreBrokerClient(
         status === "invalid-reference"
         ? { status }
         : DOWN;
+    },
+    browserMetadata: async (item) => {
+      const answer = await post("browser-metadata", item, undefined, 32 * 1024);
+      if (answer?.status === "described") {
+        try {
+          const { status: _status, ...value } = answer;
+          const metadata = decodeBrowserCredentialMetadata(value);
+          if (
+            metadata.item.accountId !== item.accountId ||
+            metadata.item.vaultId !== item.vaultId ||
+            metadata.item.itemId !== item.itemId
+          )
+            return { status: "uncertain" };
+          return { status: "described", metadata };
+        } catch {
+          return { status: "uncertain" };
+        }
+      }
+      const status = answer?.status;
+      return status === "invalid-item" ||
+        status === "locked" ||
+        status === "missing" ||
+        status === "not-linked" ||
+        status === "uncertain" ||
+        status === "changed"
+        ? { status }
+        : { status: "unavailable" };
     },
     awsCliReference: async () => {
       const answer = await post(`${AWS}reference`, {});

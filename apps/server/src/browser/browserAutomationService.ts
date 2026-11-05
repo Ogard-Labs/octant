@@ -23,6 +23,14 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import {
+  decodeBrowserCredentialTarget,
+  type BrowserCredentialCommand,
+} from "@octant/contracts/browser-credential-use";
+import {
+  browserCredentialRefusal,
+  type BrowserCredentialCurrentTarget,
+} from "./browserCredentialUseService";
+import {
   MAX_BROWSER_HELD_DOWNLOADS,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_BROWSER_THREAD_CONTEXTS,
@@ -1661,6 +1669,79 @@ export class BrowserAutomationService {
     await this.#destroy(owned, "user-requested", "ready");
     owned.failure = undefined;
     return snapshot(owned);
+  }
+
+  async credentialUseTarget(
+    windowId: WindowId,
+    command: BrowserCredentialCommand,
+    holdRequired: boolean,
+  ): Promise<BrowserCredentialCurrentTarget> {
+    const owned = this.#contexts.get(command.contextId);
+    if (
+      owned === undefined ||
+      String(owned.windowId) !== String(windowId) ||
+      String(owned.threadId) !== String(command.threadId) ||
+      owned.record.authority.mode !== command.mode ||
+      this.#isUnattendedScope(windowId) ||
+      !this.#authorityIsActive(owned)
+    )
+      return browserCredentialRefusal(
+        "unauthorized",
+        "This Browser page is not available to this local task.",
+      );
+    if (owned.record.presentation !== "native-live" || this.#runtime.peek === undefined)
+      return browserCredentialRefusal(
+        "unsupported",
+        "Login permissions require this computer's native Browser.",
+      );
+    if (holdRequired && (owned.waitingForPerson === undefined || owned.agentActions > 0))
+      return browserCredentialRefusal(
+        "hold-required",
+        "Take over the page or wait for its sign-in handoff before reviewing an item.",
+      );
+    const record = owned.record;
+    try {
+      const observed = await this.#runtime.peek(command.contextId, owned.abort.signal);
+      if (
+        this.#contexts.get(command.contextId) !== owned ||
+        owned.record !== record ||
+        !this.#authorityIsActive(owned) ||
+        owned.abort.signal.aborted ||
+        (holdRequired && (owned.waitingForPerson === undefined || owned.agentActions > 0))
+      )
+        return browserCredentialRefusal(
+          "stale",
+          "The Browser page changed while its site was being checked.",
+        );
+      if (record.authority.mode === "chat" || observed.url === undefined)
+        return browserCredentialRefusal(
+          "unsupported",
+          "This page has no eligible task and HTTPS site.",
+        );
+      const url = new URL(observed.url);
+      if (url.protocol !== "https:" || url.username !== "" || url.password !== "")
+        return browserCredentialRefusal(
+          "unsupported",
+          "Login permissions require an exact HTTPS site.",
+        );
+      return {
+        kind: "browser-credential-target",
+        target: decodeBrowserCredentialTarget({
+          contextId: record.contextId,
+          threadId: record.threadId,
+          mode: record.authority.mode,
+          projectId: record.authority.projectId,
+          profile: record.policy.profile ?? { kind: "private" },
+          topOrigin: url.origin,
+          frame: { kind: "top", origin: url.origin },
+        }),
+      };
+    } catch {
+      return browserCredentialRefusal(
+        "unavailable",
+        "The current Browser site could not be verified.",
+      );
+    }
   }
 
   inspect(

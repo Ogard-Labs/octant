@@ -2335,6 +2335,14 @@ Browser pages may keep sign-in in a Project or Personal profile. Private is the 
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Profiles](browser-profiles.md#profiles) and [The agent on a signed-in page](browser-profiles.md#the-agent-on-a-signed-in-page).
 
+Browser selected-item permission records an explicitly reviewed account/vault/
+item and exact HTTPS top-frame/profile/Project-or-task scope. It is a
+host-session permission snapshot with an eight-hour maximum, distinct from
+store unlock, OAuth identity and cookies. This binding adds no credential fill
+or iframe/script execution; later use requires fresh broker validation under
+the protected lifecycle. Detail: [Browser sign-in](browser-agent-tool.md#asking-the-person-to-sign-in)
+and [the credential boundary](../architecture.md#linked-secret-stores).
+
 ### Terminal Browser grant
 
 A person can lend a Code thread's Browser to a CLI in that thread's terminal, with no new authority.

@@ -1,4 +1,9 @@
 import {
+  BrowserCredentialResult,
+  decodeBrowserCredentialCommand,
+  type BrowserCredentialCommand,
+} from "@octant/contracts/browser-credential-use";
+import {
   BrowserTaskProfileState,
   BrowserTaskProfileSelection,
   decodeBrowserTaskProfileReadCommand,
@@ -73,6 +78,10 @@ export interface BrowserAutomationClient {
     input: BrowserTaskProfileSelectCommand,
     signal?: AbortSignal,
   ): Promise<BrowserTaskProfileSelection>;
+  manageCredentialUse?(
+    command: BrowserCredentialCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserCredentialResult.Type>;
   resolve(input: BrowserThreadScopeRequest, signal?: AbortSignal): Promise<BrowserThreadScope>;
   create(
     input: BrowserContextCreateCommand,
@@ -176,6 +185,14 @@ export function createBrowserAutomationClient(
         "/api/browser/task-profile",
         decodeBrowserTaskProfileSelectCommand(input),
         decodeHostAnswer(BrowserTaskProfileSelection),
+        signal,
+      ),
+    manageCredentialUse: (command, signal) =>
+      post(
+        options,
+        "/api/browser/credential-use",
+        decodeBrowserCredentialCommand(command),
+        decodeHostAnswer(BrowserCredentialResult),
         signal,
       ),
     resolve: (input, signal) =>

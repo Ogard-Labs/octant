@@ -1,3 +1,4 @@
+import { BrowserCredentialBindingControl } from "./BrowserCredentialBindingControl";
 import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
@@ -995,6 +996,23 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             ? {}
             : { onSignOut: () => signOutOfProfile() })}
         />
+        {nativeContext &&
+        activeContext &&
+        snapshot?.context !== undefined &&
+        (snapshot.context.authority.mode === "work" ||
+          snapshot.context.authority.mode === "code") ? (
+          <BrowserCredentialBindingControl
+            key={String(snapshot.context.contextId)}
+            client={props.client}
+            context={{
+              contextId: snapshot.context.contextId,
+              threadId: snapshot.context.threadId,
+              mode: snapshot.context.authority.mode,
+            }}
+            profile={snapshot.context.policy.profile ?? { kind: "private" }}
+            held={snapshot.waitingForPerson !== undefined}
+          />
+        ) : null}
         {nativeContext && activeContext ? (
           <BrowserExtensionsButton
             agentDriving={nativeState?.control === "agent"}

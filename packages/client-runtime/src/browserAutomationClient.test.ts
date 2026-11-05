@@ -1,3 +1,4 @@
+import { decodeBrowserCredentialCommand } from "@octant/contracts/browser-credential-use";
 import { describe, expect, it, vi } from "vitest";
 import {
   BrowserAutomationClientFailure,
@@ -51,6 +52,40 @@ describe("BrowserAutomationClient", () => {
     await expect(
       client.readTaskProfile!({ threadId: threadId as never, mode: "code" }),
     ).rejects.toMatchObject({ category: "protocol" });
+  });
+
+  it("sends selected-item permission commands through authenticated transport and rejects malformed answers", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ kind: "browser-credential-grants", grants: [] }))
+      .mockResolvedValueOnce(
+        Response.json({ kind: "browser-credential-grants", grants: [], password: "fixture" }),
+      );
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    const command = decodeBrowserCredentialCommand({
+      kind: "list-browser-credential-grants",
+      contextId,
+      threadId,
+      mode: "work",
+    });
+    await expect(client.manageCredentialUse?.(command)).resolves.toEqual({
+      kind: "browser-credential-grants",
+      grants: [],
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:13773/api/browser/credential-use"),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "x-octant-window-capability": capability }),
+      }),
+    );
+    await expect(client.manageCredentialUse?.(command)).rejects.toBeInstanceOf(
+      BrowserAutomationClientFailure,
+    );
   });
 
   it("takes a capture through its own route and reports a refusal as an unauthorized failure", async () => {

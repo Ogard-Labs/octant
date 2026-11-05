@@ -605,6 +605,15 @@ needed.
   CLI in a thread terminal (`sign-in-needs-a-person`), and on a paired device's
   turn (`sign-in-needs-this-computer`): nobody there can sign in, or the person
   there cannot see the page.
+- While a native page is held for sign-in or take-over, **Login permission**
+  lets the person review one 1Password account/vault/item by immutable IDs.
+  The review names the exact HTTPS origin and port, top frame, profile and
+  Project/task scope before **Allow selected item** records permission.
+  **Revoke permission** removes it. This records no authentication result,
+  fills nothing, and grants no iframe or script access. Its reference-only,
+  host-session/eight-hour lifecycle and mandatory future per-use validation
+  follow [the credential boundary](../architecture.md#linked-secret-stores).
+
 - Rationale: the hand-off fits the rule that a person's sign-ins are never read
   by an agent. The page keeps its profile; a Private page's sign-in lasts as
   long as the page, and a Project or Personal page keeps it for the next page

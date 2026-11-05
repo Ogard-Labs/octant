@@ -660,3 +660,13 @@ extension.
 - [Apple Development Workbench](/advanced/apple-workbench) for validation workflows
 - [Privacy and security](/advanced/privacy-and-security) for isolation and evidence policy
 - [Plugins and skills](/advanced/plugins-and-skills) for extension authority
+
+### Selected login-item permission
+
+A task's native Browser offers **Login permission** to review one explicitly
+selected 1Password account, vault and item while the page is held for the
+person. It records top-frame permission for the exact HTTPS site and port,
+profile and Project or task. It fills nothing and includes no iframe or page
+script access. Store unlock, saved permission and website sign-in are distinct.
+See [the secret-store steps](/guide/secret-stores#record-permission-for-a-browser-login-item)
+for scope, expiry, revocation and current limitations.

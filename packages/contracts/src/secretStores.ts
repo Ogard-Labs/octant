@@ -12,6 +12,7 @@
  */
 
 import { Schema } from "effect";
+import { BrowserCredentialJournalRecord } from "./browserCredentialUse";
 import { UtcTimestamp } from "./events";
 import { ProviderInstanceId } from "./providers";
 import { WindowId } from "./shell";
@@ -257,6 +258,7 @@ const CredentialTarget = Schema.Union(
  * is never an input to any of these records.
  */
 export const SecretStoreJournalRecord = Schema.Union(
+  BrowserCredentialJournalRecord,
   Schema.Struct({
     name: Schema.Literal("secret-store.linked"),
     store: SecretStoreKind,
