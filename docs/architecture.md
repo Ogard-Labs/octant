@@ -13186,12 +13186,14 @@ nothing first-party.
 This section is the one statement of what the first release includes and
 defers, and it owns the architectural rules behind it.
 
-**Where the release stands (2026-11-02).** The first release is the Apple
+**Where the release stands (2026-11-05).** The first release is the Apple
 Silicon technical preview with the provider-neutral plugin/skill marketplace.
-Builds of `main` publish daily on the `preview` ring as the second app Octant
-Nightly, and on-demand builds publish on the `candidate` ring, as GitHub
-pre-releases named `v0.1.0-preview.<date>.<build>`; each carries a macOS zip
-and a linux-x64 AppImage. The stable ring (a `vMAJOR.MINOR.PATCH` tag, approved
+Builds of `main` are meant to publish daily on the `preview` ring as the second
+app Octant Nightly, and on-demand pre-releases of the next stable on the
+`candidate` ring as Octant's Preview channel, as GitHub pre-releases named
+`v0.1.0-<ring>.<date>.<build>`; each carries a macOS zip and a linux-x64
+AppImage. The scheduled Nightly run is stopped by a preflight until Nightly is
+a usable client. The stable ring (a `vMAJOR.MINOR.PATCH` tag, approved
 in the `stable` environment) has not been used, so Octant itself has not
 shipped. The first release counts as shipped when a maintainer approves the
 first stable version; daily builds stay previews. That first stable release is
@@ -13337,13 +13339,16 @@ macOS-only.
   stay, since feed paths and version tags that installed builds follow carry
   them. A build's default ring is read from
   its version; the signed ring field is what separates the streams. The base
-  is overridable but must be HTTPS. Stable ships as Octant; preview and
-  candidate ship as a second app, Octant Nightly, with its own bundle id, link
-  scheme, command-line name, and icon. Nightly shares Octant's data through
-  Octant's running host and never runs a host of its own on that folder, so the
-  journal keeps one writer and no nightly migrates data Octant must still open.
-  The first technical preview therefore ships as Octant on `stable`
-  ([Octant Nightly](design/nightly-app.md)). Identity and packaging foundations
+  is overridable but must be HTTPS. Stable and candidate ship as Octant, one
+  binary whose ring is the person's in-app channel choice (Stable or Preview);
+  preview ships as a second app, Octant Nightly, with its own bundle id, link
+  scheme, command-line name, and icon (maintainer decision, 2026-11-05). Nightly
+  shares Octant's data through Octant's running host and never runs a host on
+  that folder, so the journal keeps one writer and no nightly migrates data
+  Octant must still open. For development and testing it can instead run its
+  own host on separate test data. A person's first install is therefore Octant
+  ([Octant Nightly](design/nightly-app.md)). The channel split, the
+  Preview-only Nightly install and the test-data host are not built yet. Identity and packaging foundations
   now stamp separate app flavors and restrict each packaged updater to its
   identity's rings. A separate authenticated native window bootstrap can load
   Nightly's own renderer with a short server-enforced lease. It never loads
