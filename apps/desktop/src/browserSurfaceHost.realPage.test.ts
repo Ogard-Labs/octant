@@ -999,6 +999,28 @@ describe.skipIf(chrome === undefined)(
       await page.close();
     });
 
+    it("ends a recording when another tab comes to the front, under the recorded tab's address", async () => {
+      const { host, contextId, page, view } = await surface("/red", 2);
+      await host.act(contextId, { kind: "record-start" });
+      await page.waitForTimeout(600);
+      await host.act(contextId, { kind: "tab-open", target: `${origin}/blue` });
+      await page.waitForTimeout(600);
+      const stopped = await host.act(contextId, { kind: "record-stop", include: ["text"] });
+      // The observation is of the tab in front; the recording is of the one it started on.
+      expect(stopped.url).toBe(`${origin}/blue`);
+      const recording = stopped.recording;
+      if (recording?.status !== "recorded") throw new Error(`not recorded: ${recording?.status}`);
+      expect(recording).toMatchObject({
+        truncated: "tab-changed",
+        url: `${origin}/red`,
+        title: "Red",
+      });
+      const corners = apngCorners(recording.dataUrl);
+      expect(corners.filter(([red, , blue]) => blue > 180 && red < 80)).toEqual([]);
+      expect(view.webContents.debugger.isAttached()).toBe(false);
+      await page.close();
+    });
+
     it("withholds a recording of a page that holds a credential field", async () => {
       const { host, contextId, page } = await surface("/login");
       await host.act(contextId, { kind: "record-start" });

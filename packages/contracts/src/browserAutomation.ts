@@ -618,6 +618,9 @@ export const BrowserRecordingTruncation = Schema.Literal(
   // The page's picture changed size mid-recording (a resize); an animation
   // keeps one size, so it ends at the last frame of the old one.
   "viewport-changed",
+  // Another tab came to the front: a recording belongs to the tab it started
+  // on, so it ends there rather than mixing two tabs' pictures.
+  "tab-changed",
 );
 export type BrowserRecordingTruncation = typeof BrowserRecordingTruncation.Type;
 

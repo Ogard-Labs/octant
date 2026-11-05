@@ -302,6 +302,21 @@ attached the same way.
   `frame-limit`, `size-limit`). A frame of a different size (the page was
   resized) ends it too (`viewport-changed`): an animation has one size. The
   call goes on; only the recording stops.
+- **One tab.** A recording belongs to the tab it started on. When another tab
+  comes to the front (the call opens or switches to one, the person switches,
+  or the recorded tab closes), the recording stops at that moment
+  (`tab-changed`) and takes no frame from either tab after it; frames that had
+  already arrived are still checked and kept. The capture is kept under the
+  recorded tab's address and title as they were when the recording stopped,
+  never the tab in front when the call ends, so the page origin a capture
+  needs is the recorded tab's and the call's later steps do not appear in it.
+  The rule is the same on the desktop and the headless Browser.
+- Rationale: the screencast is a property of one page, so following the front
+  tab would mean a second screencast and frames of two pages, possibly of
+  different sizes, in one animation; and labelling one tab's frames with
+  another's address would file the capture under a page it does not show, or
+  refuse it for a blank new tab. Stopping, as a resize already does, keeps one
+  picture of one page under that page's own address.
 - **Frames.** The desktop and the headless Browser both take frames from the
   page's own screencast (the debugger protocol's `Page.startScreencast`, in
   PNG) and keep the newest frame of each 250 ms, so the last state of a change

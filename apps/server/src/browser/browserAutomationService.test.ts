@@ -1891,6 +1891,35 @@ describe("BrowserAutomationService", () => {
         expect(captures.recordStep).toHaveBeenCalledOnce();
       });
 
+      it("keeps a recording under the address of the tab it recorded, not the tab in front", async () => {
+        const captures = { keep: keep() };
+        const { runtime, service } = harness({ captures });
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        vi.mocked(runtime.act).mockResolvedValueOnce({
+          url: "https://example.com/other",
+          title: "Other tab",
+          recording: {
+            ...recorded,
+            truncated: "tab-changed",
+            url: "https://example.com/start",
+            title: "Recorded tab",
+          },
+        });
+        await service.act({
+          windowId,
+          request: request({ kind: "record-stop" }),
+          capturedBy: "agent",
+        });
+
+        expect(captures.keep).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: "https://example.com/start",
+            title: "Recorded tab",
+            recording: { frames: 6, durationMs: 1_500, truncated: "tab-changed" },
+          }),
+        );
+      });
+
       it("records only for the agent's own call, never for the pane or an unnamed caller", async () => {
         const captures = { keep: keep() };
         const { runtime, service } = harness({ captures });

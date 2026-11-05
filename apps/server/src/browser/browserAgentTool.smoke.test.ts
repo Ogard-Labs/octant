@@ -989,6 +989,42 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     await tool.stop();
   });
 
+  it("ends a recording at the tab a batch opens, and keeps it under the tab it recorded", async () => {
+    const kept: Array<{ readonly url?: string; readonly title?: string }> = [];
+    const tool = agentTool({
+      captures: {
+        keep: async (input) => {
+          kept.push({
+            ...(input.url === undefined ? {} : { url: input.url }),
+            ...(input.title === undefined ? {} : { title: input.title }),
+          });
+          return {
+            status: "kept",
+            captureId: randomUUID() as never,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          };
+        },
+      },
+    });
+    await tool.call({ operation: "navigate", url: `${origin}/panel` });
+    const recorded = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [
+        { operation: "click", selector: "#paint" },
+        { operation: "wait", conditions: [{ text: "Done", present: true }], timeoutMs: 5_000 },
+        { operation: "tab-open", url: `${origin}/other` },
+      ],
+    });
+    expect(recorded.isError).toBe(false);
+    const recording = (recorded.result as { readonly recording?: Record<string, unknown> })
+      .recording;
+    expect(recording).toMatchObject({ captureId: expect.any(String), truncated: "tab-changed" });
+    // The recorded tab's own title when the tab changed, set by its paint.
+    expect(kept).toEqual([{ url: `${origin}/panel`, title: "Painted" }]);
+    await tool.stop();
+  });
+
   it("keeps no frame of a page off the approved origin, or of one whose origin cannot be told", async () => {
     const kept: string[] = [];
     const tool = agentTool({

@@ -94,7 +94,9 @@ export interface BrowserRuntimeObservation {
  * a data URL, the same transport a screenshot takes; it is kept as a thread
  * capture and never handed to the model. `withheld` is a recording whose every
  * frame showed a page that held a credential field (or could not be checked),
- * and `empty` a page that painted nothing.
+ * and `empty` a page that painted nothing. A recording belongs to the tab it
+ * started on: `url` and `title` are that tab's when the recording stopped,
+ * whichever tab is in front now, and are absent where it had none.
  */
 export type BrowserRuntimeRecording =
   | {
@@ -103,6 +105,8 @@ export type BrowserRuntimeRecording =
       readonly frames: number;
       readonly durationMs: number;
       readonly truncated?: BrowserRecordingTruncation;
+      readonly url?: string;
+      readonly title?: string;
     }
   | { readonly status: "withheld" }
   | { readonly status: "empty" };

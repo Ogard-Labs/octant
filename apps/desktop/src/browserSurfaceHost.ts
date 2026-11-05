@@ -402,6 +402,10 @@ interface OwnedSurface {
  * attachment, which the recording keeps between actions as an emulation does.
  */
 interface SurfaceRecording {
+  /** The tab the recording started on, and the only one it shows. */
+  readonly tab: OwnedTab;
+  /** Set once another tab came to the front: when, and what the recorded tab showed. */
+  left?: RecordedTabFacts & { readonly atMs: number };
   readonly client: BrowserSurfaceViewPort["webContents"]["debugger"];
   readonly frames: BrowserRecordingFrames;
   readonly listener: SurfaceProtocolListener;
@@ -564,6 +568,9 @@ export interface BrowserSurfaceRuntimeObservation {
         readonly frames: number;
         readonly durationMs: number;
         readonly truncated?: BrowserRecordingTruncation;
+        /** The recorded tab's address and title when the recording stopped. */
+        readonly url?: string;
+        readonly title?: string;
       }
     | { readonly status: "withheld" }
     | { readonly status: "empty" };
@@ -1021,6 +1028,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
    * held, because a view that has only ever been created has none.
    */
   const showTab = (owned: OwnedSurface, incoming: OwnedTab): void => {
+    leaveRecordedTab(owned, incoming);
     for (const tab of owned.tabs) {
       if (tab === incoming) continue;
       tab.view.setVisible(false);
@@ -1049,6 +1057,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const forgetTab = (contextId: string, owned: OwnedSurface, tab: OwnedTab): void => {
     const index = owned.tabs.indexOf(tab);
     if (index === -1) return;
+    if (tab === owned.recording?.tab) leaveRecordedTab(owned, undefined);
     owned.tabs.splice(index, 1);
     tab.view.setVisible(false);
     owned.shellWindow?.contentView.removeChildView(tab.view);
@@ -1992,7 +2001,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               case "screenshot":
                 break;
               case "record-start":
-                await startRecording(owned, contentsView(owned));
+                await startRecording(owned, activeTab(owned));
                 break;
               case "record-stop":
                 break;
@@ -3496,8 +3505,9 @@ function attachmentHeld(client: BrowserSurfaceViewPort["webContents"]["debugger"
  * that holds a credential field withholds the whole recording, as a
  * screenshot of it would be withheld. A debugger someone else holds is theirs.
  */
-async function startRecording(owned: OwnedSurface, view: BrowserSurfaceViewPort): Promise<void> {
+async function startRecording(owned: OwnedSurface, tab: OwnedTab): Promise<void> {
   dropRecording(owned);
+  const { view } = tab;
   const client = view.webContents.debugger;
   if (client.on === undefined) throw new BrowserRecordingUnavailableError();
   let attachedHere = false;
@@ -3575,7 +3585,14 @@ async function startRecording(owned: OwnedSurface, view: BrowserSurfaceViewPort)
     endScreencast(owned, recording);
   }, MAX_BROWSER_RECORDING_MS);
   timer.unref?.();
-  const recording: SurfaceRecording = { client, frames, listener, timer, settled: () => tail };
+  const recording: SurfaceRecording = {
+    tab,
+    client,
+    frames,
+    listener,
+    timer,
+    settled: () => tail,
+  };
   owned.recording = recording;
 }
 
@@ -3613,7 +3630,7 @@ async function finishRecording(
   // before the frames stop: stopped first, a frame whose credential check was
   // still running when the stop came would be refused as late, and the
   // recording would lose the page's last state.
-  const stoppedAtMs = performance.now();
+  const ended = recording.left ?? { atMs: performance.now(), ...recordedTabFacts(recording.tab) };
   endScreencast(owned, recording);
   // A page stuck in its own script would hold the credential check of the last
   // frame; the recording ends without that frame rather than waiting.
@@ -3621,7 +3638,7 @@ async function finishRecording(
     recording.settled(),
     new Promise((resolve) => setTimeout(resolve, 1_000).unref?.()),
   ]);
-  recording.frames.stop(stoppedAtMs);
+  recording.frames.stop(ended.atMs, recording.left === undefined ? undefined : "tab-changed");
   const result = recording.frames.finish(performance.now());
   if (result.status !== "recorded") return result;
   return {
@@ -3630,7 +3647,45 @@ async function finishRecording(
     frames: result.frames,
     durationMs: result.durationMs,
     ...(result.truncated === undefined ? {} : { truncated: result.truncated }),
+    ...(ended.url === undefined ? {} : { url: ended.url }),
+    ...(ended.title === undefined ? {} : { title: ended.title }),
   };
+}
+
+/**
+ * The recorded tab stops being the one in front: another is shown (`front`),
+ * by the agent or by the person, or the recorded one closes (`front`
+ * undefined). A recording belongs to the tab it started on, so it ends here,
+ * as a resize ends it, under what that tab showed; the stop still looks at the
+ * frames already received. Without this the screencast went on with a tab
+ * behind the one in front, and the stop saved it under the front tab's address.
+ */
+function leaveRecordedTab(owned: OwnedSurface, front: OwnedTab | undefined): void {
+  const recording = owned.recording;
+  if (recording === undefined || recording.left !== undefined || front === recording.tab) return;
+  recording.left = { atMs: performance.now(), ...recordedTabFacts(recording.tab) };
+  endScreencast(owned, recording);
+}
+
+interface RecordedTabFacts {
+  readonly url?: string;
+  readonly title?: string;
+}
+
+/** The recorded tab's address and title, read as an observation reads them. */
+function recordedTabFacts(tab: OwnedTab): RecordedTabFacts {
+  try {
+    const contents = tab.view.webContents;
+    const url = contents.getURL();
+    const title = contents.getTitle();
+    return {
+      ...(url === "" ? {} : { url: redactedObservationUrl(url).slice(0, 4_096) }),
+      ...(title === "" ? {} : { title: title.slice(0, 1_024) }),
+    };
+  } catch {
+    // A page that went away with its tab has nothing left to read.
+    return {};
+  }
 }
 
 /** Drop a recording without building it: its context is closing or a new one starts. */

@@ -1723,13 +1723,10 @@ export class BrowserAutomationService {
   ): Promise<BrowserCaptureOutcome | undefined> {
     const takenBy = browserCaptureTaker(input.request.kind, input.capturedBy);
     if (takenBy === undefined || this.#captures === undefined) return undefined;
-    const recording = input.request.kind === "record-stop" ? observed.recording : undefined;
-    const dataUrl =
-      input.request.kind === "record-stop"
-        ? recording?.status === "recorded"
-          ? recording.dataUrl
-          : undefined
-        : observed.screenshotDataUrl;
+    const stopping = input.request.kind === "record-stop";
+    const recording =
+      stopping && observed.recording?.status === "recorded" ? observed.recording : undefined;
+    const dataUrl = stopping ? recording?.dataUrl : observed.screenshotDataUrl;
     // Someone asked for a capture and the runtime withheld the picture (or a
     // recording's page painted nothing, or showed a credential field). Saying
     // nothing here left the pane looking as if the capture had been kept.
@@ -1740,7 +1737,7 @@ export class BrowserAutomationService {
       return await this.#captures.keep({
         threadId: owned.threadId,
         dataUrl,
-        ...(recording?.status === "recorded"
+        ...(recording !== undefined
           ? {
               recording: {
                 frames: recording.frames,
@@ -1749,8 +1746,10 @@ export class BrowserAutomationService {
               },
             }
           : {}),
-        url: observed.url,
-        title: observed.title,
+        // A recording is of the tab it started on, which need not be the tab
+        // the call left in front: it is kept under that tab's address only.
+        url: stopping ? recording?.url : observed.url,
+        title: stopping ? recording?.title : observed.title,
         takenBy,
         ...(storedBrowserProfile(owned.record.policy.profile) === undefined
           ? {}

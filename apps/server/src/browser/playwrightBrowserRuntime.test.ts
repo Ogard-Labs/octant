@@ -91,6 +91,7 @@ function harness() {
     newPage: vi.fn(async () => page),
     close: vi.fn(async () => undefined),
   }));
+  const created = [...contexts];
   let disconnected: (() => void) | undefined;
   const browser: PlaywrightBrowserPort = {
     pid: 4321,
@@ -108,6 +109,7 @@ function harness() {
   });
   return {
     browser,
+    contexts: created,
     disconnected: () => disconnected?.(),
     launch,
     pages,
@@ -630,6 +632,46 @@ describe("PlaywrightBrowserRuntime", () => {
     expect(stopped.recording).toEqual({ status: "empty" });
   });
 
+  it("ends a recording when the batch opens another tab, and keeps the recorded tab's address", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    recorder.frame();
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+    checks.settle(false);
+    await runtime.act(
+      firstId,
+      action("tab-open", "https://example.com/other"),
+      new AbortController().signal,
+    );
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+
+    // The observation is of the tab in front; the recording is of the one it started on.
+    expect(stopped.url).toBe("https://example.com/other");
+    expect(stopped.recording).toMatchObject({
+      status: "recorded",
+      frames: 1,
+      truncated: "tab-changed",
+      url: "https://example.com/start",
+      title: "first",
+    });
+  });
+
+  it("takes no frame from the recorded tab once another is in front", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    await runtime.act(
+      firstId,
+      action("tab-open", "https://example.com/other"),
+      new AbortController().signal,
+    );
+    recorder.frame();
+    checks.settle(false);
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+
+    expect(checks.pending).toBe(0);
+    expect(stopped.recording).toEqual({ status: "empty" });
+  });
+
   it("reports process death and closes all owned contexts", async () => {
     const { browser, disconnected, runtime } = harness();
     const listener = vi.fn();
@@ -724,7 +766,7 @@ function harnessWithReceipt(options: {
 
 /** A context recording its page, each frame's credential check held open until a test settles it. */
 async function recordingHarness() {
-  const { pages, runtime } = harness();
+  const { contexts, pages, runtime } = harness();
   const page = pages[0]!;
   const waiting: Array<(sensitive: boolean) => void> = [];
   // Only a frame's check is held: the page's own observations answer at once.
@@ -759,7 +801,13 @@ async function recordingHarness() {
     detach: vi.fn(async () => undefined),
   };
   Object.assign(page, { context: () => ({ newCDPSession: async () => session }) });
-  await runtime.createContext(firstId, policy, new AbortController().signal);
+  await runtime.createContext(
+    firstId,
+    { ...policy, maxConcurrentTabs: 2 },
+    new AbortController().signal,
+  );
+  // A tab the batch opens is the harness's second page.
+  vi.mocked(contexts[0]!.newPage).mockResolvedValue(pages[1]!);
   await runtime.act(
     firstId,
     action("navigate", "https://example.com/start"),

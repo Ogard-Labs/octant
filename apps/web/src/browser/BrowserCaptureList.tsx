@@ -231,6 +231,7 @@ const RECORDING_TRUNCATION: Readonly<
   "frame-limit": "stopped at its frame limit",
   "size-limit": "stopped at its size limit",
   "viewport-changed": "stopped when the page was resized",
+  "tab-changed": "stopped when another tab came to the front",
 };
 
 /** The system's or Octant's own reduced-motion choice, read when a recording opens. */

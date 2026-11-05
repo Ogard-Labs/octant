@@ -239,7 +239,9 @@ records on its own.
   for **Play**.
 - A recording lasts at most 30 seconds, takes up to 4 frames a second, is at
   most 800 pixels on its longer side, and at most 2 MB. It stops early at any
-  of these, and when the page is resized, and says so under the picture.
+  of these, when the page is resized, and when another tab comes to the front,
+  and says so under the picture. A recording shows only the tab it started on
+  and is listed under that tab's address.
 - A page with a password or other credential field on screen is never recorded:
   its frames are left out, and a recording of nothing else keeps nothing.
 - Only the sites you approved for the agent's page are recorded. If the page
