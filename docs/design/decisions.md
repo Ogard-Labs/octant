@@ -698,14 +698,17 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 ### Messaging and sibling threads
 
-Agent-to-agent messaging is a host-delivered channel, and seeing sibling threads is its read-only companion. Both are limited to Code threads of one Project.
+Agent-to-agent messaging is a host-delivered channel, and seeing sibling threads is its read-only companion. Both are operations of one tool, `octant_threads` (maintainer decision, 2026-11-05): Work and Code turns see the other open threads of their own Project, and only Code turns message them.
 
 - A refusal reveals nothing about whether another thread exists, and sending starts no turn, grants no authority and returns no reply.
 - Message bodies never enter the journal; delivery marks the recipient as having read outside content, and delivery is at least once.
-- A source turn may make at most three thread-message sends, and a target turn started by that tool is never offered the tool. _Here only._
-- `octant_threads` lists, reads and waits only; a read marks the caller, and a turn may make 8 reads and 4 waits.
-- The current recipient can explicitly report receipt of its exact delivered message; the host rechecks both Code threads and their same-Project authority. Sender status reads only its own metadata through the existing tool, and the person sees bounded recent receipts in Agents. Acknowledgement means reported receipt, never understanding or action; delivery and turn completion do not auto-acknowledge.
-- Plan still omits the messaging tool, excluded profiles and cancelled turns refuse every action, and receipt retries are idempotent for the same durable ID. Retrying a send creates a new message. Queued-message expiry has no recorded deadline and remains unimplemented; no receipt infers Expired from age.
+- A source turn may make at most three `octant_ask_thread` calls, and a target turn started by that tool is never offered the tool. _Here only._
+- Every operation names a thread by one reference, `<thread id>@<project id>`; a reference whose Project is not the caller's refuses like an unknown one, `send` included. A `send` with more than four recipients, a malformed reference, or one of another Project is refused whole; it never reaches a subset.
+- `list`, `read` and `wait` change nothing outside the caller's record and are offered in Plan; a `list` or `read` marks the caller, and a turn may make 8 reads and 4 waits. In Work they see only Work threads, and in Code only Code threads.
+- `send`, `acknowledge` and `receipts` are Code to Code only. Work threads neither send nor receive, because only Code turns carry messages; extending messaging to Work needs a rule for how a Work turn carries one.
+- The current recipient can explicitly report receipt of its exact delivered message; the host rechecks both Code threads and their same-Project authority. Sender `receipts` read only its own metadata, and the person sees bounded recent receipts in Agents. Acknowledgement means reported receipt, never understanding or action; delivery and turn completion do not auto-acknowledge.
+- Plan leaves the messaging operations out of the enum, excluded profiles and cancelled turns refuse every messaging call, and receipt retries are idempotent for the same durable ID. Retrying a send creates a new message. Queued-message expiry has no recorded deadline and remains unimplemented; no receipt infers Expired from age.
+- A non-empty profile allowlist names each operation group: `octant_threads` for the reads, `octant_threads.send` for messaging, `octant_threads.board` for the planner's board, so folding the former tools together widens no existing allowlist.
 
 Status: Built. Since: 2026-10-12. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -719,7 +722,7 @@ A `#thread` mention is a bounded, read-only view of a thread the sender can alre
 - A person may return one finished reply to its linked source’s editable unsent draft. Append preserves existing text/caret and busy work; it never sends, queues, steers or approves.
 - Typed reply/digest/source references persist with the draft and ordinary send, queue delivery, retry and resume revalidate them and inherit outside-content provenance before provider reads. Missing or corrupt provenance refuses admission; clearing the entire draft is explicit recovery.
 - New replies retain a bounded receipt of actual host source-read versions/context digest, independent read range and omissions; older replies honestly say the original snapshot was not recorded.
-- In Chat, an explicit mention also lets one bounded tool send one instruction to the mentioned Chat thread, one hop, failing closed.
+- In Chat, an explicit mention of a Chat thread also offers `octant_ask_thread`, which sends one instruction to the mentioned Chat thread and waits for its reply, one hop, failing closed. A turn whose mentions name no Chat thread is not offered it.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -795,7 +798,7 @@ Status: Designed, not built. Since: —. Detail: [Architecture: Modes: Chat, Wor
 A Code Project may designate one of its own threads as its planner, whose agent proposes new Code threads for a person to accept in the Project overview.
 
 - Only a person confirms or declines a proposal; a proposal executes nothing and the planner has no creation authority of its own.
-- The planner tools are offered only to the designated thread and re-resolve the designation on every call.
+- The planner reads its board through `octant_threads` (`board`) and proposes through `octant_offer_side_task` (target `board`); both are offered only to the designated thread and re-resolve the designation on every call. The side-task schema states the proposal's bounds, and the planner service keeps its cap of ten waiting proposals.
 - The Code Project overview designates a same-Project thread and lists versioned proposals with approve/decline and resulting tasks. Phone and CLI mutation surfaces are not added.
 - Approval reviews ordinary provider, checkout and access controls with the proposal intent fixed; only confirmed creation proceeds to the normal first-message path. Stale, refused or uncertain decisions never start work or retry automatically.
 - The host journals one submitted creation identity before awaiting creation; cross-window and restarted attempts cannot replace it. The window retains that identity through reload. Missing task data never releases uncertainty; only confirmed creation or a newer host-proven precreation failure permits progress. Unknown/post-boundary failures remain reserved for inspection.
@@ -1226,6 +1229,7 @@ Follow-up suggestions and offered side tasks are journaled offers that grant not
 
 - A confirmed follow-up is created through the mode's ordinary creation command, and the prompt is never sent on the person's behalf.
 - Starting a side task is the person's confirmation, and its prompt is sent only on their click. A Code thread still starts approval-gated.
+- A Code Project's designated planner offers work to its board with the same tool and target `board`; that records a pending planner proposal, which only a person confirms.
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
 

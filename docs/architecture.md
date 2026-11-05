@@ -682,9 +682,9 @@ never remembered.
 
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
-`octant_browser`, `octant_computer`, and in Code `octant_terminal`,
-`octant_apple`, and `octant_android` — with its actions in an `operation`
-enum. The always-visible tool prefix stays small and
+`octant_browser`, `octant_computer`, `octant_threads` in Work and Code, and in
+Code `octant_terminal`, `octant_apple`, and `octant_android` — with its actions
+in an `operation` enum. The always-visible tool prefix stays small and
 cache-stable, so a family's description says only what an agent must know
 before its first call, and its `help` operation returns the full usage on
 demand. The managed tool set answers help from the family's own static text
@@ -694,8 +694,11 @@ policy before any effect. A family whose grant or capability is off is
 omitted rather than advertised and refused: Browser when the provider has no
 verified tool transport, the thread's tool constraints exclude it, or a Code
 host lends no browser; Apple or Android when the host has no toolchain to
-lend; the planner's `octant_board` and `octant_propose_thread` outside the
-designated planner thread. Browser shares one definition across modes.
+lend; the threads tool's `board` operation and the side-task tool's `board`
+target outside the designated planner thread. A family whose operations differ
+by turn lists only the ones this turn may use in its enum, and its `help`
+covers only those: `octant_threads` drops `send`, `acknowledge`, and
+`receipts` in Plan and in Work. Browser shares one definition across modes.
 
 Omission is decided per session where the runtime keeps its own tool list,
 because a tool list sits at the start of a provider's cached prompt and any
@@ -2749,15 +2752,26 @@ designation or resolution are not added. The rules are:
 - **Designation.** Only an active Code Project, one planner per Project, and
   only a non-archived thread of that same Project. Designating while one is
   designated refuses, even for the same thread; undesignate first.
-- **Agent tools.** `octant_board` and `octant_propose_thread` are offered only
-  to the currently designated planner thread, and both re-resolve the
-  designation on every call, so an undesignation takes effect mid-turn. The
-  board read is the same server read-model the board UI queries, scoped to the
-  planner's own Project, with no GitHub call. A proposal executes nothing: it
-  is journaled as pending (at most ten unresolved per Project) with the
-  planner thread as actor. Both tools sit before the Code posture gate because
-  neither touches the checkout, but still pass the stale-identity and profile
-  tool-constraint checks.
+- **Agent tools.** The planner reads its board with the `board` operation of
+  `octant_threads` and proposes a task with `octant_offer_side_task` and target
+  `board`. Both are offered only to the currently designated planner thread,
+  and both re-resolve the designation on every call, so an undesignation takes
+  effect mid-turn. The board read is the same server read-model the board UI
+  queries, scoped to the planner's own Project, with no GitHub call, at most
+  100 cards with truncation stated; its cards are text agents wrote, so a read
+  marks the planner as having read outside content (source `octant_threads`).
+  A board offer maps the side task's title, reason, and prompt onto the
+  proposal's title, rationale, and intent; the tool's schema states the tighter
+  of each pair of bounds (title 80, reason 280, prompt 4,000 characters), and
+  the planner service decodes the proposal's own bounds again. A proposal
+  executes nothing: it is journaled as pending (at most ten unresolved per
+  Project) with the planner thread as actor, and is not a side-task card, so
+  the side-task cap of five does not apply. Neither needs an approval or
+  passes the Code posture gate, because neither touches the checkout. A
+  non-empty profile allowlist must name `octant_threads.board` for the board
+  read and `octant_offer_side_task.board` for board offers: each was a tool of
+  its own a profile could leave out, and folding them in must not hand an
+  existing allowlist either.
 - **Resolution.** Only a person confirms or declines. A confirm creates its
   thread through the ordinary Code creation command, inside the proposal's own
   Project only; the planner has no creation authority of its own.
@@ -3138,13 +3152,16 @@ time. Dragging a sidebar thread onto a composer, or choosing Attach as context
 from that thread's row menu, uses this same path: the mention search, given
 the thread's id, returns that thread only when this window can Open it, so
 where its title would rank does not matter, and the renderer does not read the
-transcript to attach the chip. In Chat, an explicit mention also grants the source provider the bounded
-`octant_thread_message` tool for that turn: it may send one of the user's
-instructions to the mentioned Chat thread and receive its completed reply. The
-target's own Chat turn, provider, Project, and authority remain authoritative;
-an active target returns Waiting rather than being interrupted or duplicated.
-Coordination is one hop and unavailable, unauthorized, or deleted targets fail
-closed. Work and Code mentions remain read-only. In Work and Code, an `@file`
+transcript to attach the chip. In Chat, an explicit mention of a Chat thread also grants the source
+provider the bounded `octant_ask_thread` tool for that turn: it may send one of
+the user's instructions to the mentioned Chat thread and receive its completed
+reply, at most three times a turn. The target's own Chat turn, provider,
+Project, and authority remain authoritative; an active target returns Waiting
+rather than being interrupted or duplicated. Coordination is one hop (the
+target's turn is offered no ask) and unavailable, unauthorized, or deleted
+targets fail closed. Work and Code mentions remain read-only: a turn whose
+mentions name no Chat thread is not offered the tool, and a Work or Code
+thread named in a call refuses. In Work and Code, an `@file`
 mention completes a path inside the thread's bound root; the host refuses a path
 outside that root before reading it. Chat Projects have no filesystem authority,
 so `@file` is absent there. Unknown `@` text stays ordinary text. `@` is the one composer
@@ -3292,20 +3309,32 @@ the outcome back into the run, so the opt-in's version stays the aggregate
 head and a stale `expectedVersion` cannot overwrite it.
 
 Agent-to-agent messaging is a separate, host-delivered channel beside mention
-excerpts and that Chat one-hop tool. Its threats are recorded in
+excerpts and that Chat one-hop ask. A Code turn reaches it through the `send`,
+`acknowledge`, and `receipts` operations of `octant_threads`, the tool it also
+sees its sibling threads with (below). Its threats are recorded in
 [security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md),
 approved by the maintainer on 2026-10-12. This section is the effective rule.
 
 - **Who may message whom.** A thread may message only another active thread of
   its own Project; any other id (unknown, another Project or mode, a child
   run, itself) refuses `unauthorized` in the same words, so a refusal never
-  confirms a thread exists. Only Code turns are offered the
-  `octant_agent_message` tool and a Project has one mode, so today this means
-  Code to Code inside one Project. Chat threads, Work threads, and child runs
-  neither send nor receive.
-- **Sending.** The tool is omitted from a turn in Plan and from a profile whose
-  tool allowlist leaves it out, and a call made anyway, or after the thread
-  dropped to Plan mid-turn, is refused before anything is stored. A refusal made
+  confirms a thread exists. Only Code turns are offered the messaging
+  operations and a Project has one mode, so this means Code to Code inside one
+  Project. Chat threads, Work threads, and child runs neither send nor
+  receive: Work turns carry no messages, so a Work thread's `octant_threads`
+  offers no `send` (see the rationale below). A recipient is named by the same
+  `<thread id>@<project id>` reference `list` returns; one whose Project part
+  is not the sender's current Project refuses `unauthorized` in the same
+  words, even when its thread part names a thread the sender could reach, and
+  is journaled as `agent.message-refused@1` like any refusal that names a
+  recipient. The tool judges the raw recipient list before the delivery
+  service sees it: more than four entries, any malformed reference, or any
+  reference of another Project refuses the whole send, and nothing is sent to
+  the rest.
+- **Sending.** The messaging operations are left out of the enum of a turn in
+  Plan and of a profile whose non-empty tool allowlist does not name
+  `octant_threads.send`, and a call made anyway, or after the thread dropped to
+  Plan mid-turn, is refused before anything is stored. A refusal made
   there, for a call that names a recipient, is journaled as
   `agent.message-refused@1` without a body. An admitted
   send journals `agent.message-sent@1` on the `agent-message` aggregate, one
@@ -3339,9 +3368,9 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   host journaled as delivered without a turn carrying it stays as journaled
   and is never offered.
 - **Acknowledgement and sender read-back.** The host-authored envelope names
-  its immutable messageId. The existing `octant_agent_message` tool accepts
-  explicit `acknowledge` and `status` actions for up to 20 durable IDs per call,
-  while legacy send input remains supported. An acknowledgement is the current
+  its immutable messageId. `octant_threads` takes explicit `acknowledge` and
+  `receipts` operations for up to 20 durable IDs per call; `send` is always
+  named. An acknowledgement is the current
   recipient reporting receipt: the host checks the exact delivered record,
   current sender and recipient Code authority and same-Project relationship.
   A sender cannot acknowledge its outgoing message or name another recipient;
@@ -3353,7 +3382,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   The authenticated existing facts route lists bounded recent receipts and
   refusals only for sender threads the window may open. Its provider-delivered
   count includes acknowledged messages; acknowledgement is a later receipt,
-  not an additive delivery total. The tool remains omitted and all its actions
+  not an additive delivery total. The messaging operations remain omitted and
   refused in Plan, on excluded profiles and cancelled turns; managed children,
   Chat and Work gain no messaging rights. Sending again, including retrying a
   send, creates a new durable message; receipt retries use the existing ID.
@@ -3387,19 +3416,33 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   is not shown.
 
 Seeing sibling threads is the read-only companion to messaging, approved by
-the maintainer on 2026-10-13. The `octant_threads` tool lets a Code turn see
-the other threads of its own Project before it messages one or while it waits
-for one to finish. No action creates, messages, steers, completes, archives,
-or stops a thread.
+the maintainer on 2026-10-13 and extended to Work on 2026-11-05, when the
+maintainer folded messaging and the planner's board into the same tool. The
+`octant_threads` tool lets a Work or Code turn see the other threads of its
+own Project, and a Code turn message one or wait for one to finish. Its
+operations are `help`, `list`, `read`, `wait`, and in Code `send`,
+`acknowledge`, `receipts`, and the planner's `board`. No operation creates,
+steers, completes, archives, or stops a thread.
 
-- **Who may see whom.** The caller is a Code thread's turn; the targets are
-  the other Code threads of the same Project that are neither completed nor
-  archived. Threads of another Project, the caller itself, child runs (they
-  have the managed `status` and `wait`), deleted threads, and every Chat or
-  Work thread are never listed or readable. The host decides the set from the
+- **Rationale for Work.** Work and Code share one authority model, so the
+  read-only operations, which change nothing outside the caller's own record,
+  reach Work under the same rules as Code. Messaging does not: a message is
+  carried by the recipient's next turn, and only Code turns assemble that
+  context, so a message to a Work thread would wait unread for good. Until a
+  rule says how a Work turn carries, frames, and confirms a message, Work
+  threads neither send nor receive, the most conservative reading of the
+  approval.
+
+- **Who may see whom.** The caller is a Work or Code thread's turn; the
+  targets are the other threads of the same Project, which are all of its
+  mode, that are neither completed nor archived (in Work also neither marked
+  Done nor being deleted). Threads of another Project, the caller itself,
+  child runs (they have the managed `status` and `wait`), deleted threads,
+  every Chat thread, and a thread of the other mode are never listed or
+  readable. The host decides the set from the
   caller's own thread on every call; the model supplies no Project, path, or
   window.
-- **Actions.** `list` returns, for each target, a reference, the title, the
+- **Operations.** `list` returns, for each target, a reference, the title, the
   state (`working`, `waiting-for-person`, or `idle`), and when the state last
   changed: at most 32 rows, most recently changed first, with `truncated`.
   `read` returns one target's title, state, and the same bounded transcript
@@ -3408,8 +3451,10 @@ or stops a thread.
   `wait` returns when the target leaves `working`, or after the caller's
   timeout, 30 seconds by default and at most 120 like a child run's `wait`,
   with the state only; `working` in its answer means the time ran out.
-- **References.** A reference is `<thread id>@<project id>`: the thread part
-  is the id messaging addresses. It grants nothing; `read` and `wait` re-decide
+- **References.** A reference is `<thread id>@<project id>`, the one form every
+  operation names a thread by, `send` included: the thread part is the id
+  messaging journals, and the Project part keeps the same text from ever
+  naming a thread of another Project. It grants nothing; `read` and `wait` re-decide
   the set at the call, so a reference refuses once its thread is completed,
   archived, deleted, or in another Project than the one it was listed in, and
   it never resolves to a different thread. `read` decides again after its
@@ -3419,7 +3464,7 @@ or stops a thread.
   to see that state change. Every reference outside the set, malformed text
   included, refuses `unauthorized` with one sentence, so a refusal confirms
   nothing outside the caller's Project. A call
-  whose input fails the tool's schema (an unknown action, an extra field, a
+  whose input fails the tool's schema (an unknown operation, an extra field, a
   timeout out of range, a reference over 128 characters), whose turn was
   cancelled, whose profile leaves the tool out, or whose caller is unknown,
   completed, or archived refuses `policy`; none depends on another thread.
@@ -3436,9 +3481,11 @@ or stops a thread.
   of states and does not mark. A thread that lists its siblings therefore
   asks for single-use confirmation on risky actions afterwards, and that mark
   clears only by a person.
-- **Offer and bounds.** The tool is offered in Plan, since no action changes
-  anything outside the caller's own context, and omitted from a turn whose
-  profile allowlist leaves it out. A turn may make 8 `read` and 4 `wait`
+- **Offer and bounds.** The read operations are offered in Plan, since none
+  changes anything outside the caller's own context, and left out for a
+  profile whose non-empty allowlist does not name `octant_threads`; the tool is
+  omitted when no operation is left. In Work they reach every turn whose
+  provider carries app-managed tools, as Work's other tools do. A turn may make 8 `read` and 4 `wait`
   calls; the next refuses `rate-limited`. Every `read` and `wait` whose input
   decodes counts, refused or not, so probing references spends the same
   budget as reading them. `list` is not counted. Each answered `read` and
@@ -3447,8 +3494,9 @@ or stops a thread.
   the bytes returned, never the text; purging the reader purges it. A call
   the host cannot journal returns `unavailable` and nothing else. A refused
   call is not journaled, and `list` is recorded only by its mark.
-- **Carriage.** The Code runtime adds the tool to each turn's app-managed
-  tool set, created once per turn so the bounds above are that turn's. It
+- **Carriage.** The Code and Work runtimes add the tool to each turn's
+  app-managed tool set, created once per turn so the bounds above are that
+  turn's. It
   reaches the provider on the transport that runtime already uses for every
   app-managed tool: an in-process MCP server for Claude, dynamic tools for
   Codex, a loopback MCP bridge for ACP agents and OpenCode, a loopback
@@ -3458,9 +3506,14 @@ or stops a thread.
   or Ollama model nobody verified for tools) is offered none, this one included. Child
   runs compose their own tool sets and are never offered it.
 - **Facts.** The host answers from its own records on every call. Threads
-  are the persisted Code threads; a deleted thread's row is erased and a
-  child run never has one, so neither resolves. The state comes from the
-  evidence that files a thread on the Code board: running work is `working`;
+  are the persisted Code threads, or the projected Work threads; a deleted
+  thread's row is erased and a child run never has one, so neither resolves.
+  A Work thread's state comes from the activity that files it on the Work
+  board (a running turn is `working`; an open request, an interrupted turn,
+  or a finished turn that asked the person to decide is
+  `waiting-for-person`), its `stateChangedAt` from its newest turn, and its
+  `read` from the Work `#thread` mention read. A Code thread's state comes
+  from the evidence that files it on the Code board: running work is `working`;
   an unanswered approval or question, a step whose outcome is unconfirmed or
   that waits on a decision, an interrupted last turn, or a finished turn that
   asked the person to decide is `waiting-for-person`; anything else is
@@ -7338,7 +7391,10 @@ and computer use. The
 model offers out-of-scope work it noticed (title, one-sentence reason,
 standalone prompt, and in a Code thread in a Project a worktree or the current
 checkout). The call only journals the offer (`thread-side-tasks`, at most five
-open per thread) and returns at once; it grants nothing. `/api/side-tasks/:threadId`
+open per thread) and returns at once; it grants nothing. In a Code Project's
+designated planner thread it also takes target `board`, which records a
+pending planner proposal for the person to confirm in the Project planner
+instead of a card (see the planner's agent tools above). `/api/side-tasks/:threadId`
 lists offers and starts or dismisses one. Starting is the person's
 confirmation: the host creates the thread through `createFollowUp` on the
 offering model, marks the offer started, and sends the prompt as the first

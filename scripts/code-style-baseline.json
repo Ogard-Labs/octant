@@ -14,7 +14,6 @@
     "apps/server/src/browser/playwrightBrowserRuntime.ts": 5,
     "apps/server/src/chat/chatService.ts": 5,
     "apps/server/src/chat/chatTurnRunner.ts": 4,
-    "apps/server/src/chat/threadDialogueService.ts": 3,
     "apps/server/src/chat/threadWorkService.ts": 1,
     "apps/server/src/chatRoutes.ts": 3,
     "apps/server/src/code/codeAppManagedTools.ts": 8,

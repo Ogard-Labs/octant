@@ -64,9 +64,8 @@ import {
   ThreadMentionService,
 } from "../chat/threadMentionService";
 import { fileMentionContextBlocks, FileMentionService } from "../fileMentionService";
-import { createAgentMessageTools } from "../agentMessage/agentMessageTools";
 import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
-import { createSiblingThreadTools } from "../siblingThreads/siblingThreadTools";
+import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import {
   readShieldWatcherLabels,
   readThreadExternalContentTaint,
@@ -1168,14 +1167,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             githubReadToolService.createToolSet({ windowId, thread, readThread }),
           ),
-        agentMessages: ({ thread, readPosture }) =>
-          createAgentMessageTools({
-            service: agentMessageService,
-            senderThreadId: String(thread.id),
-            toolConstraints: thread.toolConstraints ?? [],
-            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
-            readPosture,
-          }),
         contributedTools: (input) =>
           codeToolContributors.length === 0
             ? undefined
@@ -1185,8 +1176,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         // The facts come from the host's own records on every call. The
         // Code runtime, the decision reader, and the mention directory are
         // declared later in this startup; a turn runs only after they exist.
-        siblingThreads: ({ windowId, thread }) =>
-          createSiblingThreadTools({
+        threads: ({ windowId, thread, readPosture, planner }) =>
+          createThreadsTools({
+            mode: "code",
+            windowId,
             service: siblingThreadsService,
             source: codeSiblingThreadSource(
               {
@@ -1212,11 +1205,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             callerThreadId: String(thread.id),
             toolConstraints: thread.toolConstraints ?? [],
             profileDisplayName: thread.profileDisplayName ?? "the bound profile",
+            readPosture,
+            messaging: agentMessageService,
+            ...(planner === undefined ? {} : { planner }),
+            recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+            uuid: randomUUID,
           }),
         carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
         confirmAgentMessagesDelivered: (messageIds) =>
           agentMessageService.confirmDelivered(messageIds),
-        sideTasks: ({ thread }) =>
+        sideTasks: ({ windowId, thread, planner }) =>
           createSideTaskTools({
             store: sideTasks,
             threadId: String(thread.id),
@@ -1225,6 +1223,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             suggestedBy: thread,
             uuid: randomUUID,
             clock: () => new Date().toISOString(),
+            ...(planner === undefined ? {} : { planner: { port: planner, windowId } }),
+            toolConstraints: thread.toolConstraints ?? [],
+            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
           }),
         canvas: ({ windowId, thread }) =>
           createCanvasAgentTools({
@@ -1253,8 +1254,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             mode: "code",
             executionPolicy: thread.executionPolicy,
           }),
-        // Planner tools resolve their designation on every call through the
-        // services declared after this runtime; the closures run only once a
+        // The planner's board read and board offers resolve their designation
+        // on every call through the services declared after this runtime; the closures run only once a
         // turn is live, well after startup finishes wiring them.
         planner: {
           isPlannerThread: (threadId) => codePlannerService.isPlannerThread(threadId),

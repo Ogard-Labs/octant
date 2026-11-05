@@ -981,6 +981,7 @@ export function startOctantServer(
       routineProposalService,
       sideTaskFirstMessage,
       sideTasks,
+      siblingThreadsService,
       spendCeiling,
       threadMentionService,
       threadOutsideContentMarks,

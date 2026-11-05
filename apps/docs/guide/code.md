@@ -38,7 +38,9 @@ first. Actions are set from this computer's window, not from a paired device.
 
 Open a Code Project overview and find **Project planner**. Choose an existing
 thread in that Project and select **Designate planner**. Open that thread to ask
-it to survey the Project and propose work. Designation does not let it start
+it to survey the Project and propose work. Its agent reads the Project's board
+and offers each task it proposes the way any agent offers a side task, aimed at
+the board instead of a card in the thread. Designation does not let it start
 tasks by itself; you can remove the designation at any time.
 
 The overview lists each proposal's exact task, explanation and status. Choose
@@ -542,7 +544,8 @@ move while a turn is running or the agent is waiting on you.
 
 When several Code threads work in the same Project, each thread's agent can
 look at the others before it messages one or while it waits for one to finish.
-It has three read-only actions:
+Work threads in a Work Project can do the same with the other Work threads of
+their Project. It has three read-only actions:
 
 - **List** the other open threads of the Project, up to 32, with each title,
   whether the thread is working, waiting for you, or idle, and when that last
@@ -552,9 +555,9 @@ It has three read-only actions:
 - **Wait** for one to stop working, for up to two minutes. Waiting returns the
   state only.
 
-An agent sees only the open Code threads of its own Project. Threads in other
-Projects, put-away or archived threads, Chat and Work threads, and helper
-agents started by a thread are never listed or readable, and asking for one
+An agent sees only the open threads of its own Project. Threads in other
+Projects, put-away or archived threads, Chat threads, and helper agents
+started by a thread are never listed or readable, and asking for one
 gets the same refusal as asking for a thread that does not exist. Nothing the
 agent does here sends, changes, or stops another thread, so it works in Plan
 mode too.
@@ -569,13 +572,15 @@ The agent is offered these actions only on providers that can carry Octant's
 own tools: Claude, Codex, ACP agents that accept Octant's tools, OpenCode
 with Octant's isolated configuration, Pi, and direct endpoints for models
 you verified for tools. A profile whose tool list leaves out `octant_threads`
-does not offer them.
+does not offer them; messaging needs `octant_threads.send` in that list, and a
+planner's board needs `octant_threads.board`.
 
 ## Message receipts
 
 An agent can send a bounded message to another Code thread in the same Project.
 Sending queues it for that thread's next turn; it starts no turn there. The
-agent gets a durable message ID and can ask for its status later.
+agent gets a durable message ID and can ask for its status later. Work threads
+do not send or receive messages.
 
 **Queued** means the host admitted the message. **Delivered to provider** means
 the recipient's provider accepted the turn carrying it. **Acknowledged by
@@ -584,8 +589,8 @@ action are separate. Agents shows the recent receipt states and refusals.
 An acknowledgement is never inferred from delivery or completion.
 
 Only the actual recipient can acknowledge a delivered message. Receipt reads
-and retries use the same ID; retrying a send creates a new message. The
-messaging tool stays unavailable in Plan and where the profile excludes it.
+and retries use the same ID; retrying a send creates a new message. Messaging
+stays unavailable in Plan and where the profile excludes it.
 Queued messages currently have no expiry deadline.
 
 ## Next steps

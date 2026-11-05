@@ -43,11 +43,10 @@ export function nativeHarnessInstructions(mode: OctantMode): ReadonlyArray<Provi
  */
 const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_agents: "start, watch, and stop helper agents that work beside you",
-  octant_agent_message: "send a short message to another thread or helper agent",
+  octant_ask_thread: "ask a Chat thread the user mentioned something and wait for its reply",
   octant_android:
     "drive an Android emulator: boot, install, launch, read the screen, tap, type, read app logs",
   octant_apple: "build, test, and run Apple apps, drive the iOS Simulator, and read app logs",
-  octant_board: "read this Project's work board",
   octant_browser: "drive the built-in browser: open pages, read them, click, type, screenshot",
   octant_canvas: "write substantial deliverables as a Canvas document the user can open",
   octant_code:
@@ -59,14 +58,13 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_github: "read the repository's issues, pull requests, and projects",
   octant_offer_side_task: "offer the user a separate task for work outside this request",
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",
-  octant_propose_thread: "propose a new thread on the Project board",
   octant_pull_request:
     "open or change this thread's own pull request (draft, stacked, ready) when the user asks, or watch it to be woken when checks finish or reviews arrive instead of polling",
   octant_routines:
     "see this Project's routines, ask the user to pause or archive one this thread started, or report a routine run's result",
   octant_terminal: "run long-lived processes such as dev servers and read their output",
-  octant_threads: "see this Project's other threads: list them, read one, or wait for one to stop",
-  octant_thread_message: "ask a mentioned thread something and wait for its reply",
+  octant_threads:
+    "see this Project's other threads (list, read, wait); its operation list names anything more this turn may do",
 };
 
 /**
