@@ -694,7 +694,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 onOpenCodeThread={(threadId, title, projectId) =>
                   void openCodeThread(threadId, title, undefined, projectId)
                 }
-                onOpenReview={(threadId) => openReviewForThread(String(threadId))}
+                onOpenReview={(threadId, request) => openReviewForThread(String(threadId), request)}
                 onSelectPullRequest={selectProjectPullRequestIdentity}
                 onOpenPullRequests={() => setCodePullRequestsOpen(true)}
                 onOpenCodeSurface={(kind, threadId, title, terminalId) =>

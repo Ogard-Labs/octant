@@ -476,6 +476,40 @@ commits and says when older ones are not shown. **Ignore whitespace** is one
 per-person choice, kept in the browser profile and followed by every mounted view, that the Working tree and
 commit diffs apply by asking Git for `-w`. It changes only the diff text: the
 changed-path list, line totals and checkout state token are unchanged.
+Local review findings belong to the Code thread and checkout that supplied the
+comparison. A completed turn's changed-file row opens that file in Review only
+when its recorded checkout is still the thread's binding. Older receipts that
+did not record a checkout say so; a rebind never retargets their files. Review
+shows its current captured comparison, not a frozen diff of that turn.
+Changed-file receipts and Review cover the checkout only, not extra Project folders.
+
+The person selects a real source line on the original or modified side of a
+retained Working tree or run diff. The host binds the local finding to its own
+comparison evidence, digest, revision and side. Reconstructed hunks identify only
+those compared regions, never the full file. A deleted file supports its captured
+original lines; binary, missing, purged and uncaptured lines say why a line note
+is unavailable. Outdated anchors stay visible on their original revision and are
+never moved silently. Legacy findings remain readable with unrecorded comparison
+identity labeled explicitly.
+
+Creating or resolving a local note journals review data and grants no execution;
+it works in Plan under ordinary thread, checkout and Project access. The person
+may select open findings to prepare a bounded correction request in that same
+task's editable unsent draft. Existing draft text, caret and extra context are
+kept, including while the task is busy. The request names its selected finding
+versions and captured anchors and says which files or comments were omitted.
+It sends, queues and approves nothing automatically. Ordinary send or queue
+delivery revalidates the typed references and records outside-content provenance
+before the provider reads; missing or changed provenance refuses actionably.
+Editing prose preserves its references. Clearing a damaged reference requires
+clearing the imported draft or preparing a truthful replacement, not silently
+retaining the excerpt as trusted plain prose.
+
+After a correction, Refresh reads the new comparison and latest recorded checks.
+Checks that lack a comparison binding are labeled as such. An agent reply never
+resolves a finding: the person inspects the resulting changes and explicitly
+resolves or dismisses it.
+
 A pull request opened in Review shows, under its header, an **Automatic
 actions** section with two switches: **Merge when ready** and **Auto-fix**.
 Each has one status line under its name that says what it is doing now (off,

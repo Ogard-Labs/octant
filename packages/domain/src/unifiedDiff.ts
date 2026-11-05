@@ -273,3 +273,24 @@ export function diffSourceLines(
     }),
   );
 }
+
+/**
+ * The source line behind each reconstructed model row, indexed by row. The
+ * parser writes one empty gap row between hunks on a side that already has
+ * rows, so a selection on that gap names no source line and a selection after
+ * it must not shift onto the next line.
+ */
+export function diffModelRowSources(
+  file: ParsedDiffFile,
+  side: "original" | "modified",
+): ReadonlyArray<{ readonly line: number; readonly text: string } | undefined> {
+  const rows: Array<{ readonly line: number; readonly text: string } | undefined> = [];
+  for (const hunk of file.hunks) {
+    if (rows.length > 0) rows.push(undefined);
+    for (const line of hunk.lines) {
+      const number = side === "original" ? line.oldNumber : line.newNumber;
+      if (number !== undefined) rows.push({ line: number, text: line.text });
+    }
+  }
+  return rows;
+}

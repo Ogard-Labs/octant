@@ -1,5 +1,9 @@
 import {
   decodeSideChatDraftReturnReferences,
+  decodeCodeReviewFindingReferences,
+  MAX_CODE_REVIEW_CORRECTION_FINDINGS,
+  type CodeReviewCorrectionPrepared,
+  type CodeReviewFindingReference,
   MAX_SIDE_CHAT_DRAFT_RETURNS,
   type SideChatDraftPrepared,
   type SideChatDraftReturnReference,
@@ -38,6 +42,8 @@ export interface ComposerThreadDraft {
   readonly stagedDropped: boolean;
   readonly sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
   readonly sideChatReturnsInvalid?: true;
+  readonly reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>;
+  readonly reviewFindingReferencesInvalid?: true;
 }
 
 export type ComposerDraftPersistResult =
@@ -48,6 +54,9 @@ export type ComposerDraftPersistResult =
     };
 
 export interface ComposerThreadDraftStore {
+  readonly appendReviewCorrection: (
+    prepared: CodeReviewCorrectionPrepared,
+  ) => ComposerDraftPersistResult | { readonly status: "refused"; readonly message: string };
   readonly appendSideChatReturn: (
     prepared: SideChatDraftPrepared,
   ) => ComposerDraftPersistResult | { readonly status: "refused"; readonly message: string };
@@ -234,7 +243,10 @@ export function createComposerThreadDraftStore(
         previous.stagedDropped !== current.stagedDropped ||
         JSON.stringify(previous.sideChatReturns ?? []) !==
           JSON.stringify(current.sideChatReturns ?? []) ||
-        previous.sideChatReturnsInvalid !== current.sideChatReturnsInvalid
+        previous.sideChatReturnsInvalid !== current.sideChatReturnsInvalid ||
+        JSON.stringify(previous.reviewFindingReferences ?? []) !==
+          JSON.stringify(current.reviewFindingReferences ?? []) ||
+        previous.reviewFindingReferencesInvalid !== current.reviewFindingReferencesInvalid
       ) {
         bump(key);
       }
@@ -256,6 +268,74 @@ export function createComposerThreadDraftStore(
   }
 
   return {
+    appendReviewCorrection: (prepared) => {
+      let incoming: ReadonlyArray<CodeReviewFindingReference>;
+      try {
+        incoming = decodeCodeReviewFindingReferences(prepared.references);
+      } catch {
+        return {
+          status: "refused",
+          message:
+            "These review references are unavailable. Reopen Review to prepare the draft again.",
+        };
+      }
+      if (
+        incoming.length === 0 ||
+        incoming.some(
+          (ref) => ref.threadId !== prepared.threadId || ref.checkoutId !== prepared.checkoutId,
+        )
+      )
+        return {
+          status: "refused",
+          message: "The review destination changed. Open Review from its owning task again.",
+        };
+      const key = composerDraftRecordKey("code", prepared.threadId);
+      let refusal: string | undefined;
+      let receiptSaved = true;
+      const result = persistMerged((next) => {
+        const current = next.get(key);
+        if (current?.reviewFindingReferencesInvalid || current?.sideChatReturnsInvalid) {
+          refusal =
+            "This draft has an unavailable reference. Clear the draft or repair its source before adding review findings.";
+          return [];
+        }
+        const previous = current?.reviewFindingReferences ?? [];
+        if (previous.some((ref) => incoming.some((added) => added.findingId === ref.findingId))) {
+          refusal =
+            "A selected finding is already in the draft. Edit that request, or clear the draft before selecting it again.";
+          return [];
+        }
+        if (previous.length + incoming.length > MAX_CODE_REVIEW_CORRECTION_FINDINGS) {
+          refusal =
+            "This draft already has too many review references. Send or clear it before adding more.";
+          return [];
+        }
+        receiptSaved = markQueueDraftChanged(
+          "code",
+          prepared.threadId,
+          asQueueReceiptStorage(storage),
+        );
+        const text =
+          current !== undefined && current.text.length > 0
+            ? `${current.text}\n\n${prepared.text}`
+            : prepared.text;
+        next.set(key, {
+          ...current,
+          text,
+          caretIndex: current?.caretIndex ?? text.length,
+          stagedDropped: current?.stagedDropped ?? false,
+          reviewFindingReferences: [...previous, ...incoming],
+        });
+        return [key];
+      }, true);
+      if (refusal !== undefined) return { status: "refused", message: refusal };
+      if (!receiptSaved) {
+        persistError = COMPOSER_DRAFT_WRITE_FAILED_NOTE;
+        notify();
+        return { status: "unpersisted", reason: "write-failed" };
+      }
+      return result;
+    },
     appendSideChatReturn: (prepared) => {
       const { destination, reference } = prepared;
       if (
@@ -271,7 +351,7 @@ export function createComposerThreadDraftStore(
       let receiptSaved = true;
       const result = persistMerged((next) => {
         const current = next.get(key);
-        if (current?.sideChatReturnsInvalid) {
+        if (current?.sideChatReturnsInvalid || current?.reviewFindingReferencesInvalid) {
           refusal =
             "This draft has an unavailable Side Chat reference. Resolve or remove it before adding another.";
           return [];
@@ -296,6 +376,7 @@ export function createComposerThreadDraftStore(
             ? `${current.text}\n\n${prepared.text}`
             : prepared.text;
         next.set(key, {
+          ...current,
           text,
           caretIndex: current?.caretIndex ?? text.length,
           stagedDropped: current?.stagedDropped ?? false,
@@ -319,7 +400,11 @@ export function createComposerThreadDraftStore(
         (snapshot.get(key)?.text === normalized?.text &&
           JSON.stringify(snapshot.get(key)?.sideChatReturns ?? []) ===
             JSON.stringify(normalized?.sideChatReturns ?? []) &&
-          snapshot.get(key)?.sideChatReturnsInvalid === normalized?.sideChatReturnsInvalid) ||
+          snapshot.get(key)?.sideChatReturnsInvalid === normalized?.sideChatReturnsInvalid &&
+          JSON.stringify(snapshot.get(key)?.reviewFindingReferences ?? []) ===
+            JSON.stringify(normalized?.reviewFindingReferences ?? []) &&
+          snapshot.get(key)?.reviewFindingReferencesInvalid ===
+            normalized?.reviewFindingReferencesInvalid) ||
         markQueueDraftChanged(mode, threadId, asQueueReceiptStorage(storage));
       const result = persistMerged((next) => {
         if (normalized === undefined) {
@@ -335,7 +420,10 @@ export function createComposerThreadDraftStore(
           previous.stagedDropped === normalized.stagedDropped &&
           JSON.stringify(previous.sideChatReturns ?? []) ===
             JSON.stringify(normalized.sideChatReturns ?? []) &&
-          previous.sideChatReturnsInvalid === normalized.sideChatReturnsInvalid
+          previous.sideChatReturnsInvalid === normalized.sideChatReturnsInvalid &&
+          JSON.stringify(previous.reviewFindingReferences ?? []) ===
+            JSON.stringify(normalized.reviewFindingReferences ?? []) &&
+          previous.reviewFindingReferencesInvalid === normalized.reviewFindingReferencesInvalid
         ) {
           return [];
         }
@@ -449,6 +537,10 @@ function normalizeDraft(draft: ComposerThreadDraft): ComposerThreadDraft | undef
     stagedDropped: draft.stagedDropped,
     ...(draft.sideChatReturns?.length ? { sideChatReturns: draft.sideChatReturns } : {}),
     ...(draft.sideChatReturnsInvalid ? { sideChatReturnsInvalid: true } : {}),
+    ...(draft.reviewFindingReferences?.length
+      ? { reviewFindingReferences: draft.reviewFindingReferences }
+      : {}),
+    ...(draft.reviewFindingReferencesInvalid ? { reviewFindingReferencesInvalid: true } : {}),
   };
 }
 
@@ -494,6 +586,8 @@ function persistSnapshot(
         stagedDropped?: boolean;
         sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
         sideChatReturnsInvalid?: true;
+        reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>;
+        reviewFindingReferencesInvalid?: true;
       }
     > = {};
     for (const [key, draft] of snapshot) {
@@ -503,6 +597,10 @@ function persistSnapshot(
         ...(draft.stagedDropped ? { stagedDropped: true } : {}),
         ...(draft.sideChatReturns?.length ? { sideChatReturns: draft.sideChatReturns } : {}),
         ...(draft.sideChatReturnsInvalid ? { sideChatReturnsInvalid: true } : {}),
+        ...(draft.reviewFindingReferences?.length
+          ? { reviewFindingReferences: draft.reviewFindingReferences }
+          : {}),
+        ...(draft.reviewFindingReferencesInvalid ? { reviewFindingReferencesInvalid: true } : {}),
       };
     }
     storage.setItem(COMPOSER_THREAD_DRAFTS_STORAGE_KEY, JSON.stringify(payload));
@@ -532,12 +630,24 @@ function decodeDraft(value: unknown): ComposerThreadDraft | undefined {
       invalid = true;
     }
   }
+  let reviewFindingReferences: ReadonlyArray<CodeReviewFindingReference> | undefined;
+  let invalidReview =
+    "reviewFindingReferencesInvalid" in value && value.reviewFindingReferencesInvalid === true;
+  if ("reviewFindingReferences" in value) {
+    try {
+      reviewFindingReferences = decodeCodeReviewFindingReferences(value.reviewFindingReferences);
+    } catch {
+      invalidReview = true;
+    }
+  }
   return normalizeDraft({
     text: value.text,
     caretIndex,
     stagedDropped,
     ...(sideChatReturns?.length ? { sideChatReturns } : {}),
     ...(invalid ? { sideChatReturnsInvalid: true } : {}),
+    ...(reviewFindingReferences?.length ? { reviewFindingReferences } : {}),
+    ...(invalidReview ? { reviewFindingReferencesInvalid: true } : {}),
   });
 }
 
@@ -561,7 +671,10 @@ function snapshotsEqual(
       other.caretIndex !== draft.caretIndex ||
       other.stagedDropped !== draft.stagedDropped ||
       JSON.stringify(other.sideChatReturns ?? []) !== JSON.stringify(draft.sideChatReturns ?? []) ||
-      other.sideChatReturnsInvalid !== draft.sideChatReturnsInvalid
+      other.sideChatReturnsInvalid !== draft.sideChatReturnsInvalid ||
+      JSON.stringify(other.reviewFindingReferences ?? []) !==
+        JSON.stringify(draft.reviewFindingReferences ?? []) ||
+      other.reviewFindingReferencesInvalid !== draft.reviewFindingReferencesInvalid
     ) {
       return false;
     }

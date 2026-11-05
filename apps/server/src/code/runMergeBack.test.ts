@@ -1,4 +1,9 @@
-import type { CodeThread } from "@octant/contracts";
+import {
+  decodeCodeOperationEventFrame,
+  decodeCodeThreadId,
+  type CodeThread,
+  type CodeOperationEventFrame,
+} from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { CodeOperationService, type CodeOperationServiceOptions } from "./codeOperationService";
 
@@ -73,6 +78,7 @@ function observation(changedPaths: ReadonlyArray<string>) {
 
 function harness(
   options: {
+    readonly retainEvidence?: boolean;
     readonly mergeability?: "clean" | "conflicts" | "nothing-to-merge" | "unknown";
     readonly ahead?: number;
     readonly runUncommitted?: ReadonlyArray<string>;
@@ -81,6 +87,9 @@ function harness(
       | { readonly status: "unavailable" };
   } = {},
 ) {
+  let activeThread = thread;
+  const otherThread = { ...thread, id: decodeCodeThreadId("60000000-0000-4000-8000-000000000099") };
+  const frames: CodeOperationEventFrame[] = [];
   const mergeRun = vi.fn(async () => ({ status: "applied" as const, oid: "c".repeat(40) }));
   const base = options.base ?? { status: "observed" as const, branch: "main", clean: true };
   const git = {
@@ -103,7 +112,8 @@ function harness(
   };
   const service = new CodeOperationService({
     authority: {
-      readThread: () => thread,
+      readThread: (id: CodeThread["id"]) =>
+        id === activeThread.id ? activeThread : id === otherThread.id ? otherThread : undefined,
       readCheckout: () => checkout,
       canAccessProject: async () => true,
       resolveCheckoutRoot: async () => ({
@@ -126,7 +136,8 @@ function harness(
         : { status: "unavailable" as const },
     evidence: {
       put: () => ({ contentId: ids.content, digest: "e".repeat(64), byteLength: 32 }),
-      read: async () => undefined,
+      read: async () =>
+        options.retainEvidence === true ? "diff --git a/src/app.ts b/src/app.ts" : undefined,
     },
     pullRequests: { ensure: vi.fn(), observe: vi.fn() },
     reviewFindings: { record: vi.fn() },
@@ -134,14 +145,47 @@ function harness(
     repositoryTests: { run: vi.fn(), cancel: vi.fn() },
     turns: { start: vi.fn() },
     events: {
-      append: vi.fn(),
-      replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
+      append: vi.fn((input: Parameters<CodeOperationServiceOptions["events"]["append"]>[0]) => {
+        if (options.retainEvidence === true)
+          frames.push(
+            decodeCodeOperationEventFrame({
+              threadId: input.threadId,
+              operationId: input.operationId,
+              cursor: input.expectedCursor + 1,
+              event: input.event,
+              occurredAt: now,
+            }),
+          );
+      }),
+      replay: vi.fn((input: Parameters<CodeOperationServiceOptions["events"]["replay"]>[0]) => {
+        const own = frames
+          .filter(
+            (frame) =>
+              frame.threadId === input.threadId &&
+              frame.operationId === input.operationId &&
+              frame.cursor > input.afterCursor,
+          )
+          .slice(0, input.limit);
+        return {
+          status: "ok" as const,
+          frames: own,
+          nextCursor: own.at(-1)?.cursor ?? input.afterCursor,
+        };
+      }),
     },
     actor: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000021" },
     clock: () => now,
     uuid: () => ids.operation,
   } as unknown as CodeOperationServiceOptions);
-  return { service, git, mergeRun };
+  return {
+    service,
+    git,
+    mergeRun,
+    otherThread,
+    setThread: (next: CodeThread) => {
+      activeThread = next;
+    },
+  };
 }
 
 const reviewCommand = {
@@ -187,6 +231,57 @@ describe("reviewing what a run produced", () => {
         mergeability: "clean",
       },
     });
+  });
+
+  it("authorizes retained run-diff content only for its owning thread and checkout", async () => {
+    const f = harness({ retainEvidence: true });
+    const result = await f.service.execute(ids.window as never, reviewCommand);
+    expect(result).toMatchObject({
+      kind: "run-reviewed",
+      reviewScope: { threadId: ids.thread, checkoutId: ids.checkout },
+    });
+    if (result.kind !== "run-reviewed") throw new Error("review failed");
+    await expect(
+      f.service.readEvidence(
+        ids.window as never,
+        thread.id,
+        reviewCommand.operationId as never,
+        result.outcome.diff.contentId,
+      ),
+    ).resolves.toMatchObject({ text: "diff --git a/src/app.ts b/src/app.ts" });
+    await expect(
+      f.service.readEvidence(
+        ids.window as never,
+        f.otherThread.id,
+        reviewCommand.operationId as never,
+        result.outcome.diff.contentId,
+      ),
+    ).rejects.toMatchObject({ category: "unauthorized" });
+    await expect(
+      f.service.readEvidenceBatch(ids.window as never, f.otherThread.id, [
+        {
+          operationId: reviewCommand.operationId as never,
+          contentId: result.outcome.diff.contentId,
+        },
+      ]),
+    ).rejects.toMatchObject({ category: "unauthorized" });
+    f.setThread({ ...thread, checkoutId: "60000000-0000-4000-8000-000000000098" as never });
+    await expect(
+      f.service.readEvidence(
+        ids.window as never,
+        thread.id,
+        reviewCommand.operationId as never,
+        result.outcome.diff.contentId,
+      ),
+    ).rejects.toMatchObject({ category: "unauthorized" });
+    await expect(
+      f.service.readEvidenceBatch(ids.window as never, thread.id, [
+        {
+          operationId: reviewCommand.operationId as never,
+          contentId: result.outcome.diff.contentId,
+        },
+      ]),
+    ).rejects.toMatchObject({ category: "unauthorized" });
   });
 
   it("asks Git to ignore whitespace for the branch diff only when told to", async () => {

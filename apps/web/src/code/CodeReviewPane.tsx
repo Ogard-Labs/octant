@@ -13,7 +13,14 @@ import type {
   CodeReviewFinding,
 } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
-import { decidesCodeEffectsByApproval } from "@octant/domain";
+import {
+  CodeDigest,
+  type CodeReviewDiffAnchor,
+  type CodeReviewFindingAssessment,
+} from "@octant/contracts";
+import { Schema } from "effect";
+const decodeCodeDigest = Schema.decodeUnknownSync(CodeDigest);
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { ClipboardCheck, MessageCircle } from "lucide-react";
 import { Markdown } from "../markdown/Markdown";
 import "./project-pull-request-review.css";
@@ -134,6 +141,7 @@ export interface CodeReviewTarget {
   readonly fileId: CodeFileId;
   readonly line: number;
   readonly path: CodeRelativePath;
+  readonly anchor?: CodeReviewDiffAnchor;
 }
 
 export interface CodeReviewPaneProps {
@@ -147,10 +155,18 @@ export interface CodeReviewPaneProps {
   }) => Promise<boolean>;
   readonly scope: { readonly checkoutId: CodeCheckoutId; readonly threadId: CodeThreadId };
   readonly target?: CodeReviewTarget;
+  readonly assessments?: ReadonlyArray<CodeReviewFindingAssessment>;
+  readonly onFindingChanged?: () => void;
+  readonly onPrepareCorrection?: (
+    findings: ReadonlyArray<{ findingId: CodeReviewFindingId; expectedVersion: number }>,
+  ) => Promise<void>;
+  readonly preparingCorrection?: boolean;
 }
 
 export function CodeReviewPane(props: CodeReviewPaneProps) {
   const [summary, setSummary] = useState("");
+  const [selected, setSelected] = useState<ReadonlySet<CodeReviewFindingId>>(new Set());
+  const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [localFindings, setLocalFindings] = useState<ReadonlyArray<CodeReviewFinding>>([]);
   const findingMap = new Map(props.findings.map((finding) => [finding.id, finding]));
@@ -167,40 +183,42 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
       finding,
     ]);
 
-  const mayMutate = async (command: Parameters<CodeClient["executeOperation"]>[0]) =>
-    props.executionPolicy === "full-access" ||
-    (decidesCodeEffectsByApproval(props.executionPolicy) &&
-      (await props.requestApproval?.({ command })) === true);
-
   const add = async () => {
+    if (saving) return;
     try {
       const operationId = props.createOperationId();
       if (props.target === undefined) return;
+      setSaving(true);
       const command = {
         kind: "create-review-finding",
         operationId,
         findingId: props.createFindingId(),
         fileId: props.target.fileId,
         path: props.target.path,
-        fileDigest: props.target.fileDigest as never,
+        fileDigest: decodeCodeDigest(props.target.fileDigest),
+        ...(props.target.anchor === undefined ? {} : { anchor: props.target.anchor }),
         location: { kind: "line", line: props.target.line },
         severity: "warning",
         summary,
         ...props.scope,
       } as const;
-      if (!(await mayMutate(command))) return;
       const result = await props.client.executeOperation(command);
       if (result.kind === "review-finding-state") {
         adoptFinding(result.finding);
         setSummary("");
+        props.onFindingChanged?.();
       }
       if (result.kind === "operation-failed") setFailure(result.failure.message);
     } catch {
-      setFailure("Local review command failed. Reconnect and retry.");
+      setFailure("Local review command failed. Refresh the findings before retrying.");
+    } finally {
+      setSaving(false);
     }
   };
 
   const changeState = async (finding: CodeReviewFinding, state: "resolved" | "dismissed") => {
+    if (saving) return;
+    setSaving(true);
     try {
       const operationId = props.createOperationId();
       const command = {
@@ -211,12 +229,16 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
         state,
         ...props.scope,
       } as const;
-      if (!(await mayMutate(command))) return;
       const result = await props.client.executeOperation(command);
-      if (result.kind === "review-finding-state") adoptFinding(result.finding);
+      if (result.kind === "review-finding-state") {
+        adoptFinding(result.finding);
+        props.onFindingChanged?.();
+      }
       if (result.kind === "operation-failed") setFailure(result.failure.message);
     } catch {
-      setFailure("Local review command failed. Reconnect and retry.");
+      setFailure("Local review command failed. Refresh the findings before retrying.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -235,13 +257,42 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
         <ul className="code-review-pane__findings">
           {findings.map((finding) => (
             <li key={finding.id}>
+              {props.onPrepareCorrection !== undefined && finding.state === "open" ? (
+                <label>
+                  <OctantCheckbox
+                    aria-label={`Select finding: ${finding.summary}`}
+                    checked={selected.has(finding.id)}
+                    onChange={(event) => {
+                      const checked = event.currentTarget.checked;
+                      setSelected((current) => {
+                        const next = new Set(current);
+                        if (checked) next.add(finding.id);
+                        else next.delete(finding.id);
+                        return next;
+                      });
+                    }}
+                  />
+                  Select for correction request
+                </label>
+              ) : null}
               <strong>{finding.summary}</strong>
               <span>
-                {finding.path} · {finding.severity} · {finding.state}
+                {finding.path} · {finding.anchor?.side ?? "legacy file"}{" "}
+                {finding.location.kind === "line"
+                  ? `line ${finding.location.line}`
+                  : `lines ${finding.location.startLine}–${finding.location.endLine}`}{" "}
+                · {finding.severity} · {finding.state}
               </span>
-              {props.executionPolicy === "plan" || finding.state !== "open" ? null : (
+              <p>
+                {props.assessments?.find((item) => item.finding.id === finding.id)?.explanation ??
+                  (finding.anchor === undefined
+                    ? "Legacy finding: original comparison revision unrecorded."
+                    : `Captured ${finding.anchor.capturedAt}; original comparison digest ${finding.fileDigest}.`)}
+              </p>
+              {finding.state !== "open" ? null : (
                 <div>
                   <OctantButton
+                    disabled={saving}
                     onClick={() => void changeState(finding, "resolved")}
                     size="sm"
                     type="button"
@@ -250,6 +301,7 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
                     Resolve
                   </OctantButton>
                   <OctantButton
+                    disabled={saving}
                     onClick={() => void changeState(finding, "dismissed")}
                     size="sm"
                     type="button"
@@ -263,21 +315,52 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
           ))}
         </ul>
       )}
-      {props.executionPolicy === "plan" ? null : props.target === undefined ? (
+      {props.onPrepareCorrection === undefined ? null : (
+        <OctantButton
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={
+            props.preparingCorrection ||
+            !findings.some((finding) => finding.state === "open" && selected.has(finding.id))
+          }
+          onClick={() =>
+            void props.onPrepareCorrection?.(
+              findings
+                .filter((finding) => finding.state === "open" && selected.has(finding.id))
+                .map((finding) => ({ findingId: finding.id, expectedVersion: finding.version })),
+            )
+          }
+        >
+          Prepare correction draft
+        </OctantButton>
+      )}
+      <p>
+        Findings stay open until you review the resulting changes and resolve or dismiss them
+        yourself.
+      </p>
+      {props.target === undefined ? (
         <p className="code-delivery-pane__notice">
           Select an exact file and line to add a finding.
         </p>
       ) : (
         <div className="code-review-pane__form">
           <p>
-            {props.target.path}:{props.target.line}
+            {props.target.path} · {props.target.anchor?.side ?? "file"} line {props.target.line}
+            {props.target.anchor === undefined ? null : (
+              <>
+                {" "}
+                · captured {props.target.anchor.capturedAt}; compared regions only, not the full
+                file
+              </>
+            )}
           </p>
           <label className="code-delivery-pane__field">
             Finding summary
             <OctantTextarea value={summary} onChange={(event) => setSummary(event.target.value)} />
           </label>
           <OctantButton
-            disabled={summary.trim().length === 0}
+            disabled={saving || summary.trim().length === 0}
             onClick={() => void add()}
             size="sm"
             type="button"

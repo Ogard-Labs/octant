@@ -1451,6 +1451,10 @@ function startTurn(
     modelId: frame.event.modelId,
     sessionId: frame.event.sessionId,
     prompt: frame.event.prompt,
+    ...(frame.event.checkoutId === undefined ? {} : { checkoutId: frame.event.checkoutId }),
+    ...(frame.event.reviewFindingReferences === undefined
+      ? {}
+      : { reviewFindingReferences: frame.event.reviewFindingReferences }),
     ...(frame.event.checkpoint === undefined ? {} : { checkpoint: frame.event.checkpoint }),
     ...(frame.event.executionPolicy === undefined
       ? {}
@@ -1552,6 +1556,8 @@ type CodeConversationBuilder = {
   modelId: CodeConversationTurn["modelId"];
   sessionId: CodeConversationTurn["sessionId"];
   prompt: CodeConversationTurn["prompt"];
+  checkoutId?: CodeConversationTurn["checkoutId"];
+  reviewFindingReferences?: CodeConversationTurn["reviewFindingReferences"];
   checkpoint?: CodeConversationTurn["checkpoint"];
   executionPolicy?: CodeConversationTurn["executionPolicy"];
   usage?: CodeConversationTurn["usage"];

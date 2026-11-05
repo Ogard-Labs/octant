@@ -1,3 +1,4 @@
+import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { OwnerUnlockNotGiven } from "@octant/client-runtime";
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import type {
@@ -166,7 +167,7 @@ export type ShellActions = {
   readonly openProjects: () => void;
   readonly openPullRequests: () => void;
   readonly openReview: () => void;
-  readonly openReviewForThread: (threadId: string) => void;
+  readonly openReviewForThread: (threadId: string, request?: CodeReviewFileRequest) => void;
   readonly openRunningService: (
     service: RunningService,
     target: LocalServerOpenTarget,

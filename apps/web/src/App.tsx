@@ -1,3 +1,4 @@
+import type { CodeReviewFileRequest } from "./code/codeReviewNavigation";
 import { SidebarThreadTabsContext, type SidebarThreadTabs } from "./shell/sidebarThreadTabs";
 import { autoReviewFor } from "./code/autoReview";
 import {
@@ -1101,6 +1102,10 @@ function LaunchedShell(
   const [requestedAgentView, setRequestedAgentView] = useState<{
     readonly threadKey: string;
     readonly view: AgentRunViewRequest;
+  }>();
+  const [requestedCodeReviewFile, setRequestedCodeReviewFile] = useState<{
+    readonly threadKey: string;
+    readonly request: CodeReviewFileRequest;
   }>();
   const [requestedAgentReview, setRequestedAgentReview] = useState<{
     readonly threadKey: string;
@@ -3868,9 +3873,10 @@ function LaunchedShell(
     setDockVisible(true);
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "agents"));
   }
-  function openReviewForThread(threadId: string) {
+  function openReviewForThread(threadId: string, request?: CodeReviewFileRequest) {
     setRequestedAgentReview(undefined);
     const key = threadUtilityDockKey("code", threadId);
+    setRequestedCodeReviewFile(request === undefined ? undefined : { threadKey: key, request });
     setDockVisible(true);
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "review"));
   }
@@ -7254,6 +7260,7 @@ function LaunchedShell(
                     projectPullRequestReviewOpen={projectPullRequestReviewOpen}
                     {...(toolsPresented ? { providerController } : {})}
                     {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
+                    {...(requestedCodeReviewFile === undefined ? {} : { requestedCodeReviewFile })}
                     {...(requestedAgentView === undefined ? {} : { requestedAgentView })}
                     {...(selectedProjectPullRequest === undefined
                       ? {}

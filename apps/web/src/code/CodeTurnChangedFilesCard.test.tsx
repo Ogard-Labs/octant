@@ -83,7 +83,7 @@ describe("the files a Code turn changed", () => {
 
     expect(screen.getByRole("heading")).toHaveTextContent("40 files changed while this ran");
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Showing 1 of 40. Review has the whole change.",
+      "Showing 1 of 40. Review shows the current checkout comparison.",
     );
     // A total over one listed row would read as the whole change's size.
     expect(screen.getByRole("heading").parentElement).not.toHaveTextContent("+1");

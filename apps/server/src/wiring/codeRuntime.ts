@@ -92,7 +92,7 @@ import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
 
-function withCodeOperationRuntime(
+export function withCodeOperationRuntime(
   service: CodeRouteService,
   runtime: CodeOperationRuntime,
 ): CodeRouteService {

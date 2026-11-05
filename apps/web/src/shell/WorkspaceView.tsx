@@ -1,3 +1,4 @@
+import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { autoReviewFor, type AutoReview } from "../code/autoReview";
@@ -296,7 +297,7 @@ export interface WorkspaceViewProps {
     readonly relativePath: import("@octant/contracts/code").CodeRelativePath;
   }) => void;
   /** Opens Review in the dock for this Code thread, keeping the transcript in view. */
-  readonly onOpenReview?: (threadId: CodeThreadId) => void;
+  readonly onOpenReview?: (threadId: CodeThreadId, request?: CodeReviewFileRequest) => void;
   /** Selects a pull request named on a pane tab for the dock's Review pane. */
   readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   /** Opens the rail's complete Pull requests overview across Projects. */
@@ -1261,7 +1262,10 @@ function renderCodeTab(
           : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
         {...(props.onOpenReview === undefined
           ? {}
-          : { onOpenReview: () => props.onOpenReview?.(tab.threadId) })}
+          : {
+              onOpenReview: (request?: CodeReviewFileRequest) =>
+                props.onOpenReview?.(tab.threadId, request),
+            })}
         onOpenSurface={(kind, options) =>
           options?.terminalId === undefined
             ? props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))

@@ -3898,3 +3898,51 @@ async function chooseTurnAction(
   await user.click(within(turnArticle(turnText)).getByRole("button", { name: "More actions" }));
   await user.click(await screen.findByRole("menuitem", { name }));
 }
+
+it.each(["legacy", "rebound", "source-thread"] as const)(
+  "does not retarget a %s changed-file receipt to the active checkout",
+  (kind) => {
+    const open = vi.fn();
+    const code = controller();
+    const current = code.activeView!;
+    const message = {
+      id: "receipt",
+      role: "assistant" as const,
+      text: "Finished",
+      status: "completed" as const,
+      operationId: "70000000-0000-4000-8000-000000000001" as never,
+      changedFiles: {
+        files: [{ path: "src/old.ts" as never, insertions: 1, deletions: 0 }],
+        total: 1,
+        truncated: false,
+      },
+      ...(kind === "legacy"
+        ? {}
+        : {
+            checkoutId:
+              kind === "rebound"
+                ? ("20000000-0000-4000-8000-000000000099" as never)
+                : current.checkout.id,
+          }),
+      ...(kind === "source-thread" ? { sourceThreadId: anotherThreadId } : {}),
+    };
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ conversation: [message] })}
+        threadId={threadId}
+        onOpenReview={open}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Review src/old.ts" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        kind === "legacy"
+          ? /older receipt did not record its checkout/
+          : kind === "rebound"
+            ? /earlier checkout binding/
+            : /original source thread/,
+      ),
+    ).toBeVisible();
+    expect(open).not.toHaveBeenCalled();
+  },
+);

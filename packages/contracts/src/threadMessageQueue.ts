@@ -1,3 +1,4 @@
+import { CodeReviewFindingReferences } from "./codeOperations";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { Schema } from "effect";
 import { SendChatTurnCommand } from "./chat";
@@ -55,6 +56,7 @@ export const ThreadMessageQueuePayload = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     mode: Schema.Literal("code"),
+    reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
     sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
     prompt: ThreadMessageQueuePrompt,
     attachmentIds: Schema.optional(

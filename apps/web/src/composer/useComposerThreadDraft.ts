@@ -1,4 +1,4 @@
-import type { SideChatDraftReturnReference } from "@octant/contracts";
+import type { SideChatDraftReturnReference, CodeReviewFindingReference } from "@octant/contracts";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import {
   composerDraftRecordKey,
@@ -10,6 +10,9 @@ import {
 
 // Quiet thread updates must retain the controller's unchanged draft facts.
 const EMPTY_SIDE_CHAT_RETURNS: ReadonlyArray<SideChatDraftReturnReference> = Object.freeze([]);
+const EMPTY_REVIEW_FINDING_REFERENCES: ReadonlyArray<CodeReviewFindingReference> = Object.freeze(
+  [],
+);
 
 export interface ComposerThreadDraftController {
   readonly text: string;
@@ -17,6 +20,8 @@ export interface ComposerThreadDraftController {
   readonly stagedDropped: boolean;
   readonly sideChatReturns: ReadonlyArray<SideChatDraftReturnReference>;
   readonly sideChatReturnsInvalid: boolean;
+  readonly reviewFindingReferences: ReadonlyArray<CodeReviewFindingReference>;
+  readonly reviewFindingReferencesInvalid: boolean;
   readonly persistError: string | undefined;
   readonly setDraft: (text: string, caretIndex?: number) => void;
   readonly setCaret: (caretIndex: number) => void;
@@ -138,6 +143,8 @@ export function useComposerThreadDraft(options: {
     stagedDropped: current?.stagedDropped === true,
     sideChatReturns: current?.sideChatReturns ?? EMPTY_SIDE_CHAT_RETURNS,
     sideChatReturnsInvalid: current?.sideChatReturnsInvalid === true,
+    reviewFindingReferences: current?.reviewFindingReferences ?? EMPTY_REVIEW_FINDING_REFERENCES,
+    reviewFindingReferencesInvalid: current?.reviewFindingReferencesInvalid === true,
     persistError: store.persistError(),
     setDraft,
     setCaret,

@@ -1088,7 +1088,24 @@ export function createCodeOperationRuntime(
   const reviewFindings = new ReviewFindingService({
     persistence: options.persistence,
     access: options.windowAccess,
-    files: options.reviewFiles,
+    files: {
+      ...options.reviewFiles,
+      resolveDiff: async (windowId, input) => {
+        if (input.anchor === undefined || input.location.kind !== "line") return undefined;
+        try {
+          return await service.resolveReviewTarget(windowId, {
+            threadId: input.threadId,
+            checkoutId: input.checkoutId,
+            reviewOperationId: input.anchor.reviewOperationId,
+            path: input.path,
+            side: input.anchor.side,
+            line: input.location.line,
+          });
+        } catch {
+          return undefined;
+        }
+      },
+    },
     uuid: options.uuid,
     clock: options.clock,
   });
@@ -1172,13 +1189,22 @@ export function createCodeOperationRuntime(
     ...(options.standingMergeAllowance === undefined
       ? {}
       : { standingMergeAllowance: options.standingMergeAllowance }),
+    ...(options.recordExternalContentIngestion === undefined
+      ? {}
+      : { recordReviewContent: options.recordExternalContentIngestion }),
     reviewFindings: {
-      create: (windowId, input) => reviewFindings.create(windowId, input),
-      changeState: (windowId, input) =>
-        reviewFindings.changeState(windowId, {
-          ...input,
-          findingId: decodeCodeReviewFindingId(input.findingId),
-        }),
+      list: (windowId, threadId) => reviewFindings.list(windowId, threadId),
+      create: (windowId, input, admissionCurrent) =>
+        reviewFindings.create(windowId, input, admissionCurrent),
+      changeState: (windowId, input, admissionCurrent) =>
+        reviewFindings.changeState(
+          windowId,
+          {
+            ...input,
+            findingId: decodeCodeReviewFindingId(input.findingId),
+          },
+          admissionCurrent,
+        ),
     },
     turns,
     evidence: options.evidence,

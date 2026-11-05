@@ -1,3 +1,4 @@
+import { reviewFindingAnchorDigest } from "./codeReviewComparison";
 import {
   ActorId,
   CodeCheckoutId,
@@ -10,6 +11,7 @@ import {
   UtcTimestamp,
   decodeCodeReviewFinding,
   type CodeReviewFinding,
+  type CodeReviewTarget,
   type CodeReviewFindingId,
   type CodeThread,
   type ProjectId,
@@ -32,6 +34,22 @@ export interface ReviewFindingPersistencePort {
 }
 
 export interface ReviewFindingFilePort {
+  /** Host reconstruction from retained comparison evidence; never a caller-asserted file snapshot. */
+  readonly resolveDiff?: (
+    windowId: WindowId,
+    input: Omit<
+      CodeReviewFinding,
+      | "id"
+      | "severity"
+      | "author"
+      | "provenance"
+      | "summary"
+      | "state"
+      | "version"
+      | "createdAt"
+      | "updatedAt"
+    >,
+  ) => Promise<CodeReviewTarget | undefined>;
   readonly resolve: (input: {
     readonly fileId: typeof CodeFileId.Type;
     readonly threadId: typeof CodeThreadId.Type;
@@ -87,16 +105,44 @@ export class ReviewFindingService {
   async create(
     authenticatedWindowId: WindowId,
     input: Omit<CodeReviewFinding, "state" | "version" | "createdAt" | "updatedAt">,
+    admissionCurrent?: () => boolean,
   ): Promise<CodeReviewFinding> {
     const thread = await this.#authorize(authenticatedWindowId, input.threadId);
     if (thread.checkoutId !== input.checkoutId) throw new ReviewFindingServiceError("invalid");
-    const file = this.#files.resolve({
-      fileId: input.fileId,
-      threadId: input.threadId,
-      checkoutId: input.checkoutId,
-      path: input.path,
-      digest: input.fileDigest,
-    });
+    const captured =
+      input.anchor === undefined
+        ? undefined
+        : await this.#files.resolveDiff?.(authenticatedWindowId, input);
+    if (
+      input.anchor !== undefined &&
+      (captured === undefined ||
+        captured.fileId !== input.fileId ||
+        captured.path !== input.path ||
+        captured.fileDigest !== input.fileDigest ||
+        reviewFindingAnchorDigest({
+          ...input,
+          anchor: captured.anchor,
+          location: captured.location,
+        }) !== reviewFindingAnchorDigest(input))
+    )
+      throw new ReviewFindingServiceError("invalid");
+    const file =
+      input.anchor === undefined
+        ? this.#files.resolve({
+            fileId: input.fileId,
+            threadId: input.threadId,
+            checkoutId: input.checkoutId,
+            path: input.path,
+            digest: input.fileDigest,
+          })
+        : captured === undefined
+          ? undefined
+          : {
+              threadId: input.threadId,
+              checkoutId: input.checkoutId,
+              path: captured.path,
+              digest: captured.fileDigest,
+            };
     if (
       file === undefined ||
       file.threadId !== input.threadId ||
@@ -122,6 +168,9 @@ export class ReviewFindingService {
     if (this.#persistence.readReviewFinding(finding.id) !== undefined) {
       throw new ReviewFindingServiceError("stale");
     }
+    const current = await this.#authorize(authenticatedWindowId, input.threadId);
+    if (current.checkoutId !== input.checkoutId) throw new ReviewFindingServiceError("stale");
+    if (admissionCurrent?.() === false) throw new ReviewFindingServiceError("unauthorized");
     try {
       this.#append(finding, 0);
     } catch (error) {
@@ -135,13 +184,23 @@ export class ReviewFindingService {
     authenticatedWindowId: WindowId,
     input: Readonly<{
       findingId: typeof CodeReviewFindingId.Type;
+      threadId?: CodeThreadId;
+      checkoutId?: CodeCheckoutId;
       expectedVersion: number;
       state: CodeReviewFinding["state"];
     }>,
+    admissionCurrent?: () => boolean,
   ): Promise<CodeReviewFinding> {
     const existing = this.#persistence.readReviewFinding(input.findingId);
     if (existing === undefined) throw new ReviewFindingServiceError("invalid");
-    await this.#authorize(authenticatedWindowId, existing.threadId);
+    if (
+      (input.threadId !== undefined && input.threadId !== existing.threadId) ||
+      (input.checkoutId !== undefined && input.checkoutId !== existing.checkoutId)
+    )
+      throw new ReviewFindingServiceError("unauthorized");
+    const current = await this.#authorize(authenticatedWindowId, existing.threadId);
+    if (input.checkoutId !== undefined && current.checkoutId !== input.checkoutId)
+      throw new ReviewFindingServiceError("stale");
     if (existing.version !== input.expectedVersion) throw new ReviewFindingServiceError("stale");
     let finding: CodeReviewFinding;
     try {
@@ -154,6 +213,7 @@ export class ReviewFindingService {
     } catch {
       throw new ReviewFindingServiceError("invalid");
     }
+    if (admissionCurrent?.() === false) throw new ReviewFindingServiceError("unauthorized");
     try {
       this.#append(finding, existing.version);
     } catch (error) {
@@ -180,7 +240,10 @@ export class ReviewFindingService {
     if (!(await this.#access.canAccessProject(authenticatedWindowId, thread.projectId))) {
       throw new ReviewFindingServiceError("unauthorized");
     }
-    return thread;
+    const current = this.#persistence.readCodeThread(threadId);
+    if (current === undefined || current.projectId !== thread.projectId)
+      throw new ReviewFindingServiceError("stale");
+    return current;
   }
 
   #append(finding: CodeReviewFinding, expectedVersion: number): void {

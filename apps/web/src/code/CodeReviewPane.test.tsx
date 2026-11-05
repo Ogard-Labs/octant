@@ -75,7 +75,7 @@ describe("CodeReviewPane", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders findings read-only in Plan with no mutation controls", () => {
+  it("keeps local note resolution available in Plan without granting execution", () => {
     render(
       <CodeReviewPane
         client={codeClient()}
@@ -87,7 +87,8 @@ describe("CodeReviewPane", () => {
       />,
     );
     expect(screen.getByText("Handle the failure")).toBeVisible();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resolve" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /approve|merge|send/i })).not.toBeInTheDocument();
   });
 
   it("renders an actionable local-review command failure", async () => {

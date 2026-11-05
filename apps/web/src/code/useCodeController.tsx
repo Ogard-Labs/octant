@@ -1,4 +1,4 @@
-import type { SideChatDraftReturnReference } from "@octant/contracts";
+import type { SideChatDraftReturnReference, CodeReviewFindingReference } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
@@ -2163,6 +2163,7 @@ export function useCodeController(options: CodeControllerOptions) {
        */
       readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
       readonly sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
+      readonly reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>;
       /**
        * Images this turn carries. Ids only: the host holds the bytes it
        * accepted and reads them itself, so the renderer never re-sends an
@@ -2201,6 +2202,10 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
           ? {}
           : { threadMentionIds: [...input.threadMentionIds] }),
+        ...(input.reviewFindingReferences === undefined ||
+        input.reviewFindingReferences.length === 0
+          ? {}
+          : { reviewFindingReferences: [...input.reviewFindingReferences] }),
         ...(input.sideChatReturns === undefined || input.sideChatReturns.length === 0
           ? {}
           : { sideChatReturns: [...input.sideChatReturns] }),
@@ -2611,6 +2616,7 @@ export function useCodeController(options: CodeControllerOptions) {
       extensionSelections?: ReadonlyArray<ExtensionSelection>,
       sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> = [],
       expectedDraftRevision?: number,
+      reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -2626,6 +2632,18 @@ export function useCodeController(options: CodeControllerOptions) {
       const draftRevisionAtDispatch =
         expectedDraftRevision ?? composerDraftRef.current.revisionFor(sendingThreadId);
       const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
+      if (previousDraft?.reviewFindingReferencesInvalid) {
+        setTurnStatus("failed");
+        setTurnError(
+          "The saved review reference is unavailable. Reopen Review or explicitly clear this draft before sending.",
+        );
+        return false;
+      }
+      const reviewReferences =
+        reviewFindingReferences ??
+        (previousDraft?.text.trim() === trimmed
+          ? (previousDraft.reviewFindingReferences ?? [])
+          : []);
       let internalClearRan = false;
       const restoreFailedPrompt = () => {
         const currentRevision = composerDraftRef.current.revisionFor(sendingThreadId);
@@ -2646,6 +2664,8 @@ export function useCodeController(options: CodeControllerOptions) {
         id: globalThis.crypto.randomUUID(),
         role: "user",
         text: trimmed,
+        checkoutId: view.checkout.id,
+        ...(reviewReferences.length === 0 ? {} : { reviewFindingReferences: reviewReferences }),
         providerInstanceId: view.thread.providerInstanceId,
         modelId: view.thread.modelId,
         at: new Date().toISOString(),
@@ -2665,6 +2685,7 @@ export function useCodeController(options: CodeControllerOptions) {
           prompt: trimmed,
           threadMentionIds,
           sideChatReturns,
+          reviewFindingReferences: reviewReferences,
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
           fileMentionPaths,
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
@@ -2714,6 +2735,7 @@ export function useCodeController(options: CodeControllerOptions) {
           {
             id: assistantId,
             role: "assistant",
+            checkoutId: view.checkout.id,
             text: "",
             // The transcript reads this turn's tool and reasoning rows by
             // operation, so a live message must name its operation the same way
@@ -2807,6 +2829,9 @@ export function useCodeController(options: CodeControllerOptions) {
                           at: frame.occurredAt,
                           ...(checkpoint === undefined ? {} : { checkpoint }),
                           ...(ranUnder === undefined ? {} : { executionPolicy: ranUnder }),
+                          ...(event.checkoutId === undefined
+                            ? {}
+                            : { checkoutId: event.checkoutId }),
                         }
                       : entry.id === assistantId
                         ? { ...entry, startedAt: frame.occurredAt }
@@ -3076,11 +3101,15 @@ export function useCodeController(options: CodeControllerOptions) {
   const returnedDraftFacts: {
     readonly draftSideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
     readonly draftSideChatReturnsInvalid?: boolean;
+    readonly draftReviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>;
+    readonly draftReviewFindingReferencesInvalid?: boolean;
     readonly draftRevision?: number;
     readonly readDraftRevision?: (threadId: string) => number;
   } = {
     draftSideChatReturns: composerDraft.sideChatReturns,
     draftSideChatReturnsInvalid: composerDraft.sideChatReturnsInvalid,
+    draftReviewFindingReferences: composerDraft.reviewFindingReferences,
+    draftReviewFindingReferencesInvalid: composerDraft.reviewFindingReferencesInvalid,
     draftRevision: composerDraft.revisionFor(String(options.activeThreadId ?? "")),
     readDraftRevision: composerDraft.revisionFor,
   };

@@ -1,3 +1,23 @@
+import { requiresLiveCodeReviewAuthority } from "./codeReviewAuthority";
+import {
+  retainedReviewTarget,
+  reviewFindingAnchorDigest,
+  reviewFindingLabel,
+  boundReviewText,
+  type RetainedCodeReview,
+} from "./codeReviewComparison";
+import type {
+  RecordExternalContentIngestionInput,
+  ExternalContentIngestionResult,
+} from "../context/externalContentIngestionStore";
+import { frameExternalContentForModel } from "../context/externalContentFraming";
+import {
+  type CodeReviewTarget,
+  type CodeReviewRevision,
+  type CodeReviewFindingAssessment,
+  type CodeReviewFindingReference,
+  type CodeReviewCorrectionPrepared,
+} from "@octant/contracts";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import type { GitService } from "./gitService";
 import {
@@ -116,6 +136,11 @@ const REMOTE_FOLDER_UNAVAILABLE =
  * on the server, and its terminals, which are logins there.
  */
 const SERVER_THREAD_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
+  "prepare-review-target",
+  "list-review-findings",
+  "prepare-review-correction",
+  "create-review-finding",
+  "update-review-finding",
   // A server thread takes no checkpoints, so it rewinds its conversation
   // only; the files part refuses with the reason.
   "preview-code-rewind",
@@ -894,19 +919,31 @@ export type CodeOperationPullRequestReview =
   | { readonly status: "unavailable" };
 
 export interface CodeOperationReviewFindingPort {
+  readonly list?: (
+    windowId: WindowId,
+    threadId: CodeThreadId,
+  ) => Promise<ReadonlyArray<CodeReviewFinding>>;
   readonly create: (
     windowId: WindowId,
     input: Omit<CodeReviewFinding, "state" | "version" | "createdAt" | "updatedAt">,
+    admissionCurrent?: () => boolean,
   ) => Promise<CodeReviewFinding>;
   readonly changeState: (
     windowId: WindowId,
     input: {
       readonly findingId: string;
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
       readonly expectedVersion: number;
       readonly state: CodeReviewFinding["state"];
     },
+    admissionCurrent?: () => boolean,
   ) => Promise<CodeReviewFinding>;
 }
+
+type ReviewAnchorAssessment = Pick<CodeReviewFindingAssessment, "explanation"> & {
+  readonly anchorState: "current" | "outdated" | "unavailable";
+};
 
 export interface CodeOperationTurnPort {
   readonly start: (input: {
@@ -1135,6 +1172,9 @@ export interface CodeOperationServiceOptions {
    */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
   readonly reviewFindings: CodeOperationReviewFindingPort;
+  readonly recordReviewContent?: (
+    input: RecordExternalContentIngestionInput,
+  ) => ExternalContentIngestionResult;
   readonly turns: CodeOperationTurnPort;
   readonly evidence: CodeOperationEvidencePort;
   /**
@@ -1316,12 +1356,28 @@ export class CodeOperationService {
         "unauthorized",
         "Checkout request is no longer current.",
       );
-    const deliveredResult = (result: CodeOperationResult): CodeOperationResult =>
-      command.kind === "start-provider-turn" &&
-      command.delivery !== undefined &&
-      result.kind === "provider-turn-state"
+    const deliveredResult = (result: CodeOperationResult): CodeOperationResult => {
+      if (requiresLiveCodeReviewAuthority(command) && options.admissionCurrent?.() === false)
+        return this.#failed(
+          command.operationId,
+          "unauthorized",
+          "The review request is no longer authorized.",
+          "refused",
+        );
+      return command.kind === "start-provider-turn" &&
+        command.delivery !== undefined &&
+        result.kind === "provider-turn-state"
         ? decodeCodeOperationResult({ ...result, delivery: command.delivery })
         : result;
+    };
+    if (requiresLiveCodeReviewAuthority(command) && options.admissionCurrent?.() === false)
+      return deliveredResult(
+        this.#failed(
+          command.operationId,
+          "unauthorized",
+          "The review request is no longer authorized.",
+        ),
+      );
     const initiator = options.initiator ?? "agent";
     // Switching a grant off only narrows authority, so losing the checkout
     // cannot stand in its way: it needs the thread and a window that can open
@@ -1657,6 +1713,10 @@ export class CodeOperationService {
                       modelId: scope.thread.modelId,
                       sessionId: command.sessionId,
                       prompt: command.prompt,
+                      checkoutId: scope.checkout.id,
+                      ...(command.reviewFindingReferences === undefined
+                        ? {}
+                        : { reviewFindingReferences: command.reviewFindingReferences }),
                       ...(command.extensionSelections === undefined ||
                       command.extensionSelections.length === 0
                         ? {}
@@ -2412,6 +2472,337 @@ export class CodeOperationService {
     }
   }
 
+  async #reviewFindings(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+  ): Promise<ReadonlyArray<CodeReviewFinding>> {
+    const list = this.#options.reviewFindings.list;
+    if (list === undefined) throw new CodeOperationServiceError("unavailable");
+    return await list(windowId, threadId);
+  }
+
+  async #retainedReview(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+    reviewOperationId: CodeOperationId,
+  ): Promise<RetainedCodeReview> {
+    const replay = this.#replay(threadId, reviewOperationId, 0, 256);
+    const frame = replay.frames.find(
+      (frame) =>
+        frame.threadId === threadId &&
+        frame.operationId === reviewOperationId &&
+        frame.event.kind === "operation-result" &&
+        (frame.event.result.kind === "git-observed" || frame.event.result.kind === "run-reviewed"),
+    );
+    if (frame?.event.kind !== "operation-result")
+      throw new CodeOperationServiceError("unavailable");
+    const result = frame.event.result;
+    if (
+      (result.kind !== "git-observed" && result.kind !== "run-reviewed") ||
+      result.operationId !== reviewOperationId ||
+      result.reviewScope?.threadId !== threadId ||
+      result.reviewScope.checkoutId !== checkoutId
+    )
+      throw new CodeOperationServiceError("unauthorized");
+    const evidence = result.kind === "git-observed" ? result.diff : result.outcome.diff;
+    const revision: CodeReviewRevision =
+      result.kind === "git-observed"
+        ? { kind: "working-tree", stateToken: result.stateToken }
+        : {
+            kind: "branch",
+            head: result.outcome.head,
+            ...(result.outcome.base === undefined ? {} : { base: result.outcome.base }),
+            baseRef: result.outcome.baseRef,
+          };
+    const read = await this.readEvidence(windowId, threadId, reviewOperationId, evidence.contentId);
+    return {
+      operationId: reviewOperationId,
+      evidence,
+      revision,
+      capturedAt: frame.occurredAt,
+      text: read.text,
+    };
+  }
+
+  /** Reconstructs the exact source coordinate from retained host evidence; callers supply no content or digest. */
+  async resolveReviewTarget(
+    windowId: WindowId,
+    input: {
+      threadId: CodeThreadId;
+      checkoutId: CodeCheckoutId;
+      reviewOperationId: CodeOperationId;
+      path: string;
+      side: "original" | "modified";
+      line: number;
+    },
+    admissionCurrent?: () => boolean,
+  ): Promise<CodeReviewTarget> {
+    const scope = await this.#scope(windowId, input);
+    if ("failure" in scope)
+      throw new CodeOperationServiceError(
+        scope.failure === "waiting" ? "unavailable" : scope.failure,
+      );
+    const snapshot = await this.#retainedReview(
+      windowId,
+      input.threadId,
+      input.checkoutId,
+      input.reviewOperationId,
+    );
+    const selected = retainedReviewTarget(snapshot, input);
+    if (selected === undefined) throw new CodeOperationServiceError("unavailable");
+    // A delayed read cannot prepare an anchor under a different checkout binding.
+    const current = await this.#scope(windowId, input);
+    if ("failure" in current) throw new CodeOperationServiceError("unauthorized");
+    if (admissionCurrent?.() === false) throw new CodeOperationServiceError("unauthorized");
+    return selected.target;
+  }
+
+  #reviewAssessmentReader(checkoutRoot: string, git: CodeOperationGitPort | undefined) {
+    let observation: ReturnType<CodeOperationGitPort["observe"]> | undefined;
+    const assessments = new Map<string, Promise<ReviewAnchorAssessment>>();
+    const readObservation =
+      git === undefined
+        ? undefined
+        : () => (observation ??= git.observe({ checkoutRoot, maxDiffBytes: 0 }));
+    return (revision: CodeReviewRevision) => {
+      const key = JSON.stringify(revision);
+      let assessed = assessments.get(key);
+      if (assessed === undefined) {
+        assessed = this.#reviewAnchorState(revision, checkoutRoot, git, readObservation);
+        assessments.set(key, assessed);
+      }
+      return assessed;
+    };
+  }
+
+  async #reviewAnchorState(
+    revision: CodeReviewRevision,
+    checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
+    readObservation?: () => ReturnType<CodeOperationGitPort["observe"]>,
+  ): Promise<ReviewAnchorAssessment> {
+    try {
+      if (git === undefined)
+        return {
+          anchorState: "unavailable",
+          explanation:
+            "The current comparison cannot be read. The original captured anchor is retained.",
+        };
+      const observed = await (readObservation?.() ??
+        git.observe({ checkoutRoot, maxDiffBytes: 0 }));
+      if (observed.status !== "ready")
+        return {
+          anchorState: "unavailable",
+          explanation: "The current checkout revision could not be read.",
+        };
+      let current = false;
+      if (revision.kind === "working-tree") current = observed.stateToken === revision.stateToken;
+      else if (observed.head === undefined)
+        return {
+          anchorState: "unavailable",
+          explanation: "The current checkout revision could not be read.",
+        };
+      else if (
+        git.compareBranch !== undefined &&
+        revision.base !== undefined &&
+        "oid" in observed.head &&
+        observed.head.oid === revision.head
+      ) {
+        const compared = await git.compareBranch({
+          checkoutRoot,
+          baseRef: revision.baseRef,
+          headRef: "HEAD",
+        });
+        current =
+          compared.status === "ready" &&
+          compared.head === revision.head &&
+          compared.base === revision.base &&
+          (observed.statusEntries?.length ?? 1) === 0;
+      }
+      return current
+        ? {
+            anchorState: "current",
+            explanation:
+              "This comparison still matches the captured revision. The finding remains open until you review and resolve it.",
+          }
+        : {
+            anchorState: "outdated",
+            explanation:
+              "The checkout or compared revision changed. This finding stays on its original side and line; review the latest changes before resolving it.",
+          };
+    } catch {
+      return {
+        anchorState: "unavailable",
+        explanation:
+          "The current comparison is unavailable; the original captured anchor is retained.",
+      };
+    }
+  }
+
+  async #selectedReviewFindings(
+    windowId: WindowId,
+    thread: CodeThread,
+    selection: ReadonlyArray<{ findingId: CodeReviewFinding["id"]; expectedVersion: number }>,
+  ): Promise<
+    ReadonlyArray<{
+      finding: CodeReviewFinding;
+      reference: CodeReviewFindingReference;
+      excerpt?: string;
+    }>
+  > {
+    const findings = await this.#reviewFindings(windowId, thread.id);
+    const chosen: Array<{
+      finding: CodeReviewFinding;
+      reference: CodeReviewFindingReference;
+      excerpt?: string;
+    }> = [];
+    const seen = new Set<string>();
+    for (const wanted of selection) {
+      const finding = findings.find((item) => item.id === wanted.findingId);
+      if (
+        finding === undefined ||
+        finding.threadId !== thread.id ||
+        finding.checkoutId !== thread.checkoutId ||
+        finding.version !== wanted.expectedVersion ||
+        finding.state !== "open" ||
+        seen.has(finding.id)
+      )
+        throw new CodeOperationServiceError("invalid");
+      seen.add(finding.id);
+      let excerpt: string | undefined;
+      if (finding.anchor !== undefined) {
+        if (finding.location.kind !== "line") throw new CodeOperationServiceError("unavailable");
+        const snapshot = await this.#retainedReview(
+          windowId,
+          thread.id,
+          thread.checkoutId,
+          finding.anchor.reviewOperationId,
+        );
+        const selected = retainedReviewTarget(snapshot, {
+          threadId: thread.id,
+          checkoutId: thread.checkoutId,
+          path: finding.path,
+          side: finding.anchor.side,
+          line: finding.location.line,
+        });
+        if (
+          selected === undefined ||
+          reviewFindingAnchorDigest({ ...finding, ...selected.target }) !==
+            reviewFindingAnchorDigest(finding)
+        )
+          throw new CodeOperationServiceError("unavailable");
+        excerpt = selected.excerpt;
+      }
+      chosen.push({
+        finding,
+        reference: {
+          threadId: thread.id,
+          checkoutId: thread.checkoutId,
+          findingId: finding.id,
+          version: finding.version,
+          anchorDigest: reviewFindingAnchorDigest(finding),
+        },
+        ...(excerpt === undefined ? {} : { excerpt }),
+      });
+    }
+    const current = await this.#scope(windowId, {
+      threadId: thread.id,
+      checkoutId: thread.checkoutId,
+    });
+    if ("failure" in current) throw new CodeOperationServiceError("unauthorized");
+    const latest = await this.#reviewFindings(windowId, thread.id);
+    if (
+      chosen.some(
+        ({ finding }) => latest.find((item) => item.id === finding.id)?.version !== finding.version,
+      )
+    )
+      throw new CodeOperationServiceError("invalid");
+    return chosen;
+  }
+
+  async #prepareReviewCorrection(
+    windowId: WindowId,
+    thread: CodeThread,
+    selection: ReadonlyArray<{ findingId: CodeReviewFinding["id"]; expectedVersion: number }>,
+    checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
+    admissionCurrent?: () => boolean,
+  ): Promise<CodeReviewCorrectionPrepared> {
+    const selected = await this.#selectedReviewFindings(windowId, thread, selection);
+    const assess = this.#reviewAssessmentReader(checkoutRoot, git);
+    const pieces = [
+      "Please address these selected local review findings. This is an editable correction request, not execution approval.",
+    ];
+    for (const { finding, excerpt } of selected) {
+      pieces.push(
+        `\n${finding.summary}\n${reviewFindingLabel(finding)}\nFinding ${finding.id} version ${finding.version}; reviewed digest ${finding.fileDigest}.`,
+      );
+      if (finding.anchor === undefined) {
+        pieces.push("Legacy finding: the original comparison revision is unrecorded.");
+        continue;
+      }
+      const assessed = await assess(finding.anchor.revision);
+      pieces.push(
+        `Captured ${finding.anchor.capturedAt}; ${assessed.anchorState}: ${assessed.explanation}`,
+        "Untrusted captured compared regions only, not the whole file:",
+        excerpt ?? "",
+      );
+    }
+    await this.#revalidateReviewEvidence(windowId, thread.id, thread.checkoutId);
+    if (admissionCurrent?.() === false) throw new CodeOperationServiceError("unauthorized");
+    const bounded = boundReviewText(pieces.join("\n"), 60_000);
+    const omissions = [
+      "Only selected findings and bounded captured regions are included; other comments and the full files are omitted.",
+      ...(bounded.truncated
+        ? [
+            "Some selected note/context text was omitted to keep this draft bounded; all selected finding references remain attached.",
+          ]
+        : []),
+    ];
+    return {
+      threadId: thread.id,
+      checkoutId: thread.checkoutId,
+      text: bounded.text + "\n\n" + omissions.join("\n"),
+      references: selected.map((item) => item.reference),
+      omissions,
+    };
+  }
+
+  #reviewEvidenceScope(
+    threadId: CodeThreadId,
+    frame: CodeOperationEventFrame,
+  ): CodeCheckoutId | false | undefined {
+    if (
+      frame.event.kind !== "operation-result" ||
+      (frame.event.result.kind !== "git-observed" && frame.event.result.kind !== "run-reviewed")
+    )
+      return undefined;
+    const bound = frame.event.result.reviewScope;
+    if (bound === undefined) return undefined;
+    return bound.threadId === threadId &&
+      this.#options.authority.readThread(threadId)?.checkoutId === bound.checkoutId
+      ? bound.checkoutId
+      : false;
+  }
+
+  async #revalidateReviewEvidence(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+    admissionCurrent?: () => boolean,
+  ): Promise<void> {
+    const scope = await this.#scope(windowId, { threadId, checkoutId });
+    const current = this.#options.authority.readThread(threadId);
+    if (
+      "failure" in scope ||
+      current?.checkoutId !== checkoutId ||
+      current.projectId !== scope.thread.projectId ||
+      admissionCurrent?.() === false
+    )
+      throw new CodeOperationServiceError("unauthorized");
+  }
+
   #hunkEvidenceScope(
     threadId: CodeThreadId,
     operationId: CodeOperationId,
@@ -2457,16 +2848,19 @@ export class CodeOperationService {
   ): Promise<{ readonly reference: CodeEvidenceReference; readonly text: string }> {
     let cursor = 0;
     let reference: CodeEvidenceReference | undefined;
+    let reviewCheckoutId: CodeCheckoutId | undefined;
     let hunkCheckoutId: CodeCheckoutId | undefined;
     while (reference === undefined) {
       const frames = await this.subscribe(windowId, threadId, operationId, cursor, 256);
       for (const frame of frames) {
+        const reviewScope = this.#reviewEvidenceScope(threadId, frame);
         const hunkScope = this.#hunkEvidenceScope(threadId, operationId, frame);
-        if (hunkScope === false) continue;
+        if (reviewScope === false || hunkScope === false) continue;
         reference = evidenceReferences(frame.event).find(
           (candidate) => candidate.contentId === contentId,
         );
         if (reference !== undefined) {
+          reviewCheckoutId = reviewScope;
           hunkCheckoutId = hunkScope;
           break;
         }
@@ -2481,6 +2875,8 @@ export class CodeOperationService {
     if (hunkCheckoutId !== undefined)
       this.#requireHunkEvidenceCurrent(windowId, threadId, hunkCheckoutId, admissionCurrent);
     if (text === undefined) throw new CodeOperationServiceError("unavailable");
+    if (reviewCheckoutId !== undefined)
+      await this.#revalidateReviewEvidence(windowId, threadId, reviewCheckoutId, admissionCurrent);
     return { reference, text };
   }
 
@@ -2513,6 +2909,7 @@ export class CodeOperationService {
       requestedByOperation.set(String(item.operationId), requested);
     }
     const references = new Map<string, CodeEvidenceReference>();
+    const reviewCheckouts = new Set<CodeCheckoutId>();
     const hunkScopes = new Map<string, CodeCheckoutId>();
     const processedOperations = new Set<string>();
     for (const item of items) {
@@ -2524,12 +2921,14 @@ export class CodeOperationService {
       for (;;) {
         const frames = this.#replay(threadId, item.operationId, cursor, 256).frames;
         for (const frame of frames) {
+          const reviewScope = this.#reviewEvidenceScope(threadId, frame);
           const hunkScope = this.#hunkEvidenceScope(threadId, item.operationId, frame);
-          if (hunkScope === false) continue;
+          if (reviewScope === false || hunkScope === false) continue;
           for (const reference of evidenceReferences(frame.event)) {
             if (requested.has(String(reference.contentId))) {
               const key = `${operationKey}:${String(reference.contentId)}`;
               references.set(key, reference);
+              if (reviewScope !== undefined) reviewCheckouts.add(reviewScope);
               if (hunkScope !== undefined) hunkScopes.set(key, hunkScope);
             }
           }
@@ -2557,6 +2956,8 @@ export class CodeOperationService {
       if (text === undefined) throw new CodeOperationServiceError("unavailable");
       result.push({ operationId: item.operationId, contentId: item.contentId, text });
     }
+    for (const checkout of reviewCheckouts)
+      await this.#revalidateReviewEvidence(windowId, threadId, checkout, admissionCurrent);
     for (const checkoutId of hunkScopes.values())
       this.#requireHunkEvidenceCurrent(windowId, threadId, checkoutId, admissionCurrent);
     return result;
@@ -3313,20 +3714,86 @@ export class CodeOperationService {
         return this.#mergePullRequest(command, root.checkoutRoot, git);
       case "observe-pull-request":
         return this.#pullRequestReview(command, root.checkoutRoot, git);
-      case "create-review-finding": {
-        const finding = await this.#options.reviewFindings.create(windowId, {
-          id: command.findingId,
+      case "prepare-review-target": {
+        const target = await this.resolveReviewTarget(windowId, command, admissionCurrent);
+        const assessment = await this.#reviewAnchorState(
+          target.anchor.revision,
+          root.checkoutRoot,
+          git,
+        );
+        await this.#revalidateReviewEvidence(windowId, thread.id, checkout.id, admissionCurrent);
+        return decodeCodeOperationResult({
+          kind: "review-target-state",
+          operationId: command.operationId,
+          target,
+          ...assessment,
+        });
+      }
+      case "list-review-findings": {
+        const findings = await this.#reviewFindings(windowId, thread.id);
+        const assessed = [];
+        const assess = this.#reviewAssessmentReader(root.checkoutRoot, git);
+        for (const finding of findings.slice(0, 256)) {
+          const assessment =
+            finding.checkoutId !== checkout.id
+              ? {
+                  anchorState: "unavailable",
+                  explanation:
+                    "This finding belongs to a previous checkout. Its original anchor is retained.",
+                }
+              : finding.anchor === undefined
+                ? {
+                    anchorState: "legacy",
+                    explanation:
+                      "Legacy file finding: no captured comparison revision was recorded.",
+                  }
+                : await assess(finding.anchor.revision);
+          assessed.push({ finding, ...assessment });
+        }
+        await this.#revalidateReviewEvidence(windowId, thread.id, checkout.id, admissionCurrent);
+        return decodeCodeOperationResult({
+          kind: "review-findings-state",
+          operationId: command.operationId,
           threadId: thread.id,
           checkoutId: checkout.id,
-          fileId: command.fileId,
-          path: command.path,
-          fileDigest: command.fileDigest,
-          location: command.location,
-          severity: command.severity,
-          summary: command.summary,
-          author: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-          provenance: { kind: "manual" },
+          findings: assessed,
+          truncated: findings.length > 256,
         });
+      }
+      case "prepare-review-correction": {
+        const prepared = await this.#prepareReviewCorrection(
+          windowId,
+          thread,
+          command.findings,
+          root.checkoutRoot,
+          git,
+          admissionCurrent,
+        );
+        return decodeCodeOperationResult({
+          kind: "review-correction-prepared",
+          operationId: command.operationId,
+          prepared,
+        });
+      }
+      case "create-review-finding": {
+        const finding = await this.#options.reviewFindings.create(
+          windowId,
+          {
+            id: command.findingId,
+            threadId: thread.id,
+            checkoutId: checkout.id,
+            fileId: command.fileId,
+            path: command.path,
+            fileDigest: command.fileDigest,
+            ...(command.anchor === undefined ? {} : { anchor: command.anchor }),
+            location: command.location,
+            severity: command.severity,
+            summary: command.summary,
+            author: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+            provenance: { kind: "manual" },
+          },
+          admissionCurrent,
+        );
         return finding.id === command.findingId
           ? decodeCodeOperationResult({
               kind: "review-finding-state",
@@ -3339,11 +3806,17 @@ export class CodeOperationService {
         return decodeCodeOperationResult({
           kind: "review-finding-state",
           operationId: command.operationId,
-          finding: await this.#options.reviewFindings.changeState(windowId, {
-            findingId: command.findingId,
-            expectedVersion: command.expectedVersion,
-            state: command.state,
-          }),
+          finding: await this.#options.reviewFindings.changeState(
+            windowId,
+            {
+              findingId: command.findingId,
+              threadId: thread.id,
+              checkoutId: checkout.id,
+              expectedVersion: command.expectedVersion,
+              state: command.state,
+            },
+            admissionCurrent,
+          ),
         });
       case "start-provider-turn":
         return this.#providerTurn(
@@ -3692,6 +4165,7 @@ export class CodeOperationService {
       if (diff.status !== "ready") continue;
       return decodeCodeOperationResult({
         kind: "run-reviewed",
+        reviewScope: { threadId: thread.id, checkoutId: command.checkoutId },
         operationId: command.operationId,
         gitOperationId: command.gitOperationId,
         outcome: {
@@ -3820,6 +4294,7 @@ export class CodeOperationService {
       );
     return decodeCodeOperationResult({
       kind: "git-observed",
+      reviewScope: { threadId: command.threadId, checkoutId: command.checkoutId },
       operationId: command.operationId,
       gitOperationId: command.gitOperationId,
       head:
@@ -4917,6 +5392,61 @@ export class CodeOperationService {
         "refused",
       );
     }
+    if ((command.reviewFindingReferences?.length ?? 0) > 0) {
+      try {
+        const references = command.reviewFindingReferences ?? [];
+        if (
+          this.#options.recordReviewContent === undefined ||
+          references.some(
+            (ref) => ref.threadId !== thread.id || ref.checkoutId !== thread.checkoutId,
+          )
+        )
+          throw new Error("unavailable");
+        const selected = await this.#selectedReviewFindings(
+          windowId,
+          thread,
+          references.map((ref) => ({ findingId: ref.findingId, expectedVersion: ref.version })),
+        );
+        if (
+          selected.some(
+            (item, index) => item.reference.anchorDigest !== references[index]?.anchorDigest,
+          )
+        )
+          throw new Error("stale");
+        if (admissionCurrent?.() === false) throw new Error("revoked");
+        for (const { reference } of selected) {
+          const recorded = this.#options.recordReviewContent({
+            threadId: thread.id,
+            provenance: { origin: "external-content", sourceLabel: "Local Code review correction" },
+            contentReference: `code-review:${reference.findingId}:v${reference.version}:${reference.anchorDigest}`,
+            correlationId: command.operationId,
+            authorized: true,
+          });
+          if (recorded.kind !== "recorded" && recorded.kind !== "already-recorded")
+            throw new Error("unavailable");
+        }
+        const text = frameExternalContentForModel({
+          origin: "external-content",
+          sourceLabel: "Local Code review correction",
+          section: "conversation",
+          body: [
+            "The editable request carries selected local review references. Its text may have been edited by the person; no other findings, full files or new approval are included.",
+            ...selected.map(
+              ({ finding, reference }) =>
+                `${reviewFindingLabel(finding)}; finding ${finding.id} version ${reference.version}; original anchor ${reference.anchorDigest}.`,
+            ),
+          ].join("\n"),
+        }).text;
+        context.push({ kind: "user-message", text });
+      } catch {
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          "A selected review finding or its captured comparison is unavailable or changed. Reopen Review to prepare it again, or explicitly clear this draft. Nothing was sent.",
+          "refused",
+        );
+      }
+    }
     // Read last, after every refusal above: carrying a message marks this
     // thread as having ingested external content, and a turn that was never
     // going to start should not do that. A failed read costs the turn its
@@ -5411,11 +5941,14 @@ function sameConversationStart(
     event.providerInstanceId === thread.providerInstanceId &&
     event.modelId === thread.modelId &&
     event.sessionId === command.sessionId &&
+    (event.checkoutId === undefined || event.checkoutId === command.checkoutId) &&
     event.prompt.contentId === command.prompt.contentId &&
     event.prompt.digest === command.prompt.digest &&
     event.prompt.byteLength === command.prompt.byteLength &&
     JSON.stringify(event.extensionSelections ?? []) ===
       JSON.stringify(command.extensionSelections ?? []) &&
+    JSON.stringify(event.reviewFindingReferences ?? []) ===
+      JSON.stringify(command.reviewFindingReferences ?? []) &&
     JSON.stringify(event.delivery ?? null) === JSON.stringify(command.delivery ?? null)
   );
 }
@@ -5496,6 +6029,8 @@ function resultEvidenceReferences(result: CodeOperationResult): readonly CodeEvi
     case "git-observed":
     case "git-hunks":
       return [result.diff];
+    case "run-reviewed":
+      return result.reviewScope === undefined ? [] : [result.outcome.diff];
     case "pull-request-review":
       return result.state === "observed" ? [result.description, result.diff] : [];
     case "terminal-state":
@@ -5510,6 +6045,12 @@ function resultEvidenceReferences(result: CodeOperationResult): readonly CodeEvi
 
 function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
   switch (kind) {
+    // Local review journals annotations, not checkout effects or execution grants.
+    case "prepare-review-target":
+    case "list-review-findings":
+    case "prepare-review-correction":
+    case "create-review-finding":
+    case "update-review-finding":
     case "observe-git":
     case "observe-pull-request":
     case "start-provider-turn":
