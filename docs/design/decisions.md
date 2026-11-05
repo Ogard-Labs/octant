@@ -413,7 +413,7 @@ Status: Built. Since: —. Detail: [Architecture: Process topology](../architect
 
 App-owned tools are capability families: one tool per object with an operation enum and an on-demand help operation. Every runtime receives the same definitions through the transport its adapter verified, and no transport edits a person's provider configuration.
 
-- A family whose grant or capability is off is omitted rather than advertised and refused; help never reaches the family's executor.
+- A family whose grant or capability is off is omitted rather than advertised and refused; help never reaches the family's executor. Where the runtime keeps its own tool list, omission is per session: a Claude Code session lists a tool from the first turn that offers it and refuses it in turns that do not, so the list only grows and the cached prefix changes only when a new tool arrives.
 - A runtime connection binds its tool catalogue before it sends its prompt and accepts only the expected in-process server and offered tool names. A catalogue change cannot overlap a running tool-enabled turn. _Here only._
 - Late, duplicate or cancelled tool answers are refused, and per-request cancellation reaches the executor even while it waits for approval. _Here only._
 - Browser read-page accepts an optional CSS selector or snapshot ref. Screenshots reach the provider through its image-result channel, not as encoded bytes in text, and origin approval and task authority apply before capture. _Here only._
