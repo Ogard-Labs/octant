@@ -29,8 +29,9 @@ export interface RunningApp {
  * it is stable, which is the failure that would put unreviewed `main` in front
  * of everyone on the stable ring.
  *
- * This is the *default* ring, not a lock: a person may follow any ring, and
- * the version ordering already makes every direction safe — a stable release
+ * This is the *default* ring, not a lock: a person may follow any ring their
+ * app follows (Octant: stable or candidate; Octant Nightly: preview), and the
+ * version ordering already makes every direction safe — a stable release
  * outranks the previews and candidates leading to it, and no ring can offer a
  * version that is not strictly newer.
  */

@@ -120,30 +120,59 @@ async function fixture() {
   };
 }
 
-it("persists only Nightly's own ring and automatic choice without starting a check", async () => {
+it("persists only Nightly's own automatic choice on its one ring without starting a check", async () => {
   const f = await fixture();
   expect(f.updates.state()).toMatchObject({
     ring: "preview",
     automaticChecks: false,
-    allowedRings: ["preview", "candidate"],
+    allowedRings: ["preview"],
   });
-  await Promise.all([f.updates.setAutomatic(true), f.updates.setRing("candidate")]);
+  await Promise.all([f.updates.setAutomatic(true), f.updates.setRing("preview")]);
   expect(JSON.parse(await readFile(join(f.directory, "update-preferences.json"), "utf8"))).toEqual({
-    ring: "candidate",
+    ring: "preview",
     automaticChecks: true,
   });
   const reopened = await createNightlyAppUpdates(f.options);
-  expect(reopened.state()).toMatchObject({ ring: "candidate", automaticChecks: true });
+  expect(reopened.state()).toMatchObject({ ring: "preview", automaticChecks: true });
   reopened.dispose();
   expect(f.fetchImpl).not.toHaveBeenCalled();
-  expect((await f.updates.setRing("stable")).refusal).toBe("wrong-ring");
-  expect(f.updates.state().ring).toBe("candidate");
+  for (const other of ["stable", "candidate"]) {
+    expect((await f.updates.setRing(other)).refusal).toBe("wrong-ring");
+    expect(f.updates.state().ring).toBe("preview");
+  }
+  expect(JSON.parse(await readFile(join(f.directory, "update-preferences.json"), "utf8"))).toEqual({
+    ring: "preview",
+    automaticChecks: true,
+  });
+});
+
+it("follows Nightly's ring when an earlier choice stored the candidate ring", async () => {
+  const f = await fixture();
+  await writeFile(
+    join(f.directory, "update-preferences.json"),
+    JSON.stringify({ ring: "candidate", automaticChecks: true }),
+  );
+  const reopened = await createNightlyAppUpdates(f.options);
+  expect(reopened.state()).toMatchObject({ ring: "preview", automaticChecks: true });
+  reopened.dispose();
+});
+
+it("leaves automatic checks off when the stored preference names an unknown ring", async () => {
+  const f = await fixture();
+  await writeFile(
+    join(f.directory, "update-preferences.json"),
+    JSON.stringify({ ring: "stable", automaticChecks: true }),
+  );
+  const reopened = await createNightlyAppUpdates(f.options);
+  expect(reopened.state()).toMatchObject({ ring: "preview", automaticChecks: false });
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  reopened.dispose();
 });
 
 it("does not adopt preferences redirected outside Nightly's own preference file", async () => {
   const f = await fixture();
   const foreign = join(f.directory, "foreign-settings.json");
-  await writeFile(foreign, JSON.stringify({ ring: "candidate", automaticChecks: true }));
+  await writeFile(foreign, JSON.stringify({ ring: "preview", automaticChecks: true }));
   await symlink(foreign, join(f.directory, "update-preferences.json"));
   const reopened = await createNightlyAppUpdates(f.options);
   expect(reopened.state()).toMatchObject({ ring: "preview", automaticChecks: false });

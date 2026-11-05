@@ -2717,7 +2717,7 @@ Octant Nightly is a second desktop app that installs beside Octant, follows the 
 - Octant on Preview offers Nightly as an opt-in install, only on the person's action, after verifying the signed feed, the artifact hash and a Nightly-specific code-signature requirement.
 - A build's flavor follows its ring (stable and candidate package as Octant, preview as Nightly), one app's update can never install the other, and Nightly is published only after an Octant build exists.
 
-Status: Identity, packaging, authenticated window-bootstrap and validated Stable host-only launch and current-client retention foundations built; the 2026-11-05 channel split, the Preview install row, the test-data host, complete embedded Browser, complete native bridge, full lifecycle acceptance and installation pending. Since: 2026-11-05. Detail: [Octant Nightly: one host serves both](nightly-app.md#one-host-serves-both) and [getting Octant Nightly](nightly-app.md#getting-octant-nightly).
+Status: Identity, packaging, the 2026-11-05 channel split, authenticated window-bootstrap and validated Stable host-only launch and current-client retention foundations built; the Preview install row, the test-data host, complete embedded Browser, complete native bridge, full lifecycle acceptance and installation pending. Since: 2026-11-05. Detail: [Octant Nightly: one host serves both](nightly-app.md#one-host-serves-both) and [getting Octant Nightly](nightly-app.md#getting-octant-nightly).
 
 ## Code tooling
 

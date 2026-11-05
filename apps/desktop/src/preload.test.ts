@@ -170,7 +170,7 @@ describe("desktop preload bridge", () => {
       currentVersion: "0.1.0",
       automaticChecks: false,
       ring: "preview",
-      allowedRings: ["preview", "candidate"],
+      allowedRings: ["preview"],
     };
     const ipc: IpcRendererPort = {
       invoke: vi.fn().mockResolvedValue(state),

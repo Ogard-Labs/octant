@@ -1230,6 +1230,23 @@ describe("desktop packaging boundary", () => {
     expect(
       createDesktopRuntimeManifest("0.1.0-preview.20260915.1", desktopIdentity("nightly")).version,
     ).toBe("0.1.0-preview.20260915.1");
+    expect(createDesktopRuntimeManifest("0.1.0-candidate.20261105.3")).toMatchObject({
+      version: "0.1.0-candidate.20261105.3",
+      productName: "Octant",
+      octantDesktopFlavor: "stable",
+    });
+  });
+
+  it("refuses a Nightly package on an Octant ring and an Octant package on the Nightly ring", () => {
+    expect(() =>
+      createDesktopRuntimeManifest("0.1.0-candidate.20261105.3", desktopIdentity("nightly")),
+    ).toThrow(/require Octant/);
+    expect(() => createDesktopRuntimeManifest("0.1.0", desktopIdentity("nightly"))).toThrow(
+      /require Octant/,
+    );
+    expect(() => createDesktopRuntimeManifest("0.1.0-preview.20261105.3")).toThrow(
+      /preview versions require Octant Nightly/,
+    );
   });
 
   it("refuses a release version that is not the one this repository declares", () => {

@@ -21,8 +21,10 @@ describe("desktop application identity", () => {
       bundleId: "app.octant.desktop.nightly",
       scheme: "octant-nightly",
       commandName: "octant-nightly",
-      rings: ["preview", "candidate"],
+      rings: ["preview"],
+      defaultRing: "preview",
     });
+    expect(stable).toMatchObject({ rings: ["stable", "candidate"], defaultRing: "stable" });
   });
 
   it("reads a package's identity instead of accepting the launch environment as its identity", () => {
@@ -35,6 +37,12 @@ describe("desktop application identity", () => {
     expect(desktopIdentityForPackage({ octantDesktopFlavor: "stable", version: "0.1.0" })).toBe(
       desktopIdentity("stable"),
     );
+    expect(
+      desktopIdentityForPackage({
+        octantDesktopFlavor: "stable",
+        version: "0.1.0-candidate.20261105.2",
+      }),
+    ).toBe(desktopIdentity("stable"));
     expect(() =>
       desktopIdentityForPackage({ octantDesktopFlavor: "unknown", version: "0.1.0" }),
     ).toThrow();
@@ -45,10 +53,24 @@ describe("desktop application identity", () => {
 
   it.each([
     [{}, "0.1.0-preview.20261103.1"],
+    [{ OCTANT_PACKAGE_FLAVOR: "stable" }, "0.1.0-preview.20261103.1"],
     [{ OCTANT_PACKAGE_FLAVOR: "nightly" }, "0.1.0"],
+    [{ OCTANT_PACKAGE_FLAVOR: "nightly" }, "0.1.0-candidate.20261105.1"],
+    [{}, "0.1.0-candidate"],
     [{ OCTANT_PACKAGE_FLAVOR: "nightly" }, "0.1.0-preview"],
     [{ OCTANT_PACKAGE_FLAVOR: "nightly" }, "0.1.0-other.20261103.1"],
   ])("refuses packaging a version under the wrong application identity", (environment, version) => {
     expect(() => resolveDesktopPackageFlavor(environment, version)).toThrow();
   });
+
+  it.each([
+    [{}, "0.1.0", "stable"],
+    [{}, "0.1.0-candidate.20261105.1", "stable"],
+    [{ OCTANT_PACKAGE_FLAVOR: "nightly" }, "0.1.0-preview.20261105.1", "nightly"],
+  ])(
+    "packages stable and candidate as Octant and preview as Nightly",
+    (environment, version, flavor) => {
+      expect(resolveDesktopPackageFlavor(environment, version)).toBe(flavor);
+    },
+  );
 });

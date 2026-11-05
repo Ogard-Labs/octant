@@ -31,10 +31,11 @@ gate with lifecycle, credential and native-surface parity evidence. Stable
 release and local packaging are unaffected by that gate.
 Nothing in this foundation authorizes installation or publication.
 
-The two-binary channel model below (2026-11-05) is not built yet: today's
-workflow still packages `candidate` as Nightly, Octant's updater still follows
-only `stable`, the install row is not offered from Preview, and Nightly cannot
-yet run its own test-data host.
+The two-binary channel split below (2026-11-05) is built: Octant follows
+`stable` or `candidate`, Nightly follows only `preview`, packaging and the
+release workflow stamp the flavor from the ring, and the scheduled Nightly run
+alone is held by the functional-client preflight. The install row is not yet
+offered from Preview, and Nightly cannot yet run its own test-data host.
 
 ## Two apps, one set of data
 

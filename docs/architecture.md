@@ -13347,7 +13347,7 @@ macOS-only.
   that folder, so the journal keeps one writer and no nightly migrates data
   Octant must still open. For development and testing it can instead run its
   own host on separate test data. A person's first install is therefore Octant
-  ([Octant Nightly](design/nightly-app.md)). The channel split, the
+  ([Octant Nightly](design/nightly-app.md)). The channel split is built; the
   Preview-only Nightly install and the test-data host are not built yet. Identity and packaging foundations
   now stamp separate app flavors and restrict each packaged updater to its
   identity's rings. A separate authenticated native window bootstrap can load
