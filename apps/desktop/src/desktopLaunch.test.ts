@@ -14,6 +14,37 @@ describe("packaged desktop launch", () => {
     expect(loadHostOwningDesktop).not.toHaveBeenCalled();
   });
 
+  it("reads authenticated status before refusing the unfinished Nightly client bridge", async () => {
+    const loadHost = vi.fn(async () => undefined);
+    const status = vi.fn(async () => ({
+      kind: "ready" as const,
+      protocol: 1 as const,
+      version: "0.1.0",
+    }));
+    expect(
+      await launchDesktopApplication(desktopIdentity("nightly"), loadHost, status),
+    ).toMatchObject({
+      kind: "client-bridge-required",
+      message: expect.stringContaining("0.1.0"),
+    });
+    expect(status).toHaveBeenCalledOnce();
+    expect(loadHost).not.toHaveBeenCalled();
+  });
+
+  it("reports unsigned preflight refusal without importing the shared host", async () => {
+    const loadHost = vi.fn(async () => undefined);
+    expect(
+      await launchDesktopApplication(desktopIdentity("nightly"), loadHost, async () => ({
+        kind: "refused",
+        reason: "unsigned-build",
+      })),
+    ).toMatchObject({
+      kind: "client-bridge-required",
+      message: expect.stringContaining("signed"),
+    });
+    expect(loadHost).not.toHaveBeenCalled();
+  });
+
   it("preserves stable's existing desktop entry", async () => {
     const loadHostOwningDesktop = vi.fn(async () => undefined);
     expect(

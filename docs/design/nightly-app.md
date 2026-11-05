@@ -143,6 +143,58 @@ complete the stable-host bridge. The functional launch and publication gates
 remain until those requirements and embedded Browser parity are implemented and
 verified.
 
+## Authenticated desktop status preflight
+
+Packaged macOS Stable owns a transient status endpoint directly in its ordinary
+Electron main process. Ordinary Nightly queries it before importing any
+host-owning module. The fixed terminal and Canvas roles cannot register this
+endpoint. Development and ad-hoc builds report a typed refusal; ordinary Stable
+startup remains available when it cannot advertise authenticated status.
+
+The local bootstrap name is discovery only. Every request and reply uses the
+kernel message audit token, including effective user, login audit user and audit
+session matched to the current desktop's scope. Neither a payload PID nor a
+caller-provided path identifies a peer. Each side requires the opposite primary
+bundle identifier and exact main executable, the same validated Developer ID
+Team, hardened runtime and library validation. Runtime/helper identities,
+debuggable or DYLD-override builds and old unsealed Stable builds are refused.
+
+The native binding checks dynamic code validity against the audit token and
+strict static/nested resource validity. Only then does it consume artifact
+metadata. A signed `sealed-main-v1` entry marker, ASAR integrity configuration and
+required fuse states bind the packaging policy. A fresh static check, matching
+CodeDirectory identity and metadata, and final dynamic check surround the
+read-only fuse observation. These checks do not assert an atomic filesystem
+snapshot. The streaming reader uses bounded owned buffers and refuses unknown,
+malformed or truncated fuse schemas; it never patches a runtime. Artifact inputs
+must be on a local volume.
+
+The fixed protocol returns only its version and the authenticated app version;
+it conveys no host URL, secret, credential, window registration or lease.
+Missing status cannot distinguish a closed Stable app from an older app without
+this endpoint, so startup says so. Even an authenticated status response leaves
+Nightly's unfinished desktop-bridge gate in force. It does not establish usable
+Nightly, shared native surfaces or Browser parity.
+
+The binding exports only `start`, `status` and `close`, with no arbitrary Mach
+operation or renderer IPC. Queue and message sizes are fixed, send/receive and
+validation decisions have deadlines, and expensive Security/filesystem work
+runs off the main loop. OS validation calls cannot be forcibly cancelled: an
+expired observation is refused, and shutdown reports failure rather than claiming
+closed while validation remains active. Accepted quit closes the owned endpoint
+and awaits its worker alongside host cleanup; rejected quit leaves it available.
+Malformed and oversized messages dispose transferred rights without ending the
+listener, and close never unregisters a replacement's name.
+
+Normal desktop builds do not require Node native headers. macOS packaging builds
+only this component from source through the existing pinned Electron rebuild
+pipeline, which supplies headers as needed; no runtime version is substituted.
+The addon is an exact signed `Resources/native` payload outside ASAR. This keeps
+the existing JavaScript archive/unpack policy intact. Same-Team Developer ID
+positive acceptance, active authenticated-owner teardown and full production
+package validation still need their own evidence; unsigned fixture refusal does
+not satisfy those cases.
+
 ## Identity
 
 The apps differ only in what macOS and Linux need to keep two apps apart:

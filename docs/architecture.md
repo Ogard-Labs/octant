@@ -249,9 +249,15 @@ On macOS, both trusted desktop executables use sealed ASAR entries and fixed
 launch roles. Stable's separately identified, same-version bundled runtime runs
 its host, managed tools, scoped terminal CLI and executable extensions as Node. The worker runtime is
 not a trusted desktop peer, and Node consumers keep physical server files and
-stdin supervision. It has independent Framework/fuse bytes; no arbitrary script
-runs under the trusted desktop executable's identity. See the owning
+stdin supervision. The runtime has independent Framework/fuse bytes; no arbitrary
+script runs under the trusted desktop executable's identity. See the owning
 [fixed-entry rules](design/nightly-app.md#fixed-packaged-entry).
+
+The ordinary packaged macOS main owns a bounded native status preflight for
+Nightly, authenticated in both directions from kernel audit tokens, same-user
+login scope and strict signed primary-app policy. Its discovery name grants no
+authority; the status response includes no endpoint or lease. See
+[desktop status preflight](design/nightly-app.md#authenticated-desktop-status-preflight).
 
 ```mermaid
 flowchart LR
