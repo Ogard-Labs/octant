@@ -251,7 +251,7 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createDiagnosticsFailureIncidentEvent } from "../diagnosticsExportService";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
 import { ChatScratchStore } from "./chatScratchStore";
-import { ChatTurnRunner, type AppManagedToolSet } from "./chatTurnRunner";
+import { ChatTurnRunner, RESEARCH_TOOL_DEFINITION, type AppManagedToolSet } from "./chatTurnRunner";
 import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
@@ -5144,16 +5144,7 @@ export class ChatService {
       thread.researchEnabled &&
       researchRoute.kind === "ready" &&
       researchRoute.backend === "searxng"
-        ? [
-            {
-              name: RESEARCH_TOOL_NAME,
-              inputSchema: {
-                type: "object",
-                properties: { query: { type: "string" } },
-                required: ["query"],
-              },
-            },
-          ]
+        ? [RESEARCH_TOOL_DEFINITION]
         : [];
     const tools = [...researchTools, ...(appManagedTools?.definitions ?? [])];
     if (new Set(tools.map(({ name }) => name)).size !== tools.length) {
