@@ -5,6 +5,32 @@
 #include <string_view>
 
 namespace octant::desktop_peer {
+inline bool ordinary_desktop_arguments(bool stable,
+                                       std::span<const std::string_view> args) {
+  if (args.size() > 3)
+    return false;
+  const std::string_view scheme = stable ? "octant://" : "octant-nightly://";
+  bool psn = false, link = false, host_only = false;
+  for (auto arg : args) {
+    if (arg.size() > 16384)
+      return false;
+    if (!psn && arg.starts_with("-psn_")) {
+      psn = true;
+      continue;
+    }
+    if (stable && !host_only && !link && arg == "--octant-host-only") {
+      host_only = true;
+      continue;
+    }
+    if (!link && !host_only && arg.starts_with(scheme)) {
+      link = true;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
 enum class FusePolicy { trusted, absent, malformed, incompatible };
 
 // Read-only format documented at electronjs.org/docs/latest/tutorial/fuses.

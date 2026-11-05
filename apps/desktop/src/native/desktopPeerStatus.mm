@@ -1,4 +1,5 @@
 #include "desktopPeerPolicy.h"
+#import <AppKit/AppKit.h>
 #include <CommonCrypto/CommonDigest.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
@@ -15,7 +16,9 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#ifndef OCTANT_PEER_TRANSPORT_TEST
 #include <node_api.h>
+#endif
 #include <servers/bootstrap.h>
 #include <string>
 #include <sys/event.h>
@@ -51,7 +54,7 @@ struct Scope {
   au_asid_t session = 0;
 };
 struct Identity {
-  std::string team, version;
+  std::string team, version, root;
   Scope scope;
 };
 struct StatusMessage {
@@ -75,8 +78,8 @@ struct State {
 };
 std::shared_ptr<State> state = std::make_shared<State>();
 std::atomic<bool> start_pending = false, status_pending = false,
-                  close_pending = false;
-std::atomic<unsigned> validations = 0;
+                  close_pending = false, launch_pending = false;
+std::atomic<unsigned> validations = 0, launches = 0;
 
 bool expired(Deadline deadline) { return Clock::now() >= deadline; }
 std::string text(CFTypeRef value) {
@@ -112,28 +115,17 @@ bool same_scope(audit_token_t token, const Scope &self) {
          audit_token_to_asid(token) == self.session;
 }
 bool ordinary_self(bool stable) {
-  const std::string scheme = stable ? "octant://" : "octant-nightly://";
-  bool psn = false, link = false;
   const int count = *_NSGetArgc();
   char **args = *_NSGetArgv();
-  if (count > 4)
+  if (count < 1 || count > 4)
     return false;
-  for (int index = 1; index < count; ++index) {
-    std::string_view arg(args[index]);
-    if (arg.size() > 16384)
-      return false;
-    if (!psn && arg.starts_with("-psn_")) {
-      psn = true;
-      continue;
-    }
-    if (!link && arg.starts_with(scheme)) {
-      link = true;
-      continue;
-    }
-    return false;
-  }
-  return true;
+  std::array<std::string_view, 3> entries;
+  for (int index = 1; index < count; ++index)
+    entries[index - 1] = args[index];
+  return octant::desktop_peer::ordinary_desktop_arguments(
+      stable, {entries.data(), static_cast<size_t>(count - 1)});
 }
+
 bool same_file(const struct stat &a, const struct stat &b) {
   return a.st_dev == b.st_dev && a.st_ino == b.st_ino &&
          a.st_size == b.st_size &&
@@ -183,36 +175,11 @@ bool signed_info(SecStaticCodeRef code, OwnedCF<CFDictionaryRef> &info) {
                                        kSecCSSigningInformation,
                                        &info.value) == errSecSuccess;
 }
-bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
+bool validate_artifact(SecStaticCodeRef disk, SecCodeRef dynamic, bool stable,
                        const std::string &required_team, Identity &identity,
                        Deadline deadline, std::string &reason) {
-  if (expired(deadline)) {
-    reason = "deadline-exceeded";
-    return false;
-  }
-  if (!same_scope(token, scope)) {
-    reason = "invalid-scope";
-    return false;
-  }
-  OwnedCF<CFDataRef> audit;
-  audit.value = CFDataCreate(nullptr, reinterpret_cast<const UInt8 *>(&token),
-                             sizeof(token));
-  if (!audit.value)
-    return false;
-  const void *keys[] = {kSecGuestAttributeAudit}, *values[] = {audit.value};
-  OwnedCF<CFDictionaryRef> attributes;
-  attributes.value = CFDictionaryCreate(nullptr, keys, values, 1,
-                                        &kCFTypeDictionaryKeyCallBacks,
-                                        &kCFTypeDictionaryValueCallBacks);
-  OwnedCF<SecCodeRef> dynamic;
-  if (!attributes.value || SecCodeCopyGuestWithAttributes(
-                               nullptr, attributes.value, kSecCSDefaultFlags,
-                               &dynamic.value) != errSecSuccess) {
-    reason = "invalid-peer";
-    return false;
-  }
   OwnedCF<CFDictionaryRef> info;
-  if (!signed_info(dynamic.value, info))
+  if (!signed_info(dynamic ? dynamic : disk, info))
     return false;
   const std::string identifier = stable ? stable_id : nightly_id;
   const std::string product = stable ? "Octant" : "Octant Nightly";
@@ -249,8 +216,8 @@ bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
       SecRequirementCreateWithString(requirement_string.value,
                                      kSecCSDefaultFlags,
                                      &requirement.value) != errSecSuccess ||
-      SecCodeCheckValidity(dynamic.value, kSecCSDefaultFlags,
-                           requirement.value) != errSecSuccess) {
+      (dynamic && SecCodeCheckValidity(dynamic, kSecCSDefaultFlags,
+                                       requirement.value) != errSecSuccess)) {
     reason = "invalid-peer";
     return false;
   }
@@ -258,10 +225,7 @@ bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
     reason = "deadline-exceeded";
     return false;
   }
-  OwnedCF<SecStaticCodeRef> disk;
-  if (SecCodeCopyStaticCode(dynamic.value, kSecCSDefaultFlags, &disk.value) !=
-          errSecSuccess ||
-      SecStaticCodeCheckValidity(disk.value,
+  if (SecStaticCodeCheckValidity(disk,
                                  kSecCSStrictValidate |
                                      kSecCSCheckAllArchitectures |
                                      kSecCSCheckNestedCode,
@@ -276,7 +240,7 @@ bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
   // Candidate signing data forms the requirement only. Consume filesystem
   // metadata after validity, as SecCodeCopySigningInformation requires.
   OwnedCF<CFDictionaryRef> verified_info;
-  if (!signed_info(disk.value, verified_info) ||
+  if (!signed_info(disk, verified_info) ||
       text(field(verified_info.value, kSecCodeInfoIdentifier)) != identifier ||
       text(field(verified_info.value, kSecCodeInfoTeamIdentifier)) != team ||
       !field(verified_info.value, kSecCodeInfoFlags) ||
@@ -351,8 +315,8 @@ bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
     reason = expired(deadline) ? "deadline-exceeded" : "incompatible-host";
     return false;
   }
-  // Dynamic validation binds this on-disk signature to the kernel's running
-  // guest. A fresh static object rechecks resources after the fuse read.
+  // Running peers additionally bind this artifact to the kernel guest. Both
+  // paths recheck resources after reading the fixed-entry fuse policy.
   OwnedCF<CFURLRef> root_url;
   root_url.value = CFURLCreateFromFileSystemRepresentation(
       nullptr, reinterpret_cast<const UInt8 *>(root.data()), root.size(), true);
@@ -381,8 +345,8 @@ bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
       !CFEqual(original_hash, fresh_hash) || !fresh_plist ||
       CFGetTypeID(fresh_plist) != CFDictionaryGetTypeID() ||
       !CFEqual(plist, fresh_plist) ||
-      SecCodeCheckValidity(dynamic.value, kSecCSDefaultFlags,
-                           requirement.value) != errSecSuccess) {
+      (dynamic && SecCodeCheckValidity(dynamic, kSecCSDefaultFlags,
+                                       requirement.value) != errSecSuccess)) {
     reason = "invalid-peer";
     return false;
   }
@@ -391,7 +355,7 @@ bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
     return false;
   }
   identity.team = team;
-  identity.scope = scope;
+  identity.root = root;
   identity.version = text(field(plist, CFSTR("CFBundleShortVersionString")));
   if (identity.version.empty() || identity.version.size() >= 64) {
     reason = "incompatible-host";
@@ -399,6 +363,45 @@ bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
   }
   return true;
 }
+bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
+                       const std::string &required_team, Identity &identity,
+                       Deadline deadline, std::string &reason) {
+  if (expired(deadline)) {
+    reason = "deadline-exceeded";
+    return false;
+  }
+  if (!same_scope(token, scope)) {
+    reason = "invalid-scope";
+    return false;
+  }
+  OwnedCF<CFDataRef> audit;
+  audit.value = CFDataCreate(nullptr, reinterpret_cast<const UInt8 *>(&token),
+                             sizeof(token));
+  if (!audit.value)
+    return false;
+  const void *keys[] = {kSecGuestAttributeAudit}, *values[] = {audit.value};
+  OwnedCF<CFDictionaryRef> attributes;
+  attributes.value = CFDictionaryCreate(nullptr, keys, values, 1,
+                                        &kCFTypeDictionaryKeyCallBacks,
+                                        &kCFTypeDictionaryValueCallBacks);
+  OwnedCF<SecCodeRef> dynamic;
+  if (!attributes.value || SecCodeCopyGuestWithAttributes(
+                               nullptr, attributes.value, kSecCSDefaultFlags,
+                               &dynamic.value) != errSecSuccess) {
+    reason = "invalid-peer";
+    return false;
+  }
+  OwnedCF<SecStaticCodeRef> disk;
+  if (SecCodeCopyStaticCode(dynamic.value, kSecCSDefaultFlags, &disk.value) !=
+      errSecSuccess)
+    return false;
+  if (!validate_artifact(disk.value, dynamic.value, stable, required_team,
+                         identity, deadline, reason))
+    return false;
+  identity.scope = scope;
+  return true;
+}
+
 bool self_identity(bool stable, Identity &identity, Deadline deadline,
                    std::string &reason) {
   Scope scope;
@@ -625,11 +628,96 @@ Result query_status(Deadline deadline) {
     result = {"refused", "deadline-exceeded", {}};
   return result;
 }
+struct PendingLaunch {
+  std::mutex lock;
+  std::condition_variable changed;
+  bool finished = false, accepted = false;
+  PendingLaunch() { ++launches; }
+};
+void finish_launch(const std::shared_ptr<PendingLaunch> &launch,
+                   bool accepted) {
+  std::lock_guard guard(launch->lock);
+  if (launch->finished)
+    return;
+  launch->accepted = accepted;
+  launch->finished = true;
+  --launches;
+  launch->changed.notify_all();
+}
+
+Result launch_stable_host(Deadline deadline) {
+  Result result;
+  Identity self;
+  if (!self_identity(false, self, deadline, result.reason))
+    return result;
+  if (state->stopping)
+    return {"refused", "deadline-exceeded", {}};
+  @autoreleasepool {
+    NSURL *candidate = [NSWorkspace.sharedWorkspace
+        URLForApplicationWithBundleIdentifier:@"app.octant.desktop"];
+    if (!candidate)
+      return {"refused", "not-installed", {}};
+    OwnedCF<SecStaticCodeRef> disk;
+    if (SecStaticCodeCreateWithPath((__bridge CFURLRef)candidate,
+                                    kSecCSDefaultFlags,
+                                    &disk.value) != errSecSuccess)
+      return result;
+    Identity installed;
+    if (!validate_artifact(disk.value, nullptr, true, self.team, installed,
+                           deadline, result.reason))
+      return result;
+    OwnedCF<CFDictionaryRef> info;
+    if (!signed_info(disk.value, info))
+      return result;
+    const auto raw_plist = field(info.value, kSecCodeInfoPList);
+    if (!raw_plist || CFGetTypeID(raw_plist) != CFDictionaryGetTypeID() ||
+        text(field(static_cast<CFDictionaryRef>(raw_plist),
+                   CFSTR("OctantHostLaunchPolicy"))) != "host-only-v1")
+      return {"refused", "incompatible-host", {}};
+    // Open the validated primary bundle URL, never a command found on PATH.
+    NSURL *url = [NSURL
+        fileURLWithPath:[NSString stringWithUTF8String:installed.root.c_str()]
+            isDirectory:YES];
+    auto launch = std::make_shared<PendingLaunch>();
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (expired(deadline) || state->stopping) {
+        finish_launch(launch, false);
+        return;
+      }
+      NSWorkspaceOpenConfiguration *configuration =
+          [NSWorkspaceOpenConfiguration configuration];
+      configuration.activates = NO;
+      configuration.addsToRecentItems = NO;
+      configuration.promptsUserIfNeeded = NO;
+      configuration.createsNewApplicationInstance = NO;
+      configuration.allowsRunningApplicationSubstitution = NO;
+      configuration.arguments = @[ @"--octant-host-only" ];
+      [NSWorkspace.sharedWorkspace
+          openApplicationAtURL:url
+                 configuration:configuration
+             completionHandler:^(NSRunningApplication *application,
+                                 NSError *error) {
+               finish_launch(launch, application != nil && error == nil &&
+                                         !expired(deadline) &&
+                                         !state->stopping);
+             }];
+    });
+    std::unique_lock guard(launch->lock);
+    launch->changed.wait_until(guard, deadline,
+                               [&] { return launch->finished; });
+    if (expired(deadline))
+      return {"refused", "deadline-exceeded", {}};
+    return launch->accepted ? Result{"started", {}, {}} : result;
+  }
+}
+
 Result close_status(Deadline deadline) {
   stop(state);
-  while ((!state->finished || validations.load() != 0) && !expired(deadline))
+  while (
+      (!state->finished || validations.load() != 0 || launches.load() != 0) &&
+      !expired(deadline))
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  if (!state->finished || validations.load() != 0)
+  if (!state->finished || validations.load() != 0 || launches.load() != 0)
     return {"failed", "deadline-exceeded", {}};
   std::lock_guard guard(state->lock);
   if (state->worker.joinable())
@@ -655,6 +743,8 @@ void execute(napi_env, void *data) {
       job.result = start_status(job.deadline);
     else if (job.operation == "status")
       job.result = query_status(job.deadline);
+    else if (job.operation == "launchStableHost")
+      job.result = launch_stable_host(job.deadline);
     else
       job.result = close_status(job.deadline);
   } catch (...) {
@@ -693,6 +783,8 @@ void complete(napi_env env, napi_status, void *data) {
     start_pending = false;
   if (job->operation == "status")
     status_pending = false;
+  if (job->operation == "launchStableHost")
+    launch_pending = false;
   if (job->operation == "close")
     close_pending = false;
 }
@@ -710,6 +802,8 @@ napi_value operation(napi_env env, napi_callback_info info) {
   if (!busy)
     busy = (job->operation == "start" && start_pending.exchange(true)) ||
            (job->operation == "status" && status_pending.exchange(true)) ||
+           (job->operation == "launchStableHost" &&
+            launch_pending.exchange(true)) ||
            (job->operation == "close" && close_pending.exchange(true));
   if (busy) {
     job->result = {"refused", "native-unavailable", {}};
@@ -736,6 +830,8 @@ napi_value operation(napi_env env, napi_callback_info info) {
       start_pending = false;
     if (job->operation == "status")
       status_pending = false;
+    if (job->operation == "launchStableHost")
+      launch_pending = false;
     if (job->operation == "close")
       close_pending = false;
     if (job->work)
@@ -752,7 +848,7 @@ napi_value operation(napi_env env, napi_callback_info info) {
 }
 napi_value initialize(napi_env env, napi_value exports) {
   install_window_exports(env, exports);
-  for (const char *name : {"start", "status", "close"}) {
+  for (const char *name : {"start", "status", "launchStableHost", "close"}) {
     napi_value function;
     napi_create_function(env, name, NAPI_AUTO_LENGTH, operation,
                          const_cast<char *>(name), &function);

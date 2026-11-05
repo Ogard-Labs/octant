@@ -751,6 +751,7 @@ export function createPackagerOptions(
       ? {
           extendInfo: {
             OctantDesktopEntryPolicy: "sealed-main-v1",
+            ...(identity.flavor === "stable" ? { OctantHostLaunchPolicy: "host-only-v1" } : {}),
             NSMicrophoneUsageDescription:
               "Octant uses the microphone to dictate a message when you press the microphone button.",
           },
@@ -1955,6 +1956,11 @@ export function validateDarwinBundleIdentity(
     metadata.OctantDesktopEntryPolicy !== "sealed-main-v1"
   )
     throw new Error("Packaged desktop is missing its sealed entry policy.");
+  if (
+    identity.bundleId === desktopIdentity("stable").bundleId &&
+    metadata.OctantHostLaunchPolicy !== "host-only-v1"
+  )
+    throw new Error("Packaged Stable is missing its host launch policy.");
 }
 
 export async function validateBundleIdentity(

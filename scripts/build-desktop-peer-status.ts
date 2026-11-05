@@ -56,7 +56,12 @@ export async function buildDesktopPeerStatus(
           target_name: "octant-desktop-peer-status",
           sources: ["desktopPeerStatus.mm"],
           defines: ["NAPI_VERSION=8"],
-          libraries: ["-framework Security", "-framework CoreFoundation", "-lbsm"],
+          libraries: [
+            "-framework Security",
+            "-framework CoreFoundation",
+            "-framework AppKit",
+            "-lbsm",
+          ],
           xcode_settings: {
             CLANG_CXX_LANGUAGE_STANDARD: "c++20",
             GCC_ENABLE_CPP_EXCEPTIONS: "YES",

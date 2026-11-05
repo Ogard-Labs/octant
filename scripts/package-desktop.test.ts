@@ -128,6 +128,27 @@ describe("desktop packaging boundary", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+  it("requires Stable's signed host-only capability while keeping it out of Nightly", () => {
+    const stable = desktopIdentity("stable");
+    const metadata = {
+      CFBundleIdentifier: stable.bundleId,
+      CFBundleName: stable.productName,
+      CFBundleExecutable: stable.productName,
+      OctantDesktopEntryPolicy: "sealed-main-v1",
+    };
+    expect(() => validateDarwinBundleIdentity(metadata, stable)).toThrow(/host launch/);
+    expect(() =>
+      validateDarwinBundleIdentity({ ...metadata, OctantHostLaunchPolicy: "host-only-v1" }, stable),
+    ).not.toThrow();
+    const nightly = createPackagerOptions(
+      "/tmp/stage",
+      "/tmp/output",
+      "0.1.0-preview.20261104.1",
+      undefined,
+      desktopIdentity("nightly"),
+    );
+    expect(nightly.extendInfo).not.toHaveProperty("OctantHostLaunchPolicy");
+  });
   it("defaults the Apple Silicon packager options, and can target Linux x64 AppImage packaging", () => {
     // The version is not cosmetic: the updater compares it against the feed,
     // and a build that cannot say which version it is cannot refuse a
@@ -142,6 +163,7 @@ describe("desktop packaging boundary", () => {
       electronVersion: "43.7.11",
       extendInfo: {
         OctantDesktopEntryPolicy: "sealed-main-v1",
+        OctantHostLaunchPolicy: "host-only-v1",
         NSMicrophoneUsageDescription:
           "Octant uses the microphone to dictate a message when you press the microphone button.",
       },
@@ -290,6 +312,7 @@ describe("desktop packaging boundary", () => {
       const metadata = (identity: typeof expected) => ({
         CFBundleIdentifier: identity.bundleId,
         OctantDesktopEntryPolicy: "sealed-main-v1",
+        ...(identity.flavor === "stable" ? { OctantHostLaunchPolicy: "host-only-v1" } : {}),
         CFBundleName: identity.productName,
         CFBundleExecutable: identity.productName,
       });

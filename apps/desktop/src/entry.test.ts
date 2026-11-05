@@ -31,7 +31,7 @@ vi.mock("./canvasPrototypeHost", () => ({
 }));
 vi.mock("./desktopPeerStatus", () => ({
   loadDesktopPeerStatus: () => ({}),
-  desktopPeerPreflight: async () => ({ kind: "ready", protocol: 1, version: "0.1.0" }),
+  ensureNightlyHostReady: async () => ({ kind: "ready", protocol: 1, version: "0.1.0" }),
   closeDesktopPeerStatus: async () => ({ kind: "closed" }),
 }));
 vi.mock("./desktopLaunch", async (original) => ({
