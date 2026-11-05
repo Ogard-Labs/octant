@@ -130,6 +130,13 @@ describe("AppUpdateSettings", () => {
     expect(f.host.setAppUpdateRing).toHaveBeenCalledWith("candidate");
   });
 
+  it("offers no ring switch until the host has said which rings this app follows", () => {
+    const f = view({ subscribeAppUpdateState: () => () => {} });
+    expect(screen.queryByRole("group", { name: "Release ring" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Nightly" })).toBeNull();
+    expect(f.host.setAppUpdateRing).not.toHaveBeenCalled();
+  });
+
   it("says what an update check sends, beside the switch that turns it off", () => {
     // The person deciding whether to leave checks on is the person who should
     // be able to read what those checks disclose.

@@ -24,10 +24,11 @@ full lifecycle acceptance, shared sign-in operations, the complete
 and the functional release preflight. Coexistence and rollback
 still need their remaining implementation and packaged evidence. Bounded native
 lease reconnect is implemented; full signed lifecycle acceptance remains separate. The
-preview/candidate workflow now selects the Nightly flavor and matching artifact
-and payload-smoke paths, but an explicit early gate stops that workflow before
-build, signing or publication. The functional client change must replace the
-gate with lifecycle, credential and native-surface parity evidence. Stable
+preview workflow selects each run's flavor, artifact and payload-smoke paths
+from its ring. An explicit early gate stops only the scheduled Nightly run
+before build, signing or publication; a dispatched run builds Octant on
+`candidate` and is not held by it. The functional client change must replace
+the gate with lifecycle, credential and native-surface parity evidence. Stable
 release and local packaging are unaffected by that gate.
 Nothing in this foundation authorizes installation or publication.
 

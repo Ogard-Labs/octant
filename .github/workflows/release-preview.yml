@@ -50,6 +50,7 @@ jobs:
       ring: ${{ steps.decide.outputs.ring }}
       flavor: ${{ steps.decide.outputs.flavor }}
       product: ${{ steps.decide.outputs.product }}
+      asset_prefix: ${{ steps.decide.outputs.asset_prefix }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,15 +84,21 @@ jobs:
           ring="preview"
           flavor="nightly"
           product="Octant Nightly"
+          # Release asset names carry no space: GitHub renames an uploaded
+          # asset with one, and the feed URL and the bridge both need the
+          # exact published name.
+          asset_prefix="Octant-Nightly"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             ring="candidate"
             flavor="stable"
             product="Octant"
+            asset_prefix="Octant"
           fi
           {
             echo "ring=${ring}"
             echo "flavor=${flavor}"
             echo "product=${product}"
+            echo "asset_prefix=${asset_prefix}"
           } >> "$GITHUB_OUTPUT"
           # The date and the run number both go in: the date is for whoever
           # reads the version, and the run number keeps two builds on one day
@@ -208,13 +215,19 @@ jobs:
           VERSION: ${{ needs.decide.outputs.version }}
           RING: ${{ needs.decide.outputs.ring }}
           PRODUCT: ${{ needs.decide.outputs.product }}
+          ASSET_PREFIX: ${{ needs.decide.outputs.asset_prefix }}
           ARTIFACT_SUFFIX: ${{ matrix.artifact_suffix }}
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           # `Octant-*` cannot match `Octant Nightly-*`, so the glob names one
           # flavor's artifact and a stray build of the other is not published.
-          archive=$(python3 -c 'import glob, os; artifacts = glob.glob(os.path.join("out", glob.escape(os.environ["PRODUCT"]) + "-*" + os.environ["ARTIFACT_SUFFIX"])); assert len(artifacts) == 1, "Expected one " + os.environ["PRODUCT"] + " release artifact"; print(artifacts[0])')
+          built=$(python3 -c 'import glob, os; artifacts = glob.glob(os.path.join("out", glob.escape(os.environ["PRODUCT"]) + "-*" + os.environ["ARTIFACT_SUFFIX"])); assert len(artifacts) == 1, "Expected one " + os.environ["PRODUCT"] + " release artifact"; print(artifacts[0])')
+          # Copied to the exact space-free name the release and feed use, so
+          # the bytes uploaded are the bytes the feed step hashes and signs.
+          mkdir -p "${RUNNER_TEMP}/release"
+          archive="${RUNNER_TEMP}/release/${ASSET_PREFIX}-${VERSION}${ARTIFACT_SUFFIX}"
+          cp "$built" "$archive"
           tag="v${VERSION}"
           # Matrix rows share one tag. The first arch creates the release;
           # later arches attach their artifact without racing a second create.

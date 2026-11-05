@@ -93,9 +93,15 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
 
   const status = state?.status ?? "idle";
   // Nightly follows its one ring and Octant chooses between Stable and
-  // Preview; only a development build, which names no rings, offers all three.
-  const allowedRings = state?.allowedRings ?? (localPreferences ? ["preview"] : undefined);
-  const offersRingChoice = allowedRings === undefined || allowedRings.length > 1;
+  // Preview. The switch waits for the host's first state: before it, a
+  // packaged Octant would offer Nightly's ring and a click would store a ring
+  // its host refuses on every launch. Only a development build, whose state
+  // names no rings, offers all three.
+  const allowedRings = state?.allowedRings;
+  const offersRingChoice =
+    state !== undefined &&
+    !localPreferences &&
+    (allowedRings === undefined || allowedRings.length > 1);
   const offeredNotes =
     status === "available" && state?.available?.notes !== undefined && state.available.notes !== ""
       ? state.available.notes
