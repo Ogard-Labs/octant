@@ -452,6 +452,13 @@ check its outcome before trying again. Octant does not replay that call.
 Finish any unconfirmed sign-out before removing that server; Octant keeps it
 installed so the cleanup action stays available.
 
+Before using a hosted connection, Octant checks its stored credential and
+refreshes an expired grant when possible. If authentication changed, Octant
+refreshes the task's connection on a subsequent request rather than sending
+the tool call with the old credential. If the server rejects authentication,
+restore the credential store or sign in again before asking the task to retry.
+A failed tool call is not replayed by the connection; check its outcome first.
+
 Choose **Client setup** to use an app identity you registered yourself. The dialog
 shows the server and authorization server and an exact **Callback address** you
 can copy into your app registration. Enter the public **Client ID**, or choose

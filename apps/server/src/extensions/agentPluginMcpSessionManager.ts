@@ -19,6 +19,7 @@ import type { ExtensionToolReach } from "@octant/domain/extension-tool-grant-pol
 import { watchedTextOf, watchOutsideContent } from "@octant/domain/shield-watcher-policy";
 import {
   connectAgentPluginMcpSession,
+  McpHttpStatusError,
   type AgentPluginMcpSession,
   type AgentPluginMcpStdioProcessPort,
   type McpToolDefinition,
@@ -44,12 +45,18 @@ export interface AgentPluginMcpSessionKey {
   readonly scope: ExtensionEffectiveSnapshot["scope"];
 }
 
+interface McpSessionAuthentication {
+  readonly check: () => Promise<"unchanged" | "changed" | "unavailable">;
+  readonly rejected: () => Promise<void>;
+}
+
 export interface AgentPluginMcpSessionRecord extends AgentPluginMcpSessionKey {
   readonly serverName: string;
   readonly session: AgentPluginMcpSession;
   readonly tools: ReadonlyArray<McpToolDefinition>;
   readonly reach: ExtensionToolReach;
   readonly authenticationGeneration: number;
+  readonly authentication?: McpSessionAuthentication;
   /** Each tool's definition digest, taken once from the listing at connect. */
   readonly toolDefinitionDigests: ReadonlyMap<string, string>;
 }
@@ -84,6 +91,10 @@ type AgentPluginMcpSessionTarget = AgentPluginMcpSessionKey & {
 };
 
 export interface AgentPluginMcpSessionManagerOptions {
+  readonly bindUserAddedAuthentication?: (
+    launch: AgentPluginsMcpLaunchSpec,
+    target: Pick<AgentPluginMcpSessionKey, "extensionId" | "componentId">,
+  ) => Promise<McpSessionAuthentication | undefined>;
   readonly store: Pick<
     ExtensionPackageStore,
     "contentRoot" | "readVerifiedConfiguration" | "pluginDataRoot"
@@ -133,6 +144,7 @@ export class AgentPluginMcpSessionManager {
   readonly #uuid: () => string;
   readonly #isUserAddedSource: AgentPluginMcpSessionManagerOptions["isUserAddedSource"];
   readonly #resolveUserAddedSecrets: AgentPluginMcpSessionManagerOptions["resolveUserAddedSecrets"];
+  readonly #bindUserAddedAuthentication: AgentPluginMcpSessionManagerOptions["bindUserAddedAuthentication"];
   readonly #sessions = new Map<string, AgentPluginMcpSessionRecord>();
   readonly #desired = new Map<string, AgentPluginMcpSessionTarget>();
   readonly #authenticationGenerations = new Map<string, number>();
@@ -172,6 +184,7 @@ export class AgentPluginMcpSessionManager {
     this.#uuid = options.uuid ?? randomUUID;
     this.#isUserAddedSource = options.isUserAddedSource;
     this.#resolveUserAddedSecrets = options.resolveUserAddedSecrets;
+    this.#bindUserAddedAuthentication = options.bindUserAddedAuthentication;
   }
 
   sessions(): ReadonlyArray<AgentPluginMcpSessionRecord> {
@@ -287,6 +300,30 @@ export class AgentPluginMcpSessionManager {
         }
         if (!this.#currentRecord(indexed.sessionKey, record))
           return { result: { error: "extension-tool-authentication-changed" }, isError: true };
+        if (record.authentication !== undefined) {
+          const authentication = await record.authentication
+            .check()
+            .catch(() => "unavailable" as const);
+          if (!this.#currentRecord(indexed.sessionKey, record))
+            return { result: { error: "extension-tool-authentication-changed" }, isError: true };
+          if (authentication !== "unchanged") {
+            await this.invalidateAuthentication(record.extensionId, record.componentId);
+            return {
+              result: {
+                error:
+                  authentication === "changed"
+                    ? "Authentication changed. Refresh this task's extension tools before invoking the tool again; no tool call was sent."
+                    : "Credentials are unavailable. Restore the credential broker, then refresh this task's extension tools; no tool call was sent.",
+              },
+              isError: true,
+            };
+          }
+        }
+        if (signal?.aborted)
+          return {
+            result: { error: "MCP tool call was cancelled before dispatch." },
+            isError: true,
+          };
         this.#touchIdle(indexed.sessionKey);
         const controller = new AbortController();
         const onCallerAbort = () => controller.abort();
@@ -325,6 +362,18 @@ export class AgentPluginMcpSessionManager {
               },
               isError: true,
             };
+          if (error instanceof McpHttpStatusError && error.status === 401) {
+            const rejected = record.authentication?.rejected().catch(() => undefined);
+            await this.invalidateAuthentication(record.extensionId, record.componentId);
+            await rejected;
+            return {
+              result: {
+                error:
+                  "The server rejected authentication. Refresh this task's extension tools or reconnect before trying again. The failed tool call was not replayed.",
+              },
+              isError: true,
+            };
+          }
           if (controller.signal.aborted) {
             await this.#close(indexed.sessionKey, record);
             const desired = this.#desired.get(indexed.sessionKey);
@@ -626,6 +675,15 @@ export class AgentPluginMcpSessionManager {
       authenticationGeneration !== this.#authenticationGeneration(target)
     )
       return;
+    const authentication =
+      target.userAdded && launch.transport === "streamable-http"
+        ? await this.#bindUserAddedAuthentication?.(launch, target)
+        : undefined;
+    if (
+      controller.signal.aborted ||
+      authenticationGeneration !== this.#authenticationGeneration(target)
+    )
+      return;
     const timeout = setTimeout(() => controller.abort(), this.#connectionTimeoutMs);
     timeout.unref?.();
     let session: AgentPluginMcpSession;
@@ -652,6 +710,14 @@ export class AgentPluginMcpSessionManager {
               }),
             }),
       });
+    } catch (error) {
+      if (
+        error instanceof McpHttpStatusError &&
+        error.status === 401 &&
+        authenticationGeneration === this.#authenticationGeneration(target)
+      )
+        await authentication?.rejected().catch(() => undefined);
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
@@ -671,6 +737,7 @@ export class AgentPluginMcpSessionManager {
       // which denies it the network and confines its writes to plugin data.
       reach: session.transport === "stdio" ? "confined-stdio" : "network",
       authenticationGeneration,
+      ...(authentication === undefined ? {} : { authentication }),
       toolDefinitionDigests: new Map(
         session.tools.map((tool) => [tool.name, extensionToolDefinitionDigest(tool)]),
       ),

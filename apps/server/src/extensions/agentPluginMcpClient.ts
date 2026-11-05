@@ -2,6 +2,13 @@ import type { Readable, Writable } from "node:stream";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import { readBoundedResponseBody } from "./boundedResponseBody";
 
+export class McpHttpStatusError extends Error {
+  constructor(readonly status: number) {
+    super(`MCP HTTP request failed with status ${status}.`);
+    this.name = "McpHttpStatusError";
+  }
+}
+
 export interface McpToolDefinition {
   readonly name: string;
   readonly description?: string;
@@ -412,7 +419,7 @@ class StreamableHttpJsonRpcTransport implements JsonRpcTransport {
     if (sessionId) this.#sessionId = sessionId;
     if (!response.ok) {
       if (response.status === 404) this.#fail();
-      throw new Error(`MCP HTTP request failed with status ${response.status}.`);
+      throw new McpHttpStatusError(response.status);
     }
     return response;
   }

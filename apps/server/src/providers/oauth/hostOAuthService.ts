@@ -406,6 +406,14 @@ export function createHostOAuthService(options: {
           } else {
             return { kind: "unavailable" };
           }
+        } else if (
+          input.descriptor.dialect === "mcp-authorization" ||
+          input.descriptor.dialect === "slack-mcp-user"
+        ) {
+          // The runtime joins an in-flight refresh/write before deleting this MCP grant.
+          const retired = await options.broker.revoke(input.credentialRef);
+          if (!isRecord(retired) || retired.kind !== "revoked") return { kind: "unavailable" };
+          result = { kind: "signed-out" };
         } else {
           await options.broker.forget(input.credentialRef);
           result = { kind: "signed-out" };

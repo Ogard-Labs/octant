@@ -41,6 +41,7 @@ export interface McpServerSignInRecord {
   /** Set once the broker answered that the grant is gone; Settings then says Sign in again. */
   readonly signInAgain?: McpSignInAgainReason;
   readonly signOutPending?: boolean;
+  readonly refreshRequired?: boolean;
 }
 
 type AwaitingConsent = Extract<McpServerSignInView, { kind: "awaiting-consent" }>;
@@ -58,6 +59,7 @@ export interface McpServerSignInOptions {
   readonly oauth: HostOAuthService;
   /** The broker's access route: the bearer for a stored grant, refreshed as needed. */
   readonly access: (credentialRef: string) => Promise<unknown>;
+  readonly refresh?: (credentialRef: string) => Promise<unknown>;
   /** The address the component's package names, or undefined for a command server. */
   readonly serverUrl: (extensionId: string, componentId: string) => Promise<string | undefined>;
   readonly fetch?: typeof fetch;
@@ -1087,11 +1089,17 @@ export class McpServerSignIn {
       await this.#options.onAuthenticationChanged?.(extensionId, componentId);
       return { kind: "signed-out" };
     }
-    const pending = record.signOutPending ? record : { ...record, signOutPending: true };
+    let pending: McpServerSignInRecord | undefined;
     let persisted = true;
     try {
       await this.#commit(async () => {
-        if (this.#signIns.get(key) !== record) return;
+        const current = this.#signIns.get(key);
+        if (
+          current?.credentialRef !== record.credentialRef ||
+          current.descriptor !== record.descriptor
+        )
+          return;
+        pending = current.signOutPending ? current : { ...current, signOutPending: true };
         this.#signIns.set(key, pending);
         await this.#persist();
       });
@@ -1103,7 +1111,9 @@ export class McpServerSignIn {
     } catch {
       return signOutPending();
     }
-    if (!persisted || this.#signIns.get(key) !== pending) return signOutPending();
+    if (!persisted || pending === undefined || this.#signIns.get(key) !== pending)
+      return signOutPending();
+    const owner = pending;
     let result: Awaited<ReturnType<HostOAuthService["signOut"]>>;
     try {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1111,8 +1121,8 @@ export class McpServerSignIn {
         result = await Promise.race([
           this.#options.oauth.signOut({
             principalKind,
-            descriptor: pending.descriptor,
-            credentialRef: pending.credentialRef,
+            descriptor: owner.descriptor,
+            credentialRef: owner.credentialRef,
             forgetWhenNotRevoked: true,
           }),
           new Promise<never>((_resolve, reject) => {
@@ -1133,14 +1143,14 @@ export class McpServerSignIn {
       return signOutPending();
     try {
       await this.#commit(async () => {
-        if (this.#signIns.get(key) !== pending) return;
+        if (this.#signIns.get(key) !== owner) return;
         this.#signIns.delete(key);
-        const secretRef = pending.descriptor.clientAuthentication?.secretRef;
+        const secretRef = owner.descriptor.clientAuthentication?.secretRef;
         const reserved = this.#reserveUnownedSecret(secretRef);
         try {
           await this.#persist();
         } catch (error) {
-          this.#signIns.set(key, pending);
+          this.#signIns.set(key, owner);
           if (reserved && secretRef !== undefined) this.#retiredClientSecrets.delete(secretRef);
           throw error;
         }
@@ -1148,7 +1158,7 @@ export class McpServerSignIn {
     } catch {
       return signOutPending();
     }
-    await this.#retireUnusedSecret(pending.descriptor.clientAuthentication?.secretRef);
+    await this.#retireUnusedSecret(owner.descriptor.clientAuthentication?.secretRef);
     return this.#signIns.has(key) ? signOutPending() : { kind: "signed-out" };
   }
 
@@ -1188,6 +1198,160 @@ export class McpServerSignIn {
       if (key.startsWith(prefix)) this.#serverResources.delete(key);
   }
 
+  /** Captures this exact grant owner and a digest, never a reusable caller-selected ref. */
+  async bindAuthentication(
+    extensionId: string,
+    componentId: string,
+    launch: AgentPluginsMcpLaunchSpec,
+  ): Promise<
+    | {
+        readonly check: () => Promise<"unchanged" | "changed" | "unavailable">;
+        readonly rejected: () => Promise<void>;
+      }
+    | undefined
+  > {
+    await this.#load();
+    if (launch.transport === "stdio") return undefined;
+    const key = signInKey(extensionId, componentId);
+    const record = this.#signIns.get(key);
+    if (record === undefined) return undefined;
+    const expected = authorizationDigest(new Headers(launch.headers).get("authorization") ?? "");
+    return {
+      check: async () => {
+        if (!this.#currentGrant(key, record) || !recordAdmitsTransport(record, launch.url))
+          return "changed";
+        const answer = await this.#currentAccess(key, record);
+        if (!this.#currentGrant(key, record)) return "changed";
+        if (isRecord(answer) && answer.kind === "sign-in-again") {
+          await this.#markSignInAgain(key, record, answer.reason, extensionId, componentId);
+          return "changed";
+        }
+        if (
+          !isRecord(answer) ||
+          answer.kind !== "granted" ||
+          typeof answer.accessToken !== "string"
+        )
+          return "unavailable";
+        const tokenType = typeof answer.tokenType === "string" ? answer.tokenType : "Bearer";
+        if (
+          record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect &&
+          tokenType.toLowerCase() !== "bearer"
+        )
+          return "unavailable";
+        return authorizationDigest(`${tokenType} ${answer.accessToken}`) === expected
+          ? "unchanged"
+          : "changed";
+      },
+      rejected: async () => {
+        await this.#commit(async () => {
+          if (!this.#currentGrant(key, record)) return;
+          const current = this.#signIns.get(key);
+          if (current === undefined) return;
+          this.#signIns.set(key, { ...current, refreshRequired: true });
+          await this.#persist();
+        });
+      },
+    };
+  }
+
+  #currentGrant(key: string, record: McpServerSignInRecord): boolean {
+    const current = this.#signIns.get(key);
+    return (
+      current !== undefined &&
+      current.credentialRef === record.credentialRef &&
+      current.descriptor === record.descriptor &&
+      !current.signOutPending &&
+      current.signInAgain === undefined
+    );
+  }
+
+  async #credentialStage<T>(operation: () => Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Credential access timed out.")),
+            REQUEST_TIMEOUT_MS,
+          );
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async #currentAccess(key: string, record: McpServerSignInRecord): Promise<unknown> {
+    if (!this.#currentGrant(key, record)) return { kind: "unavailable" };
+    try {
+      let answer = await this.#credentialStage(() => this.#options.access(record.credentialRef));
+      if (!this.#currentGrant(key, record)) return { kind: "unavailable" };
+      if (!isRecord(answer) || answer.kind !== "granted") return answer;
+      const expiry = accessExpiry(answer);
+      if (expiry === "invalid") return { kind: "unavailable" };
+      if (
+        this.#signIns.get(key)?.refreshRequired ||
+        (expiry !== undefined && expiry <= (this.#options.now?.().getTime() ?? Date.now()))
+      ) {
+        const refresh = this.#options.refresh;
+        if (refresh === undefined) return { kind: "unavailable" };
+        const refreshed = await this.#credentialStage(() => refresh(record.credentialRef));
+        if (!this.#currentGrant(key, record)) return { kind: "unavailable" };
+        if (!isRecord(refreshed) || refreshed.kind !== "refreshed") return refreshed;
+        answer = await this.#credentialStage(() => this.#options.access(record.credentialRef));
+        if (!this.#currentGrant(key, record)) return { kind: "unavailable" };
+        if (!isRecord(answer) || answer.kind !== "granted") return answer;
+        const currentExpiry = accessExpiry(answer);
+        if (
+          currentExpiry === "invalid" ||
+          (currentExpiry !== undefined &&
+            currentExpiry <= (this.#options.now?.().getTime() ?? Date.now()))
+        )
+          return { kind: "unavailable" };
+        await this.#commit(async () => {
+          if (!this.#currentGrant(key, record)) return;
+          const current = this.#signIns.get(key);
+          if (current?.refreshRequired !== true) return;
+          const { refreshRequired: _required, ...clean } = current;
+          this.#signIns.set(key, clean);
+          try {
+            await this.#persist();
+          } catch (error) {
+            this.#signIns.set(key, current);
+            throw error;
+          }
+        });
+      }
+      return this.#currentGrant(key, record) ? answer : { kind: "unavailable" };
+    } catch {
+      return { kind: "unavailable" };
+    }
+  }
+
+  async #markSignInAgain(
+    key: string,
+    record: McpServerSignInRecord,
+    value: unknown,
+    extensionId: string,
+    componentId: string,
+  ): Promise<void> {
+    const reason = signInAgainReason(value);
+    if (reason === undefined) return;
+    let changed = false;
+    try {
+      await this.#commit(async () => {
+        if (!this.#currentGrant(key, record)) return;
+        this.#signIns.set(key, { ...record, signInAgain: reason });
+        changed = true;
+        await this.#persist();
+      });
+    } finally {
+      if (changed) await this.#options.onAuthenticationChanged?.(extensionId, componentId);
+    }
+  }
+
   /**
    * Attaches the signed-in bearer to a launch, when there is one. A sign-in
    * whose grant the broker says is gone (revoked, expired, refresh reused) is
@@ -1205,40 +1369,11 @@ export class McpServerSignIn {
     const record = this.#signIns.get(key);
     if (record === undefined || record.signOutPending || record.signInAgain !== undefined)
       return launch;
-    const transportUrl = canonicalResource(launch.url);
-    if (record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect) {
-      if (
-        !isSlackMcpUserDescriptorBinding(record.descriptor) ||
-        transportUrl !== SLACK_MCP_USER_OAUTH.transportUrl
-      )
-        return launch;
-    } else if (
-      record.descriptor.resource !== transportUrl ||
-      transportUrl === SLACK_MCP_USER_OAUTH.transportUrl
-    )
-      return launch;
-    let answer: unknown;
-    try {
-      answer = await this.#options.access(record.credentialRef);
-    } catch {
-      return launch;
-    }
-    if (!isRecord(answer) || this.#signIns.get(key) !== record) return launch;
+    if (!recordAdmitsTransport(record, launch.url)) return launch;
+    const answer = await this.#currentAccess(key, record);
+    if (!isRecord(answer) || !this.#currentGrant(key, record)) return launch;
     if (answer.kind === "sign-in-again") {
-      const reason = signInAgainReason(answer.reason);
-      if (reason !== undefined && record.signInAgain !== reason) {
-        let changed = false;
-        try {
-          await this.#commit(async () => {
-            if (this.#signIns.get(key) !== record) return;
-            this.#signIns.set(key, { ...record, signInAgain: reason });
-            changed = true;
-            await this.#persist();
-          });
-        } finally {
-          if (changed) await this.#options.onAuthenticationChanged?.(extensionId, componentId);
-        }
-      }
+      await this.#markSignInAgain(key, record, answer.reason, extensionId, componentId);
       return launch;
     }
     if (answer.kind !== "granted" || typeof answer.accessToken !== "string") return launch;
@@ -1715,4 +1850,22 @@ function signOutPending(): Extract<McpServerSignInView, { readonly kind: "sign-o
     message:
       "Sign-out is not confirmed. Restore the credential broker, then finish signing out. This connection cannot be used meanwhile.",
   };
+}
+
+function authorizationDigest(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+function accessExpiry(answer: Record<string, unknown>): number | "invalid" | undefined {
+  if (answer.expiresAt === undefined) return undefined;
+  if (typeof answer.expiresAt !== "string") return "invalid";
+  const expiry = Date.parse(answer.expiresAt);
+  return Number.isFinite(expiry) ? expiry : "invalid";
+}
+function recordAdmitsTransport(record: McpServerSignInRecord, url: string): boolean {
+  const transportUrl = canonicalResource(url);
+  return record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect
+    ? isSlackMcpUserDescriptorBinding(record.descriptor) &&
+        transportUrl === SLACK_MCP_USER_OAUTH.transportUrl
+    : record.descriptor.resource === transportUrl &&
+        transportUrl !== SLACK_MCP_USER_OAUTH.transportUrl;
 }

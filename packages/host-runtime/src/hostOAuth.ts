@@ -378,7 +378,9 @@ export interface HostOAuthRuntime {
    * ChatGPT plan dialect only: revoke the refresh token at the issuer's
    * revocation endpoint, then drop the stored grant. Other dialects have no
    * revocation endpoint and simply drop the grant; the directory offers no
-   * client-side refresh-token revocation, so its sign-out is local.
+   * client-side refresh-token revocation, so its sign-out is local. MCP local
+   * retirement joins an in-flight refresh/write before deletion and denies
+   * access/refresh until confirmed cleanup; it does not invent issuer revocation.
    */
   readonly revoke: (credentialRef: string) => Promise<HostOAuthRevokeResult>;
   readonly close: () => Promise<void>;
@@ -1949,6 +1951,7 @@ export function createHostOAuthRuntime(options: {
   const siwcIssuer = options.siwcIssuer ?? SIWC_ISSUER;
   const attempts = new Map<string, Attempt>();
   const inflightRefresh = new Map<string, Promise<HostOAuthRefreshResult>>();
+  const retiringMcpGrants = new Set<string>();
   // The ChatGPT plan dialect memoizes the issuer's JWKS here so a refresh
   // does not re-fetch keys the issuer already published.
   const siwcJwks: { current: JwksCache | undefined } = { current: undefined };
@@ -2940,6 +2943,24 @@ export function createHostOAuthRuntime(options: {
     }
   };
 
+  const retireMcpGrant = async (credentialRef: string): Promise<HostOAuthRevokeResult> => {
+    // No deletion can precede a refresh's already-issued store write.
+    retiringMcpGrants.add(credentialRef);
+    try {
+      await inflightRefresh.get(credentialRef);
+      await options.store.delete(credentialRef);
+      retiringMcpGrants.delete(credentialRef);
+      return { kind: "revoked" };
+    } catch (error) {
+      if (error instanceof CredentialStoreFailure && error.category === "missing") {
+        retiringMcpGrants.delete(credentialRef);
+        return { kind: "revoked" };
+      }
+      // Keep this exact owner unusable until an explicit cleanup retry succeeds.
+      return { kind: "unavailable" };
+    }
+  };
+
   return Object.freeze({
     begin,
     cancel,
@@ -2948,6 +2969,7 @@ export function createHostOAuthRuntime(options: {
       return attempt === undefined ? { kind: "unknown" } : attempt.status;
     },
     refresh: (credentialRef: string): Promise<HostOAuthRefreshResult> => {
+      if (retiringMcpGrants.has(credentialRef)) return Promise.resolve({ kind: "unavailable" });
       const existing = inflightRefresh.get(credentialRef);
       if (existing !== undefined) return existing;
       const run = refreshOnce(credentialRef).finally(() => {
@@ -2960,9 +2982,11 @@ export function createHostOAuthRuntime(options: {
       credentialRef: string,
       binding?: HostOAuthDirectoryBinding,
     ): Promise<HostOAuthAccessResult> => {
-      if (!UUID_PATTERN.test(credentialRef)) return { kind: "unavailable" };
+      if (!UUID_PATTERN.test(credentialRef) || retiringMcpGrants.has(credentialRef))
+        return { kind: "unavailable" };
       try {
         const grant = decodeGrant(await options.store.resolve(credentialRef));
+        if (retiringMcpGrants.has(credentialRef)) return { kind: "unavailable" };
         if (!grantAdmitsBinding(grant, binding)) return { kind: "binding-mismatch" };
         return {
           kind: "granted",
@@ -2984,15 +3008,18 @@ export function createHostOAuthRuntime(options: {
     },
     revoke: async (credentialRef: string): Promise<HostOAuthRevokeResult> => {
       if (!UUID_PATTERN.test(credentialRef)) return { kind: "unavailable" };
+      if (retiringMcpGrants.has(credentialRef)) return retireMcpGrant(credentialRef);
       let grant: StoredGrant;
       try {
         grant = decodeGrant(await options.store.resolve(credentialRef));
       } catch (error) {
         if (error instanceof CredentialStoreFailure && error.category === "missing") {
-          return { kind: "revoked" };
+          return inflightRefresh.has(credentialRef) ? { kind: "unavailable" } : { kind: "revoked" };
         }
         return { kind: "unavailable" };
       }
+      if (grant.dialect === MCP_DIALECT || grant.dialect === SLACK_MCP_DIALECT)
+        return retireMcpGrant(credentialRef);
       // Only the ChatGPT plan dialect has a revocation endpoint: the refresh
       // token is revoked at the issuer's discovery revocation_endpoint before
       // the local grant is dropped. Other dialects have nothing to revoke.

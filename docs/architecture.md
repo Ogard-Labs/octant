@@ -8823,9 +8823,36 @@ call completion cannot reinstall or retire a replacement session. Calls already
 dispatched may have completed and are never replayed; their late result is not
 adopted as current authenticated content. Unrelated components stay usable.
 Only later authoritative task reconciliation initializes and lists again with
-the current broker grant; Settings does not probe tools. This fence does not
-refresh bearer headers in an otherwise reused HTTP session or implement
-changed-catalog continuation for a retained provider thread.
+the current broker grant; Settings does not probe tools.
+
+For an existing host-owned HTTP OAuth session, an approved explicit invocation
+checks the exact retained grant owner again before dispatch. Credential access
+and refresh each have a ten-second stage bound. A known expired token or a
+grant marked after an actual HTTP401 uses the existing broker refresh profile,
+then reads access again; an unavailable or still-expired result never falls
+back to the session's captured bearer. The owner, descriptor and authentication
+generation are checked after awaits. A changed authorization digest retires the
+session and tools before sending that invocation, requiring normal subsequent
+authoritative task reconciliation. It does not replace headers in place or
+probe from Settings. Missing account identity is not guessed from a token or
+client registration.
+
+An actual HTTP401 retires the current session and marks only its captured grant
+for refresh on a later connection; it never replays the failed tool call.
+Ordinary MCP application errors retain their existing behavior. A late old
+credential check or401 cannot mark, refresh or retire a replacement. Editing
+application setup does not replace the account grant's retained client identity,
+issuer, resource or secret binding during refresh.
+
+Completed MCP cleanup uses the broker runtime's existing exact-grant retirement
+path, with no invented issuer revocation endpoint. It refuses new access and
+refresh for that grant, joins its captured in-flight refresh and any issued
+store write, and only then deletes. Unavailable deletion retains retirement and
+the local sign-out owner for explicit retry; a caller timeout cannot claim
+success while a late write may resurrect a grant. Siblings remain usable.
+Runtime retirement is in memory; native failures and process loss do not imply
+a durable recovery engine. Changed-catalog continuation for a retained provider
+thread remains separate code work.
 
 The authenticated broker also accepts cancellation of a retained MCP PKCE
 attempt only under the actor and descriptor recorded at Begin. It takes no
