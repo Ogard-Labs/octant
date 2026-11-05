@@ -6106,8 +6106,16 @@ prompt is therefore built to be appended, never rewritten:
   rules (Work's folder rule, document delivery, the status file), tool notes,
   and finally anything for the current turn alone.
 - **Rules follow the tools the session can call.** A block that describes an
-  app tool (the Canvas delivery rule, the Browser and Computer notes) names
-  that tool, and a driver whose session cannot call it leaves the block out.
+  app tool (the Canvas delivery rule, the Browser and Computer notes, and the
+  routing lines) names that tool, and a driver whose session cannot call it
+  leaves the block out. A routing line says only where an Octant tool replaces
+  a path the runtime would take on its own: `octant_apple` and `octant_android`
+  instead of Simulator.app or an emulator window, `octant_terminal` instead of
+  a backgrounded shell command, `octant_pull_request` and `octant_github`
+  instead of `gh`, and `octant_agents` when work should run on another
+  provider or model or where the person can watch it. Each is sent only when
+  its tool is offered, and every line stays under 240 characters
+  (`appToolHostLines.test.ts`).
   Codex needs this: a thread keeps the tools it started with for good, since
   `thread/resume` accepts other tools and ignores them, and nothing reports
   them back (0.164.0 against a local stand-in endpoint). The Codex driver
