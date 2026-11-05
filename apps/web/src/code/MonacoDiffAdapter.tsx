@@ -13,6 +13,10 @@ export interface MonacoDiffAdapterProps {
   readonly modified: string;
   readonly original: string;
   readonly renderSideBySide: boolean;
+  readonly onSelectLine?: (selection: {
+    readonly side: "original" | "modified";
+    readonly line: number;
+  }) => void;
   readonly typography?: EditorTypographyProjection;
 }
 
@@ -53,6 +57,12 @@ export function MonacoDiffAdapter(props: MonacoDiffAdapterProps) {
           original: latestProps.current.original,
           modified: latestProps.current.modified,
           renderSideBySide: latestProps.current.renderSideBySide,
+          ...(latestProps.current.onSelectLine === undefined
+            ? {}
+            : {
+                onSelectLine: (selection: { side: "original" | "modified"; line: number }) =>
+                  latestProps.current.onSelectLine?.(selection),
+              }),
           typography: latestTypography.current,
         });
         if (disposed) mounted.dispose();

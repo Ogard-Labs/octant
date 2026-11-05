@@ -1481,3 +1481,31 @@ describe("code client", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 });
+
+it("forwards cancellation for scoped local review reads", async () => {
+  const controller = new AbortController();
+  const fetch = vi.fn().mockResolvedValue(
+    Response.json({
+      kind: "review-findings-state",
+      operationId: ids.operation,
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      findings: [],
+      truncated: false,
+    }),
+  );
+  const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+  await client.executeOperation(
+    {
+      kind: "list-review-findings",
+      operationId: ids.operation as never,
+      threadId: ids.thread as never,
+      checkoutId: ids.checkout as never,
+    },
+    controller.signal,
+  );
+  expect(fetch).toHaveBeenCalledWith(
+    `${baseUrl}/api/code/commands`,
+    expect.objectContaining({ signal: controller.signal }),
+  );
+});

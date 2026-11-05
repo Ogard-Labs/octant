@@ -2,6 +2,7 @@
 export {
   parseUnifiedDiff,
   diffSourceLines,
+  diffModelRowSources,
   type DiffFileChange,
   type DiffLineKind,
   type DiffLine,

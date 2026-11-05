@@ -1,3 +1,5 @@
+import { CodeLocalReview, type CodeReviewLineSelection } from "../code/CodeLocalReview";
+import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type {
@@ -18,6 +20,7 @@ import { ShellState } from "./ShellState";
 import type { OctantHostBridge } from "./hostBridge";
 
 export interface DockReviewToolProps {
+  readonly requestedCodeReviewFile?: CodeReviewFileRequest;
   /** The thread's Code client; without one the tool only says it is loading. */
   readonly client?: CodeClient;
   /** The thread as its own controller last read it. */
@@ -53,8 +56,22 @@ export function DockReviewTool(props: DockReviewToolProps) {
   if (props.client === undefined || view === undefined || checkoutId === undefined) {
     return <ShellState state="loading" title="Loading review" />;
   }
+  if (
+    props.requestedCodeReviewFile !== undefined &&
+    props.requestedCodeReviewFile.checkoutId !== checkoutId
+  )
+    return (
+      <ShellState
+        state="warning"
+        title="Receipt checkout unavailable"
+        message="This receipt belongs to an earlier checkout binding. Open its original checkout to review it; its files cannot be retargeted here."
+      />
+    );
   return (
     <BoundReview
+      {...(props.requestedCodeReviewFile === undefined
+        ? {}
+        : { requestedCodeReviewFile: props.requestedCodeReviewFile })}
       key={`${String(props.threadId)}:${String(checkoutId)}`}
       checkoutId={checkoutId}
       client={props.client}
@@ -77,6 +94,7 @@ export function DockReviewTool(props: DockReviewToolProps) {
 }
 
 function BoundReview(props: {
+  readonly requestedCodeReviewFile?: CodeReviewFileRequest;
   readonly checkoutId: CodeCheckoutId;
   readonly client: CodeClient;
   readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
@@ -94,6 +112,7 @@ function BoundReview(props: {
     () => props.createUuid?.() ?? globalThis.crypto.randomUUID(),
     [props.createUuid],
   );
+  const [line, setLine] = useState<CodeReviewLineSelection>();
   const [projection, setProjection] = useState<CodeDiffProjection>({ state: "loading" });
   const [stale, setStale] = useState(false);
   const [ignoreWhitespace, setIgnoreWhitespace] = useCodeDiffIgnoreWhitespace();
@@ -103,6 +122,7 @@ function BoundReview(props: {
   );
 
   const observe = useCallback(async () => {
+    setLine(undefined);
     setStale(false);
     setProjection({ state: "loading" });
     setProjection(await observeCodeThreadDiff(props.client, nextUuid, scope, { ignoreWhitespace }));
@@ -140,30 +160,51 @@ function BoundReview(props: {
   const approvals = nativeCodeWorkspaceApprovals(props.hostBridge, props.view);
 
   return (
-    <CodeDiffPane
-      client={refreshingClient}
-      createGitOperationId={() => nextUuid() as never}
-      createOperationId={() => nextUuid() as never}
-      defaultLayout={props.defaultDiffLayout ?? "unified"}
-      diff={projection}
-      ignoreWhitespace={{
-        value: ignoreWhitespace,
-        onChange: setIgnoreWhitespace,
-      }}
-      executionPolicy={props.view.thread.executionPolicy}
-      {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
-      {...(props.onOpenFile === undefined
-        ? {}
-        : { onOpenFile: (path) => props.onOpenFile?.(path as CodeRelativePath) })}
-      {...(approvals?.git === undefined ? {} : { requestApproval: approvals.git })}
-      {...(stale
-        ? {
-            staleNotice: {
-              message: "Git state changed; refresh the diff.",
-              onRefresh: () => void observe(),
-            },
-          }
-        : {})}
-    />
+    <>
+      <p>Checkout changes only. Edits in extra Project folders are not included.</p>
+      {props.requestedCodeReviewFile === undefined ? null : (
+        <p role="note">
+          Opened {props.requestedCodeReviewFile.path} from a completed turn in this checkout. This
+          is the current captured comparison, not a frozen diff of that turn.
+        </p>
+      )}
+      <CodeDiffPane
+        onSelectReviewLine={setLine}
+        {...(props.requestedCodeReviewFile === undefined
+          ? {}
+          : { requestedCodeReviewFile: props.requestedCodeReviewFile })}
+        client={refreshingClient}
+        createGitOperationId={() => nextUuid() as never}
+        createOperationId={() => nextUuid() as never}
+        defaultLayout={props.defaultDiffLayout ?? "unified"}
+        diff={projection}
+        ignoreWhitespace={{
+          value: ignoreWhitespace,
+          onChange: setIgnoreWhitespace,
+        }}
+        executionPolicy={props.view.thread.executionPolicy}
+        {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
+        {...(props.onOpenFile === undefined
+          ? {}
+          : { onOpenFile: (path) => props.onOpenFile?.(path as CodeRelativePath) })}
+        {...(approvals?.git === undefined ? {} : { requestApproval: approvals.git })}
+        {...(stale
+          ? {
+              staleNotice: {
+                message: "Git state changed; refresh the diff.",
+                onRefresh: () => void observe(),
+              },
+            }
+          : {})}
+      />
+      <CodeLocalReview
+        client={props.client}
+        scope={scope}
+        executionPolicy={props.view.thread.executionPolicy}
+        {...(line === undefined ? {} : { line })}
+        {...(props.createUuid === undefined ? {} : { createUuid: props.createUuid })}
+        onRefreshComparison={() => void observe()}
+      />
+    </>
   );
 }

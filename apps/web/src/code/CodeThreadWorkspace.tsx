@@ -1,3 +1,4 @@
+import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { CredentialRequests } from "../credentials/CredentialRequests";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -163,6 +164,7 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 };
 
 export interface CodeThreadWorkspaceProps {
+  readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
   readonly controller: CodeController;
   /**
    * Set where a paired device shows the thread. An approval the host takes
@@ -851,6 +853,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
   async function submitFollowUp() {
+    if (props.controller.draftReviewFindingReferencesInvalid) {
+      setSendNotice(
+        "A saved review reference is unreadable. Clear this draft and prepare the findings again from Review before sending.",
+      );
+      return;
+    }
+    const reviewFindingReferences = props.controller.draftReviewFindingReferences ?? [];
     if (props.controller.draftSideChatReturnsInvalid) {
       setSendNotice(
         "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
@@ -884,6 +893,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             attachmentIds: captured.map((entry) => entry.reference.attachmentId),
             threadMentionIds,
             ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
+            ...(reviewFindingReferences.length === 0 ? {} : { reviewFindingReferences }),
             fileMentionPaths,
             extensionSelections,
           },
@@ -928,6 +938,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (sideChatReturns.length > 0) sendArguments[8] = sideChatReturns;
     if (props.controller.draftRevision !== undefined)
       sendArguments[9] = props.controller.draftRevision;
+    if (reviewFindingReferences.length > 0) sendArguments[10] = reviewFindingReferences;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
       attachments.takeForSend();
@@ -1824,7 +1835,42 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       {/* After the reply, like Work's: the files are what the turn
                         left behind, read once the answer has been. */}
                       {message.role === "assistant" && message.changedFiles !== undefined ? (
-                        <CodeTurnChangedFilesCard changedFiles={message.changedFiles} />
+                        <CodeTurnChangedFilesCard
+                          changedFiles={message.changedFiles}
+                          {...(props.onOpenReview !== undefined &&
+                          message.operationId !== undefined &&
+                          message.checkoutId !== undefined &&
+                          message.checkoutId === view.checkout.id &&
+                          (message.sourceThreadId === undefined ||
+                            message.sourceThreadId === props.threadId) &&
+                          message.status !== "incomplete" &&
+                          message.status !== "waiting"
+                            ? {
+                                onReviewFile: (path: string) => {
+                                  if (
+                                    message.checkoutId === undefined ||
+                                    message.operationId === undefined
+                                  )
+                                    return;
+                                  props.onOpenReview?.({
+                                    checkoutId: message.checkoutId,
+                                    path,
+                                    receiptOperationId: message.operationId,
+                                  });
+                                },
+                              }
+                            : {
+                                reviewUnavailable:
+                                  message.checkoutId === undefined
+                                    ? "This older receipt did not record its checkout. Open the task’s current Review separately."
+                                    : message.sourceThreadId !== undefined &&
+                                        message.sourceThreadId !== props.threadId
+                                      ? "This receipt belongs to the original source thread. Open that thread to review its files."
+                                      : message.checkoutId !== view.checkout.id
+                                        ? "This receipt belongs to an earlier checkout binding. Its files cannot be retargeted to this checkout."
+                                        : "Review these files after this turn finishes.",
+                              })}
+                        />
                       ) : null}
                       {(markedCheckpoint !== undefined ||
                         checkpointDraft?.messageId === message.id) &&
@@ -2113,6 +2159,29 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 )}
               </div>
             )}
+            {props.controller.draftReviewFindingReferencesInvalid ||
+            (props.controller.draftReviewFindingReferences?.length ?? 0) > 0 ? (
+              <OctantAlert
+                tone={props.controller.draftReviewFindingReferencesInvalid ? "warning" : "neutral"}
+              >
+                {props.controller.draftReviewFindingReferencesInvalid
+                  ? "A saved review reference is unavailable. Clear the draft and select the findings again in Review."
+                  : `This editable draft includes ${props.controller.draftReviewFindingReferences?.length ?? 0} local review finding references. Nothing is sent or approved until you send it.`}
+                {props.controller.draftReviewFindingReferencesInvalid ? (
+                  <OctantButton
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setDraft("");
+                      props.controller.setPendingDraft?.("");
+                    }}
+                  >
+                    Clear draft
+                  </OctantButton>
+                ) : null}
+              </OctantAlert>
+            ) : null}
             <SideChatDraftNotice
               count={props.controller.draftSideChatReturns?.length ?? 0}
               invalid={props.controller.draftSideChatReturnsInvalid === true}

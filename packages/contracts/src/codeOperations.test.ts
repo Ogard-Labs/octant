@@ -15,6 +15,8 @@ import {
   decodeCodeOperationResult,
   decodeCodeRepositoryTestStatus,
   decodeCodeReviewFinding,
+  decodeCodeReviewTarget,
+  decodeCodeReviewFindingReferences,
   decodeCodeReviewFindingUpdated,
   decodeCodeThreadOperationalMetadata,
   decodeCodeThreadOperationalMetadataView,
@@ -419,6 +421,20 @@ describe("Code operation contracts", () => {
         findingId: ids.finding,
         expectedVersion: 1,
         state: "resolved",
+      },
+      {
+        kind: "prepare-review-target",
+        ...scope,
+        reviewOperationId: ids.operation,
+        path: "src/index.ts",
+        side: "original",
+        line: 4,
+      },
+      { kind: "list-review-findings", ...scope },
+      {
+        kind: "prepare-review-correction",
+        ...scope,
+        findings: [{ findingId: ids.finding, expectedVersion: 1 }],
       },
       {
         kind: "start-provider-turn",
@@ -1657,4 +1673,41 @@ describe("Code thread follow-up contracts", () => {
     const empty = { threadId: ids.thread, followUpVersion: 0 } as const;
     expect(decodeCodeThreadFollowUpView(empty)).toEqual(empty);
   });
+});
+
+it("decodes scoped local review selection and bounded original finding references without execution authority", () => {
+  const command = {
+    kind: "prepare-review-target",
+    ...scope,
+    reviewOperationId: ids.resourceOperation,
+    path: "src/file.ts",
+    side: "original",
+    line: 4,
+  };
+  expect(decodeCodeOperationCommand(command)).toEqual(command);
+  expect(() => decodeCodeOperationCommand({ ...command, side: "left" })).toThrow();
+  expect(() => decodeCodeOperationCommand({ ...command, line: 0 })).toThrow();
+  expect(() => decodeCodeOperationCommand({ ...command, path: "../outside" })).toThrow();
+  const reference = {
+    threadId: ids.thread,
+    checkoutId: ids.checkout,
+    findingId: ids.finding,
+    version: 1,
+    anchorDigest: "a".repeat(64),
+  };
+  expect(decodeCodeReviewFindingReferences([reference])).toEqual([reference]);
+  expect(() =>
+    decodeCodeReviewFindingReferences([{ ...reference, anchorDigest: "damaged" }]),
+  ).toThrow();
+  expect(() =>
+    decodeCodeReviewFindingReferences(Array.from({ length: 17 }, () => reference)),
+  ).toThrow();
+  expect(() =>
+    decodeCodeReviewTarget({
+      fileId: ids.finding,
+      path: "src/file.ts",
+      fileDigest: "a".repeat(64),
+      location: { kind: "line", line: 4 },
+    }),
+  ).toThrow();
 });

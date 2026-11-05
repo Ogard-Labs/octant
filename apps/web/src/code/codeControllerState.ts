@@ -54,6 +54,8 @@ export interface CodeConversationMessage {
   readonly text: string;
   readonly operationId?: CodeOperationId;
   readonly sourceThreadId?: CodeThreadId;
+  readonly checkoutId?: CodeConversationTurn["checkoutId"];
+  readonly reviewFindingReferences?: CodeConversationTurn["reviewFindingReferences"];
   readonly providerInstanceId?: CodeThread["providerInstanceId"];
   readonly modelId?: CodeThread["modelId"];
   readonly status?: "waiting" | "completed" | "interrupted" | "failed" | "incomplete";
@@ -521,6 +523,10 @@ async function projectConversationTurns(
       role: "user",
       text: prompt ?? "Conversation prompt evidence is unavailable.",
       operationId: turn.operationId,
+      ...(turn.checkoutId === undefined ? {} : { checkoutId: turn.checkoutId }),
+      ...(turn.reviewFindingReferences === undefined
+        ? {}
+        : { reviewFindingReferences: turn.reviewFindingReferences }),
       providerInstanceId: turn.providerInstanceId,
       modelId: turn.modelId,
       status: turn.status,
@@ -548,6 +554,10 @@ async function projectConversationTurns(
       role: "assistant",
       text: parts.join("") || turn.failure?.message || conversationFallback(turn.status),
       operationId: turn.operationId,
+      ...(turn.checkoutId === undefined ? {} : { checkoutId: turn.checkoutId }),
+      ...(turn.reviewFindingReferences === undefined
+        ? {}
+        : { reviewFindingReferences: turn.reviewFindingReferences }),
       providerInstanceId: turn.providerInstanceId,
       modelId: turn.modelId,
       status: turn.status,

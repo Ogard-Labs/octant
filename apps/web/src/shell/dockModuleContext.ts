@@ -1,3 +1,4 @@
+import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { WorkFileOpenRequest } from "../work/WorkFilesPanel";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
@@ -46,6 +47,7 @@ export interface ThreadUtilityDockContentProps {
   /** Clears that request when the reader returns from a child's detail. */
   readonly onAgentViewRequestHandled?: () => void;
   readonly requestedAgentReview?: AgentResultReviewRequest;
+  readonly requestedCodeReviewFile?: CodeReviewFileRequest;
   readonly onAgentReviewBack?: () => void;
   readonly onReviewAgentChanges?: (request: AgentResultReviewRequest) => void;
   readonly nativeHarnessClient?: NativeHarnessClient;

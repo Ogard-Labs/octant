@@ -1,3 +1,4 @@
+import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient, CodeFileOpenResult } from "@octant/client-runtime/code-client";
 import type { AutoReview } from "./autoReview";
 import type { WorkspaceTab } from "@octant/contracts/shell";
@@ -38,7 +39,7 @@ export default function CodeWorkspaceTab(props: {
   readonly onPinTerminal?: CodeWorkspaceProps["onPinTerminal"];
   /** Opens one changed repository file as a Code file tab, from the diff. */
   readonly onOpenFile?: (relativePath: string) => void;
-  readonly onOpenReview?: () => void;
+  readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
   readonly onOpenSurface?: (
     kind: CodeOverviewSurfaceKind,
     options?: { readonly terminalId?: import("@octant/contracts/code").CodeTerminalId },

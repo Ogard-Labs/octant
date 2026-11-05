@@ -525,6 +525,7 @@ describe("CodeOperationService", () => {
     expect(reviewFindings.create).toHaveBeenCalledWith(
       ids.window,
       expect.objectContaining({ id: findingId }),
+      undefined,
     );
 
     reviewFindings.changeState.mockRejectedValueOnce(new ReviewFindingServiceError("stale"));
@@ -589,6 +590,7 @@ describe("CodeOperationService", () => {
         prompt: expect.objectContaining({
           contentId: "61616161-6161-4161-8161-616161616161",
         }),
+        checkoutId: ids.checkout,
         executionPolicy: "approval-gated",
       },
     });
@@ -668,32 +670,22 @@ describe("CodeOperationService", () => {
     expect(approvals.validate).toHaveBeenCalledTimes(approvalChecksBeforeUser);
 
     // Vouching for a command is authority to open a shell and nothing else.
-    // A durable mutation the classifier calls an edit keeps its ordinary gate
-    // even when the caller labels it user-initiated.
-    const findingOperation = decodeCodeOperationId("49494949-4949-4494-8494-494949494949");
+    // A checkout mutation keeps its ordinary gate even when the caller labels
+    // it user-initiated. (Local review notes are reads, so they cannot show it.)
+    const userMutationOperation = decodeCodeOperationId("49494949-4949-4494-8494-494949494949");
     events.replay.mockReturnValue({ status: "ok", frames: [], nextCursor: 0 });
     await expect(
       service.execute(
         ids.window,
         {
-          kind: "create-review-finding",
-          operationId: findingOperation,
+          kind: "stage-git",
+          operationId: userMutationOperation,
           threadId: ids.thread,
           checkoutId: ids.checkout,
-          findingId: "51515151-5151-4515-8515-515151515151",
-          fileId: "52525252-5252-4525-8525-525252525252",
-          path: "src/index.ts",
-          fileDigest: "d".repeat(64),
-          location: {
-            kind: "selection",
-            startLine: 4,
-            startColumn: 1,
-            endLine: 4,
-            endColumn: 12,
-          },
-          severity: "warning",
-          summary: "Keep this boundary strict.",
-        } as never,
+          gitOperationId: decodeCodeOperationId("51515151-5151-4515-8515-515151515151"),
+          paths: ["src/index.ts"],
+          expectedStateToken: "f".repeat(64),
+        },
         { initiator: "user" },
       ),
     ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "waiting" } });

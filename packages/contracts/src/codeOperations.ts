@@ -319,6 +319,51 @@ export const CodeReviewProvenance = Schema.Union(
 );
 export type CodeReviewProvenance = typeof CodeReviewProvenance.Type;
 
+/** A host-observed comparison identity; reconstructed hunks are never whole-file snapshots. */
+export const CodeReviewRevision = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("working-tree"),
+    stateToken: boundedNonEmptyText(512),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("branch"),
+    head: boundedNonEmptyText(128),
+    base: Schema.optional(boundedNonEmptyText(128)),
+    baseRef: boundedNonEmptyText(512),
+  }).annotations(strict),
+);
+export type CodeReviewRevision = typeof CodeReviewRevision.Type;
+export const CodeReviewDiffAnchor = Schema.Struct({
+  kind: Schema.Literal("captured-diff"),
+  reviewOperationId: CodeOperationId,
+  diff: CodeEvidenceReference,
+  revision: CodeReviewRevision,
+  side: Schema.Literal("original", "modified"),
+  capturedAt: UtcTimestamp,
+}).annotations(strict);
+export type CodeReviewDiffAnchor = typeof CodeReviewDiffAnchor.Type;
+export const CodeReviewTarget = Schema.Struct({
+  fileId: CodeFileId,
+  path: CodeRelativePath,
+  /** For a captured-diff anchor this hashes the compared side's regions AND original line mapping. */
+  fileDigest: CodeDigest,
+  location: CodeReviewLocation,
+  anchor: CodeReviewDiffAnchor,
+}).annotations(strict);
+export type CodeReviewTarget = typeof CodeReviewTarget.Type;
+export const MAX_CODE_REVIEW_CORRECTION_FINDINGS = 16;
+export const CodeReviewFindingReference = Schema.Struct({
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  findingId: CodeReviewFindingId,
+  version: AggregateVersion,
+  anchorDigest: CodeDigest,
+}).annotations(strict);
+export type CodeReviewFindingReference = typeof CodeReviewFindingReference.Type;
+export const CodeReviewFindingReferences = Schema.Array(CodeReviewFindingReference).pipe(
+  Schema.maxItems(MAX_CODE_REVIEW_CORRECTION_FINDINGS),
+);
+
 export const CodeReviewFinding = Schema.Struct({
   id: CodeReviewFindingId,
   threadId: CodeThreadId,
@@ -326,6 +371,7 @@ export const CodeReviewFinding = Schema.Struct({
   fileId: CodeFileId,
   path: CodeRelativePath,
   fileDigest: CodeDigest,
+  anchor: Schema.optional(CodeReviewDiffAnchor),
   location: CodeReviewLocation,
   severity: Schema.Literal("note", "warning", "error"),
   author: CodeReviewAuthor,
@@ -850,6 +896,7 @@ const CreateReviewFinding = Schema.Struct({
   fileId: CodeFileId,
   path: CodeRelativePath,
   fileDigest: CodeDigest,
+  anchor: Schema.optional(CodeReviewDiffAnchor),
   location: CodeReviewLocation,
   severity: Schema.Literal("note", "warning", "error"),
   summary: boundedNonEmptyText(4_096),
@@ -860,6 +907,28 @@ const UpdateReviewFinding = Schema.Struct({
   findingId: CodeReviewFindingId,
   expectedVersion: AggregateVersion,
   state: Schema.Literal("open", "resolved", "dismissed"),
+}).annotations(strict);
+const PrepareReviewTarget = Schema.Struct({
+  kind: Schema.Literal("prepare-review-target"),
+  ...OperationScope,
+  reviewOperationId: CodeOperationId,
+  path: CodeRelativePath,
+  side: Schema.Literal("original", "modified"),
+  line: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+const ListReviewFindings = Schema.Struct({
+  kind: Schema.Literal("list-review-findings"),
+  ...OperationScope,
+}).annotations(strict);
+const PrepareReviewCorrection = Schema.Struct({
+  kind: Schema.Literal("prepare-review-correction"),
+  ...OperationScope,
+  findings: Schema.Array(
+    Schema.Struct({
+      findingId: CodeReviewFindingId,
+      expectedVersion: AggregateVersion,
+    }).annotations(strict),
+  ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_REVIEW_CORRECTION_FINDINGS)),
 }).annotations(strict);
 const StartProviderTurn = Schema.Struct({
   kind: Schema.Literal("start-provider-turn"),
@@ -891,6 +960,7 @@ const StartProviderTurn = Schema.Struct({
     Schema.Array(CodeAttachmentId).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
+  reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
@@ -959,6 +1029,9 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "observe-pull-request",
   "create-review-finding",
   "update-review-finding",
+  "prepare-review-target",
+  "list-review-findings",
+  "prepare-review-correction",
   "start-provider-turn",
   "answer-provider-input",
   "answer-provider-approval",
@@ -966,6 +1039,9 @@ export const CODE_OPERATION_COMMAND_KINDS = [
 ] as const;
 
 export const CodeOperationCommand = Schema.Union(
+  PrepareReviewTarget,
+  ListReviewFindings,
+  PrepareReviewCorrection,
   ReviewRun,
   MergeRun,
   StartTerminal,
@@ -1027,6 +1103,9 @@ const GitRemoteEndpoint = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("local") }).annotations(strict),
 );
 const GitObservation = Schema.Struct({
+  reviewScope: Schema.optional(
+    Schema.Struct({ threadId: CodeThreadId, checkoutId: CodeCheckoutId }).annotations(strict),
+  ),
   kind: Schema.Literal("git-observed"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
@@ -1361,6 +1440,40 @@ const PullRequestReviewResult = Schema.Union(
     failureCode: Schema.optional(Schema.Literal("no-remote")),
   }).annotations(strict),
 );
+export const CodeReviewFindingAssessment = Schema.Struct({
+  finding: CodeReviewFinding,
+  anchorState: Schema.Literal("current", "outdated", "unavailable", "legacy"),
+  explanation: boundedNonEmptyText(512),
+}).annotations(strict);
+export type CodeReviewFindingAssessment = typeof CodeReviewFindingAssessment.Type;
+export const CodeReviewCorrectionPrepared = Schema.Struct({
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  text: boundedNonEmptyText(64_000),
+  references: CodeReviewFindingReferences,
+  omissions: Schema.Array(boundedNonEmptyText(512)).pipe(Schema.maxItems(16)),
+}).annotations(strict);
+export type CodeReviewCorrectionPrepared = typeof CodeReviewCorrectionPrepared.Type;
+const ReviewTargetResult = Schema.Struct({
+  kind: Schema.Literal("review-target-state"),
+  operationId: CodeOperationId,
+  target: CodeReviewTarget,
+  anchorState: Schema.Literal("current", "outdated", "unavailable"),
+  explanation: boundedNonEmptyText(512),
+}).annotations(strict);
+const ReviewFindingsResult = Schema.Struct({
+  kind: Schema.Literal("review-findings-state"),
+  operationId: CodeOperationId,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  findings: Schema.Array(CodeReviewFindingAssessment).pipe(Schema.maxItems(256)),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+const ReviewCorrectionResult = Schema.Struct({
+  kind: Schema.Literal("review-correction-prepared"),
+  operationId: CodeOperationId,
+  prepared: CodeReviewCorrectionPrepared,
+}).annotations(strict);
 const ReviewFindingResult = Schema.Struct({
   kind: Schema.Literal("review-finding-state"),
   operationId: CodeOperationId,
@@ -1419,6 +1532,9 @@ const GitDraftResult = Schema.Struct({
 }).annotations(strict);
 
 const RunReviewResult = Schema.Struct({
+  reviewScope: Schema.optional(
+    Schema.Struct({ threadId: CodeThreadId, checkoutId: CodeCheckoutId }).annotations(strict),
+  ),
   kind: Schema.Literal("run-reviewed"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
@@ -1480,6 +1596,9 @@ const ThreadRewoundResult = Schema.Struct({
 }).annotations(strict);
 
 export const CodeOperationResult = Schema.Union(
+  ReviewTargetResult,
+  ReviewFindingsResult,
+  ReviewCorrectionResult,
   RunReviewResult,
   OperationAccepted,
   TerminalStateResult,
@@ -1519,6 +1638,9 @@ const ConversationTurnStartedEvent = Schema.Struct({
   modelId: ProviderModelId,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  /** The host's actual checkout binding; legacy turns did not record it. */
+  checkoutId: Schema.optional(CodeCheckoutId),
+  reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   /** Images sent with this turn. Absent when the turn attached none. */
   attachments: Schema.optional(
@@ -2079,6 +2201,8 @@ export const CodeConversationTurn = Schema.Struct({
   modelId: ProviderModelId,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  checkoutId: Schema.optional(CodeCheckoutId),
+  reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
   /** Images the user attached to this turn. Absent when it attached none. */
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
@@ -2870,3 +2994,11 @@ export const decodePersistedCodeThreadFollowUpUpdated = Schema.decodeUnknownSync
   PersistedCodeThreadFollowUpUpdated,
 );
 export const decodeCodeThreadFollowUpView = Schema.decodeUnknownSync(CodeThreadFollowUpView);
+
+export const decodeCodeReviewTarget = Schema.decodeUnknownSync(CodeReviewTarget);
+export const decodeCodeReviewFindingReferences = Schema.decodeUnknownSync(
+  CodeReviewFindingReferences,
+);
+export const decodeCodeReviewCorrectionPrepared = Schema.decodeUnknownSync(
+  CodeReviewCorrectionPrepared,
+);

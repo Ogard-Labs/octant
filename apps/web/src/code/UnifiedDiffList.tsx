@@ -1,9 +1,16 @@
+import { useEffect, useRef } from "react";
 import type { DiffHunk, ParsedDiffFile } from "./unifiedDiff";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface UnifiedDiffListProps {
   readonly files: ReadonlyArray<ParsedDiffFile>;
   readonly onOpenFile?: (path: string) => void;
+  readonly onSelectLine?: (input: {
+    path: string;
+    side: "original" | "modified";
+    line: number;
+  }) => void;
+  readonly requestedPath?: string;
 }
 
 const CHANGE_LABELS: Readonly<Record<ParsedDiffFile["change"], string>> = {
@@ -26,10 +33,23 @@ const MARKERS: Readonly<Record<DiffHunk["lines"][number]["kind"], string>> = {
  * length so the reader knows how far apart two hunks sit in the file.
  */
 export function UnifiedDiffList(props: UnifiedDiffListProps) {
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (props.requestedPath === undefined) return;
+    const target = Array.from(
+      container.current?.querySelectorAll<HTMLElement>("[data-diff-path]") ?? [],
+    ).find((item) => item.dataset.diffPath === props.requestedPath);
+    target?.scrollIntoView?.({ block: "nearest" });
+  }, [props.requestedPath, props.files]);
   return (
-    <div className="unified-diff">
+    <div className="unified-diff" ref={container}>
       {props.files.map((file) => (
-        <section aria-label={file.path} className="unified-diff__file" key={file.id}>
+        <section
+          data-diff-path={file.path}
+          aria-label={file.path}
+          className="unified-diff__file"
+          key={file.id}
+        >
           <header className="unified-diff__file-header">
             <h2 className="unified-diff__path" title={file.path}>
               {file.path}
@@ -65,7 +85,7 @@ export function UnifiedDiffList(props: UnifiedDiffListProps) {
             </p>
           ) : (
             <table aria-label={`Diff for ${file.path}`} className="unified-diff__table">
-              <tbody>{hunkRows(file.hunks)}</tbody>
+              <tbody>{hunkRows(file.hunks, file.path, props.onSelectLine)}</tbody>
             </table>
           )}
         </section>
@@ -74,7 +94,11 @@ export function UnifiedDiffList(props: UnifiedDiffListProps) {
   );
 }
 
-function hunkRows(hunks: ReadonlyArray<DiffHunk>) {
+function hunkRows(
+  hunks: ReadonlyArray<DiffHunk>,
+  path: string,
+  onSelectLine: UnifiedDiffListProps["onSelectLine"],
+) {
   const rows: React.ReactNode[] = [];
   let previousEnd = 1;
   hunks.forEach((hunk, index) => {
@@ -89,14 +113,52 @@ function hunkRows(hunks: ReadonlyArray<DiffHunk>) {
       );
     }
     hunk.lines.forEach((line, lineIndex) => {
+      const oldNumber = line.oldNumber;
+      const newNumber = line.newNumber;
       rows.push(
         <tr
           className="unified-diff__line"
           data-kind={line.kind}
           key={`${String(index)}-${String(lineIndex)}`}
         >
-          <td className="unified-diff__number">{line.oldNumber ?? ""}</td>
-          <td className="unified-diff__number">{line.newNumber ?? ""}</td>
+          <td className="unified-diff__number">
+            {line.oldNumber === undefined ? (
+              ""
+            ) : onSelectLine === undefined ? (
+              line.oldNumber
+            ) : (
+              <OctantButton
+                type="button"
+                variant="bare"
+                aria-label={`Comment on ${path} original line ${line.oldNumber}`}
+                onClick={() => {
+                  if (oldNumber !== undefined)
+                    onSelectLine({ path, side: "original", line: oldNumber });
+                }}
+              >
+                {line.oldNumber}
+              </OctantButton>
+            )}
+          </td>
+          <td className="unified-diff__number">
+            {line.newNumber === undefined ? (
+              ""
+            ) : onSelectLine === undefined ? (
+              line.newNumber
+            ) : (
+              <OctantButton
+                type="button"
+                variant="bare"
+                aria-label={`Comment on ${path} modified line ${line.newNumber}`}
+                onClick={() => {
+                  if (newNumber !== undefined)
+                    onSelectLine({ path, side: "modified", line: newNumber });
+                }}
+              >
+                {line.newNumber}
+              </OctantButton>
+            )}
+          </td>
           <td className="unified-diff__marker">{MARKERS[line.kind]}</td>
           <td className="unified-diff__code">{line.text}</td>
         </tr>,

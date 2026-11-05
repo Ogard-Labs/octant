@@ -38,7 +38,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
   const checkoutId = props.checkoutId ?? props.view?.checkout.id;
   return (
     <BoundReview
-      key={`${props.threadId}:${checkoutId ?? ""}:${props.serverUrl ?? ""}`}
+      key={`${props.threadId}:${checkoutId ?? ""}:${props.serverUrl ?? ""}:${props.requestedCodeReviewFile?.receiptOperationId ?? ""}:${props.requestedCodeReviewFile?.path ?? ""}`}
       {...props}
       {...(checkoutId === undefined ? {} : { checkoutId })}
     />

@@ -117,6 +117,10 @@ export interface MonacoDiffRuntime {
       readonly original: string;
       readonly modified: string;
       readonly renderSideBySide: boolean;
+      readonly onSelectLine?: (selection: {
+        readonly side: "original" | "modified";
+        readonly line: number;
+      }) => void;
       readonly typography?: EditorTypographyProjection;
     },
   ) => MonacoDiffSession;

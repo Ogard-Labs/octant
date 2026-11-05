@@ -1,3 +1,8 @@
+import { withCodeOperationRuntime } from "../wiring/codeRuntime";
+import { createCodeRouteHandler } from "../codeRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
+import { createRemoteDevicePrincipal } from "../clientPrincipal";
 import type { CodeOperationPullRequestActions } from "./codeOperationService";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
@@ -11,6 +16,7 @@ import {
   decodeCodeFileId,
   CodeOperationEventFrame,
   CodeRuntimeWorkUpdated,
+  CodeReviewFindingUpdated,
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
@@ -36,6 +42,7 @@ import {
   decodeSiblingThreadsToolResult,
   type CodeOperationEventFrame as OperationFrame,
   type CodeOperationId,
+  type CodeEvidenceReference,
   type CodeRuntimeWork,
   type CodeThread,
   type CodeThreadId,
@@ -59,8 +66,6 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
-import { createCodeRouteHandler } from "../codeRoutes";
-import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { codeTurnExecutionPolicyReader } from "./codeTurnExecutionPolicy";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -74,6 +79,8 @@ import {
   readCodeRuntimeWorks,
   readCodeRuntimeWorkAggregateVersion,
   readCodeThreadActivity,
+  readCodeReviewFinding,
+  readCodeReviewFindings,
 } from "../persistence/codeProjection";
 import {
   AGENT_MESSAGE_TOOL_NAME,
@@ -7671,6 +7678,7 @@ function runtimeFixture(options: {
     registry: new EventRegistry()
       .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
       .register(CODE_RUNTIME_WORK_UPDATED, 1, CodeRuntimeWorkUpdated)
+      .register("code.review-finding-updated@1", 1, CodeReviewFindingUpdated)
       .register("feedback.note-captured@1", 1, ProductFeedbackCaptured)
       .register("feedback.note-delivered@1", 1, ProductFeedbackDelivered),
     projections: new ProjectionRegistry()
@@ -7727,6 +7735,10 @@ function runtimeFixture(options: {
       [prompt.contentId, "Implement this."],
       [response.contentId, "A"],
     ]);
+  let evidenceReadHook:
+    | ((reference: CodeEvidenceReference) => Promise<string | undefined>)
+    | undefined;
+  let gitObservationReadHook: (() => Promise<GitObservationResult>) | undefined;
   let evidenceCounter = 50;
   // A restarted host mints new event identities, never the first host's again.
   let uuidCounter = options.restartOf === undefined ? 100 : 10_000;
@@ -7838,8 +7850,8 @@ function runtimeFixture(options: {
         readCodeRuntimeWorkAggregateVersion(connection, id),
       readCodeThread: readThread,
       readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
-      readReviewFinding: () => undefined,
-      readReviewFindings: () => [],
+      readReviewFinding: (id) => readCodeReviewFinding(connection, id),
+      readReviewFindings: (id) => readCodeReviewFindings(connection, id),
     },
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
     windowAccess: {
@@ -7962,7 +7974,10 @@ function runtimeFixture(options: {
         evidenceValues.set(reference.contentId, content);
         return reference;
       },
-      read: async (reference) => evidenceValues.get(reference.contentId),
+      read: async (reference) =>
+        evidenceReadHook === undefined
+          ? evidenceValues.get(reference.contentId)
+          : await evidenceReadHook(reference),
     },
     ...(options.managedThreadCreation === undefined
       ? {}
@@ -8036,7 +8051,10 @@ function runtimeFixture(options: {
     },
     ...(options.pullRequestPort === undefined ? {} : { pullRequestPort: options.pullRequestPort }),
     gitObservationPort: {
-      observe: async () => options.gitObservation ?? { status: "unavailable" as const },
+      observe: async () =>
+        gitObservationReadHook === undefined
+          ? (options.gitObservation ?? { status: "unavailable" as const })
+          : await gitObservationReadHook(),
       observeRemotes: async () => options.gitRemotes ?? [],
       ...(options.gitReadDiff === undefined ? {} : { readDiff: options.gitReadDiff }),
       ...(options.gitTreeChanges === undefined
@@ -8080,6 +8098,13 @@ function runtimeFixture(options: {
     prompt,
     response,
     evidenceValues,
+    setEvidenceRead: (hook: typeof evidenceReadHook) => {
+      evidenceReadHook = hook;
+    },
+    setGitObservationRead: (hook: typeof gitObservationReadHook) => {
+      gitObservationReadHook = hook;
+    },
+    reviewFindings: () => readCodeReviewFindings(connection, threadId),
     directory,
     selectConversation,
     selectForkConversation,
@@ -10374,6 +10399,303 @@ it("forwards Side Chat return validation through the actual Code runtime-to-serv
   }
 });
 
+it("turns a retained diff line into a Plan-safe local finding and an unsent correction without changing its anchor", async () => {
+  const patch =
+    "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -4,2 +4,2 @@\n-old value\n+new value\n context\n";
+  const observation = {
+    ...readyGitObservation([]),
+    statusEntries: [{ path: "src/example.ts", index: " ", worktree: "M" }],
+    changedPaths: ["src/example.ts"],
+    diff: { text: patch, byteLength: Buffer.byteLength(patch), truncated: false },
+  } as import("./gitObservationPort").GitObservationResult;
+  const fixture = runtimeFixture({ approvalValidator: false, gitObservation: observation });
+  fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+  try {
+    const observed = await fixture.runtime.execute(windowId, {
+      kind: "observe-git",
+      operationId: operationId(1001),
+      gitOperationId: operationId(1002),
+      threadId,
+      checkoutId,
+      maxDiffBytes: 1_048_576,
+    });
+    expect(observed.kind).toBe("git-observed");
+    const target = await fixture.runtime.execute(windowId, {
+      kind: "prepare-review-target",
+      operationId: operationId(1003),
+      threadId,
+      checkoutId,
+      reviewOperationId: operationId(1001),
+      path: "src/example.ts",
+      side: "original",
+      line: 4,
+    });
+    expect(target).toMatchObject({
+      kind: "review-target-state",
+      anchorState: "current",
+      target: {
+        path: "src/example.ts",
+        location: { kind: "line", line: 4 },
+        anchor: {
+          kind: "captured-diff",
+          reviewOperationId: operationId(1001),
+          side: "original",
+          revision: { kind: "working-tree", stateToken: "b".repeat(64) },
+        },
+      },
+    });
+    if (target.kind !== "review-target-state") throw new Error("target");
+    const findingId = "90000000-0000-4000-8000-000000001004";
+    const finding = await fixture.runtime.execute(windowId, {
+      kind: "create-review-finding",
+      operationId: operationId(1005),
+      threadId,
+      checkoutId,
+      findingId,
+      ...target.target,
+      severity: "warning",
+      summary: "Keep the existing behavior while correcting the new value.",
+    });
+    expect(finding).toMatchObject({
+      kind: "review-finding-state",
+      finding: {
+        id: findingId,
+        state: "open",
+        anchor: target.target.anchor,
+        fileDigest: target.target.fileDigest,
+      },
+    });
+    const prepared = await fixture.runtime.execute(windowId, {
+      kind: "prepare-review-correction",
+      operationId: operationId(1006),
+      threadId,
+      checkoutId,
+      findings: [{ findingId, expectedVersion: 1 }],
+    });
+    expect(prepared).toMatchObject({
+      kind: "review-correction-prepared",
+      prepared: { threadId, checkoutId, references: [{ findingId, version: 1 }] },
+    });
+    if (prepared.kind !== "review-correction-prepared") throw new Error("correction");
+    expect(prepared.prepared.text).toContain("original line 4");
+    expect(prepared.prepared.text).toContain("old value");
+    expect(prepared.prepared.text).toContain("not the whole file");
+    const listed = await fixture.runtime.execute(windowId, {
+      kind: "list-review-findings",
+      operationId: operationId(1007),
+      threadId,
+      checkoutId,
+    });
+    expect(listed).toMatchObject({
+      kind: "review-findings-state",
+      findings: [{ finding: { id: findingId, state: "open" }, anchorState: "current" }],
+    });
+    expect(fixture.conversation().turns).toHaveLength(0);
+    expect(fixture.restoredTrees()).toBe(0);
+  } finally {
+    fixture.close();
+  }
+});
+
+async function capturedReviewFixture(options: Parameters<typeof runtimeFixture>[0] = {}) {
+  const patch =
+    "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -4,2 +4,2 @@\n-old value\n+new value\n context\n";
+  const observation = {
+    ...readyGitObservation([]),
+    statusEntries: [{ path: "src/example.ts", index: " ", worktree: "M" }],
+    changedPaths: ["src/example.ts"],
+    diff: { text: patch, byteLength: Buffer.byteLength(patch), truncated: false },
+  } as GitObservationResult;
+  const fixture = runtimeFixture({
+    ...options,
+    approvalValidator: false,
+    gitObservation: observation,
+  });
+  fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+  const observed = await fixture.runtime.execute(windowId, {
+    kind: "observe-git",
+    operationId: operationId(1101),
+    gitOperationId: operationId(1102),
+    threadId,
+    checkoutId,
+    maxDiffBytes: 1_048_576,
+  });
+  if (observed.kind !== "git-observed") throw new Error("observation unavailable");
+  const target = await fixture.runtime.execute(windowId, {
+    kind: "prepare-review-target",
+    operationId: operationId(1103),
+    threadId,
+    checkoutId,
+    reviewOperationId: operationId(1101),
+    path: "src/example.ts",
+    side: "modified",
+    line: 4,
+  });
+  if (target.kind !== "review-target-state") throw new Error("target unavailable");
+  const findingId = "90000000-0000-4000-8000-000000001104";
+  const finding = await fixture.runtime.execute(windowId, {
+    kind: "create-review-finding",
+    operationId: operationId(1105),
+    threadId,
+    checkoutId,
+    findingId,
+    ...target.target,
+    severity: "warning",
+    summary: "Correct the behavior.",
+  });
+  if (finding.kind !== "review-finding-state") throw new Error("finding unavailable");
+  const prepared = await fixture.runtime.execute(windowId, {
+    kind: "prepare-review-correction",
+    operationId: operationId(1106),
+    threadId,
+    checkoutId,
+    findings: [{ findingId, expectedVersion: 1 }],
+  });
+  if (prepared.kind !== "review-correction-prepared") throw new Error("correction unavailable");
+  return {
+    ...fixture,
+    prepared: prepared.prepared,
+    review: observed,
+    finding: finding.finding,
+    reviseComparison: () => Object.assign(observation, { stateToken: "c".repeat(64) }),
+  };
+}
+
+it("marks a persisted selected review reference before ordinary Code provider reads and retains it in the resulting turn", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "octant-review-taint-"));
+  directories.push(directory);
+  const connection = openSqlite(join(directory, "events.sqlite3"));
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const registries = createPhase1RuntimeRegistries();
+  const journal = new Journal({
+    connection,
+    registry: registries.events,
+    projections: registries.projections,
+    clock: () => now,
+  });
+  const ingestion = new ExternalContentIngestionStore({
+    journal,
+    connection,
+    uuid: randomUUID,
+    clock: () => now,
+    actor,
+  });
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  vi.mocked(provider.send).mockImplementation(() => {
+    expect(
+      readThreadExternalContentTaint(connection, String(threadId)).externalContentIngested,
+    ).toBe(true);
+    return Effect.void;
+  });
+  const fixture = await capturedReviewFixture({
+    provider: providerDriver(provider),
+    recordExternalContentIngestion: (input) => ingestion.record(input),
+    readThreadExternalContentTaint: (id) => readThreadExternalContentTaint(connection, String(id)),
+  });
+  try {
+    expect(
+      readThreadExternalContentTaint(connection, String(threadId)).externalContentIngested,
+    ).toBe(false);
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(1110),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+      reviewFindingReferences: fixture.prepared.references,
+    });
+    expect(result).toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    const sent = vi.mocked(provider.send).mock.calls[0]?.[0];
+    expect(
+      sent?.context?.some(
+        (block) =>
+          block.kind === "user-message" &&
+          block.text.includes(EXTERNAL_CONTENT_FRAME_OPEN_PREFIX) &&
+          block.text.includes(fixture.finding.id),
+      ),
+    ).toBe(true);
+    expect(
+      sent?.context?.some(
+        (block) => block.kind === "user-message" && block.text.includes("new value"),
+      ),
+    ).toBe(false);
+    expect(fixture.conversation().turns[0]).toMatchObject({
+      checkoutId,
+      reviewFindingReferences: fixture.prepared.references,
+      executionPolicy: "plan",
+    });
+    const listed = await fixture.runtime.execute(windowId, {
+      kind: "list-review-findings",
+      operationId: operationId(1111),
+      threadId,
+      checkoutId,
+    });
+    expect(listed).toMatchObject({
+      kind: "review-findings-state",
+      findings: [{ finding: { id: fixture.finding.id, state: "open", version: 1 } }],
+    });
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+    connection.close();
+  }
+});
+
+it.each(["changed finding", "purged diff", "wrong thread", "missing taint recorder"] as const)(
+  "refuses a review correction with %s before provider reads",
+  async (reason) => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const record = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["Local Code review correction"] },
+    }));
+    const fixture = await capturedReviewFixture({
+      provider: providerDriver(provider),
+      ...(reason === "missing taint recorder" ? {} : { recordExternalContentIngestion: record }),
+    });
+    try {
+      if (reason === "changed finding")
+        await fixture.runtime.execute(windowId, {
+          kind: "update-review-finding",
+          operationId: operationId(1120),
+          threadId,
+          checkoutId,
+          findingId: fixture.finding.id,
+          expectedVersion: 1,
+          state: "resolved",
+        });
+      if (reason === "purged diff") fixture.evidenceValues.delete(fixture.review.diff.contentId);
+      const refs = fixture.prepared.references.map((reference) =>
+        reason === "wrong thread"
+          ? { ...reference, threadId: "90000000-0000-4000-8000-000000001199" }
+          : reference,
+      );
+      const result = await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1121),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+        reviewFindingReferences: refs,
+      });
+      expect(result).toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "unavailable", message: expect.stringContaining("Reopen Review") },
+      });
+      expect(provider.send).not.toHaveBeenCalled();
+      expect(record).not.toHaveBeenCalled();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  },
+);
+
 it.each(["stage-git-hunks", "unstage-git-hunks", "reverse-git-hunks"] as const)(
   "prepares exact retained %s approval and applies it through the production runtime adapter",
   async (kind) => {
@@ -10489,6 +10811,243 @@ it.each(["stage-git-hunks", "unstage-git-hunks", "reverse-git-hunks"] as const)(
     } finally {
       await fixture.runtime.close();
       fixture.close();
+    }
+  },
+);
+
+it("keeps an outdated finding on its captured source after checkout edits, without resolving it", async () => {
+  const f = await capturedReviewFixture();
+  try {
+    f.reviseComparison();
+    const listed = await f.runtime.execute(windowId, {
+      kind: "list-review-findings",
+      operationId: operationId(1130),
+      threadId,
+      checkoutId,
+    });
+    expect(listed).toMatchObject({
+      kind: "review-findings-state",
+      findings: [
+        {
+          anchorState: "outdated",
+          finding: {
+            id: f.finding.id,
+            state: "open",
+            version: 1,
+            fileDigest: f.finding.fileDigest,
+            anchor: f.finding.anchor,
+          },
+        },
+      ],
+    });
+    const prepared = await f.runtime.execute(windowId, {
+      kind: "prepare-review-correction",
+      operationId: operationId(1131),
+      threadId,
+      checkoutId,
+      findings: [{ findingId: f.finding.id, expectedVersion: 1 }],
+    });
+    expect(prepared.kind).toBe("review-correction-prepared");
+    if (prepared.kind !== "review-correction-prepared") throw new Error("unavailable");
+    expect(prepared.prepared.text).toContain("outdated");
+    expect(prepared.prepared.text).toContain("4: new value");
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it.each(
+  (["body", "diff", "assessment", "typed-send", "content", "content-batch"] as const).flatMap(
+    (phase) =>
+      (["revoke", "expire", "rotate", "remote-abort"] as const).map((revoked) => ({
+        phase,
+        revoked,
+      })),
+  ),
+)(
+  "refuses a bound request revoked during review $phase/$revoked before notes/source return",
+  async ({ phase, revoked }) => {
+    let authorityNow = Date.parse(now);
+    const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability: token, now: authorityNow });
+    const workspace = defaultWindowWorkspace(windowId);
+    const access = new CodeProjectAccess({
+      readWorkspace: () => ({
+        ...workspace,
+        contextByMode: {
+          ...workspace.contextByMode,
+          code: contextKeyForProject("code", LOCAL_HOST_ID, thread().projectId, "/repo"),
+        },
+      }),
+      hasActiveCodeProject: () => true,
+      isWindowLive: (id) => store.listWindowIds(authorityNow).includes(id),
+    });
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const record = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["Local Code review correction"] },
+    }));
+    const f = await capturedReviewFixture({
+      codeProjectAccess: access,
+      provider: providerDriver(provider),
+      recordExternalContentIngestion: record,
+    });
+    const aborted = new AbortController();
+    const context: PrincipalRouteContext =
+      revoked === "remote-abort"
+        ? {
+            scopeId: windowId,
+            abortSignal: aborted.signal,
+            principal: createRemoteDevicePrincipal({
+              hostId: Schema.decodeUnknownSync(StableHostId)(
+                "90000000-0000-4000-8000-0000000000d2",
+              ),
+              deviceId: Schema.decodeUnknownSync(DeviceId)(String(windowId)),
+              credentialGeneration: 1,
+              origin: "https://octant.example",
+              protocolVersion: 1,
+              capabilityDigest: "b".repeat(64),
+              sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+                "90000000-0000-4000-8000-0000000000d3",
+              ),
+            }),
+          }
+        : {
+            scopeId: windowId,
+            principal: {
+              kind: "local-window",
+              windowId: String(windowId),
+              capabilityGeneration: 0,
+            },
+          };
+    const unused = () => {
+      throw new Error("unused route");
+    };
+    const route = createCodeRouteHandler({
+      windowAuthorityStore: store,
+      now: () => authorityNow,
+      service: withCodeOperationRuntime(
+        {
+          bootstrap: unused,
+          navigation: unused,
+          read: unused,
+          execute: unused,
+          subscribe: async function* () {},
+          readContent: unused,
+          saveFile: unused,
+          openFile: unused,
+        },
+        f.runtime,
+      ),
+    });
+    const base = { threadId, checkoutId, operationId: operationId(1200) };
+    const command =
+      phase === "typed-send"
+        ? {
+            ...base,
+            kind: "start-provider-turn",
+            sessionId,
+            prompt: f.prompt,
+            reviewFindingReferences: f.prepared.references,
+          }
+        : phase === "assessment"
+          ? {
+              ...base,
+              kind: "prepare-review-correction",
+              findings: [{ findingId: f.finding.id, expectedVersion: 1 }],
+            }
+          : {
+              ...base,
+              kind: "create-review-finding",
+              findingId: "90000000-0000-4000-8000-000000001201",
+              fileId: f.finding.fileId,
+              path: f.finding.path,
+              fileDigest: f.finding.fileDigest,
+              location: f.finding.location,
+              anchor: f.finding.anchor,
+              severity: "warning",
+              summary: "Do not save after revocation",
+            };
+    const body = new TextEncoder().encode(JSON.stringify(command));
+    const request =
+      phase === "content-batch"
+        ? new Request("http://127.0.0.1/api/code/evidence/batch", {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-octant-window-capability": token },
+            body: JSON.stringify({
+              threadId,
+              items: [{ operationId: f.review.operationId, contentId: f.review.diff.contentId }],
+            }),
+          })
+        : phase === "content"
+          ? new Request(
+              `http://127.0.0.1/api/code/threads/${threadId}/operations/${f.review.operationId}/evidence/${f.review.diff.contentId}`,
+              { headers: { "x-octant-window-capability": token } },
+            )
+          : new Request("http://127.0.0.1/api/code/commands", {
+              method: "POST",
+              headers: { "content-type": "application/json", "x-octant-window-capability": token },
+              body,
+            });
+    bindPrincipalRouteContext(request, context);
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    if (phase === "body")
+      vi.spyOn(request, "arrayBuffer").mockImplementation(async () => {
+        entered.resolve();
+        await finish.promise;
+        return body.buffer;
+      });
+    if (
+      phase === "diff" ||
+      phase === "typed-send" ||
+      phase === "content" ||
+      phase === "content-batch"
+    )
+      f.setEvidenceRead(async (reference) => {
+        entered.resolve();
+        await finish.promise;
+        return f.evidenceValues.get(reference.contentId);
+      });
+    if (phase === "assessment")
+      f.setGitObservationRead(async () => {
+        entered.resolve();
+        await finish.promise;
+        return readyGitObservation([]);
+      });
+    try {
+      const response = access.run(context, () => route(request));
+      await entered.promise;
+      if (revoked === "remote-abort") aborted.abort();
+      else if (revoked === "expire") authorityNow += 2 * 24 * 60 * 60 * 1000;
+      else {
+        store.revoke(windowId);
+        if (revoked === "rotate")
+          store.register({
+            windowId,
+            capability: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA",
+            now: authorityNow,
+          });
+      }
+      finish.resolve();
+      const result = await response;
+      const payload = await result?.json();
+      expect(payload, `${phase}/${revoked}`).toMatchObject(
+        phase === "content" || phase === "content-batch"
+          ? { category: "unauthorized" }
+          : { kind: "operation-failed", failure: { category: "unauthorized" } },
+      );
+      expect(provider.start).not.toHaveBeenCalled();
+      expect(provider.send).not.toHaveBeenCalled();
+      expect(record).not.toHaveBeenCalled();
+      expect(f.reviewFindings()).toHaveLength(1);
+    } finally {
+      finish.resolve();
+      await f.runtime.close();
+      f.close();
     }
   },
 );

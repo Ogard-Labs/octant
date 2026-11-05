@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { decodeSideChatDraftPrepared, decodeThreadMessageQueueCommand } from "@octant/contracts";
+import {
+  decodeSideChatDraftPrepared,
+  decodeCodeReviewCorrectionPrepared,
+  decodeThreadMessageQueueCommand,
+} from "@octant/contracts";
 import { readQueueReceipts, saveQueueReceipt } from "../messageQueue/threadMessageQueueReceipts";
 import {
   COMPOSER_THREAD_DRAFTS_STORAGE_KEY,
@@ -381,3 +385,100 @@ it("keeps an explicit pending clear authoritative over older persisted return te
   store.clear("chat", chatThread);
   expect(createComposerThreadDraftStore(storage).read("chat", chatThread)).toBeUndefined();
 });
+
+function reviewCorrection() {
+  return decodeCodeReviewCorrectionPrepared({
+    threadId: codeThread,
+    checkoutId: workThread,
+    text: "Selected review finding with bounded untrusted captured regions; other findings omitted.",
+    references: [
+      {
+        threadId: codeThread,
+        checkoutId: workThread,
+        findingId: "00000000-0000-4000-8000-000000000999",
+        version: 1,
+        anchorDigest: "a".repeat(64),
+      },
+    ],
+    omissions: ["Full files omitted."],
+  });
+}
+
+it("appends selected review findings to newer failed-write draft text and preserves exact references through edit/reload", () => {
+  const backing = memoryStorage();
+  let fail = false;
+  const storage = {
+    ...backing,
+    getItem: backing.getItem,
+    removeItem: backing.removeItem,
+    setItem: (key: string, value: string) => {
+      if (fail) throw new Error("full");
+      backing.setItem(key, value);
+    },
+  };
+  const store = createComposerThreadDraftStore(storage);
+  store.write("code", codeThread, { text: "A", caretIndex: 1, stagedDropped: false });
+  fail = true;
+  store.write("code", codeThread, { text: "AB", caretIndex: 1, stagedDropped: true });
+  const prepared = reviewCorrection();
+  expect(store.appendReviewCorrection(prepared).status).toBe("unpersisted");
+  expect(store.read("code", codeThread)).toMatchObject({
+    text: `AB\n\n${prepared.text}`,
+    caretIndex: 1,
+    stagedDropped: true,
+    reviewFindingReferences: prepared.references,
+  });
+  fail = false;
+  store.reloadFromStorage();
+  store.write("code", codeThread, {
+    ...store.read("code", codeThread)!,
+    text: "Person edited the excerpt",
+    caretIndex: 3,
+  });
+  const reopened = createComposerThreadDraftStore(storage);
+  expect(reopened.read("code", codeThread)).toMatchObject({
+    text: "Person edited the excerpt",
+    reviewFindingReferences: prepared.references,
+  });
+  expect(reopened.appendReviewCorrection(prepared).status).toBe("refused");
+  backing.setItem(
+    COMPOSER_THREAD_DRAFTS_STORAGE_KEY,
+    JSON.stringify({
+      [`code:${codeThread}`]: {
+        text: "Edited excerpt with damaged provenance",
+        caretIndex: 2,
+        reviewFindingReferences: [{ ...prepared.references[0], anchorDigest: "broken" }],
+      },
+    }),
+  );
+  reopened.reloadFromStorage();
+  expect(reopened.read("code", codeThread)?.reviewFindingReferencesInvalid).toBe(true);
+  reopened.write("code", codeThread, {
+    ...reopened.read("code", codeThread)!,
+    text: "Another arbitrary edit",
+  });
+  expect(reopened.read("code", codeThread)?.reviewFindingReferencesInvalid).toBe(true);
+  expect(reopened.appendReviewCorrection(prepared).status).toBe("refused");
+  reopened.clear("code", codeThread);
+  expect(reopened.read("code", codeThread)).toBeUndefined();
+  expect(reopened.appendReviewCorrection(prepared).status).toBe("ok");
+});
+
+it.each(["", "   \n", "existing text"])(
+  "preserves review-return draft %j and its useful caret",
+  (text) => {
+    const storage = memoryStorage();
+    const store = createComposerThreadDraftStore(storage);
+    store.write("code", codeThread, {
+      text,
+      caretIndex: Math.min(text.length, 2),
+      stagedDropped: false,
+    });
+    const prepared = reviewCorrection();
+    expect(store.appendReviewCorrection(prepared).status).toBe("ok");
+    expect(store.read("code", codeThread)).toMatchObject({
+      text: text.length ? `${text}\n\n${prepared.text}` : prepared.text,
+      caretIndex: text.length ? Math.min(text.length, 2) : prepared.text.length,
+    });
+  },
+);

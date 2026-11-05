@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseUnifiedDiff } from "./unifiedDiff";
+import { diffModelRowSources, parseUnifiedDiff } from "./unifiedDiff";
 
 const modified = [
   "diff --git a/src/app.ts b/src/app.ts",
@@ -137,6 +137,36 @@ describe("unified diff parsing", () => {
     );
     expect(file?.modified).toBe(["FIRST", "", "SECOND"].join("\n"));
     expect(file?.original).toBe(["first", "", "second"].join("\n"));
+  });
+
+  it("maps each Monaco model row to its source line and gives the gap row between hunks none", () => {
+    const [file] = parseUnifiedDiff(
+      [
+        "diff --git a/src/app.ts b/src/app.ts",
+        "--- a/src/app.ts",
+        "+++ b/src/app.ts",
+        "@@ -1,2 +1,2 @@",
+        "-first",
+        "+first changed",
+        " second",
+        "@@ -20,2 +20,2 @@",
+        " twentieth",
+        "-twenty-first",
+        "+twenty-first changed",
+        "",
+      ].join("\n"),
+    );
+    if (file === undefined) throw new Error("Expected a parsed file.");
+    const rows = diffModelRowSources(file, "modified");
+    expect(file.modified.split("\n")).toHaveLength(rows.length);
+    expect(rows.map((row) => row?.line)).toEqual([1, 2, undefined, 20, 21]);
+    expect(diffModelRowSources(file, "original").map((row) => row?.line)).toEqual([
+      1,
+      2,
+      undefined,
+      20,
+      21,
+    ]);
   });
 
   it("returns nothing for an empty diff", () => {

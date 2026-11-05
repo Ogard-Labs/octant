@@ -1,3 +1,4 @@
+import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { ChatThreadId } from "@octant/contracts/chat";
 import {
   decodeCodeThreadId,
@@ -161,6 +162,10 @@ export interface DockContainerProps {
   readonly projectPullRequestReviewOpen: boolean;
   /** Like `codeThreadController`: only while a tool is on screen. */
   readonly providerController?: ProviderController;
+  readonly requestedCodeReviewFile?: {
+    readonly threadKey: string;
+    readonly request: CodeReviewFileRequest;
+  };
   readonly requestedAgentReview?: {
     readonly threadKey: string;
     readonly request: AgentResultReviewRequest;
@@ -231,6 +236,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     projectPullRequestReviewOpen,
     providerController,
     requestedAgentReview,
+    requestedCodeReviewFile,
     requestedAgentView,
     selectedProjectPullRequest,
     selectedProjectPullRequestKey,
@@ -310,6 +316,9 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           actions.openDockTab("review");
           actions.setRequestedAgentReview({ threadKey: dockThreadKey, request });
         }}
+        {...(requestedCodeReviewFile?.threadKey === dockThreadKey
+          ? { requestedCodeReviewFile: requestedCodeReviewFile.request }
+          : {})}
         {...(requestedAgentReview?.threadKey === dockThreadKey
           ? {
               requestedAgentReview: requestedAgentReview.request,

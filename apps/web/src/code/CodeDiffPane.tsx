@@ -1,3 +1,5 @@
+import type { CodeReviewLineSelection } from "./CodeLocalReview";
+import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type {
   CodeApprovalId,
@@ -18,7 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
-import { parseUnifiedDiff, type ParsedDiffFile } from "./unifiedDiff";
+import { parseUnifiedDiff, diffModelRowSources, type ParsedDiffFile } from "./unifiedDiff";
 import { UnifiedDiffList } from "./UnifiedDiffList";
 import { CodeSelectedHunks } from "./CodeSelectedHunks";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -49,6 +51,8 @@ export type CodeDiffProjection =
   | { readonly state: "unavailable"; readonly message: string };
 
 export interface CodeDiffPaneProps {
+  readonly onSelectReviewLine?: (selection: CodeReviewLineSelection) => void;
+  readonly requestedCodeReviewFile?: CodeReviewFileRequest;
   readonly client: Pick<CodeClient, "operationContent" | "executeOperation">;
   readonly createGitOperationId?: () => CodeGitOperationId;
   readonly createOperationId?: () => CodeOperationId;
@@ -257,6 +261,13 @@ function AvailableDiff(
     () => (content.kind === "ready" ? parseUnifiedDiff(content.text) : []),
     [content],
   );
+  useEffect(() => {
+    const requested = props.requestedCodeReviewFile;
+    if (requested === undefined) return;
+    const file = files.find((item) => item.path === requested.path);
+    if (file !== undefined) setSelectedId(file.id);
+  }, [files, props.requestedCodeReviewFile]);
+
   const selected = files.find((file) => file.id === selectedId) ?? files[0];
   const trackedPath = selected === undefined ? undefined : tracked.get(selected.path);
 
@@ -337,6 +348,14 @@ function AvailableDiff(
       {content.kind === "unavailable" ? (
         <OctantAlert tone="warning">{content.message}</OctantAlert>
       ) : null}
+      {content.kind === "ready" &&
+      props.requestedCodeReviewFile !== undefined &&
+      !files.some((file) => file.path === props.requestedCodeReviewFile?.path) ? (
+        <OctantAlert tone="warning">
+          The receipt’s file is not in this current comparison. Its original per-turn diff was not
+          retained here; no line has been retargeted.
+        </OctantAlert>
+      ) : null}
       {content.kind === "ready" && files.length === 0 ? (
         <p role="status">This checkout has no textual changes.</p>
       ) : null}
@@ -345,6 +364,18 @@ function AvailableDiff(
         <div className="code-diff-pane__stack">
           <UnifiedDiffList
             files={files}
+            {...(props.requestedCodeReviewFile === undefined
+              ? {}
+              : { requestedPath: props.requestedCodeReviewFile.path })}
+            {...(props.onSelectReviewLine === undefined
+              ? {}
+              : {
+                  onSelectLine: (line: {
+                    path: string;
+                    side: "original" | "modified";
+                    line: number;
+                  }) => props.onSelectReviewLine?.({ ...line, reviewOperationId: operationId }),
+                })}
             {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
           />
         </div>
@@ -440,6 +471,20 @@ function AvailableDiff(
                 modified={selected.modified}
                 original={selected.original}
                 renderSideBySide={sideBySide}
+                {...(props.onSelectReviewLine === undefined
+                  ? {}
+                  : {
+                      onSelectLine: (line: { side: "original" | "modified"; line: number }) => {
+                        const source = diffModelRowSources(selected, line.side)[line.line - 1];
+                        if (source !== undefined)
+                          props.onSelectReviewLine?.({
+                            reviewOperationId: operationId,
+                            path: selected.path,
+                            side: line.side,
+                            line: source.line,
+                          });
+                      },
+                    })}
               />
             )}
           </div>

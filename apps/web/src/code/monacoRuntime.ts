@@ -469,6 +469,18 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
   editor.setModel({ original, modified });
   const disposeOriginalMenu = installNativeEditorMenu(editor.getOriginalEditor());
   const disposeModifiedMenu = installNativeEditorMenu(editor.getModifiedEditor());
+  const lineSelections =
+    options.onSelectLine === undefined
+      ? []
+      : (["original", "modified"] as const).map((side) =>
+          (side === "original"
+            ? editor.getOriginalEditor()
+            : editor.getModifiedEditor()
+          ).onDidChangeCursorPosition((event) => {
+            if (event.source === "keyboard" || event.source === "mouse")
+              options.onSelectLine?.({ side, line: event.position.lineNumber });
+          }),
+        );
   let disposed = false;
 
   return {
@@ -477,6 +489,7 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
       disposed = true;
       disposeOriginalMenu();
       disposeModifiedMenu();
+      for (const selection of lineSelections) selection.dispose();
       editor.dispose();
       original.dispose();
       modified.dispose();

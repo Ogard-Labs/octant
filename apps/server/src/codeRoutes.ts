@@ -1,3 +1,4 @@
+import { requiresLiveCodeReviewAuthority } from "./code/codeReviewAuthority";
 import type { CodeOperationExecuteOptions } from "./code/codeOperationService";
 import {
   refusesTerminalSessionImport,
@@ -616,7 +617,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // route directly.
     let operationInitiator: "user" | "agent";
     let callerKind: "local-window" | "remote-device";
-    let hunkAdmissionCurrent: () => boolean;
+    let liveAdmissionCurrent: () => boolean;
     let principalAbortSignal: AbortSignal | undefined;
     const originalWindowCapability = request.headers.get(WINDOW_CAPABILITY_HEADER);
     try {
@@ -632,8 +633,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
       callerKind = principalContext.principal.kind;
       principalAbortSignal = principalContext.abortSignal;
       operationInitiator = callerKind === "local-window" ? "user" : "agent";
-      const capability = request.headers.get("x-octant-window-capability") ?? "";
-      hunkAdmissionCurrent = () => {
+      const capability = request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "";
+      // Review and selected-hunk requests recheck that this same window still
+      // holds the authority it presented, at each awaited step of the request.
+      liveAdmissionCurrent = () => {
         if (request.signal.aborted || principalContext.abortSignal?.aborted === true) return false;
         if (principalContext.principal.kind === "remote-device") return true;
         try {
@@ -800,13 +803,14 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           const operationResult = decodeCodeOperationResult(
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {
               initiator: operationInitiator,
-              ...([
+              ...(requiresLiveCodeReviewAuthority(operation) ||
+              [
                 "prepare-git-hunks",
                 "stage-git-hunks",
                 "unstage-git-hunks",
                 "reverse-git-hunks",
               ].includes(operation.kind)
-                ? { admissionCurrent: hunkAdmissionCurrent }
+                ? { admissionCurrent: liveAdmissionCurrent }
                 : {}),
             }),
           );
@@ -1901,7 +1905,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               threadId,
               operationId,
               contentId,
-              hunkAdmissionCurrent,
+              liveAdmissionCurrent,
             ),
             origin,
           );
@@ -2143,7 +2147,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               await dependencies.service.readOperationContents(
                 authenticatedWindowId,
                 input,
-                hunkAdmissionCurrent,
+                liveAdmissionCurrent,
               ),
             ),
             200,
