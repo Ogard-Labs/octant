@@ -35,6 +35,16 @@ import type { CodeLanguageAgentReadResult, CodeLanguageService } from "./codeLan
  */
 
 const MAX_TOOL_INPUT_BYTES = 4 * 1024;
+/**
+ * The most bytes one result's list of places or diagnostics may serialize to.
+ * A Code turn replaces any tool result over 64 KiB with a bare
+ * `tool-result-too-large` (codeTurnRunner), which tells the model nothing and
+ * repeats on a retry, so a count bound alone is not enough: 200 references to
+ * one 310-character path already serialize to about 72 KiB. 48 KiB leaves a
+ * 16 KiB margin for the rest of the result, whose largest part is the echoed
+ * path, itself under the 4 KiB input bound.
+ */
+const MAX_RESULT_LIST_BYTES = 48 * 1024;
 const STALE_MESSAGE =
   "This thread no longer holds the authority the read needs. Continue without it and say so.";
 
@@ -147,11 +157,12 @@ export function createCodeLanguageAgentTools(
           path: call.path,
         });
         if (answer.status !== "diagnostics") return unanswered(answer);
+        const diagnostics = withinBudget(answer.diagnostics.map(agentDiagnostic));
         return {
           result: {
             path: call.path,
-            diagnostics: answer.diagnostics.map(agentDiagnostic),
-            truncated: answer.truncated,
+            diagnostics: diagnostics.entries,
+            truncated: answer.truncated || diagnostics.cut,
           },
           isError: false,
         };
@@ -183,15 +194,17 @@ export function createCodeLanguageAgentTools(
         includeDeclaration: call.includeDeclaration === true,
       });
       if (answer.status !== "references") return unanswered(answer);
+      const references = withinBudget(
+        answer.targets.slice(0, MAX_CODE_LANGUAGE_AGENT_REFERENCES + 1).map(agentDefinition),
+        MAX_CODE_LANGUAGE_AGENT_REFERENCES,
+      );
       return {
         result: {
           path: call.path,
           line: call.line,
           column: call.column,
-          references: answer.targets
-            .slice(0, MAX_CODE_LANGUAGE_AGENT_REFERENCES)
-            .map(agentDefinition),
-          truncated: answer.truncated || answer.targets.length > MAX_CODE_LANGUAGE_AGENT_REFERENCES,
+          references: references.entries,
+          truncated: answer.truncated || references.cut,
         },
         isError: false,
       };
@@ -207,6 +220,28 @@ function parseCall(inputJson: string): CodeLanguageToolArguments | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The leading entries that fit both `maxCount` and the result's byte budget;
+ * `cut` says either bound left one out.
+ */
+function withinBudget<Entry>(
+  entries: ReadonlyArray<Entry>,
+  maxCount: number = entries.length,
+): { readonly entries: ReadonlyArray<Entry>; readonly cut: boolean } {
+  const kept: Array<Entry> = [];
+  let bytes = 0;
+  for (const entry of entries) {
+    // One byte more for the comma that separates it from the entry before.
+    const size = Buffer.byteLength(JSON.stringify(entry), "utf8") + 1;
+    if (kept.length === maxCount || bytes + size > MAX_RESULT_LIST_BYTES) {
+      return { entries: kept, cut: true };
+    }
+    kept.push(entry);
+    bytes += size;
+  }
+  return { entries: kept, cut: false };
 }
 
 function agentRange(range: CodeLanguageRange) {

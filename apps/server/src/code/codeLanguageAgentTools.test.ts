@@ -299,6 +299,94 @@ describe("Code language agent tools", () => {
     });
   });
 
+  it("stops listing places before the result outgrows the provider's tool result budget, and says so", async () => {
+    const thread = codeThread();
+    const deepPath = `${"deep/".repeat(60)}name.ts`;
+    const { call } = tools({
+      thread,
+      answer: {
+        status: "references",
+        threadId: thread.id,
+        checkoutId: thread.checkoutId,
+        fileId: "50000000-0000-4000-8000-000000000001" as never,
+        documentVersion: 1,
+        documentRevision: "90000000-0000-4000-8000-000000000001",
+        targets: Array.from({ length: MAX_CODE_LANGUAGE_AGENT_REFERENCES }, (_, line) => ({
+          kind: "checkout-location" as const,
+          path: deepPath as never,
+          range: { start: { line, character: 2 }, end: { line, character: 7 } },
+        })),
+        truncated: false,
+      },
+    });
+    const outcome = await call({ operation: "references", path: "src/b.ts", line: 2, column: 31 });
+    expect(outcome.isError).toBe(false);
+    const result = outcome.result as {
+      readonly references: ReadonlyArray<unknown>;
+      readonly truncated: boolean;
+    };
+    expect(Buffer.byteLength(JSON.stringify(outcome.result), "utf8")).toBeLessThan(64 * 1024);
+    expect(result.references.length).toBeGreaterThan(0);
+    expect(result.references.length).toBeLessThan(MAX_CODE_LANGUAGE_AGENT_REFERENCES);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("returns every place when there are exactly as many as the bound, without calling the list truncated", async () => {
+    const thread = codeThread();
+    const { call } = tools({
+      thread,
+      answer: {
+        status: "references",
+        threadId: thread.id,
+        checkoutId: thread.checkoutId,
+        fileId: "50000000-0000-4000-8000-000000000001" as never,
+        documentVersion: 1,
+        documentRevision: "90000000-0000-4000-8000-000000000001",
+        targets: Array.from({ length: MAX_CODE_LANGUAGE_AGENT_REFERENCES }, (_, line) => ({
+          kind: "checkout-location" as const,
+          path: "b.ts" as never,
+          range: { start: { line, character: 2 }, end: { line, character: 7 } },
+        })),
+        truncated: false,
+      },
+    });
+    const outcome = await call({ operation: "references", path: "src/b.ts", line: 2, column: 31 });
+    expect(outcome.result).toMatchObject({ truncated: false });
+    expect(
+      (outcome.result as { readonly references: ReadonlyArray<unknown> }).references,
+    ).toHaveLength(MAX_CODE_LANGUAGE_AGENT_REFERENCES);
+  });
+
+  it("stops listing diagnostics before the result outgrows the provider's tool result budget, and says so", async () => {
+    const thread = codeThread();
+    const { call } = tools({
+      thread,
+      answer: {
+        status: "diagnostics",
+        threadId: thread.id,
+        checkoutId: thread.checkoutId,
+        fileId: "50000000-0000-4000-8000-000000000001" as never,
+        diagnostics: Array.from({ length: 1_000 }, (_, line) => ({
+          path: "src/b.ts" as never,
+          range: { start: { line, character: 0 }, end: { line, character: 4 } },
+          severity: "error" as const,
+          message: "x".repeat(2_048),
+          source: "typescript",
+        })),
+        truncated: false,
+      },
+    });
+    const outcome = await call({ operation: "diagnostics", path: "src/b.ts" });
+    expect(outcome.isError).toBe(false);
+    const result = outcome.result as {
+      readonly diagnostics: ReadonlyArray<unknown>;
+      readonly truncated: boolean;
+    };
+    expect(Buffer.byteLength(JSON.stringify(outcome.result), "utf8")).toBeLessThan(64 * 1024);
+    expect(result.diagnostics.length).toBeGreaterThan(0);
+    expect(result.truncated).toBe(true);
+  });
+
   it("answers no tool it does not offer", async () => {
     await expect(tools().call({}, "octant_terminal")).resolves.toMatchObject({
       result: { error: "tool-unavailable" },

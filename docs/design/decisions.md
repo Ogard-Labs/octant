@@ -2731,7 +2731,7 @@ A Code thread's editor gets diagnostics and go-to-definition from separately lau
 - The bundled native language server is on by default for Code, with a Settings switch; the Project's own copy of that language toolchain is not used.
 - Paired devices may read results; starting a `repo-tooling` server stays local-host only.
 - Agents get one read-only tool, `octant_code`, with `diagnostics`, `definition` and `references` operations, available in Plan and asking nothing, that never starts or reads through a `repo-tooling` server (real-provider smoke owed).
-- `octant_code` is offered on a Code turn only when an effective `static` server covers a file a bounded scan finds in the turn's checkout or extra folders; `references` returns at most 200 places and says when it was cut.
+- `octant_code` is offered on a Code turn only when an effective `static` server covers a file a bounded scan finds in the turn's checkout or extra folders; `references` returns at most 200 places, `references` and `diagnostics` stop before their list passes 48 KiB so a result fits the provider's tool result budget, and each says when it was cut.
 - Octant hosts no other editor's extension API.
 
 Status: Built. Since: 2026-10-26. Detail: [Language services: launch classes](language-services.md#launch-classes), [authority](language-services.md#authority) and [maintainer decisions](language-services.md#maintainer-decisions).

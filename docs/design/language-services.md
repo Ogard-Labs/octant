@@ -833,8 +833,10 @@ design left a choice open.
   the person's retry.
 - **Answers.** Results keep the editor's bounds, and a definition or
   reference outside the checkout is only its label. `references` returns at
-  most 200 places, fewer than the editor's 1,000, so a result always fits the
-  provider's tool result budget whole; `truncated` says when there were more.
+  most 200 places, fewer than the editor's 1,000, and `references` and
+  `diagnostics` stop adding entries once the list would pass 48 KiB, so a
+  result fits the provider's 64 KiB tool result budget whole even for long
+  paths and messages; `truncated` says when either bound left entries out.
   An agent holds no acknowledged revision, so its `references` read is
   answered for the saved text it just brought the server up to, never through
   the editor's revision-staged path; a server that does not report
