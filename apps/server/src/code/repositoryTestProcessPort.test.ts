@@ -962,6 +962,48 @@ describe("RepositoryTestProcessPort", () => {
     expect(new TextDecoder().decode(result.stderr)).toBe("abc");
   });
 
+  it("keeps the newest output over the bound for a launch that asks for it, without splitting a character", async () => {
+    const child = fakeChild(4321);
+    const port = new RepositoryTestProcessPort(
+      confinedOptions({ spawn: vi.fn(() => child), maxOutputBytes: 8 }),
+    );
+
+    const execution = port.execute({
+      argv: ["/usr/bin/test"],
+      cwd: "/repo",
+      environment: {},
+      timeoutMs: 5_000,
+      outputRetention: "newest",
+    });
+    child.stdout.write("old line\n");
+    child.stderr.write("é");
+    child.stdout.write("new line\n");
+    child.close(0, null);
+    const result = await execution;
+
+    expect(new TextDecoder().decode(result.stdout)).toBe("new line\n");
+    expect(result.stderr.byteLength).toBe(0);
+    expect(result.parserFailed).toBe(false);
+
+    const split = fakeChild(4322);
+    const splitPort = new RepositoryTestProcessPort(
+      confinedOptions({ spawn: vi.fn(() => split), maxOutputBytes: 2 }),
+    );
+    const splitExecution = splitPort.execute({
+      argv: ["/usr/bin/test"],
+      cwd: "/repo",
+      environment: {},
+      timeoutMs: 5_000,
+      outputRetention: "newest",
+    });
+    split.stdout.write("aé\nb");
+    split.close(0, null);
+    const splitResult = await splitExecution;
+    // The three bytes kept from "aé\nb" would start inside "é"; the cut drops its rest.
+    expect(new TextDecoder().decode(splitResult.stdout)).toBe("\nb");
+    expect(splitResult.parserFailed).toBe(false);
+  });
+
   it("escalates timeout and cancellation from process-group TERM to KILL", async () => {
     for (const termination of ["timed-out", "cancelled"] as const) {
       const child = fakeChild(4321);

@@ -184,6 +184,7 @@ export interface AppleToolchainServiceOptions {
       readonly additionalWriteRoots?: ReadonlyArray<string>;
       readonly additionalReadRoots?: ReadonlyArray<string>;
       readonly isolatedRoots?: ReadonlyArray<string>;
+      readonly outputRetention?: "first" | "newest";
     },
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
@@ -1514,6 +1515,10 @@ export class AppleToolchainService {
       context,
       request.timeoutMs,
       signal,
+      undefined,
+      // `log show` has no tail bound of its own, and the window can hold more
+      // than the capture keeps; the newest lines are the ones asked about.
+      "newest",
     );
     const cleanup = info.cleanupUncertain || shown.cleanupUncertain ? "uncertain" : "complete";
     if (!succeeded(shown)) {
@@ -1707,6 +1712,7 @@ export class AppleToolchainService {
     timeoutMs: number,
     signal?: AbortSignal,
     grants?: AppleLaunchGrants,
+    outputRetention?: "newest",
   ): Promise<AppleProcessResult> {
     return await this.#options.execute(
       {
@@ -1720,6 +1726,7 @@ export class AppleToolchainService {
         // same directory as an additional write root.
         isolatedRoots: [this.#captureDirectory, ...(this.#options.isolatedRoots ?? [])],
         ...(grants === undefined ? {} : grants),
+        ...(outputRetention === undefined ? {} : { outputRetention }),
       },
       signal,
     );

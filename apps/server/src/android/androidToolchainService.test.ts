@@ -2007,13 +2007,21 @@ describe("AndroidToolchainService", () => {
       "</node></node></hierarchy>";
 
     function inspectionService(
-      answer: (argv: ReadonlyArray<string>) => ReturnType<typeof processResult> | undefined,
+      answer: (
+        argv: ReadonlyArray<string>,
+        outputRetention?: "first" | "newest",
+      ) => ReturnType<typeof processResult> | undefined,
       executionContext: ExecutionContext = context,
     ) {
       const discovery = discoveryExecutor();
-      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
-        return answer(input.argv) ?? (await discovery(input));
-      });
+      const execute = vi.fn(
+        async (input: {
+          readonly argv: ReadonlyArray<string>;
+          readonly outputRetention?: "first" | "newest";
+        }) => {
+          return answer(input.argv, input.outputRetention) ?? (await discovery(input));
+        },
+      );
       const artifacts = new Map<string, Uint8Array>();
       const service = new AndroidToolchainService({
         execute,
@@ -2270,6 +2278,39 @@ describe("AndroidToolchainService", () => {
           "1762336680.000",
           "--pid=1234",
         ]);
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("returns the newest lines of a window that holds more than the process capture keeps", async () => {
+      const full = Array.from(
+        { length: 2_000 },
+        (_unused, index) => `11-05 10:00:00.000  1234  1234 I Example: line ${index}`,
+      ).join("\n");
+      // `-t <time>` bounds the window, not its line count; the process port
+      // keeps a bounded part of an oversized output, and which end follows the
+      // launch's retention.
+      const cap = 4_096;
+      const { service, artifacts, ready } = inspectionService((argv, outputRetention) => {
+        if (argv.includes("pidof")) return processResult("1234\n");
+        if (argv.includes("date")) return processResult("1762336800\n");
+        if (argv.includes("logcat")) {
+          return processResult(
+            outputRetention === "newest" ? full.slice(-cap) : full.slice(0, cap),
+          );
+        }
+        return undefined;
+      });
+      try {
+        await ready;
+        const evidence = await service.execute(
+          action("logs", { packageName: "com.example.app", sinceSeconds: 120 }),
+          context,
+        );
+        expect(evidence.outcome).toBe("succeeded");
+        const text = new TextDecoder().decode(artifacts.get(`android-log-${ids.action}`));
+        expect(text.trim().split("\n").at(-1)).toContain("line 1999");
       } finally {
         await service.close();
       }

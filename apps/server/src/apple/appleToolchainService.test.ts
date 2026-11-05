@@ -986,6 +986,47 @@ describe("AppleToolchainService lifecycle", () => {
     ).toBeUndefined();
   });
 
+  it("returns the newest log lines when the window holds more than the process capture keeps", async () => {
+    const base = discoveryExecutor();
+    const full = Array.from(
+      { length: 2_000 },
+      (_unused, index) => `2026-11-05 10:00:00.000 E  Fixture App[42:7] line ${index}`,
+    ).join("\n");
+    // The process port keeps a bounded part of an oversized output, and which
+    // end follows the launch's retention.
+    const cap = 4_096;
+    const execute = vi.fn(
+      async (input: Parameters<typeof base>[0] & { readonly outputRetention?: string }) => {
+        const command = input.argv.join(" ");
+        if (command.startsWith("xcrun simctl appinfo")) {
+          return processResult('{\n    CFBundleExecutable = "Fixture App";\n}\n');
+        }
+        if (command.includes("log show")) {
+          return processResult(
+            input.outputRetention === "newest" ? full.slice(-cap) : full.slice(0, cap),
+          );
+        }
+        return base(input);
+      },
+    );
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      readArtifact: async (reference: string) => artifacts.get(reference),
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(simulatorRequest(), context);
+    expect(evidence.outcome).toBe("succeeded");
+    const log = await (service as any).readLogArtifact(evidence.artifacts[0].reference, context);
+    expect(log.trim().split("\n").at(-1)).toContain("line 1999");
+  });
+
   it("falls back to the app's subsystem when the installed app's executable cannot be read", async () => {
     const base = discoveryExecutor();
     const execute = vi.fn(async (input: Parameters<typeof base>[0]) => {

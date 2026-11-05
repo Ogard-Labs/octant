@@ -86,6 +86,7 @@ export interface AndroidToolchainServiceOptions {
       readonly cwd: string;
       readonly environment: Readonly<Record<string, string>>;
       readonly timeoutMs: number;
+      readonly outputRetention?: "first" | "newest";
     },
     signal?: AbortSignal,
   ) => Promise<AndroidProcessResult>;
@@ -1363,6 +1364,9 @@ export class AndroidToolchainService {
         context,
         request.timeoutMs,
         signal,
+        // `-t <time>` bounds the window but not its line count, so a chatty
+        // app can write more than the capture keeps; keep its newest lines.
+        "newest",
       );
       if (!succeeded(log)) return logReadFailure(log);
       const bounded = boundedDeviceLogTail(text(log.stdout), budget);
@@ -1736,6 +1740,7 @@ export class AndroidToolchainService {
     context: AndroidExecutionContext,
     timeoutMs: number,
     signal?: AbortSignal,
+    outputRetention?: "newest",
   ): Promise<AndroidProcessResult> {
     const combined =
       signal === undefined
@@ -1755,6 +1760,7 @@ export class AndroidToolchainService {
         cwd: context.checkoutRoot,
         environment: androidEnv(this.#options.environment?.() ?? {}, this.#sdk),
         timeoutMs,
+        ...(outputRetention === undefined ? {} : { outputRetention }),
       },
       combined,
     );
