@@ -24,6 +24,68 @@ function fixture() {
 }
 
 describe("shared desktop client lifetime", () => {
+  it("does not grant restart retention without a current retained client or after ordinary reopen", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    try {
+      const ordinary = f.lifetime.beginHostRestart();
+      ordinary();
+      f.count(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(f.quitHost).not.toHaveBeenCalled();
+      f.count(1);
+      await f.lifetime.requestLocalQuit();
+      const ready = f.lifetime.beginHostRestart();
+      f.count(0);
+      expect(await f.lifetime.reopen()).toBe(true);
+      ready();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(f.quitHost).not.toHaveBeenCalled();
+    } finally {
+      f.lifetime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds a stalled retained-host restart without extending it for repeated requests", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    try {
+      await f.lifetime.requestLocalQuit();
+      f.lifetime.beginHostRestart();
+      await vi.advanceTimersByTimeAsync(20_000);
+      f.lifetime.beginHostRestart();
+      f.count(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(f.quitHost).toHaveBeenCalledOnce();
+    } finally {
+      f.lifetime.dispose();
+      vi.useRealTimers();
+    }
+  });
+  it("allows only known retained clients bounded recovery after a managed host restart", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    try {
+      await f.lifetime.requestLocalQuit();
+      const ready = f.lifetime.beginHostRestart();
+      f.count(0);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(f.quitHost).not.toHaveBeenCalled();
+      ready();
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(f.quitHost).not.toHaveBeenCalled();
+      f.count(1);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(f.quitHost).not.toHaveBeenCalled();
+      f.count(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.quitHost).toHaveBeenCalledOnce();
+    } finally {
+      f.lifetime.dispose();
+      vi.useRealTimers();
+    }
+  });
   it("closes local windows while another client retains the host, then confirms the final exit once", async () => {
     const f = fixture();
     expect(await f.lifetime.requestLocalQuit()).toBe("retained");

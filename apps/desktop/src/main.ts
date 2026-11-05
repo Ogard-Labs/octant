@@ -2053,8 +2053,18 @@ export async function restartDesktopHostAndRefreshWindowAuthorities(options: {
 }
 
 async function restartDesktopHost(): Promise<HostAdmission> {
+  const finishRestart = desktopClientLifetime.beginHostRestart();
   const outcome = await restartDesktopHostAndRefreshWindowAuthorities({
-    restart: () => hostLifecycle.restart(),
+    restart: async () => {
+      try {
+        const admission = await hostLifecycle.restart();
+        finishRestart(admission.status !== "closing");
+        return admission;
+      } catch (error) {
+        finishRestart(false);
+        throw error;
+      }
+    },
     refreshWindowAuthorities: refreshDesktopWindowAuthorities,
   });
   if (outcome.status === "closing") return outcome;
