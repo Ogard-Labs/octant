@@ -983,9 +983,12 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
         try: async () => {
           const prompt = new BoundedAsyncInput<ClaudeAgentSdkInputMessage>(inputCapacity);
           const issuedMessageIds = new Set<string>();
-          // Several messages can wait in the input at once, so each context
-          // waits for the hook call naming its own message's text.
-          const pendingContexts: Array<{ readonly text: string; readonly context: string }> = [];
+          // Several messages can wait in the input at once, and the hook names
+          // a message only by its text, so every message sent waits here in
+          // order, with or without context. Matching by text alone let a
+          // context-free message take the context of a later one with the
+          // same text, a turn early, leaving its own turn without any.
+          const submissions: Array<{ readonly text: string; readonly context?: string }> = [];
           let query: ClaudeAgentSdkQueryLike | undefined;
           let initializedSessionId: string | undefined;
           let costBaseline: number | undefined;
@@ -1084,12 +1087,18 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             };
             const userPromptSubmit: ClaudeAgentSdkInvocationOptions["hooks"]["UserPromptSubmit"][0]["hooks"][0] =
               async (hookInput) => {
-                const index = pendingContexts.findIndex(
-                  (pending) => pending.text === hookInput.prompt,
+                // A subagent's prompt, or one Octant did not send, takes
+                // nothing. Claude Code reads its input in order, so messages
+                // queued ahead of the one named here will never reach the
+                // hook and are dropped with it.
+                if (hookInput.agent_id !== undefined || hookInput.agent_type !== undefined)
+                  return {};
+                const index = submissions.findIndex(
+                  (submission) => submission.text === hookInput.prompt,
                 );
-                const pending = pendingContexts[index];
-                if (pending === undefined) return {};
-                pendingContexts.splice(index, 1);
+                if (index === -1) return {};
+                const [pending] = submissions.splice(0, index + 1).slice(-1);
+                if (pending?.context === undefined) return {};
                 return {
                   hookSpecificOutput: {
                     hookEventName: "UserPromptSubmit",
@@ -1514,15 +1523,23 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   }
                   const messageId = crypto.randomUUID();
                   issuedMessageIds.add(messageId);
-                  if (context !== undefined) pendingContexts.push({ text, context });
-                  return prompt.offer({
-                    type: "user",
-                    message: { role: "user", content: text },
-                    parent_tool_use_id: null,
-                    origin: { kind: "human" },
-                    uuid: messageId,
-                    session_id: initializedSessionId ?? announcedSessionId ?? "",
-                  });
+                  const submission = context === undefined ? { text } : { text, context };
+                  submissions.push(submission);
+                  try {
+                    return await prompt.offer({
+                      type: "user",
+                      message: { role: "user", content: text },
+                      parent_tool_use_id: null,
+                      origin: { kind: "human" },
+                      uuid: messageId,
+                      session_id: initializedSessionId ?? announcedSessionId ?? "",
+                    });
+                  } catch (error) {
+                    // A message the input refused never reaches the hook.
+                    const index = submissions.indexOf(submission);
+                    if (index !== -1) submissions.splice(index, 1);
+                    throw error;
+                  }
                 }, "input delivery"),
               requestCompaction: () =>
                 request(async () => {
@@ -1547,7 +1564,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   // An interrupted turn never counts as holding its context, so
                   // the next turn sends it again; a stale entry left here could
                   // attach to a later message with the same text.
-                  pendingContexts.length = 0;
+                  // A message Claude Code read but had not started is named by
+                  // the interrupt receipt, which closes the session below, so
+                  // nothing left here is still owed context.
+                  submissions.length = 0;
                   try {
                     const receipt = decodeInterruptReceipt(await query!.interrupt());
                     if (
