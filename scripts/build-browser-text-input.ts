@@ -43,7 +43,7 @@ export async function buildBrowserTextInput(
     resolve(moduleRoot, "package.json"),
     JSON.stringify({ name: moduleName, version: "0.0.0", gypfile: true }),
   );
-  for (const source of ["browserTextInput.mm"])
+  for (const source of ["browserTextInput.mm", "browserTextInputRange.h"])
     await cp(
       resolve(repositoryRoot, "apps/desktop/src/native", source),
       resolve(moduleRoot, source),
@@ -54,7 +54,7 @@ export async function buildBrowserTextInput(
       targets: [
         {
           target_name: "octant-browser-text-input",
-          sources: ["browserTextInput.mm"],
+          sources: ["browserTextInput.mm", "browserTextInputRange.h"],
           defines: ["NAPI_VERSION=8"],
           libraries: ["-framework AppKit"],
           xcode_settings: {

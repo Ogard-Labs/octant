@@ -113,7 +113,7 @@ export function createOffscreenBrowserSurface(
         window.webContents.executeJavaScriptInIsolatedWorld(world, [...scripts]),
       );
       if (target === undefined || epoch !== generation || !shown) return undefined;
-      const rect = caret.read(target.selectionEnd);
+      const rect = caret.read(target.selectionStart, target.selectionEnd);
       // The public range lookup can round-trip through Chromium. Re-observe
       // the same field and selection after it, without reading field contents.
       const after = await readBrowserEditableTarget((world, scripts) =>

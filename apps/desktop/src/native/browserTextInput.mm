@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdint>
+#include "browserTextInputRange.h"
 
 namespace {
 const napi_type_tag ownerTag = {0x24973a891d254c65, 0x895e2df7938b964e};
@@ -25,10 +26,10 @@ bool bounded(NSRect value) {
 }
 napi_value read(napi_env env, napi_callback_info info) {
   if (!browserMain(env)) return refused(env);
-  size_t argc = 2; napi_value args[2], self;
-  if (napi_get_cb_info(env, info, &argc, args, &self, nullptr) != napi_ok || argc != 1) return refused(env);
-  auto state = owner(env, self); double offset = 0;
-  if (state == nullptr || napi_get_value_double(env, args[0], &offset) != napi_ok || !std::isfinite(offset) || std::floor(offset) != offset || offset < 0 || offset > 1048576) return refused(env);
+  size_t argc = 3; napi_value args[3], self;
+  if (napi_get_cb_info(env, info, &argc, args, &self, nullptr) != napi_ok || argc != 2) return refused(env);
+  auto state = owner(env, self); double offset = 0, end = 0;
+  if (state == nullptr || napi_get_value_double(env, args[0], &offset) != napi_ok || !std::isfinite(offset) || std::floor(offset) != offset || offset < 0 || offset > 1048576 || napi_get_value_double(env, args[1], &end) != napi_ok || !std::isfinite(end) || std::floor(end) != end || end < offset || end > 1048576) return refused(env);
   @autoreleasepool { @try {
     NSView *view = state->view;
     if (view == nil || view.window == nil) return refused(env);
@@ -38,9 +39,9 @@ napi_value read(napi_env env, napi_callback_info info) {
     if ((target != view && ![target isDescendantOf:view]) || ![target conformsToProtocol:@protocol(NSTextInputClient)]) return refused(env);
     NSRange actual = NSMakeRange(NSNotFound, 0);
     // Chromium's cached selectedRange/hasMarkedText can lag a hidden page. Only
-    // the host-observed requested UTF16 offset and the returned actual range count.
+    // the fresh host-observed UTF16 bounds and returned exact range count.
     NSRect screen = [(id<NSTextInputClient>)target firstRectForCharacterRange:NSMakeRange(static_cast<NSUInteger>(offset), 0) actualRange:&actual];
-    if (actual.location != static_cast<NSUInteger>(offset) || actual.length > 1) return refused(env);
+    if (!browserCaretRangeMatches(static_cast<NSUInteger>(offset), static_cast<NSUInteger>(end), actual.location, actual.length)) return refused(env);
     NSRect local = [view convertRect:[window convertRectFromScreen:screen] fromView:nil];
     if (!view.isFlipped) local.origin.y = NSHeight(view.bounds) - NSMaxY(local);
     if (!bounded(local)) return refused(env);

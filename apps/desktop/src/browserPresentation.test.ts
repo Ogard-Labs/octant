@@ -38,6 +38,50 @@ function setup() {
 }
 
 describe("embedded human presentation", () => {
+  it.each(["native failure", "owner expiry"])(
+    "attempts the original release without reporting success after %s",
+    (mode) => {
+      const s = setup();
+      s.offer(s.image(1));
+      s.presentation.frame(s.id, 0);
+      const scope = s.presentation.guard(s.id);
+      s.source.input.mockImplementationOnce(() => {
+        if (mode === "native failure") throw new Error("Native input failed");
+        s.expire();
+      });
+      expect(s.presentation.contextMenuAtCaret(s.id, { x: 50, y: 40 }, scope)).toBe(false);
+      expect(s.source.input.mock.calls.map((call) => call[0].type)).toEqual([
+        "mouseDown",
+        "mouseUp",
+      ]);
+      if (mode === "owner expiry")
+        expect(s.source.input.mock.calls[1]?.[0]).toMatchObject({ x: -1, y: -1 });
+    },
+  );
+
+  it("bounds a verified caret click to the current viewport and keeps its release paired", () => {
+    const s = setup();
+    s.offer(s.image(1));
+    s.presentation.frame(s.id, 0);
+    const scope = s.presentation.guard(s.id);
+    for (const point of [
+      { x: 800, y: 20 },
+      { x: 20, y: 600 },
+      { x: -1, y: 20 },
+      { x: NaN, y: 20 },
+    ])
+      expect(s.presentation.contextMenuAtCaret(s.id, point, scope)).toBe(false);
+    expect(s.source.input).not.toHaveBeenCalled();
+    expect(s.presentation.contextMenuAtCaret(s.id, { x: 50, y: 40 }, scope)).toBe(true);
+    expect(s.source.input.mock.calls.map((call) => call[0])).toEqual([
+      { type: "mouseDown", button: "right", x: 50, y: 40, clickCount: 1, modifiers: [] },
+      { type: "mouseUp", button: "right", x: 50, y: 40, clickCount: 1, modifiers: [] },
+    ]);
+    s.presentation.layout(s.id, { width: 300, height: 200, visible: true });
+    expect(s.presentation.contextMenuAtCaret(s.id, { x: 20, y: 20 }, scope)).toBe(false);
+    expect(s.source.input).toHaveBeenCalledTimes(2);
+  });
+
   it("admits current input before asynchronous cleanup without accepting initially stale coordinates", () => {
     const s = setup();
     s.offer(s.image(1));

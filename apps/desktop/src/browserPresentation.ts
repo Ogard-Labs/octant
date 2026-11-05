@@ -119,6 +119,16 @@ export class BrowserPresentation {
     return true;
   }
 
+  guard(id: string): () => boolean {
+    const owned = this.#current(id);
+    const epoch = owned?.layoutEpoch;
+    return () =>
+      owned !== undefined &&
+      this.#current(id) === owned &&
+      owned.visible &&
+      owned.layoutEpoch === epoch;
+  }
+
   current(id: string): boolean {
     return this.#current(id) !== undefined;
   }
@@ -159,6 +169,61 @@ export class BrowserPresentation {
 
   input(id: string, input: HumanBrowserInput, frameSequence: number): boolean {
     return this.reserveInput(id, input, frameSequence)?.() ?? false;
+  }
+
+  /** Coordinates come from the owned native caret, never a request payload. */
+  contextMenuAtCaret(
+    id: string,
+    point: { readonly x: number; readonly y: number },
+    authorized: () => boolean,
+  ): boolean {
+    const owned = this.#current(id);
+    if (
+      owned === undefined ||
+      !owned.visible ||
+      !owned.inputReady ||
+      !authorized() ||
+      !Number.isInteger(point.x) ||
+      !Number.isInteger(point.y) ||
+      point.x < 0 ||
+      point.y < 0 ||
+      point.x >= owned.width ||
+      point.y >= owned.height ||
+      owned.buttons.size !== 0
+    )
+      return false;
+    const epoch = owned.layoutEpoch;
+    const current = () =>
+      this.#current(id) === owned && owned.visible && owned.layoutEpoch === epoch && authorized();
+    let accepted = false;
+    owned.buttons.set("right", point);
+    try {
+      owned.source.input({
+        type: "mouseDown",
+        button: "right",
+        ...point,
+        clickCount: 1,
+        modifiers: [],
+      });
+      accepted = current();
+    } catch {
+      /* A partial native press still needs its matching release. */
+    } finally {
+      const release = current() ? point : { x: -1, y: -1 };
+      try {
+        owned.source.input({
+          type: "mouseUp",
+          button: "right",
+          ...release,
+          clickCount: 1,
+          modifiers: [],
+        });
+      } catch {
+        accepted = false;
+      }
+      owned.buttons.delete("right");
+    }
+    return accepted && current();
   }
 
   /** Admission precedes awaited composition cleanup; dispatch keeps its exact layout epoch. */

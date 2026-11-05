@@ -131,9 +131,14 @@ export function nativeMenuTemplate(
 
 const activeMenus = new WeakMap<BrowserWindow, () => void>();
 
-export function popupNativeMenu(window: BrowserWindow, value: unknown): Promise<NativeMenuOutcome> {
+export function popupNativeMenu(
+  window: BrowserWindow,
+  value: unknown,
+  signal?: AbortSignal,
+): Promise<NativeMenuOutcome> {
   const request = decodeNativeMenuRequest(value);
-  if (request === undefined || window.isDestroyed()) return Promise.resolve({ kind: "refused" });
+  if (request === undefined || window.isDestroyed() || signal?.aborted)
+    return Promise.resolve({ kind: "refused" });
   // BrowserWindow.webContents throws once the window's closed event fires.
   // Keep the original emitter for teardown instead of consulting that getter.
   const contents = window.webContents;
@@ -149,7 +154,8 @@ export function popupNativeMenu(window: BrowserWindow, value: unknown): Promise<
     const finish = () => {
       if (settled) return;
       settled = true;
-      activeMenus.delete(window);
+      if (activeMenus.get(window) === dismiss) activeMenus.delete(window);
+      signal?.removeEventListener("abort", dismiss);
       window.removeListener("closed", dismiss);
       contents.removeListener("did-start-navigation", navigated);
       resolve(outcome);
@@ -174,6 +180,7 @@ export function popupNativeMenu(window: BrowserWindow, value: unknown): Promise<
     ) => {
       if (isMainFrame) dismiss();
     };
+    signal?.addEventListener("abort", dismiss, { once: true });
     activeMenus.set(window, dismiss);
     window.once("closed", dismiss);
     contents.on("did-start-navigation", navigated);

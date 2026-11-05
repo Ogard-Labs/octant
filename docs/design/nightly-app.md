@@ -223,9 +223,11 @@ again. Password, custom editable and nested-frame targets remain unsupported.
 
 Stable binds its own hidden window once to an opaque main-only native object.
 The public requested-range text-input API returns caret geometry for the observed
-selection offset. Native cached selection and marked-text flags can lag hidden
-Chromium documents, so they do not establish the field or its selection. The
-host rechecks the same field and selection after geometry lookup. No native
+selection start. Native cached selection and marked-text flags can lag hidden
+Chromium documents, so they do not establish the field or its selection. A lookup
+may return that point or the exact host-observed selected span, never a partial
+or displaced range. The host rechecks the same field and selection after geometry
+lookup. No native
 pointer crosses the presentation protocol.
 
 Nightly positions its local native input context at that caret. It holds only
@@ -262,13 +264,52 @@ the existing renderer callback still uses ordinary server authorization.
 Ordinary editable fields in the Nightly shell receive the platform editing menu.
 These roles act on Nightly's own fields. They do not forward clipboard data,
 editing commands or menus into the Stable-owned page behind an embedded image.
-Stable page context menus, HTML select popups and page accessibility remain
-separate parity work.
+
+### Standard page editing menus
+
+A pointer right-click in an already focused, supported main-frame standard text
+field opens a native editing menu in Nightly. Shift+F10 or a context-menu key
+uses the same supported field through a paired user key gesture. Stable captures that field's
+issued incarnation before forwarding the gesture, accepts only its actual
+main-frame editable context-menu event, and rechecks the same view, presentation,
+layout, field and live native lease before executing one enabled action. The
+keyboard gesture binds a host-issued pending identity to its captured field and
+selection. Only its matching user key release may activate it. Cleanup key
+releases cannot activate a menu. Where Chromium does not emit a menu event for
+the key, Stable forwards a fixed native right-button pair just inside the
+verified selection-start rectangle, within the current actual viewport. The
+same field and selection must still match after the geometry lookup. No
+renderer-selected coordinates or synthetic DOM menu event are accepted. Fixed
+Undo, Redo, Cut, Copy, Paste and Select All commands use Stable's native page
+methods. Clipboard contents stay in the local OS operation and never enter the
+menu response or renderer JavaScript.
+
+Menu identities and edit flags travel only between the authenticated main
+processes. The ordinary renderer IPC refuses menu read, watch, action and dismiss
+requests, including pending-key activation. The main consumes pending identities
+without exposing them through the preload. A menu identity grants no additional authority. A bounded main-only
+watch dismisses the exact native popup on source retirement, field replacement,
+navigation, layout change, hide or lease loss. An old callback or detach cannot
+act on or dismiss its successor. Already committed native effects are not undone
+by later cancellation. Before a native popup opens, the main releases the same
+presentation's held source keys and buttons. New presses while that popup is
+preparing, open or retiring belong to the popup and are not forwarded to its
+page; matching held releases remain available. A queued earlier press cannot
+reappear after popup retirement.
+
+Native evidence covers pointer Select All and Undo, plus Shift+F10 invocation,
+Select All, reopening a selected range, dismissal and reinvocation. The physical
+context-menu key uses the same policy but has no separate hardware acceptance.
+Clipboard actions are wired through the same closed commands but have no live
+clipboard acceptance evidence. Keyboard navigation within an open menu is
+separate from invoking it. Password,
+custom-editor and iframe menus, link/media menus, HTML select popups, spelling and
+page accessibility remain separate parity work.
 
 The current foundation remains publication-gated while full IME reconversion,
 accessibility,
-native-popup parity, other native brokers and the remaining lifecycle behavior
-need implementation and evidence. An isolated synthetic fixture is feasibility evidence only; it is not
+remaining native-popup parity, other native brokers and the remaining lifecycle behavior
+need implementation and evidence. An isolated synthetic fixture validates only the exercised components; it does not establish
 packaged coexistence, signed-in browsing, or native identity verification.
 
 ## Fixed packaged entry

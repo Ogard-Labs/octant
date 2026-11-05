@@ -14,6 +14,27 @@ export const decodeBrowserEditorId = Schema.decodeUnknownSync(BrowserEditorId);
 export const BrowserCompositionId = Schema.UUID.pipe(Schema.brand("BrowserCompositionId"));
 export type BrowserCompositionId = typeof BrowserCompositionId.Type;
 export const decodeBrowserCompositionId = Schema.decodeUnknownSync(BrowserCompositionId);
+export const BrowserEditMenuId = Schema.UUID.pipe(Schema.brand("BrowserEditMenuId"));
+export type BrowserEditMenuId = typeof BrowserEditMenuId.Type;
+export const decodeBrowserEditMenuId = Schema.decodeUnknownSync(BrowserEditMenuId);
+export const BrowserEditAction = Schema.Literal(
+  "undo",
+  "redo",
+  "cut",
+  "copy",
+  "paste",
+  "selectAll",
+);
+export type BrowserEditAction = typeof BrowserEditAction.Type;
+export const BrowserEditFlags = Schema.Struct({
+  undo: Schema.Boolean,
+  redo: Schema.Boolean,
+  cut: Schema.Boolean,
+  copy: Schema.Boolean,
+  paste: Schema.Boolean,
+  selectAll: Schema.Boolean,
+}).annotations(strict);
+export type BrowserEditFlags = typeof BrowserEditFlags.Type;
 export const MAX_BROWSER_COMPOSITION_TEXT = 256;
 const CandidateText = Schema.String.pipe(
   Schema.maxLength(MAX_BROWSER_COMPOSITION_TEXT),
@@ -138,6 +159,24 @@ export const HumanBrowserState = Schema.Struct({
 }).annotations(strict);
 const Owner = { contextId: BrowserContextId, threadId: BrowserThreadId };
 export const HumanBrowserRequest = Schema.Union(
+  Schema.Struct({
+    ...Owner,
+    kind: Schema.Literal("edit-menu"),
+    presentationId: BrowserPresentationId,
+  }).annotations(strict),
+  Schema.Struct({
+    ...Owner,
+    kind: Schema.Literal("edit-menu-watch", "edit-menu-dismiss", "edit-menu-keyboard"),
+    presentationId: BrowserPresentationId,
+    menuId: BrowserEditMenuId,
+  }).annotations(strict),
+  Schema.Struct({
+    ...Owner,
+    kind: Schema.Literal("edit-menu-action"),
+    presentationId: BrowserPresentationId,
+    menuId: BrowserEditMenuId,
+    action: BrowserEditAction,
+  }).annotations(strict),
   Schema.Struct({ ...Owner, kind: Schema.Literal("attach") }).annotations(strict),
   Schema.Struct({
     ...Owner,
@@ -194,6 +233,15 @@ export const HumanBrowserRequest = Schema.Union(
 );
 export type HumanBrowserRequest = typeof HumanBrowserRequest.Type;
 export const HumanBrowserResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("edit-menu-pending"),
+    menuId: BrowserEditMenuId,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("edit-menu"),
+    menuId: BrowserEditMenuId,
+    flags: BrowserEditFlags,
+  }).annotations(strict),
   Schema.Struct({ status: Schema.Literal("editor"), editor: HumanBrowserEditor }).annotations(
     strict,
   ),

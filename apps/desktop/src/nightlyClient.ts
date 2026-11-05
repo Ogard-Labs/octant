@@ -1,6 +1,6 @@
 import { createBrowserPresentationClient } from "@octant/client-runtime";
 import { NightlyBrowserPresentation } from "./nightlyBrowserPresentation";
-import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
+import { app, BrowserWindow, screen, dialog, ipcMain, session } from "electron";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DesktopIdentity } from "@octant/host-runtime";
@@ -178,6 +178,20 @@ export async function runNightlyClient(
         current: () => windows.get(id) === window && !window.isDestroyed(),
         visible: () => !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
         focused: () => !window.isDestroyed() && window.isFocused(),
+        popupMenu: (request, signal) => {
+          if (window.isDestroyed()) return Promise.resolve({ kind: "refused" });
+          const point = screen.getCursorScreenPoint();
+          const bounds = window.getContentBounds();
+          return popupNativeMenu(
+            window,
+            {
+              ...request,
+              x: (point.x - bounds.x) / window.webContents.getZoomFactor(),
+              y: (point.y - bounds.y) / window.webContents.getZoomFactor(),
+            },
+            signal,
+          );
+        },
         execute: browserClient.execute,
       });
       presentations.set(id, presentation);

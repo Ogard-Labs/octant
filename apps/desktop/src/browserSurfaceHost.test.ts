@@ -68,6 +68,124 @@ function view(): BrowserSurfaceViewPort {
   };
 }
 
+async function keyboardMenuSurface(selectionStart = 0, selectionEnd = selectionStart) {
+  const base = view();
+  const target = { id: "60000000-0000-4000-8000-000000000039", selectionStart, selectionEnd };
+  let current = true;
+  let readCaret = async () => ({
+    ...target,
+    id: decodeBrowserEditorId(target.id),
+    caret: { x: 20, y: 30, width: 0, height: 24 },
+  });
+  vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(async () => ({
+    ...target,
+  }));
+  let receive:
+    | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
+    | undefined;
+  const nativeInput = vi.fn((input: { readonly type: string; readonly button?: string }) => {
+    if (input.type === "mouseUp" && input.button === "right")
+      for (const [name, listener] of vi.mocked(base.webContents.on).mock.calls)
+        if (name === "context-menu")
+          listener(
+            {},
+            {
+              frame: base.webContents.mainFrame,
+              isEditable: true,
+              editFlags: { canSelectAll: true },
+            },
+          );
+  });
+  const host = createBrowserSurfaceHost({
+    isEmbeddedOwner: () => current,
+    isOwnerWindowAvailable: () => current,
+    createView: () => ({
+      ...base,
+      human: {
+        input: nativeInput,
+        visible: vi.fn(),
+        bounds: vi.fn(),
+        editor: () => readCaret(),
+        frames: (listener) => {
+          receive = listener;
+          return () => {};
+        },
+      },
+    }),
+  });
+  await host.createContext({
+    contextId,
+    owner: { windowId: "window-a", threadId },
+    policy: {
+      profileMode: "isolated",
+      profile: { kind: "personal" },
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 2,
+      sessionTimeoutMs: 300000,
+    },
+  });
+  const attached = await host.humanPresentation(
+    decodeHumanBrowserRequest({ contextId, threadId, kind: "attach" }),
+    "window-a",
+  );
+  if (attached.status !== "attached") throw new Error("Expected native presentation");
+  const send = (raw: Readonly<Record<string, unknown>>) =>
+    host.humanPresentation(
+      decodeHumanBrowserRequest({
+        contextId,
+        threadId,
+        presentationId: attached.presentationId,
+        ...raw,
+      }),
+      "window-a",
+    );
+  await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+  receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+  await send({ kind: "frame", acknowledgement: 0 });
+  return {
+    host,
+    send,
+    nativeInput,
+    press: async () => {
+      const result = await send({
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "keyDown", keyCode: "F10", modifiers: ["shift"] },
+      });
+      if (result.status !== "edit-menu-pending")
+        throw new Error("Expected private pending gesture");
+      return result.menuId;
+    },
+    release: () =>
+      send({
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "keyUp", keyCode: "F10", modifiers: [] },
+      }),
+    expire: () => {
+      current = false;
+    },
+    deferCaret: () => {
+      let resume: () => void = () => {};
+      let entered: () => void = () => {};
+      const original = readCaret;
+      const held = new Promise<void>((done) => {
+        resume = done;
+      });
+      const started = new Promise<void>((done) => {
+        entered = done;
+      });
+      readCaret = async () => {
+        entered();
+        await held;
+        return original();
+      };
+      return { resume, started };
+    },
+  };
+}
+
 describe("BrowserSurfaceHost", () => {
   it("keeps owner frames volatile, fences earlier agent captures and lets local input reclaim the exact native page", async () => {
     const created = view();
@@ -255,6 +373,117 @@ describe("BrowserSurfaceHost", () => {
         await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
       } finally {
         await host.closeAll();
+      }
+    },
+  );
+
+  it("opens inside the native selection-start rectangle without moving a selected range", async () => {
+    const f = await keyboardMenuSurface(0, 20);
+    try {
+      const menuId = await f.press();
+      await f.release();
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId })).toEqual({ status: "accepted" });
+      expect(f.nativeInput.mock.calls.map(([event]) => event)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "mouseDown", button: "right", x: 21, y: 42 }),
+          expect.objectContaining({ type: "mouseUp", button: "right", x: 21, y: 42 }),
+        ]),
+      );
+    } finally {
+      await f.host.closeContext(contextId);
+    }
+  });
+
+  it("requires a released exact menu intent before one native caret click", async () => {
+    const f = await keyboardMenuSurface();
+    try {
+      const first = await f.press();
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: first })).toEqual({
+        status: "refused",
+      });
+      await f.release();
+      expect(f.nativeInput.mock.calls.map(([input]) => input.type)).toEqual(["keyDown", "keyUp"]);
+      const next = await f.press();
+      await f.release();
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: first })).toEqual({
+        status: "refused",
+      });
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: next })).toEqual({
+        status: "accepted",
+      });
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: next })).toEqual({
+        status: "refused",
+      });
+      expect(
+        f.nativeInput.mock.calls
+          .filter(([input]) => input.type.startsWith("mouse"))
+          .map(([input]) => input.type),
+      ).toEqual(["mouseDown", "mouseUp"]);
+      expect((await f.send({ kind: "edit-menu" })).status).toBe("edit-menu");
+    } finally {
+      await f.host.closeContext(contextId);
+    }
+  });
+
+  it("retires an awaited old activation without clearing a queued successor", async () => {
+    const f = await keyboardMenuSurface();
+    let resume = () => {};
+    try {
+      const old = await f.press();
+      await f.release();
+      const caret = f.deferCaret();
+      resume = caret.resume;
+      const activating = f.send({ kind: "edit-menu-keyboard", menuId: old });
+      await caret.started;
+      expect(await f.send({ kind: "edit-menu-dismiss", menuId: old })).toEqual({
+        status: "accepted",
+      });
+      const successor = f.press();
+      resume();
+      expect(await activating).toEqual({ status: "refused" });
+      const next = await successor;
+      await f.release();
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: old })).toEqual({
+        status: "refused",
+      });
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: next })).toEqual({
+        status: "accepted",
+      });
+      expect(
+        f.nativeInput.mock.calls
+          .filter(([input]) => input.type.startsWith("mouse"))
+          .map(([input]) => input.type),
+      ).toEqual(["mouseDown", "mouseUp"]);
+    } finally {
+      resume();
+      await f.host.closeContext(contextId);
+    }
+  });
+
+  it.each(["hide", "expiry", "revoke"])(
+    "refuses caret dispatch after %s during the native caret await",
+    async (retirement) => {
+      const f = await keyboardMenuSurface();
+      let resume = () => {};
+      try {
+        const id = await f.press();
+        await f.release();
+        const caret = f.deferCaret();
+        resume = caret.resume;
+        const pending = f.send({ kind: "edit-menu-keyboard", menuId: id });
+        await caret.started;
+        if (retirement === "hide")
+          await f.send({ kind: "layout", layout: { width: 800, height: 600, visible: false } });
+        else if (retirement === "expiry") f.expire();
+        else await f.host.closeContext(contextId);
+        resume();
+        expect(await pending).toEqual({ status: "refused" });
+        expect(f.nativeInput.mock.calls.some(([input]) => input.type.startsWith("mouse"))).toBe(
+          false,
+        );
+      } finally {
+        resume();
+        await f.host.closeContext(contextId);
       }
     },
   );
@@ -781,6 +1010,154 @@ describe("BrowserSurfaceHost", () => {
 
     vi.mocked(created.webContents.capturePage).mockResolvedValue(image);
     await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+  });
+
+  it.each([false, true])(
+    "closes an already destroyed view with its cached contents and preferred close %s",
+    async (preferred) => {
+      const base = view();
+      const contents = base.webContents;
+      let destroyed = false;
+      vi.mocked(contents.isDestroyed).mockImplementation(() => destroyed);
+      const close = vi.fn();
+      const created: BrowserSurfaceViewPort = { ...base, ...(preferred ? { close } : {}) };
+      Object.defineProperty(created, "webContents", {
+        get() {
+          if (destroyed) throw new Error("Destroyed view wrapper");
+          return contents;
+        },
+      });
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      const gone = vi.fn();
+      host.onContextGone(gone);
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: {
+          profileMode: "isolated",
+          profile: { kind: "personal" },
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300000,
+        },
+      });
+      const listener = vi
+        .mocked(contents.on)
+        .mock.calls.find(([event]) => event === "destroyed")?.[1];
+      if (listener === undefined) throw new Error("Missing native retirement listener");
+      destroyed = true;
+      expect(() => listener()).not.toThrow();
+      expect(gone).toHaveBeenCalledExactlyOnceWith(contextId);
+      if (preferred) expect(close).toHaveBeenCalledOnce();
+      else expect(contents.close).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a successor page menu through stale detach and revokes it with its source", async () => {
+    const base = view();
+    const selectAll = vi.fn();
+    const target = {
+      id: "60000000-0000-4000-8000-000000000029",
+      selectionStart: 0,
+      selectionEnd: 0,
+    };
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(target);
+    let receive:
+      | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
+      | undefined;
+    const emit = (event: string, ...args: readonly unknown[]) => {
+      for (const [name, listener] of vi.mocked(base.webContents.on).mock.calls)
+        if (event === name) listener(...args);
+    };
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView: () => ({
+        ...base,
+        webContents: { ...base.webContents, selectAll },
+        human: {
+          input: (input) => {
+            if (input.type === "mouseUp" && input.button === "right")
+              emit(
+                "context-menu",
+                {},
+                {
+                  frame: base.webContents.mainFrame,
+                  isEditable: true,
+                  editFlags: { canSelectAll: true },
+                },
+              );
+          },
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener) => {
+            receive = listener;
+            return () => {};
+          },
+        },
+      }),
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300000,
+      },
+    });
+    const send = (raw: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        decodeHumanBrowserRequest({ contextId, threadId, ...raw }),
+        "window-a",
+      );
+    const first = await send({ kind: "attach" });
+    const second = await send({ kind: "attach" });
+    if (first.status !== "attached" || second.status !== "attached")
+      throw new Error("Expected attachments");
+    const owned = (raw: Readonly<Record<string, unknown>>) =>
+      send({ presentationId: second.presentationId, ...raw });
+    await owned({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await owned({ kind: "frame", acknowledgement: 0 });
+    for (const type of ["mouseDown", "mouseUp"])
+      expect(
+        await owned({
+          kind: "input",
+          frameSequence: 1,
+          input: { type, x: 10, y: 20, button: "right", clickCount: 1 },
+        }),
+      ).toEqual({ status: "accepted" });
+    const menu = await owned({ kind: "edit-menu" });
+    expect(menu.status).toBe("edit-menu");
+    if (menu.status !== "edit-menu") throw new Error("Expected page editing menu");
+    expect(await send({ kind: "detach", presentationId: first.presentationId })).toEqual({
+      status: "refused",
+    });
+    expect(await owned({ kind: "edit-menu" })).toEqual(menu);
+    expect(
+      await owned({ kind: "edit-menu-action", menuId: menu.menuId, action: "selectAll" }),
+    ).toEqual({ status: "accepted" });
+    expect(selectAll).toHaveBeenCalledOnce();
+    expect(
+      await owned({ kind: "edit-menu-action", menuId: menu.menuId, action: "selectAll" }),
+    ).toEqual({ status: "refused" });
+    for (const type of ["mouseDown", "mouseUp"])
+      await owned({
+        kind: "input",
+        frameSequence: 1,
+        input: { type, x: 10, y: 20, button: "right", clickCount: 1 },
+      });
+    const next = await owned({ kind: "edit-menu" });
+    if (next.status !== "edit-menu") throw new Error("Expected successor menu");
+    const watching = owned({ kind: "edit-menu-watch", menuId: next.menuId });
+    emit("did-start-loading");
+    expect(await watching).toEqual({ status: "refused" });
+    await host.closeContext(contextId);
   });
 
   it("keeps an admitted pointer down ahead of its release while composition cleanup awaits", async () => {

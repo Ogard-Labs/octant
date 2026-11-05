@@ -6,13 +6,21 @@ import {
   type BrowserCompositionId,
 } from "@octant/contracts/browser-presentation";
 
+import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
+import type { BrowserEditAction, BrowserEditMenuId } from "@octant/contracts/browser-presentation";
+
 interface Presentation {
   readonly contextId: HumanBrowserRequest["contextId"];
   readonly threadId: HumanBrowserRequest["threadId"];
   readonly presentationId: Extract<HumanBrowserResult, { status: "attached" }>["presentationId"];
   layout: HumanBrowserLayout;
+  menuEpoch: number;
 }
 interface NightlyBrowserPresentationOptions {
+  readonly popupMenu?: (
+    request: NativeMenuRequest,
+    signal: AbortSignal,
+  ) => Promise<NativeMenuOutcome>;
   readonly current: () => boolean;
   readonly visible: () => boolean;
   readonly focused: () => boolean;
@@ -21,7 +29,14 @@ interface NightlyBrowserPresentationOptions {
     signal: AbortSignal,
   ) => Promise<HumanBrowserResult>;
 }
+interface KeyboardMenu {
+  readonly id: BrowserEditMenuId;
+  readonly owner: Extract<HumanBrowserRequest, { kind: "input" }>;
+  closing?: Promise<void>;
+}
 interface Pending {
+  readonly inputEpoch: number;
+  readonly menuEpoch: number;
   request: HumanBrowserRequest;
   readonly internal: boolean;
   readonly promise: Promise<HumanBrowserResult>;
@@ -37,6 +52,7 @@ export class NightlyBrowserPresentation {
   readonly #presentations = new Map<string, Presentation>();
   readonly #lifetime = new AbortController();
   readonly #queue: Pending[] = [];
+  readonly #keyboardMenus = new Map<string, KeyboardMenu>();
   readonly #held = new Map<string, Extract<HumanBrowserRequest, { kind: "input" }>>();
   readonly #compositions = new Map<
     string,
@@ -46,11 +62,15 @@ export class NightlyBrowserPresentation {
       terminal: boolean;
     }
   >();
+  #pageMenu: AbortController | undefined;
+  #pageMenuPresentation: Presentation | undefined;
+  readonly #pageMenuTasks = new Set<Promise<void>>();
   #active: Pending | undefined;
   #running: Promise<void> | undefined;
   #hide: Promise<void> | undefined;
   #hidden = false;
   #visibilityEpoch = 0;
+  #inputEpoch = 0;
 
   constructor(options: NightlyBrowserPresentationOptions) {
     this.#options = options;
@@ -58,7 +78,18 @@ export class NightlyBrowserPresentation {
 
   invoke(raw: unknown): Promise<HumanBrowserResult> {
     try {
-      return this.#enqueue(decodeHumanBrowserRequest(raw), false);
+      const request = decodeHumanBrowserRequest(raw);
+      if (
+        [
+          "edit-menu",
+          "edit-menu-watch",
+          "edit-menu-action",
+          "edit-menu-dismiss",
+          "edit-menu-keyboard",
+        ].includes(request.kind)
+      )
+        return Promise.resolve(refused());
+      return this.#enqueue(request, false);
     } catch {
       return Promise.resolve(refused());
     }
@@ -168,7 +199,14 @@ export class NightlyBrowserPresentation {
     const promise = new Promise<HumanBrowserResult>((done) => {
       resolve = done;
     });
-    const pending: Pending = { request, internal, promise, resolve };
+    const pending: Pending = {
+      request,
+      internal,
+      promise,
+      resolve,
+      inputEpoch: this.#inputEpoch,
+      menuEpoch: this.#presentations.get(String(request.contextId))?.menuEpoch ?? 0,
+    };
     if (internal) this.#queue.unshift(pending);
     else if (release !== undefined) {
       // Preserve down/character/up order while bypassing replaceable motion.
@@ -191,13 +229,32 @@ export class NightlyBrowserPresentation {
       const pending = this.#queue.shift();
       if (pending === undefined) break;
       this.#active = pending;
-      pending.resolve(await this.#dispatch(pending.request, pending.internal).catch(refused));
+      pending.resolve(
+        await this.#dispatch(
+          pending.request,
+          pending.internal,
+          pending.inputEpoch,
+          pending.menuEpoch,
+        ).catch(refused),
+      );
       this.#active = undefined;
     }
     this.#running = undefined;
   }
 
-  async #dispatch(request: HumanBrowserRequest, internal: boolean): Promise<HumanBrowserResult> {
+  async #dispatch(
+    request: HumanBrowserRequest,
+    internal: boolean,
+    queuedEpoch: number,
+    queuedMenuEpoch: number,
+  ): Promise<HumanBrowserResult> {
+    if (
+      !internal &&
+      request.kind === "input" &&
+      menuKeyDown(request.input) &&
+      queuedEpoch !== this.#inputEpoch
+    )
+      return refused();
     if (!this.#options.current() || this.#lifetime.signal.aborted) return refused();
     const owned = this.#presentations.get(String(request.contextId));
     if (
@@ -206,6 +263,24 @@ export class NightlyBrowserPresentation {
         String(owned.threadId) !== String(request.threadId))
     )
       return refused();
+    if (
+      !internal &&
+      request.kind === "input" &&
+      ["keyDown", "char", "mouseDown"].includes(request.input.type) &&
+      (queuedMenuEpoch !== owned?.menuEpoch || this.#pageMenuPresentation === owned)
+    ) {
+      // A native popup can consume releases without blurring the window. New
+      // presses belong to that popup; only already-owned releases reach the page.
+      if (request.input.type === "mouseDown" && this.#pageMenuPresentation === owned)
+        this.#pageMenu?.abort();
+      return refused();
+    }
+    if (
+      ["attach", "layout", "detach", "command", "tab"].includes(request.kind) ||
+      (request.kind === "input" &&
+        (request.input.type === "mouseDown" || menuKeyDown(request.input)))
+    )
+      this.#pageMenu?.abort();
     const hiding = request.kind === "layout" && !request.layout.visible;
     if (!hiding && request.kind !== "detach" && (this.#hidden || !this.#options.visible()))
       return refused();
@@ -229,7 +304,10 @@ export class NightlyBrowserPresentation {
       return refused();
     if (downKey(request) !== undefined && this.#held.size >= 32) return refused();
     const signal = AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(2_000)]);
-    const result = await new Promise<HumanBrowserResult>((resolve) => {
+    const keyboard = this.#keyboardMenus.get(String(request.contextId));
+    const inputEpoch = this.#inputEpoch;
+    let returnedKeyboard: KeyboardMenu | undefined;
+    let result = await new Promise<HumanBrowserResult>((resolve) => {
       const aborted = () => resolve(refused());
       signal.addEventListener("abort", aborted, { once: true });
       if (signal.aborted) {
@@ -244,7 +322,20 @@ export class NightlyBrowserPresentation {
     });
     if (!this.#options.current() || this.#lifetime.signal.aborted || signal.aborted)
       return refused();
+    if (result.status === "edit-menu-pending") {
+      if (
+        request.kind !== "input" ||
+        request.input.type !== "keyDown" ||
+        !menuKeyDown(request.input) ||
+        internal
+      )
+        return refused();
+      returnedKeyboard = { id: result.menuId, owner: request };
+      this.#keyboardMenus.set(String(request.contextId), returnedKeyboard);
+      result = { status: "accepted" };
+    }
     if ((result.status === "attached" && request.kind === "attach") || request.kind === "detach") {
+      if (keyboard !== undefined) await this.#retireKeyboard(keyboard);
       for (const [key, held] of this.#held)
         if (String(held.contextId) === String(request.contextId)) this.#held.delete(key);
     }
@@ -254,6 +345,7 @@ export class NightlyBrowserPresentation {
         threadId: request.threadId,
         presentationId: result.presentationId,
         layout: { width: 800, height: 600, visible: false },
+        menuEpoch: 0,
       });
     if (request.kind === "layout" && owned !== undefined && result.status === "accepted")
       owned.layout = request.layout;
@@ -285,13 +377,223 @@ export class NightlyBrowserPresentation {
         !this.#options.visible() ||
         (request.kind === "input" &&
           !this.#options.focused() &&
-          !(internal && releaseKey(request) !== undefined)))
-    )
+          !(internal && releaseKey(request) !== undefined)) ||
+        (returnedKeyboard !== undefined && inputEpoch !== this.#inputEpoch))
+    ) {
+      if (returnedKeyboard !== undefined) {
+        const retiring = this.#retireKeyboard(returnedKeyboard);
+        const original = returnedKeyboard.owner;
+        if (original.input.type === "keyDown") {
+          const released = await this.#options
+            .execute(
+              { ...original, input: { ...original.input, type: "keyUp" } },
+              AbortSignal.timeout(1000),
+            )
+            .catch(refused);
+          const held = downKey(original);
+          if (
+            released.status === "accepted" &&
+            held !== undefined &&
+            this.#held.get(held) === original
+          )
+            this.#held.delete(held);
+        }
+        await retiring;
+      }
       return refused();
-    return result;
+    }
+    if (request.kind === "frame" && result.status === "refused") this.#pageMenu?.abort();
+    if (
+      keyboard !== undefined &&
+      this.#keyboardMenus.get(String(request.contextId)) === keyboard &&
+      request.kind === "input" &&
+      request.input.type === "keyUp" &&
+      keyboard.owner.input.type === "keyDown" &&
+      request.input.keyCode === keyboard.owner.input.keyCode &&
+      result.status === "accepted" &&
+      !internal
+    ) {
+      const task = this.#openPageMenu(request, keyboard);
+      this.#pageMenuTasks.add(task);
+      void task.finally(() => this.#pageMenuTasks.delete(task));
+    }
+
+    if (
+      request.kind === "input" &&
+      request.input.type === "mouseUp" &&
+      request.input.button === "right" &&
+      result.status === "accepted"
+    ) {
+      const task = this.#openPageMenu(request);
+      this.#pageMenuTasks.add(task);
+      void task.finally(() => this.#pageMenuTasks.delete(task));
+    }
+    return result.status === "edit-menu" ? refused() : result;
+  }
+
+  async #openPageMenu(
+    owner: Extract<HumanBrowserRequest, { kind: "input" }>,
+    keyboard?: KeyboardMenu,
+  ): Promise<void> {
+    const popup = this.#options.popupMenu;
+    if (popup === undefined) {
+      if (keyboard !== undefined) await this.#retireKeyboard(keyboard);
+      return;
+    }
+    const presentation = this.#presentations.get(String(owner.contextId));
+    if (presentation?.presentationId !== owner.presentationId) return;
+    this.#pageMenu?.abort();
+    const owned = new AbortController();
+    this.#pageMenu = owned;
+    this.#pageMenuPresentation = presentation;
+    presentation.menuEpoch++;
+    const signal = AbortSignal.any([owned.signal, this.#lifetime.signal]);
+    const current = () =>
+      !signal.aborted &&
+      this.#pageMenu === owned &&
+      this.#options.current() &&
+      this.#options.visible() &&
+      !this.#hidden &&
+      this.#presentations.get(String(owner.contextId))?.presentationId === owner.presentationId;
+    const base = {
+      contextId: owner.contextId,
+      threadId: owner.threadId,
+      presentationId: owner.presentationId,
+    };
+    const execute = (request: HumanBrowserRequest) =>
+      this.#options
+        .execute(request, AbortSignal.any([signal, AbortSignal.timeout(1500)]))
+        .catch(refused);
+    let menu: Extract<HumanBrowserResult, { status: "edit-menu" }> | undefined;
+    try {
+      if (keyboard !== undefined) {
+        if (!current() || !this.#options.focused()) return;
+        const activated = await execute({
+          ...base,
+          kind: "edit-menu-keyboard",
+          menuId: keyboard.id,
+        });
+        if (activated.status !== "accepted" || !current() || !this.#options.focused()) return;
+      }
+      const end = Date.now() + 750;
+      while (current() && Date.now() < end) {
+        const result = await execute({ ...base, kind: "edit-menu" });
+        if (result.status === "edit-menu") {
+          menu = result;
+          break;
+        }
+        if (result.status !== "idle") return;
+        await new Promise<void>((done) => setTimeout(done, 25));
+      }
+      if (menu === undefined || !current() || !this.#options.focused()) return;
+      // Release modifiers/buttons before AppKit can consume their physical ups.
+      // Keep this scoped to the captured presentation and never activate cleanup.
+      for (const request of [...this.#held.values()]) {
+        if (
+          String(request.contextId) !== String(owner.contextId) ||
+          request.presentationId !== owner.presentationId
+        )
+          continue;
+        const event = request.input;
+        let released: HumanBrowserResult;
+        if (event.type === "keyDown")
+          released = await this.#enqueue({ ...request, input: { ...event, type: "keyUp" } }, true);
+        else if (event.type === "mouseDown")
+          released = await this.#enqueue(
+            { ...request, input: { ...event, type: "mouseUp" } },
+            true,
+          );
+        else continue;
+        if (released.status !== "accepted" || !current()) return;
+      }
+      const selectedMenu = menu;
+      const actions: ReadonlyArray<readonly [BrowserEditAction, string]> = [
+        ["undo", "Undo"],
+        ["redo", "Redo"],
+        ["cut", "Cut"],
+        ["copy", "Copy"],
+        ["paste", "Paste"],
+        ["selectAll", "Select All"],
+      ];
+      const watch = (async () => {
+        while (current()) {
+          const result = await execute({
+            ...base,
+            kind: "edit-menu-watch",
+            menuId: selectedMenu.menuId,
+          });
+          if (result.status !== "accepted") {
+            owned.abort();
+            break;
+          }
+        }
+      })();
+      const outcome = await popup(
+        {
+          x: 0,
+          y: 0,
+          items: actions.map(([action, label], index) => ({
+            kind: "item",
+            id: String(index),
+            label,
+            enabled: selectedMenu.flags[action],
+          })),
+        },
+        signal,
+      );
+      if (outcome.kind === "selected" && current() && this.#options.focused()) {
+        const action = actions.find((_entry, index) => String(index) === outcome.id)?.[0];
+        if (action !== undefined)
+          await execute({ ...base, kind: "edit-menu-action", menuId: selectedMenu.menuId, action });
+      }
+      owned.abort();
+      await watch;
+    } catch {
+      /* A retired native popup cannot revive its source. */
+    } finally {
+      owned.abort();
+      presentation.menuEpoch++;
+      if (this.#pageMenu === owned) {
+        this.#pageMenu = undefined;
+        this.#pageMenuPresentation = undefined;
+      }
+      if (keyboard !== undefined) await this.#retireKeyboard(keyboard);
+      if (menu !== undefined)
+        await this.#options
+          .execute(
+            { ...base, kind: "edit-menu-dismiss", menuId: menu.menuId },
+            AbortSignal.timeout(1000),
+          )
+          .catch(refused);
+    }
+  }
+
+  #retireKeyboard(owned: KeyboardMenu): Promise<void> {
+    if (this.#keyboardMenus.get(String(owned.owner.contextId)) === owned)
+      this.#keyboardMenus.delete(String(owned.owner.contextId));
+    return (owned.closing ??= this.#options
+      .execute(
+        {
+          contextId: owned.owner.contextId,
+          threadId: owned.owner.threadId,
+          presentationId: owned.owner.presentationId,
+          kind: "edit-menu-dismiss",
+          menuId: owned.id,
+        },
+        AbortSignal.timeout(1000),
+      )
+      .then(
+        () => undefined,
+        () => undefined,
+      ));
   }
 
   async releaseInputs(): Promise<void> {
+    this.#inputEpoch++;
+    this.#pageMenu?.abort();
+    const keyboardCleanup = [...this.#keyboardMenus.values()].map((owned) =>
+      this.#retireKeyboard(owned),
+    );
     for (const owned of [...this.#compositions.values()]) {
       await this.#enqueue(
         { ...owned.owner, composition: { phase: "cancel", compositionId: owned.id } },
@@ -310,6 +612,7 @@ export class NightlyBrowserPresentation {
       if (result.status !== "accepted")
         console.warn("Octant could not confirm Browser input release.");
     }
+    await Promise.all(keyboardCleanup);
   }
 
   show(): void {
@@ -318,11 +621,17 @@ export class NightlyBrowserPresentation {
   }
 
   hide(): Promise<void> {
+    this.#inputEpoch++;
+    this.#pageMenu?.abort();
+    const keyboardCleanup = [...this.#keyboardMenus.values()].map((owned) =>
+      this.#retireKeyboard(owned),
+    );
     if (this.#hidden && this.#hide !== undefined) return this.#hide;
     this.#hidden = true;
     const epoch = ++this.#visibilityEpoch;
     if (this.#hide !== undefined) return this.#hide.then(() => this.hide());
     this.#hide = (async () => {
+      await Promise.all(keyboardCleanup);
       for (const owned of this.#presentations.values()) {
         if (epoch !== this.#visibilityEpoch || this.#lifetime.signal.aborted) break;
         const result = await this.#enqueue(
@@ -349,12 +658,19 @@ export class NightlyBrowserPresentation {
   }
 
   async close(): Promise<void> {
+    this.#inputEpoch++;
+    this.#pageMenu?.abort();
+    const keyboardCleanup = [...this.#keyboardMenus.values()].map((owned) =>
+      this.#retireKeyboard(owned),
+    );
     this.#lifetime.abort();
     this.#presentations.clear();
     this.#compositions.clear();
     this.#held.clear();
     await this.#running;
     await this.#hide;
+    await Promise.all(this.#pageMenuTasks);
+    await Promise.all(keyboardCleanup);
   }
 }
 
@@ -385,4 +701,12 @@ function releaseKey(request: HumanBrowserRequest): string | undefined {
   if (request.input.type === "mouseUp")
     return `${request.contextId}:button:${request.input.button}`;
   return undefined;
+}
+
+function menuKeyDown(input: Extract<HumanBrowserRequest, { kind: "input" }>["input"]): boolean {
+  return (
+    input.type === "keyDown" &&
+    (input.keyCode === "ContextMenu" ||
+      (input.keyCode === "F10" && input.modifiers?.includes("shift") === true))
+  );
 }
