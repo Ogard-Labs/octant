@@ -113,9 +113,18 @@ Control-Escape leaves the page; Tab moves among its controls. Standard text
 inputs and textareas support native composition with a caret anchored to the
 Stable-owned field. Password, custom editors, embedded frames and full IME
 reconversion are not supported by that path. Page accessibility, native popups,
-other native brokers and host retention remain
+other native brokers and full lifecycle acceptance remain
 unfinished, so this is not a usable Nightly release. Installation and
 publication remain pending.
+
+An in-app Quit command in Octant closes its workspace windows while a current
+Nightly window still uses its host. The host remains in the background, and
+opening Octant again brings its screens back. When the final Nightly client
+leaves, the host uses its normal active-work confirmation before stopping.
+Cancelling keeps the host running. Signals, logout and update restart keep their
+existing shutdown behavior. A headless launch waits up to 30 seconds after
+host-ready for its first Nightly window, then follows that same guarded quit.
+This does not yet prove signed coexistence or reconnect after a host restart.
 
 A local desktop package defaults to Octant. An explicitly selected
 `OCTANT_PACKAGE_FLAVOR=nightly` requires a matching dated preview or candidate

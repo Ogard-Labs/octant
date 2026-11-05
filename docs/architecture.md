@@ -275,8 +275,12 @@ status still precedes window registration. See the owning
 [host-only launch rules](design/nightly-app.md#starting-a-closed-stable-host).
 Agent observations remain separate;
 Standard-text composition uses a separate native input context and no-content
-field/caret metadata. Full IME reconversion, accessibility, native popups and
-retained-host parity remain unfinished. See
+field/caret metadata.
+Explicit in-app UI quit can retain the host for current authenticated Nightly
+clients; accepted terminal quit closes admission before cleanup. See the owning
+[client lifetime rules](design/nightly-app.md#keeping-the-host-for-current-clients).
+Full IME reconversion, accessibility, native popups and full lifecycle
+acceptance remain unfinished. See
 [native client window leases](design/nightly-app.md#native-client-window-leases) and
 [desktop status preflight](design/nightly-app.md#authenticated-desktop-status-preflight).
 
@@ -13298,7 +13302,8 @@ macOS-only.
   validated installed Stable to start without a window. Incompatible
   or unsigned builds refuse. Bounded embedded frames and human input use the
   existing native Browser owner; complete Browser parity, other native brokers
-  and retained-host behavior remain unfinished.
+  remain unfinished. Current-client retention precedes the existing terminal
+  shutdown path; full signed lifecycle acceptance remains separate.
   Packaged macOS Nightly additionally seals its JavaScript entry in ASAR and
   disables alternate Node/loader entry paths. Its existing scoped terminal MCP
   command runs through a fixed bundled role. Stable uses a separately identified

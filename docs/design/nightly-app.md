@@ -19,7 +19,7 @@ and other native broker parity remain unfinished; this is not yet a usable
 second app.
 
 The remaining delivery includes complete embedded browsing parity,
-host retention, shared sign-in operations, the complete
+full lifecycle acceptance, shared sign-in operations, the complete
 `octant-nightly` command, the installer and removal controls,
 Nightly labels, and the functional release preflight. Coexistence, reconnect
 and rollback still need their implementation and packaged evidence. The
@@ -100,7 +100,57 @@ Native close reports failure while an OS launch completion is still outstanding.
 
 Unsigned native refusal and a synthetic host startup fixture do not establish
 signed installed-app launch, complete host payload, simultaneous-start races or
-coexistence. Retention, quit-one/quit-last and reconnect remain separate work.
+coexistence. Full signed quit-one/quit-last acceptance and reconnect remain
+separate work.
+
+## Keeping the host for current clients
+
+An in-app Quit command closes Stable's registered workspace windows while
+Nightly has at least one acknowledged, unexpired window lease for the current
+host instance. The same Stable main process keeps the host and native brokers
+alive. Its external Nightly offscreen Browser windows are not local workspace
+windows and remain owned. Ordinary local-window close retains its existing
+menu-bar behavior. An ordinary launch or reopen can bring Stable's shell back.
+
+The lease owner publishes count changes only after acknowledgement, and removes
+revoked state before notifying observers. Pending acquisition, expired leases,
+other host instances and failed replies cannot retain a host. Observer failure
+cannot skip lease or context cleanup. A closing host admits no new native lease.
+
+When the final current Nightly client leaves after Stable's UI quit, the host
+uses the existing fresh active-work confirmation before its normal shutdown.
+Cancellation keeps the background host available. A new client or ordinary
+reopen during that cancellable wait withdraws the older conditional quit. If a
+new client arrives and leaves before the old question settles, the host checks
+the new empty state once afterward. A person's cancellation of an unchanged
+question does not prompt again. Acceptance closes native admission synchronously
+before window-state flushing or cleanup can await, so a later registration
+cannot slip between the final check and host shutdown.
+
+Local close and reopen have an admission generation. Reopen waits for a pending
+local close; an older pending window registration cannot construct or resurrect
+a window afterward. A reopen that joins such a retired opening retries it under
+its own admission, so one reopen always shows a window. The retained UI close never permanently shuts down Project
+window lifecycles. Terminal helper/resource cleanup still runs only through the
+existing accepted-quit path. OS signals, logout, updater quit and unclassified
+termination requests keep that terminal behavior; they are not person-scoped UI
+quit requests.
+
+A host-only launch waits 30 seconds after the host is ready for its first current
+Nightly lease. This spans the existing 15-second status retry, a status operation
+of up to three seconds, a window registration operation of up to three seconds,
+and a finite scheduling margin. It does not extend any native or lease deadline.
+Empty notifications and unsuccessful acquisition do not restart the grace. A
+real first lease cancels it; a later final-client departure uses the conditional
+quit above. Ordinary reopen cancels the grace, and a reopen that
+arrives while the host is still starting means the grace is never armed. If no client arrives, its expiry
+uses the same active-work confirmation and current-intent check.
+
+This lifetime policy is implemented before the existing shutdown callback.
+The independent native-helper and acquired-resource cleanup changes keep their
+own ownership and evidence. An extracted startup or synthetic peer fixture is
+not full signed-app or host-payload acceptance. Reconnect after host replacement
+remains separate work.
 
 ## Embedded Browser
 
@@ -356,8 +406,8 @@ whose host instance changed. It reserves a closing client handle until cleanup
 settles, and cleans only its host-issued server ID and generation. A failed
 registration does not establish ownership of Browser contexts. Close waits for
 pending acquisition and attempts server revocation and owned-context cleanup;
-failure remains observable. This does not implement host retention when Stable
-quits or reconnect after a host replacement.
+failure remains observable. Current acknowledged leases feed the retained-client
+lifetime above. Reconnect after a host replacement remains unfinished.
 
 Nightly sets its separate window storage before Electron is ready, loads its
 own existing renderer/preload and installs the trusted renderer-header registry
@@ -371,8 +421,9 @@ persistent profiles.
 
 Unsigned native refusal and mechanical lifecycle tests are separate from
 Developer ID same-Team admission. Actual signed-pair registration, active-owner
-process exit, full-payload renderer/native acceptance and retained-host behavior
-still need their evidence. The functional publication gate stays in force.
+process exit and full-payload renderer/native acceptance still need their
+evidence. The retained-client policy has separate focused and synthetic evidence;
+full signed lifecycle acceptance remains unrun. The functional publication gate stays in force.
 
 ## Identity
 
