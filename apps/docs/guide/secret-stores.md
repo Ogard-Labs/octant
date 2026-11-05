@@ -12,6 +12,10 @@ for the key each time the key is used.
 The 1Password command line tool (`op`) is supported today. Other tools can be
 added without changing how this works.
 
+The provider-key path below keeps values out of the agent. The separately
+approved Full access command channel later in this guide gives credentials
+directly to its recipient and has different disclosure limits.
+
 ## What Octant keeps, and what it does not
 
 | Octant keeps                                                     | Octant never keeps                                     |
@@ -182,3 +186,55 @@ providers that support app-managed tools. It does not accept administrator
 passwords or hand credentials to arbitrary shell commands. Choosing a linked
 1Password item is not yet available in this card; existing Settings bindings
 continue to work separately.
+
+## Run a named command with linked credentials
+
+For a normal Code task at **Full access**, you can save a command binding in
+**Settings › Secret stores › Credential commands**. Choose its Code Project,
+absolute recipient executable, fixed arguments (one per line), directory within
+the Project and explicit 1Password account ID. Add one to eight environment
+mappings as `ENV=op://vaultID/itemID/[sectionID/]fieldID`. Use immutable IDs,
+not names or secret values. Reserved runtime and authority variables refuse.
+The local op 2 CLI and recipient are pinned by path and digest when saved;
+replacing either requires saving a new binding.
+After `op` finishes any unlock or authentication wait, a fixed Octant bootstrap
+checks the recipient's path, digest and file identity again before starting it.
+A changed recipient refuses. A brief final check-to-exec race remains; this is
+not an atomic guarantee against concurrent executable replacement. The bootstrap
+uses Octant's own trusted runtime and refuses if its required execution support
+is unavailable. Runtime flags do not become credential mappings or reach the
+recipient.
+
+Open **Credential commands** in the Code conversation and choose **Review**.
+An agent can request the same review with `octant_command`; it cannot approve
+it. Check the executable, arguments, directory, account, reference mappings and
+timeout, then choose **Approve one run**, **Deny**, or **Cancel command**.
+Approval expires after three minutes if the child has not started. A started
+command keeps its displayed timeout, up to five minutes.
+
+The recipient and its descendants receive the credentials and ordinary Full
+access, including network access. Choose a recipient you trust. `op run`
+conceals secrets in ordinary output by default, but a recipient can encode,
+write or send them elsewhere. Octant cannot promise complete redaction of
+values it never receives. The broker returns only reference authorization;
+it does not return resolved command credentials to the server or renderer.
+
+Window revocation, unlinking, changing a binding or losing current Code
+authority invalidates pending use observed by this host. The final launch also
+rechecks the broker revision and owning checkout/root authority. These reads
+are not an atomic revocation transaction across processes. Cancellation before
+spawn prevents that command; after spawn it requests termination and reports
+possible effects. It cannot undo a request or revoke a credential already used.
+A zero exit code does not prove the intended account operation succeeded.
+
+Settings bindings survive restart; approvals and output do not. A repeated
+preparation replays only while its request/receipt is retained. After restart
+or eviction, review and approve a new request. That does not mean an earlier
+process stopped. The journal retains its start/outcome metadata for recovery.
+A missing, replaced or unsupported CLI refuses; a locked store or invalid item
+may instead make the command exit nonzero. Octant does not label every nonzero
+exit as an authentication failure and does not retry automatically.
+
+This command channel currently refuses below Full access. It is unavailable to
+routines, managed subagents, paired clients and headless callers. It does not
+change the AWS temporary-session channel or the one-time HTTPS token card.

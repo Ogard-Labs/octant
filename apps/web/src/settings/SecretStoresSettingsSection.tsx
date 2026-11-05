@@ -1,3 +1,4 @@
+import { CommandCredentialBindingsSettings } from "./CommandCredentialBindingsSettings";
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
 import type {
   AwsCliKeyReference,
@@ -36,6 +37,7 @@ const REFERENCE_PLACEHOLDER = "op://Vault/Item/field";
 export interface SecretStoresSettingsSectionProps {
   /** Absent off this host: linking a store is host authority. */
   readonly client: SecretStoresClient | undefined;
+  readonly projectNames?: ReadonlyMap<string, string>;
   readonly focusedSetting?: string | undefined;
 }
 
@@ -401,6 +403,10 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
           you link it again. Nothing in {unlinking.label} is changed or deleted.
         </OctantConfirmDialog>
       )}
+      <CommandCredentialBindingsSettings
+        client={client.commandBindings}
+        projectNames={props.projectNames ?? new Map()}
+      />
     </div>
   );
 }

@@ -961,6 +961,7 @@ export function wireHarness(deps: HarnessDependencies) {
 
     beginGoogleCliChange: googleCliCommands.beginChange,
     recoverGoogleCliCommands: () => googleCliCommands.recover(() => harnessProcessPort.reconcile()),
+    credentialCommandProcess: harnessFullAccessProcessPort,
     personMemorySweep,
     runtimeForgeChanges,
     followUpCreation,

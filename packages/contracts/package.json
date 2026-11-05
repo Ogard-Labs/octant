@@ -157,7 +157,8 @@
     "./simulator-device": "./src/simulatorDevice.ts",
     "./managed-tooling": "./src/managedTooling.ts",
     "./browser-credential-use": "./src/browserCredentialUse.ts",
-    "./credential-request": "./src/credentialRequest.ts"
+    "./credential-request": "./src/credentialRequest.ts",
+    "./command-credentials": "./src/commandCredentials.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

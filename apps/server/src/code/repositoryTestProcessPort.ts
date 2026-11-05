@@ -157,6 +157,10 @@ export interface HarnessShellScriptInput {
 
 export interface RepositoryTestProcessInput {
   readonly beforeLaunch?: () => boolean;
+  /** Rechecks named-command authority after launch preparation, immediately before spawn. */
+  readonly admitStart?: () => boolean | Promise<boolean>;
+  /** Reports an actually created child, before any asynchronous receipt work. */
+  readonly onStarted?: () => void;
   readonly argv: readonly string[];
   readonly cwd: string;
   readonly environment: Readonly<Record<string, string>>;
@@ -640,6 +644,16 @@ export class RepositoryTestProcessPort {
 
     if (signal?.aborted) return cancelledBeforeSpawn();
 
+    try {
+      if (input.admitStart !== undefined) {
+        const admission = input.admitStart();
+        if ((typeof admission === "boolean" ? admission : await admission) === false)
+          return cancelledBeforeSpawn();
+      }
+    } catch {
+      return cancelledBeforeSpawn();
+    }
+    if (signal?.aborted) return cancelledBeforeSpawn();
     if (input.beforeLaunch !== undefined && !input.beforeLaunch()) return unavailable(false);
 
     let child: SpawnedProcess;
@@ -673,6 +687,13 @@ export class RepositoryTestProcessPort {
       forward(chunk);
     });
     const closed = observeClose(child);
+    let notificationFailed = false;
+    try {
+      if (child.pid !== undefined) input.onStarted?.();
+    } catch {
+      notificationFailed = true;
+    }
+
     const receiptAttempt = persistProcessReceipt(
       {
         supervisor: "repository-test-runner",
@@ -687,7 +708,11 @@ export class RepositoryTestProcessPort {
       await value.ready;
       return value;
     });
-    const settlement = firstSettlement(closed, input.timeoutMs, signal);
+    const settlement = firstSettlement(
+      closed,
+      input.timeoutMs,
+      notificationFailed ? AbortSignal.abort() : signal,
+    );
     const receiptOutcome = await Promise.race([
       receiptAttempt.then(
         (value) => ({ kind: "receipt" as const, value }),

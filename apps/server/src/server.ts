@@ -1,3 +1,19 @@
+import { isToolAllowedByAllowlist } from "@octant/domain";
+import { CommandCredentialBindings } from "./secretStores/commandCredentialBindings";
+import { commandCredentialContext } from "./secretStores/commandCredentialContext";
+import { commandCredentialRoutes } from "./secretStores/commandCredentialRoutes";
+import { commandCredentialTools } from "./secretStores/commandCredentialTools";
+import {
+  createCommandCredentialExecution,
+  commandCredentialRecipientPin,
+} from "./secretStores/commandCredentialExecution";
+import {
+  readCommandCredentialHistory,
+  secretStoresJournal,
+} from "./secretStores/secretStoresJournal";
+import { makeSecretStoreBrokerClient } from "./secretStores/secretStoreBrokerClient";
+import { decodeProjectId, decodeWindowId } from "@octant/contracts";
+import { randomUUID } from "node:crypto";
 import { CredentialRequests } from "./credentials/credentialRequests";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
 import { createCredentialRequestTools } from "./credentials/credentialRequestTools";
@@ -470,6 +486,7 @@ export function startOctantServer(
       readHarnessProcessReceipts,
       beginGoogleCliChange,
       recoverGoogleCliCommands,
+      credentialCommandProcess,
       personMemorySweep,
       runtimeForgeChanges,
       followUpCreation,
@@ -1164,6 +1181,113 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    const commandBroker =
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeSecretStoreBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          });
+    const commandJournal = secretStoresJournal({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      now: () => new Date().toISOString(),
+    });
+    const commands = new CommandCredentialBindings({
+      now: () => performance.now(),
+      uuid: randomUUID,
+      canConfigure: (window, project) => {
+        try {
+          return (
+            windowAuthorityStore.listWindowIds().some((id) => String(id) === window) &&
+            canAccessCodeProject(decodeWindowId(window), decodeProjectId(project))
+          );
+        } catch {
+          return false;
+        }
+      },
+      context: commandCredentialContext({
+        persistence,
+        read: async (window, thread) => (await codeService.read(window, thread)).thread,
+        roots,
+        session: codeSessionAuthority,
+        providerRevision: (thread) => {
+          const provider = persistence.readProviderInstance(thread.providerInstanceId);
+          return provider?.enabled === true && isCodeProviderModelAllowed(thread)
+            ? provider.version
+            : undefined;
+        },
+        windowCurrent: (window) =>
+          windowAuthorityStore.listWindowIds().some((id) => String(id) === String(window)),
+        runtime: codeOperationRuntime,
+        canAccess: canAccessCodeProject,
+      }),
+      pin: commandCredentialRecipientPin(credentialCommandProcess),
+      execute: createCommandCredentialExecution({
+        process: credentialCommandProcess,
+        broker: commandBroker,
+      }),
+      record: (record) => commandJournal.record(record),
+      records: readCommandCredentialHistory(persistence.journal),
+    });
+    onWindowRevoked((window) => commands.windowRevoked(String(window)));
+    yield* Effect.addFinalizer(() => Effect.sync(() => commands.close()));
+    const commandRoutes = commandCredentialRoutes(
+      commands,
+      windowAuthorityStore,
+      options.allowedRendererHttpOrigin,
+    );
+    contributeCodeTools(({ windowId, thread, readThread }) => {
+      const providerVersion = persistence.readProviderInstance(thread.providerInstanceId)?.version;
+      return commandCredentialTools({
+        service: commands,
+        windowId: String(windowId),
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+        current: () => {
+          try {
+            const current = readThread();
+            return (
+              current !== undefined &&
+              providerVersion !== undefined &&
+              persistence.readProviderInstance(current.providerInstanceId)?.enabled === true &&
+              persistence.readProviderInstance(current.providerInstanceId)?.version ===
+                providerVersion &&
+              isCodeProviderModelAllowed(current) &&
+              windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)) &&
+              isToolAllowedByAllowlist(current.toolConstraints ?? [], "octant_command") &&
+              JSON.stringify([
+                current.checkoutId,
+                current.bindingRevisionId,
+                current.providerInstanceId,
+                current.modelId,
+                current.profileId,
+                current.toolConstraints,
+              ]) ===
+                JSON.stringify([
+                  thread.checkoutId,
+                  thread.bindingRevisionId,
+                  thread.providerInstanceId,
+                  thread.modelId,
+                  thread.profileId,
+                  thread.toolConstraints,
+                ]) &&
+              current.lifecycle === "active" &&
+              (
+                codeOperationRuntime?.threadWithActiveTurnPosture?.(
+                  codeSessionAuthority.effectiveThread(windowId, current),
+                ) ?? codeSessionAuthority.effectiveThread(windowId, current)
+              ).executionPolicy === "full-access" &&
+              canAccessCodeProject(windowId, current.projectId) &&
+              String(current.projectId) === String(thread.projectId)
+            );
+          } catch {
+            return false;
+          }
+        },
+      });
+    });
     const credentialRequests = new CredentialRequests();
     yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
     const credentialRequestRoutes = createCredentialRequestRoutes(
@@ -1294,6 +1418,7 @@ export function startOctantServer(
       remoteHost,
     } = wireRemote({
       beginGoogleCliChange,
+      onSecretStoreLinkChange: () => commands.linkChanged(),
       codeService,
       projectService,
       browserExtensionService,
@@ -1422,6 +1547,7 @@ export function startOctantServer(
                 (await delegationAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await secretStoresRoutes(request)) ??
+                (await commandRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??

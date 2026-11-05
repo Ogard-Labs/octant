@@ -40,6 +40,31 @@ function confinedOptions(
 }
 
 describe("RepositoryTestProcessPort", () => {
+  it("refuses revoked named-command authority after asynchronous executable preparation and before spawn", async () => {
+    const cwd = temporaryDirectory();
+    const bin = temporaryDirectory();
+    symlinkSync(process.execPath, join(bin, "qa-revoked-command"));
+    vi.stubEnv("PATH", bin);
+    let current = true;
+    const spawn = vi.fn();
+    const started = vi.fn();
+    const port = new RepositoryTestProcessPort(confinedOptions({ spawn }));
+    const admission = vi.fn(() => current);
+    const pending = port.execute({
+      argv: ["qa-revoked-command"],
+      cwd: realpathSync(cwd),
+      environment: {},
+      timeoutMs: 1000,
+      admitStart: admission,
+      onStarted: started,
+    });
+    current = false;
+    expect((await pending).termination).toBe("cancelled");
+    expect(admission).toHaveBeenCalledOnce();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(started).not.toHaveBeenCalled();
+  });
+
   it("runs a discovered command name through confinement using the host executable path", async () => {
     const cwd = temporaryDirectory();
     const bin = temporaryDirectory();

@@ -2,6 +2,12 @@ import {
   decodeBrowserCredentialGrant,
   decodeBrowserCredentialMetadata,
 } from "@octant/contracts/browser-credential-use";
+import { CommandCredentialBindings } from "./commandCredentialBindings";
+import {
+  decodeCommandCredentialDefinition,
+  decodeCommandCredentialHostRequest,
+} from "@octant/contracts/command-credentials";
+import { readCommandCredentialHistory } from "./secretStoresJournal";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -225,6 +231,8 @@ async function host(
   };
   return {
     tool,
+    journal,
+    commandJournal: real,
     directory,
     instances,
     store,
@@ -890,5 +898,126 @@ describe("secret store routes", () => {
     expect(await handler(new Request("http://127.0.0.1:13773/api/replica-store/commands"))).toBe(
       undefined,
     );
+  });
+});
+
+describe("command reference custody and recovery", () => {
+  it("authorizes reference pins without reading values and invalidates unlink/relink at the same clock", async () => {
+    const h = await host();
+    const client = makeSecretStoreBrokerClient({ url: h.broker.url, token: h.broker.token });
+    const request = decodeCommandCredentialHostRequest({
+      requestId: crypto.randomUUID(),
+      bindingId: crypto.randomUUID(),
+      accountId: "a".repeat(26),
+      environment: [
+        {
+          name: "API_TOKEN",
+          vaultId: "v".repeat(26),
+          itemId: "i".repeat(26),
+          fieldId: "credential",
+        },
+      ],
+    });
+    expect(await client.commandUse?.(request)).toEqual({ status: "not-linked" });
+    await h.service.linkStore(WINDOW, "onepassword");
+    const first = await client.commandUse?.(request);
+    if (first?.status !== "authorized") throw Error("Expected authorization");
+    await h.service.unlinkStore(WINDOW, "onepassword");
+    await h.service.linkStore(WINDOW, "onepassword");
+    expect(await client.commandUse?.({ ...request, expectedRevision: first.revision })).toEqual({
+      status: "changed",
+    });
+    expect(h.journalText()).not.toContain(VALUE);
+  });
+  it("replays reference configuration from the real journal but never restores an approval or command output", async () => {
+    const h = await host();
+    const definition = decodeCommandCredentialDefinition({
+      label: "Fixture",
+      projectId: crypto.randomUUID(),
+      executable: "/usr/bin/client",
+      args: ["status"],
+      directory: "",
+      accountId: "a".repeat(26),
+      environment: [
+        {
+          name: "API_TOKEN",
+          vaultId: "v".repeat(26),
+          itemId: "i".repeat(26),
+          fieldId: "credential",
+        },
+      ],
+      timeoutMs: 1000,
+    });
+    const create = () =>
+      new CommandCredentialBindings({
+        now: () => performance.now(),
+        uuid: () => crypto.randomUUID(),
+        canConfigure: () => true,
+        context: async (windowId, threadId) => ({
+          windowId,
+          threadId,
+          projectId: String(definition.projectId),
+          root: "/fixture",
+          authorityKey: "one",
+          executionPolicy: "full-access",
+          current: () => true,
+          revalidate: async () => true,
+        }),
+        pin: async (executable) => ({
+          executable,
+          digest: "a".repeat(64),
+          credentialExecutable: "/usr/local/bin/op",
+          credentialExecutableDigest: "b".repeat(64),
+          credentialVersion: "2.33.0",
+        }),
+        execute: async (_b, _c, _s, before, started) => {
+          if (!before()) throw Error("Expected admission");
+          started();
+          return {
+            status: "exited",
+            exitCode: 0,
+            effect: "completed",
+            output: "private-command-output",
+            truncated: false,
+          };
+        },
+        record: (record) => h.commandJournal.record(record),
+        records: readCommandCredentialHistory(h.journal),
+      });
+    const first = create();
+    let requestId: string;
+    try {
+      const saved = await first.save(WINDOW, definition);
+      if (saved.kind !== "command-credential-view" || !saved.bindings[0])
+        throw Error("Expected binding");
+      const review = await first.review(
+        WINDOW,
+        crypto.randomUUID(),
+        saved.bindings[0].bindingId,
+        crypto.randomUUID(),
+      );
+      if (review.kind !== "command-credential-view" || !review.requests[0])
+        throw Error("Expected review");
+      requestId = review.requests[0].requestId;
+      await first.approve(WINDOW, requestId);
+    } finally {
+      first.close();
+    }
+    const recovered = create();
+    try {
+      expect(recovered.view(WINDOW)).toMatchObject({
+        bindings: [{ definition }],
+        requests: [],
+        receipts: [],
+      });
+      expect(await recovered.approve(WINDOW, requestId)).toMatchObject({
+        kind: "command-credential-refused",
+      });
+      const history = readCommandCredentialHistory(h.journal);
+      expect(history.map((record) => record.name)).toContain("command-binding.run");
+      expect(h.journalText()).not.toContain("private-command-output");
+    } finally {
+      recovered.close();
+    }
   });
 });

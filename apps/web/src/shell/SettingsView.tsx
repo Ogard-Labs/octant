@@ -1280,6 +1280,7 @@ function ActiveSectionContent({
       return (
         <SecretStoresSettingsSection
           client={props.secretStoresClient}
+          projectNames={props.projectNames ?? new Map()}
           focusedSetting={focusedSetting}
         />
       );
