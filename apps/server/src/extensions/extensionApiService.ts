@@ -289,7 +289,7 @@ export class ExtensionApiService {
           } catch {
             return failure(
               "blocked",
-              "Sign-in cancellation is not confirmed. Restore the credential broker and retry removal.",
+              "Finish signing out or cancelling sign-in on this host, then retry removal.",
             );
           }
           try {

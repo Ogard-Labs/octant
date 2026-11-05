@@ -49,6 +49,7 @@ export interface AgentPluginMcpSessionRecord extends AgentPluginMcpSessionKey {
   readonly session: AgentPluginMcpSession;
   readonly tools: ReadonlyArray<McpToolDefinition>;
   readonly reach: ExtensionToolReach;
+  readonly authenticationGeneration: number;
   /** Each tool's definition digest, taken once from the listing at connect. */
   readonly toolDefinitionDigests: ReadonlyMap<string, string>;
 }
@@ -134,7 +135,16 @@ export class AgentPluginMcpSessionManager {
   readonly #resolveUserAddedSecrets: AgentPluginMcpSessionManagerOptions["resolveUserAddedSecrets"];
   readonly #sessions = new Map<string, AgentPluginMcpSessionRecord>();
   readonly #desired = new Map<string, AgentPluginMcpSessionTarget>();
-  readonly #connections = new Map<string, Promise<void>>();
+  readonly #authenticationGenerations = new Map<string, number>();
+  readonly #connections = new Map<
+    string,
+    {
+      readonly target: AgentPluginMcpSessionTarget;
+      readonly generation: number;
+      readonly controller: AbortController;
+      readonly promise: Promise<void>;
+    }
+  >();
   readonly #idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #toolIndex = new Map<
     string,
@@ -243,7 +253,7 @@ export class AgentPluginMcpSessionManager {
           return { result: { error: "extension-tool-unavailable" }, isError: true };
         }
         const record = this.#sessions.get(indexed.sessionKey);
-        if (record === undefined) {
+        if (record === undefined || !this.#currentRecord(indexed.sessionKey, record)) {
           return { result: { error: "extension-tool-unavailable" }, isError: true };
         }
         if (
@@ -275,6 +285,8 @@ export class AgentPluginMcpSessionManager {
         if (!approved) {
           return { result: { error: "extension-tool-approval-required" }, isError: true };
         }
+        if (!this.#currentRecord(indexed.sessionKey, record))
+          return { result: { error: "extension-tool-authentication-changed" }, isError: true };
         this.#touchIdle(indexed.sessionKey);
         const controller = new AbortController();
         const onCallerAbort = () => controller.abort();
@@ -289,6 +301,14 @@ export class AgentPluginMcpSessionManager {
         try {
           const args = inputJson.trim() === "" ? {} : JSON.parse(inputJson);
           const result = await record.session.callTool(indexed.toolName, args, controller.signal);
+          if (!this.#currentRecord(indexed.sessionKey, record))
+            return {
+              result: {
+                error:
+                  "Authentication changed while this tool call was in flight. Its outcome may have completed; check before trying again.",
+              },
+              isError: true,
+            };
           if (!isProviderSafeToolResult(result)) {
             return {
               result: { error: "MCP tool result exceeded provider limits." },
@@ -297,10 +317,22 @@ export class AgentPluginMcpSessionManager {
           }
           return this.#taintToolResult(thread.id, result);
         } catch (error) {
+          if (!this.#currentRecord(indexed.sessionKey, record))
+            return {
+              result: {
+                error:
+                  "Authentication changed while this tool call was in flight. Its outcome is uncertain; check before trying again.",
+              },
+              isError: true,
+            };
           if (controller.signal.aborted) {
             await this.#close(indexed.sessionKey, record);
             const desired = this.#desired.get(indexed.sessionKey);
-            if (desired !== undefined && !this.#sessions.has(indexed.sessionKey)) {
+            if (
+              desired !== undefined &&
+              record.authenticationGeneration === this.#authenticationGeneration(record) &&
+              !this.#sessions.has(indexed.sessionKey)
+            ) {
               this.#failures.set(indexed.sessionKey, {
                 target: desired,
                 reason: "MCP tool transport closed; authority reconciliation is required.",
@@ -423,20 +455,33 @@ export class AgentPluginMcpSessionManager {
     }
 
     for (const [key, target] of desired) {
+      const authenticationGeneration = this.#authenticationGeneration(target);
       const existing = this.#sessions.get(key);
       if (
         existing !== undefined &&
         existing.version === target.version &&
-        existing.digest === target.digest
+        existing.digest === target.digest &&
+        existing.authenticationGeneration === authenticationGeneration
       ) {
         this.#failures.delete(key);
         continue;
       }
       if (existing !== undefined) await this.#close(key, existing);
+      if (
+        authenticationGeneration !== this.#authenticationGeneration(target) ||
+        !this.#desired.has(key)
+      )
+        continue;
       try {
         await this.#connectOnce(target);
+        if (authenticationGeneration !== this.#authenticationGeneration(target)) continue;
         this.#failures.delete(key);
       } catch (error) {
+        if (
+          authenticationGeneration !== this.#authenticationGeneration(target) ||
+          !this.#desired.has(key)
+        )
+          continue;
         // Independent MCP server failure must not block siblings, but the
         // component must not remain advertised as effective/active.
         this.#failures.set(key, {
@@ -447,12 +492,51 @@ export class AgentPluginMcpSessionManager {
     }
   }
 
+  async invalidateAuthentication(extensionId: string, componentId: string): Promise<void> {
+    const matches = (target: AgentPluginMcpSessionKey) =>
+      target.extensionId === extensionId && target.componentId === componentId;
+    const identity = { extensionId, componentId };
+    this.#authenticationGenerations.set(
+      authenticationKey(identity),
+      this.#authenticationGeneration(identity) + 1,
+    );
+    for (const [key, connection] of this.#connections)
+      if (matches(connection.target)) {
+        connection.controller.abort();
+        if (this.#connections.get(key) === connection) this.#connections.delete(key);
+      }
+    for (const [key, target] of this.#desired) if (matches(target)) this.#desired.delete(key);
+    for (const [key, failure] of this.#failures)
+      if (matches(failure.target)) this.#failures.delete(key);
+    const closing: Promise<void>[] = [];
+    for (const [key, record] of this.#sessions)
+      if (matches(record)) closing.push(this.#close(key, record));
+    await Promise.allSettled(closing);
+  }
+
+  #authenticationGeneration(
+    target: Pick<AgentPluginMcpSessionKey, "extensionId" | "componentId">,
+  ): number {
+    return this.#authenticationGenerations.get(authenticationKey(target)) ?? 0;
+  }
+
+  #currentRecord(key: string, record: AgentPluginMcpSessionRecord): boolean {
+    return (
+      this.#sessions.get(key) === record &&
+      this.#desired.has(key) &&
+      record.authenticationGeneration === this.#authenticationGeneration(record)
+    );
+  }
+
   async drainAll(): Promise<void> {
     this.#desired.clear();
     this.#failures.clear();
     for (const timer of this.#idleTimers.values()) clearTimeout(timer);
     this.#idleTimers.clear();
-    await Promise.allSettled(this.#connections.values());
+    for (const connection of this.#connections.values()) connection.controller.abort();
+    await Promise.allSettled(
+      [...this.#connections.values()].map((connection) => connection.promise),
+    );
     for (const [key, record] of this.#sessions) {
       await this.#close(key, record);
     }
@@ -490,7 +574,11 @@ export class AgentPluginMcpSessionManager {
     }
   }
 
-  async #connect(target: AgentPluginMcpSessionTarget): Promise<void> {
+  async #connect(
+    target: AgentPluginMcpSessionTarget,
+    authenticationGeneration: number,
+    controller: AbortController,
+  ): Promise<void> {
     const versionRef = {
       extensionId: target.extensionId,
       packageId: target.packageId,
@@ -521,6 +609,11 @@ export class AgentPluginMcpSessionManager {
             componentId: target.componentId,
           })
         : selectedLaunch;
+    if (
+      controller.signal.aborted ||
+      authenticationGeneration !== this.#authenticationGeneration(target)
+    )
+      return;
     const launch =
       withSecrets.transport === "stdio" && !isAbsolute(withSecrets.command)
         ? {
@@ -528,14 +621,26 @@ export class AgentPluginMcpSessionManager {
             command: await resolveApprovedExecutable(withSecrets.command, this.#baseEnv.PATH),
           }
         : withSecrets;
-    const controller = new AbortController();
+    if (
+      controller.signal.aborted ||
+      authenticationGeneration !== this.#authenticationGeneration(target)
+    )
+      return;
     const timeout = setTimeout(() => controller.abort(), this.#connectionTimeoutMs);
     timeout.unref?.();
     let session: AgentPluginMcpSession;
+    let connectedSession: AgentPluginMcpSession | undefined;
     try {
       session = await connectAgentPluginMcpSession(launch, {
         signal: controller.signal,
-        onTransportClosed: () => this.#handleTransportClosed(sessionKey(target), target),
+        onTransportClosed: () =>
+          this.#handleTransportClosed(
+            sessionKey(target),
+            target,
+            authenticationGeneration,
+            controller,
+            connectedSession,
+          ),
         ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
         ...(launch.transport !== "stdio" || this.#stdioSupervisor === undefined
           ? {}
@@ -550,6 +655,7 @@ export class AgentPluginMcpSessionManager {
     } finally {
       clearTimeout(timeout);
     }
+    connectedSession = session;
     const record: AgentPluginMcpSessionRecord = {
       extensionId: target.extensionId,
       packageId: target.packageId,
@@ -564,13 +670,25 @@ export class AgentPluginMcpSessionManager {
       // A stdio server only ever starts through `supervisedStdioProcessPort`,
       // which denies it the network and confines its writes to plugin data.
       reach: session.transport === "stdio" ? "confined-stdio" : "network",
+      authenticationGeneration,
       toolDefinitionDigests: new Map(
         session.tools.map((tool) => [tool.name, extensionToolDefinitionDigest(tool)]),
       ),
     };
     const key = sessionKey(target);
-    if (!this.#desired.has(key) || this.#sessions.has(key)) {
-      await session.close().catch(() => undefined);
+    if (
+      controller.signal.aborted ||
+      authenticationGeneration !== this.#authenticationGeneration(target) ||
+      !this.#desired.has(key) ||
+      this.#sessions.has(key)
+    ) {
+      await this.#closeTransport(session);
+      if (
+        controller.signal.aborted &&
+        authenticationGeneration === this.#authenticationGeneration(target) &&
+        this.#desired.has(key)
+      )
+        throw new Error("MCP connection closed before initialization completed.");
       return;
     }
     this.#sessions.set(key, record);
@@ -580,16 +698,34 @@ export class AgentPluginMcpSessionManager {
 
   #connectOnce(target: AgentPluginMcpSessionTarget): Promise<void> {
     const key = sessionKey(target);
+    const generation = this.#authenticationGeneration(target);
     const existing = this.#connections.get(key);
-    if (existing !== undefined) return existing;
-    const pending = this.#connect(target).finally(() => {
-      if (this.#connections.get(key) === pending) this.#connections.delete(key);
+    if (
+      existing !== undefined &&
+      existing.generation === generation &&
+      !existing.controller.signal.aborted
+    )
+      return existing.promise;
+    const controller = new AbortController();
+    const pending = this.#connect(target, generation, controller).finally(() => {
+      if (this.#connections.get(key)?.promise === pending) this.#connections.delete(key);
     });
-    this.#connections.set(key, pending);
+    this.#connections.set(key, { target, generation, controller, promise: pending });
     return pending;
   }
 
-  #handleTransportClosed(key: string, target: AgentPluginMcpSessionTarget): void {
+  #handleTransportClosed(
+    key: string,
+    target: AgentPluginMcpSessionTarget,
+    authenticationGeneration: number,
+    controller: AbortController,
+    session: AgentPluginMcpSession | undefined,
+  ): void {
+    if (authenticationGeneration !== this.#authenticationGeneration(target)) return;
+    if (session === undefined) {
+      if (this.#connections.get(key)?.controller !== controller) return;
+      controller.abort();
+    } else if (this.#sessions.get(key)?.session !== session) return;
     const idleTimer = this.#idleTimers.get(key);
     if (idleTimer !== undefined) clearTimeout(idleTimer);
     this.#idleTimers.delete(key);
@@ -610,7 +746,24 @@ export class AgentPluginMcpSessionManager {
       this.#sessions.delete(key);
       this.#reindex();
     }
-    await record.session.close().catch(() => undefined);
+    await this.#closeTransport(record.session);
+  }
+
+  async #closeTransport(session: AgentPluginMcpSession): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.resolve()
+          .then(() => session.close())
+          .catch(() => undefined),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 10_000);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   #touchIdle(key: string): void {
@@ -934,4 +1087,11 @@ function isProviderSafeToolResult(result: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+function authenticationKey(target: {
+  readonly extensionId: string;
+  readonly componentId: string;
+}): string {
+  return `${target.extensionId}\u0000${target.componentId}`;
 }

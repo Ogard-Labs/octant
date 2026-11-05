@@ -1407,6 +1407,8 @@ export function wireProviders(deps: ProvidersDependencies) {
         access: (credentialRef) => oauthBroker.access(credentialRef),
         actorId: OCTANT_LOCAL_ACTOR_ID,
         serverUrl: mcpServerSignInAddress,
+        onAuthenticationChanged: (extensionId, componentId) =>
+          agentPluginMcpSessionManager.invalidateAuthentication(extensionId, componentId),
         ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
           ? {}
           : {

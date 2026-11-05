@@ -53,6 +53,16 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
             };
           if (
             request.kind === "sign-out" &&
+            (current?.kind === "signed-in" ||
+              current?.kind === "sign-in-again" ||
+              current?.kind === "sign-out-pending")
+          )
+            return {
+              kind: "sign-out-pending",
+              message: "Sign-out is not confirmed. Finish signing out when the host is available.",
+            };
+          if (
+            request.kind === "sign-out" &&
             (current?.kind === "awaiting-consent" ||
               current?.kind === "cancel-pending" ||
               current?.kind === "status-unavailable")
@@ -203,6 +213,23 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
       </div>
     );
   }
+  if (view.kind === "sign-out-pending")
+    return (
+      <div className="mcp-sign-in">
+        <span className="mcp-sign-in__state" role="status">
+          {view.message}
+        </span>
+        <OctantButton
+          disabled={props.disabled || busy}
+          onClick={() => void ask({ kind: "sign-out", ...target })}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Finish signing out
+        </OctantButton>
+      </div>
+    );
   if (view.kind === "signed-in") {
     return (
       <div className="mcp-sign-in">

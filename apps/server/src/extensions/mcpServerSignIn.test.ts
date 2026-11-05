@@ -17,6 +17,18 @@ const COMPONENT = "mcp-docs";
 const ATTEMPT = "55000000-0000-4000-8000-000000000001";
 const CREDENTIAL = "55000000-0000-4000-8000-000000000002";
 
+const publicSetup = {
+  binding: {
+    resource: SERVER,
+    issuer: ISSUER,
+    tokenEndpoint: `${ISSUER}/token`,
+    callback: "http://127.0.0.1:43125/oauth/callback",
+  },
+  kind: "registered",
+  clientId: "owned-public-client",
+  authentication: "none",
+} as const;
+
 const directories: string[] = [];
 afterEach(async () => {
   for (const directory of directories.splice(0))
@@ -132,6 +144,7 @@ async function signIn(options: {
   readonly retirementTimeoutMs?: number;
   readonly beginTimeoutMs?: number;
   readonly replaceState?: (path: string, contents: string) => Promise<void>;
+  readonly onAuthenticationChanged?: (extensionId: string, componentId: string) => Promise<void>;
 }) {
   const directory = await mkdtemp(join(tmpdir(), "octant-mcp-sign-in-"));
   directories.push(directory);
@@ -152,12 +165,202 @@ async function signIn(options: {
         : { retirementTimeoutMs: options.retirementTimeoutMs }),
       ...(options.beginTimeoutMs === undefined ? {} : { beginTimeoutMs: options.beginTimeoutMs }),
       ...(options.replaceState === undefined ? {} : { replaceState: options.replaceState }),
+      ...(options.onAuthenticationChanged === undefined
+        ? {}
+        : { onAuthenticationChanged: options.onAuthenticationChanged }),
       pickPort: options.pickPort ?? (async () => 43125),
     }),
   };
 }
 
 describe("signing in to a hosted MCP server", () => {
+  it("does not create a hidden completed-cleanup owner during prepared package removal", async () => {
+    const { oauth } = fakeOauth();
+    const { service } = await signIn({ fetchImpl: issuerFetch().fetchImpl, oauth });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    const release = await service.preparePackageRemoval(EXTENSION);
+    try {
+      expect(await service.signOut(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+        kind: "refused",
+        reason: "unavailable",
+      });
+      expect(oauth.signOut).not.toHaveBeenCalled();
+      expect(await service.signOut(EXTENSION, COMPONENT, "remote-device")).toMatchObject({
+        kind: "refused",
+        reason: "local-host-required",
+      });
+      expect(await service.status(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+        kind: "signed-in",
+      });
+    } finally {
+      release();
+    }
+    expect(await service.signOut(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "signed-out",
+    });
+  });
+
+  it("retains an unusable completed grant across restart until explicit sign-out cleanup succeeds", async () => {
+    const { oauth } = fakeOauth();
+    const access = vi.fn(async () => ({
+      kind: "granted",
+      tokenType: "Bearer",
+      accessToken: "synthetic-old-bearer",
+    }));
+    const invalidate = vi.fn(async () => undefined);
+    const fetchImpl = issuerFetch().fetchImpl;
+    const { service, statePath } = await signIn({
+      fetchImpl,
+      oauth,
+      access,
+      onAuthenticationChanged: invalidate,
+    });
+    await service.saveClient(EXTENSION, COMPONENT, publicSetup, "local-window");
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    vi.mocked(oauth.signOut).mockResolvedValue({ kind: "unavailable" });
+    expect(await service.signOut(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "sign-out-pending",
+    });
+    expect(invalidate).toHaveBeenLastCalledWith(EXTENSION, COMPONENT);
+    expect(
+      JSON.parse(await readFile(statePath, "utf8")).signIns[`${EXTENSION}:${COMPONENT}`],
+    ).toMatchObject({ credentialRef: CREDENTIAL, signOutPending: true });
+    const restarted = new McpServerSignIn({
+      statePath,
+      oauth,
+      access,
+      fetch: fetchImpl,
+      serverUrl: async () => SERVER,
+      actorId: "66000000-0000-4000-8000-000000000001",
+      onAuthenticationChanged: invalidate,
+    });
+    const launch = {
+      transport: "streamable-http",
+      name: "remote",
+      headers: {},
+      url: SERVER,
+    } as const;
+    expect(await restarted.attachBearer(EXTENSION, COMPONENT, launch)).toEqual(launch);
+    expect(access).not.toHaveBeenCalled();
+    expect(await restarted.begin(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "sign-out-pending",
+    });
+    expect(oauth.begin).toHaveBeenCalledTimes(1);
+    vi.mocked(oauth.signOut).mockResolvedValue({ kind: "signed-out" });
+    expect(await restarted.signOut(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "signed-out",
+    });
+    expect((await restarted.prepareClient(EXTENSION, COMPONENT, "local-window")).kind).toBe(
+      "client-setup",
+    );
+    expect(JSON.parse(await readFile(statePath, "utf8")).signIns).toEqual({});
+    expect(JSON.parse(await readFile(statePath, "utf8")).registrations[SERVER].clientId).toBe(
+      publicSetup.clientId,
+    );
+  });
+
+  it("invalidates cached authentication on a proven revoked grant and refuses remote sign-out", async () => {
+    const { oauth } = fakeOauth();
+    const invalidate = vi.fn(async () => undefined);
+    const access = vi.fn(async () => ({ kind: "sign-in-again", reason: "revoked" }));
+    const { service } = await signIn({
+      fetchImpl: issuerFetch().fetchImpl,
+      oauth,
+      access,
+      onAuthenticationChanged: invalidate,
+    });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    invalidate.mockClear();
+    expect(await service.signOut(EXTENSION, COMPONENT, "remote-device")).toMatchObject({
+      kind: "refused",
+      reason: "local-host-required",
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(oauth.signOut).not.toHaveBeenCalled();
+    const launch = {
+      transport: "streamable-http",
+      name: "remote",
+      headers: {},
+      url: SERVER,
+    } as const;
+    expect(await service.attachBearer(EXTENSION, COMPONENT, launch)).toEqual(launch);
+    expect(invalidate).toHaveBeenCalledExactlyOnceWith(EXTENSION, COMPONENT);
+    expect(await service.attachBearer(EXTENSION, COMPONENT, launch)).toEqual(launch);
+    expect(access).toHaveBeenCalledOnce();
+    expect(await service.status(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "sign-in-again",
+      reason: "revoked",
+    });
+  });
+
+  it("bounds unknown completed sign-out cleanup and suppresses its late result", async () => {
+    const { oauth } = fakeOauth();
+    const { service } = await signIn({ fetchImpl: issuerFetch().fetchImpl, oauth });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    const held = Promise.withResolvers<Awaited<ReturnType<HostOAuthService["signOut"]>>>();
+    const entered = Promise.withResolvers<void>();
+    vi.mocked(oauth.signOut).mockImplementation(async () => {
+      entered.resolve();
+      return held.promise;
+    });
+    vi.useFakeTimers();
+    try {
+      const signingOut = service.signOut(EXTENSION, COMPONENT, "local-window");
+      await entered.promise;
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await signingOut).toMatchObject({ kind: "sign-out-pending" });
+      held.resolve({ kind: "signed-out" });
+      await Promise.resolve();
+      expect(await service.status(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+        kind: "sign-out-pending",
+      });
+      expect(await service.begin(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+        kind: "sign-out-pending",
+      });
+      vi.mocked(oauth.signOut).mockResolvedValue({ kind: "signed-out" });
+      expect(await service.signOut(EXTENSION, COMPONENT, "local-window")).toEqual({
+        kind: "signed-out",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains sign-out ownership if final persistence fails after broker deletion", async () => {
+    const { oauth } = fakeOauth();
+    let fail = false;
+    const { service, statePath } = await signIn({
+      fetchImpl: issuerFetch().fetchImpl,
+      oauth,
+      replaceState: async (path, contents) => {
+        if (fail && Object.keys(JSON.parse(contents).signIns).length === 0)
+          throw new Error("synthetic disk failure");
+        await writeFile(path, contents, "utf8");
+      },
+    });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    fail = true;
+    expect(await service.signOut(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "sign-out-pending",
+    });
+    expect(await service.status(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "sign-out-pending",
+    });
+    expect(
+      JSON.parse(await readFile(statePath, "utf8")).signIns[`${EXTENSION}:${COMPONENT}`]
+        .credentialRef,
+    ).toBe(CREDENTIAL);
+    fail = false;
+    expect(await service.signOut(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "signed-out",
+    });
+  });
+
   it.each(["complete", "cancel"])(
     "retains an attempt after real service status timeout and permits later explicit %s",
     async (action) => {
@@ -678,18 +881,6 @@ describe("signing in to a hosted MCP server", () => {
 });
 
 describe("application setup without account consent", () => {
-  const publicSetup = {
-    binding: {
-      resource: SERVER,
-      issuer: ISSUER,
-      tokenEndpoint: `${ISSUER}/token`,
-      callback: "http://127.0.0.1:43125/oauth/callback",
-    },
-    kind: "registered",
-    clientId: "owned-public-client",
-    authentication: "none",
-  } as const;
-
   it("prepares one exact callback across concurrent requests and restarts without registration or consent", async () => {
     const { fetchImpl, calls } = issuerFetch({ registration: false, metadataClient: true });
     const { oauth, begun } = fakeOauth();
@@ -1069,7 +1260,12 @@ describe("application setup without account consent", () => {
     expect(begun).toHaveLength(2);
     release.resolve();
     expect(await saving).toEqual({ kind: "client-configured" });
-    expect(await beginning).toMatchObject({ kind: "awaiting-consent" });
+    expect(await beginning).toMatchObject({ kind: "signed-in" });
+    expect(begun).toHaveLength(2);
+    await service.signOut(EXTENSION, COMPONENT, "local-window");
+    expect(await service.begin(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "awaiting-consent",
+    });
     expect(begun[2]?.clientId).toBe("replacement-client");
   });
 

@@ -5,6 +5,7 @@ import {
   decodeExtensionCommandResult,
   decodeUserAddedMcpServerRequest,
   decodeExtensionSnapshot,
+  decodeMcpServerSignInView,
 } from "./extensionRpc";
 import { ExtensionProvenance } from "./extensions";
 import { Schema } from "effect";
@@ -62,6 +63,22 @@ describe("extension RPC contracts", () => {
     ).toThrow();
     expect(() =>
       decodeUserAddedMcpServerRequest({ ...request, executableTrusted: true }),
+    ).toThrow();
+  });
+
+  it("keeps completed sign-out recovery bounded and free of credential fields", () => {
+    expect(
+      decodeMcpServerSignInView({ kind: "sign-out-pending", message: "Finish signing out." }),
+    ).toEqual({ kind: "sign-out-pending", message: "Finish signing out." });
+    expect(() =>
+      decodeMcpServerSignInView({ kind: "sign-out-pending", message: "x".repeat(513) }),
+    ).toThrow();
+    expect(() =>
+      decodeMcpServerSignInView({
+        kind: "sign-out-pending",
+        message: "Finish signing out.",
+        credentialRef: "55000000-0000-4000-8000-000000000002",
+      }),
     ).toThrow();
   });
 
