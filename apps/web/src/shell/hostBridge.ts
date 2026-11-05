@@ -425,6 +425,11 @@ export interface OctantHostBridge
   readonly checkForAppUpdate?: () => Promise<AppUpdateState>;
   /** This application's native process persists its own update preferences. */
   readonly appUpdatePreferenceScope?: "local";
+  /** Local application display only; never a host or capability identity. */
+  readonly applicationIdentity?: Readonly<{
+    readonly flavor: "nightly";
+    readonly productName: "Octant Nightly";
+  }>;
   readonly downloadAppUpdate?: () => Promise<AppUpdateState>;
   readonly installAppUpdate?: () => Promise<AppUpdateInstallOutcome>;
   readonly setAutomaticAppUpdateChecks?: (enabled: boolean) => Promise<AppUpdateState>;

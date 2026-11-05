@@ -29,6 +29,22 @@ function hostBridge(): OctantHostBridge {
   };
 }
 
+it("moves the Nightly identity into the collapsed window's measured leading controls", () => {
+  const { container, rerender, props } = renderChrome({
+    hostBridge: {
+      ...hostBridge(),
+      applicationIdentity: { flavor: "nightly", productName: "Octant Nightly" },
+    },
+    onExpandSidebar: vi.fn(),
+  });
+  const identity = screen.getByLabelText("Octant Nightly");
+  expect(container.querySelector(".window-chrome__leading")).toContainElement(identity);
+  expect(identity.querySelector("button, a, [tabindex]")).toBeNull();
+  const { onExpandSidebar: _expand, ...expanded } = props;
+  rerender(<WindowChrome {...expanded} />);
+  expect(screen.queryByLabelText("Octant Nightly")).not.toBeInTheDocument();
+});
+
 function renderChrome(overrides: Partial<React.ComponentProps<typeof WindowChrome>> = {}) {
   const props: React.ComponentProps<typeof WindowChrome> = {
     activeSurface: "Welcome to Code",
@@ -508,6 +524,10 @@ describe("WindowChrome", () => {
     expect(cssRule(":root")).toContain("--octant-border: #303030;");
     expect(cssRule(":root")).toContain("--octant-border-strong: #4d4d4d;");
     expect(cssRule(".sidebar__native-leading")).not.toMatch(/background|border|box-shadow/);
+    expect(cssRule(".sidebar__native-leading")).toContain("padding: 0 var(--oct-space-3);");
+    expect(
+      cssRule(".shell--rail-beside.shell-frame > .sidebar .sidebar__native-leading"),
+    ).toContain("padding-left: max(");
 
     expect(cssRule(".new-project", 1)).toContain("color: var(--octant-text-primary);");
     expect(cssRule(".new-project", 1)).toContain("background: transparent;");

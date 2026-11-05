@@ -3,6 +3,7 @@ import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } fro
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
+import { ApplicationIdentity } from "./ApplicationIdentity";
 import type { WindowHistory } from "./windowHistory";
 import { WindowHistoryButtons } from "./WindowHistoryButtons";
 
@@ -93,6 +94,9 @@ export function WindowChrome(props: WindowChromeProps) {
             label="Show sidebar"
             onClick={props.onExpandSidebar}
           />
+          {props.hostBridge?.applicationIdentity !== undefined ? (
+            <ApplicationIdentity productName={props.hostBridge.applicationIdentity.productName} />
+          ) : null}
           {props.history === undefined ? null : (
             <WindowHistoryButtons className="window-chrome__button" history={props.history} />
           )}

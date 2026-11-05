@@ -17,6 +17,7 @@ import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
 import type { DiscoveryController } from "../providers/useDiscoveryController";
 import type { ProviderController } from "../providers/useProviderController";
+import type { OctantHostBridge } from "./hostBridge";
 
 const now = "2026-07-20T08:00:00.000Z";
 
@@ -120,6 +121,49 @@ function defaultProps(): SettingsViewProps {
 }
 
 describe("SettingsView", () => {
+  it.each([false, true])(
+    "keeps exactly one Nightly identity in standalone Settings (narrow: %s)",
+    (isNarrow) => {
+      const hostBridge: OctantHostBridge = {
+        applicationIdentity: { flavor: "nightly", productName: "Octant Nightly" },
+        projectWindowCapability: "C".repeat(43),
+        clearProviderCredential: vi.fn(),
+        close: vi.fn(),
+        maximizeOrRestore: vi.fn(),
+        minimize: vi.fn(),
+        providerCredentialStatus: vi.fn(async () => "missing" as const),
+        resetBounds: vi.fn(),
+        selectProjectRoot: vi.fn(),
+        setProviderCredential: vi.fn(),
+        addProviderApiKey: vi.fn(),
+        listProviderApiKeys: vi.fn(async () => []),
+        renameProviderApiKey: vi.fn(),
+        replaceProviderApiKey: vi.fn(),
+        removeProviderApiKey: vi.fn(),
+        setActiveProviderApiKey: vi.fn(),
+        moveProviderApiKey: vi.fn(),
+        setSidebarMaterialPreference: vi.fn(),
+        subscribeResolvedMaterial: vi.fn(() => () => undefined),
+      };
+      const { container, rerender, props } = renderSettings({
+        hostBridge,
+        isNarrow,
+        reservesTitlebarInset: true,
+      });
+      expect(screen.getAllByLabelText("Octant Nightly")).toHaveLength(1);
+      const identity = screen.getByLabelText("Octant Nightly");
+      expect(
+        container.querySelector(
+          isNarrow ? ".settings-view__mobile-titlebar" : ".settings-view__sidebar",
+        ),
+      ).toContainElement(identity);
+      expect(identity.querySelector("button, a, [tabindex]")).toBeNull();
+      const { hostBridge: _bridge, ...remote } = props;
+      rerender(<SettingsView {...remote} />);
+      expect(screen.queryByLabelText("Octant Nightly")).not.toBeInTheDocument();
+    },
+  );
+
   it("lets the reader choose to wait for finished replies from Chat settings", async () => {
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
