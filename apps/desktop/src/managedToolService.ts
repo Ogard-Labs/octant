@@ -87,6 +87,7 @@ export function createManagedToolService(options: {
   let settingsAutomaticUpdates = false;
   let initializing: Promise<void> | undefined;
   let closed = false;
+  let closing: Promise<void> | undefined;
   const trackedProcesses = new Set<ChildProcess>();
 
   const bundledReleaseFor = (packageName: string) =>
@@ -376,9 +377,20 @@ export function createManagedToolService(options: {
         ...(supported ? {} : { message: "Managed tools require the Octant desktop app." }),
       };
     },
-    close: async () => {
-      closed = true;
-      for (const instance of instances) await instance.updates.close();
+    close: () => {
+      closing ??= (async () => {
+        closed = true;
+        let failed = false;
+        for (const instance of instances) {
+          try {
+            await instance.updates.close();
+          } catch {
+            failed = true;
+          }
+        }
+        if (failed) throw new Error("Octant could not close managed-tool updaters.");
+      })();
+      return closing;
     },
   };
 }

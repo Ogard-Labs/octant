@@ -67,6 +67,70 @@ function tools(source = script) {
 }
 
 describe("serve-avd broker", () => {
+  it("closes later sessions and its listener when one child refuses cleanup", async () => {
+    const managed = tools();
+    const children: Array<ReturnType<typeof spawn>> = [];
+    const broker = await startServeAvdBroker(managed, {
+      spawn: (command, args, options) => {
+        const child = spawn(command, [...args], options);
+        children.push(child);
+        return child;
+      },
+    });
+    let failingKill: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      expect((await post(broker, { serial: "emulator-5554" })).status).toBe(200);
+      expect((await post(broker, { serial: "emulator-5556" })).status).toBe(200);
+      const first = children[0];
+      const second = children[1];
+      if (first === undefined || second === undefined)
+        throw new Error("Missing disposable children");
+      failingKill = vi.spyOn(first, "kill").mockImplementation(() => {
+        throw new Error("private signal failure");
+      });
+      const secondKill = vi.spyOn(second, "kill");
+      const completion = broker.close();
+      await expect(completion).rejects.toThrow();
+      expect(secondKill).toHaveBeenCalledWith("SIGTERM");
+      await expect(fetch(broker.url)).rejects.toThrow();
+      expect(broker.close()).toBe(completion);
+    } finally {
+      failingKill?.mockRestore();
+      for (const child of children)
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await broker.close().catch(() => undefined);
+    }
+  });
+
+  it("closes its listener and later sessions after a pending launch rejects", async () => {
+    const managed = tools();
+    const launchSpec = managed.launchSpec;
+    managed.launchSpec = vi
+      .fn(launchSpec)
+      .mockRejectedValueOnce(new Error("fixture launch failed"));
+    let child: ReturnType<typeof spawn> | undefined;
+    const broker = await startServeAvdBroker(managed, {
+      spawn: (command, args, options) => {
+        child = spawn(command, [...args], options);
+        return child;
+      },
+    });
+    try {
+      expect((await post(broker, { serial: "emulator-5554" })).status).toBe(503);
+      expect((await post(broker, { serial: "emulator-5556" })).status).toBe(200);
+      if (child === undefined) throw new Error("Missing disposable child");
+      const kill = vi.spyOn(child, "kill");
+      const completion = broker.close();
+      await expect(completion).rejects.toThrow("managed-device broker resources");
+      expect(kill).toHaveBeenCalledWith("SIGTERM");
+      await expect(fetch(broker.url)).rejects.toThrow();
+    } finally {
+      if (child !== undefined && child.exitCode === null && child.signalCode === null)
+        child.kill("SIGKILL");
+      await broker.close().catch(() => undefined);
+    }
+  });
+
   it("attaches a booted emulator serial and reuses that process", async () => {
     const managed = tools();
     const broker = await startServeAvdBroker(managed);

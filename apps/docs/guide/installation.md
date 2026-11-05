@@ -116,6 +116,21 @@ be offered as a usable download. The preview/candidate release workflow has an
 explicit preflight stop until that functional client is implemented and
 verified. Stable releases and local packaging have no such temporary stop.
 
+## Desktop host shutdown
+
+Closing the last window keeps the desktop-owned host available. Quitting
+Octant uses the existing active-work confirmation; cancelling it keeps the
+host running. Once quit is accepted, queued starts and restarts cannot reopen
+the host. Startup failure and shutdown both attempt all acquired native
+services even if one cleanup step fails, including closing the Computer and
+managed-device listeners after their service cleanup fails. A host started
+independently is left running.
+
+If graceful shutdown stalls, the existing quit deadline still attempts to
+terminate Octant's owned server and tracked managed tools before ending the
+app. Completion of service cleanup alone does not confirm every managed-tool
+process has exited.
+
 ## Data directory
 
 ### macOS

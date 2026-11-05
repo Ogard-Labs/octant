@@ -1,13 +1,18 @@
+import {
+  createDesktopHostLaunch,
+  startDesktopHostServer,
+  type DesktopHostLaunch,
+} from "./desktopHostLaunch";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
 import { createNativeCodeApprovalViewHost } from "./nativeCodeApprovalView";
-import { startComputerUseBroker, type ComputerUseBroker } from "./computerUseBroker";
-import { startSimulatorDeviceBroker, type SimulatorDeviceBroker } from "./simulatorDeviceBroker";
+import { startComputerUseBroker } from "./computerUseBroker";
+import { startSimulatorDeviceBroker } from "./simulatorDeviceBroker";
 import { createSimulatorDeviceHelpers } from "./simulatorDeviceHelper";
 import {
   createManagedSimulatorHelpers,
   createUnavailableSimulatorHelpers,
 } from "./managedSimulatorHelpers";
-import { startServeAvdBroker, type ServeAvdBroker } from "./serveAvdBroker";
+import { startServeAvdBroker } from "./serveAvdBroker";
 import {
   createComputerUseDesktopService,
   type ComputerUseDesktopService,
@@ -205,6 +210,7 @@ import {
 import {
   createHostLifecycleController,
   workInFlight,
+  type HostAdmission,
   type LocalHostDescriptor,
 } from "./hostLifecycle";
 import { createDesktopBackendSupervisor } from "./desktopBackendSupervision";
@@ -1010,53 +1016,6 @@ interface DisposablePresentationController {
   readonly dispose: () => void;
 }
 
-interface ManagedBrokerResource {
-  readonly url: string;
-  readonly token: string;
-  readonly close: () => Promise<void>;
-}
-
-export async function startManagedServerResources<
-  TBroker extends ManagedBrokerResource,
-  TServer,
->(options: {
-  readonly startBroker: () => Promise<TBroker | undefined>;
-  readonly startServer: (broker: TBroker | undefined) => TServer;
-}): Promise<{ readonly broker: TBroker | undefined; readonly server: TServer }> {
-  let broker: TBroker | undefined;
-  try {
-    broker = await options.startBroker();
-    return { broker, server: options.startServer(broker) };
-  } catch {
-    try {
-      await broker?.close();
-    } catch {
-      // The fixed startup error remains sanitized even if broker cleanup also fails.
-    }
-    throw new Error("Octant could not start its managed server resources.");
-  }
-}
-
-export async function shutdownManagedServerResources<TServer>(options: {
-  readonly broker: ManagedBrokerResource | undefined;
-  readonly server: TServer | undefined;
-  readonly shutdownServer: (server: TServer) => Promise<void>;
-}): Promise<void> {
-  let failed = false;
-  try {
-    if (options.server !== undefined) await options.shutdownServer(options.server);
-  } catch {
-    failed = true;
-  } finally {
-    try {
-      await options.broker?.close();
-    } catch {
-      failed = true;
-    }
-  }
-  if (failed) throw new Error("Octant could not stop its managed server resources.");
-}
-
 export function createProjectWindowPreparationCleanup() {
   let controller: DisposablePresentationController | undefined;
   let stopThermal: (() => void) | undefined;
@@ -1295,11 +1254,11 @@ app.setPath(
 );
 
 let server: ChildProcess | undefined;
+let desktopHostLaunch: DesktopHostLaunch | undefined;
+let acceptedQuitLaunch: DesktopHostLaunch | undefined;
+let desktopQuitAccepted = false;
 let credentialBroker: CredentialBroker | undefined;
 let browserRuntimeBroker: BrowserRuntimeBroker | undefined;
-let computerUseBroker: ComputerUseBroker | undefined;
-let simulatorDeviceBroker: SimulatorDeviceBroker | undefined;
-let serveAvdBroker: ServeAvdBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
 let managedToolService: ManagedToolService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
@@ -1828,6 +1787,10 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   if (!applicationIdentity.mayStartHost) {
     throw new Error("Octant Nightly cannot start a host or migrate shared data.");
   }
+  if (desktopHostLaunch !== undefined && desktopHostLaunch.state !== "closed") {
+    if (desktopHostLaunch.state !== "acquiring")
+      throw new Error("Octant still owns resources whose shutdown was not confirmed.");
+  }
   if (server !== undefined && activeServerUrl !== undefined && serverInstanceId !== undefined) {
     return {
       url: activeServerUrl,
@@ -1851,11 +1814,8 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   // before spawning the managed server, which must bind that same port.
   await portReservation.close();
   const serverStderr = createStderrTail();
-  let startingBrowserBroker: BrowserRuntimeBroker | undefined;
-  let startingComputerBroker: ComputerUseBroker | undefined;
-  let startingDeviceBroker: SimulatorDeviceBroker | undefined;
-  let startingServeAvdBroker: ServeAvdBroker | undefined;
-  let startingManagedToolService: ManagedToolService | undefined;
+  const launch = createDesktopHostLaunch({ shutdownServer: shutdownManagedServer });
+  desktopHostLaunch = launch;
   try {
     const instanceId = randomUUID();
     // Files held for the agent are cleared when the app starts; if the folder
@@ -1897,7 +1857,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         popupViewOf(new WebContentsView({ webPreferences: { partition, ...webPreferences } })),
     });
     const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(surfaceHost, profileStore);
-    startingBrowserBroker = nextBrowserRuntimeBroker;
+    launch.acquired({ browserBroker: nextBrowserRuntimeBroker });
     const nextComputerService = createComputerUseDesktopService({
       bundledPath: resolveDesktopNativeHelperPath(
         {
@@ -1910,9 +1870,10 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       dataDirectory: desktopDataDirectory,
       isWindowAvailable: (windowId) => desktopWindows.hasWindowId(windowId),
     });
+    launch.acquired({ computerService: nextComputerService });
     const nextComputerBroker = await startComputerUseBroker(nextComputerService);
-    startingComputerBroker = nextComputerBroker;
-    startingManagedToolService = createManagedToolService({
+    launch.acquired({ computerBroker: nextComputerBroker });
+    const nextManagedToolService = createManagedToolService({
       bundledToolsDirectory: resolveManagedToolsDirectory({
         packaged: app.isPackaged,
         resourcesPath: process.resourcesPath,
@@ -1921,6 +1882,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       dataDirectory: desktopDataDirectory,
       execPath: process.execPath,
     });
+    launch.acquired({ managedTools: nextManagedToolService });
     const deviceHelperPath = resolveDesktopNativeHelperPath(
       {
         packaged: app.isPackaged,
@@ -1932,23 +1894,27 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     // Simulators exist on macOS only. The broker still starts when the native
     // helper binary is missing, so a managed serve-sim stream can drive the
     // pane. Without either, input is reported unavailable.
-    const nextDeviceBroker =
+    const nextSimulatorHelpers =
       process.platform === "darwin"
-        ? await startSimulatorDeviceBroker(
-            createManagedSimulatorHelpers(
-              existsSync(deviceHelperPath)
-                ? createSimulatorDeviceHelpers({ helperPath: deviceHelperPath })
-                : createUnavailableSimulatorHelpers(),
-              startingManagedToolService,
-              { captureDirectory: join(desktopDataDirectory, "apple-runtime", "captures") },
-            ),
+        ? createManagedSimulatorHelpers(
+            existsSync(deviceHelperPath)
+              ? createSimulatorDeviceHelpers({ helperPath: deviceHelperPath })
+              : createUnavailableSimulatorHelpers(),
+            nextManagedToolService,
+            { captureDirectory: join(desktopDataDirectory, "apple-runtime", "captures") },
           )
         : undefined;
-    startingDeviceBroker = nextDeviceBroker;
-    const nextServeAvdBroker = await startServeAvdBroker(startingManagedToolService);
-    startingServeAvdBroker = nextServeAvdBroker;
-    const resources = await startManagedServerResources({
-      startBroker: () => startDesktopCredentialBroker(),
+    if (nextSimulatorHelpers !== undefined)
+      launch.acquired({ simulatorHelpers: nextSimulatorHelpers });
+    const nextDeviceBroker =
+      nextSimulatorHelpers === undefined
+        ? undefined
+        : await startSimulatorDeviceBroker(nextSimulatorHelpers);
+    if (nextDeviceBroker !== undefined) launch.acquired({ simulatorBroker: nextDeviceBroker });
+    const nextServeAvdBroker = await startServeAvdBroker(nextManagedToolService);
+    launch.acquired({ avdBroker: nextServeAvdBroker });
+    const { broker, server: child } = await startDesktopHostServer(launch, {
+      startBroker: startDesktopCredentialBroker,
       startServer: (broker) => {
         const codeFileHelperPath = resolveCodeFileHelperPath({
           packaged: app.isPackaged,
@@ -1996,26 +1962,22 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           execPath: process.execPath,
           env: { ...process.env, OCTANT_DATA_DIR: desktopDataDirectory },
         });
-        const child = spawn(spec.command, spec.args, {
+        return spawn(spec.command, spec.args, {
           env: spec.env,
           stdio: [...spec.stdio] as ["pipe", "inherit", "pipe"],
         });
-        // pipe() honours backpressure from a slow parent stderr; the tail
-        // listener only keeps a bounded copy.
-        child.stderr.pipe(process.stderr, { end: false });
-        child.stderr.on("data", (chunk: Buffer) => serverStderr.append(chunk));
-        child.stderr.once("end", serverStderr.end);
-        return child;
       },
     });
-    credentialBroker = resources.broker;
+    // pipe() honours backpressure from a slow parent stderr; the tail
+    // listener only keeps a bounded copy.
+    child.stderr.pipe(process.stderr, { end: false });
+    child.stderr.on("data", (chunk: Buffer) => serverStderr.append(chunk));
+    child.stderr.once("end", serverStderr.end);
+    credentialBroker = broker;
     browserRuntimeBroker = nextBrowserRuntimeBroker;
-    computerUseBroker = nextComputerBroker;
     computerUseService = nextComputerService;
-    simulatorDeviceBroker = nextDeviceBroker;
-    serveAvdBroker = nextServeAvdBroker;
-    managedToolService = startingManagedToolService;
-    server = resources.server;
+    managedToolService = nextManagedToolService;
+    server = child;
     serverInstanceId = instanceId;
     activeServerUrl = serverUrl;
     const attached = await waitForStorageReady({
@@ -2043,67 +2005,45 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       ) {
         throw new Error("Octant could not load the attached host authority.");
       }
-      const child = server;
-      const broker = credentialBroker;
       desktopBackendSupervisor.release();
-      server = undefined;
-      credentialBroker = undefined;
-      browserRuntimeBroker = undefined;
-      await shutdownManagedServerResources({
-        broker,
-        server: child,
-        shutdownServer: shutdownManagedServer,
-      });
-      await nextBrowserRuntimeBroker.close();
-      await nextComputerBroker.close();
-      await nextDeviceBroker?.close();
-      await nextServeAvdBroker.close();
-      await startingManagedToolService?.close();
-      computerUseBroker = undefined;
-      computerUseService = undefined;
-      simulatorDeviceBroker = undefined;
-      serveAvdBroker = undefined;
-      managedToolService = undefined;
+      await closeDesktopHostLaunch(launch);
       desktopBridgeSecret = winningAttachment.bridgeSecret;
       serverInstanceId = attached.instanceId;
       activeServerUrl = attached.url;
       return { url: attached.url, instanceId: attached.instanceId, ownership: "managed" };
     }
-    if (server !== undefined) desktopBackendSupervisor.observe(server);
+    if (server !== undefined && !desktopQuitAccepted) desktopBackendSupervisor.observe(server);
     return { url: serverUrl, instanceId, ownership: "desktop-owned" };
   } catch (error) {
     if (desktopBackendSupervisor.snapshot().status !== "restarting") {
       desktopBackendSupervisor.release();
     }
-    const child = server;
-    const broker = credentialBroker;
-    const browserBroker = browserRuntimeBroker ?? startingBrowserBroker;
-    const computerBroker = computerUseBroker ?? startingComputerBroker;
-    const deviceBroker = simulatorDeviceBroker ?? startingDeviceBroker;
-    const avdBroker = serveAvdBroker ?? startingServeAvdBroker;
-    const managedTools = managedToolService ?? startingManagedToolService;
-    computerUseBroker = undefined;
-    computerUseService = undefined;
-    simulatorDeviceBroker = undefined;
-    serveAvdBroker = undefined;
-    managedToolService = undefined;
-    server = undefined;
-    credentialBroker = undefined;
-    browserRuntimeBroker = undefined;
-    serverInstanceId = undefined;
-    activeServerUrl = undefined;
-    await shutdownManagedServerResources({
-      broker,
-      server: child,
-      shutdownServer: shutdownManagedServer,
-    }).catch(() => undefined);
-    await browserBroker?.close().catch(() => undefined);
-    await computerBroker?.close().catch(() => undefined);
-    await deviceBroker?.close().catch(() => undefined);
-    await avdBroker?.close().catch(() => undefined);
-    await managedTools?.close().catch(() => undefined);
+    await closeDesktopHostLaunch(launch).catch((cleanupError: unknown) => {
+      // Cleanup errors contain only fixed stage names; preserve the original
+      // startup error so retry policy still sees its actual classification.
+      logQuitProblem(String(cleanupError));
+    });
     throw error;
   }
+}
+
+async function closeDesktopHostLaunch(launch: DesktopHostLaunch): Promise<void> {
+  const result = await launch.close();
+  if (result.status === "failed") {
+    throw new Error(`Octant could not close owned host resources: ${result.stages.join(", ")}.`);
+  }
+  if (desktopHostLaunch !== launch) return;
+  // Normal API closure does not prove tracked helper exit. Keep the one
+  // quit-owned launch reachable through the existing application deadline.
+  if (desktopQuitAccepted) acceptedQuitLaunch = launch;
+  desktopHostLaunch = undefined;
+  computerUseService = undefined;
+  managedToolService = undefined;
+  server = undefined;
+  credentialBroker = undefined;
+  browserRuntimeBroker = undefined;
+  serverInstanceId = undefined;
+  activeServerUrl = undefined;
 }
 
 async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
@@ -2113,42 +2053,8 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   if (desktopBackendSupervisor.snapshot().status !== "restarting") {
     desktopBackendSupervisor.release();
   }
-  const child = server;
-  const broker = credentialBroker;
-  const browserBroker = browserRuntimeBroker;
-  const computerBroker = computerUseBroker;
-  const deviceBroker = simulatorDeviceBroker;
-  const avdBroker = serveAvdBroker;
-  const managedTools = managedToolService;
-  computerUseBroker = undefined;
-  computerUseService = undefined;
-  simulatorDeviceBroker = undefined;
-  serveAvdBroker = undefined;
-  managedToolService = undefined;
-  server = undefined;
-  credentialBroker = undefined;
-  browserRuntimeBroker = undefined;
-  serverInstanceId = undefined;
-  activeServerUrl = undefined;
-  await shutdownManagedServerResources({
-    broker,
-    server: child,
-    shutdownServer: shutdownManagedServer,
-  });
-  // The references above are already cleared, so a failed close (an
-  // unconfirmed Simulator helper exit) must not skip the brokers after it:
-  // nothing else would close them before a restart. Report the first failure
-  // once every resource has had its close attempt.
-  const closes = [browserBroker, computerBroker, deviceBroker, avdBroker, managedTools];
-  let firstFailure: { readonly error: unknown } | undefined;
-  for (const resource of closes) {
-    try {
-      await resource?.close();
-    } catch (error) {
-      firstFailure ??= { error };
-    }
-  }
-  if (firstFailure !== undefined) throw firstFailure.error;
+  const launch = desktopHostLaunch;
+  if (launch !== undefined) await closeDesktopHostLaunch(launch);
 }
 
 const hostLifecycle = createHostLifecycleController({
@@ -2195,26 +2101,33 @@ export async function refreshProjectWindowAuthoritiesAfterHostRestart(
 }
 
 export async function restartDesktopHostAndRefreshWindowAuthorities(options: {
-  readonly restart: () => Promise<LocalHostDescriptor>;
+  readonly restart: () => Promise<HostAdmission>;
   readonly refreshWindowAuthorities: (host: LocalHostDescriptor) => Promise<void>;
-}): Promise<{
-  readonly host: LocalHostDescriptor;
-  readonly windowAuthorities: "ready" | "attention-required";
-}> {
-  const host = await options.restart();
+}): Promise<
+  | { readonly status: "closing" }
+  | {
+      readonly status: "running";
+      readonly host: LocalHostDescriptor;
+      readonly windowAuthorities: "ready" | "attention-required";
+    }
+> {
+  const admission = await options.restart();
+  if (admission.status === "closing") return admission;
+  const host = admission.host;
   try {
     await options.refreshWindowAuthorities(host);
-    return Object.freeze({ host, windowAuthorities: "ready" });
+    return Object.freeze({ status: "running", host, windowAuthorities: "ready" });
   } catch {
-    return Object.freeze({ host, windowAuthorities: "attention-required" });
+    return Object.freeze({ status: "running", host, windowAuthorities: "attention-required" });
   }
 }
 
-async function restartDesktopHost(): Promise<LocalHostDescriptor> {
+async function restartDesktopHost(): Promise<HostAdmission> {
   const outcome = await restartDesktopHostAndRefreshWindowAuthorities({
     restart: () => hostLifecycle.restart(),
     refreshWindowAuthorities: refreshDesktopWindowAuthorities,
   });
+  if (outcome.status === "closing") return outcome;
   if (outcome.windowAuthorities === "attention-required") {
     hostLifecycle.setActivity({
       activeAgentCount: 0,
@@ -2223,12 +2136,18 @@ async function restartDesktopHost(): Promise<LocalHostDescriptor> {
     });
     updateHostTray();
   }
-  return outcome.host;
+  return { status: "running", host: outcome.host };
 }
 
 const desktopBackendSupervisor = createDesktopBackendSupervisor({
   restart: async () => {
-    await restartDesktopHost();
+    const admission = await restartDesktopHost();
+    // An accepted quit ends supervision; releasing here makes the supervisor
+    // treat this refused restart as a stop rather than a crash to retry.
+    if (admission.status === "closing") {
+      desktopBackendSupervisor.release();
+      return undefined;
+    }
     return server;
   },
   reportFatal: (error) => {
@@ -2249,7 +2168,9 @@ async function createWindow(): Promise<void> {
   if (mainWindow !== undefined && !mainWindow.isDestroyed()) return;
   const root = repositoryRoot();
   markHostInteraction("host", "window-create-start");
-  const host = await hostLifecycle.ensureRunning();
+  const admission = await hostLifecycle.ensureRunning();
+  if (admission.status === "closing") return;
+  const host = admission.host;
   markHostInteraction("server", "host-running");
   const serverUrl = host.url;
   activeServerUrl = serverUrl;
@@ -3045,7 +2966,9 @@ async function openLocalWebApp(): Promise<void> {
 }
 
 async function startHostFromMenu(): Promise<void> {
-  const host = await hostLifecycle.ensureRunning();
+  const admission = await hostLifecycle.ensureRunning();
+  if (admission.status === "closing") return;
+  const host = admission.host;
   activeServerUrl = host.url;
   serverInstanceId = host.instanceId;
   if (host.ownership === "desktop-owned") {
@@ -3065,7 +2988,9 @@ async function stopHostFromMenu(): Promise<void> {
 }
 
 async function restartHostFromMenu(): Promise<void> {
-  const host = await restartDesktopHost();
+  const admission = await restartDesktopHost();
+  if (admission.status === "closing") return;
+  const host = admission.host;
   activeServerUrl = host.url;
   serverInstanceId = host.instanceId;
   await writeBridgeSecretFile(desktopHostRuntimePaths, desktopBridgeSecret);
@@ -4480,28 +4405,16 @@ function logQuitProblem(message: string): void {
 }
 
 // Ends the app when graceful shutdown stalls. It first kills the processes the
-// quit started with: stopping the host clears the module references to them,
-// and a broker's own close can be waiting out a launch, so an exit would
-// otherwise orphan children that hold the data directory or a port.
-function forceExitAfterStalledQuit(owned: {
-  readonly server: ChildProcess | undefined;
-  readonly managedTools: ManagedToolService | undefined;
-}): () => void {
+// current launch owns, including acquisitions completed after quit acceptance.
+// Failed cleanup keeps that owner reachable until the deadline fires.
+function forceExitAfterStalledQuit(): () => void {
   let exiting = false;
   return () => {
     if (exiting) return;
     exiting = true;
     logQuitProblem("Octant quit did not finish in time; ending the application.");
-    try {
-      owned.server?.kill("SIGKILL");
-    } catch {
-      // The server already exited or cannot be signalled; the exit proceeds.
-    }
-    try {
-      owned.managedTools?.terminateTrackedProcesses();
-    } catch {
-      // The exit proceeds; the tool processes are the last thing to clean up.
-    }
+    desktopHostLaunch?.forceStop();
+    if (acceptedQuitLaunch !== desktopHostLaunch) acceptedQuitLaunch?.forceStop();
     app.exit(0);
   };
 }
@@ -4513,6 +4426,8 @@ async function stopHostForQuit(): Promise<void> {
     await projectWindowLifecycle.shutdown(async () => {
       const result = await hostLifecycle.prepareQuit(() => true);
       if (result === "cancelled") throw new Error("Octant quit was cancelled.");
+      const retained = desktopHostLaunch;
+      if (retained !== undefined) await closeDesktopHostLaunch(retained);
     });
   })();
   const [hostResult, prototypeResult] = await Promise.allSettled([hostStopped, prototypesStopped]);
@@ -4532,7 +4447,7 @@ function finishQuit(): void {
   quitPrepared = true;
   preparingQuit = false;
   armQuitDeadline({
-    forceExit: forceExitAfterStalledQuit({ server: undefined, managedTools: managedToolService }),
+    forceExit: forceExitAfterStalledQuit(),
     boundMs: WINDOW_CLOSE_GRACE_MS,
   });
   app.quit();
@@ -4560,10 +4475,13 @@ async function prepareToQuit(): Promise<void> {
     preparingQuit = false;
     return;
   }
+  desktopQuitAccepted = true;
+  hostLifecycle.acceptQuit();
+  desktopBackendSupervisor.release();
   // Armed only once the quit is accepted, so the time a person spends on the
   // confirmation does not count against it.
   armQuitDeadline({
-    forceExit: forceExitAfterStalledQuit({ server, managedTools: managedToolService }),
+    forceExit: forceExitAfterStalledQuit(),
   });
   await shutDownForQuit({
     flushWindowState,
@@ -4575,9 +4493,12 @@ async function prepareToQuit(): Promise<void> {
 
 async function handleFatalStartup(error: unknown): Promise<void> {
   preparingQuit = true;
+  desktopQuitAccepted = true;
+  hostLifecycle.acceptQuit();
+  desktopBackendSupervisor.release();
   dialog.showErrorBox("Octant could not start", formatDesktopStartupFailure(error));
   armQuitDeadline({
-    forceExit: forceExitAfterStalledQuit({ server, managedTools: managedToolService }),
+    forceExit: forceExitAfterStalledQuit(),
   });
   await shutDownForQuit({
     flushWindowState: async () => undefined,

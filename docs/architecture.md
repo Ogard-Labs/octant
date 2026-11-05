@@ -289,6 +289,28 @@ workbench input.
 It starts the prototype host, a second process of its own executable with no
 network route and no resolver, where running Canvas prototypes are drawn
 (see [Canvas documents, designs, and prototypes](#canvas-documents-designs-and-prototypes)).
+One desktop-owned launch keeps a fixed inventory of the server child, native
+brokers, constructed services, and managed-tool service as each is acquired.
+Until the Computer or Simulator broker returns, the launch owns cleanup of
+its constructed Computer service or Simulator helper wrapper.
+Startup rollback, losing a competing-host race, and normal stop share one
+close completion. They attempt every acquired stage in dependency order even
+when another stage fails, report only fixed cleanup stage names, and retain
+failed ownership for the existing quit deadline. Credential setup and
+synchronous server-spawn failures remain sanitized; readiness failures keep
+their classification for restart policy. An independently managed host is
+never added to this inventory or stopped with it.
+
+Accepted quit is terminal for host start and restart admission, including
+queued work. A start already in progress must close a late desktop-owned
+result; a late borrowed attachment is left alone. Confirmation remains
+cancellable before that admission closes. The quit deadline reads the current
+launch, including resources acquired after acceptance, and retains the one
+successfully closed quit-owned launch until app exit: closing updater and
+broker APIs does not itself prove every tracked managed-tool process exited.
+This preserves the existing emergency termination path and its deadline;
+it does not add a process-exit guarantee for managed tools.
+
 Every app window confines top-level navigation, redirects, and opened windows to
 the exact packaged renderer asset or configured Vite development origin. Native
 IPC also requires that trusted renderer URL, and the packaged renderer ships a
