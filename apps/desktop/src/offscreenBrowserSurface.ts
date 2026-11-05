@@ -41,7 +41,8 @@ export function createOffscreenBrowserSurface(
   const heldButtons = new Map<"left" | "middle" | "right", { x: number; y: number }>();
   const release = () => {
     if (window.isDestroyed() || window.webContents.isDestroyed()) return;
-    for (const keyCode of heldKeys) window.webContents.sendInputEvent({ type: "keyUp", keyCode });
+    for (const keyCode of heldKeys)
+      window.webContents.sendInputEvent({ type: "keyUp", keyCode: electronKeyCode(keyCode) });
     for (const button of heldButtons.keys())
       window.webContents.sendInputEvent({ type: "mouseUp", button, x: -1, y: -1, clickCount: 1 });
     heldKeys.clear();
@@ -141,7 +142,11 @@ export function createOffscreenBrowserSurface(
       if (input.type === "keyUp") heldKeys.delete(input.keyCode);
       if (input.type === "mouseDown") heldButtons.set(input.button, { x: input.x, y: input.y });
       if (input.type === "mouseUp") heldButtons.delete(input.button);
-      const { modifiers, ...event } = input;
+      const native =
+        input.type === "keyDown" || input.type === "keyUp"
+          ? { ...input, keyCode: electronKeyCode(input.keyCode) }
+          : input;
+      const { modifiers, ...event } = native;
       window.webContents.sendInputEvent({
         ...event,
         ...(modifiers === undefined ? {} : { modifiers: [...modifiers] }),
@@ -164,4 +169,21 @@ export function createOffscreenBrowserSurface(
     setVisible: human.visible,
     webContents: window.webContents,
   };
+}
+
+// DOM ArrowDown reached hidden Chromium as an empty key in the native fixture;
+// Electron's documented accelerator names preserve the actual directional key.
+function electronKeyCode(keyCode: string): string {
+  switch (keyCode) {
+    case "ArrowLeft":
+      return "Left";
+    case "ArrowRight":
+      return "Right";
+    case "ArrowUp":
+      return "Up";
+    case "ArrowDown":
+      return "Down";
+    default:
+      return keyCode;
+  }
 }
