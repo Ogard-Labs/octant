@@ -1,4 +1,7 @@
-import { GITHUB_REPOSITORY_PERMISSION_NOTICE } from "@octant/domain";
+import {
+  GITHUB_REPOSITORY_PERMISSION_NOTICE,
+  googleWorkspaceServiceForResource,
+} from "@octant/domain";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { McpClientSetupInput, McpServerSignInView } from "@octant/contracts/extension-rpc";
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
@@ -94,20 +97,23 @@ export function McpClientSetupControl(props: Props) {
 function McpClientSetupDialog(
   props: Props & { readonly setup: SetupView; readonly onClose: () => void },
 ) {
+  const google = googleWorkspaceServiceForResource(props.setup.resource);
   const ids = useId();
   const clientIdInput = useRef<HTMLInputElement>(null);
   const secretInput = useRef<HTMLInputElement>(null);
   const secretStores = useSecretStoresClient();
   const [linkedStore, setLinkedStore] = useState(false);
   const [kind, setKind] = useState<McpClientSetupInput["kind"]>(
-    props.setup.registration?.kind ?? "registered",
+    google === undefined ? (props.setup.registration?.kind ?? "registered") : "registered",
   );
   const [clientId, setClientId] = useState(props.setup.registration?.clientId ?? "");
   const [authentication, setAuthentication] = useState<McpClientSetupInput["authentication"]>(
-    props.setup.registration?.clientAuthentication?.method ??
-      (props.setup.authenticationMethods.includes("none")
-        ? "none"
-        : (props.setup.authenticationMethods[0] ?? "none")),
+    google !== undefined
+      ? "none"
+      : (props.setup.registration?.clientAuthentication?.method ??
+          (props.setup.authenticationMethods.includes("none")
+            ? "none"
+            : (props.setup.authenticationMethods[0] ?? "none"))),
   );
   const [reference, setReference] = useState("");
   const [problem, setProblem] = useState<string>();
@@ -224,6 +230,27 @@ function McpClientSetupDialog(
           Use the app identity you registered for this server. Saving does not sign in to an
           account.
         </p>
+        {google === undefined ? null : (
+          <>
+            <p className="endpoint-flow__hint">
+              Developer Preview requires an enrolled Google Workspace account and Cloud project. A
+              client ID alone does not establish eligibility. Public distribution requires Google's
+              permission or general availability.
+            </p>
+            <p className="endpoint-flow__hint">{google.description}</p>
+            <p className="endpoint-flow__hint">
+              Create a Desktop app client with Use this client for an AI-powered agent selected.
+              Enable {google.api} and {google.mcpApi}. No client secret is needed.
+            </p>
+            <a
+              href="https://developers.google.com/workspace/guides/create-credentials#desktop-app"
+              rel="noreferrer"
+              target="_blank"
+            >
+              Google Desktop client setup
+            </a>
+          </>
+        )}
         {props.setup.mcpPermissionProfile === "github-repositories-read-write" ? (
           <p className="endpoint-flow__hint">{GITHUB_REPOSITORY_PERMISSION_NOTICE}</p>
         ) : null}
@@ -244,8 +271,9 @@ function McpClientSetupDialog(
             value={props.setup.callback}
           />
           <span className="endpoint-flow__hint" id={`${ids}-callback-hint`}>
-            Register this exact address with your app. Octant keeps it across restarts; the port
-            must be free when you sign in.
+            {google === undefined
+              ? "Register this exact address with your app. Octant keeps it across restarts; the port must be free when you sign in."
+              : "Your Desktop client receives the browser's reply on this computer. Octant keeps this loopback address across restarts; its port must be free when you sign in."}
           </span>
           <OctantButton
             onClick={() => void copyCallback()}
@@ -257,33 +285,39 @@ function McpClientSetupDialog(
           </OctantButton>
           <span role="status">{copyMessage}</span>
         </div>
-        <OctantToggleGroup
-          aria-label="Client identity"
-          onValueChange={(values) => {
-            const value = values[0];
-            if (value === "registered" || value === "metadata-document") {
-              setKind(value);
-              if (value === "metadata-document") setAuthentication("none");
-            }
-          }}
-          value={[kind]}
-        >
-          <OctantToggleGroupItem value="registered">Registered client</OctantToggleGroupItem>
-          <OctantToggleGroupItem
-            disabled={!props.setup.metadataClientSupported}
-            value="metadata-document"
+        {google !== undefined ? null : (
+          <OctantToggleGroup
+            aria-label="Client identity"
+            onValueChange={(values) => {
+              const value = values[0];
+              if (value === "registered" || value === "metadata-document") {
+                setKind(value);
+                if (value === "metadata-document") setAuthentication("none");
+              }
+            }}
+            value={[kind]}
           >
-            Client metadata URL
-          </OctantToggleGroupItem>
-        </OctantToggleGroup>
-        {props.setup.metadataClientSupported ? null : (
+            <OctantToggleGroupItem value="registered">Registered client</OctantToggleGroupItem>
+            <OctantToggleGroupItem
+              disabled={!props.setup.metadataClientSupported}
+              value="metadata-document"
+            >
+              Client metadata URL
+            </OctantToggleGroupItem>
+          </OctantToggleGroup>
+        )}
+        {google !== undefined || props.setup.metadataClientSupported ? null : (
           <p className="endpoint-flow__hint">
             This authorization server does not advertise client metadata URLs.
           </p>
         )}
         <div className="endpoint-flow__field">
           <label htmlFor={`${ids}-client`}>
-            {kind === "metadata-document" ? "Client metadata URL" : "Client ID"}
+            {kind === "metadata-document"
+              ? "Client metadata URL"
+              : google === undefined
+                ? "Client ID"
+                : "Desktop client ID"}
           </label>
           <OctantInput
             aria-describedby={`${ids}-client-hint`}
@@ -301,7 +335,7 @@ function McpClientSetupDialog(
               : "The public app identifier from your registration, not its client secret."}
           </span>
         </div>
-        {kind === "metadata-document" ? null : (
+        {google !== undefined || kind === "metadata-document" ? null : (
           <OctantToggleGroup
             aria-label="Client authentication"
             onValueChange={(values) => {

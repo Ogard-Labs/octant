@@ -243,6 +243,8 @@ export { onePasswordCommandCredentials } from "./onePasswordCommandCredentials";
 
 export { resolveOnePasswordExecutable } from "./linkedSecretStores";
 
+export { GOOGLE_WORKSPACE_MCP_OAUTH, googleWorkspaceMcpScopes } from "./googleWorkspaceMcpOAuth";
+
 export {
   GITHUB_MCP_OAUTH_APP,
   GITHUB_MCP_REPOSITORY_PROFILE,

@@ -31,6 +31,14 @@ import {
   githubMcpReportedAccount,
 } from "./githubMcpOAuth";
 import type { McpOAuthAccount } from "./mcpOAuthAccount";
+import {
+  GOOGLE_WORKSPACE_MCP_OAUTH,
+  googleWorkspaceMcpScopes,
+  googleWorkspaceMcpScopeMatches,
+  isGoogleWorkspaceMcpDescriptorBinding,
+  isGoogleWorkspaceMcpGrantBinding,
+  googleWorkspaceMcpAuthorizationRequest,
+} from "./googleWorkspaceMcpOAuth";
 
 const GRANT_KIND = "host-oauth-grant";
 const CALLBACK_PATH = "/oauth/callback";
@@ -2297,6 +2305,8 @@ export function createHostOAuthRuntime(options: {
           challenge,
           ...(descriptor.resource === undefined ? {} : { resource: descriptor.resource }),
         });
+        if (googleWorkspaceMcpScopes(descriptor.resource) !== undefined)
+          authorizationUrl = googleWorkspaceMcpAuthorizationRequest(authorizationUrl);
       }
       const awaiting: HostOAuthBeginResult = {
         kind: "awaiting-consent",
@@ -2421,6 +2431,19 @@ export function createHostOAuthRuntime(options: {
     }
     // Closed profiles cannot switch issuer; GitHub advertises and must return it.
     if (
+      googleWorkspaceMcpScopes(session.descriptor.resource) !== undefined &&
+      (params.getAll("iss").length > 1 ||
+        (params.has("iss") && params.get("iss") !== GOOGLE_WORKSPACE_MCP_OAUTH.issuer))
+    ) {
+      publish(
+        session.attemptId,
+        refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
+      );
+      replyCallback(response, 400);
+      finishListener(session.attempt);
+      return;
+    }
+    if (
       (session.descriptor.dialect === SLACK_MCP_DIALECT ||
         session.descriptor.dialect === GITHUB_MCP_DIALECT) &&
       (params.getAll("iss").length > 1 ||
@@ -2437,7 +2460,12 @@ export function createHostOAuthRuntime(options: {
     }
     const error = params.get("error");
     if (error !== null) {
-      const reason = error === "access_denied" ? "denied" : "exchange-refused";
+      const reason =
+        error === "access_denied" ||
+        (googleWorkspaceMcpScopes(session.descriptor.resource) !== undefined &&
+          error === "admin_policy_enforced")
+          ? "denied"
+          : "exchange-refused";
       publish(
         session.attemptId,
         refused(session.attemptId, session.descriptor.descriptorId, reason),
@@ -3387,6 +3415,9 @@ async function requestTokens(input: {
     body: Readonly<Record<string, unknown>>,
   ) => TokenRequestResult;
 }): Promise<TokenRequestResult> {
+  const google = googleWorkspaceMcpScopes(input.resource) !== undefined;
+  if (google && !isGoogleWorkspaceMcpGrantBinding(input))
+    return { kind: "refused", reason: "exchange-refused" };
   if (input.tokenDialect === SLACK_MCP_DIALECT && !isSlackMcpUserGrantBinding(input))
     return { kind: "refused", reason: "exchange-refused" };
   if (input.tokenDialect === GITHUB_MCP_DIALECT && !isGithubMcpGrantBinding(input))
@@ -3464,6 +3495,18 @@ async function requestTokens(input: {
       : { kind: "transient" };
   }
   const accessToken = stringField(body, "access_token");
+  // RFC 6749 §6 lets refresh omit an unchanged scope. Initial consent must
+  // report it; a present malformed or widened scope never inherits permission.
+  const googleScope =
+    google && !input.codeExchange && body.scope === undefined
+      ? (googleWorkspaceMcpScopes(input.resource)?.join(" ") ?? "")
+      : (stringField(body, "scope") ?? "");
+  if (
+    google &&
+    (!googleWorkspaceMcpScopeMatches(input.resource, googleScope) ||
+      stringField(body, "token_type")?.toLowerCase() !== "bearer")
+  )
+    return { kind: "refused", reason: "exchange-refused" };
   const refreshToken = stringField(body, "refresh_token") ?? input.previousRefresh;
   const reportedTokenType = stringField(body, "token_type");
   if (
@@ -3547,15 +3590,17 @@ async function requestTokens(input: {
       ...(refreshToken === undefined ? {} : { refreshToken }),
       tokenType: tokenType.slice(0, 32),
       expiresAt: input.now() + expiresIn * 1_000,
-      scope: (stringField(body, "scope") ?? "").slice(0, 512),
+      scope: (google ? googleScope : (stringField(body, "scope") ?? "")).slice(0, 512),
       clientId: input.clientId,
       tokenEndpoint: input.tokenEndpoint,
       generation: input.generation + 1,
       ...(idToken === undefined ? {} : { idToken }),
       ...(input.resource === undefined ? {} : { resource: input.resource }),
-      ...(input.tokenDialect === SLACK_MCP_DIALECT || input.tokenDialect === GITHUB_MCP_DIALECT
-        ? { dialect: input.tokenDialect }
-        : {}),
+      ...(google
+        ? { dialect: MCP_DIALECT }
+        : input.tokenDialect === SLACK_MCP_DIALECT || input.tokenDialect === GITHUB_MCP_DIALECT
+          ? { dialect: input.tokenDialect }
+          : {}),
       ...(input.mcpTransportUrl === undefined ? {} : { mcpTransportUrl: input.mcpTransportUrl }),
       ...(input.mcpIssuer === undefined ? {} : { mcpIssuer: input.mcpIssuer }),
       ...(input.mcpPermissionProfile === undefined
@@ -3720,6 +3765,16 @@ function decodeGrant(raw: string): StoredGrant {
     clientAuthentication,
   };
   if (
+    typeof resource === "string" &&
+    googleWorkspaceMcpScopes(resource) !== undefined &&
+    (dialect !== MCP_DIALECT ||
+      !isGoogleWorkspaceMcpGrantBinding(mcpBinding) ||
+      typeof resource !== "string" ||
+      typeof scope !== "string" ||
+      !googleWorkspaceMcpScopeMatches(resource, scope))
+  )
+    throw new CredentialStoreFailure("invalid");
+  if (
     dialect === SLACK_MCP_DIALECT
       ? !isSlackMcpUserGrantBinding(mcpBinding)
       : dialect === GITHUB_MCP_DIALECT
@@ -3825,6 +3880,11 @@ function decodeGrant(raw: string): StoredGrant {
 function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescriptor | undefined {
   if (!safeId(descriptor.descriptorId) || !safeId(descriptor.termsId)) return undefined;
   const dialect = descriptor.dialect;
+  if (
+    googleWorkspaceMcpScopes(descriptor.resource) !== undefined &&
+    (dialect !== MCP_DIALECT || !isGoogleWorkspaceMcpDescriptorBinding(descriptor))
+  )
+    return undefined;
   if (
     descriptor.mcpPermissionProfile !== undefined &&
     (dialect !== GITHUB_MCP_DIALECT ||

@@ -9028,6 +9028,49 @@ the sign-in and store the grant, which is a host action. The release-boundary ho
 marketplace was lifted by the maintainer on 2026-10-20; the start gates it set
 are met by this section and the rules above.
 
+**Google Workspace preview connectors.** Gmail, Drive and Calendar are three
+separate read-only MCP connections at Google's documented `/mcp/v1` endpoints.
+Each requires its own account consent and selects only that service's read
+scopes; advertised resource scopes never select a scope union. Gmail cannot
+draft, send, label or delete mail; Drive cannot create, modify, share or delete
+files; Calendar cannot change events or send replies. The Library and Client
+setup explain these limits before consent. A selected connection uses the
+ordinary extension activation, provider capability and per-tool task authority.
+Neither setup nor consent enables another service or provider feature.
+
+Google's documented native contract is an agentic **Desktop app** public
+client, PKCE S256, system-browser account selection and a local loopback
+callback. The existing registered-client setup retains that callback and
+stores the client identity separately from account grants. No client secret,
+hosted Octant service or second token store is introduced. The closed
+Google wire adapter within `mcp-authorization` verifies the exact Google resource,
+issuer and authorization/token endpoints, requests `access_type=offline`, and
+refuses broader response scopes or missing scopes at initial consent. A refresh
+may omit an unchanged scope under RFC 6749; a present invalid refresh scope is
+refused. A new interactive sign-in obtains
+the missing refresh grant with account selection and consent; ordinary
+reconnect and restart reuse the broker grant and refresh without opening
+consent. Missing, expired or revoked refresh grants require sign-in again and
+never erase a task or draft. The wire adapter is available through the same
+discovery and broker contract for user-added and plugin MCP servers naming
+those endpoints, not through a catalog-only call into host internals.
+
+Requirements checked on 2026-11-03: Google's Developer Preview requires an
+enrolled Workspace account and registered Cloud project, product and MCP APIs,
+the agentic-client setting, consent-screen audience eligibility and any required
+administrator approval. A client ID does not prove enrollment. Google's terms
+prohibit public inclusion and outside-domain/company access before GA absent
+specific permission. This implementation is an unpublished reviewable slice;
+public distribution remains held until Google permits it or announces GA.
+Sensitive/restricted scope verification and possible restricted-data security
+review are separate requirements, not satisfied by endpoint discovery or a
+token exchange. Google's request/response screening requirement must be
+reconciled with Octant's external-content and approval protections before that
+distribution gate is lifted. See the [Workspace setup guide](https://developers.google.com/workspace/guides/configure-mcp-servers),
+[native client rules](https://developers.google.com/identity/protocols/oauth2/native-app),
+[preview terms](https://developers.google.com/workspace/preview), and the
+[user setup and workflow guide](../apps/docs/advanced/google-workspace.md).
+
 **Computer use plugin.** The bundled Computer component supplies
 `octant_computer` through the provider's existing app-managed tool transport on
 every eligible Chat, Work, and Code turn, under the offer and approval rules in

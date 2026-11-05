@@ -2,6 +2,20 @@ import { describe, expect, it } from "vitest";
 import { connectorCatalog, featuredConnectors, searchConnectorCatalog } from "./connectorCatalog";
 
 describe("the connectors catalog", () => {
+  it("requires separate public-client setup and read-only consent for each Google preview service", () => {
+    const google = connectorCatalog().filter((entry) => entry.id.startsWith("google-"));
+    expect(google).toHaveLength(3);
+    expect(google.every((entry) => entry.displayName.endsWith(" preview"))).toBe(true);
+    expect(new Set(google.map((entry) => entry.url)).size).toBe(3);
+    for (const entry of google) {
+      expect(entry.auth).toMatchObject({
+        kind: "sign-in",
+        clientSetup: "registered",
+        permissionNotice: expect.stringContaining("Cannot"),
+      });
+    }
+    expect(featuredConnectors().some((entry) => entry.id.startsWith("google-"))).toBe(false);
+  });
   it("offers repository read/write as a separate explicit GitHub preset without changing PAT or profile-read identities", () => {
     const repository = connectorCatalog().find((entry) => entry.id === "github-repositories");
     expect(repository).toMatchObject({
