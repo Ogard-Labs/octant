@@ -188,6 +188,60 @@ describe("browser automation routes", () => {
     });
   });
 
+  it("keeps login-permission commands local, authenticated and strictly decoded", async () => {
+    const execute = vi.fn(async () => ({ kind: "browser-credential-grants" as const, grants: [] }));
+    const login = createBrowserAutomationRouteHandler({
+      service: {
+        create: async () => snapshot,
+        act: async () => snapshot,
+        cancel: async () => snapshot,
+        stop: async () => snapshot,
+        inspect: () => snapshot,
+        inspectThread: () => snapshot,
+        releaseThread: async () => snapshot,
+      },
+      credentialUse: { execute },
+      authority: { canAccessWindow: () => true, resolve: () => authority },
+      windowAuthorityStore: store,
+      maxRequestBodySize: 4096,
+    });
+    const payload = { kind: "list-browser-credential-grants", contextId, threadId, mode: "work" };
+    const request = (host: string, authenticated = true, data: object = payload) =>
+      new Request(`http://${host}/api/browser/credential-use`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(authenticated ? { "x-octant-window-capability": capability } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+    expect((await login(request("127.0.0.1", false)))?.status).toBe(401);
+    expect((await login(request("outside.example")))?.status).toBe(403);
+    const paired = request("127.0.0.1");
+    bindPrincipalRouteContext(paired, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: "90000000-0000-4000-8000-000000000001" as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+      }),
+      scopeId: windowId,
+    });
+    expect((await login(paired))?.status).toBe(403);
+    expect(
+      (await login(request("127.0.0.1", true, { ...payload, topOrigin: "https://forged.example" })))
+        ?.status,
+    ).toBe(400);
+    expect(execute).not.toHaveBeenCalled();
+    const response = await login(request("127.0.0.1"));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ kind: "browser-credential-grants", grants: [] });
+    expect(execute).toHaveBeenCalledWith(windowId, payload, expect.any(AbortSignal));
+  });
+
   it("rejects an unauthenticated browser scope request", async () => {
     const response = await handler(
       new Request("http://127.0.0.1/api/browser/scope", {

@@ -156,6 +156,7 @@
     "./desktop-lease": "./src/desktopLease.ts",
     "./simulator-device": "./src/simulatorDevice.ts",
     "./managed-tooling": "./src/managedTooling.ts",
+    "./browser-credential-use": "./src/browserCredentialUse.ts",
     "./credential-request": "./src/credentialRequest.ts"
   },
   "scripts": {

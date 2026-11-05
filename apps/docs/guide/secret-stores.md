@@ -135,6 +135,34 @@ host computer. A paired phone or browser cannot link a store or change an item.
 A host with no credential store, such as a Linux machine without a keyring,
 shows that **Secret stores** is unavailable.
 
+## Record permission for a Browser login item
+
+In a task's native Browser, choose **Login permission**. Take over the page or
+wait for the agent's sign-in handoff before reviewing a new item.
+
+1. Enter the exact 26-character account, vault and item IDs from 1Password.
+   Names are not accepted, so a similarly named account or item cannot be
+   selected silently. Never paste a password or one-time code.
+2. Choose **Review item**. Octant checks only that selected item's metadata
+   through its credential broker. The review shows the item, account, vault,
+   exact HTTPS site and port, top frame and Browser profile.
+3. Choose this Project's eligible threads or the stricter task/page scope,
+   then **Allow selected item**. Private pages permit task/page scope only.
+4. Use **Revoke permission** to remove a recorded permission.
+
+This step records permission only. Automatic filling is not available yet,
+and no website sign-in result is claimed. Iframes are not included. The item
+must have a verified saved HTTPS website matching this exact origin and port;
+missing, malformed or more than eight saved websites refuse the review.
+
+Permission ends when the host restarts or after eight hours. Cookies and
+1Password unlock do not renew it. Item/link changes are detected on the next
+permission read; clearing the profile also invalidates its permissions.
+A saved snapshot must be checked again before use. No password, OTP or raw
+item JSON is returned to the agent, renderer or journal. The CLI's selected
+item JSON may contain concealed fields inside the adapter; Octant projects
+only the named metadata fields and discards raw output.
+
 ## One-time token requests in Code
 
 An agent can use `request_credential` to open a private card in its Code

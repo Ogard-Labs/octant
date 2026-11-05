@@ -18,6 +18,12 @@
  */
 
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import {
+  readOnePasswordBrowserMetadata,
+  type BrowserCredentialItemPin,
+  type BrowserItemMetadata,
+} from "./onePasswordBrowserMetadata";
 import { constants } from "node:fs";
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -59,6 +65,7 @@ export interface LinkedSecretStoreAdapter {
   /** Whether the tool is installed and the store is open to it. */
   readonly probe: () => Promise<LinkedSecretToolState>;
   readonly read: (reference: string) => Promise<LinkedSecretRead>;
+  readonly browserMetadata?: (item: BrowserCredentialItemPin) => Promise<BrowserItemMetadata>;
 }
 
 export interface LinkedSecretStoreStatus {
@@ -91,6 +98,13 @@ export interface LinkedSecretStores {
   readonly setAwsCliPointer: (pointer: AwsCliPointer | undefined) => Promise<void>;
   readonly googleCliPointer?: () => Promise<GoogleCliPointerState>;
   readonly setGoogleCliPointer?: (pointer: GoogleCliPointer | undefined) => Promise<void>;
+  readonly browserMetadata?: (item: BrowserCredentialItemPin) => Promise<
+    | (Extract<BrowserItemMetadata, { readonly status: "described" }> & {
+        readonly storeRevision: string;
+      })
+    | Exclude<BrowserItemMetadata, { readonly status: "described" }>
+    | { readonly status: "not-linked" | "changed" }
+  >;
 }
 
 /**
@@ -307,6 +321,16 @@ export function makeOnePasswordAdapter(
   return {
     kind: "onepassword",
     label: "1Password",
+    browserMetadata: async (item) => {
+      const file = await executable();
+      if (file === undefined) return { status: "unavailable" };
+      return readOnePasswordBrowserMetadata(item, {
+        executable: file,
+        run,
+        env: environment(),
+        timeoutMs,
+      });
+    },
     isValidReference: (reference) =>
       isPlainReference(reference) && ONE_PASSWORD_REFERENCE.test(reference),
     probe: async () => {
@@ -362,6 +386,8 @@ export function linkedSecretStoresStatePath(dataDirectory: string): string {
 export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): LinkedSecretStores {
   const adapters = options.adapters ?? [makeOnePasswordAdapter()];
   const now = options.now ?? (() => new Date().toISOString());
+  const browserSession = randomUUID();
+  let browserRevision = 0;
   const adapterFor = (kind: LinkedSecretStoreKind): LinkedSecretStoreAdapter | undefined =>
     adapters.find((adapter) => adapter.kind === kind);
 
@@ -428,6 +454,7 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       // locked or missing tool is reported and nothing is linked.
       const tool = await adapter.probe();
       if (tool !== "ready") return { status: tool };
+      browserRevision += 1;
       await update((state) => ({
         ...state,
         stores: { ...state.stores, [kind]: { linkedAt: now() } },
@@ -435,6 +462,7 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       return { status: "linked" };
     },
     unlink: async (kind) => {
+      browserRevision += 1;
       // A pointer stays, and fails closed until the store is linked again.
       await update((state) => {
         const { [kind]: _removed, ...rest } = state.stores;
@@ -442,6 +470,20 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       });
     },
     isLinked: async (kind) => (await load()).stores[kind] !== undefined,
+    browserMetadata: async (item) => {
+      const adapter = adapterFor(item.store);
+      if (adapter?.browserMetadata === undefined) return { status: "unavailable" };
+      const before = (await load()).stores[item.store];
+      if (before === undefined) return { status: "not-linked" };
+      const revision = browserRevision;
+      const result = await adapter.browserMetadata(item);
+      const after = (await load()).stores[item.store];
+      if (after === undefined || after.linkedAt !== before.linkedAt || revision !== browserRevision)
+        return { status: "changed" };
+      return result.status === "described"
+        ? { ...result, storeRevision: `${browserSession}:${revision}:${before.linkedAt}` }
+        : result;
+    },
     isValidReference: (kind, reference) => adapterFor(kind)?.isValidReference(reference) ?? false,
     read: async (kind, reference) => {
       const adapter = adapterFor(kind);

@@ -1,3 +1,5 @@
+import { decodeBrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
+import { decodeBrowserCredentialResult } from "@octant/contracts/browser-credential-use";
 import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
@@ -1610,6 +1612,44 @@ describe("BrowserWorkspace", () => {
             timeout: 2000,
           });
           expect(browser.inspect).not.toHaveBeenCalled();
+        }
+      },
+    );
+
+    it.each(["native-live", "headless"] as const)(
+      "exposes login permission only on the native Browser consumer, not %s fallback",
+      async (presentation) => {
+        const browser = client();
+        browser.manageCredentialUse = vi.fn(async () =>
+          decodeBrowserCredentialResult({ kind: "browser-credential-grants", grants: [] }),
+        );
+        vi.mocked(browser.inspectThread).mockResolvedValue(
+          decodeBrowserAutomationSnapshot({
+            status: "running",
+            threadId,
+            context: { ...context, presentation },
+            evidence: [],
+            waitingForPerson: "sign-in",
+          }),
+        );
+        render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
+        await screen.findByRole("button", { name: "Stop" });
+        if (presentation === "headless")
+          expect(screen.queryByRole("button", { name: "Login permission" })).toBeNull();
+        else {
+          fireEvent.click(await screen.findByRole("button", { name: "Login permission" }));
+          expect(
+            await screen.findByRole("dialog", { name: "Browser login permission" }),
+          ).toBeTruthy();
+          expect(browser.manageCredentialUse).toHaveBeenCalledWith(
+            expect.objectContaining({
+              kind: "list-browser-credential-grants",
+              contextId: context.contextId,
+              threadId,
+              mode: "work",
+            }),
+            expect.any(AbortSignal),
+          );
         }
       },
     );

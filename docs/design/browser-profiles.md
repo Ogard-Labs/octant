@@ -157,6 +157,16 @@ microphone, location, notifications, devices, and screen capture are refused; on
 addresses open; a loopback HTTPS certificate is accepted only by the context
 opened for it; the host's session ceiling and tab limit apply.
 
+Credential-use permission is separate from profile cookies, store unlock and
+website sign-in. **Login permission** records a selected item for one exact
+HTTPS top-frame origin and profile. Project scope can be reused by eligible
+threads of that Project; Personal still has Project scope, and Private only
+permits the exact task/context. The snapshot expires on host restart or after
+eight hours. Cookies never renew it. Clearing a profile invalidates its pending
+reviews and saved permissions. Matching reads revalidate item/link facts and
+remove changed permission; no atomic/background invalidation or credential
+fill is implied. See [the credential boundary](../architecture.md#linked-secret-stores).
+
 ## Cookie import
 
 A person can bring the sign-ins they already have in another browser on this Mac

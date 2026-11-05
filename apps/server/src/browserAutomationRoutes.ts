@@ -68,7 +68,12 @@ import {
 } from "@octant/contracts/browser-profiles";
 import { storedBrowserProfile } from "@octant/domain";
 import { authenticateRoutePrincipal, readPrincipalRouteContext } from "./principalRouteContext";
-import { isAllowedRendererOrigin } from "./shellRoutes";
+import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
+import {
+  decodeBrowserCredentialCommand,
+  decodeBrowserCredentialResult,
+} from "@octant/contracts/browser-credential-use";
+import type { BrowserCredentialUseService } from "./browser/browserCredentialUseService";
 import type { WindowId } from "@octant/contracts/shell";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -78,6 +83,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 const BROWSER_MODES = ["chat", "work", "code"] as const;
 
 export interface BrowserAutomationRouteDependencies {
+  readonly credentialUse?: Pick<BrowserCredentialUseService, "execute">;
   readonly service: Pick<
     BrowserAutomationService,
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
@@ -333,6 +339,33 @@ export function createBrowserAutomationRouteHandler(
           );
         return success(
           decodeBrowserTaskProfileSelection({ selection: state(), browser: result.browser }),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/credential-use") {
+        if (callerKind !== "local-window" || !isLoopbackHostname(url.hostname))
+          return failure(
+            {
+              category: "unauthorized",
+              message: "Login permission requires a local window on this computer.",
+            },
+            403,
+            origin,
+          );
+        if (dependencies.credentialUse === undefined)
+          return failure(
+            { category: "unavailable", message: "Login permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserCredentialResult(
+            await dependencies.credentialUse.execute(
+              windowId,
+              decodeBrowserCredentialCommand(decoded.value),
+              request.signal,
+            ),
+          ),
           origin,
         );
       }

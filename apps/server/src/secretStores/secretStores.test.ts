@@ -1,3 +1,7 @@
+import {
+  decodeBrowserCredentialGrant,
+  decodeBrowserCredentialMetadata,
+} from "@octant/contracts/browser-credential-use";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -232,6 +236,7 @@ async function host(
     journalNames,
     reprobes,
     connectorServers,
+    records: real,
   };
 }
 
@@ -262,6 +267,100 @@ const fakeSts = Object.assign(
 );
 
 describe("the AWS command line through a linked store", () => {
+  it("journals Browser permission references and refuses secret values during decoding", async () => {
+    const h = await host();
+    const grant = decodeBrowserCredentialGrant({
+      kind: "browser-credential-grant",
+      grantId: "00000000-0000-4000-8000-000000000010",
+      hostSessionId: "00000000-0000-4000-8000-000000000011",
+      metadata: {
+        item: {
+          store: "onepassword",
+          accountId: "a".repeat(26),
+          vaultId: "v".repeat(26),
+          itemId: "i".repeat(26),
+        },
+        title: "Fixture login",
+        version: 1,
+        websiteOrigins: ["https://login.example"],
+        storeRevision: "fixture-link",
+      },
+      target: {
+        contextId: "00000000-0000-4000-8000-000000000012",
+        threadId: "00000000-0000-4000-8000-000000000013",
+        mode: "code",
+        projectId: "00000000-0000-4000-8000-000000000014",
+        profile: { kind: "private" },
+        topOrigin: "https://login.example",
+        frame: { kind: "top", origin: "https://login.example" },
+      },
+      scope: {
+        kind: "task",
+        projectId: "00000000-0000-4000-8000-000000000014",
+        threadId: "00000000-0000-4000-8000-000000000013",
+        contextId: "00000000-0000-4000-8000-000000000012",
+      },
+      createdAt: "2026-11-03T10:00:00.000Z",
+      expiresAt: "2026-11-03T18:00:00.000Z",
+    });
+    h.records.record({ name: "browser-credential.granted", grant, windowId: WINDOW });
+    h.records.record({
+      name: "browser-credential.revoked",
+      grantId: grant.grantId,
+      reason: "changed",
+    });
+    expect(h.journalNames()).toEqual(["browser-credential.granted", "browser-credential.revoked"]);
+    expect(h.journalText()).toContain(grant.metadata.item.accountId);
+
+    const registry = createPhase1RuntimeRegistries().events;
+    expect(
+      registry.decodePersisted("secret-store.recorded@1", 1, {
+        name: "browser-credential.granted",
+        grant,
+        windowId: WINDOW,
+      }),
+    ).toMatchObject({
+      name: "browser-credential.granted",
+      grant: { kind: "browser-credential-grant" },
+    });
+    expect(() =>
+      registry.decodePersisted("secret-store.recorded@1", 1, {
+        name: "browser-credential.granted",
+        grant: { ...grant, password: "fixture-secret" },
+        windowId: WINDOW,
+      }),
+    ).toThrow();
+  });
+
+  it("bounds selected-item broker metadata and refuses mismatched or secret-bearing answers", async () => {
+    const item = {
+      store: "onepassword" as const,
+      accountId: "a".repeat(26),
+      vaultId: "v".repeat(26),
+      itemId: "i".repeat(26),
+    };
+    const metadata = decodeBrowserCredentialMetadata({
+      item,
+      title: "Fixture",
+      version: 1,
+      websiteOrigins: ["https://login.example"],
+      storeRevision: "link",
+    });
+    const answer = { status: "described", ...metadata };
+    for (const response of [
+      Response.json({ ...answer, item: { ...item, accountId: "b".repeat(26) } }),
+      Response.json({ ...answer, password: "fixture" }),
+      Response.json({ ...answer, title: "x".repeat(33 * 1024) }),
+    ]) {
+      const client = makeSecretStoreBrokerClient({
+        url: "http://127.0.0.1:12345",
+        token: "fixture",
+        fetch: async () => response,
+      });
+      expect((await client.browserMetadata?.(metadata.item))?.status).not.toBe("described");
+    }
+  });
+
   it("points at two items, journals both halves as one change, and gives a command only a session", async () => {
     const h = await host();
     await h.service.linkStore(WINDOW, "onepassword");

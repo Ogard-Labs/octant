@@ -6,7 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 import { makeFakeOnePassword, type FakeOnePassword } from "./fakeOnePassword.test-support";
-import { makeLinkedSecretStores, makeOnePasswordAdapter } from "./linkedSecretStores";
+import {
+  type LinkedSecretStoreAdapter,
+  makeLinkedSecretStores,
+  makeOnePasswordAdapter,
+} from "./linkedSecretStores";
 
 const REFERENCE = "op://Private/Provider key/credential";
 const VALUE = "fixture-linked-value-91be";
@@ -43,7 +47,7 @@ afterEach(async () => {
   await Promise.all(brokers.splice(0).map((broker) => broker.close()));
 });
 
-async function harness(): Promise<Harness> {
+async function harness(adapter?: LinkedSecretStoreAdapter): Promise<Harness> {
   const op = makeFakeOnePassword();
   op.addItem(REFERENCE, VALUE);
   const provider = memoryStore();
@@ -51,7 +55,9 @@ async function harness(): Promise<Harness> {
   const others = memoryStore();
   const linked = makeLinkedSecretStores({
     statePath: join(mkdtempSync(join(tmpdir(), "octant-broker-linked-")), "state.json"),
-    adapters: [makeOnePasswordAdapter({ executablePath: op.executablePath, env: op.env })],
+    adapters: [
+      adapter ?? makeOnePasswordAdapter({ executablePath: op.executablePath, env: op.env }),
+    ],
   });
   const broker = await startCredentialBroker(
     provider,
@@ -97,6 +103,47 @@ const point = (id = instanceId, namespace = "provider", reference = REFERENCE) =
 
 // Each case starts real child processes, which are slow on a busy machine.
 describe("credential broker linked secret stores", { timeout: 30_000 }, () => {
+  it("returns selected-item metadata through the authenticated broker without changing legacy pointers", async () => {
+    const item = {
+      store: "onepassword" as const,
+      accountId: "a".repeat(26),
+      vaultId: "v".repeat(26),
+      itemId: "i".repeat(26),
+    };
+    const metadata = vi.fn(async () => ({
+      status: "described" as const,
+      item,
+      title: "Fixture",
+      version: 1,
+      websiteOrigins: ["https://login.example"],
+    }));
+    const h = await harness({
+      kind: "onepassword",
+      label: "Fixture",
+      isValidReference: () => true,
+      probe: async () => "ready",
+      read: async () => ({ status: "unavailable" }),
+      browserMetadata: metadata,
+    });
+    await h.post("/v1/secret-stores/link", { store: "onepassword" });
+    const answer = await h.post("/v1/secret-stores/browser-metadata", item);
+    expect(answer.status).toBe(200);
+    expect(JSON.parse(answer.text)).toMatchObject({
+      status: "described",
+      item,
+      title: "Fixture",
+      version: 1,
+      storeRevision: expect.any(String),
+    });
+    expect(metadata).toHaveBeenCalledWith(item);
+    const invalid = await h.post("/v1/secret-stores/browser-metadata", {
+      ...item,
+      password: "fixture",
+    });
+    expect(invalid.status).toBe(400);
+    expect(metadata).toHaveBeenCalledOnce();
+  });
+
   it("follows a pointer at use and keeps only the pointer in the credential store", async () => {
     const h = await harness();
     expect((await h.post("/v1/secret-stores/link", { store: "onepassword" })).text).toBe(

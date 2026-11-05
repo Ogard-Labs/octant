@@ -35,6 +35,9 @@ import {
   createBrowserToolCallAuthorityService,
 } from "../browser/browserAutomationService";
 import { BrowserToolApprovalService } from "../browser/browserToolApprovalService";
+import { createBrowserCredentialUseService } from "../browser/browserCredentialUseService";
+import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
+import { secretStoresJournal } from "../secretStores/secretStoresJournal";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRuntime";
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
@@ -290,6 +293,28 @@ export function wireBrowser(deps: BrowserDependencies) {
       now: Date.now,
     });
     onWindowRevoked((windowId) => void browserAutomationService.revokeWindow(windowId));
+    const credentialMetadataBroker =
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeSecretStoreBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          });
+    const credentialUseJournal = secretStoresJournal({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      now: () => new Date().toISOString(),
+    });
+    const browserCredentialUseService = createBrowserCredentialUseService({
+      currentTarget: (windowId, command, held) =>
+        browserAutomationService.credentialUseTarget(windowId, command, held),
+      metadata: async (item) =>
+        (await credentialMetadataBroker?.browserMetadata?.(item)) ?? { status: "unavailable" },
+      record: (record) => credentialUseJournal.record(record),
+      now: Date.now,
+      uuid: randomUUID,
+    });
     const browserExtensionService = new BrowserExtensionService({
       dataDirectory: persistence.dataDirectory,
       journal: persistence.journal,
@@ -313,6 +338,8 @@ export function wireBrowser(deps: BrowserDependencies) {
       journal: persistence.journal,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       closePages: async (profile) => {
+        if (!browserCredentialUseService.invalidateProfile(profile))
+          throw new Error("Profile login permission revocations could not be recorded.");
         await Promise.all([
           liveProjectBrowsers.closeProfile(profile),
           browserAutomationService.closeProfile(profile),
@@ -405,6 +432,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     });
     return {
       browserAutomationService,
+      browserCredentialUseService,
       browserExtensionService,
       browserFlowService,
       browserFlows,
