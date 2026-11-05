@@ -100,6 +100,7 @@ const pages: Record<string, string> = {
     <button aria-label="Close">×</button>
     <button id="ghost"><span hidden>Save</span><span style="display:none">Save</span></button>
     <button id="muted"><span aria-hidden="true">Mute</span></button>
+    <div inert><h2>Inactive panel</h2><h5>Skipped level</h5><button id="asleep"></button><a href="/form"></a><input></div>
     <span id="draft-label" hidden>Save draft</span><button aria-labelledby="draft-label"></button>
     <p>See <a id="empty" href="/form"></a> and our <a href="/form">deals</a> today.</p>
     <input id="unlabelled"><label for="mail">Email</label><input id="mail"><input placeholder="Search">

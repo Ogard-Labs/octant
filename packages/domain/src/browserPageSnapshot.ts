@@ -575,8 +575,14 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       element.checkVisibility({ visibilityProperty: true });
     const ariaHidden = (element: Element): boolean =>
       ancestry(element).some((each) => each.getAttribute("aria-hidden") === "true");
+    const inert = (element: Element): boolean =>
+      ancestry(element).some((each) => each.hasAttribute("inert"));
     // Exposed to assistive technology: drawn, and not hidden from it on purpose.
-    const exposed = (element: Element): boolean => rendered(element) && !ariaHidden(element);
+    // An inert subtree is still drawn (`checkVisibility` holds), but the
+    // browser leaves it out of the accessibility tree, so an inactive panel's
+    // controls are not audited.
+    const exposed = (element: Element): boolean =>
+      rendered(element) && !ariaHidden(element) && !inert(element);
     const filled = (value: string | null | undefined): boolean =>
       value !== null && value !== undefined && value.replace(/\s+/g, "") !== "";
     const explicitRole = (element: Element): string =>
@@ -798,9 +804,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       if (!element.matches(focusableSelector) || element.matches(":disabled")) continue;
       const tabIndex = element.getAttribute("tabindex");
       if (tabIndex !== null && Number.parseInt(tabIndex, 10) < 0) continue;
-      if (!rendered(element) || ancestry(element).some((each) => each.hasAttribute("inert"))) {
-        continue;
-      }
+      if (!rendered(element) || inert(element)) continue;
       if (ariaHidden(element)) report("focusable-hidden", element);
     }
 

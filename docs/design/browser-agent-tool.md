@@ -874,8 +874,9 @@ frames are not recovered after host restart.
   is unnamed; a label or `aria-labelledby` target that is itself hidden still
   names, as browsers name from it. A finding is made only when every source
   is empty, so the rule errs toward silence.
-- Elements not drawn, and elements hidden from assistive technology, are not
-  checked for names. Inline links in a sentence and browser-drawn checkboxes
+- Elements not drawn, and elements hidden from assistive technology
+  (`aria-hidden`, or inside an `inert` subtree), are not checked for names,
+  heading order, or target size. Inline links in a sentence and browser-drawn checkboxes
   and radios are exempt from target size, as WCAG 2.5.8 exempts them.
 - Contrast is judged only where the colours are known: solid background
   colours composited up the element's ancestors onto the white page. Text over
