@@ -94,7 +94,7 @@ describe("MCP application identity setup", () => {
     await user.type(item, "op://Private/Slack/client secret");
     await user.click(screen.getByRole("button", { name: "Save client setup" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(mcpServerSignIn).toHaveBeenLastCalledWith({
+    expect(mcpServerSignIn).toHaveBeenCalledWith({
       kind: "save-client",
       ...target,
       setup: {
@@ -129,7 +129,7 @@ describe("MCP application identity setup", () => {
     await user.click(screen.getByRole("button", { name: "Save client setup" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(await screen.findByText("Client setup saved.")).toBeInTheDocument();
-    expect(mcpServerSignIn).toHaveBeenLastCalledWith({
+    expect(mcpServerSignIn).toHaveBeenCalledWith({
       kind: "save-client",
       ...target,
       setup: {
@@ -159,7 +159,7 @@ describe("MCP application identity setup", () => {
     expect(screen.getByLabelText("Client metadata URL")).toHaveValue(
       "https://client.example/app.json",
     );
-    expect(mcpServerSignIn).toHaveBeenLastCalledWith({
+    expect(mcpServerSignIn).toHaveBeenCalledWith({
       kind: "save-client",
       ...target,
       setup: {
@@ -201,7 +201,7 @@ describe("MCP application identity setup", () => {
     await user.type(item, "op://Private/My app/client secret");
     await user.click(screen.getByRole("button", { name: "Save client setup" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(mcpServerSignIn).toHaveBeenLastCalledWith({
+    expect(mcpServerSignIn).toHaveBeenCalledWith({
       kind: "save-client",
       ...target,
       setup: {

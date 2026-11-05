@@ -270,6 +270,19 @@ export const McpServerSignInRequest = Schema.Union(
 );
 export type McpServerSignInRequest = typeof McpServerSignInRequest.Type;
 export const decodeMcpServerSignInRequest = Schema.decodeUnknownSync(McpServerSignInRequest);
+/** Optional last-reported account facts; never token/JWT fields or inferred names. */
+export const McpReportedAccount = Schema.Struct({
+  workspaceId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9]{1,128}$/))),
+  userId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9]{1,128}$/))),
+  grantedScopes: Schema.optional(
+    Schema.Array(
+      Schema.String.pipe(Schema.maxLength(128), Schema.pattern(/^[\x21\x23-\x5B\x5D-\x7E]+$/)),
+    ).pipe(Schema.maxItems(64)),
+  ),
+}).annotations(strict);
+export type McpReportedAccount = typeof McpReportedAccount.Type;
+export const decodeMcpReportedAccount = Schema.decodeUnknownSync(McpReportedAccount);
+
 export const McpServerSignInView = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("client-configured") }).annotations(strict),
   Schema.Struct({
@@ -288,6 +301,10 @@ export const McpServerSignInView = Schema.Union(
   /** A server reached by a command, or one that answered without asking for a sign-in. */
   Schema.Struct({ kind: Schema.Literal("not-applicable") }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("signed-out") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("client-setup-required"),
+    message: boundedText(512),
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("cancel-pending"), message: boundedText(512) }).annotations(
     strict,
   ),
@@ -309,10 +326,17 @@ export const McpServerSignInView = Schema.Union(
     kind: Schema.Literal("signed-in"),
     /** The authorization server that issued the grant, for the row. */
     issuer: boundedText(256),
+    account: Schema.optional(McpReportedAccount),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("sign-in-again"),
-    reason: Schema.Literal("revoked", "expired", "refresh-reused"),
+    reason: Schema.Literal(
+      "revoked",
+      "expired",
+      "refresh-reused",
+      "account-changed",
+      "permission-missing",
+    ),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("refused"),

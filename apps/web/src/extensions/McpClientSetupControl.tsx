@@ -1,6 +1,6 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { McpClientSetupInput, McpServerSignInView } from "@octant/contracts/extension-rpc";
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useSecretStoresClient } from "../settings/SecretStoresClientContext";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -15,6 +15,8 @@ interface Props {
   readonly componentId: string;
   readonly disabled: boolean;
   readonly onSaved: () => void;
+  readonly autoOpen?: boolean;
+  readonly onAutoOpen?: () => void;
 }
 
 /** Application identity is saved separately from a person's account consent. */
@@ -29,7 +31,7 @@ export function McpClientSetupControl(props: Props) {
       alive.current = false;
     };
   }, []);
-  const prepare = async () => {
+  const prepare = useCallback(async () => {
     setBusy(true);
     setProblem(undefined);
     try {
@@ -49,7 +51,14 @@ export function McpClientSetupControl(props: Props) {
     } finally {
       if (alive.current) setBusy(false);
     }
-  };
+  }, [props.client, props.extensionId, props.componentId]);
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (props.autoOpen !== true || props.disabled || autoOpened.current) return;
+    autoOpened.current = true;
+    props.onAutoOpen?.();
+    void prepare();
+  }, [props.autoOpen, props.disabled, props.onAutoOpen, prepare]);
   return (
     <>
       <OctantButton

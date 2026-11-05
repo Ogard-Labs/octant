@@ -82,6 +82,143 @@ function protocol(
 }
 
 describe("Slack MCP dedicated user-token dialect", () => {
+  it("retains previously reported metadata on omitted refresh fields without treating it as a new report", async () => {
+    const first = protocol({
+      ok: true,
+      access_token: "synthetic-first",
+      refresh_token: "synthetic-first-refresh",
+      token_type: "user",
+      team: { id: "TTEST001" },
+      authed_user: { id: "UTEST001", scope: slack.readScope },
+    });
+    const exchanged = await exchangeAuthorizationCode(first.input);
+    if (exchanged.kind !== "tokens") throw new Error("Expected initial grant");
+    const store = memoryStore();
+    await store.set(credential, JSON.stringify(exchanged.grant));
+    const next = protocol({
+      ok: true,
+      access_token: "synthetic-next",
+      refresh_token: "synthetic-next-refresh",
+      token_type: "user",
+    });
+    const runtime = createHostOAuthRuntime({
+      store,
+      fetch: next.fetchImpl,
+      now: () => 1_000_000,
+      resolveClientSecret: async () => secret,
+    });
+    try {
+      expect(await runtime.refresh(credential)).toEqual({ kind: "refreshed" });
+      expect(await runtime.access(credential)).toMatchObject({
+        mcpAccount: {
+          workspaceId: "TTEST001",
+          userId: "UTEST001",
+          grantedScopes: [slack.readScope],
+        },
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it.each([
+    { team: null },
+    { team: { id: "not/a/workspace" } },
+    { authed_user: { id: "x".repeat(129) } },
+    { authed_user: { scope: "search:read.public\nchat:write" } },
+    { authed_user: { scope: "chat:write" } },
+  ])(
+    "refuses malformed or insufficient explicitly reported account data before issuing a grant (%j)",
+    async (metadata) => {
+      const { input } = protocol({
+        ok: true,
+        access_token: "synthetic-access",
+        refresh_token: "synthetic-refresh",
+        token_type: "user",
+        ...metadata,
+      });
+      expect(await exchangeAuthorizationCode(input)).toMatchObject({ kind: "refused" });
+    },
+  );
+
+  it("keeps only endpoint-reported workspace, user and granted permissions on the closed grant", async () => {
+    const { input } = protocol({
+      ok: true,
+      access_token: "synthetic-access",
+      token_type: "user",
+      refresh_token: "synthetic-refresh",
+      expires_in: 3600,
+      team: { id: "TTEST001", name: "Ignored name" },
+      authed_user: { id: "UTEST001", scope: slack.readScope },
+      id_token: "not-an-identity-source",
+    });
+    expect(await exchangeAuthorizationCode(input)).toMatchObject({
+      kind: "tokens",
+      grant: {
+        mcpAccount: {
+          workspaceId: "TTEST001",
+          userId: "UTEST001",
+          grantedScopes: [slack.readScope],
+        },
+      },
+    });
+  });
+
+  it.each([
+    {
+      team: { id: "TTEST002" },
+      authed_user: { id: "UTEST001", scope: slack.readScope },
+      reason: "account-changed",
+    },
+    {
+      team: { id: "TTEST001" },
+      authed_user: { id: "UTEST002", scope: slack.readScope },
+      reason: "account-changed",
+    },
+    {
+      team: { id: "TTEST001" },
+      authed_user: { id: "UTEST001", scope: "chat:write" },
+      reason: "permission-missing",
+    },
+  ])(
+    "refuses a refresh that changes the reported account or omits its selected read permission ($reason)",
+    async ({ reason, ...metadata }) => {
+      const first = protocol({
+        ok: true,
+        access_token: "synthetic-access",
+        token_type: "user",
+        refresh_token: "synthetic-refresh",
+        expires_in: 3600,
+        team: { id: "TTEST001" },
+        authed_user: { id: "UTEST001", scope: slack.readScope },
+      });
+      const exchanged = await exchangeAuthorizationCode(first.input);
+      if (exchanged.kind !== "tokens") throw new Error("Expected initial fixture grant");
+      const store = memoryStore();
+      await store.set(credential, JSON.stringify(exchanged.grant));
+      const next = protocol({
+        ok: true,
+        access_token: "synthetic-other-access",
+        token_type: "user",
+        refresh_token: "synthetic-other-refresh",
+        expires_in: 3600,
+        ...metadata,
+      });
+      const runtime = createHostOAuthRuntime({
+        store,
+        fetch: next.fetchImpl,
+        now: () => 1_000_000,
+        resolveClientSecret: async () => secret,
+      });
+      try {
+        expect(await runtime.refresh(credential)).toEqual({ kind: "sign-in-again", reason });
+        expect(store.values.has(credential)).toBe(false);
+      } finally {
+        await runtime.close();
+      }
+    },
+  );
+
   it.each([
     "http://127.0.0.1:43125/oauth/callback",
     "https://localhost:43125/oauth/callback",

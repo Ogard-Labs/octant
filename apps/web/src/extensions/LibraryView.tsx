@@ -786,7 +786,17 @@ function LibraryDetail(props: LibraryDetailProps) {
       signInExtension !== undefined ? (
         <div className="library-detail__signin">
           <McpServerSignInControl
-            autoBegin={props.fresh !== undefined}
+            autoBegin={props.fresh !== undefined && item.connectorAuth.clientSetup !== "registered"}
+            autoSetup={props.fresh !== undefined && item.connectorAuth.clientSetup === "registered"}
+            {...(item.connectorAuth.clientSetup === "registered" &&
+            item.connectorAuth.setupGuide !== undefined
+              ? {
+                  registration: {
+                    guideUrl: item.connectorAuth.setupGuide,
+                    requestedScopes: item.connectorAuth.requestedScopes ?? [],
+                  },
+                }
+              : {})}
             client={props.connectClient}
             componentId={signInComponent}
             disabled={props.disabled}

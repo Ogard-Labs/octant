@@ -8,7 +8,7 @@ import {
   type ConnectorCategory,
 } from "@octant/domain";
 import { Search } from "lucide-react";
-import { useCallback, useId, useState, type ReactNode } from "react";
+import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -79,6 +79,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
     };
   };
 
+  const openedSetups = useRef(new Set<string>());
   const connect = useCallback(
     async (entry: ConnectorCatalogEntry, secret?: string) => {
       setBusyId(entry.id);
@@ -91,6 +92,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
       }
       if (result.extensionId !== undefined) {
         const extensionId = result.extensionId;
+        openedSetups.current.delete(entry.id);
         setConnected((current) => ({
           ...current,
           [entry.id]: { extensionId, componentId: result.componentId },
@@ -175,7 +177,27 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                         <span className="connectors__detail">{entry.description}</span>
                         {installed?.componentId !== undefined && entry.auth.kind === "sign-in" ? (
                           <McpServerSignInControl
-                            autoBegin={connected[entry.id] !== undefined}
+                            autoBegin={
+                              connected[entry.id] !== undefined &&
+                              entry.auth.clientSetup !== "registered"
+                            }
+                            autoSetup={
+                              connected[entry.id] !== undefined &&
+                              entry.auth.clientSetup === "registered" &&
+                              !openedSetups.current.has(entry.id)
+                            }
+                            onAutoSetup={() => {
+                              openedSetups.current.add(entry.id);
+                            }}
+                            {...(entry.auth.clientSetup === "registered" &&
+                            entry.auth.setupGuide !== undefined
+                              ? {
+                                  registration: {
+                                    guideUrl: entry.auth.setupGuide,
+                                    requestedScopes: entry.auth.requestedScopes ?? [],
+                                  },
+                                }
+                              : {})}
                             client={client}
                             componentId={installed.componentId}
                             disabled={props.disabled}
@@ -221,7 +243,10 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                       <span className="connectors__actions">
                         {installed !== undefined ? (
                           <span className="connectors__detail" role="status">
-                            Connected
+                            {entry.auth.kind === "sign-in" &&
+                            entry.auth.clientSetup === "registered"
+                              ? "Added"
+                              : "Connected"}
                           </span>
                         ) : (
                           <OctantButton

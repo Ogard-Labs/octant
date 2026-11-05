@@ -102,6 +102,7 @@ async function fixture(
     readonly metadata?: Parameters<typeof metadataFetch>[0];
     readonly access?: (credential: string) => Promise<unknown>;
     readonly now?: () => Date;
+    readonly onAuthenticationChanged?: McpServerSignInOptions["onAuthenticationChanged"];
     readonly linkedSecrets?: McpServerSignInOptions["linkedSecrets"];
     readonly serverUrl?: McpServerSignInOptions["serverUrl"];
   } = {},
@@ -129,6 +130,9 @@ async function fixture(
     fetch: metadata.fetchImpl,
     ...(options.now === undefined ? {} : { now: options.now }),
     access,
+    ...(options.onAuthenticationChanged === undefined
+      ? {}
+      : { onAuthenticationChanged: options.onAuthenticationChanged }),
     actorId: credentialRef,
     pickPort: async () => 43125,
   });
@@ -136,6 +140,229 @@ async function fixture(
 }
 
 describe("closed Slack MCP transport and OAuth resource", () => {
+  it("reports missing or legacy app setup without discovery, consent or credential access", async () => {
+    const { service, calls, access, oauth } = await fixture();
+    expect(await service.status(extension, component, "local-window")).toMatchObject({
+      kind: "client-setup-required",
+    });
+    await service.configureForServer(extension, component, registration(), "local-window");
+    expect(await service.status(extension, component, "local-window")).toMatchObject({
+      kind: "client-setup-required",
+    });
+    await service.configureForServer(
+      extension,
+      component,
+      { ...registration(), redirectHostname: "localhost" },
+      "local-window",
+    );
+    expect(await service.status(extension, component, "local-window")).toEqual({
+      kind: "signed-out",
+    });
+    expect(calls).toEqual([]);
+    expect(access).not.toHaveBeenCalled();
+    expect(oauth.begin).not.toHaveBeenCalled();
+  });
+
+  it("stores only reported account facts and reads them after restart without probing", async () => {
+    const account = {
+      workspaceId: "TTEST001",
+      userId: "UTEST001",
+      grantedScopes: [slack.readScope],
+    };
+    const { service, statePath, oauth, calls } = await fixture({
+      access: async () => ({
+        kind: "granted",
+        tokenType: "Bearer",
+        accessToken: "synthetic-not-public",
+        mcpAccount: account,
+      }),
+    });
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        signIns: {
+          [`${extension}:${component}`]: {
+            descriptor: descriptor(),
+            credentialRef,
+            issuer: slack.issuer,
+          },
+        },
+      }),
+    );
+    expect(
+      await service.attachBearer(extension, component, {
+        transport: "streamable-http",
+        name: "slack",
+        url: slack.transportUrl,
+        headers: {},
+      }),
+    ).toMatchObject({ headers: { Authorization: "Bearer synthetic-not-public" } });
+    const access = vi.fn(async () => {
+      throw new Error("Status must not read a token");
+    });
+    const restarted = new McpServerSignIn({
+      statePath,
+      oauth: oauth as never,
+      access,
+      serverUrl: async () => slack.transportUrl,
+      actorId: credentialRef,
+    });
+    const view = await restarted.status(extension, component, "local-window");
+    expect(view).toEqual({ kind: "signed-in", issuer: slack.issuer, account });
+    expect(JSON.stringify(view)).not.toContain("synthetic-not-public");
+    expect(access).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    {
+      account: { workspaceId: "TTEST002", userId: "UTEST001", grantedScopes: [slack.readScope] },
+      reason: "account-changed",
+    },
+    {
+      account: { workspaceId: "TTEST001", userId: "UTEST002", grantedScopes: [slack.readScope] },
+      reason: "account-changed",
+    },
+    {
+      account: { workspaceId: "TTEST001", userId: "UTEST001", grantedScopes: ["chat:write"] },
+      reason: "permission-missing",
+    },
+  ])(
+    "durably refuses changed reported identity or permission before attaching a bearer ($reason)",
+    async ({ account, reason }) => {
+      const changed = vi.fn(async () => undefined);
+      const { service, statePath, oauth } = await fixture({
+        access: async () => ({
+          kind: "granted",
+          tokenType: "Bearer",
+          accessToken: "synthetic-refused",
+          mcpAccount: account,
+        }),
+        onAuthenticationChanged: changed,
+      });
+      await writeFile(
+        statePath,
+        JSON.stringify({
+          schemaVersion: 1,
+          signIns: {
+            [`${extension}:${component}`]: {
+              descriptor: descriptor(),
+              credentialRef,
+              issuer: slack.issuer,
+              account: {
+                workspaceId: "TTEST001",
+                userId: "UTEST001",
+                grantedScopes: [slack.readScope],
+              },
+            },
+          },
+        }),
+      );
+      const launch = {
+        transport: "streamable-http",
+        name: "slack",
+        url: slack.transportUrl,
+        headers: {},
+      } as const;
+      expect(await service.attachBearer(extension, component, launch)).toEqual(launch);
+      expect(await service.status(extension, component, "local-window")).toEqual({
+        kind: "sign-in-again",
+        reason,
+      });
+      expect(changed).toHaveBeenCalledExactlyOnceWith(extension, component);
+      const access = vi.fn(async () => ({
+        kind: "granted",
+        tokenType: "Bearer",
+        accessToken: "do-not-use-old",
+      }));
+      const restarted = new McpServerSignIn({
+        statePath,
+        oauth: oauth as never,
+        access,
+        serverUrl: async () => slack.transportUrl,
+        actorId: credentialRef,
+      });
+      expect(await restarted.attachBearer(extension, component, launch)).toEqual(launch);
+      expect(access).not.toHaveBeenCalled();
+      expect(await restarted.status(extension, component, "local-window")).toEqual({
+        kind: "sign-in-again",
+        reason,
+      });
+    },
+  );
+
+  it.each([
+    { account: { workspaceId: "https://untrusted.example" }, reason: "account-changed" },
+    { account: { grantedScopes: ["chat:write"] }, reason: "permission-missing" },
+  ])("refuses unsafe retained account facts on restart ($reason)", async ({ account, reason }) => {
+    const { service, statePath, access } = await fixture();
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        signIns: {
+          [`${extension}:${component}`]: {
+            descriptor: descriptor(),
+            credentialRef,
+            issuer: slack.issuer,
+            account,
+          },
+        },
+      }),
+    );
+    expect(await service.status(extension, component, "local-window")).toEqual({
+      kind: "sign-in-again",
+      reason,
+    });
+    const launch = {
+      transport: "streamable-http",
+      name: "slack",
+      url: slack.transportUrl,
+      headers: {},
+    } as const;
+    expect(await service.attachBearer(extension, component, launch)).toEqual(launch);
+    expect(access).not.toHaveBeenCalled();
+  });
+
+  it("retains last-reported facts when an authorized access omits account metadata", async () => {
+    const account = { workspaceId: "TTEST001", grantedScopes: [slack.readScope] };
+    const { service, statePath } = await fixture({
+      access: async () => ({
+        kind: "granted",
+        tokenType: "Bearer",
+        accessToken: "synthetic-omitted-details",
+      }),
+    });
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        signIns: {
+          [`${extension}:${component}`]: {
+            descriptor: descriptor(),
+            credentialRef,
+            issuer: slack.issuer,
+            account,
+          },
+        },
+      }),
+    );
+    expect(
+      await service.attachBearer(extension, component, {
+        transport: "streamable-http",
+        name: "slack",
+        url: slack.transportUrl,
+        headers: {},
+      }),
+    ).toMatchObject({ headers: { Authorization: "Bearer synthetic-omitted-details" } });
+    expect(await service.status(extension, component, "local-window")).toEqual({
+      kind: "signed-in",
+      issuer: slack.issuer,
+      account,
+    });
+  });
+
   it("keeps legacy callback setup refused until localhost is explicitly saved", async () => {
     const { service, oauth, calls } = await fixture();
     expect(

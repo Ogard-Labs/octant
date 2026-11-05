@@ -2,6 +2,20 @@ import { describe, expect, it } from "vitest";
 import { connectorCatalog, featuredConnectors, searchConnectorCatalog } from "./connectorCatalog";
 
 describe("the connectors catalog", () => {
+  it("requires person-owned app setup for Slack public search at the documented transport", () => {
+    expect(connectorCatalog().find((entry) => entry.id === "slack")).toMatchObject({
+      displayName: "Slack",
+      url: "https://mcp.slack.com/mcp",
+      auth: {
+        kind: "sign-in",
+        clientSetup: "registered",
+        setupGuide: "https://docs.slack.dev/ai/slack-mcp-server/",
+        requestedScopes: ["search:read.public"],
+      },
+    });
+    expect(featuredConnectors().map((entry) => entry.id)).not.toContain("slack");
+  });
+
   it("names each connector once, at an https address, with a key page for every key entry", () => {
     const entries = connectorCatalog();
     expect(new Set(entries.map((entry) => entry.id)).size).toBe(entries.length);

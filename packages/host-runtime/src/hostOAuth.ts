@@ -16,6 +16,9 @@ import {
   isSlackMcpUserGrantBinding,
   isSlackMcpUserDescriptorBinding,
   isSlackMcpCallbackUri,
+  decodeSlackMcpAccount,
+  slackMcpReportedAccount,
+  type SlackMcpAccount,
 } from "./slackMcpOAuth";
 
 const GRANT_KIND = "host-oauth-grant";
@@ -261,7 +264,9 @@ export type HostOAuthSignInAgainReason =
   | "revoked"
   | "expired"
   | "refresh-reused"
-  | "interaction-required";
+  | "interaction-required"
+  | "account-changed"
+  | "permission-missing";
 
 export type HostOAuthRefusalReason =
   | "state-mismatch"
@@ -324,6 +329,7 @@ export type HostOAuthAccessResult =
   | {
       readonly kind: "granted";
       readonly accessToken: string;
+      readonly mcpAccount?: SlackMcpAccount;
       readonly tokenType: string;
       /** Absent when the stored credential does not expire. */
       readonly expiresAt?: string;
@@ -401,6 +407,7 @@ interface StoredGrant {
   readonly kind: typeof GRANT_KIND;
   readonly version: 1;
   readonly accessToken: string;
+  readonly mcpAccount?: SlackMcpAccount;
   /**
    * Absent when the issuer granted no refresh token (RFC 6749 §5.1 lets it):
    * the access token is the whole grant and expiry means signing in again.
@@ -2907,6 +2914,7 @@ export function createHostOAuthRuntime(options: {
       clientId: current.clientId,
       tokenEndpoint: current.tokenEndpoint,
       previousRefresh: refreshToken,
+      ...(current.mcpAccount === undefined ? {} : { previousMcpAccount: current.mcpAccount }),
       generation,
       codeExchange: false,
       ...(current.resource === undefined ? {} : { resource: current.resource }),
@@ -2925,7 +2933,10 @@ export function createHostOAuthRuntime(options: {
     if (exchanged.kind === "transient") return { kind: "transient" };
     if (exchanged.kind === "pending") return { kind: "transient" };
     if (exchanged.kind === "refused") {
-      const reason = refreshRefusal(exchanged.reason, exchanged.error);
+      const reason =
+        current.dialect === SLACK_MCP_DIALECT && exchanged.signInAgain !== undefined
+          ? exchanged.signInAgain
+          : refreshRefusal(exchanged.reason, exchanged.error);
       try {
         await options.store.delete(credentialRef);
       } catch {
@@ -2992,6 +3003,7 @@ export function createHostOAuthRuntime(options: {
           kind: "granted",
           accessToken: grant.accessToken,
           tokenType: grant.tokenType,
+          ...(grant.mcpAccount === undefined ? {} : { mcpAccount: grant.mcpAccount }),
           ...(grant.expiresAt === undefined
             ? {}
             : { expiresAt: new Date(grant.expiresAt).toISOString() }),
@@ -3170,6 +3182,7 @@ async function accessRoute(
       kind: "granted",
       accessToken: granted.accessToken,
       tokenType: granted.tokenType,
+      ...(granted.mcpAccount === undefined ? {} : { mcpAccount: granted.mcpAccount }),
       ...(granted.expiresAt === undefined ? {} : { expiresAt: granted.expiresAt }),
       ...(granted.subscriptionUsageGranted === undefined
         ? {}
@@ -3304,6 +3317,7 @@ async function requestTokens(input: {
   readonly clientId: string;
   readonly tokenEndpoint: string;
   readonly previousRefresh: string | undefined;
+  readonly previousMcpAccount?: SlackMcpAccount;
   readonly generation: number;
   readonly codeExchange: boolean;
   /** MCP authorization dialect: kept on the grant so a refresh names it again. */
@@ -3410,12 +3424,28 @@ async function requestTokens(input: {
   ) {
     return { kind: "refused", reason: "exchange-refused" };
   }
+  const reported =
+    input.tokenDialect === SLACK_MCP_DIALECT
+      ? slackMcpReportedAccount(body, input.previousMcpAccount)
+      : { kind: "valid" as const };
+  if (reported.kind !== "valid") {
+    if (reported.kind === "account-changed" || reported.kind === "permission-missing")
+      return {
+        kind: "refused",
+        reason: input.codeExchange ? "denied" : "exchange-refused",
+        ...(input.codeExchange ? {} : { signInAgain: reported.kind }),
+      };
+    return { kind: "refused", reason: "exchange-refused" };
+  }
   return {
     kind: "tokens",
     grant: {
       kind: GRANT_KIND,
       version: 1,
       accessToken,
+      ...("account" in reported && reported.account !== undefined
+        ? { mcpAccount: reported.account }
+        : {}),
       ...(refreshToken === undefined ? {} : { refreshToken }),
       tokenType: tokenType.slice(0, 32),
       expiresAt: input.now() + expiresIn * 1_000,
@@ -3506,6 +3536,13 @@ function decodeGrant(raw: string): StoredGrant {
   const clientAuthentication = parseClientAuthentication(parsed.clientAuthentication);
   const mcpTransportUrl = parsed.mcpTransportUrl;
   const mcpIssuer = parsed.mcpIssuer;
+  const mcpAccount =
+    parsed.mcpAccount === undefined ? undefined : decodeSlackMcpAccount(parsed.mcpAccount);
+  if (
+    parsed.mcpAccount !== undefined &&
+    (dialect !== SLACK_MCP_DIALECT || mcpAccount === undefined)
+  )
+    throw new CredentialStoreFailure("invalid");
   if (
     dialect === SLACK_MCP_DIALECT
       ? !isSlackMcpUserGrantBinding({
@@ -3592,6 +3629,7 @@ function decodeGrant(raw: string): StoredGrant {
     ...(resource === undefined ? {} : { resource }),
     ...(typeof mcpTransportUrl === "string" ? { mcpTransportUrl } : {}),
     ...(typeof mcpIssuer === "string" ? { mcpIssuer } : {}),
+    ...(mcpAccount === undefined ? {} : { mcpAccount }),
     ...(clientAuthentication === undefined ? {} : { clientAuthentication }),
     ...(dialect === undefined ? {} : { dialect }),
     ...(idToken === undefined ? {} : { idToken }),
