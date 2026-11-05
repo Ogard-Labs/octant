@@ -72,7 +72,7 @@ export function BrowserRecordingBadge(props: { readonly capture: BrowserCapture 
   if (recording === undefined) return null;
   return (
     <span aria-hidden="true" className="browser-capture__badge">
-      <Play className="browser-capture__badge-icon" size={10} strokeWidth={2.5} />
+      <Play className="browser-capture__badge-icon" size={12} strokeWidth={2.5} />
       {recordingLength(recording.durationMs)}
     </span>
   );
