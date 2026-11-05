@@ -1357,7 +1357,7 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     await tool.stop();
   });
 
-  it("audits a page's load with rated vitals and redacted addresses, and refuses in Plan", async () => {
+  it("audits a page's load with rated vitals and redacted addresses, and Plan admits an audit", async () => {
     const tool = agentTool();
     await tool.call({ operation: "navigate", url: `${origin}/perf` });
     await new Promise((resolve) => setTimeout(resolve, 700));
@@ -1379,9 +1379,11 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(audit.notMeasured).toContainEqual(expect.objectContaining({ metric: "inp" }));
     expect(audit.longTasks?.longestMs).toBeGreaterThanOrEqual(140);
     await tool.stop();
+    // Plan reaches the page like any read: with none open it is asked to
+    // navigate, not refused as read-only.
     const planned = agentTool({ plan: true });
     expect((await planned.call({ operation: "audit", kind: "performance" })).result).toEqual({
-      error: "plan-mode-read-only",
+      error: "browser-navigation-required",
     });
   });
 
@@ -1722,17 +1724,20 @@ describe.skipIf(!available)("recording and replaying a Browser flow on a real pa
     await allowed.stop();
   });
 
-  it("refuses to save, run, or list in Plan mode, and to save or run for a paired device", async () => {
+  it("refuses to save or run in Plan mode but lists, and refuses to save or run for a paired device", async () => {
     const flows = flowPort();
     await recordOrderCheck(flows);
     const planning = agentTool({ flows, plan: true });
     for (const call of [
       { operation: "flow-save", name: "x" },
       { operation: "flow-run", name: "Order check" },
-      { operation: "flow-list" },
     ]) {
       expect((await planning.call(call)).result).toEqual({ error: "plan-mode-read-only" });
     }
+    // Listing reads the Project's saved flows and touches no page.
+    expect((await planning.call({ operation: "flow-list" })).result).toMatchObject({
+      flows: [{ name: "Order check" }],
+    });
     const paired = agentTool({ flows, pairedDevice: true });
     expect((await paired.call({ operation: "flow-run", name: "Order check" })).result).toEqual({
       error: "flow-needs-this-computer",

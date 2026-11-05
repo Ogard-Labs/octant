@@ -75,7 +75,17 @@ off:
   person asked for it, or under a standing setting the person turned on.
 - An agent never marks a thread Done, and a spend ceiling the person set
   holds at every level.
-- Plan mode is read-only. That is the definition of Plan, not a guardrail.
+- Plan mode is read-only. That is the definition of Plan, not a guardrail:
+  in Plan an agent may look and propose, and changes nothing in the
+  workspace (the Code checkout or the Work folder), on the host, or in the
+  outside world. Looking includes the page already open in the thread's own
+  Browser ([Browser in Plan](design/browser-agent-tool.md#plan-mode)), and
+  proposing includes an offer the person confirms (a side task, a routine).
+  The one thing Plan writes is the thread's own Canvas documents
+  (`octant_canvas` `create` and `revise`), because a Canvas changes only the
+  thread's own document, never the checkout, the host, or the outside world;
+  publishing, sharing, the artifact mirror, and replica sync of a Plan
+  thread's Canvas stay refused ([Canvas](design/canvas.md)).
 
 Every other product rule that limits what a person or an agent may do is a
 default: on out of the box, lowerable by the person, and journaled when
@@ -665,8 +675,12 @@ showed. A remembered origin covers Private pages only; a page in a Project or
 Personal Browser profile asks for each origin and remembers the pair (origin,
 profile), never one without the other
 ([Browser profiles](design/browser-profiles.md#the-agent-on-a-signed-in-page)).
-Plan refuses every Code browser operation except stopping the
-thread's own browser (`plan-mode-read-only`). Downloads in the agent's Browser
+Plan admits only the Browser operations that read the page already open in
+the thread's own Browser (`audit` among them) and `stop`, and refuses every
+other one as `plan-mode-read-only`, a recording included, from one table of
+operations
+([Browser for agents: Plan mode](design/browser-agent-tool.md#plan-mode)).
+Downloads in the agent's Browser
 are blocked on every page unless the person turns on "Let agents download
 files" in Settings (a shell setting only a local window writes, off by
 default). Then a download an agent action starts is held in a private
@@ -751,7 +765,8 @@ ignored; the composers drop it from a restored draft with a note.
 
 - **Browser** is offered in Work and Code when the provider carries app-managed
   tools, never in Chat. The first effect on each origin asks inline. In Plan
-  the definition is present and every effect is refused.
+  the definition is present, the reads of the page already open still run
+  under every other gate, and every effect is refused.
 - **Computer** is offered in Chat, Work, and Code only when all of these hold:
   the bundled plugin is enabled, there is a screen bridge or a leased desktop,
   the provider carries app-managed tools, the tool is not constrained out, and
@@ -805,8 +820,11 @@ authors as an agent; only a host window moves board nodes; `preview` renders
 with the network off and no server address or credential; a static `design`
 frame never receives `allow-scripts` and no frame has both `allow-scripts` and
 `allow-same-origin`; a share carries a design only with the sharer's
-acknowledgement that markup is shared as written, and refuses an action block; and
-nothing drawn inline in the thread can journal a version.
+acknowledgement that markup is shared as written, and refuses an action block;
+nothing drawn inline in the thread can journal a version; and Plan keeps
+`create` and `revise` (the thread's own document) while the tool offers no
+publish or share and the mirror and replica sync write nothing for a Plan
+thread.
 
 Descriptions explain the existing presentation flows and distinguish creation,
 queued jobs, and work proposals from opened previews or completed work.
@@ -2292,9 +2310,12 @@ hold for every action in it:
   person asked for (the forge's own protection still applies); a stacked pull
   request may only target
   the branch of the thread or linked thread it stacks on.
-- **Refusals.** Plan mode refuses every action, and so does revoked forge
-  access. The tool's `help` operation is not an action: it returns the
-  tool's own usage text in any posture, asks nothing, and reaches no forge.
+- **Refusals.** Plan mode refuses every action except `unwatch`, and revoked
+  forge access refuses every action that reaches the forge. `unwatch` stops the thread's own watch,
+  which only takes reach away, so Plan allows it and it never asks (see
+  Watching its own pull request below). The tool's `help` operation is not an
+  action: it returns the tool's own usage text in any posture, asks nothing,
+  and reaches no forge.
 - **Force-push.** Rewriting the thread's own branch uses force-with-lease
   (`push-git` with `force`), which names the remote head it replaces, so a
   branch someone else moved is refused by Git. The host accepts a force only on
@@ -2988,8 +3009,12 @@ the thread it came from.
   and the agent cannot choose another Project, a profile, a model, or any
   authority. Chat is never offered the tool, a turn that runs as the host (a
   routine's run, or a usage-limit resume) is refused it as
-  `automation-recursion`, and a Code turn in Plan is
-  refused it because Plan is read-only. A proposal creates nothing, whatever
+  `automation-recursion`. A turn in Plan is offered and may call it, as it
+  may offer a side task: a proposal records only a suggestion the person
+  confirms, and the routine takes none of the thread's posture, so it runs
+  asking first (or at the level the person later picks for it), never in
+  Plan; a follow-up's turn in its own thread is still narrowed by that
+  thread's posture, as any turn is. A proposal creates nothing, whatever
   the thread's posture: a remembered Full access does not let an agent create
   or confirm a routine, and the routine it leads to is approval-gated anyway.
   The host holds it for ten minutes as a suggestion chip at the foot of the
@@ -3007,9 +3032,10 @@ the thread it came from.
   unchanged: filesystem and tools only, no network or subagents, Work without
   shell or Git, Code asking first, and session-only permission kept
   session-only in both the authority receipt and the execution profile each
-  run's thread is created from. A thread that left its Project, an archived thread, a
-  Plan-posture Code thread, or an unavailable checkout refuses at confirm and
-  creates nothing. The first answer takes the proposal off the list, so a
+  run's thread is created from. A thread that left its Project, an archived
+  thread, or an unavailable checkout refuses at confirm and creates nothing; a
+  thread in Plan does not, since the routine is built at the approval-gated
+  authority above whatever the thread's posture. The first answer takes the proposal off the list, so a
   retry cannot create a second routine. The call waits for the answer and
   reports `confirmed` with the routine id, `declined`, `expired`, `cancelled`,
   or the host's refusal. The tool rides the `appManagedTools` capability in
@@ -3056,8 +3082,8 @@ the thread it came from.
   name, prompt, trigger, missed-run policy). The host builds the definition
   from that thread's live facts exactly as for a confirmed proposal, so its
   Project, mode, binding, and approval-gated profile are the thread's and the
-  body cannot name wider ones; a thread outside the named Project, Chat, or a
-  Plan-posture Code thread refuses. It is created as the requesting principal
+  body cannot name wider ones; a thread outside the named Project, or Chat,
+  refuses. It is created as the requesting principal
   through the same create command.
 - **Origin thread.** A routine confirmed from a proposal, or created from a
   thread by a person, records that thread as `originThreadId` on its journaled

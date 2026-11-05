@@ -11,6 +11,7 @@ import { browserToolImage } from "../browser/browserToolImage";
 import { admitBrowserUpload, browserUploadSummary } from "../browser/browserUploadFiles";
 import { browserDownloadQuestion } from "@octant/domain";
 import {
+  browserOperationRefusedInPlan,
   browserToolAction,
   browserPageScriptToolResult,
   browserDownloadSavedResult,
@@ -26,6 +27,7 @@ import {
   signInPageRefusal,
   type BrowserToolAnswer,
   type BrowserToolInput,
+  type BrowserToolOperationName,
   type BrowserToolRecordingOperation,
 } from "../browser/browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "../browser/browserToolDefinition";
@@ -1229,7 +1231,7 @@ async function browserTool(
     if (flows === undefined) return failure("browser-flows-unavailable");
     const flowAuthority = browser.resolveAuthority(threadId, "code");
     if (flowAuthority === undefined) return failure("browser-authority-unavailable");
-    const flowPosture = browserAuthorityFailure(options);
+    const flowPosture = browserAuthorityFailure(options, input.operation);
     if (flowPosture !== undefined) return failure(flowPosture);
     const replay = () =>
       runBrowserFlowOperation(input, {
@@ -1275,7 +1277,7 @@ async function browserToolOne(
     const released = await options.browser.releaseThread(options.windowId, threadId);
     return browserToolResult(released);
   }
-  const postureFailure = browserAuthorityFailure(options);
+  const postureFailure = browserAuthorityFailure(options, input.operation);
   if (postureFailure !== undefined) return failure(postureFailure);
   let snapshot = options.browser.inspectThread(options.windowId, threadId);
   // While the person signs in, the page is theirs; see Work's tool.
@@ -1424,7 +1426,7 @@ async function browserToolOne(
       });
       if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
     }
-    const changed = browserAuthorityFailure(options);
+    const changed = browserAuthorityFailure(options, input.operation);
     const freshAuthority = options.browser.resolveAuthority(threadId, "code");
     if (
       signal?.aborted ||
@@ -1454,14 +1456,14 @@ async function browserToolOne(
     if (options.browserApproval === undefined) return failure("browser-approval-required");
     const outcome = await options.browserApproval.request(origin, signal);
     if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
-    const changed = browserAuthorityFailure(options);
+    const changed = browserAuthorityFailure(options, input.operation);
     if (changed !== undefined || signal?.aborted === true)
       return failure(changed ?? "tool-interrupted");
     if (existing !== undefined) options.browserApproval.remember(String(existing.contextId));
   }
   if (existing === undefined) {
     const action = actionRequest(options, authority);
-    const created = await guardedBrowserEffect(options, threadId, signal, () =>
+    const created = await guardedBrowserEffect(options, threadId, input.operation, signal, () =>
       options.browser!.create({
         windowId: options.windowId,
         threadId,
@@ -1549,7 +1551,7 @@ async function browserToolOne(
     releaseUpload = admitted.release;
   }
   if (releaseUpload !== undefined) {
-    const changed = browserAuthorityFailure(options);
+    const changed = browserAuthorityFailure(options, input.operation);
     if (changed !== undefined || signal?.aborted === true) {
       await releaseUpload();
       return failure(changed ?? "tool-interrupted");
@@ -1563,7 +1565,7 @@ async function browserToolOne(
   }
   // The service keeps the copies until the page closes; see Work's tool.
   const release = releaseUpload;
-  const acted = await guardedBrowserEffect(options, threadId, signal, () =>
+  const acted = await guardedBrowserEffect(options, threadId, input.operation, signal, () =>
     options.browser!.act({
       windowId: options.windowId,
       threadId,
@@ -2295,6 +2297,7 @@ function agentEventActor(
 async function guardedBrowserEffect(
   options: CodeAppManagedToolsOptions,
   threadId: BrowserThreadId,
+  operation: BrowserToolOperationName | BrowserToolRecordingOperation,
   signal: AbortSignal | undefined,
   effect: () => Promise<BrowserAutomationSnapshot>,
 ): Promise<
@@ -2311,7 +2314,7 @@ async function guardedBrowserEffect(
     while (!settled) {
       await defaultWait(25);
       if (settled) break;
-      const reason = browserAuthorityFailure(options);
+      const reason = browserAuthorityFailure(options, operation);
       if (reason !== undefined) return reason;
     }
     return new Promise<string>(() => undefined);
@@ -2325,7 +2328,7 @@ async function guardedBrowserEffect(
     ]);
     settled = true;
     if (outcome.kind === "snapshot") {
-      const reason = browserAuthorityFailure(options);
+      const reason = browserAuthorityFailure(options, operation);
       if (reason === undefined && signal?.aborted !== true) return outcome;
       await options.browser?.releaseThread(options.windowId, threadId);
       return { kind: "failure", reason: signal?.aborted === true ? "tool-interrupted" : reason! };
@@ -2775,7 +2778,16 @@ function profileToolConstraintFailure(thread: CodeThread, toolName: string): str
   return decision.status === "refused" ? decision.reason : undefined;
 }
 
-function browserAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {
+/**
+ * What keeps a Browser operation from running now: a stale thread, or Plan
+ * for an operation that changes something (see `BROWSER_OPERATION_EFFECT`).
+ * Asked again after every wait, so a thread that moved into Plan meanwhile
+ * still refuses an effect and still admits a read.
+ */
+function browserAuthorityFailure(
+  options: CodeAppManagedToolsOptions,
+  operation: BrowserToolOperationName | BrowserToolRecordingOperation,
+): string | undefined {
   const stale = currentThreadIdentityFailure(options);
   if (stale !== undefined) return stale;
   const current = options.readThread(options.windowId, options.thread.id);
@@ -2783,7 +2795,9 @@ function browserAuthorityFailure(options: CodeAppManagedToolsOptions): string | 
     requested: options.thread.executionPolicy,
     thread: current?.executionPolicy ?? options.thread.executionPolicy,
   });
-  return posture === "plan" ? "plan-mode-read-only" : undefined;
+  return posture === "plan" && browserOperationRefusedInPlan(operation)
+    ? "plan-mode-read-only"
+    : undefined;
 }
 
 /**

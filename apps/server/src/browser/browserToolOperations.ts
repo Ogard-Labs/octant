@@ -16,6 +16,7 @@ import {
   type BrowserWaitCondition,
   type BrowserWaitFor,
 } from "@octant/contracts";
+import type { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
 import { browserToolImage } from "./browserToolImage";
 
 /**
@@ -83,6 +84,92 @@ export function isBrowserToolFlowInput(input: BrowserToolInput): input is Browse
     input.operation === "flow-list" ||
     input.operation === "flow-run"
   );
+}
+
+/** Every operation the tool advertises, `help` included. */
+export type BrowserToolOperationName =
+  (typeof BROWSER_TOOL_DEFINITION.inputSchema.properties.operation.enum)[number];
+
+/**
+ * What each operation does, which is what Plan mode decides on. Plan may look
+ * and propose but changes nothing, so it admits an operation that only
+ * `reads` the page already open in this thread's own Browser (or the
+ * Project's saved flows) and sends no request, and `releases`, which closes
+ * only this thread's own Browser. It refuses every operation that `changes`
+ * something: a request, input, the page's state or size, a tab, the
+ * workspace, the Project's flows, or a recording the thread would keep.
+ * `each-step` is a batch whose steps are each admitted as a call of their
+ * own. The table is keyed by the advertised operations and the two the host
+ * issues for a recording, so a new operation does not compile until it takes
+ * a row here; one that is admitted exactly where `diagnostics` or
+ * `screenshot` is takes their row, `reads`.
+ */
+export const BROWSER_OPERATION_EFFECT = {
+  // The page's outline and refs, read from the open page.
+  snapshot: "reads",
+  // The text of the page or of one element.
+  "read-page": "reads",
+  // A picture of the open page, kept as this thread's own capture.
+  screenshot: "reads",
+  // What the page already logged and failed to load; reading clears nothing.
+  diagnostics: "reads",
+  // Accessibility findings or the browser's own record of the load, read
+  // from the open page; it never navigates, reloads, or changes it.
+  audit: "reads",
+  // This Browser's tabs, by id and address.
+  "tab-list": "reads",
+  // Waits for the page to reach a state; it presses, types, and loads nothing.
+  wait: "reads",
+  // The Project's saved flows by name; no page is touched.
+  "flow-list": "reads",
+  // The tool's own usage text.
+  help: "reads",
+  stop: "releases",
+  steps: "each-step",
+  // Loads a page: a request.
+  navigate: "changes",
+  // Input reaches the page and may submit, send, or change it.
+  click: "changes",
+  type: "changes",
+  press: "changes",
+  select: "changes",
+  drag: "changes",
+  // Moves the pointer, which runs the page's hover handlers and opens menus.
+  hover: "changes",
+  // Moves the page, which can load more of it.
+  scroll: "changes",
+  // Changes the page's size and emulation, which it may answer with requests.
+  resize: "changes",
+  // Sends files from the workspace.
+  upload: "changes",
+  // Writes a file into the workspace.
+  "download-save": "changes",
+  // Opens a page, closes one, or changes which one is shown.
+  "tab-open": "changes",
+  "tab-close": "changes",
+  "tab-switch": "changes",
+  // Hands the page to the person to act on.
+  "sign-in": "changes",
+  // Arbitrary page JavaScript.
+  "run-script": "changes",
+  // Writes the Project's flows.
+  "flow-save": "changes",
+  // Replays steps that act.
+  "flow-run": "changes",
+  // Host-issued around a call with `record`: the thread keeps the recording
+  // as an artifact, which Plan does not make, so a recorded call does not run.
+  "record-start": "changes",
+  "record-stop": "changes",
+} as const satisfies Record<
+  BrowserToolOperationName | BrowserToolRecordingOperation,
+  "reads" | "releases" | "changes" | "each-step"
+>;
+
+/** Whether Plan mode refuses this operation; see `BROWSER_OPERATION_EFFECT`. */
+export function browserOperationRefusedInPlan(
+  operation: BrowserToolOperationName | BrowserToolRecordingOperation,
+): boolean {
+  return BROWSER_OPERATION_EFFECT[operation] === "changes";
 }
 
 /** How many operations one `steps` call may carry. */
@@ -849,7 +936,9 @@ export async function runBrowserToolSteps(
  * while it runs. The recording starts and stops through `record`, the
  * adapter's ordinary path for one operation, so each is admitted like a
  * screenshot: the thread's authority, the model binding, the origin approval,
- * Plan, and the person's hold. A start that is refused runs nothing. The stop
+ * and the person's hold. Plan refuses the start, because the recording is an
+ * artifact the thread keeps (see `BROWSER_OPERATION_EFFECT`). A start that is
+ * refused runs nothing. The stop
  * always follows, whether the call succeeded, failed, or was interrupted, and
  * the answer is the call's own with the recording's capture id and facts, or
  * why it was not kept.

@@ -40,6 +40,47 @@ asking the agent.
   the model binding, the origin approval, Plan mode, the stale check, and the
   credential check. No operation adds authority a page did not already have.
 
+## Plan mode
+
+Plan may look and propose but changes nothing
+([Architecture: principles](../architecture.md#overview-and-principles)). In
+both adapters (Code's, and Work's, which a terminal grant also uses), Plan
+admits a Browser operation that only reads the page
+already open in the thread's own Browser, or the Project's saved flows, and
+sends no request; it refuses every other one as `plan-mode-read-only` before
+the page, the workspace, or the person is reached.
+
+| Verdict in Plan | Operations                                                                                             | Why                                                                                                                                                                                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Admitted: reads | `snapshot`, `read-page`, `screenshot`, `diagnostics`, `audit`, `tab-list`, `wait`, `flow-list`, `help` | Each reads what the open page or the Project already holds: the outline, text, pixels (kept as this thread's own capture), what the page already logged, accessibility findings or the browser's own record of the load, the tab list, a state the page reaches by itself, the saved flows, or static usage. |
+| Admitted        | `stop`                                                                                                 | It closes only this thread's own Browser.                                                                                                                                                                                                                                                                    |
+| Each step       | `steps`                                                                                                | Each step is admitted as a call of its own, so a batch of reads runs and the first step that would change something ends it.                                                                                                                                                                                 |
+| Refused         | `navigate`, `tab-open`                                                                                 | A request, a new page.                                                                                                                                                                                                                                                                                       |
+| Refused         | `click`, `type`, `press`, `select`, `drag`, `hover`                                                    | Input reaches the page; hover runs its handlers and opens menus.                                                                                                                                                                                                                                             |
+| Refused         | `scroll`, `resize`                                                                                     | The page moves or changes size and emulation, which it may answer with requests (more of the page, other images).                                                                                                                                                                                            |
+| Refused         | `tab-switch`, `tab-close`                                                                              | Which page is shown changes, or a page closes.                                                                                                                                                                                                                                                               |
+| Refused         | `upload`, `download-save`, `sign-in`, `run-script`                                                     | Files leave the workspace or enter it, the person acts on the page, or arbitrary JavaScript runs.                                                                                                                                                                                                            |
+| Refused         | `flow-save`, `flow-run`                                                                                | A save writes the Project's flows; a replay acts.                                                                                                                                                                                                                                                            |
+| Refused         | `record-start`, `record-stop` (host-issued for `record: true`)                                         | A recording is an artifact the thread keeps, and Plan only reads, so a `steps` with `record: true` answers `recording-refused` and runs nothing; a recorded `flow-run` is refused as a replay.                                                                                                               |
+
+- Every other gate applies to an admitted read unchanged: the thread's
+  authority and model binding, the origin approval (a page this model or
+  thread was not approved for still asks, and a declined answer reads
+  nothing), the person's hold, the stale check, and outside-content taint. A
+  read never opens a page: with none open it answers `browser-navigation-required`.
+- Code re-asks after every wait (an approval, the action itself), so a thread
+  that moves into Plan while a click is in flight is still refused it and the
+  page released, while a read in flight finishes. A terminal grant decides Plan
+  once per call; an approval answered for an effect after its thread moved into
+  Plan is still cancelled.
+- The rule is one table, `BROWSER_OPERATION_EFFECT` in
+  `apps/server/src/browser/browserToolOperations.ts`, keyed by the operations
+  the definition advertises and the two the host issues around a recorded
+  call, so a new operation does not compile until it takes a row. `audit`,
+  admitted exactly where `diagnostics` is, takes the `reads` row. A recording
+  does not follow `screenshot`: the thread keeps it as an artifact, so its
+  start is refused in Plan and the call it wraps never runs.
+
 ## Page snapshot
 
 - `snapshot` returns a compact outline of the page: one line per heading, short
@@ -137,8 +178,8 @@ asking the agent.
 - **Recording a call.** `record: true` on `steps` or `flow-run` keeps a short
   animated PNG of the page while the call runs, as a thread capture the person
   can attach to a pull request; the model never receives the animation. It
-  needs a page already open and is admitted like a `screenshot`; a start that
-  is refused answers `recording-refused` with the refusal, and the call does
+  needs a page already open and is admitted like a `screenshot`, except that
+  Plan refuses it ([Plan mode](#plan-mode)); a start that is refused answers `recording-refused` with the refusal, and the call does
   not run. The call's answer carries `recording` (`captureId`, `frames`,
   `durationMs`, and `truncated` when a bound cut it short) or
   `recordingNotKept` with the reason. Starting and ending a recording leave
@@ -417,8 +458,8 @@ runs, not when it was recorded.
   does ([Results](#results)); a saved flow never holds a recording.
 - **Who may.** The thread's own agent in Work and Code saves, lists, and runs. A
   paired device may not save or run (a flow navigates and types, which it may
-  not), and Plan mode refuses every flow operation like every other Browser
-  operation. A routine or a subagent may run a flow, on a Private page only,
+  not), and Plan mode lists but refuses to save or run
+  ([Plan mode](#plan-mode)). A routine or a subagent may run a flow, on a Private page only,
   because the profile rules apply to each replayed step as to any call; it may
   not save one. A terminal grant has no flows. Chat has no Browser.
 - **Where flows live.** Flows are host data per Project, journaled as
@@ -520,7 +561,7 @@ runs, not when it was recorded.
     color scheme are refused there (`Browser automation control is already in
 use`), a size still applies. The person sees the page at the emulated size
     until it is restored. A paired device cannot resize or emulate, and Plan
-    mode refuses it like any other operation.
+    mode refuses it ([Plan mode](#plan-mode)).
 - Rationale: emulation is optional fields on `resize` rather than a separate
   operation. The operation already means "change how the page is sized, and
   restore it", it keeps one restore that undoes everything, and the model learns
@@ -845,7 +886,8 @@ frames are not recovered after host restart.
   or changes it; it takes no other argument, so no option can make it act. It
   is admitted exactly where `diagnostics` is: the thread's authority, the
   model binding, the origin approval, the person's hold, and Plan, which
-  refuses it as it refuses every page operation but `stop`. It may be a
+  admits it as it admits every read of the open page
+  ([Plan mode](#plan-mode)). It may be a
   step of a batch, a flow does not store it, and its answer carries no
   `changed` line. The page's address and title come back with it, so a
   snapshot's refs stay good. Like every read, it marks the thread as having
@@ -1138,14 +1180,14 @@ stale until the page is read again.
   truncation, ratings at the boundaries, layout-shift windows, blocking time,
   request types, address redaction, and what is not measured);
   `browserAppManagedTools.test.ts` the arguments, their refusals, and Plan
-  refusing an audit as it refuses diagnostics; `browserAutomationService.test.ts`
+  admitting an audit as it admits diagnostics; `browserAutomationService.test.ts`
   findings named by the latest snapshot's refs and a Browser that cannot audit
   refusing; and `browserRuntimeBroker.test.ts` the desktop broker admitting only
   a known audit. Against real Chromium, the smoke test above audits a fixture
   page (an unlabelled field found by its ref, contrast of 2.32:1, target size
   only under the phone preset, a ref still acting afterwards) and a fixture
   load (rated vitals, a long task, a layout shift, a redacted largest resource,
-  Plan refused), and the desktop real-page test finds each planted problem and
+  Plan not refusing it), and the desktop real-page test finds each planted problem and
   nothing on the clean elements, reads the load without reloading the
   document, and leaves the counters unread while someone else holds the
   developer tools.
@@ -1167,6 +1209,15 @@ stale until the page is read again.
   terminal grant, and the Project's page list.
 - The smoke test also records, saves, and replays a flow on a fresh page, stops
   at a renamed button, a different title, and an ambiguous element, asks again
-  for an origin a replay opens, and refuses Plan mode and a paired device.
+  for an origin a replay opens, refuses a save or a run in Plan mode and for a
+  paired device, and lists in Plan mode.
+- `browserAppManagedTools.test.ts` (Work) and `codeAppManagedTools.test.ts`
+  (Code) run one call of every operation in Plan from
+  `browserToolPlanCalls.test-support.ts`, keyed like `BROWSER_OPERATION_EFFECT`:
+  each read (`audit` included) runs on the open page without asking, each
+  refused operation reaches neither the page nor the person, a recorded batch
+  or replay is refused before anything runs, a batch stops at its first refused
+  step, and a read of a page the model was not approved for still asks.
+  `terminalBrowserGrantService.test.ts` covers a terminal read in Plan.
   `browserFlowService.test.ts` covers saving, replacing, listing, deleting,
   limits, replay of the journal, and erasing a Project.

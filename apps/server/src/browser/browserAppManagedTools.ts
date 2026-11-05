@@ -3,6 +3,7 @@ import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
 import {
   browserDownloadSavedResult,
+  browserOperationRefusedInPlan,
   browserToolAction,
   browserToolResult,
   browserToolWantsScreenshot,
@@ -194,7 +195,11 @@ export function createBrowserAppManagedTools(
       );
     }
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
-    if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
+    // Plan admits the reads of the page already open; every other gate below
+    // still applies to them.
+    if (options.executionPolicy === "plan" && browserOperationRefusedInPlan(input.operation)) {
+      return failure("plan-mode-read-only");
+    }
     let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
     // While the person signs in, the page is theirs: no other agent action
     // reaches it until they press Continue or the ask ends.
@@ -556,7 +561,9 @@ export function createBrowserAppManagedTools(
       return failure("browser-authority-stale");
     }
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
-    if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
+    if (options.executionPolicy === "plan" && browserOperationRefusedInPlan(input.operation)) {
+      return failure("plan-mode-read-only");
+    }
     return runBrowserFlowOperation(input, {
       flows,
       projectId: authority.projectId,

@@ -599,12 +599,12 @@ export function wireAutomation(deps: AutomationDependencies) {
   // A Code turn's routine tools ride the seam later areas use to add tools to
   // a Code turn; the Work turn adds the same tools where it composes its own.
   // Each run's own turn, which acts as the host, is refused proposals and
-  // change requests, and is the only turn handed its run to report on.
+  // change requests, and is the only turn handed its run to report on. Plan
+  // may propose a routine; a change request still reads the turn's posture.
   contributeCodeTools(({ windowId, thread, readThread, routineRun }) => {
     const turn = {
       windowId,
       thread: { id: String(thread.id), mode: "code" as const, projectId: String(thread.projectId) },
-      readPosture: () => readThread()?.executionPolicy ?? thread.executionPolicy,
       isAutomationOrigin: isRoutineHostScope(windowId),
       now: Date.now,
     };
@@ -612,6 +612,7 @@ export function wireAutomation(deps: AutomationDependencies) {
       createRoutineProposalTools({ ...turn, proposals: routineProposalService }),
       createRoutineTools({
         ...turn,
+        readPosture: () => readThread()?.executionPolicy ?? thread.executionPolicy,
         ...(routineRun === undefined ? {} : { routineRun }),
         routines: {
           hostId: LOCAL_HOST_ID,
@@ -691,7 +692,6 @@ export function wireAutomation(deps: AutomationDependencies) {
                     active: thread.lifecycle !== "archived",
                     providerInstanceId: String(thread.providerInstanceId),
                     modelId: String(thread.modelId),
-                    executionPolicy: thread.executionPolicy,
                     permissionPersistence: thread.permissionPersistence,
                     ...(thread.profileId === undefined
                       ? {}

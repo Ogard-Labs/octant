@@ -124,6 +124,7 @@ import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remot
 import type { PrincipalRouteContext } from "../principalRouteContext";
 import { CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
 import { GhPullRequestPort, type GhCommandPort } from "./ghPullRequestPort";
+import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { createCodeLanguageAgentTools } from "./codeLanguageAgentTools";
 import type { CodeLanguageAgentReadResult } from "./codeLanguageService";
 import {
@@ -2679,6 +2680,105 @@ describe("CodeOperationRuntime", () => {
     });
     expect(canvasRule(chosen.context)).toHaveLength(0);
     expect(chosen.start).toMatchObject({ nativeArtifacts: true });
+  });
+
+  it("lets a Plan turn create and revise the thread's Canvas, and offers no way to publish or share it", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const create = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      card: { canvasId: "canvas-1", versionId: "version-1" },
+    }));
+    const revise = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      receipt: { versionId: "version-2", sequence: 2 },
+    }));
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      supportsAppManagedTools: true,
+      canvas: ({ windowId: owner, thread: owning }) =>
+        createCanvasAgentTools({
+          windowId: owner,
+          mode: "code",
+          thread: {
+            id: String(owning.id),
+            projectId: String(owning.projectId),
+            providerInstanceId: owning.providerInstanceId,
+            modelId: owning.modelId,
+          },
+          port: {
+            activeContext: () => undefined,
+            project: async (_window, id) => ({ id, type: "code", lifecycle: "active" }),
+            canvas: {
+              create,
+              revise,
+              get: () => ({ kind: "unavailable" }),
+              threadReferenceCards: () => [],
+            } as never,
+            markReader: () => ({ status: "nothing-to-mark" }) as never,
+            uuid: randomUUID,
+            hostId: LOCAL_HOST_ID,
+            resolveWorkspace: () =>
+              ({
+                kind: "code-worktree",
+                projectId: String(owning.projectId),
+                repositoryId: "88888888-8888-4888-8888-888888888888",
+                worktreeId: "99999999-9999-4999-8999-999999999999",
+              }) as never,
+          },
+        }),
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    const blocks = [
+      {
+        blockId: "steps",
+        schemaVersion: 1,
+        kind: "diagram",
+        nodes: [
+          { nodeId: "read", label: "Read" },
+          { nodeId: "propose", label: "Propose" },
+        ],
+        edges: [{ edgeId: "then", source: "read", target: "propose" }],
+      },
+    ];
+    const calls = [
+      { operation: "create", title: "Plan", blocks },
+      { operation: "revise", canvasId: "canvas-1", expectedSequence: 1, blocks },
+      { operation: "publish", canvasId: "canvas-1" },
+      { operation: "share", canvasId: "canvas-1" },
+    ];
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1301),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      for (const [index, input] of calls.entries()) {
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-request",
+              requestId: `canvas-${String(index)}`,
+              toolName: "octant_canvas",
+              inputJson: JSON.stringify(input),
+            }),
+          ),
+        );
+      }
+      await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledTimes(calls.length));
+      const answers = vi.mocked(connection.answerTool).mock.calls.map(([answer]) => answer);
+      expect(answers.map((answer) => answer.isError === true)).toEqual([false, false, true, true]);
+      expect(create).toHaveBeenCalledOnce();
+      expect(revise).toHaveBeenCalledOnce();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
   });
 
   describe("Octant Shield answering a provider runtime's prompts", () => {
