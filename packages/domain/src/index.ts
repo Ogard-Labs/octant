@@ -1,6 +1,7 @@
 export * from "./browserAutomationPolicy";
 export * from "./browserDownloadPolicy";
 export * from "./browserPageSnapshot";
+export * from "./browserPageAudit";
 export * from "./browserCapturePolicy";
 export * from "./browserProofPolicy";
 export * from "./browserProfilePolicy";

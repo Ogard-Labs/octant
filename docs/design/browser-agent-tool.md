@@ -15,8 +15,9 @@ roots included), short results, hover, select, drag, key chords, upload,
 download (behind a person-only switch and an answer for every file), tabs,
 batched steps, waits, settling, dialogs, viewport size and device emulation
 (presets, touch, color scheme), the sign-in handoff, person and agent together
-(the person's input kept, Take over and Hand back), and diagnostics with a
-cursor are built on the headless and desktop Browsers. Flows (recording a run,
+(the person's input kept, Take over and Hand back), diagnostics with a
+cursor, and accessibility and performance audits are built on the headless
+and desktop Browsers. Flows (recording a run,
 saving it in the Project, and replaying it by name) are built in Work and Code;
 the person can list and delete a Project's flows in Settings, and runs one by
 asking the agent.
@@ -362,7 +363,7 @@ runs, not when it was recorded.
   successful operations since the page opened, at most 50. Each is stored as the
   operation would be written as a call (without the `expectedObservationRevision`
   and `include` that belong to one call). `snapshot`, `screenshot`, `read-page`,
-  `diagnostics`, `tab-list`, and `help` are not stored, and a failed or refused
+  `diagnostics`, `audit`, `tab-list`, and `help` are not stored, and a failed or refused
   operation is not stored. A ref is stored as the element's role and accessible
   name, with the snapshot's selector as a hint for a reader; the ref id is never
   stored, because it means nothing on a fresh page.
@@ -530,7 +531,7 @@ made active.
   renews the interval after authority, policy, revision/ref and credential
   checks, immediately before it reaches the runtime, and again when it finishes
   while the context is still live. Intentional agent reads, snapshots,
-  screenshots, waits, tab operations and diagnostics count, as navigation and
+  screenshots, waits, tab operations, diagnostics and audits count, as navigation and
   input do. A runtime failure after true admission is still a recent attempt;
   a refusal, a held call or a call waiting in the queue is not activity.
 - **The person's input counts.** Native keys and clicks, and the existing
@@ -659,8 +660,8 @@ other without saying so, and the server, not the pane, decides.
   agent action that clicks, types, presses a key, hovers, chooses, drags, or
   uploads is refused as `stale` and does not run, whether it names a ref or a
   selector, until the agent has taken a snapshot (a `snapshot` operation or an
-  `include` of one). Reading, waiting, scrolling, screenshots, diagnostics, tab
-  listing, and navigating still run. A snapshot that was already in flight when
+  `include` of one). Reading, waiting, scrolling, screenshots, diagnostics,
+  audits, tab listing, and navigating still run. A snapshot that was already in flight when
   the person typed does not clear it: it began before their input.
 - The desktop Browser enforces the same rule at its own action boundary, where
   the person's key is known the moment it lands, not a poll later: it refuses an
@@ -814,6 +815,159 @@ frames are not recovered after host restart.
   cursor answers the agent's real question, "what happened since I last
   looked", without that.
 
+## Page audits
+
+`audit` checks the open page the way a developer does while building it:
+`{"operation":"audit","kind":"accessibility"}` or `"kind":"performance"`.
+
+- **A read.** An audit reads the page in front and never navigates, reloads,
+  or changes it; it takes no other argument, so no option can make it act. It
+  is admitted exactly where `diagnostics` is: the thread's authority, the
+  model binding, the origin approval, the person's hold, and Plan, which
+  refuses it as it refuses every page operation but `stop`. It may be a
+  step of a batch, a flow does not store it, and its answer carries no
+  `changed` line. The page's address and title come back with it, so a
+  snapshot's refs stay good. Like every read, it marks the thread as having
+  read outside content, and its result stays on this computer: no telemetry,
+  no upload.
+- **The same reader in both Browsers.** The checks run in the shared page
+  reader (`readBrowserPage`), in the desktop Browser's isolated world and in
+  the headless page, and the server shapes what it read, so both Browsers
+  answer with the same rules, words, bounds, and redaction. A Browser that
+  cannot audit (an older desktop app) refuses with `unavailable` ("This
+  Browser cannot audit pages."), never an empty result that would read as a
+  clean page.
+- **Scope.** The top document and its open shadow roots. Frames are not
+  audited; the answer counts them in `framesNotAudited`.
+
+### Accessibility
+
+- Each finding has a `rule`, a `severity` (`serious` or `moderate`), the
+  host's own `message` (with the WCAG criterion), and the element: its `ref`
+  when the latest snapshot of this page gave it one, otherwise its `selector`
+  (left out when longer than 256 characters rather than shortened into
+  another), with its role and accessible name as the snapshot names them, or
+  its first 80 characters of text when it has no role. No field value is
+  read, so a credential field is named, never valued.
+- The rules:
+
+  | Rule                | Finds                                                                                                                     |
+  | ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+  | `image-alt`         | An image, image button, or `role="img"` with no text alternative; `alt=""` is decorative and passes                       |
+  | `button-name`       | A button with no accessible name                                                                                          |
+  | `link-name`         | A link with no accessible name                                                                                            |
+  | `field-name`        | A form field or custom field role with no label, `aria-label`, `aria-labelledby`, title, or placeholder                   |
+  | `document-title`    | A page with no title                                                                                                      |
+  | `document-lang`     | An `<html>` with no `lang`                                                                                                |
+  | `heading-order`     | A heading more than one level below the heading before it                                                                 |
+  | `duplicate-id-aria` | An id used more than once in its root when a label or an aria attribute points at it                                      |
+  | `color-contrast`    | Text under 4.5:1, or 3:1 for large text (24 px, or 18.66 px bold), over a background it can know                          |
+  | `focusable-hidden`  | An element in the tab order inside `aria-hidden="true"`                                                                   |
+  | `target-size`       | A touch target under 24 by 24 CSS pixels whose 24 px circle reaches another target, only while the page is a touch device |
+
+- A name counts from every source a browser uses that the reader can see:
+  `aria-labelledby`, `aria-label`, labels, title, placeholder, the default
+  name of a submit or reset button, the text of the content, alt text and
+  labels of descendants, an SVG's title, and CSS-generated text. Content that
+  is not drawn (`hidden`, `display: none`, `visibility: hidden`) or is
+  `aria-hidden` names nothing, so `<button><span hidden>Save</span></button>`
+  is unnamed; a label or `aria-labelledby` target that is itself hidden still
+  names, as browsers name from it. A finding is made only when every source
+  is empty, so the rule errs toward silence.
+- Elements not drawn, and elements hidden from assistive technology
+  (`aria-hidden`, or inside an `inert` subtree), are not checked for names,
+  heading order, or target size. Inline links in a sentence and browser-drawn checkboxes
+  and radios are exempt from target size, as WCAG 2.5.8 exempts them.
+- Contrast is judged only where the colours are known: solid background
+  colours composited up the element's ancestors onto the white page. Text over
+  a background image or gradient, with a text shadow, inside a positioned
+  element with no background of its own, on a dark page canvas, or with
+  colours in a space other than sRGB is counted in `contrastNotMeasured` and
+  not judged. So is text under a filter, blend mode, or partial opacity on
+  itself or on any ancestor, even when its own background is opaque: the
+  effect changes text and background together.
+  Disabled controls are exempt.
+- `target-size` runs only while the page reports a coarse pointer; otherwise
+  `notRun` names it with how to run it (`resize` with `preset` `phone` or
+  `touch` true).
+- **Bounds.** The reader reads at most 6,000 elements, in tree order, and
+  every rule looks only at those: an id or reference past the bound is not
+  read, so `duplicate-id-aria` counts holders among the elements read. At most 10 findings per
+  rule and 25 in all are listed, serious rules first; `found` counts every
+  rule's findings, listed or not, and `truncated` says when more exist or the
+  page was larger than the reader reads.
+
+### Performance
+
+- **What is measured.** The browser's own record of the load that made this
+  document: the navigation timing (`domContentLoadedMs`, `loadMs`, the type),
+  first contentful paint, the largest contentful paint and the element it
+  drew (by ref or selector, and its resource's address), layout shifts, long
+  tasks, and the resources the page fetched, all read through `buffered`
+  performance observers by fixed code; nothing is installed in the page. The
+  answer's `documentAgeMs` says how long ago that load began.
+- **Vitals.** `ttfb`, `fcp`, `lcp`, `cls` (the largest burst of shifts: less
+  than a second apart, at most five seconds, shifts after input left out), and
+  `tbt` (each long task after first contentful paint, past its first 50 ms,
+  up to the audit). Each is rated `good`, `needs-improvement`, or `poor`:
+
+  | Metric | Good up to | Poor above |
+  | ------ | ---------- | ---------- |
+  | TTFB   | 800 ms     | 1,800 ms   |
+  | FCP    | 1,800 ms   | 3,000 ms   |
+  | LCP    | 2,500 ms   | 4,000 ms   |
+  | CLS    | 0.1        | 0.25       |
+  | TBT    | 200 ms     | 600 ms     |
+
+- **Requests.** The count and transfer size of the document and every
+  resource, by type (`document`, `script`, `stylesheet`, `image`, `font`,
+  `fetch`, `media`, `other`), and the five largest by transfer size. A
+  resource's address is redacted exactly as diagnostics redacts one (no user
+  or password, no fragment, a secret-named query value reads `redacted`) and
+  capped at 1,024 characters. A cache hit, or a resource from another origin
+  that does not allow timing, transfers 0 bytes as the browser reports it.
+  Chromium keeps 250 resource entries; a list that full says `listFull`.
+- **The page now.** Live DOM nodes, script heap in use, and event listeners,
+  read with the debugging protocol's `Performance.getMetrics`, which the
+  audit enables and disables around the read. Its duration counters start when
+  the domain is enabled, so they are not reported. While someone else holds
+  the desktop page's developer tools these are not read.
+- **What is not measured,** in `notMeasured` with the reason: a metric the
+  page has not produced yet (no paint, load not finished), one the browser
+  does not report, the page counters when they could not be read, and always
+  `inp`.
+- **A fresh load is a navigation.** An audit never reloads. To measure a fresh
+  load the agent navigates to the page again, which the navigation rules
+  admit, and then audits.
+- Rationale: the browser already buffers every one of these entries from the
+  document's start, so reading them back measures the real load without
+  injecting an observer into every page or giving a read the power to reload.
+  INP is left out because Chromium does not record input sent through the
+  debugging protocol as interactions (measured: a 180 ms click handler driven
+  this way left no `event` or `first-input` entry), so it would read as "no
+  interaction" after the agent clicked; TBT is the lab stand-in. The protocol's
+  duration counters are left out because they read zero when enabled at the
+  audit (measured on headless Chromium 1243).
+
+### Rationale
+
+- One operation with a `kind` keeps the verb list short and the authority one
+  rule: both audits are reads of the page in front.
+- The accessibility checks run in the shared page reader rather than over the
+  browser's accessibility tree (`Accessibility.getFullAXTree`). A finding is
+  only actionable with the element's ref, and the reader computes the same
+  selector the snapshot keeps for each ref, so the server names a finding by
+  ref with no extra round trip. Mapping accessibility-tree nodes back to
+  snapshot refs needs a protocol round trip per node that differs between the
+  two Browsers, and the desktop Browser cannot reach the protocol while
+  someone else holds the page's developer tools. The reader instead looks
+  wider than the snapshot's own naming and reports only when every source is
+  empty.
+- Not shipped as unreliable: contrast over images, gradients, and layered
+  elements (counted, not guessed); the validity of a `lang` value; landmark
+  and region rules, which are advice rather than failures; INP and the
+  protocol's duration counters (above).
+
 ## Parallel threads
 
 Several threads of one Project may each drive their own page at the same time.
@@ -958,6 +1112,22 @@ stale until the page is read again.
   Playwright download stands in for Electron's `will-download` item. The cap
   while a file is still arriving is covered against a fake session item
   (`browserDownloadHold.test.ts`) because Electron is not present there.
+- Page audits: `packages/domain/src/browserPageAudit.test.ts` covers the
+  answer's shaping (refs by selector, per-rule and total caps with counts and
+  truncation, ratings at the boundaries, layout-shift windows, blocking time,
+  request types, address redaction, and what is not measured);
+  `browserAppManagedTools.test.ts` the arguments, their refusals, and Plan
+  refusing an audit as it refuses diagnostics; `browserAutomationService.test.ts`
+  findings named by the latest snapshot's refs and a Browser that cannot audit
+  refusing; and `browserRuntimeBroker.test.ts` the desktop broker admitting only
+  a known audit. Against real Chromium, the smoke test above audits a fixture
+  page (an unlabelled field found by its ref, contrast of 2.32:1, target size
+  only under the phone preset, a ref still acting afterwards) and a fixture
+  load (rated vitals, a long task, a layout shift, a redacted largest resource,
+  Plan refused), and the desktop real-page test finds each planted problem and
+  nothing on the clean elements, reads the load without reloading the
+  document, and leaves the counters unread while someone else holds the
+  developer tools.
 - `apps/server/src/browser/browserThreadOwnership.test.ts` covers one thread's
   page being out of reach of another thread, a subagent, and another thread's
   terminal grant, and the Project's page list.

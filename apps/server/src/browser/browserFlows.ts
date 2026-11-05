@@ -337,6 +337,7 @@ const UNSTORED_OPERATIONS: ReadonlySet<string> = new Set([
   "screenshot",
   "read-page",
   "diagnostics",
+  "audit",
   "tab-list",
   "help",
 ]);

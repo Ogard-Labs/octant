@@ -56,6 +56,7 @@ import {
 import {
   authorizeToolAction,
   browserCaptureTaker,
+  browserPageAuditResult,
   canRequestToolCancellation,
   browserProfileKey,
   browserContextExpiresAt,
@@ -1324,6 +1325,15 @@ export class BrowserAutomationService {
           "interrupted",
         );
       }
+      // A runtime that cannot audit (an older desktop app's Browser) answers
+      // the action without one; that is a refusal, not a clean page.
+      if (input.request.kind === "audit" && observed.audit === undefined) {
+        return this.#failure(
+          owned,
+          { category: "unavailable", message: "This Browser cannot audit pages." },
+          owned.status,
+        );
+      }
       const change = describeChange(
         input.request.kind,
         {
@@ -1371,6 +1381,21 @@ export class BrowserAutomationService {
         ...(observed.diagnosticsCursor === undefined
           ? {}
           : { diagnosticsCursor: observed.diagnosticsCursor }),
+        // Shaped here, so both Browsers answer with the same bounds and words,
+        // and a finding is named by the ref the latest snapshot of this page
+        // gave its element.
+        ...(observed.audit === undefined
+          ? {}
+          : {
+              audit: browserPageAuditResult(
+                observed.audit,
+                new Map(
+                  owned.refs !== undefined && owned.refs.url === observed.url
+                    ? [...owned.refs.byRef.values()].map((entry) => [entry.selector, entry.ref])
+                    : [],
+                ),
+              ),
+            }),
         revision: ++owned.observationRevision,
         observedAt: this.#clock() as BrowserObservation["observedAt"],
         stale: false,
@@ -3216,7 +3241,8 @@ function describeChange(
     kind === "extract-text" ||
     kind === "snapshot" ||
     kind === "screenshot" ||
-    kind === "observe-diagnostics"
+    kind === "observe-diagnostics" ||
+    kind === "audit"
   ) {
     return undefined;
   }

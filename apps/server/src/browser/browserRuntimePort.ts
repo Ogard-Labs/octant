@@ -25,7 +25,7 @@ import type {
   BrowserThreadId,
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
-import type { BrowserPageSnapshotRef } from "@octant/domain";
+import type { BrowserPageAuditReading, BrowserPageSnapshotRef } from "@octant/domain";
 import type {
   BrowserCredentialFillPreparation,
   BrowserCredentialNativeResult,
@@ -80,6 +80,8 @@ export interface BrowserRuntimeObservation {
     readonly seq?: number;
   }>;
   readonly diagnosticsCursor?: number;
+  /** Only an audit action fills this: what the fixed reader measured, before the server shapes it. */
+  readonly audit?: BrowserPageAuditReading;
   /** Downloads the page started while an action that allowed them ran. */
   readonly downloads?: ReadonlyArray<BrowserDownloadReport>;
 }
@@ -223,6 +225,7 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
       | "colorScheme"
       | "diagnosticsSince"
       | "diagnosticsWarnings"
+      | "auditKind"
     >
   > & {
     /**

@@ -42,6 +42,7 @@ const READ_ONLY_OPERATIONS: ReadonlySet<BrowserActionKind> = new Set([
   "snapshot",
   "screenshot",
   "observe-diagnostics",
+  "audit",
   "tab-list",
 ]);
 

@@ -19,6 +19,7 @@ import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/con
 import {
   BROWSER_RESIZE_BOUNDS,
   BrowserActionKind,
+  BrowserAuditKind,
   BrowserColorScheme,
   BrowserObservationPart,
   decodeBrowserWaitFor,
@@ -539,6 +540,7 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "colorScheme",
     "diagnosticsSince",
     "diagnosticsWarnings",
+    "auditKind",
     "downloads",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
@@ -567,6 +569,8 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     (value.diagnosticsSince === undefined ||
       (Number.isSafeInteger(value.diagnosticsSince) && (value.diagnosticsSince as number) >= 0)) &&
     (value.diagnosticsWarnings === undefined || typeof value.diagnosticsWarnings === "boolean") &&
+    (value.auditKind === undefined ||
+      (BrowserAuditKind.literals as ReadonlyArray<unknown>).includes(value.auditKind)) &&
     (value.viewport === undefined || isViewportSize(value.viewport)) &&
     (value.deviceScaleFactor === undefined ||
       (typeof value.deviceScaleFactor === "number" &&

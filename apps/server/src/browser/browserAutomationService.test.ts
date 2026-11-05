@@ -1203,6 +1203,83 @@ describe("BrowserAutomationService", () => {
     expect(afterNavigation.failure?.category).toBe("stale");
   });
 
+  it("answers an audit in its shaped form, naming a finding by the ref the latest snapshot gave its element", async () => {
+    const ingested = vi.fn(() => ({ kind: "recorded" as const }));
+    const { runtime, service } = harness({ recordExternalContentIngestion: ingested as never });
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    vi.mocked(runtime.act).mockResolvedValueOnce({
+      url: "https://example.com/start",
+      snapshot: '- textbox [ref=e1]\n- button "Save" [ref=e2]',
+      snapshotRefs: [
+        { ref: "e1", selector: "#name", role: "textbox", name: "" },
+        { ref: "e2", selector: "#save", role: "button", name: "Save" },
+      ],
+    });
+    await service.act({ windowId, request: request({ kind: "snapshot", target: undefined }) });
+    vi.mocked(runtime.act).mockResolvedValueOnce({
+      url: "https://example.com/start",
+      title: "Start",
+      audit: {
+        kind: "accessibility",
+        reading: {
+          findings: [
+            { rule: "field-name", selector: "#name", role: "textbox" },
+            {
+              rule: "color-contrast",
+              selector: "main > p",
+              text: "Faint",
+              detail: { ratio: 2.1, required: 4.5 },
+            },
+          ],
+          found: [
+            { rule: "field-name", count: 1 },
+            { rule: "color-contrast", count: 1 },
+          ],
+          touch: false,
+          contrastNotMeasured: 0,
+          frames: 0,
+          truncated: false,
+        },
+      },
+    });
+    const audited = await service.act({
+      windowId,
+      capturedBy: "agent",
+      request: request({ kind: "audit", target: undefined, auditKind: "accessibility" }),
+    });
+    expect(audited.failure).toBeUndefined();
+    expect(audited.observation?.change).toBeUndefined();
+    expect(audited.observation?.audit).toMatchObject({
+      kind: "accessibility",
+      findings: [
+        { rule: "field-name", ref: "e1" },
+        { rule: "color-contrast", selector: "main > p", text: "Faint" },
+      ],
+    });
+    // Reading the page as outside content marks the thread, as any read does.
+    expect(ingested).toHaveBeenCalledTimes(2);
+    // The audit changed nothing, so the snapshot's refs still act.
+    expect(service.snapshotRefs(windowId, threadOne).map((entry) => entry.ref)).toEqual([
+      "e1",
+      "e2",
+    ]);
+  });
+
+  it("refuses an audit the Browser cannot run rather than answering as if the page were clean", async () => {
+    const { service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const refused = await service.act({
+      windowId,
+      capturedBy: "agent",
+      request: request({ kind: "audit", target: undefined, auditKind: "performance" }),
+    });
+    expect(refused.failure).toEqual({
+      category: "unavailable",
+      message: "This Browser cannot audit pages.",
+    });
+    expect(refused.observation?.audit).toBeUndefined();
+  });
+
   it("refuses an upload that did not come with the agent tool's approved files", async () => {
     const { runtime, service } = harness();
     await service.create({ windowId, threadId: threadOne, action: action(), policy });

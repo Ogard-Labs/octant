@@ -776,6 +776,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       wait: { selector: "#go" },
       screenshot: {},
       diagnostics: {},
+      audit: { kind: "accessibility" },
       stop: {},
       help: {},
     };
@@ -792,6 +793,94 @@ describe("browser diagnostics reach the provider-facing result", () => {
         result: { error: "invalid-browser-input" },
       });
     }
+  });
+
+  it("asks the page for the audit it names and passes the shaped answer through", async () => {
+    const audit = {
+      kind: "accessibility",
+      findings: [
+        {
+          rule: "field-name",
+          severity: "serious",
+          message: "Form field has no label.",
+          ref: "e3",
+          role: "textbox",
+        },
+      ],
+      found: [{ rule: "field-name", count: 1 }],
+      notRun: [],
+      contrastNotMeasured: 0,
+      framesNotAudited: 0,
+      truncated: false,
+    };
+    const running = snapshot({
+      status: "running",
+      context: activeContext(),
+      observation: { revision: 4, audit } as never,
+    });
+    const act = vi.fn(async () => running);
+    const result = await toolsFor({ revision: 4, audit }, act).execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "audit", kind: "accessibility" }),
+    });
+    expect(act).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ kind: "audit", auditKind: "accessibility" }),
+      }),
+    );
+    expect(result).toMatchObject({ isError: false, result: { page: { audit } } });
+  });
+
+  it("refuses an audit that names no known audit or asks for more than the audit", async () => {
+    const act = vi.fn();
+    const tools = toolsFor({ revision: 1 }, act);
+    for (const input of [
+      { operation: "audit" },
+      { operation: "audit", kind: "seo" },
+      { operation: "audit", kind: "performance", include: ["snapshot"] },
+      { operation: "audit", kind: "performance", reload: true },
+    ]) {
+      const result = await tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify(input),
+      });
+      expect(result.result).toEqual({ error: "invalid-browser-input" });
+    }
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("refuses an audit in Plan exactly as it refuses diagnostics, before the page is asked", async () => {
+    const act = vi.fn(async () => snapshot());
+    const running = snapshot({ status: "running", context: activeContext() });
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "work",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy: "plan",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => running,
+        create: vi.fn(async () => running),
+        act,
+        releaseThread: vi.fn(async () => running),
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    for (const input of [
+      { operation: "diagnostics" },
+      { operation: "audit", kind: "performance" },
+    ]) {
+      const result = await tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify(input),
+      });
+      expect(result.result).toEqual({ error: "plan-mode-read-only" });
+    }
+    expect(act).not.toHaveBeenCalled();
   });
 
   it("omits the diagnostics rather than inventing an empty list", async () => {
@@ -1413,6 +1502,7 @@ describe("octant_browser flow operations", () => {
     for (const operation of ["snapshot", "screenshot", "read-page", "diagnostics", "tab-list"]) {
       expect(decide({ operation })).toBe("unstored");
     }
+    expect(decide({ operation: "audit", kind: "accessibility" })).toBe("unstored");
     expect(decide({ operation: "click", selector: "#go" })).toBe("stored");
     expect(decide({ operation: "upload", selector: "#f", files: ["a.pdf"] })).toBe(
       "needs-a-person",
