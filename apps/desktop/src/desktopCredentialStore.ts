@@ -7,6 +7,7 @@ import {
 import {
   makeKeychainCredentialPurgeStore,
   makeKeychainCredentialStore,
+  type KeychainServiceFamily,
 } from "./keychainCredentialStore";
 
 export type DesktopCredentialBackend =
@@ -87,42 +88,43 @@ export async function resolveDesktopCredentialBackend(options: {
   readonly platform: NodeJS.Platform;
   readonly keychainHelperPath: string;
   readonly storeScope: string;
+  readonly serviceFamily?: KeychainServiceFamily;
 }): Promise<DesktopCredentialBackend> {
   if (options.platform === "darwin") {
+    const keychain = {
+      storeScope: options.storeScope,
+      serviceFamily: options.serviceFamily ?? "octant",
+    } as const;
     return {
       kind: "keychain",
-      store: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
-      }),
-      purgeStore: makeKeychainCredentialPurgeStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
-      }),
+      store: makeKeychainCredentialStore(options.keychainHelperPath, keychain),
+      purgeStore: makeKeychainCredentialPurgeStore(options.keychainHelperPath, keychain),
       replicaDeviceKeys: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "replica-device-key",
       }),
       replicaStoreCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "replica-store-credential",
       }),
       canvasPublicShareSecrets: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "canvas-public-share-secret",
       }),
       mcpServerCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "mcp-server-credential",
       }),
       desktopProviderCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "desktop-provider-credential",
       }),
       pushPlatformCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "push-platform-credential",
       }),
       sshKeys: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "ssh-key",
       }),
     };

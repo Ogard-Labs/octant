@@ -13351,7 +13351,10 @@ macOS-only.
   Preview-only Nightly install row (packaged macOS Octant, person-started,
   feed signature, artifact hash and a Nightly-specific code requirement) are
   built; a signed install from a published Nightly build has not been
-  exercised, and the test-data host is not built yet. Identity and packaging foundations
+  exercised. The test-data host's startup (its own folder, port and Keychain
+  service names, decided once from Nightly's stored choice) is built; its
+  Settings choice and packaged host payload are not, so a person cannot yet
+  choose it. Identity and packaging foundations
   now stamp separate app flavors and restrict each packaged updater to its
   identity's rings. A separate authenticated native window bootstrap can load
   Nightly's own renderer with a short server-enforced lease. It never loads

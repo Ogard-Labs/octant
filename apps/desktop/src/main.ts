@@ -124,6 +124,7 @@ import type {
 } from "@octant/contracts/desktop-bridge";
 import { createAppUpdateService } from "./appUpdateService";
 import { createNightlyInstaller } from "./nightlyInstaller";
+import { refuseTestDataInsideOctantData, resolveStartupHostRole } from "./nightlyTestData";
 import {
   createPortableImagePort,
   defaultProcessIsAlive,
@@ -1222,11 +1223,36 @@ const applicationIdentity = app.isPackaged
   : desktopIdentity("stable");
 app.setName(applicationIdentity.productName);
 isolateEachCanvasFrameDocument(app.commandLine);
+// Decided once here from Nightly's stored Data choice, never from a renderer.
+const desktopHostRole = resolveStartupHostRole({
+  identity: applicationIdentity,
+  windowStorageDirectory: desktopWindowStorageDirectory(
+    applicationIdentity,
+    "",
+    app.getPath("appData"),
+  ),
+  appDataDirectory: app.getPath("appData"),
+  platform: process.platform,
+  env: process.env,
+});
+const desktopMayStartHost =
+  applicationIdentity.mayStartHost || desktopHostRole.kind === "test-host";
+if (desktopHostRole.kind === "test-host") {
+  const apart = refuseTestDataInsideOctantData({
+    role: desktopHostRole,
+    octantDataDirectory: resolveDesktopDataDirectory(undefined, app.getPath("appData")),
+    explicitDataDirectory: process.env.OCTANT_DATA_DIR,
+  });
+  if (apart.kind === "refused") throw new Error(apart.message);
+}
 const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
-  process.env.OCTANT_DATA_DIR,
+  process.env.OCTANT_DATA_DIR ??
+    (desktopHostRole.kind === "test-host" ? desktopHostRole.dataDirectory : undefined),
   app.getPath("appData"),
 );
 const desktopDataDirectory = desktopHostRuntimePaths.dataDirectory;
+const desktopKeychainServiceFamily =
+  desktopHostRole.kind === "test-host" ? desktopHostRole.keychainServiceFamily : "octant";
 const desktopHostId = deriveHostRuntimeHostId(desktopDataDirectory);
 app.setPath(
   "userData",
@@ -1555,6 +1581,7 @@ function getCredentialBackend(): Promise<DesktopCredentialBackend> {
       moduleUrl: import.meta.url,
     }),
     storeScope: desktopHostId,
+    serviceFamily: desktopKeychainServiceFamily,
   }).then((backend) => {
     return backend;
   });
@@ -1632,7 +1659,7 @@ async function resolveExistingHostAttachment() {
 }
 
 async function attachExistingLocalHost(): Promise<LocalHostDescriptor | undefined> {
-  if (!applicationIdentity.mayStartHost) {
+  if (!desktopMayStartHost) {
     throw new Error(
       "Needs a newer Octant. The stable desktop client bridge is not available in this build of Octant Nightly.",
     );
@@ -1696,7 +1723,7 @@ function browserProfilesDirectory(): string {
 }
 
 async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
-  if (!applicationIdentity.mayStartHost) {
+  if (!desktopMayStartHost) {
     throw new Error("Octant Nightly cannot start a host or migrate shared data.");
   }
   if (desktopHostLaunch !== undefined && desktopHostLaunch.state !== "closed") {
@@ -1715,7 +1742,12 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   );
   await prepareHostRuntimePaths(desktopHostRuntimePaths);
   const root = repositoryRoot();
-  const portReservation = await reserveLoopbackPort(resolveConfiguredServerPort());
+  const portReservation = await reserveLoopbackPort(
+    resolveConfiguredServerPort(
+      process.env,
+      desktopHostRole.kind === "test-host" ? desktopHostRole.serverPort : undefined,
+    ),
+  );
   const serverUrl = resolveManagedServerUrl({
     needsServerStart: true,
     activeServerUrl: undefined,
@@ -2988,9 +3020,10 @@ async function runMenuBarAction(
 
 export function resolveConfiguredServerPort(
   environment: Readonly<Record<string, string | undefined>> = process.env,
+  defaultPort = 13_773,
 ): number {
   const value = environment.OCTANT_SERVER_PORT;
-  if (value === undefined) return 13_773;
+  if (value === undefined) return defaultPort;
   const port = Number(value);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
     throw new Error("OCTANT_SERVER_PORT must be an integer between 1 and 65535");
@@ -3032,7 +3065,7 @@ function getOwnerUnlockKeyService(): OwnerUnlockKeyService | undefined {
       resourcesPath: process.resourcesPath,
       moduleUrl: import.meta.url,
     }),
-    { storeScope: desktopHostId },
+    { storeScope: desktopHostId, serviceFamily: desktopKeychainServiceFamily },
   );
   return ownerUnlockKeyService;
 }
@@ -3046,6 +3079,7 @@ function getHostIdentitySigningService(): HostIdentitySigningService {
     }),
     {
       storeScope: desktopHostId,
+      serviceFamily: desktopKeychainServiceFamily,
       expectedLegacyFingerprint: readPersistedHostIdentityFingerprint,
     },
   );

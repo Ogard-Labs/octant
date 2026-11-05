@@ -37,7 +37,12 @@ release workflow stamp the flavor from the ring, and the scheduled Nightly run
 alone is held by the functional-client preflight. The Octant Nightly row in
 Octant's Settings › Updates is built for packaged macOS Octant, including its
 three checks; a signed install from a published Nightly build has not yet been
-exercised. Nightly cannot yet run its own test-data host.
+exercised. The test-data host's startup is built: Nightly reads its stored
+Data choice once at launch and, with separate test data, runs Octant's
+host-owning desktop on its own folder, port and Keychain service names, refusing
+a folder that overlaps Octant's. Nightly's Settings choice, relaunch offer,
+removal control and Test data label, and the host payload in packaged Nightly,
+are not built, so a person cannot yet choose test data.
 
 ## Two apps, one set of data
 
@@ -120,6 +125,20 @@ never Octant's:
 - `OCTANT_DATA_DIR` and `OCTANT_SERVER_PORT` still override either app, as for
   a development build. Pointing Nightly's own host at Octant's folder that way
   is the developer's explicit choice and is not a supported configuration.
+- The choice is `data-choice.json` in Nightly's window storage. Only an exact
+  `{"data":"test-data"}` selects test data; a missing, oversized, linked or
+  malformed file means Octant's data. The main process reads it once at launch
+  and no renderer request changes the running role.
+- On Linux the test data lives in `$XDG_DATA_HOME/octant-nightly/test-data`
+  (default `~/.local/share`). Nightly refuses to start its test host when that
+  folder is, or lies inside, Octant's data folder, or contains it, unless
+  `OCTANT_DATA_DIR` set the folder explicitly.
+- The test host's macOS Keychain services are named
+  `app.octant.desktop.nightly.test-data.*` rather than `app.octant.*`. Because
+  Octant's unscoped legacy items live only under Octant's names, the helper's
+  legacy re-scoping can never claim one for test data.
+- Removal moves only the fixed test folder to the Trash, refuses while the test
+  host runs, and refuses a linked folder.
 
 ## Starting a closed Stable host
 

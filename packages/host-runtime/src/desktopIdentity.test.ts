@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeDesktopDataChoice,
+  desktopDataDirectoriesOverlap,
   desktopIdentity,
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
+  encodeDesktopDataChoice,
+  resolveDesktopHostRole,
   resolveDesktopPackageFlavor,
 } from "./desktopIdentity";
 
@@ -73,4 +77,79 @@ describe("desktop application identity", () => {
       expect(resolveDesktopPackageFlavor(environment, version)).toBe(flavor);
     },
   );
+
+  describe("Nightly's Data choice", () => {
+    const mac = { platform: "darwin" as const, home: "/Users/test", env: {} };
+
+    it("keeps Octant the owner of its own host whatever a stored choice says", () => {
+      expect(resolveDesktopHostRole(desktopIdentity("stable"), "test-data", mac)).toEqual({
+        kind: "octant-host",
+      });
+      expect(resolveDesktopHostRole(desktopIdentity("stable"), "octant", mac)).toEqual({
+        kind: "octant-host",
+      });
+    });
+
+    it("connects Nightly to Octant's host unless separate test data was chosen", () => {
+      expect(resolveDesktopHostRole(desktopIdentity("nightly"), "octant", mac)).toEqual({
+        kind: "octant-client",
+      });
+    });
+
+    it("gives Nightly's test host its own folder, port and Keychain services", () => {
+      expect(resolveDesktopHostRole(desktopIdentity("nightly"), "test-data", mac)).toEqual({
+        kind: "test-host",
+        dataDirectory: "/Users/test/Library/Application Support/Octant Nightly/Test Data",
+        serverPort: 13_774,
+        keychainServiceFamily: "octant-nightly-test-data",
+      });
+      expect(
+        resolveDesktopHostRole(desktopIdentity("nightly"), "test-data", {
+          platform: "linux",
+          home: "/home/test",
+          env: {},
+        }),
+      ).toMatchObject({ dataDirectory: "/home/test/.local/share/octant-nightly/test-data" });
+      expect(
+        resolveDesktopHostRole(desktopIdentity("nightly"), "test-data", {
+          platform: "linux",
+          home: "/home/test",
+          env: { XDG_DATA_HOME: "/data/xdg" },
+        }),
+      ).toMatchObject({ dataDirectory: "/data/xdg/octant-nightly/test-data" });
+    });
+
+    it.each([
+      undefined,
+      "",
+      "not json",
+      "[]",
+      "null",
+      '{"data":"octant"}',
+      '{"data":"Test-Data"}',
+      '{"data":"test-data","dataDirectory":"/Users/test/Library/Application Support/Octant"}',
+      '{"data":true}',
+    ])("reads a missing, malformed or unexpected choice %j as Octant's data", (raw) => {
+      expect(decodeDesktopDataChoice(raw)).toBe("octant");
+    });
+
+    it("reads back the choice it stores", () => {
+      expect(decodeDesktopDataChoice(encodeDesktopDataChoice("test-data"))).toBe("test-data");
+      expect(decodeDesktopDataChoice(encodeDesktopDataChoice("octant"))).toBe("octant");
+    });
+
+    it("finds an overlap only by whole path segments", () => {
+      const octant = "/Users/test/Library/Application Support/Octant";
+      expect(desktopDataDirectoriesOverlap(octant, octant)).toBe(true);
+      expect(desktopDataDirectoriesOverlap(`${octant}/Test Data`, octant)).toBe(true);
+      expect(desktopDataDirectoriesOverlap(octant, `${octant}/Test Data`)).toBe(true);
+      expect(desktopDataDirectoriesOverlap(`${octant}/../Octant/x`, octant)).toBe(true);
+      expect(
+        desktopDataDirectoriesOverlap(
+          "/Users/test/Library/Application Support/Octant Nightly/Test Data",
+          octant,
+        ),
+      ).toBe(false);
+    });
+  });
 });

@@ -73,23 +73,37 @@ const NAMESPACE_ID_FIELD = {
   "ssh-key": "credentialRef",
 } as const;
 
+/**
+ * Which set of Keychain service names the helper reaches. Nightly's own test
+ * host keeps its items under services of its own, so a sign-in made for test
+ * data never reads or replaces one of Octant's, and the helper's re-scoping of
+ * Octant's unscoped legacy items can never claim one for test data.
+ */
+export type KeychainServiceFamily = "octant" | "octant-nightly-test-data";
+
+/** The helper's only argument; Octant's own services take none. */
+export function keychainHelperArguments(family: KeychainServiceFamily = "octant"): string[] {
+  return family === "octant" ? [] : [`--service-family=${family}`];
+}
+
 export function keychainHelperSpec(
   helperPath: string,
   request: KeychainHelperRequest,
   storeScope: string,
   namespace: KeychainCredentialNamespace = "provider",
+  serviceFamily: KeychainServiceFamily = "octant",
 ): KeychainHelperSpec {
   if (namespace === "provider") {
     return {
       command: helperPath,
-      args: [],
+      args: keychainHelperArguments(serviceFamily),
       stdin: `${JSON.stringify({ version: 1, storeScope, ...request })}\n`,
     };
   }
   const { providerInstanceId, ...rest } = request;
   return {
     command: helperPath,
-    args: [],
+    args: keychainHelperArguments(serviceFamily),
     stdin: `${JSON.stringify({ version: 1, storeScope, namespace, [NAMESPACE_ID_FIELD[namespace]]: providerInstanceId, ...rest })}\n`,
   };
 }
@@ -100,6 +114,7 @@ interface MakeKeychainCredentialStoreOptions {
   readonly storeScope: string;
   readonly timeoutMs?: number;
   readonly namespace?: KeychainCredentialNamespace;
+  readonly serviceFamily?: KeychainServiceFamily;
 }
 
 export function makeKeychainCredentialStore(
@@ -132,6 +147,7 @@ export function makeKeychainCredentialStore(
       normalizedRequest,
       options.storeScope,
       options.namespace,
+      options.serviceFamily,
     );
     if (Buffer.byteLength(spec.stdin) > KEYCHAIN_HELPER_MAX_BYTES) {
       throw new CredentialStoreFailure("invalid");
@@ -170,10 +186,11 @@ export function keychainPurgeHelperSpec(
   helperPath: string,
   input: CredentialPurgeInput,
   storeScope: string,
+  serviceFamily: KeychainServiceFamily = "octant",
 ): KeychainHelperSpec {
   return {
     command: helperPath,
-    args: [],
+    args: keychainHelperArguments(serviceFamily),
     stdin: `${JSON.stringify({
       version: 1,
       operation: "purge",
@@ -222,6 +239,7 @@ export function makeKeychainCredentialPurgeStore(
             : { hostIdentityFingerprint: input.hostIdentityFingerprint }),
         },
         options.storeScope,
+        options.serviceFamily,
       );
       if (Buffer.byteLength(spec.stdin) > KEYCHAIN_HELPER_MAX_BYTES) {
         throw new CredentialPurgeFailure("failed");

@@ -221,12 +221,19 @@ export {
   type BrowserDownloadHoldKind,
 } from "./browserDownloadHold";
 export {
+  DESKTOP_DATA_CHOICE_FILE,
   DESKTOP_FLAVOR_IDENTITIES,
+  decodeDesktopDataChoice,
+  desktopDataDirectoriesOverlap,
   desktopIdentity,
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
+  encodeDesktopDataChoice,
+  resolveDesktopHostRole,
   resolveDesktopPackageFlavor,
+  type DesktopDataChoice,
   type DesktopFlavor,
+  type DesktopHostRole,
   type DesktopIdentity,
 } from "./desktopIdentity";
 
