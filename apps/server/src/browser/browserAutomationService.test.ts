@@ -1,4 +1,10 @@
 import { decodeBrowserPageScriptPreparation } from "@octant/contracts/browser-page-script";
+import { Schema } from "effect";
+import { HubMemberId, UtcTimestamp } from "@octant/contracts";
+import {
+  decodeOwnerBrowserControlId,
+  OwnerBrowserNativeTarget,
+} from "@octant/contracts/owner-browser";
 function importPlanId() {
   const result = decodeBrowserPageScriptPreparation({
     status: "prepared",
@@ -84,6 +90,8 @@ function request(overrides: Partial<BrowserActionRequest> = {}): BrowserActionRe
 
 function harness(
   options: {
+    readonly authority?: ToolActionAuthority;
+    readonly ownerControl?: BrowserRuntimePort["ownerControl"];
     readonly access?: boolean;
     readonly pageScriptPolicy?: ConstructorParameters<
       typeof BrowserAutomationService
@@ -107,6 +115,7 @@ function harness(
   const timers: Array<{ delay: number; run: () => void }> = [];
   let now = Date.parse("2026-07-27T20:00:00.000Z");
   const runtime: BrowserRuntimePort = {
+    ...(options.ownerControl === undefined ? {} : { ownerControl: options.ownerControl }),
     available: vi.fn(async () => true),
     nativeAvailable: vi.fn(async () => true),
     createContext: vi.fn(async (contextId) => void contexts.add(contextId)),
@@ -161,7 +170,7 @@ function harness(
         revokedThreads.has(threadId)
           ? undefined
           : threadId === threadOne
-            ? authorityOne
+            ? (options.authority ?? authorityOne)
             : threadId === threadTwo
               ? authorityTwo
               : undefined,
@@ -202,6 +211,234 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it.each([
+    { mode: "work" as const, unattended: false, dedicated: false },
+    { mode: "code" as const, unattended: true, dedicated: false },
+    { mode: "code" as const, unattended: false, dedicated: true },
+  ])(
+    "does not offer an owner target for excluded resource %j",
+    async ({ mode, unattended, dedicated }) => {
+      const authority = { ...authorityOne, mode };
+      const ownerControl = vi.fn<NonNullable<BrowserRuntimePort["ownerControl"]>>(async () => ({
+        status: "refused",
+      }));
+      const f = harness({ authority, unattended, ownerControl });
+      vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+        f.contexts.add(id);
+        return "native-live";
+      });
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(authority),
+        policy,
+        dedicated,
+      });
+      const host = f.service.ownerBrowserHost({
+        hostMemberId: () =>
+          Schema.decodeUnknownSync(HubMemberId)("a7880000-0000-4000-8000-000000000001"),
+        threadTitle: () => "Synthetic task",
+      });
+      expect(await host.targets()).toEqual([]);
+      expect(ownerControl).not.toHaveBeenCalled();
+      await f.service.close();
+    },
+  );
+
+  it("does not let an old delayed native release hand back a successor's person hold", async () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const authority = { ...authorityOne, mode: "code" as const };
+    const target = Schema.decodeUnknownSync(OwnerBrowserNativeTarget)({
+      targetVersion: "a".repeat(64),
+      documentRevision: 1,
+      origin: "https://example.com",
+    });
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const firstId = decodeOwnerBrowserControlId("a7880000-0000-4000-8000-000000000002");
+    const secondId = decodeOwnerBrowserControlId("a7880000-0000-4000-8000-000000000003");
+    const ownerControl = vi.fn<NonNullable<BrowserRuntimePort["ownerControl"]>>(async (command) => {
+      if (command.operation === "inspect") return { status: "target", target };
+      if (command.operation === "claim") return { status: "claimed" };
+      if (command.operation === "release") {
+        if (command.controlId === firstId) {
+          entered.resolve();
+          await release.promise;
+        }
+        return { status: "released" };
+      }
+      return { status: "refused" };
+    });
+    const f = harness({ authority, ownerControl });
+    try {
+      vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+        f.contexts.add(id);
+        return "native-live";
+      });
+      await f.service.create({ windowId, threadId: threadOne, action: action(authority), policy });
+      const host = f.service.ownerBrowserHost({
+        hostMemberId: () =>
+          Schema.decodeUnknownSync(HubMemberId)("a7880000-0000-4000-8000-000000000001"),
+        threadTitle: () => "Synthetic task",
+      });
+      const page = (await host.targets())[0]?.target;
+      if (page === undefined) throw new Error("Expected native page");
+      expect(
+        await host.claim(
+          page,
+          firstId,
+          "First owner",
+          Schema.decodeUnknownSync(UtcTimestamp)(new Date(now + 60_000).toISOString()),
+        ),
+      ).toBe(true);
+      const old = host.release(page, firstId, "hand-back");
+      await entered.promise;
+      clock.mockReturnValue(now + 61_000);
+      expect(
+        await host.claim(
+          page,
+          secondId,
+          "Second owner",
+          Schema.decodeUnknownSync(UtcTimestamp)(new Date(now + 120_000).toISOString()),
+        ),
+      ).toBe(true);
+      release.resolve();
+      await old;
+      expect(f.service.inspectThread(windowId, threadOne).ownerController?.name).toBe(
+        "Second owner",
+      );
+      expect(f.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("take-over");
+    } finally {
+      release.resolve();
+      await f.service.close();
+      clock.mockRestore();
+    }
+  });
+
+  it("keeps the person hold when revocation overlaps a delayed native handback", async () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const authority = { ...authorityOne, mode: "code" as const };
+    const target = Schema.decodeUnknownSync(OwnerBrowserNativeTarget)({
+      targetVersion: "a".repeat(64),
+      documentRevision: 1,
+      origin: "https://example.com",
+    });
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const revokeRelease = Promise.withResolvers<void>();
+    const firstId = decodeOwnerBrowserControlId("a7880000-0000-4000-8000-000000000002");
+    let releases = 0;
+    const ownerControl = vi.fn<NonNullable<BrowserRuntimePort["ownerControl"]>>(async (command) => {
+      if (command.operation === "inspect") return { status: "target", target };
+      if (command.operation === "claim") return { status: "claimed" };
+      if (command.operation === "release") {
+        if (releases++ === 0) {
+          entered.resolve();
+          await release.promise;
+        } else {
+          await revokeRelease.promise;
+        }
+        return { status: "released" };
+      }
+      return { status: "refused" };
+    });
+    const f = harness({ authority, ownerControl });
+    try {
+      vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+        f.contexts.add(id);
+        return "native-live";
+      });
+      await f.service.create({ windowId, threadId: threadOne, action: action(authority), policy });
+      const host = f.service.ownerBrowserHost({
+        hostMemberId: () =>
+          Schema.decodeUnknownSync(HubMemberId)("a7880000-0000-4000-8000-000000000001"),
+        threadTitle: () => "Synthetic task",
+      });
+      const page = (await host.targets())[0]?.target;
+      if (page === undefined) throw new Error("Expected native page");
+      expect(
+        await host.claim(
+          page,
+          firstId,
+          "First owner",
+          Schema.decodeUnknownSync(UtcTimestamp)(new Date(now + 60_000).toISOString()),
+        ),
+      ).toBe(true);
+      const old = host.release(page, firstId, "hand-back");
+      await entered.promise;
+      const revoke = host.release(page, firstId, "revoke");
+      release.resolve();
+      await old;
+      expect(f.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("take-over");
+      revokeRelease.resolve();
+      await revoke;
+    } finally {
+      release.resolve();
+      revokeRelease.resolve();
+      await f.service.close();
+      clock.mockRestore();
+    }
+  });
+
+  it("keeps a person hold when native owner release is refused and combines request and resource lifetimes", async () => {
+    const authority = { ...authorityOne, mode: "code" as const };
+    const target = Schema.decodeUnknownSync(OwnerBrowserNativeTarget)({
+      targetVersion: "a".repeat(64),
+      documentRevision: 1,
+      origin: "https://example.com",
+    });
+    const started = Promise.withResolvers<AbortSignal>();
+    const settle = Promise.withResolvers<void>();
+    const ownerControl = vi.fn<NonNullable<BrowserRuntimePort["ownerControl"]>>(
+      async (command, signal) => {
+        if (command.operation === "inspect") return { status: "target", target };
+        if (command.operation === "claim") return { status: "claimed" };
+        if (command.operation === "release") return { status: "refused" };
+        if (command.operation === "frame") {
+          started.resolve(signal);
+          await settle.promise;
+        }
+        return { status: "refused" };
+      },
+    );
+    const f = harness({ authority, ownerControl });
+    vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+      f.contexts.add(id);
+      return "native-live";
+    });
+    await f.service.create({ windowId, threadId: threadOne, action: action(authority), policy });
+    const host = f.service.ownerBrowserHost({
+      hostMemberId: () =>
+        Schema.decodeUnknownSync(HubMemberId)("a7880000-0000-4000-8000-000000000001"),
+      threadTitle: () => "Synthetic Code task",
+    });
+    const page = (await host.targets())[0]?.target;
+    if (page === undefined) throw new Error("Expected eligible native page");
+    const id = decodeOwnerBrowserControlId("a7880000-0000-4000-8000-000000000002");
+    expect(
+      await host.claim(
+        page,
+        id,
+        "Synthetic owner phone",
+        Schema.decodeUnknownSync(UtcTimestamp)(new Date(Date.now() + 60_000).toISOString()),
+      ),
+    ).toBe(true);
+    expect(f.service.inspectThread(windowId, threadOne).ownerController?.name).toBe(
+      "Synthetic owner phone",
+    );
+    expect(await host.release(page, id, "hand-back")).toEqual({ status: "refused" });
+    expect(f.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("take-over");
+    const caller = new AbortController();
+    const pending = host.frame(page, id, 1, caller.signal);
+    const signal = await started.promise;
+    await f.service.close();
+    expect(caller.signal.aborted).toBe(false);
+    expect(signal.aborted).toBe(true);
+    settle.resolve();
+    await pending;
+  });
   it("rechecks Full access after native realm preparation and cancels the unstarted script when revoked", async () => {
     let full = true;
     const f = harness({ pageScriptPolicy: () => (full ? "full-access" : "approval-gated") });

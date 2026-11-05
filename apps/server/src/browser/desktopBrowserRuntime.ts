@@ -1,4 +1,8 @@
 import {
+  decodeOwnerBrowserNativeResult,
+  type OwnerBrowserNativeCommand,
+} from "@octant/contracts/owner-browser";
+import {
   decodeBrowserPageScriptPreparation,
   type BrowserPageScriptNativeCommand,
 } from "@octant/contracts/browser-page-script";
@@ -217,6 +221,16 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
         planId,
         expiresAt,
       }),
+    );
+  }
+
+  async ownerControl(command: OwnerBrowserNativeCommand, signal: AbortSignal) {
+    return decodeOwnerBrowserNativeResult(
+      await this.#request<unknown>(
+        "/v1/contexts/owner-control",
+        command,
+        AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
+      ),
     );
   }
 

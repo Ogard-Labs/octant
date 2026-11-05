@@ -2,6 +2,11 @@ import { decodeBrowserPageScriptPlanId } from "@octant/contracts/browser-page-sc
 import { describe, expect, it, vi } from "vitest";
 import { startBrowserRuntimeBroker } from "./browserRuntimeBroker";
 import { BrowserNavigationBlockedError, BrowserTargetStaleError } from "./browserSurfaceHost";
+import { createBrowserSurfaceHost } from "./browserSurfaceHost";
+import type {
+  OwnerBrowserNativeCommand,
+  OwnerBrowserNativeResult,
+} from "@octant/contracts/owner-browser";
 
 const contextId = "10000000-0000-4000-8000-000000000001";
 
@@ -54,6 +59,79 @@ function host() {
 }
 
 describe("BrowserRuntimeBroker", () => {
+  it("cancels queued owner input on a complete POST disconnect and refuses untyped or unauthenticated native requests", async () => {
+    const base = createBrowserSurfaceHost({
+      createView: () => {
+        throw new Error("This transport fixture opens no native page");
+      },
+    });
+    const entered = Promise.withResolvers<AbortSignal | undefined>();
+    const waiting = Promise.withResolvers<void>();
+    let starts = 0;
+    const settled = Promise.withResolvers<void>();
+    const surface = {
+      ...base,
+      ownerControl: vi.fn(
+        async (
+          _command: OwnerBrowserNativeCommand,
+          signal?: AbortSignal,
+        ): Promise<OwnerBrowserNativeResult> => {
+          entered.resolve(signal);
+          await waiting.promise;
+          if (!signal?.aborted) starts += 1;
+          settled.resolve();
+          return signal?.aborted ? { status: "refused" } : { status: "input", effect: "completed" };
+        },
+      ),
+    };
+    const broker = await startBrowserRuntimeBroker(surface);
+    const body = {
+      operation: "input",
+      contextId,
+      owner: { windowId: contextId, threadId: contextId },
+      controlId: contextId,
+      sequence: 2,
+      expectedFrame: 1,
+      input: { kind: "type", text: "synthetic-only" },
+    };
+    const abort = new AbortController();
+    const pending = fetch(request(broker.url, broker.token, body, "v1/contexts/owner-control"), {
+      signal: abort.signal,
+    }).catch(() => undefined);
+    try {
+      const signal = await entered.promise;
+      abort.abort();
+      await pending;
+      await vi.waitFor(() => expect(signal?.aborted).toBe(true));
+      waiting.resolve();
+      await settled.promise;
+      expect(starts).toBe(0);
+      expect(
+        (
+          await broker.fetchForTest(
+            request(broker.url, "wrong-token", body, "v1/contexts/owner-control"),
+          )
+        ).status,
+      ).toBe(401);
+      expect(
+        (
+          await broker.fetchForTest(
+            request(
+              broker.url,
+              broker.token,
+              { ...body, input: { kind: "evaluate", source: "1+1" } },
+              "v1/contexts/owner-control",
+            ),
+          )
+        ).status,
+      ).toBe(400);
+      expect(surface.ownerControl).toHaveBeenCalledOnce();
+    } finally {
+      waiting.resolve();
+      await pending;
+      await broker.close();
+    }
+  });
   it("keeps a normally completed HTTP preparation current for its subsequent execute request", async () => {
     const surface = host();
     let preparationSignal: AbortSignal | undefined;

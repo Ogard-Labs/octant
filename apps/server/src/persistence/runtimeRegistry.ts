@@ -1,4 +1,8 @@
 import {
+  OWNER_BROWSER_AUDIT_EVENT,
+  OwnerBrowserAuditRecord,
+} from "@octant/contracts/owner-browser";
+import {
   registerThreadMessageQueueEvents,
   ThreadMessageQueueProjection,
 } from "../messageQueue/threadMessageQueuePersistence";
@@ -673,6 +677,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(HUB_MEMBERSHIP_CHANGED, 1, HubMembershipChangedPayload)
+    .register(OWNER_BROWSER_AUDIT_EVENT, 1, OwnerBrowserAuditRecord)
     .register(HUB_DELEGATION_RECORDED, 1, HubDelegationRecordedPayload)
     .register(REMOTE_SERVER_GRANT_OPENED, 1, RemoteServerGrantOpenedPayload)
     .register(REMOTE_SERVER_GRANT_CLOSED, 1, RemoteServerGrantClosedPayload)

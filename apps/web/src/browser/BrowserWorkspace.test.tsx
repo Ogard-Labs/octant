@@ -1216,6 +1216,36 @@ describe("BrowserWorkspace", () => {
       expect(screen.getByText("You have the page")).toBeInTheDocument();
     });
 
+    it("names the active owner and reclaims locally without handing the page back to the agent", async () => {
+      const browser = holdingClient();
+      const local = decodeBrowserAutomationSnapshot({
+        status: "running",
+        threadId,
+        context,
+        evidence: [],
+        waitingForPerson: "take-over",
+      });
+      vi.mocked(browser.inspectThread).mockResolvedValue(
+        decodeBrowserAutomationSnapshot({
+          ...local,
+          ownerController: {
+            name: "Synthetic owner phone",
+            expiresAt: "2026-11-04T12:01:00.000Z",
+          },
+        }),
+      );
+      browser.takeOver = vi.fn(async () => {
+        vi.mocked(browser.inspectThread).mockResolvedValue(local);
+        return local;
+      });
+      await renderHeadless(browser);
+      expect(await screen.findByText("Owner: Synthetic owner phone")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Reclaim locally" }));
+      expect(browser.takeOver).toHaveBeenCalledWith({ threadId });
+      expect(await screen.findByText("You have the page")).toBeInTheDocument();
+      expect(browser.handBack).not.toHaveBeenCalled();
+    });
+
     it("offers no Take over without a page, with a client that cannot, or under the agent's sign-in ask", async () => {
       const bare = client();
       vi.mocked(bare.inspectThread).mockResolvedValue({

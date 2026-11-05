@@ -159,7 +159,8 @@
     "./browser-credential-use": "./src/browserCredentialUse.ts",
     "./credential-request": "./src/credentialRequest.ts",
     "./command-credentials": "./src/commandCredentials.ts",
-    "./browser-page-script": "./src/browserPageScript.ts"
+    "./browser-page-script": "./src/browserPageScript.ts",
+    "./owner-browser": "./src/ownerBrowser.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

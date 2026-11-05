@@ -328,7 +328,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // they hand it back. The server decides; this only shows it.
   const personHasPage = activeContext && snapshot?.waitingForPerson === "take-over";
   const driverLabel = personHasPage
-    ? "You have the page"
+    ? snapshot?.ownerController === undefined
+      ? "You have the page"
+      : `Owner: ${snapshot.ownerController.name}`
     : !nativeContext
       ? "Preview"
       : nativeSurface.failed
@@ -1109,6 +1111,21 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           >
             <Undo2 aria-hidden="true" />
             <span className="browser-workspace__take-over-label">Hand back</span>
+          </OctantButton>
+        ) : null}
+        {activeContext &&
+        snapshot?.ownerController !== undefined &&
+        props.client.takeOver !== undefined ? (
+          <OctantButton
+            aria-label="Reclaim locally"
+            className="browser-workspace__take-over"
+            onClick={() => void holdPage("take-over")}
+            size="xs"
+            title="Stop remote owner control and keep the page held locally"
+            type="button"
+            variant="secondary"
+          >
+            Reclaim locally
           </OctantButton>
         ) : null}
         {activeContext &&

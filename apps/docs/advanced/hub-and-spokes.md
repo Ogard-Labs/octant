@@ -232,6 +232,12 @@ action, for at most 60 seconds. A second action asks again. An unlock that was
 used, that ran out, or that was for a different action is refused, and the
 screen says so in plain words. If you cancel the unlock, nothing changes.
 
+Owner Browser control uses one such fresh unlock for one selected open Code
+Private page, with a maximum 60-second control lease. Each frame and input stays
+signed by the same owner device; the lease grants no administration powers.
+Stopping it does not resume the agent. See [Use an open page from an owner
+browser](browser-and-computer-use.md#use-an-open-page-from-an-owner-browser).
+
 **Phone.** The phone makes an unlock key when it joins with an owner code. Its
 private half is kept only in the phone's secure storage and opens only after you
 unlock. This is a narrower protection than a hardware key: the key is not bound

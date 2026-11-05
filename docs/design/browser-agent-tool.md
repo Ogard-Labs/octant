@@ -722,6 +722,70 @@ other without saying so, and the server, not the pane, decides.
   window's, adds no remote surface for the gateway to list, and means a phone
   can never lock the agent out of the desktop's page. A paired device that
   wants the agent to stop can stop the turn, as it can today.
+
+### Owner control of an open Code page
+
+An enrolled owner has a separate signed control path. It does not widen the
+ordinary paired-device routes above. The first supported resource is an
+already-open, visible native Code Private page in its original local window.
+Work, Chat, dedicated pages, routine/subagent scopes, stored profiles, embedded
+or hidden views, and headless pages are refused. Listing targets exposes only
+the exact thread, site and controller metadata, under owner administration
+consent. It exposes neither page content nor a local window capability.
+
+Taking over always needs a fresh own-class unlock bound to that selected host,
+thread, context, document and origin-policy version. An administration session
+cannot authorize it. One controller receives at most 60 seconds, measured from
+admission with an absolute native deadline. Every subsequent request is signed
+by that original owner identity, uses a one-use sequence, and revalidates owner
+list/key/device status, task/window authority and the native target. A control
+ID alone grants nothing. A changed document, active tab or viewport refuses
+old coordinates; the person must select and unlock the current target again.
+
+The owner uses a closed touch-tap/touch-scroll/key/text operation set. Native
+mouse dispatch cannot stand in for a tap: the supported Electron runtime emits
+the same reclaim event for a dispatched mouse click as for local mouse input.
+Fixed touch dispatch preserves local mouse/key reclaim without suppressing it.
+There is no URL,
+selector, JavaScript, arbitrary protocol, transfer, profile or credential-broker
+operation. Page navigation remains inside the task's existing reviewed origins;
+owner input does not add origins. Device-local authenticators, popups, unsupported
+pages and cross-origin sign-in paths may require **Finish on the host Mac**.
+
+Frames are volatile, person-only JPEG responses, at most 1920 by 1200 and
+4 MiB of JPEG bytes, with bounded base64/JSON transport. They can contain credentials.
+They never enter agent observations, captures, artifacts, journal, export or
+logs. The native source must still be visible and current after capture.
+Private fill/script custody blocks owner frame/input admission, including an
+acquire-and-release interval overlapping a late frame. Owner control likewise
+blocks private fill/script acquisition and agent observations; an earlier
+agent capture cannot publish after a control interval has ended.
+
+The local toolbar names the active owner and offers **Reclaim locally**. Local
+input immediately invalidates remote control at the native boundary. **Stop
+remote control**, lease expiry and disconnect do not resume the agent: the
+existing person hold remains. Closing or hiding the owner view aborts pending
+requests and sends a bounded, signed stop without another unlock. An unreachable
+host may retain its finite lease until expiry; instantaneous network-disconnect
+revocation is not promised. A sent input can have a possible effect and is never
+automatically retried. Only an explicitly confirmed **Hand back** releases the
+person hold and requires the agent's fresh reading before acting again.
+A handback is confirmed only while the native controller is still current, so
+after local input reclaims the page a remote **Hand back** is refused and the
+person hold stays. An input still awaiting its native result prevents a
+confirmed handback, another controller and agent observations on that page. A transport failure is not proof
+that input stopped; an unsettled native input keeps those operations refused.
+Host-observed membership and journaled device/resource changes revalidate the
+current controller and abort its queued requests before input admission. This
+does not promise atomic revocation across a disconnected host or an effect that
+has already started.
+
+The journal records only bounded authority/effect metadata with the actual
+`owner-unlock` petitioner. Its service envelope is `system`, not a fabricated
+local user. Typed values, origins, frames and signing material are absent, and
+thread purge removes these thread-owned records. The live controller and
+frames are not recovered after host restart.
+
 - Rationale: reusing the sign-in hold keeps one place that decides the page is
   the person's, so every agent path (Work, Code, a batch's steps, an action
   that waited on an approval) already checks it. The refusal names a different

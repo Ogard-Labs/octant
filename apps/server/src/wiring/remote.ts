@@ -1,5 +1,7 @@
 import { CodeService } from "../code/codeService";
 import { randomUUID } from "node:crypto";
+import { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
+import { createOwnerBrowserJournal } from "../browser/ownerBrowserJournal";
 import { homedir } from "node:os";
 import {
   AgentRunParentThreadId,
@@ -10,6 +12,7 @@ import {
   decodeThreadMessageQueueScope,
   decodeWorkThreadId,
   LOCAL_HOST_ID,
+  HubMemberId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
@@ -169,7 +172,13 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
     | "providerService"
   > &
   Pick<WorkspaceWiring, "shellService" | "projectService"> &
-  Pick<BrowserWiring, "browserExtensionService" | "browserFlowService" | "browserProfileService"> &
+  Pick<
+    BrowserWiring,
+    | "browserAutomationService"
+    | "browserExtensionService"
+    | "browserFlowService"
+    | "browserProfileService"
+  > &
   Pick<
     CodeToolingWiring,
     | "debugConfigurationApprovals"
@@ -214,6 +223,7 @@ function deviceIsActive(
 
 export function wireRemote(deps: RemoteDependencies) {
   const {
+    browserAutomationService,
     browserExtensionService,
     browserFlowService,
     browserProfileService,
@@ -443,7 +453,8 @@ export function wireRemote(deps: RemoteDependencies) {
   };
   const hubStateStore = createHubStateStore(providerDataDirectory);
   const hubTransport = createPinnedHubTransport();
-  const recordHubMembership = createHubMembershipJournal({
+  let ownerBrowserAuthorityChanged: (() => void) | undefined;
+  const writeHubMembership = createHubMembershipJournal({
     journal: persistence.journal,
     connection: persistence.connection,
     hostId: () => String(resolveHubIdentity().hostId),
@@ -451,6 +462,13 @@ export function wireRemote(deps: RemoteDependencies) {
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
   });
+  const recordHubMembership = (change: Parameters<typeof writeHubMembership>[0]): void => {
+    try {
+      writeHubMembership(change);
+    } finally {
+      ownerBrowserAuthorityChanged?.();
+    }
+  };
   const hubPairing = (): HubPairingPort | undefined => {
     const gateway = currentRemoteGateway;
     const administration = gateway?.localDeviceAdministration();
@@ -897,7 +915,36 @@ export function wireRemote(deps: RemoteDependencies) {
     now: Date.now,
   });
   const peerCredentialRoutes = createPeerCredentialRouteHandler({ copy: ownerCredentialCopy });
+  const ownerBrowserControlService = new OwnerBrowserControlService({
+    host: browserAutomationService.ownerBrowserHost({
+      hostMemberId: () => Schema.decodeUnknownSync(HubMemberId)(hubService.hubMemberId()),
+      threadTitle: (threadId) => {
+        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        return thread?.lifecycle === "active" ? thread.title : undefined;
+      },
+    }),
+    now: Date.now,
+    timestamp: () => new Date().toISOString(),
+    uuid: randomUUID,
+    onReclaim: (listener) => browserAutomationService.onOwnerControlReclaimed(listener),
+    onAuthorityChange: (listener) => {
+      ownerBrowserAuthorityChanged = listener;
+      const removeCommitted = persistence.journal.subscribeCommitted(listener);
+      return () => {
+        if (ownerBrowserAuthorityChanged === listener) ownerBrowserAuthorityChanged = undefined;
+        removeCommitted();
+      };
+    },
+    audit: createOwnerBrowserJournal({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      localActorId: OCTANT_LOCAL_ACTOR_ID,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    }),
+  });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
+    browser: ownerBrowserControlService,
     hub: hubService,
     spoke: spokeLinkService,
     unlock: ownerUnlock,
@@ -1273,6 +1320,7 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
   });
   return {
+    ownerBrowserControlService,
     composeHostDiagnostics,
     delegationAdministrationRoutes,
     externalContentRoutes,

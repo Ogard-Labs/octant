@@ -227,3 +227,5 @@ export * from "./unifiedDiff";
 export * from "./browserCredentialUsePolicy";
 
 export * from "./browserPageScriptPolicy";
+
+export * from "./ownerBrowserPolicy";
