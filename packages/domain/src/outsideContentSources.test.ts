@@ -27,6 +27,8 @@ const RECORDED_LABELS: ReadonlyArray<string> = [
   "github-issues",
   "github-pull-requests",
   "github-projects",
+  "github-pull-request",
+  "github-search",
   "linear-issue",
   "mcp-tool",
   "planner-proposal",
@@ -64,6 +66,7 @@ const RECORDED_LABELS: ReadonlyArray<string> = [
   // Recorded by tools since folded into others; their marks still replay.
   "octant_thread_message",
   "octant_web_research",
+  "octant_zen",
   "octant_zen_search_threads",
   "octant_zen_pin_thread",
 ];

@@ -34,7 +34,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
-| [App-managed tools](#app-managed-tools)                                               | 2         | 2       | 0            | 0                   |
+| [App-managed tools](#app-managed-tools)                                               | 5         | 5       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **224**   | **190** | **31**       | **3**               |
+| **All areas**                                                                         | **226**   | **192** | **31**       | **3**               |
 
 ## Principles and hard lines
 
@@ -432,6 +432,38 @@ Browser and Computer are tools, not mentions. The host offers them on every elig
 - "Always allow" remembers an origin only through the approval answer, covers Private pages only, and a Project or Personal profile remembers the (origin, profile) pair.
 
 Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
+
+### GitHub reads for Code agents
+
+A Code thread's agent reads its Project's delivery repository through one read-only family, `octant_github`: lists of issues, pull requests and projects, one issue or pull request in detail, and a search of issues and pull requests.
+
+- The host fixes the repository to the thread's delivery target; no input names a repository, host, endpoint or flag, and a field an operation does not take is refused. A search keeps only `author:` and `#number` qualifiers and always carries the server's own `repo:`.
+- Every call re-checks the thread's binding, its tool constraints and the read's GitHub capability on a fresh snapshot, and changes nothing on GitHub.
+- Pages hold 1 to 30 rows; a size outside that is refused, not clamped. An issue's body is cut to 8 KB and each comment to 2 KB, only the newest ten comments come back, and every cut is stated (`bodyTruncated`, `truncated`, `commentsOmitted`).
+- A successful read is journaled as outside content before the model sees it, and withheld when it cannot be.
+
+Status: Built. Since: —. Detail: [Architecture: Reading GitHub](../architecture.md#modes-chat-work-and-code).
+
+### Zen assistant tool
+
+Zen's assistant arranges its window's Zen space through one family, `octant_zen`, offered only to the Chat thread bound as that space's assistant.
+
+- `get-space` returns the space's version and each element's id and layout, never element content, so a model can make its first change.
+- Every change names the version it applies to; an out-of-date one changes nothing and the conflict carries the current version.
+- `create-widget` offers only the kinds it creates (Notes, Checklist, Timer); a recipe widget exists only after the person confirms a preview.
+- Labels journaled under the seven tools it replaced (`octant_zen_*`) still read.
+
+Status: Built. Since: —. Detail: [Architecture: Zen assistant tool](../architecture.md#zen-assistant-tool).
+
+### One web search
+
+Octant has one web search definition, `web-search`, offered to every Chat provider while the thread's research is on and its route searches through SearXNG, and by the native harness in every mode where its research or network grant allows.
+
+- A harness Chat thread gets it once, from the harness; the turn adds no second copy.
+- A missing, empty or over-long query is invalid and searches nothing; no other text stands in for it.
+- A successful result marks the thread as having read outside content. The harness's tainted-query refusal applies to harness threads, as before, and not to a Chat thread on another provider.
+
+Status: Built. Since: —. Detail: [Architecture: Web search](../architecture.md#web-search).
 
 ## Canvas authority
 
@@ -2415,6 +2447,7 @@ Status: Built. Since: —. Detail: [Terminal Browser grant: Current behavior](te
 
 On a tainted thread the harness refuses a web search query that looks like it carries data, before any request leaves.
 
+- It applies to every `web-search` call the harness's tool-call policy decides, a harness Chat thread's included, since that thread's only search is the harness's own.
 - Refused patterns include long text, URLs, email addresses, long hex runs, escaped bytes, base64 and high-entropy tokens.
 - It is a guard, not a privacy rule: the person lowers it with the outside-content gate by choosing Full access for a thread or a Project's new threads, so at Full access in Work and Code the query is not refused and the mark is only recorded.
 

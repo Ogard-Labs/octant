@@ -31,7 +31,10 @@ asks you to review one.
 
 Web means `web-fetch`, plus `web-search` once a SearXNG search endpoint is
 set. A Chat thread gets neither, and cannot open a page, until you turn
-research on for it.
+research on for it. `web-search` is the same search a Chat thread on any
+other provider uses while its research searches through SearXNG, so the
+model sees one search tool, never two. A search with no query is refused
+rather than run on your message.
 
 `context-remaining`, `second-opinion`, and `journal-lookup` are offered in
 every mode and reach none of those. `journal-lookup` re-reads earlier

@@ -682,10 +682,10 @@ never remembered.
 
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
-`octant_browser`, `octant_computer`, `octant_threads` in Work and Code, and in
-Code `octant_terminal`, `octant_apple`, `octant_android`, and
-`octant_pull_request` — with its actions
-in an `operation` enum. The always-visible tool prefix stays small and
+`octant_browser`, `octant_computer`, `octant_threads` in Work and Code, in
+Code `octant_terminal`, `octant_apple`, `octant_android`, `octant_pull_request`,
+and `octant_github`, and for Zen's assistant `octant_zen` — with its actions in
+an `operation` enum. The always-visible tool prefix stays small and
 cache-stable, so a family's description says only what an agent must know
 before its first call, and its `help` operation returns the full usage on
 demand. The managed tool set answers help from the family's own static text
@@ -2725,6 +2725,39 @@ CI or reviewers should be woken, not left polling).
   switch or a watch is on, through the host's `gh` login. It is not a routine
   and needs no hosted service; a stopped host observes nothing.
 
+**Reading GitHub (`octant_github`).** A Code thread's agent reads the
+repository its Project delivers to through one read-only family, offered to
+Code threads on a provider that carries app-managed tools while the GitHub
+integration is effective and the thread's tool constraints allow it. The host
+fixes the repository to the thread's delivery target; no input names a
+repository, host, endpoint, or flag, and an input field an operation does not
+take is refused rather than ignored.
+
+- **Operations.** `issues`, `pull-requests`, and `projects` list rows (number,
+  title, state, author, last update, link) newest first. `issue` reads one
+  issue or pull request by number in detail: labels, body, and the newest ten
+  comments of its conversation, never review comments or a diff. `search`
+  finds issues and pull requests in that repository whose title or body match
+  a query of at most 160 characters; the server composes the search, always
+  with its own `repo:` qualifier, and keeps only `author:` and `#number` from
+  the query's terms, so a search never leaves the repository. `help` returns
+  the full usage without reaching GitHub.
+- **Bounds.** A page is 1 to 30 rows (20 by default), and a size outside that
+  is refused as invalid input rather than clamped; further pages follow an
+  opaque cursor bound to the same read. In `issue`, the body is cut to 8 KB and
+  each comment to 2 KB, each marked truncated when cut, and `commentsOmitted`
+  counts the older comments left out, so a cut is always stated.
+- **Authority.** Every call re-checks the thread (same binding, still active),
+  its profile's tool constraints, and the GitHub capability for that read on a
+  fresh snapshot before anything is read: `issues-read` for `issues`, `issue`,
+  and `search`, which go through GitHub's Issues endpoints that serve pull
+  requests too, `pull-requests-read` for `pull-requests`, and `projects-read`
+  for `projects`. It changes nothing on GitHub. A successful read is journaled
+  as outside content (`github-issues`, `github-pull-requests`,
+  `github-projects`, `github-issue`, `github-pull-request`, or
+  `github-search`) before the model receives it, and a read that cannot be
+  journaled is withheld.
+
 **Delivery (publishing to a user-owned target) is dormant.** The ship service
 and its journaled events exist, but the host wires no target source, no
 artifact observer that saw a build produced, and no issuer of the per-act
@@ -3725,6 +3758,41 @@ still decodes, and the group draws nothing for a turn that called no tool. This
 changes rendering and recording only; Chat's and Work's authority, and Work's
 shell posture, are unchanged.
 
+### Web search
+
+Octant has one web search, `web-search` (`WEB_SEARCH_TOOL_DEFINITION`): one
+name, one argument schema, and one result shape wherever a model meets it. It
+searches the SearXNG endpoint in Chat settings for a query of 1 to 512
+characters and returns that query with each result's title, URL, and snippet,
+5 results unless the call asks for 1 to 10. It opens no page.
+
+- **Where.** A Chat thread is offered it on every provider while its research
+  is on and its research route is ready through SearXNG; a provider-native
+  route uses the provider's own search instead. The native harness offers the
+  same definition as its own tool in Work and Code, and in Chat under the
+  same research grant ([Native harness](#native-harness)). A harness Chat
+  thread gets it once, from the harness's own tool set: the turn adds no second
+  copy beside it.
+- **Invalid queries.** A call with a missing, empty, blank, or over-long query
+  is refused as `invalid-query` and searches nothing. It never stands in
+  other text for the query: Chat's earlier search, `octant_web_research`,
+  searched the person's whole prompt when the query was missing, sending text
+  they never meant as a query to the search service. A search the endpoint
+  does not answer comes back to the model as `search-failed` rather than
+  ending the turn.
+- **Outside content.** A successful result marks the thread as having read
+  outside content. On a harness thread the call also passes the harness's
+  tool-call policy, which refuses a tainted thread's query that looks like it
+  carries data ([Search queries on a tainted thread](design/search-query-taint.md));
+  a Chat thread on another provider searches through its research route, as
+  its search did before, without that refusal.
+- **Rationale for the name.** `web-search` was already the harness's tool, with
+  its policy, Plan rule, and outside-content label keyed to it. Giving every
+  Chat provider that name, rather than keeping `octant_web_research` beside it,
+  is what lets a harness Chat thread carry one search instead of two, one of
+  which skipped the taint rule. The earlier label `octant_web_research` still
+  reads in a journaled outside-content list.
+
 ## Workspace shell
 
 [Workspace behavior](design/workspace.md) owns navigation, Projects, panes,
@@ -3732,6 +3800,38 @@ content tabs, dock tools, and their presentation lifecycle. [DESIGN.md](../DESIG
 owns their visual treatment. Those current specifications replace the earlier
 shell and visual-language migration descriptions; server authority and durable
 state remain owned by the architectural sections here.
+
+### Zen assistant tool
+
+Zen's assistant arranges the Zen space in front of its window through one
+family, `octant_zen`, offered only to the Chat thread bound as that space's
+assistant on that window ([Workspace](design/workspace.md)); no other thread,
+and no other window's space, is reachable through it.
+
+- **Operations.** `get-space` returns the space's version, its dimming and
+  element opacity, and each element's id, kind, title, geometry, stacking, and
+  whether it is minimized, and nothing of what a note, checklist, or pinned
+  thread says. `search-threads` finds threads this window can open, and
+  `pin-thread` pins one as a card. `create-widget` adds an empty Notes,
+  Checklist, or Timer widget, the only kinds it can create; a recipe widget
+  comes only from `preview-recipe`, whose preview creates nothing until the
+  person confirms it in Zen, expires after ten minutes or when the space
+  changes, and is limited to four open at once. `place-element` moves,
+  resizes, focuses, minimizes, restores, or removes an element, and
+  `update-appearance` changes dimming and element opacity. `help` returns the
+  full usage without touching the space.
+- **Versions.** Every change names the version it applies to
+  (`expectedVersion`) and returns the new one. A change against an out-of-date
+  version changes nothing and comes back as a `conflict` carrying the space's
+  current version, so a model reads the space again and retries rather than
+  failing blind. `get-space` is how a model learns the version and element ids
+  before its first change.
+- **Authority.** The host decides every call against the window's own space and
+  the assistant binding; input naming a window or space is refused. A timer
+  runs at most eight hours (25 minutes by default).
+  A successful result is journaled as outside content under `octant_zen`; the
+  seven tools it replaced were journaled under their own `octant_zen_*` names,
+  which still read.
 
 ## Persistence
 
@@ -6850,6 +6950,9 @@ the model at another size.
   configured SearXNG endpoint). A Chat thread gets them only while its
   research is on, because research is its grant to reach the web; Work and
   Code need no such grant, and a child gets them only with network authority.
+  `web-search` is Octant's one search definition, the one a Chat thread on
+  any other provider is offered too ([Web search](#web-search)), so a harness
+  Chat thread carries it once.
   `context-remaining` and `second-opinion` are offered to the lead in every
   mode and reach no file, shell, or network of the thread: `context-remaining`
   reads the thread's own capacity snapshot, and `second-opinion` sends only

@@ -7,6 +7,7 @@ import {
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import {
   CANVAS_DELIVERY_INSTRUCTIONS,
   offersCanvasTool,
@@ -17,6 +18,7 @@ import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNati
 import { createHash } from "node:crypto";
 import {
   ActorId,
+  WEB_SEARCH_TOOL_DEFINITION,
   CONTEXT_COMPACTION_EVENT_NAMES,
   CorrelationId,
   EventId,
@@ -251,7 +253,8 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createDiagnosticsFailureIncidentEvent } from "../diagnosticsExportService";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
 import { ChatScratchStore } from "./chatScratchStore";
-import { ChatTurnRunner, RESEARCH_TOOL_DEFINITION, type AppManagedToolSet } from "./chatTurnRunner";
+import { ChatTurnRunner, type AppManagedToolSet } from "./chatTurnRunner";
+import { createWebSearchTools } from "./research/webSearchTools";
 import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
@@ -275,7 +278,7 @@ import {
 } from "../context/inheritedExternalContentMark";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 
-const RESEARCH_TOOL_NAME = "octant_web_research";
+const RESEARCH_TOOL_NAME = WEB_SEARCH_TOOL_DEFINITION.name;
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
 const THREAD_ID_IN_USE_MESSAGE = "That thread ID is already in use.";
 /**
@@ -4110,10 +4113,11 @@ export class ChatService {
     const computerTools = carriesAppTools
       ? this.#resolveComputerUseTools?.({ thread, windowId: executionContext.windowId })
       : undefined;
+    const searchTools = this.#webSearchTools(thread, researchRoute, hostAppTools);
     const appManagedTools =
-      computerTools === undefined
+      computerTools === undefined && searchTools === undefined
         ? hostAppTools
-        : combineAppManagedToolSets(hostAppTools, computerTools);
+        : combineAppManagedToolSets(searchTools, hostAppTools, computerTools);
     const resolvedExtensions =
       preResolvedExtensions ??
       (await this.#resolveExtensionContext(
@@ -4122,18 +4126,12 @@ export class ChatService {
         extensionPhase,
         executionContext?.windowId,
       ));
-    const reservedResearchTools =
-      thread.researchEnabled &&
-      researchRoute.kind === "ready" &&
-      researchRoute.backend === "searxng"
-        ? 1
-        : 0;
     const tools = this.#mergeToolSets(
       appManagedTools,
       resolvedExtensions.toolSet,
-      MAX_PROVIDER_TOOLS - reservedResearchTools,
+      MAX_PROVIDER_TOOLS,
     );
-    this.#preflightChatTurn(probe, thread, attachments, researchRoute, tools);
+    this.#preflightChatTurn(probe, thread, attachments, tools);
     const providerFacts = await this.#resolveProviderContextFacts(
       driver,
       probe,
@@ -5109,11 +5107,38 @@ export class ChatService {
     );
   }
 
+  /**
+   * Octant's web search for a turn whose research searches through SearXNG,
+   * or nothing. A harness thread is already offered the same `web-search` by
+   * its own tool set, under the harness's tool-call policy and its rules for
+   * a tainted thread's queries, so it is not given a second copy.
+   */
+  #webSearchTools(
+    thread: ChatThread,
+    researchRoute: ResearchRouteDecision,
+    hostAppTools: AppManagedToolSet | undefined,
+  ): AppManagedToolSet | undefined {
+    if (!thread.researchEnabled) return undefined;
+    if (researchRoute.kind !== "ready" || researchRoute.backend !== "searxng") return undefined;
+    if (hostAppTools?.definitions.includes(WEB_SEARCH_TOOL_DEFINITION) === true) return undefined;
+    const tools = createWebSearchTools(researchRoute.execute);
+    const record = this.#recordExternalContentIngestion;
+    // What a search returns was written by others, so a result marks the
+    // thread as the harness's own search does.
+    return record === undefined
+      ? tools
+      : taintAppManagedToolResults({
+          tools,
+          threadId: thread.id,
+          recordExternalContentIngestion: record,
+          uuid: this.#uuid,
+        });
+  }
+
   #preflightChatTurn(
     probe: ProviderProbeResult,
     thread: ChatThread,
     attachments: ReadonlyArray<ProviderAttachmentInput>,
-    researchRoute: ResearchRouteDecision,
     appManagedTools?: AppManagedToolSet,
   ): void {
     const model = probe.models.find((candidate) => String(candidate.id) === String(thread.modelId));
@@ -5140,26 +5165,13 @@ export class ChatService {
         }),
       );
     }
-    const researchTools =
-      thread.researchEnabled &&
-      researchRoute.kind === "ready" &&
-      researchRoute.backend === "searxng"
-        ? [RESEARCH_TOOL_DEFINITION]
-        : [];
-    const tools = [...researchTools, ...(appManagedTools?.definitions ?? [])];
-    if (new Set(tools.map(({ name }) => name)).size !== tools.length) {
-      throw new ChatServiceError({
-        category: "invalid",
-        message: "Selected extension tool names collide with available research tools.",
-      });
-    }
     const rejected = validateChatTurnInput(
       {
         sessionId: decodeProviderSessionId(this.#uuid()),
         prompt: "preflight",
         context: [],
         attachments: [...attachments],
-        tools,
+        tools: [...(appManagedTools?.definitions ?? [])],
       },
       {
         ...probe.capabilities,
@@ -5951,7 +5963,6 @@ export class ChatService {
               reservationId,
               estimatedTokens: input.prepared.context.snapshot.next.plan.plannedInputTokens,
               attachments: input.prepared.attachments,
-              researchEnabled: input.thread.researchEnabled,
               ...nativeSetupOption(
                 sessionNativeSetup(this.#persistence, {
                   providerInstanceId,

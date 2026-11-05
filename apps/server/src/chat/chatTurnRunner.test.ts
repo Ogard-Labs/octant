@@ -23,6 +23,7 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { ChatTurnRunner } from "./chatTurnRunner";
+import { createWebSearchTools } from "./research/webSearchTools";
 
 const now = "2026-07-19T22:00:00.000Z";
 const providerInstanceId = decodeProviderInstanceId("82000000-0000-4000-8000-000000000003");
@@ -204,7 +205,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -273,7 +273,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -349,7 +348,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -430,7 +428,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
@@ -475,14 +472,14 @@ describe("ChatTurnRunner", () => {
             kind: "tool-request",
             sessionId,
             requestId: "tool-1",
-            toolName: "octant_web_research",
+            toolName: "web-search",
             inputJson: JSON.stringify({ query: "Octant" }),
           } as never);
           yield* Queue.offer(queue, {
             kind: "tool-request",
             sessionId,
             requestId: "tool-2",
-            toolName: "octant_web_research",
+            toolName: "web-search",
             inputJson: JSON.stringify({ query: "Octant architecture" }),
           } as never);
           yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Done" } as never);
@@ -536,13 +533,13 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: true,
           researchRoute: {
             kind: "ready",
             backend: "searxng",
             attribution: "SearXNG",
             execute: executeResearch,
           },
+          appManagedTools: createWebSearchTools(executeResearch),
           attachments: [],
           signal: controller.signal,
           persistAttempt: () => Effect.void,
@@ -604,7 +601,7 @@ describe("ChatTurnRunner", () => {
             kind: "tool-request",
             sessionId,
             requestId: "tool-1",
-            toolName: "octant_web_research",
+            toolName: "web-search",
             inputJson: JSON.stringify({ query: "Octant" }),
           } as never);
           yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Done" } as never);
@@ -641,7 +638,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           onHarnessRetry: () => seen.push("retrying"),
@@ -709,7 +705,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             appManagedTools: {
@@ -795,7 +790,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           appManagedTools: {
@@ -880,7 +874,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             appManagedTools: {
@@ -962,7 +955,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             signal: controller.signal,
@@ -1044,7 +1036,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
@@ -1121,7 +1112,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -1183,7 +1173,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -1255,7 +1244,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -1329,7 +1317,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
@@ -1393,7 +1380,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
@@ -1463,7 +1449,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             signal: controller.signal,
@@ -1546,7 +1531,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: (next) => {
@@ -1633,7 +1617,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           ...(record === undefined
@@ -1783,7 +1766,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           signal: controller.signal,
@@ -1869,7 +1851,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -1969,7 +1950,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: (next) => {
@@ -2107,7 +2087,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               appManagedTools: {
@@ -2239,7 +2218,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           appManagedTools: {
@@ -2345,7 +2323,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: () => Effect.void,
@@ -2440,7 +2417,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: (next) => {
@@ -2523,7 +2499,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -2611,7 +2586,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -2714,7 +2688,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: () => Effect.void,
@@ -2809,7 +2782,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             clock: () => at(nowMs),
@@ -3042,7 +3014,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -3131,7 +3102,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: true,
           researchRoute: researchRoute({ backend: "searxng" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -3215,7 +3185,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -3346,7 +3315,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: true,
           researchRoute: researchRoute({ backend: "searxng" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -3454,7 +3422,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: true,
           researchRoute: researchRoute({ backend: "searxng" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -3539,7 +3506,6 @@ describe("ChatTurnRunner", () => {
               bytes,
             },
           ],
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           persistAttempt: () => Effect.void,
           persistAppendedResponse: () => Effect.void,
@@ -3556,7 +3522,7 @@ describe("ChatTurnRunner", () => {
     expect(sent[0]?.attachments[0]?.bytes).toEqual(bytes);
   });
 
-  it("omits the app-managed research tool for provider-native routes", async () => {
+  it("offers no web search for a provider-native route and answers a call to it as unavailable", async () => {
     const sent: Array<{ readonly tools: ReadonlyArray<{ readonly name: string }> }> = [];
     const answeredTools: Array<{ readonly isError: boolean; readonly resultJson: string }> = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
@@ -3570,7 +3536,7 @@ describe("ChatTurnRunner", () => {
             kind: "tool-request",
             sessionId,
             requestId: "unexpected-native-tool",
-            toolName: "octant_web_research",
+            toolName: "web-search",
             inputJson: JSON.stringify({ query: "should not execute" }),
           } as never);
           yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Done" } as never);
@@ -3616,7 +3582,6 @@ describe("ChatTurnRunner", () => {
           reservationId: reservation,
           estimatedTokens: 100,
           attachments: [],
-          researchEnabled: true,
           researchRoute: researchRoute({ backend: "provider-native" }),
           persistAttempt: () => Effect.void,
           persistAppendedResponse: () => Effect.void,
@@ -3634,7 +3599,7 @@ describe("ChatTurnRunner", () => {
     expect(answeredTools).toEqual([
       expect.objectContaining({
         isError: true,
-        resultJson: JSON.stringify({ error: "research-unavailable" }),
+        resultJson: JSON.stringify({ error: "tool-unavailable" }),
       }),
     ]);
   });
@@ -3661,8 +3626,12 @@ describe("ChatTurnRunner", () => {
             kind: "tool-request",
             sessionId,
             requestId: "zen-request-1",
-            toolName: "octant_zen_pin_thread",
-            inputJson: JSON.stringify({ catalogRef: "chat:exact", expectedVersion: 2 }),
+            toolName: "octant_zen",
+            inputJson: JSON.stringify({
+              operation: "pin-thread",
+              catalogRef: "chat:exact",
+              expectedVersion: 2,
+            }),
           } as never;
           yield* Queue.offer(queue, request);
           yield* Queue.offer(queue, request);
@@ -3703,13 +3672,12 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           appManagedTools: {
             definitions: [
               {
-                name: "octant_zen_pin_thread",
+                name: "octant_zen",
                 inputSchema: { type: "object", properties: {}, required: [] },
               },
             ],
@@ -3727,7 +3695,7 @@ describe("ChatTurnRunner", () => {
       ),
     );
 
-    expect(sent[0]?.tools.map((tool) => tool.name)).toEqual(["octant_zen_pin_thread"]);
+    expect(sent[0]?.tools.map((tool) => tool.name)).toEqual(["octant_zen"]);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(answerTool).toHaveBeenCalledTimes(1);
     expect(answerTool).toHaveBeenCalledWith({
@@ -3812,7 +3780,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             mode: "resume",
@@ -3903,7 +3870,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           mode: "resume",
@@ -3993,7 +3959,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -4082,7 +4047,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -4160,7 +4124,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -4249,7 +4212,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: nextReservationId(),
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               clock: () => new Date(nowMs).toISOString(),
@@ -4341,7 +4303,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               signal: controller.signal,

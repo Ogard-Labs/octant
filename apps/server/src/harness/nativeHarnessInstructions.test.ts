@@ -38,16 +38,20 @@ describe("native harness instructions", () => {
     "octant_side_chat_list_files",
     "octant_side_chat_read_file",
     "octant_side_chat_search_files",
-    "octant_web_research",
-    "octant_zen_search_threads",
-    "octant_zen_pin_thread",
-    "octant_zen_list_widgets",
-    "octant_zen_create_widget",
-    "octant_zen_preview_recipe",
-    "octant_zen_place_element",
-    "octant_zen_update_appearance",
+    "octant_zen",
   ])("says what %s is for only in a turn that offers it", (name) => {
     expect(nativeHarnessToolGuide([name])).toMatch(new RegExp(`^- ${name}: \\S`, "m"));
     expect(nativeHarnessToolGuide(["octant_canvas"])).not.toContain(name);
+  });
+
+  it("has no line for a tool name that is no longer offered", () => {
+    expect(
+      nativeHarnessToolGuide([
+        "octant_web_research",
+        "octant_zen_search_threads",
+        "octant_zen_list_widgets",
+        "octant_zen_create_widget",
+      ]),
+    ).toBeUndefined();
   });
 });
