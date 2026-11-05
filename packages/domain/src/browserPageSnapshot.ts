@@ -156,6 +156,25 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       (element.getAttribute("contenteditable") ?? "false").toLowerCase() !== "false"
     );
   };
+  // The parent an element is drawn inside: the slot it is assigned to, else
+  // its parent, else the host of the shadow root it sits in. A slotted
+  // element's own parent is the host, whose shadow tree draws over it.
+  const renderedParent = (element: Element): Element | null => {
+    if (element.assignedSlot !== null) return element.assignedSlot;
+    const parentNode: ParentNode | null = element.parentNode;
+    return element.parentElement ?? (parentNode instanceof ShadowRoot ? parentNode.host : null);
+  };
+  // Inside an editable element, every descendant's text is what was typed:
+  // `<div contenteditable><span>secret</span></div>` reads "secret" from the
+  // span. The walk reaches every parent too: a slotted element's chain climbs
+  // through its host.
+  const withinEditable = (element: Element): boolean => {
+    for (let current: Element | null = element; current !== null;) {
+      if (isEditable(current)) return true;
+      current = renderedParent(current);
+    }
+    return false;
+  };
   const isCredential = (element: Element): boolean => {
     if (!isEditable(element)) return false;
     const type = (element.getAttribute("type") ?? "").toLowerCase();
@@ -222,7 +241,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
   };
   const textOf = (root: Document | ShadowRoot, id: string): string => {
     const target = root.getElementById(id);
-    return target === null ? "" : readableText(target);
+    return target === null || withinEditable(target) ? "" : readableText(target);
   };
   const nameOf = (element: Element): string => {
     const labelledBy = element.getAttribute("aria-labelledby");
@@ -547,10 +566,13 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       if (seen > request.maxPerRule) return;
       // Named as the snapshot names it; an element the snapshot gives no role
       // is shown by its first words instead, and the page itself by neither.
+      // Nothing is read from inside an editable element: its text is what was
+      // typed, as the snapshot withholds it by never stepping inside.
       const whole = element === document.documentElement;
       const role = roleOf(element);
-      const name = role === undefined || whole ? "" : nameOf(element);
-      const text = name !== "" || whole ? "" : clip(readableText(element), 80);
+      const typed = withinEditable(element);
+      const name = role === undefined || whole || typed ? "" : nameOf(element);
+      const text = name !== "" || whole || typed ? "" : clip(readableText(element), 80);
       findings.push({
         rule,
         selector: selectorOf(element),
@@ -850,9 +872,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       } else if (["absolute", "fixed", "sticky"].includes(style.position)) {
         result = null;
       } else {
-        const parentNode: ParentNode | null = element.parentNode;
-        const parent =
-          element.parentElement ?? (parentNode instanceof ShadowRoot ? parentNode.host : null);
+        const parent = renderedParent(element);
         const below: Color | null =
           parent === null ? (canvasDark ? null : [255, 255, 255, 1]) : backdrop(parent);
         result = below === null ? null : own[3] > 0 ? over(own, below) : below;
@@ -867,9 +887,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       const known = compositing.get(element);
       if (known !== undefined) return known;
       const style = window.getComputedStyle(element);
-      const parentNode: ParentNode | null = element.parentNode;
-      const parent =
-        element.parentElement ?? (parentNode instanceof ShadowRoot ? parentNode.host : null);
+      const parent = renderedParent(element);
       const result =
         style.filter !== "none" ||
         style.mixBlendMode !== "normal" ||

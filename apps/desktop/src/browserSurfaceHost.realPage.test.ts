@@ -110,6 +110,16 @@ const pages: Record<string, string> = {
     <span id="hint">Hint</span><span id="hint">Again</span><input aria-describedby="hint" aria-label="Code">
     <div><button id="tiny-a" style="width:16px;height:16px;padding:0;border:0">A</button><button id="tiny-b" style="width:16px;height:16px;padding:0;border:0;margin-left:2px">B</button></div>
     <iframe title="Ad" srcdoc="<p>Ad</p>"></iframe></body></html>`,
+  // Typed text in a rich editor, and text a shadow root's slot draws over its own backdrop.
+  "/audit-private": `<!doctype html><html lang="en"><title>Private</title><body style="background:#fff">
+    <h1>Notes</h1><div contenteditable aria-label="Password"><span style="color:#999;background:#fff">secret</span><h3>Typed heading</h3><span id="typed">typed name</span></div>
+    <div aria-hidden="true"><a href="/form" aria-labelledby="typed">Hidden link</a></div>
+    <slot-card id="dark"><span style="color:#555">Slotted words</span></slot-card>
+    <slot-card id="faded"><span style="color:#000">Faded words</span></slot-card>
+    <script>
+      document.getElementById("dark").attachShadow({ mode: "open" }).innerHTML = '<div style="background:#000"><slot></slot></div>';
+      document.getElementById("faded").attachShadow({ mode: "open" }).innerHTML = '<div style="opacity:0.5"><slot></slot></div>';
+    </script></body></html>`,
   // More elements than the audit reads, with a referenced duplicate id past the end.
   "/audit-large": `<!doctype html><html lang="en"><title>Large</title><body>
     ${"<div></div>".repeat(6_100)}
@@ -975,6 +985,35 @@ describe.skipIf(chrome === undefined)(
           .map((each) => each.selector),
       ).toEqual(expect.arrayContaining(["#tiny-a", "#tiny-b"]));
       await host.act(contextId, { kind: "resize" });
+      await page.close();
+    });
+
+    it("withholds the text typed into an editable field from findings, and judges slotted text against the slot's backdrop", async () => {
+      const { host, contextId, page } = await surface("/audit-private");
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      const { reading } = observed.audit;
+      const written = JSON.stringify(reading.findings);
+      expect(written).not.toContain("secret");
+      expect(written).not.toContain("Typed heading");
+      expect(written).not.toContain("typed name");
+      expect(
+        reading.findings.filter((each) => each.rule === "color-contrast").map((each) => each.text),
+      ).toEqual([undefined, "Slotted words"]);
+      expect(reading.findings.find((each) => each.text === "Slotted words")?.detail).toMatchObject({
+        foreground: "#555555",
+        background: "#000000",
+      });
+      // A label taken from typed text is skipped; the link's own text names it.
+      expect(reading.findings.find((each) => each.rule === "focusable-hidden")?.name).toBe(
+        "Hidden link",
+      );
+      expect(reading.findings.find((each) => each.rule === "heading-order")).toMatchObject({
+        role: "heading",
+        detail: { level: 3, previousLevel: 1 },
+      });
+      // The text drawn through the half-transparent slot.
+      expect(reading.contrastNotMeasured).toBe(1);
       await page.close();
     });
 
