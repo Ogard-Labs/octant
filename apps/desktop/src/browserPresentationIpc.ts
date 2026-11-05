@@ -43,13 +43,60 @@ function input(value: unknown): boolean {
     integer(value.clickCount, 2)
   );
 }
+function composition(value: unknown): boolean {
+  if (!record(value)) return false;
+  if (value.phase === "begin") return keys(value, ["phase", "editorId"]) && uuid(value.editorId);
+  if (!uuid(value.compositionId)) return false;
+  if (value.phase === "cancel") return keys(value, ["phase", "compositionId"]);
+  if (!text(value.text, 256) || !value.text.isWellFormed()) return false;
+  if (value.phase === "commit") return keys(value, ["phase", "compositionId", "text"]);
+  if (
+    value.phase !== "update" ||
+    !keys(value, ["phase", "compositionId", "text", "selectionStart", "selectionEnd"]) ||
+    !integer(value.selectionStart, value.text.length) ||
+    !integer(value.selectionEnd, value.text.length) ||
+    value.selectionEnd < value.selectionStart
+  )
+    return false;
+  const candidate = value.text;
+  const boundary = (offset: number) =>
+    !(
+      offset > 0 &&
+      offset < candidate.length &&
+      /[\uD800-\uDBFF]/.test(candidate[offset - 1] ?? "") &&
+      /[\uDC00-\uDFFF]/.test(candidate[offset] ?? "")
+    );
+  return boundary(value.selectionStart) && boundary(value.selectionEnd);
+}
+function editor(value: unknown): boolean {
+  if (
+    !record(value) ||
+    !keys(value, ["id", "selectionStart", "selectionEnd", "caret"]) ||
+    !uuid(value.id) ||
+    !integer(value.selectionStart, 1_048_576) ||
+    !integer(value.selectionEnd, 1_048_576) ||
+    value.selectionEnd < value.selectionStart ||
+    !record(value.caret) ||
+    !keys(value.caret, ["x", "y", "width", "height"])
+  )
+    return false;
+  return (
+    number(value.caret.x, 1_920) &&
+    number(value.caret.y, 1_200) &&
+    number(value.caret.width, 1_920) &&
+    number(value.caret.height, 1_200, Number.MIN_VALUE)
+  );
+}
 function isRequest(value: unknown): value is HumanBrowserRequest {
   if (!record(value) || !uuid(value.contextId) || !uuid(value.threadId)) return false;
   const base = ["contextId", "threadId", "kind"];
   if (value.kind === "attach") return keys(value, base);
   if (!uuid(value.presentationId)) return false;
   const owned = [...base, "presentationId"];
-  if (value.kind === "state" || value.kind === "detach") return keys(value, owned);
+  if (value.kind === "state" || value.kind === "detach" || value.kind === "editor")
+    return keys(value, owned);
+  if (value.kind === "composition")
+    return keys(value, [...owned, "composition"]) && composition(value.composition);
   if (value.kind === "frame")
     return (
       keys(value, [...owned, "acknowledgement"]) &&
@@ -123,8 +170,11 @@ function isState(value: unknown): boolean {
 }
 function isResult(value: unknown): value is HumanBrowserResult {
   if (!record(value)) return false;
-  if (["accepted", "idle", "refused"].includes(String(value.status)))
+  if (["accepted", "idle", "refused", "editor-unavailable"].includes(String(value.status)))
     return keys(value, ["status"]);
+  if (value.status === "editor") return keys(value, ["status", "editor"]) && editor(value.editor);
+  if (value.status === "composition-started")
+    return keys(value, ["status", "compositionId"]) && uuid(value.compositionId);
   if (value.status === "attached")
     return keys(value, ["status", "presentationId"]) && uuid(value.presentationId);
   if (value.status === "state") return keys(value, ["status", "state"]) && isState(value.state);

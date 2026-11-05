@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   decodeBrowserPresentationId,
   type BrowserPresentationId,
@@ -8,6 +8,7 @@ import {
   type HumanBrowserInput,
   type HumanBrowserLayout,
   type HumanBrowserResult,
+  type HumanBrowserEditor,
 } from "@octant/contracts/browser-presentation";
 
 export interface HumanBrowserImage {
@@ -19,6 +20,7 @@ export interface HumanBrowserSource {
   readonly visible: (visible: boolean) => void;
   readonly bounds: (width: number, height: number) => void;
   readonly input: (input: HumanBrowserInput) => void;
+  readonly editor?: () => Promise<HumanBrowserEditor | undefined>;
 }
 interface Attached {
   readonly id: BrowserPresentationId;
@@ -28,6 +30,8 @@ interface Attached {
   visible: boolean;
   inputReady: boolean;
   sequence: number;
+  layoutEpoch: number;
+  lastImageHash: string | undefined;
   acknowledged: number;
   width: number;
   height: number;
@@ -51,6 +55,8 @@ export class BrowserPresentation {
       visible: false,
       inputReady: false,
       sequence: 0,
+      layoutEpoch: 0,
+      lastImageHash: undefined,
       acknowledged: 0,
       width: 800,
       height: 600,
@@ -97,6 +103,8 @@ export class BrowserPresentation {
       return false;
     // A layout change retires the old coordinate space and releases its input.
     owned.visible = false;
+    owned.layoutEpoch++;
+    owned.lastImageHash = undefined;
     owned.inputReady = false;
     owned.published = undefined;
     owned.pending = undefined;
@@ -131,6 +139,12 @@ export class BrowserPresentation {
     const bytes = image.toJPEG(75);
     if (this.#current(id) !== owned || !owned.visible || bytes.byteLength > MAX_HUMAN_FRAME_BYTES)
       return { status: "refused" };
+    // Hidden ordinary windows are captured at a bounded cadence, even when no
+    // pixels changed. Re-publishing identical images needlessly invalidates a
+    // person's displayed input frame while it is being decoded.
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    if (owned.lastImageHash === hash) return { status: "idle" };
+    owned.lastImageHash = hash;
     owned.sequence += 1;
     owned.inputReady = true;
     owned.published = {
@@ -144,37 +158,55 @@ export class BrowserPresentation {
   }
 
   input(id: string, input: HumanBrowserInput, frameSequence: number): boolean {
+    return this.reserveInput(id, input, frameSequence)?.() ?? false;
+  }
+
+  /** Admission precedes awaited composition cleanup; dispatch keeps its exact layout epoch. */
+  reserveInput(
+    id: string,
+    input: HumanBrowserInput,
+    frameSequence: number,
+  ): (() => boolean) | undefined {
     const owned = this.#current(id);
-    if (owned === undefined || !owned.visible) return false;
+    if (owned === undefined || !owned.visible) return undefined;
     const releaseKey = input.type === "keyUp" && owned.keys.has(input.keyCode);
     const releaseButton = input.type === "mouseUp" ? owned.buttons.get(input.button) : undefined;
     const heldCharacter =
       input.type === "char" &&
       (owned.keys.has(input.keyCode) ||
         (input.keyCode === "\r" && (owned.keys.has("Enter") || owned.keys.has("Return"))));
-    if (input.type === "char" && input.keyCode === "\r" && !heldCharacter) return false;
+    if (input.type === "char" && input.keyCode === "\r" && !heldCharacter) return undefined;
     const currentFrame = owned.inputReady && owned.sequence > 0 && frameSequence === owned.sequence;
-    if (!currentFrame && !releaseKey && releaseButton === undefined && !heldCharacter) return false;
+    if (!currentFrame && !releaseKey && releaseButton === undefined && !heldCharacter)
+      return undefined;
     if (
       (input.type === "keyUp" && !releaseKey) ||
       (input.type === "mouseUp" && releaseButton === undefined)
     )
-      return false;
+      return undefined;
     if (input.type === "keyDown" && owned.keys.size >= 32 && !owned.keys.has(input.keyCode))
-      return false;
+      return undefined;
     // A stale release cancels capture outside the current page, never a new click.
     const delivered =
       !currentFrame && input.type === "mouseUp" && releaseButton !== undefined
         ? { ...input, x: -1, y: -1 }
         : input;
     if ("x" in delivered && (delivered.x >= owned.width || delivered.y >= owned.height))
-      return false;
-    owned.source.input(delivered);
-    if (input.type === "keyDown") owned.keys.add(input.keyCode);
-    if (input.type === "keyUp") owned.keys.delete(input.keyCode);
-    if (input.type === "mouseDown") owned.buttons.set(input.button, { x: input.x, y: input.y });
-    if (input.type === "mouseUp") owned.buttons.delete(input.button);
-    return true;
+      return undefined;
+    const epoch = owned.layoutEpoch;
+    let consumed = false;
+    return () => {
+      if (consumed) return false;
+      consumed = true;
+      if (this.#current(id) !== owned || !owned.visible || owned.layoutEpoch !== epoch)
+        return false;
+      owned.source.input(delivered);
+      if (input.type === "keyDown") owned.keys.add(input.keyCode);
+      if (input.type === "keyUp") owned.keys.delete(input.keyCode);
+      if (input.type === "mouseDown") owned.buttons.set(input.button, { x: input.x, y: input.y });
+      if (input.type === "mouseUp") owned.buttons.delete(input.button);
+      return true;
+    };
   }
 
   detach(id: string): boolean {

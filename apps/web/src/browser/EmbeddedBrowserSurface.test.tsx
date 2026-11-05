@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeBrowserPresentationId,
+  decodeBrowserEditorId,
   type HumanBrowserRequest,
   type HumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
@@ -13,6 +14,141 @@ const threadId = "00000000-0000-4000-8000-000000000702";
 const presentationId = decodeBrowserPresentationId("00000000-0000-4000-8000-000000000703");
 
 describe("embedded Browser pointer ownership", () => {
+  it("retires the native input context when a deferred frame refuses without enlarging its caret", async () => {
+    const calls: HumanBrowserRequest[] = [];
+    let endFrame: ((value: HumanBrowserResult) => void) | undefined;
+    const pending = new Promise<HumanBrowserResult>((done) => {
+      endFrame = done;
+    });
+    let frames = 0;
+    const bridge: Pick<OctantHostBridge, "presentBrowser"> = {
+      presentBrowser: async (request) => {
+        calls.push(request);
+        if (request.kind === "attach") return { status: "attached", presentationId };
+        if (request.kind === "frame")
+          return ++frames === 1
+            ? {
+                status: "frame",
+                sequence: 1,
+                width: 800,
+                height: 600,
+                dataUrl: "data:image/jpeg;base64,AA==",
+              }
+            : frames === 2
+              ? { status: "idle" }
+              : pending;
+        if (request.kind === "editor")
+          return {
+            status: "editor",
+            editor: {
+              id: decodeBrowserEditorId("00000000-0000-4000-8000-000000000715"),
+              selectionStart: 1,
+              selectionEnd: 1,
+              caret: { x: 67, y: 158, width: 0, height: 24 },
+            },
+          };
+        return { status: "accepted" };
+      },
+    };
+    const rect = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 0, 800, 600));
+    const rects = vi
+      .spyOn(Element.prototype, "getClientRects")
+      .mockReturnValue(Object.assign([new DOMRect(0, 0, 800, 600)], { item: () => null }));
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const view = render(
+      <EmbeddedBrowserSurface
+        bridge={bridge}
+        contextId={contextId}
+        threadId={threadId}
+        overlaySelector="[data-overlay]"
+        onState={vi.fn()}
+      />,
+    );
+    try {
+      fireEvent.load(await screen.findByAltText("Browser page image"));
+      screen.getByLabelText("Embedded Browser page").focus();
+      const input = screen.getByLabelText("Browser text input");
+      await waitFor(() => expect(input.getAttribute("contenteditable")).toBe("true"));
+      endFrame?.({ status: "refused" });
+      await waitFor(() => expect(input.getAttribute("contenteditable")).toBe("false"));
+      expect(input.style.display).toBe("none");
+      expect(Number.parseFloat(input.style.height)).toBeLessThanOrEqual(32);
+      expect(calls.filter((request) => request.kind === "composition")).toHaveLength(0);
+    } finally {
+      endFrame?.({ status: "refused" });
+      view.unmount();
+      rect.mockRestore();
+      rects.mockRestore();
+      focus.mockRestore();
+    }
+  });
+  it("leaves the page with Control-Escape while its text field holds focus", async () => {
+    const calls: HumanBrowserRequest[] = [];
+    const bridge: Pick<OctantHostBridge, "presentBrowser"> = {
+      presentBrowser: async (request): Promise<HumanBrowserResult> => {
+        calls.push(request);
+        if (request.kind === "attach") return { status: "attached", presentationId };
+        if (request.kind === "frame")
+          return {
+            status: "frame",
+            sequence: 1,
+            width: 800,
+            height: 600,
+            dataUrl: "data:image/jpeg;base64,AA==",
+          };
+        if (request.kind === "editor")
+          return {
+            status: "editor",
+            editor: {
+              id: decodeBrowserEditorId("00000000-0000-4000-8000-000000000716"),
+              selectionStart: 0,
+              selectionEnd: 0,
+              caret: { x: 10, y: 10, width: 0, height: 24 },
+            },
+          };
+        return { status: "accepted" };
+      },
+    };
+    const rect = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 0, 800, 600));
+    const rects = vi
+      .spyOn(Element.prototype, "getClientRects")
+      .mockReturnValue(Object.assign([new DOMRect(0, 0, 800, 600)], { item: () => null }));
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    // jsdom has no Range geometry; the caret position itself is not under test.
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(0, 0, 0, 24),
+    });
+    const view = render(
+      <EmbeddedBrowserSurface
+        bridge={bridge}
+        contextId={contextId}
+        threadId={threadId}
+        overlaySelector="[data-overlay]"
+        onState={vi.fn()}
+      />,
+    );
+    try {
+      fireEvent.load(await screen.findByAltText("Browser page image"));
+      const surface = screen.getByLabelText("Embedded Browser page");
+      surface.focus();
+      const input = screen.getByLabelText("Browser text input");
+      await waitFor(() => expect(document.activeElement).toBe(input));
+      fireEvent.keyDown(input, { key: "Escape", ctrlKey: true });
+      expect(surface.contains(document.activeElement)).toBe(false);
+      await waitFor(() => expect(calls.some((request) => request.kind === "detach")).toBe(true));
+    } finally {
+      view.unmount();
+      rect.mockRestore();
+      rects.mockRestore();
+      focus.mockRestore();
+      Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
+    }
+  });
   it("keeps a completed click attached and releases unexpected pointer cancellation", async () => {
     const calls: HumanBrowserRequest[] = [];
     const bridge: Pick<OctantHostBridge, "presentBrowser"> = {

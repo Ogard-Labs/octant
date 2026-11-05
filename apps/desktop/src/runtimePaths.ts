@@ -1,6 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+export const BROWSER_EDITABLE_PRELOAD_FILENAME = "browserEditablePreload.cjs" as const;
 export const DESKTOP_PRELOAD_FILENAME = "preload.cjs" as const;
 export const CODE_APPROVAL_PRELOAD_FILENAME = "codeOperationApprovalViewPreload.cjs" as const;
 export const CANVAS_PROTOTYPE_PRELOAD_FILENAME = "canvasPrototypePreload.cjs" as const;
@@ -91,3 +92,4 @@ export function resolveDesktopHostRoot(options: {
 }
 
 export const DESKTOP_PEER_STATUS_FILENAME = "octant-desktop-peer-status.node";
+export const BROWSER_TEXT_INPUT_FILENAME = "octant-browser-text-input.node";

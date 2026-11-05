@@ -274,7 +274,9 @@ its fixed host-only role after installed-artifact validation; fresh authenticate
 status still precedes window registration. See the owning
 [host-only launch rules](design/nightly-app.md#starting-a-closed-stable-host).
 Agent observations remain separate;
-IME, accessibility, native popups and retained-host parity remain unfinished. See
+Standard-text composition uses a separate native input context and no-content
+field/caret metadata. Full IME reconversion, accessibility, native popups and
+retained-host parity remain unfinished. See
 [native client window leases](design/nightly-app.md#native-client-window-leases) and
 [desktop status preflight](design/nightly-app.md#authenticated-desktop-status-preflight).
 

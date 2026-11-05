@@ -1,3 +1,5 @@
+import { observeBrowserEditableTarget } from "./browserEditableObservation";
+import { readBrowserEditableTarget } from "./browserEditableTarget";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -30,6 +32,7 @@ const chrome = [
 ].find((candidate) => candidate !== undefined && existsSync(candidate));
 
 const pages: Record<string, string> = {
+  "/ime-editors": `<input id="a" value="private-fixture"><textarea id="b"></textarea><input id="password" type="password" value="fixture-password"><div id="custom" contenteditable="true">fixture</div><input id="readonly" readonly><script>for(const type of ['focusin','focusout'])window.addEventListener(type,event=>event.stopImmediatePropagation(),true)</script>`,
   "/login": `<!doctype html><title>Sign in</title>
     <h1>Sign in</h1>
     <label for="user">Email</label><input id="user" value="ada@example.com">
@@ -557,6 +560,43 @@ describe.skipIf(chrome === undefined)(
         await page.context().close();
       }
     });
+
+    it("observes a fresh editable incarnation after A to B to A without exporting field contents", async () => {
+      const { view, page } = await pageView();
+      try {
+        await page.addInitScript(
+          `globalThis.octantBrowserEditable = (${observeBrowserEditableTarget.toString()})();`,
+        );
+        await page.goto(origin + "/ime-editors");
+        const read = () =>
+          readBrowserEditableTarget(view.webContents.executeJavaScriptInIsolatedWorld);
+        await page.locator("#a").focus();
+        const first = await read();
+        expect(first).toBeDefined();
+        expect(JSON.stringify(first)).not.toContain("private-fixture");
+        await page.locator("#b").focus();
+        await page.locator("#a").focus();
+        const next = await read();
+        expect(next?.id).not.toBe(first?.id);
+        for (const selector of ["#password", "#custom", "#readonly"]) {
+          await page.locator(selector).focus();
+          expect(await read()).toBeUndefined();
+        }
+        expect(observeBrowserEditableTarget.toString()).not.toMatch(
+          /\.value\b|textContent|innerText/,
+        );
+        await page.evaluate(() => {
+          document.open();
+          document.write('<input id="a">');
+          document.close();
+        });
+        await page.locator("#a").focus();
+        expect(await read()).toBeUndefined();
+      } finally {
+        await page.close();
+      }
+    });
+
     it("reads a snapshot with refs and names a password field without its value", async () => {
       const { host, contextId, page } = await surface("/login");
       const observed = await host.act(contextId, { kind: "snapshot" });
