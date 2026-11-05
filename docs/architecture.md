@@ -2957,8 +2957,11 @@ the thread it came from.
   author only on its own host and within those Projects; its routines get the
   same ceiling. Automation-origin execution cannot create, edit, run, pause, or
   archive a routine (`automation-recursion`). No agent or provider tool reaches
-  the routes; the one way an agent takes part is the proposal below, and the
-  routine it leads to is still created by a person's principal.
+  the routes. An agent takes part only through the proposal and the routine
+  tools below: it may read routines, propose one, ask the person to pause or
+  archive one that is its thread's own, and report its own run's result.
+  Every change still happens as a person's principal confirming it; resume,
+  edit, run now, and cancel stay the person's alone.
 - **Proposed from a thread.** A Work or Code thread's agent may propose a
   routine with the app-managed `octant_propose_routine` tool: a name, a task
   prompt, a trigger (once at an explicit instant, every N minutes within the
@@ -2995,6 +2998,40 @@ the thread it came from.
   the matrix under [security and authority](#security-and-authority): a
   provider or model without it is not offered the tool, and its degraded form
   is the person creating the routine in Automation Center.
+- **Routine tools in a thread.** A Work or Code thread's agent is also offered
+  the app-managed `octant_routines` tool, on the same capability and never in
+  Chat, with `help`, `list`, `get`, `pause`, `archive`, and `report-result`.
+  `list` and `get` read the routines of the thread's own Project and mode from
+  the projection (a routine elsewhere reads as absent), with each routine's
+  schedule, state, prompt, and recent runs, and flag a routine proposed or
+  created from this thread, the routine whose run started this thread, and the
+  run this turn belongs to. They answer at any posture, Plan included, and in
+  a routine's own turn. `pause` and `archive` only ask: the request waits as a
+  card in the thread under the proposal rules above (the raising window or
+  paired device only, ten minutes, the shared cap of 32, withdrawn with the
+  turn), and the person's confirmation is their own pause or archive through
+  the `proposals/decide` route and the ordinary command, under the same
+  Project check, at the routine version the agent saw, so a routine changed
+  since is refused rather than changed. An agent may ask only about a routine
+  that is its thread's own: `originThreadId` is this thread, or one of the
+  routine's runs started this thread. A Code turn in Plan is refused, and so
+  is every turn the host runs on its own, the routine's own run included:
+  nobody is present to confirm, the card is listed only to the window that
+  raised it and a host-run turn has none, and acting without a confirmation
+  would be automation-origin execution pausing a routine. A run that should
+  stop says so through `report-result` instead. `report-result` takes an
+  outcome (`succeeded`, `nothing-to-do`, `needs-attention`, `failed`) and a
+  summary of at most 1 KB, and is accepted only from the turn the dispatcher
+  started for that run: the dispatcher hands the run's identity to the turn it
+  starts through host-only start options that no wire command carries, and
+  the host checks it against the run's journaled thread, so neither the host
+  scope alone, a usage-limit resume, nor a person's later turn in the same
+  thread can report. It is journaled once per run as
+  `automation-run-result-reported@1`; replay keeps the first, it never
+  changes the run's lifecycle, and Automation Center shows it beside the
+  run's own status. Push notifications stay redacted and do not carry it. A
+  reported summary is the run agent's own words, so a thread that reads it is
+  marked as having read outside content.
 - **Created from a thread by a person.** The person may also create a routine
   from a Work or Code thread's Environment with
   `POST /api/automations/thread-routines` (`create-thread-routine`: thread,
@@ -3073,7 +3110,8 @@ the thread it came from.
   browser (one bound to the routine's Project); answering settles only that
   prompt, and an "always allow" is journaled by the answering window.
 - **Journal.** Definitions, revisions, lifecycle changes, occurrence claims and
-  skips, runs, dispatch intents and claims, and cancellations are journaled. A
+  skips, runs, dispatch intents and claims, cancellations, and a run's
+  reported result are journaled. A
   claim commits the deterministic run before the occurrence ledger, so a crash
   repairs forward to the same run and never dispatches twice. Run-now and
   cancel are idempotent by request id.
@@ -3090,7 +3128,9 @@ the thread it came from.
 - **Turning one off.** Pause stops future occurrences; Resume restarts from the
   next occurrence; Archive ends the routine and keeps its history (there is no
   delete). Cancel stops a run before its first turn starts; afterwards the
-  thread's own interrupt applies.
+  thread's own interrupt applies. A thread's agent may ask for a pause or an
+  archive of its own routine under the routine tools above; only the person's
+  confirmation does it.
 
 A `#thread` mention points at another thread the sender can already Open. The
 host resolves a bounded, read-only title, status, and transcript window at send

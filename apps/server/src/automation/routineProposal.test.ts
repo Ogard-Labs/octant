@@ -7,6 +7,9 @@ import {
   decodeRoutineProposalDecisionResult,
   decodeRoutineProposalList,
   decodeWindowId,
+  LOCAL_HOST_ID,
+  type AutomationDefinition,
+  type AutomationRunReference,
   type ProviderExecutionPolicy,
   type WindowId,
 } from "@octant/contracts";
@@ -25,6 +28,8 @@ import { AutomationProjection, hydrateAutomationProjection } from "./automationP
 import { createAutomationRouteHandler } from "./automationRoutes";
 import { RoutineProposalService, type RoutineProposalOutcome } from "./routineProposalService";
 import { createRoutineProposalTools } from "./routineProposalTools";
+import { createRoutineTools } from "./routineTools";
+import { automationRunForDefinition } from "./automationTestFixtures";
 import { buildThreadRoutineDraft, type RoutineSourceThread } from "./threadRoutineDraft";
 
 const NOW = "2026-10-31T12:00:00.000Z";
@@ -174,7 +179,23 @@ function harness(options: { readonly mode?: "work" | "code" } = {}) {
       proposals,
       now: () => NOW_MS,
     });
-  return { handler, projection, proposals, thread, tools, journal, store };
+  const routines = (
+    turn: {
+      readonly hostStarted?: boolean;
+      readonly posture?: ProviderExecutionPolicy;
+      readonly routineRun?: AutomationRunReference;
+    } = {},
+  ) =>
+    createRoutineTools({
+      windowId,
+      thread: { id: THREAD, mode, projectId: PROJECT },
+      ...(turn.posture === undefined ? {} : { readPosture: () => turn.posture }),
+      isAutomationOrigin: turn.hostStarted ?? false,
+      ...(turn.routineRun === undefined ? {} : { routineRun: turn.routineRun }),
+      routines: { hostId: LOCAL_HOST_ID, projection, store, changes: proposals },
+      now: () => NOW_MS,
+    });
+  return { handler, projection, proposals, thread, tools, routines, journal, store };
 }
 
 const weeklyInput = JSON.stringify({
@@ -661,5 +682,340 @@ describe("routines a person creates from a thread's Environment", () => {
     expect(
       h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
     ).toEqual([]);
+  });
+});
+
+const OTHER_THREAD = "bb000000-0000-4000-8000-000000000009";
+const RUN = "bb000000-0000-4000-8000-000000000201";
+
+/** A routine created from a thread of the harness Project, this one unless told otherwise. */
+async function routineFrom(
+  h: ReturnType<typeof harness>,
+  threadId = THREAD,
+): Promise<AutomationDefinition> {
+  const created = await threadRoutines(h.handler, { ...manualRoutine, mode: "work", threadId });
+  if (created.body?.kind !== "automation-created") throw new Error("routine not created");
+  const routine = h.projection.getDefinition(created.body.automation.id);
+  if (routine === undefined) throw new Error("routine not projected");
+  return routine;
+}
+
+/** A run of the routine whose dispatch recorded this harness thread as its thread. */
+function runInThisThread(h: ReturnType<typeof harness>, routine: AutomationDefinition) {
+  const run = automationRunForDefinition(routine, { id: RUN, at: NOW });
+  h.store.appendRunCreated({ run });
+  h.store.appendDispatchIntentRecorded({
+    automationId: routine.id,
+    runId: run.id,
+    intent: {
+      firstTurnRequestId: run.firstTurnRequestId,
+      threadId: THREAD as never,
+      authoritySnapshot: run.authoritySnapshot,
+      promptDigest: "digest" as never,
+      recordedAt: NOW as never,
+    },
+    expectedVersion: 1,
+  });
+  return { automationId: routine.id, runId: run.id } satisfies AutomationRunReference;
+}
+
+/** Starts a pause or archive call and waits until the person is shown its card. */
+async function askToChange(
+  h: ReturnType<typeof harness>,
+  input: Record<string, unknown>,
+  tools = h.routines(),
+) {
+  const call = tools.execute({ name: "octant_routines", inputJson: JSON.stringify(input) });
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const first = (await listed(h.handler))[0];
+    if (first !== undefined && "kind" in first) return { call, request: first };
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("The change request never appeared.");
+}
+
+async function routinesCall(
+  tools: ReturnType<ReturnType<typeof harness>["routines"]>,
+  input: unknown,
+) {
+  return tools.execute({ name: "octant_routines", inputJson: JSON.stringify(input) });
+}
+
+describe("routines a thread's agent can see and ask about", () => {
+  it("offers Chat no routine tools and refuses a call that names them anyway", async () => {
+    const h = harness();
+    const chat = createRoutineTools({
+      windowId,
+      thread: { id: THREAD, mode: "chat", projectId: PROJECT },
+      isAutomationOrigin: false,
+      routines: {
+        hostId: LOCAL_HOST_ID,
+        projection: h.projection,
+        store: h.store,
+        changes: h.proposals,
+      },
+      now: () => NOW_MS,
+    });
+    expect(chat.definitions).toEqual([]);
+    expect(await routinesCall(chat, { operation: "list" })).toMatchObject({
+      isError: true,
+      result: { reason: "chat-has-no-routines" },
+    });
+  });
+
+  it("explains every operation on help without reading or changing a routine", async () => {
+    const h = harness();
+    const outcome = await routinesCall(h.routines(), { operation: "help" });
+    expect(outcome.isError).toBe(false);
+    expect(JSON.stringify(outcome.result)).toMatch(/report-result/);
+    expect(await listed(h.handler)).toEqual([]);
+  });
+
+  it("lists this Project's routines and marks the one this thread proposed, in Plan and in a routine's own turn", async () => {
+    const h = harness();
+    const own = await routineFrom(h);
+    const other = await routineFrom(h, OTHER_THREAD);
+    for (const tools of [
+      h.routines(),
+      h.routines({ posture: "plan" }),
+      h.routines({ hostStarted: true }),
+    ]) {
+      const outcome = await routinesCall(tools, { operation: "list" });
+      expect(outcome.isError).toBeUndefined();
+      const listedRoutines = (outcome.result as { routines: ReadonlyArray<unknown> }).routines;
+      expect(listedRoutines).toHaveLength(2);
+      expect(listedRoutines).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ routineId: String(own.id), proposedHere: true }),
+          expect.objectContaining({ routineId: String(other.id), proposedHere: false }),
+        ]),
+      );
+    }
+  });
+
+  it("reads one routine with its recent runs and flags the run this turn belongs to", async () => {
+    const h = harness();
+    const routine = await routineFrom(h, OTHER_THREAD);
+    const routineRun = runInThisThread(h, routine);
+    const outcome = await routinesCall(h.routines({ hostStarted: true, routineRun }), {
+      operation: "get",
+      routineId: String(routine.id),
+    });
+    expect(outcome.result).toMatchObject({
+      prompt: manualRoutine.taskPrompt,
+      proposedHere: false,
+      startedThisThread: true,
+      runningThisTurn: true,
+      recentRuns: [{ runId: RUN, threadId: THREAD, thisTurn: true }],
+    });
+  });
+
+  it("treats a routine in another Project as absent", async () => {
+    const h = harness();
+    const routine = await routineFrom(h);
+    const elsewhere = createRoutineTools({
+      windowId,
+      thread: { id: THREAD, mode: "work", projectId: "bb000000-0000-4000-8000-0000000000ff" },
+      isAutomationOrigin: false,
+      routines: {
+        hostId: LOCAL_HOST_ID,
+        projection: h.projection,
+        store: h.store,
+        changes: h.proposals,
+      },
+      now: () => NOW_MS,
+    });
+    expect(await routinesCall(elsewhere, { operation: "list" })).toMatchObject({
+      result: { routines: [] },
+    });
+    expect(
+      await routinesCall(elsewhere, { operation: "get", routineId: String(routine.id) }),
+    ).toMatchObject({ isError: true, result: { reason: "routine-unavailable" } });
+  });
+
+  it("pauses the routine this thread proposed only when the person confirms, as the confirming window", async () => {
+    const h = harness();
+    const routine = await routineFrom(h);
+    const { call, request } = await askToChange(h, {
+      operation: "pause",
+      routineId: String(routine.id),
+      reason: "The report folder moved.",
+    });
+    expect(request).toMatchObject({
+      kind: "routine-change-request",
+      change: "pause",
+      automationId: routine.id,
+      threadId: THREAD,
+      reason: "The report folder moved.",
+    });
+    // Asking changed nothing, and another window cannot answer it.
+    expect(h.projection.getDefinition(routine.id)?.lifecycle).toBe("enabled");
+    expect(await listed(h.handler, otherCapability)).toEqual([]);
+
+    const answer = await decide(h.handler, String(request.proposalId), "confirm");
+    expect(answer).toMatchObject({
+      kind: "routine-proposal-confirmed",
+      automation: { id: routine.id, lifecycle: "paused" },
+    });
+    expect((await call).result).toMatchObject({ status: "confirmed" });
+    expect(h.projection.getDefinition(routine.id)?.updatedBy).toEqual({
+      kind: "local-window",
+      windowId: String(windowId),
+      capabilityGeneration: 0,
+    });
+  });
+
+  it("leaves the routine as it was when the person declines an archive", async () => {
+    const h = harness();
+    const routine = await routineFrom(h);
+    const { call, request } = await askToChange(h, {
+      operation: "archive",
+      routineId: String(routine.id),
+    });
+    expect(await decide(h.handler, String(request.proposalId), "decline")).toEqual({
+      kind: "routine-proposal-declined",
+    });
+    expect((await call).result).toMatchObject({ status: "declined" });
+    expect(h.projection.getDefinition(routine.id)?.lifecycle).toBe("enabled");
+  });
+
+  it("lets a person's turn in a routine's run thread ask to archive that routine", async () => {
+    const h = harness();
+    const routine = await routineFrom(h, OTHER_THREAD);
+    runInThisThread(h, routine);
+    const { call, request } = await askToChange(h, {
+      operation: "archive",
+      routineId: String(routine.id),
+    });
+    await decide(h.handler, String(request.proposalId), "confirm");
+    expect((await call).result).toMatchObject({ status: "confirmed" });
+    expect(h.projection.getDefinition(routine.id)?.lifecycle).toBe("archived");
+  });
+
+  it("refuses to ask about a same-Project routine this thread did not start", async () => {
+    const h = harness();
+    const routine = await routineFrom(h, OTHER_THREAD);
+    const outcome = await routinesCall(h.routines(), {
+      operation: "pause",
+      routineId: String(routine.id),
+    });
+    expect(outcome).toMatchObject({
+      isError: true,
+      result: { reason: "not-this-threads-routine" },
+    });
+    expect(await listed(h.handler)).toEqual([]);
+  });
+
+  it("refuses change requests in Plan and in a turn the host runs, even the routine's own run", async () => {
+    const h = harness();
+    const routine = await routineFrom(h);
+    const routineRun = runInThisThread(h, routine);
+    const plan = await routinesCall(h.routines({ posture: "plan" }), {
+      operation: "pause",
+      routineId: String(routine.id),
+    });
+    expect(plan).toMatchObject({ isError: true, result: { reason: "plan-read-only" } });
+    const hostRun = await routinesCall(h.routines({ hostStarted: true, routineRun }), {
+      operation: "archive",
+      routineId: String(routine.id),
+    });
+    expect(hostRun).toMatchObject({ isError: true, result: { reason: "host-started-turn" } });
+    expect(await listed(h.handler)).toEqual([]);
+    expect(h.projection.getDefinition(routine.id)?.lifecycle).toBe("enabled");
+  });
+
+  it("changes nothing when the routine changed between the request and the confirm", async () => {
+    const h = harness();
+    const routine = await routineFrom(h);
+    const { call, request } = await askToChange(h, {
+      operation: "archive",
+      routineId: String(routine.id),
+    });
+    const paused = await h.handler(
+      new Request("http://127.0.0.1/api/automations/commands", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability, "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "pause-automation",
+          automationId: routine.id,
+          expectedVersion: routine.version,
+        }),
+      }),
+    );
+    expect(await paused?.json()).toMatchObject({ kind: "automation-paused" });
+    expect(await decide(h.handler, String(request.proposalId), "confirm")).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "stale-version",
+    });
+    expect(await call).toMatchObject({ isError: true, result: { reason: "not-changed" } });
+    expect(h.projection.getDefinition(routine.id)?.lifecycle).toBe("paused");
+  });
+});
+
+describe("results a routine's run reports", () => {
+  it("records the result once from the turn its run started, without changing the run", async () => {
+    const h = harness();
+    const routine = await routineFrom(h);
+    const routineRun = runInThisThread(h, routine);
+    const tools = h.routines({ hostStarted: true, routineRun });
+    const before = h.projection.getRun(routineRun.runId);
+    const reported = await routinesCall(tools, {
+      operation: "report-result",
+      outcome: "nothing-to-do",
+      summary: "No new invoices arrived.",
+    });
+    expect(reported.result).toMatchObject({ status: "reported" });
+    const after = h.projection.getRun(routineRun.runId);
+    expect(after?.reportedResult).toEqual({
+      outcome: "nothing-to-do",
+      summary: "No new invoices arrived.",
+      reportedAt: NOW,
+    });
+    expect(after?.lifecycle).toBe(before?.lifecycle);
+
+    const again = await routinesCall(tools, {
+      operation: "report-result",
+      outcome: "succeeded",
+      summary: "Second thoughts.",
+    });
+    expect(again).toMatchObject({ isError: true, result: { reason: "already-reported" } });
+    expect(h.projection.getRun(routineRun.runId)?.reportedResult?.outcome).toBe("nothing-to-do");
+
+    // The journal rebuilds the same result after a restart.
+    const rebuilt = new AutomationProjection();
+    expect(hydrateAutomationProjection({ store: h.store, projection: rebuilt })).toBe("ok");
+    expect(rebuilt.getRun(routineRun.runId)?.reportedResult).toEqual(after?.reportedResult);
+  });
+
+  it("refuses a result from a turn no run started, even in the run's own thread", async () => {
+    const h = harness();
+    const routine = await routineFrom(h);
+    const routineRun = runInThisThread(h, routine);
+    for (const tools of [h.routines(), h.routines({ hostStarted: true })]) {
+      expect(
+        await routinesCall(tools, {
+          operation: "report-result",
+          outcome: "succeeded",
+          summary: "Done.",
+        }),
+      ).toMatchObject({ isError: true, result: { reason: "not-a-routine-run" } });
+    }
+    expect(h.projection.getRun(routineRun.runId)?.reportedResult).toBeUndefined();
+  });
+
+  it("refuses a summary over its bound or an outcome it does not know", async () => {
+    const h = harness();
+    const routine = await routineFrom(h);
+    const tools = h.routines({ hostStarted: true, routineRun: runInThisThread(h, routine) });
+    for (const input of [
+      { operation: "report-result", outcome: "succeeded", summary: "é".repeat(600) },
+      { operation: "report-result", outcome: "great", summary: "Done." },
+      { operation: "report-result", outcome: "succeeded", summary: " " },
+    ]) {
+      expect(await routinesCall(tools, input)).toMatchObject({
+        isError: true,
+        result: { reason: "invalid-input" },
+      });
+    }
   });
 });

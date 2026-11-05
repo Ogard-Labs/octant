@@ -24,6 +24,7 @@ import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import {
   ActorId,
+  type AutomationRunReference,
   CorrelationId,
   EventId,
   MAX_WORK_TRANSCRIPT_TURNS,
@@ -235,6 +236,12 @@ export interface WorkTurnStartOptions {
   readonly limitRecovery?: boolean;
   /** Host-only revocation check; never grants authority or travels on the wire. */
   readonly admissionCurrent?: () => boolean;
+  /**
+   * Set by the routine dispatcher for the turn it starts for a run, and only
+   * there: the turn may report that run's result. Host-only: the wire command
+   * cannot carry it.
+   */
+  readonly routineRun?: AutomationRunReference;
 }
 
 /**
@@ -363,6 +370,8 @@ export interface WorkTurnServiceDependencies {
     /** The Project's extra folders, which file tools treat as the root. */
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
+    /** The routine run this turn was started for, from the dispatcher only. */
+    readonly routineRun?: AutomationRunReference;
   }) => AppManagedToolSet | undefined;
   /** Work threads in a Project on a registered server, whose turns act there. */
   readonly serverProjects?: ServerWorkTurns;
@@ -1360,6 +1369,7 @@ export class WorkTurnService {
       ...(options?.admissionCurrent === undefined
         ? {}
         : { admissionCurrent: options.admissionCurrent }),
+      ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       signal: controller.signal,
     }).finally(() => {
@@ -1720,6 +1730,7 @@ export class WorkTurnService {
      */
     readonly sessionHolds: ReadonlySet<ProviderContextBlock>;
     readonly admissionCurrent?: () => boolean;
+    readonly routineRun?: AutomationRunReference;
     /** The selected MCP servers' tools, resolved when the turn was accepted. */
     readonly extensionTools?: AppManagedToolSet;
     readonly signal: AbortSignal;
@@ -1747,6 +1758,7 @@ export class WorkTurnService {
               projectRoot: input.projectRoot,
               ...(input.extraFolders.length === 0 ? {} : { extraFolders: input.extraFolders }),
               windowId: input.windowId,
+              ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),
             });
     const appManagedTools =
       input.extensionTools === undefined

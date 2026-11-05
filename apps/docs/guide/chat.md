@@ -33,8 +33,8 @@ You can schedule a Chat routine in Automation Center: choose **Chat**, pick a
 Chat Project, and say what to do and when. Each run starts a new Chat thread in
 that Project and sends it the task, on the model the routine names. A Chat
 routine keeps Chat's limits, so it has no files, commands, or Git and no mode
-to pick. A Chat thread's agent does not propose routines; you create them in
-Automation Center.
+to pick. A Chat thread's agent does not propose, read, or change routines; you
+create and manage them in Automation Center.
 
 ## Scoped memory
 

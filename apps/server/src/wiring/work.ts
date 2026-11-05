@@ -67,6 +67,7 @@ import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools"
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { createRoutineProposalTools } from "../automation/routineProposalTools";
+import { createRoutineTools } from "../automation/routineTools";
 import { isRoutineHostScope } from "../routineHostScope";
 import {
   defaultShellSettings,
@@ -105,6 +106,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     AuthorityWiring,
     | "agentRunPersistence"
+    | "automationEventStore"
     | "browserCaptures"
     | "browserModelBindings"
     | "codeSessionAuthority"
@@ -204,6 +206,7 @@ export function wireWork(deps: WorkDependencies) {
     agentRunPersistence,
     agentsManagedToolsFor,
     authorizeWorkThreadForWindow,
+    automationEventStore,
     browserAuthority,
     browserAutomationService,
     browserCaptures,
@@ -462,19 +465,31 @@ export function wireWork(deps: WorkDependencies) {
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
+        const routineTurn = {
+          windowId: input.windowId,
+          thread: {
+            id: String(input.thread.id),
+            mode: "work" as const,
+            projectId: String(input.thread.projectId),
+          },
+          isAutomationOrigin: isRoutineHostScope(input.windowId),
+          now: Date.now,
+        };
         const routineTools = !browserSupported
           ? undefined
-          : createRoutineProposalTools({
-              windowId: input.windowId,
-              thread: {
-                id: String(input.thread.id),
-                mode: "work",
-                projectId: String(input.thread.projectId),
-              },
-              isAutomationOrigin: isRoutineHostScope(input.windowId),
-              proposals: routineProposalService,
-              now: Date.now,
-            });
+          : combineAppManagedToolSets(
+              createRoutineProposalTools({ ...routineTurn, proposals: routineProposalService }),
+              createRoutineTools({
+                ...routineTurn,
+                ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),
+                routines: {
+                  hostId: LOCAL_HOST_ID,
+                  projection: persistence.automationProjection,
+                  store: automationEventStore,
+                  changes: routineProposalService,
+                },
+              }),
+            );
         const agentsTools = !browserSupported
           ? undefined
           : agentsManagedToolsFor({

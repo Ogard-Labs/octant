@@ -22,6 +22,7 @@ import {
   type AutomationId,
   type HostId,
   type ProjectId,
+  type RoutineChangeRequest,
   type RoutineProposal,
   type UtcTimestamp,
 } from "@octant/contracts";
@@ -61,9 +62,11 @@ export interface AutomationRouteDependencies {
    */
   readonly historyAvailable?: () => boolean;
   /**
-   * Routines thread agents proposed. Listed and answered only by the window
-   * whose turn raised them; a confirm builds the routine from the thread's
-   * live facts and creates it through the same command path as `commands`.
+   * Routines thread agents proposed, and pauses or archives they asked for.
+   * Listed and answered only by the window whose turn raised them; a confirm
+   * builds the routine from the thread's live facts and creates it, or pauses
+   * or archives the named routine, through the same command path as
+   * `commands`.
    */
   readonly proposals?: {
     readonly service: Pick<RoutineProposalService, "list" | "claim">;
@@ -599,11 +602,11 @@ async function handleCommand(
 }
 
 /**
- * A person's answer to a thread's routine proposal. The proposal leaves the
- * waiting list on the first answer, so a retry cannot create a second
- * routine. A confirm is a create by this request's own principal, held to the
- * same Project check and command service as a create from the editor; only
- * the host adds which thread proposed it.
+ * A person's answer to a thread's routine proposal or change request. It
+ * leaves the waiting list on the first answer, so a retry cannot act twice.
+ * A confirm is a create, pause, or archive by this request's own principal,
+ * held to the same Project check and command service as the person's own;
+ * only the host adds which thread proposed a created routine.
  */
 async function handleProposalDecision(
   dependencies: AutomationRouteDependencies,
@@ -638,6 +641,25 @@ async function handleProposalDecision(
     claimed.settle({ status: "not-created", message: failure.message });
     return jsonResponse(decodeRoutineProposalDecisionResult(failure), 200, origin);
   };
+  if ("kind" in claimed.proposal) {
+    const changed = await changeThreadRoutine(dependencies, context, claimed.proposal);
+    if (changed.kind !== "automation-paused" && changed.kind !== "automation-archived") {
+      return refuse(
+        changed.kind === "automation-command-failed"
+          ? changed
+          : commandFailure("invalid", "The routine was not changed."),
+      );
+    }
+    claimed.settle({ status: "confirmed", automationId: changed.automation.id });
+    return jsonResponse(
+      decodeRoutineProposalDecisionResult({
+        kind: "routine-proposal-confirmed",
+        automation: changed.automation,
+      }),
+      200,
+      origin,
+    );
+  }
   const result = await createThreadRoutine(dependencies, context, claimed.proposal);
   if (result.kind !== "automation-created") {
     return refuse(
@@ -696,6 +718,38 @@ async function createThreadRoutine(
     } as AutomationCommand,
     { originThreadId: proposal.threadId },
   );
+}
+
+/**
+ * Pause or archive the routine a thread's agent asked about, as this
+ * request's own principal: the same Project check and command as the person's
+ * own pause or archive in Automation Center, at the version the agent saw, so
+ * a routine changed since the request is refused rather than changed.
+ */
+async function changeThreadRoutine(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  request: RoutineChangeRequest,
+): Promise<AutomationCommandResult> {
+  if (dependencies.historyAvailable?.() === false) {
+    return commandFailure(
+      "unsupported",
+      "Automation history could not be loaded, so Automations cannot change.",
+    );
+  }
+  const command = {
+    kind: request.change === "pause" ? "pause-automation" : "archive-automation",
+    automationId: request.automationId,
+    expectedVersion: request.expectedVersion,
+  };
+  const accessible = await accessibleProjects(dependencies, context);
+  const denial = authorizeCommandProject(dependencies, command, accessible);
+  if (denial !== undefined) return denial;
+  return dependencies.commands.execute({
+    ...command,
+    principal: context.principal,
+    origin: { kind: "interactive" },
+  } as AutomationCommand);
 }
 
 /**
