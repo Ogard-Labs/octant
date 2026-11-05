@@ -316,6 +316,8 @@ interface PlaywrightRecording {
   readonly timer: ReturnType<typeof setTimeout>;
   /** Settles once every frame that arrived so far has been looked at. */
   readonly settled: () => Promise<void>;
+  /** Take no further frame from the screencast; those already received still finish. */
+  readonly stopReceiving: () => void;
 }
 
 export const DEFAULT_BROWSER_EXECUTABLE_CANDIDATES = [
@@ -856,7 +858,9 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     }
     const frames = new BrowserRecordingFrames(performance.now());
     let tail: Promise<void> = Promise.resolve();
+    let receiving = true;
     session.on("Page.screencastFrame", (parameters) => {
+      if (!receiving) return;
       const frame = parameters as { readonly data?: unknown; readonly sessionId?: unknown };
       tail = tail.then(async () => {
         try {
@@ -908,7 +912,15 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       void session.send("Page.stopScreencast").catch(() => undefined);
     }, MAX_BROWSER_RECORDING_MS);
     timer.unref?.();
-    owned.recording = { frames, session, timer, settled: () => tail };
+    owned.recording = {
+      frames,
+      session,
+      timer,
+      settled: () => tail,
+      stopReceiving: () => {
+        receiving = false;
+      },
+    };
   }
 
   /** End the context's recording and build its animation; nothing running is empty. */
@@ -916,8 +928,13 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const recording = owned.recording;
     if (recording === undefined) return { status: "empty" };
     owned.recording = undefined;
-    recording.frames.stop(performance.now());
+    // The frames are stopped only once the screencast has ended and the frames
+    // it already sent were checked: stopped first, a frame whose credential
+    // check was still running when the stop came would be refused as late,
+    // and the recording would lose the page's last state.
+    const stoppedAtMs = performance.now();
     await this.#endScreencast(recording);
+    recording.frames.stop(stoppedAtMs);
     const result = recording.frames.finish(performance.now());
     if (result.status !== "recorded") return result;
     return {
@@ -940,6 +957,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
 
   async #endScreencast(recording: PlaywrightRecording): Promise<void> {
     clearTimeout(recording.timer);
+    recording.stopReceiving();
     await recording.session.send("Page.stopScreencast").catch(() => undefined);
     // A page stuck in its own script would hold the credential check of the
     // last frame; the recording ends without that frame rather than waiting.

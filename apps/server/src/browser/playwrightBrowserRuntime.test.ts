@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { deflateSync } from "node:zlib";
+import { crc32 } from "@octant/domain";
 import type { BrowserActionRequest, BrowserContextId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -604,6 +606,30 @@ describe("PlaywrightBrowserRuntime", () => {
     ).rejects.toThrow("sensitive or credential field");
   });
 
+  it("keeps a frame whose credential check was still running when the recording stopped", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    recorder.frame();
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+    // The check settles only once the stop has reached the screencast, so the
+    // stop arrives while the frame is still being looked at.
+    recorder.onStopScreencast(() => checks.settle(false));
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+
+    expect(stopped.recording).toMatchObject({ status: "recorded", frames: 1 });
+  });
+
+  it("drops a frame whose credential check outlasts the drain bound", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    recorder.frame();
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+    checks.settle(false);
+
+    expect(stopped.recording).toEqual({ status: "empty" });
+  });
+
   it("reports process death and closes all owned contexts", async () => {
     const { browser, disconnected, runtime } = harness();
     const listener = vi.fn();
@@ -694,6 +720,87 @@ function harnessWithReceipt(options: {
     shutdownTimeoutMs: 1,
   });
   return { browser, disconnected: () => disconnected?.(), runtime };
+}
+
+/** A context recording its page, each frame's credential check held open until a test settles it. */
+async function recordingHarness() {
+  const { pages, runtime } = harness();
+  const page = pages[0]!;
+  const waiting: Array<(sensitive: boolean) => void> = [];
+  // Only a frame's check is held: the page's own observations answer at once.
+  let holdNextCheck = false;
+  const checks = {
+    get pending() {
+      return waiting.length;
+    },
+    settle(sensitive: boolean) {
+      for (const resolve of waiting.splice(0)) resolve(sensitive);
+    },
+  };
+  vi.mocked(page.frames).mockReturnValue([
+    {
+      evaluate: vi.fn(async () => {
+        if (!holdNextCheck) return false;
+        holdNextCheck = false;
+        return new Promise((resolve) => waiting.push(resolve));
+      }),
+      locator: page.locator,
+    },
+  ] as any);
+  let frameListener: ((parameters: unknown) => void) | undefined;
+  let stopScreencast = () => {};
+  const session = {
+    send: vi.fn(async (method: string) => {
+      if (method === "Page.stopScreencast") stopScreencast();
+    }),
+    on: vi.fn((_event: string, listener: (parameters: unknown) => void) => {
+      frameListener = listener;
+    }),
+    detach: vi.fn(async () => undefined),
+  };
+  Object.assign(page, { context: () => ({ newCDPSession: async () => session }) });
+  await runtime.createContext(firstId, policy, new AbortController().signal);
+  await runtime.act(
+    firstId,
+    action("navigate", "https://example.com/start"),
+    new AbortController().signal,
+  );
+  await runtime.act(firstId, action("record-start"), new AbortController().signal);
+  const recorder = {
+    frame() {
+      holdNextCheck = true;
+      frameListener?.({ data: Buffer.from(onePixelPng()).toString("base64"), sessionId: 1 });
+    },
+    onStopScreencast(listener: () => void) {
+      stopScreencast = listener;
+    },
+  };
+  return { checks, recorder, runtime };
+}
+
+/** A one-pixel RGBA PNG, the shape a page's screencast sends. */
+function onePixelPng(): Uint8Array {
+  const chunk = (type: string, data: Buffer) => {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    out.write(type, 4, "ascii");
+    data.copy(out, 8);
+    out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(1, 0);
+  header.writeUInt32BE(1, 4);
+  header[8] = 8;
+  header[9] = 6;
+  return Uint8Array.from(
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk("IHDR", header),
+      chunk("IDAT", deflateSync(Buffer.from([0, 255, 0, 0, 255]))),
+      chunk("IEND", Buffer.alloc(0)),
+    ]),
+  );
 }
 
 describe("naming the element a user pointed at", () => {

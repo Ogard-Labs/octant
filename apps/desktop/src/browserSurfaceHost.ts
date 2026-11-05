@@ -3609,7 +3609,11 @@ async function finishRecording(
   const recording = owned.recording;
   if (recording === undefined) return { status: "empty" };
   owned.recording = undefined;
-  recording.frames.stop(performance.now());
+  // The screencast ends first and the frames it already sent are checked
+  // before the frames stop: stopped first, a frame whose credential check was
+  // still running when the stop came would be refused as late, and the
+  // recording would lose the page's last state.
+  const stoppedAtMs = performance.now();
   endScreencast(owned, recording);
   // A page stuck in its own script would hold the credential check of the last
   // frame; the recording ends without that frame rather than waiting.
@@ -3617,6 +3621,7 @@ async function finishRecording(
     recording.settled(),
     new Promise((resolve) => setTimeout(resolve, 1_000).unref?.()),
   ]);
+  recording.frames.stop(stoppedAtMs);
   const result = recording.frames.finish(performance.now());
   if (result.status !== "recorded") return result;
   return {
