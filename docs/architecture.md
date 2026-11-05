@@ -279,6 +279,9 @@ field/caret metadata.
 Explicit in-app UI quit can retain the host for current authenticated Nightly
 clients; accepted terminal quit closes admission before cleanup. See the owning
 [client lifetime rules](design/nightly-app.md#keeping-the-host-for-current-clients).
+Nightly's own updater uses its local preference storage and current window
+authority; it never changes Stable's channel or stops Stable's host. See
+[Nightly update ownership](design/nightly-app.md#nightlys-own-updates).
 Lease loss destroys the old Nightly renderer before a bounded fresh native
 registration retry; only an already retained current client receives managed
 restart grace. See [reconnect rules](design/nightly-app.md#reconnecting-after-host-loss).

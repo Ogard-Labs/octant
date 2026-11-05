@@ -203,6 +203,8 @@ export const AppUpdateState = Schema.Struct({
   automaticChecks: Schema.Boolean,
   /** The ring this app is following, which decides which feed it reads. */
   ring: AppReleaseRing,
+  /** Choices belonging to this running application, not another installed app. */
+  allowedRings: Schema.optional(Schema.Array(AppReleaseRing).pipe(Schema.maxItems(3))),
 }).annotations(strict);
 export type AppUpdateState = typeof AppUpdateState.Type;
 

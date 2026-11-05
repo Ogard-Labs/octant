@@ -82,6 +82,7 @@ export function createMainBrowserWindowOptions(options: {
   readonly initialProjectId?: string;
   readonly initialThreadMode?: "code" | "work";
   readonly initialThreadId?: string;
+  readonly localUpdatePreferences?: boolean;
   readonly preloadPath: string;
   readonly browserWindow: WindowPresentation["browserWindow"];
 }): BrowserWindowConstructorOptions {
@@ -105,6 +106,7 @@ export function createMainBrowserWindowOptions(options: {
     webPreferences: {
       contextIsolation: true,
       additionalArguments: [
+        ...(options.localUpdatePreferences === true ? ["--octant-local-update-preferences"] : []),
         `--octant-project-capability=${options.capability}`,
         `--octant-window-id=${options.windowId}`,
         ...(options.initialProjectId === undefined

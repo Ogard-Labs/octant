@@ -78,6 +78,33 @@ function view(overrides: Partial<OctantHostBridge> = {}, automaticChecks = true)
 }
 
 describe("AppUpdateSettings", () => {
+  it("keeps Nightly update preferences local and offers only its own release rings", () => {
+    const local: AppUpdateState = {
+      ...ready,
+      automaticChecks: false,
+      ring: "preview",
+      allowedRings: ["preview", "candidate"],
+    };
+    const f = view({
+      appUpdatePreferenceScope: "local",
+      subscribeAppUpdateState: (listener) => {
+        listener(local);
+        return () => {};
+      },
+    });
+    expect(
+      screen
+        .getByRole("switch", { name: "Check for updates automatically" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+    expect(screen.queryByRole("button", { name: "Stable" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(f.host.setAppUpdateRing).toHaveBeenCalledWith("candidate");
+    expect(f.onReleaseRingChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("switch", { name: "Check for updates automatically" }));
+    expect(f.host.setAutomaticAppUpdateChecks).toHaveBeenCalledWith(true);
+    expect(f.onAutomaticChecksChange).not.toHaveBeenCalled();
+  });
   it("says what an update check sends, beside the switch that turns it off", () => {
     // The person deciding whether to leave checks on is the person who should
     // be able to read what those checks disclose.

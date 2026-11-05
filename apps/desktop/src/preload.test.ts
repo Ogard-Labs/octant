@@ -98,6 +98,7 @@ describe("desktop preload bridge", () => {
       currentVersion: "0.1.0",
       automaticChecks: false,
       ring: "preview",
+      allowedRings: ["preview", "candidate"],
     };
     const ipc: IpcRendererPort = {
       invoke: vi.fn().mockResolvedValue(state),
@@ -105,12 +106,42 @@ describe("desktop preload bridge", () => {
       removeListener: vi.fn(),
     };
     const listener = vi.fn();
-    const unsubscribe = createHostBridge(ipc, projectWindowCapability).subscribeAppUpdateState(
-      listener,
+    const bridge = createHostBridge(
+      ipc,
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
     );
+    expect(bridge.appUpdatePreferenceScope).toBe("local");
+    const unsubscribe = bridge.subscribeAppUpdateState(listener);
     await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(state));
     expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.appUpdateState);
     expect(ipc.invoke).not.toHaveBeenCalledWith(IPC_CHANNELS.appUpdateCheck);
+    unsubscribe();
+  });
+
+  it("discards update choices containing an unknown release ring", async () => {
+    const snapshot = Promise.resolve({
+      status: "idle",
+      currentVersion: "0.1.0",
+      automaticChecks: false,
+      ring: "preview",
+      allowedRings: ["preview", "untrusted"],
+    });
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(() => snapshot),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(ipc, projectWindowCapability).subscribeAppUpdateState(
+      listener,
+    );
+    await snapshot;
+    await Promise.resolve();
+    expect(listener).not.toHaveBeenCalled();
     unsubscribe();
   });
 
