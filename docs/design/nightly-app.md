@@ -200,6 +200,21 @@ so an agent action that starts while an edit awaits its field never has its text
 changed mid-action; cancellation still reaches the field. Control-Escape blurs
 whichever element inside the page holds focus, including the text input.
 
+### Local native menus
+
+Nightly's own shared renderer uses the same bounded native dropdown and context
+menu contract as Stable. Its main validates the current owned top-level window,
+main frame and bundled renderer before opening the menu, and rechecks that owner
+before returning a selected item. Navigation, window retirement and superseding
+menus dismiss the old instance. A selected menu-entry ID grants no host authority;
+the existing renderer callback still uses ordinary server authorization.
+
+Ordinary editable fields in the Nightly shell receive the platform editing menu.
+These roles act on Nightly's own fields. They do not forward clipboard data,
+editing commands or menus into the Stable-owned page behind an embedded image.
+Stable page context menus, HTML select popups and page accessibility remain
+separate parity work.
+
 The current foundation remains publication-gated while full IME reconversion,
 accessibility,
 native-popup parity, other native brokers and the remaining lifecycle behavior

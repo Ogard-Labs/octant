@@ -134,6 +134,9 @@ const activeMenus = new WeakMap<BrowserWindow, () => void>();
 export function popupNativeMenu(window: BrowserWindow, value: unknown): Promise<NativeMenuOutcome> {
   const request = decodeNativeMenuRequest(value);
   if (request === undefined || window.isDestroyed()) return Promise.resolve({ kind: "refused" });
+  // BrowserWindow.webContents throws once the window's closed event fires.
+  // Keep the original emitter for teardown instead of consulting that getter.
+  const contents = window.webContents;
   activeMenus.get(window)?.();
   return new Promise((resolve) => {
     let outcome: NativeMenuOutcome = { kind: "dismissed" };
@@ -148,13 +151,20 @@ export function popupNativeMenu(window: BrowserWindow, value: unknown): Promise<
       settled = true;
       activeMenus.delete(window);
       window.removeListener("closed", dismiss);
-      window.webContents.removeListener("did-start-navigation", navigated);
+      contents.removeListener("did-start-navigation", navigated);
       resolve(outcome);
     };
     const dismiss = () => {
       outcome = { kind: "dismissed" };
-      menu.closePopup(window);
-      finish();
+      try {
+        // This Menu instance belongs only to this popup. Omitting an already
+        // destroyed window closes its own menu without a dead native argument.
+        menu.closePopup(window.isDestroyed() ? undefined : window);
+      } catch {
+        outcome = { kind: "refused" };
+      } finally {
+        finish();
+      }
     };
     const navigated = (
       _event: Electron.Event,
@@ -166,8 +176,8 @@ export function popupNativeMenu(window: BrowserWindow, value: unknown): Promise<
     };
     activeMenus.set(window, dismiss);
     window.once("closed", dismiss);
-    window.webContents.on("did-start-navigation", navigated);
-    const zoom = window.webContents.getZoomFactor();
+    contents.on("did-start-navigation", navigated);
+    const zoom = contents.getZoomFactor();
     menu.popup({
       window,
       x: Math.round(request.x * zoom),

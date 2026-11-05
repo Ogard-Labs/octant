@@ -100,12 +100,19 @@ describe("native menu contributions", () => {
     expect(window.listenerCount("closed")).toBe(0);
   });
 
-  it("dismisses an earlier menu when replaced and the current menu on navigation", async () => {
+  it("dismisses an earlier menu when replaced and current menus on navigation or window retirement", async () => {
+    let destroyed = false;
     const webContents = Object.assign(new EventEmitter(), { getZoomFactor: () => 1 });
     const window = Object.assign(new EventEmitter(), {
       webContents,
-      isDestroyed: () => false,
+      isDestroyed: () => destroyed,
     }) as unknown as BrowserWindow;
+    Object.defineProperty(window, "webContents", {
+      get() {
+        if (destroyed) throw new TypeError("Object has been destroyed");
+        return webContents;
+      },
+    });
     const close = vi.fn();
     nativeMenus.build.mockImplementation((template: MenuItemConstructorOptions[]) => ({
       items: template,
@@ -119,6 +126,13 @@ describe("native menu contributions", () => {
     expect(await current).toEqual({ kind: "dismissed" });
     expect(close).toHaveBeenCalledTimes(2);
     expect(webContents.listenerCount("did-start-navigation")).toBe(0);
+    const retiring = popupNativeMenu(window, request);
+    destroyed = true;
+    expect(() => window.emit("closed")).not.toThrow();
+    expect(await retiring).toEqual({ kind: "dismissed" });
+    expect(close).toHaveBeenLastCalledWith(undefined);
+    expect(webContents.listenerCount("did-start-navigation")).toBe(0);
+    expect(window.listenerCount("closed")).toBe(0);
   });
 
   it("offers native editing roles only where Chromium allows the edit", () => {

@@ -898,9 +898,9 @@ disabled and checked states, and nested actions. Native menus dismiss after
 a selection, including checkbox/radio changes; reopening reads the current state. Ordinary editable text and text selections
 receive the platform editing/copy menu. The Code editor and both diff sides
 use native editing/find actions that run through the existing editor commands. Browser clients retain the accessible
-Base UI menus. Native menus rely on macOS accessibility and get no automated
-check, because the OS draws them and a test cannot reach them; only the
-browser menus are covered by automated keyboard and role checks. Searchable pickers and popovers with embedded controls remain
+Base UI menus. Native menus use macOS accessibility. Verify their actual presentation and
+selection through native accessibility in an isolated desktop fixture; renderer
+keyboard and role checks cover the browser fallback. Searchable pickers and popovers with embedded controls remain
 renderer surfaces.
 
 ### Turn header
