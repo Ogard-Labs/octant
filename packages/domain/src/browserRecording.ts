@@ -5,6 +5,7 @@ import {
   MAX_BROWSER_RECORDING_FRAMES,
   MAX_BROWSER_RECORDING_MS,
 } from "@octant/contracts";
+import { originAllowed } from "./browserAutomationPolicy";
 
 /**
  * A Browser recording as an animated PNG, built from the PNG frames the page's
@@ -182,6 +183,29 @@ function encodedSize(dataLengths: ReadonlyArray<number>): number {
       total + CHUNK_OVERHEAD + FCTL_LENGTH + CHUNK_OVERHEAD + length + (index === 0 ? 0 : 4),
     fixed,
   );
+}
+
+/**
+ * Whether a frame may join a recording: the page it shows is on an origin the
+ * thread approved, and holds no credential field. A page with no web origin to
+ * check (a blank page, the browser's own error page, an address that cannot be
+ * read) fails closed, as an unapproved one does, because what it shows cannot
+ * be tied to an approval.
+ */
+export function browserRecordingFrameKept(input: {
+  readonly pageUrl: string | undefined;
+  readonly allowedOrigins: ReadonlyArray<string>;
+  readonly credentialField: boolean;
+}): boolean {
+  if (input.credentialField || input.pageUrl === undefined) return false;
+  let protocol: string;
+  try {
+    protocol = new URL(input.pageUrl).protocol;
+  } catch {
+    return false;
+  }
+  if (protocol !== "http:" && protocol !== "https:") return false;
+  return originAllowed(input.pageUrl, input.allowedOrigins);
 }
 
 /** The bounds one recording keeps to; see the contract's recording constants. */

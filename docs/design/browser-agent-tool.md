@@ -1152,13 +1152,16 @@ stale until the page is read again.
 - Recording runs against real Chromium in both Browsers: the smoke test above
   records a batch into an animated PNG with the frame count its answer names,
   keeps the revision the batch answered with current, withholds a page with a
-  password field, and refuses Plan and a page that is not open; the desktop
-  real-page test records the desktop Browser's actions through its own
-  debugger attachment, lets the attachment go when the recording ends, and
-  withholds a credential page. `browserAppManagedTools.test.ts` covers the
-  start, the stop after a failed step, a Browser that cannot record, and the
-  `record` argument; `browserRecording.test.ts` covers the animated PNG and its
-  bounds.
+  password field, keeps no frame of the error and blank pages a refused
+  off-origin link leaves, and refuses Plan and a page that is not open; the
+  desktop real-page test records the desktop Browser's actions through its own
+  debugger attachment, lets the attachment go when the recording ends,
+  withholds a credential page, and keeps no frame of a site the person took
+  the view to that the thread did not approve (both read each kept frame's
+  pixels). `browserAppManagedTools.test.ts` covers the start, the stop after a
+  failed step, a Browser that cannot record, and the `record` argument;
+  `browserRecording.test.ts` covers the animated PNG, its bounds, and which
+  frames may be kept.
 - `apps/server/src/browser/browserThreadOwnership.test.ts` covers one thread's
   page being out of reach of another thread, a subagent, and another thread's
   terminal grant, and the Project's page list.

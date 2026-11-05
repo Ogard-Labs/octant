@@ -27,6 +27,7 @@ import {
   browserProfilePartition,
   awaitQuietPage,
   BrowserRecordingFrames,
+  browserRecordingFrameKept,
   BROWSER_DIALOG_POLICY,
   BROWSER_SETTLE_CAP_MS,
   BROWSER_SETTLE_QUIET_MS,
@@ -3519,9 +3520,23 @@ async function startRecording(owned: OwnedSurface, view: BrowserSurfaceViewPort)
     tail = tail.then(async () => {
       try {
         if (!frames.recording || typeof frame.data !== "string") return;
-        // The check fails closed: a page between documents, which cannot be
-        // read, counts as one that holds a credential field.
-        if (await hasSensitiveDocument(view, owned.policy.credentialFieldProtection)) {
+        // The view's address is read as the frame arrives and again after the
+        // credential check, so a frame is kept only if the page stayed on an
+        // approved origin throughout: the person can take this view anywhere,
+        // and the approval covers only these origins. The credential check
+        // fails closed: a page between documents counts as one with a field.
+        const shown = view.webContents.getURL();
+        const admitted = (credentialField: boolean) =>
+          browserRecordingFrameKept({
+            pageUrl: shown,
+            allowedOrigins: owned.policy.allowedOrigins,
+            credentialField,
+          });
+        if (
+          !admitted(false) ||
+          !admitted(await hasSensitiveDocument(view, owned.policy.credentialFieldProtection)) ||
+          view.webContents.getURL() !== shown
+        ) {
           frames.leaveOut();
           return;
         }

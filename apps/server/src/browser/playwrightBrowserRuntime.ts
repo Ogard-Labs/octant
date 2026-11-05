@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   awaitQuietPage,
   BrowserRecordingFrames,
+  browserRecordingFrameKept,
   BROWSER_DIALOG_POLICY,
   BROWSER_SETTLE_CAP_MS,
   BROWSER_SHADOW_HOP,
@@ -860,9 +861,22 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       tail = tail.then(async () => {
         try {
           if (!frames.recording || typeof frame.data !== "string") return;
-          // The check fails closed: a page between documents, which cannot be
-          // read, counts as one that holds a credential field.
-          if (owned.protectCredentials && (await sensitiveDocument(page))) {
+          // The page's address is read as the frame arrives and again after
+          // the credential check, so a frame is kept only if the page stayed
+          // on an approved origin throughout. The credential check fails
+          // closed: a page between documents counts as one that holds a field.
+          const shown = page.url();
+          const admitted = (credentialField: boolean) =>
+            browserRecordingFrameKept({
+              pageUrl: shown,
+              allowedOrigins: owned.allowedOrigins,
+              credentialField,
+            });
+          if (
+            !admitted(false) ||
+            !admitted(owned.protectCredentials && (await sensitiveDocument(page))) ||
+            page.url() !== shown
+          ) {
             frames.leaveOut();
             return;
           }

@@ -242,6 +242,10 @@ records on its own.
   of these, and when the page is resized, and says so under the picture.
 - A page with a password or other credential field on screen is never recorded:
   its frames are left out, and a recording of nothing else keeps nothing.
+- Only the sites you approved for the agent's page are recorded. If the page
+  shows any other site (for example because you took it somewhere else while
+  the agent worked), a blank page, or an error page, those moments are left
+  out the same way.
 - If you take over the page, or the agent asks you to sign in, while it is
   recording, nothing of what you do is kept.
 - Recordings follow every capture rule above: they stay on this computer, count

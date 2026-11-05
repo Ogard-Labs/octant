@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { inflateSync } from "node:zlib";
 import type {
   BrowserAccessibilityAudit,
   BrowserContextId,
@@ -191,6 +192,14 @@ beforeAll(async () => {
       );
       return;
     }
+    if (path === "/red-away") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Red</title>
+        <style>html, body { margin: 0; height: 100%; background: rgb(220, 30, 30); }</style>
+        <a id="away" href="http://localhost:${String(port)}/other">Away</a>`);
+      return;
+    }
     if (path === "/leave") {
       const port = (server.address() as AddressInfo).port;
       response.writeHead(302, { location: `http://localhost:${String(port)}/other` });
@@ -256,6 +265,30 @@ afterAll(async () => {
   await runtime.closeAll();
   await new Promise((resolve) => server.close(resolve));
 });
+
+/**
+ * The colour of each animation frame's top-left pixel. Whatever filter a row
+ * uses, the first pixel of the first row is stored as it is, so inflating a
+ * frame's data is enough to read it.
+ */
+function apngCorners(dataUrl: string): ReadonlyArray<readonly [number, number, number]> {
+  const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
+  const frames: Buffer[][] = [];
+  let offset = 8;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString("ascii", offset + 4, offset + 8);
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    if (type === "fcTL") frames.push([]);
+    if (type === "IDAT") frames.at(-1)?.push(data);
+    if (type === "fdAT") frames.at(-1)?.push(data.subarray(4));
+    offset += 12 + length;
+  }
+  return frames.map((parts) => {
+    const pixels = inflateSync(Buffer.concat(parts));
+    return [pixels[1] ?? 0, pixels[2] ?? 0, pixels[3] ?? 0] as const;
+  });
+}
 
 function agentTool(
   options: {
@@ -953,6 +986,46 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       "no-picture",
     );
     expect(kept).toHaveLength(1);
+    await tool.stop();
+  });
+
+  it("keeps no frame of a page off the approved origin, or of one whose origin cannot be told", async () => {
+    const kept: string[] = [];
+    const tool = agentTool({
+      captures: {
+        keep: async (input) => {
+          kept.push(input.dataUrl);
+          return {
+            status: "kept",
+            captureId: randomUUID() as never,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          };
+        },
+      },
+    });
+    await tool.call({ operation: "navigate", url: `${origin}/red-away` });
+    // The link leads to another origin: the context refuses the request, the
+    // page shows the browser's own error page, and the runtime then leaves it
+    // for a blank page. None of those is a page this thread approved.
+    const recorded = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [
+        { operation: "wait", selector: "#away", timeoutMs: 1_000 },
+        { operation: "click", selector: "#away" },
+        { operation: "wait", conditions: [{ text: "never", present: true }], timeoutMs: 1_000 },
+      ],
+    });
+    const recording = (recorded.result as { readonly recording?: Record<string, unknown> })
+      .recording;
+    expect(recording?.captureId).toEqual(expect.any(String));
+    const corners = apngCorners(kept[0] ?? "");
+    expect(corners.length).toBe(recording?.frames);
+    expect(corners.length).toBeGreaterThan(0);
+    // Every kept frame is the approved red page.
+    expect(corners.filter(([red, green, blue]) => !(red > 180 && green < 80 && blue < 80))).toEqual(
+      [],
+    );
     await tool.stop();
   });
 

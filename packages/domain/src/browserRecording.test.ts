@@ -2,6 +2,7 @@ import { deflateSync, inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import {
   BrowserRecordingFrames,
+  browserRecordingFrameKept,
   browserRecordingStillFrame,
   crc32,
   encodeBrowserRecordingApng,
@@ -171,6 +172,40 @@ describe("parseBrowserRecordingPng", () => {
     corrupt[20] = (corrupt[20] ?? 0) ^ 0xff;
     expect(parseBrowserRecordingPng(corrupt)).toBeUndefined();
     expect(parseBrowserRecordingPng(Uint8Array.from([1, 2, 3]))).toBeUndefined();
+  });
+});
+
+describe("browserRecordingFrameKept", () => {
+  const approved = ["https://shop.example.com"];
+  const kept = (pageUrl: string | undefined, credentialField = false) =>
+    browserRecordingFrameKept({ pageUrl, allowedOrigins: approved, credentialField });
+
+  it("keeps a frame of a page on an origin the thread approved", () => {
+    expect(kept("https://shop.example.com/cart?item=2")).toBe(true);
+  });
+
+  it("leaves out a frame of a page on any origin the thread did not approve", () => {
+    expect(kept("https://other.example.com/")).toBe(false);
+    expect(kept("https://shop.example.com:8443/")).toBe(false);
+    expect(kept("http://localhost:5173/")).toBe(false);
+  });
+
+  it("leaves out a frame whose page has no origin that can be checked", () => {
+    for (const pageUrl of [
+      undefined,
+      "",
+      "about:blank",
+      "chrome-error://chromewebdata/",
+      "data:text/html,hi",
+      "file:///etc/hosts",
+      "not a url",
+    ]) {
+      expect(kept(pageUrl), String(pageUrl)).toBe(false);
+    }
+  });
+
+  it("leaves out a frame of an approved page that holds a credential field", () => {
+    expect(kept("https://shop.example.com/sign-in", true)).toBe(false);
   });
 });
 

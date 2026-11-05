@@ -299,9 +299,29 @@ attached the same way.
   a page that could not be checked (the check fails closed, as a page between
   documents does). The frame before it stays on screen in its place. A
   recording whose every frame was left out keeps nothing (`no-picture`).
+- **Approved origins only.** A frame is kept only when the page it shows is on
+  an origin the thread's Browser context approved. A frame of a page on any
+  other origin is left out, and so is one whose page has no web origin to
+  check: a blank page, the browser's own error page, or an address that cannot
+  be read. The page's address is read as each frame arrives and again after
+  its credential check, and a frame whose page moved in between is left out
+  too. The rule is the same on the desktop and the headless Browser
+  (`browserRecordingFrameKept`), and a left-out frame is handled as a
+  credential frame is: the frame before it stays on screen, and a recording
+  whose every frame was left out keeps nothing.
 - Rationale: leaving out the frame, rather than the whole recording, is what
   the screenshot rule says for each picture, and a flow that passes through a
-  page mid-load (every navigation does) would otherwise never be kept.
+  page mid-load (every navigation does) would otherwise never be kept. The
+  origin rule exists because a frame is a picture of whatever the view shows,
+  not of what the approval covered: on the desktop the person can take the
+  agent's own view to any site while a call runs, and a request the context
+  refuses still paints an error page. The approval is the thread's whole
+  authority to look at a page, so a recording must hold no picture of a page
+  it did not cover, and a page whose origin cannot be told cannot be shown to
+  be covered. Each frame is checked within milliseconds of being painted (the
+  page sends the next frame only once the last is acknowledged), so the
+  remaining window is a page that left an approved origin and came back
+  between one paint and its check.
 - **When it ends early.** The page closing, or the context stopping or
   expiring, drops the recording. While the person has taken the page over, or
   is signing in, the call's closing stop is refused like any other agent call,
@@ -351,4 +371,4 @@ attached the same way.
 `browserAutomationService.test.ts`, `browserAutomationRoutes.test.ts`,
 `threadPurge.test.ts`, `threadExportService.test.ts`, `canvasDesignAssets.test.ts`, `BrowserCaptureList.test.tsx`, and `BrowserWorkspace.test.tsx`.
 Proof adds `browserProofPolicy.test.ts`, the steps cases of `browserCaptureService.test.ts`, `browserAutomationService.test.ts`, and `browserAutomationRoutes.test.ts`, `CodePullRequestPane.test.tsx`, and the desktop `browserProofSaver.test.ts` and `preload.test.ts`.
-Recordings add `browserRecording.test.ts` (an animated PNG read back by a parser in the test: frame count, delays, size, CRCs, the still frame, and every bound), the recording cases of `browserCapture.test.ts`, `browserCapturePolicy.test.ts`, `browserAutomationPolicy.test.ts`, `browserProofPolicy.test.ts`, `browserCaptureService.test.ts`, `browserAutomationService.test.ts`, `browserAppManagedTools.test.ts`, `browserAutomationRoutes.test.ts`, `desktopBrowserRuntime.test.ts`, `BrowserCaptureList.test.tsx`, and the desktop `browserRuntimeBroker.test.ts` and `browserProofSaver.test.ts`; and real Chromium pages in `browserAgentTool.smoke.test.ts` (headless) and `browserSurfaceHost.realPage.test.ts` (the desktop Browser's code).
+Recordings add `browserRecording.test.ts` (an animated PNG read back by a parser in the test: frame count, delays, size, CRCs, the still frame, every bound, and which frames may be kept), the recording cases of `browserCapture.test.ts`, `browserCapturePolicy.test.ts`, `browserAutomationPolicy.test.ts`, `browserProofPolicy.test.ts`, `browserCaptureService.test.ts`, `browserAutomationService.test.ts`, `browserAppManagedTools.test.ts`, `browserAutomationRoutes.test.ts`, `desktopBrowserRuntime.test.ts`, `BrowserCaptureList.test.tsx`, and the desktop `browserRuntimeBroker.test.ts` and `browserProofSaver.test.ts`; and real Chromium pages in `browserAgentTool.smoke.test.ts` (headless) and `browserSurfaceHost.realPage.test.ts` (the desktop Browser's code), which read the pixels of every kept frame to show that no page off the approved origin, and no blank or error page, was recorded.
