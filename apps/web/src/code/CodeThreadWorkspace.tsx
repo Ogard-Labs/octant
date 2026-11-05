@@ -13,7 +13,7 @@ import {
   type CodeThreadId,
 } from "@octant/contracts/code";
 import type { CodeCheckpoint, CodeThreadChangedFileState } from "@octant/contracts/code-operations";
-import type { PermissionMode } from "@octant/contracts";
+import type { PermissionMode, CodeTurnReviewCapture } from "@octant/contracts";
 import {
   decidesCodeEffectsByApproval,
   permissionModeOf,
@@ -90,6 +90,7 @@ import { useThreadMentions } from "../chat/useThreadMentions";
 import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
+import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { liveTaskProgress } from "./transcriptActivity";
@@ -1845,7 +1846,36 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       )}
                       {/* After the reply, like Work's: the files are what the turn
                         left behind, read once the answer has been. */}
-                      {message.role === "assistant" && message.changedFiles !== undefined ? (
+                      {message.role === "assistant" && message.reviewPreview !== undefined ? (
+                        <CodeTurnReviewPreviewCard
+                          preview={message.reviewPreview}
+                          settled={message.status !== "incomplete" && message.status !== "waiting"}
+                          {...(props.onOpenReview !== undefined &&
+                          message.operationId !== undefined &&
+                          message.reviewPreview.capture?.checkoutId === view.checkout.id &&
+                          (message.sourceThreadId === undefined ||
+                            message.sourceThreadId === props.threadId)
+                            ? {
+                                onReviewFile: (path: string, capture: CodeTurnReviewCapture) => {
+                                  if (
+                                    message.operationId === undefined ||
+                                    capture.checkoutId !== view.checkout.id
+                                  )
+                                    return;
+                                  props.onOpenReview?.({
+                                    checkoutId: capture.checkoutId,
+                                    path,
+                                    receiptOperationId: message.operationId,
+                                    turnCapture: capture,
+                                  });
+                                },
+                              }
+                            : {
+                                reviewUnavailable:
+                                  "This captured comparison belongs to another task or checkout binding. Open its original task to review it.",
+                              })}
+                        />
+                      ) : message.role === "assistant" && message.changedFiles !== undefined ? (
                         <CodeTurnChangedFilesCard
                           changedFiles={message.changedFiles}
                           {...(props.onOpenReview !== undefined &&

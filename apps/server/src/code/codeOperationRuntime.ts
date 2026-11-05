@@ -1,4 +1,7 @@
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
+import { CodeTurnReviewCaptureScheduler } from "./codeTurnReviewCaptureScheduler";
+import { boundReviewText } from "./codeReviewComparison";
+import { DEFAULT_MAX_GIT_DIFF_BYTES } from "./gitObservationPort";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, relative, sep } from "node:path";
 import {
@@ -14,6 +17,7 @@ import {
   decodeCodeCheckoutId,
   decodeCodeCheckoutHead,
   decodeCodeOperationCommand,
+  decodeCodeTurnReviewCapture,
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeCodeEvidenceBatchResponse,
@@ -27,6 +31,8 @@ import {
   type CodeOperationCommand,
   type CodeOperationFailure,
   type CodeConversationPage,
+  type CodeTurnReviewCapture,
+  type CodeTurnReviewPreview,
   type CodeConversationWindowRequest,
   type CodeForkMergeBackOutcome,
   type ProviderSessionId,
@@ -320,6 +326,7 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
+    /** Existing host authority read synchronously at fresh capture publication; absent means unavailable. */
     readonly currentProjectAccess?: CodeOperationAuthorityPort["currentProjectAccess"];
     /**
      * Runs `run` on the window's standing authority: its persisted binding,
@@ -395,7 +402,9 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly repositoryTestDiscovery?: Pick<RepositoryTestDiscoveryService, "discover">;
   readonly gitObservationPort?: Pick<GitObservationPort, "observe"> &
-    Partial<Pick<GitObservationPort, "observeRemotes" | "readDiff">>;
+    Partial<
+      Pick<GitObservationPort, "observeRemotes" | "readDiff" | "readTreeChanges" | "readTreeDiff">
+    >;
   readonly gitMutationPort?: Pick<
     GitMutationPort,
     | "stage"
@@ -1097,6 +1106,9 @@ export function createCodeOperationRuntime(
             threadId: input.threadId,
             checkoutId: input.checkoutId,
             reviewOperationId: input.anchor.reviewOperationId,
+            ...(input.anchor.revision.kind === "turn-capture"
+              ? { captureCursor: input.anchor.revision.captureCursor }
+              : {}),
             path: input.path,
             side: input.anchor.side,
             line: input.location.line,
@@ -2389,6 +2401,7 @@ interface ActiveTurn {
   readonly sessionId: string;
   readonly requestedSessionId: string;
   readonly checkoutRoot: string;
+  readonly rootIdentity?: { readonly device: string; readonly inode: string };
   /** The Project's extra folders, granted what the checkout is granted. */
   readonly extraFolders: ReadonlyArray<string>;
   readonly driver: ProviderDriver;
@@ -2428,6 +2441,12 @@ interface ActiveTurn {
   lastPersistedFailure?: string | undefined;
   /** In-flight change-list recording, so a second terminal path waits instead of skipping. */
   changedFilesRecording?: Promise<void>;
+  reviewCapture?: CodeTurnReviewCaptureScheduler;
+  reviewLatest?: CodeTurnReviewCapture;
+  reviewFinalCaptured?: boolean;
+  reviewCaptureGuard?: (() => boolean) | undefined;
+  /** Current-attempt failure receipt; no new evidence or journal authority. */
+  reviewCaptureFailure?: { readonly current: () => boolean; readonly explanation: string };
   launch?: () => void;
   /** Told once the provider has accepted this turn's prompt and context. */
   readonly onContextDelivered?: () => void;
@@ -3064,6 +3083,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       requestedSessionId: input.sessionId,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
+      ...(input.rootIdentity === undefined ? {} : { rootIdentity: input.rootIdentity }),
       extraFolders: this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? [],
       driver,
       carriedSentContext: carriedSentContext({
@@ -4157,6 +4177,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
     active.state = "interrupted";
+    active.reviewCapture?.cancelPending();
     this.#revokeBrowserGrants(active);
     this.#persistRuntimeWork(active, "interrupted");
     active.abort.abort();
@@ -4176,6 +4197,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     this.#pending.clear();
     await Promise.all(
       activeTurns.map(async (active) => {
+        active.reviewCapture?.close();
         active.state = "interrupted";
         this.#persistRuntimeWork(active, "interrupted");
         active.abort.abort();
@@ -4233,6 +4255,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
           uuid: this.#options.uuid,
+          onCheckoutActivity: () => {
+            if (this.#captureIdentityCurrent(active, false))
+              this.#reviewScheduler(active).request();
+          },
           deviceApproval: {
             request: (effect, signal) => this.#askDeviceApproval(active, effect, signal),
           },
@@ -4729,6 +4755,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 };
               }
               if (claim.kind === "file-change" || claim.kind === "diff") {
+                if (this.#captureIdentityCurrent(active, false))
+                  this.#reviewScheduler(active).request();
                 const observation = await this.#git.observe(active.checkoutRoot);
                 return observation.status === "ready"
                   ? { status: "confirmed" as const, summary: "Checkout observation completed." }
@@ -4831,6 +4859,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }
       })
       .finally(() => {
+        active.reviewCapture?.close();
         this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)
           this.#active.delete(String(active.thread.id));
@@ -4935,10 +4964,266 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * passed on, because an interrupted turn is exactly one whose changes a
    * person needs to see.
    */
+  #reviewSource(threadId: CodeThreadId, operationId: CodeOperationId) {
+    return this.#events.reviewSource(threadId, operationId);
+  }
+
+  async reviewPreview(
+    input: Parameters<NonNullable<CodeOperationTurnPort["reviewPreview"]>>[0],
+  ): Promise<CodeTurnReviewPreview | undefined> {
+    if (input.admissionCurrent?.() === false) return undefined;
+    const source = this.#reviewSource(input.thread.id, input.operationId);
+    if (source === undefined || source.checkoutId !== input.thread.checkoutId) return undefined;
+    const active = this.#active.get(String(input.thread.id));
+    if (input.refresh) {
+      if (
+        active === undefined ||
+        active.operationId !== input.operationId ||
+        active.thread.checkoutId !== input.thread.checkoutId ||
+        active.windowId !== input.windowId
+      )
+        return source.reviewPreview;
+      active.reviewCaptureGuard = input.admissionCurrent;
+      try {
+        await this.#reviewScheduler(active).flush();
+      } finally {
+        if (active.reviewCaptureGuard === input.admissionCurrent)
+          active.reviewCaptureGuard = undefined;
+      }
+    }
+    if (input.admissionCurrent?.() === false) return undefined;
+    const recorded = this.#reviewSource(input.thread.id, input.operationId);
+    if (recorded === undefined || recorded.checkoutId !== input.thread.checkoutId) return undefined;
+    const settled = recorded.status !== "incomplete" && recorded.status !== "waiting";
+    const retained: CodeTurnReviewPreview = recorded.reviewPreview ?? {
+      status: "unavailable" as const,
+      explanation:
+        source.checkpoint === undefined
+          ? "This turn did not record a readable starting capture. No current checkout comparison was substituted."
+          : "No edit-triggered capture has finished yet. Refresh explicitly to inspect the current captured state.",
+    };
+    const failure =
+      active?.operationId === input.operationId ? active.reviewCaptureFailure : undefined;
+    const preview: CodeTurnReviewPreview =
+      failure?.current() === true
+        ? { ...retained, status: "unavailable", explanation: failure.explanation }
+        : retained;
+    return settled && preview.capture?.final !== true
+      ? {
+          ...preview,
+          status: "unavailable",
+          settled,
+          explanation:
+            "The final comparison was not captured. The last valid version is retained; later edits may be missing.",
+        }
+      : { ...preview, settled };
+  }
+
+  #captureIdentityCurrent(active: ActiveTurn, final: boolean): boolean {
+    const thread = this.#effectiveThread(active.windowId, active.thread.id);
+    const checkout = this.#options.persistence.readCodeCheckout(active.thread.checkoutId);
+    return (
+      this.#active.get(String(active.thread.id)) === active &&
+      active.serverTools === undefined &&
+      thread?.lifecycle === "active" &&
+      thread.checkoutId === active.thread.checkoutId &&
+      thread.projectId === active.thread.projectId &&
+      thread.bindingRevisionId === active.thread.bindingRevisionId &&
+      thread.repositoryId === active.thread.repositoryId &&
+      thread.providerInstanceId === active.thread.providerInstanceId &&
+      thread.modelId === active.thread.modelId &&
+      thread.executionPolicy !== "plan" &&
+      checkout?.availability === "available" &&
+      checkout.repositoryId === active.thread.repositoryId &&
+      (final ||
+        (!active.abort.signal.aborted &&
+          (active.state === "running" || active.state === "waiting")))
+    );
+  }
+
+  #publishReview(active: ActiveTurn, preview: CodeTurnReviewPreview): void {
+    const frame = this.#events.append({
+      threadId: active.thread.id,
+      operationId: active.operationId,
+      expectedCursor: active.cursor,
+      event: { kind: "conversation-turn-review-preview", preview },
+    });
+    active.cursor = frame.cursor;
+    if (preview.capture !== undefined) active.reviewLatest = preview.capture;
+  }
+
+  async #captureRootCurrent(
+    active: ActiveTurn,
+    current: () => boolean,
+  ): Promise<(() => boolean) | undefined> {
+    const accessCurrent = this.#options.windowAccess.currentProjectAccess;
+    if (!current() || accessCurrent === undefined) return undefined;
+    return this.#options.windowAccess.standingAuthority(async () => {
+      if (
+        !(await this.#options.windowAccess.canAccessProject(
+          active.windowId,
+          active.thread.projectId,
+        )) ||
+        !current()
+      )
+        return undefined;
+      const thread = this.#effectiveThread(active.windowId, active.thread.id);
+      const checkout = this.#options.persistence.readCodeCheckout(active.thread.checkoutId);
+      if (thread === undefined || checkout === undefined) return undefined;
+      const root = await this.#options.resolveCheckoutRoot(active.windowId, thread, checkout);
+      const access = this.#options.windowAccess.canAccessProject(
+        active.windowId,
+        active.thread.projectId,
+      );
+      if (!(typeof access === "boolean" ? access : await access)) return undefined;
+      const proof = () =>
+        current() &&
+        accessCurrent(active.windowId, active.thread.projectId) &&
+        root?.rootCurrent?.() !== false &&
+        root?.checkoutRoot === active.checkoutRoot &&
+        (active.rootIdentity === undefined ||
+          (root.rootIdentity?.device === active.rootIdentity.device &&
+            root.rootIdentity.inode === active.rootIdentity.inode)) &&
+        current();
+      return proof() ? proof : undefined;
+    });
+  }
+
+  #reviewScheduler(active: ActiveTurn): CodeTurnReviewCaptureScheduler {
+    active.reviewCapture ??= new CodeTurnReviewCaptureScheduler({
+      now: () => performance.now(),
+      capture: (final, signal, deadline) => this.#captureReview(active, final, signal, deadline),
+      unavailable: (reason, attemptCurrent) => {
+        const guard = active.reviewCaptureGuard;
+        const current = () =>
+          attemptCurrent() && this.#captureIdentityCurrent(active, true) && guard?.() !== false;
+        if (!current()) return;
+        const explanation =
+          reason === "deadline"
+            ? "The newer capture timed out. The last valid version is retained; later edits remain uncaptured."
+            : "The newer comparison could not be retained. The last valid version is retained; later edits remain uncaptured.";
+        active.reviewCaptureFailure = { current, explanation };
+        void this.#captureRootCurrent(active, current)
+          .then((proof) => {
+            if (proof?.() === true && current())
+              this.#publishReview(active, {
+                status: "unavailable",
+                explanation,
+              });
+          })
+          .catch(() => {});
+      },
+    });
+    return active.reviewCapture;
+  }
+
+  async #captureReview(
+    active: ActiveTurn,
+    final: boolean,
+    signal: AbortSignal,
+    deadline: number,
+  ): Promise<void | "unavailable"> {
+    const admissionCurrent = active.reviewCaptureGuard;
+    const identityCurrent = () =>
+      !signal.aborted &&
+      performance.now() < deadline &&
+      admissionCurrent?.() !== false &&
+      this.#captureIdentityCurrent(active, final);
+    let rootCurrent: (() => boolean) | undefined;
+    const current = () => identityCurrent() && rootCurrent?.() !== false;
+    const authorized = async () => {
+      const proof = await this.#captureRootCurrent(active, identityCurrent);
+      if (proof === undefined) return false;
+      rootCurrent = proof;
+      return current();
+    };
+    if (!(await authorized())) return identityCurrent() ? "unavailable" : undefined;
+    const source = this.#reviewSource(active.thread.id, active.operationId);
+    if (
+      source?.checkoutId !== active.thread.checkoutId ||
+      source.checkpoint === undefined ||
+      !this.#git.supportsCapturedDiff
+    ) {
+      if (current())
+        this.#publishReview(active, {
+          status: "unavailable",
+          explanation:
+            "A readable starting capture or bounded tree comparison is unavailable for this turn. No working-tree substitute was captured.",
+        });
+      return;
+    }
+    if (source.reviewPreview?.capture !== undefined)
+      active.reviewLatest ??= source.reviewPreview.capture;
+    this.#publishReview(active, {
+      status: "capturing",
+      explanation:
+        "Capturing a newer checkout comparison. The last valid version stays readable; later edits may be uncaptured.",
+    });
+    const result = await this.#git.changesSince(
+      {
+        checkoutId: String(active.thread.checkoutId),
+        checkoutRoot: active.checkoutRoot,
+        from: source.checkpoint.worktree,
+        includeDiff: true,
+        captureCurrent: authorized,
+        resolveExecutionPolicy: () =>
+          this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ?? "plan",
+      },
+      signal,
+    );
+    if (!(await authorized())) return identityCurrent() ? "unavailable" : undefined;
+    if (result.status !== "ready" || result.capture === undefined) {
+      this.#publishReview(active, {
+        status: "unavailable",
+        explanation:
+          "The newer capture failed. The last valid version remains readable; later changes have not been captured.",
+      });
+      return;
+    }
+    const bounded = boundReviewText(result.capture.diff.text, DEFAULT_MAX_GIT_DIFF_BYTES);
+    if (!current()) return identityCurrent() ? "unavailable" : undefined;
+    const diff = this.#options.evidence.put(bounded.text, {
+      truncated: bounded.truncated || result.capture.diff.truncated,
+    });
+    const capture = decodeCodeTurnReviewCapture({
+      checkoutId: active.thread.checkoutId,
+      version: (active.reviewLatest?.version ?? 0) + 1,
+      cursor: active.cursor + 1,
+      baseline: source.checkpoint.worktree,
+      tree: result.capture.to,
+      diff,
+      changedFiles: turnChangedFiles(result.changes) ?? { files: [], total: 0, truncated: false },
+      capturedAt: this.#options.clock(),
+      final,
+    });
+    if (!current()) return identityCurrent() ? "unavailable" : undefined;
+    this.#publishReview(active, {
+      status: "ready",
+      capture,
+      explanation:
+        "Checkout changes since this turn’s starting capture, possibly including other writers. Later edits may be uncaptured; viewing does not verify the changes.",
+    });
+    if (final) active.reviewFinalCaptured = true;
+  }
+
   async #recordChangedFiles(active: ActiveTurn): Promise<void> {
     if (active.changedFilesRecording !== undefined) return active.changedFilesRecording;
     active.changedFilesRecording = (async () => {
       try {
+        if (this.#git.supportsCapturedDiff) {
+          await this.#reviewScheduler(active).flush(true);
+          const changedFiles =
+            active.reviewFinalCaptured === true ? active.reviewLatest?.changedFiles : undefined;
+          if (changedFiles === undefined || changedFiles.total === 0) return;
+          const frame = this.#events.append({
+            threadId: active.thread.id,
+            operationId: active.operationId,
+            expectedCursor: active.cursor,
+            event: { kind: "conversation-turn-changed-files", changedFiles },
+          });
+          active.cursor = frame.cursor;
+          return;
+        }
         const replay = this.#events.replay({
           threadId: active.thread.id,
           operationId: active.operationId,

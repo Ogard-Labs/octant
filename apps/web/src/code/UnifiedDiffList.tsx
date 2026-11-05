@@ -10,7 +10,7 @@ export interface UnifiedDiffListProps {
     side: "original" | "modified";
     line: number;
   }) => void;
-  readonly requestedPath?: string;
+  readonly requestedFile?: { readonly path: string };
 }
 
 const CHANGE_LABELS: Readonly<Record<ParsedDiffFile["change"], string>> = {
@@ -35,12 +35,12 @@ const MARKERS: Readonly<Record<DiffHunk["lines"][number]["kind"], string>> = {
 export function UnifiedDiffList(props: UnifiedDiffListProps) {
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (props.requestedPath === undefined) return;
+    if (props.requestedFile === undefined) return;
     const target = Array.from(
       container.current?.querySelectorAll<HTMLElement>("[data-diff-path]") ?? [],
-    ).find((item) => item.dataset.diffPath === props.requestedPath);
+    ).find((item) => item.dataset.diffPath === props.requestedFile?.path);
     target?.scrollIntoView?.({ block: "nearest" });
-  }, [props.requestedPath, props.files]);
+  }, [props.requestedFile]);
   return (
     <div className="unified-diff" ref={container}>
       {props.files.map((file) => (

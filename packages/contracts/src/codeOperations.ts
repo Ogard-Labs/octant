@@ -331,6 +331,14 @@ export const CodeReviewRevision = Schema.Union(
     base: Schema.optional(boundedNonEmptyText(128)),
     baseRef: boundedNonEmptyText(512),
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("turn-capture"),
+    operationId: CodeOperationId,
+    captureCursor: Schema.Int.pipe(Schema.positive()),
+    version: Schema.Int.pipe(Schema.positive()),
+    baseline: GitObjectId,
+    tree: GitObjectId,
+  }).annotations(strict),
 );
 export type CodeReviewRevision = typeof CodeReviewRevision.Type;
 export const CodeReviewDiffAnchor = Schema.Struct({
@@ -670,6 +678,33 @@ export const CodeTurnChangedFiles = Schema.Struct({
   truncated: Schema.Boolean,
 }).annotations(strict);
 export type CodeTurnChangedFiles = typeof CodeTurnChangedFiles.Type;
+
+/** A bounded immutable comparison from the turn's original checkpoint, not exclusive authorship. */
+export const CodeTurnReviewCapture = Schema.Struct({
+  checkoutId: CodeCheckoutId,
+  version: Schema.Int.pipe(Schema.positive()),
+  cursor: Schema.Int.pipe(Schema.positive()),
+  baseline: GitObjectId,
+  tree: GitObjectId,
+  diff: CodeEvidenceReference,
+  changedFiles: CodeTurnChangedFiles,
+  capturedAt: UtcTimestamp,
+  final: Schema.Boolean,
+}).annotations(strict);
+export type CodeTurnReviewCapture = typeof CodeTurnReviewCapture.Type;
+export const CodeTurnReviewPreview = Schema.Struct({
+  status: Schema.Literal("capturing", "ready", "unavailable"),
+  /** Last valid capture remains readable while a later capture waits or fails. */
+  capture: Schema.optional(CodeTurnReviewCapture),
+  explanation: boundedNonEmptyText(1_024),
+  /** Added by a scoped metadata read from the owning turn's recorded outcome. */
+  settled: Schema.optional(Schema.Boolean),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((preview) => preview.status !== "ready" || preview.capture !== undefined));
+export type CodeTurnReviewPreview = typeof CodeTurnReviewPreview.Type;
+export const decodeCodeTurnReviewCapture = Schema.decodeUnknownSync(CodeTurnReviewCapture);
+export const decodeCodeTurnReviewPreview = Schema.decodeUnknownSync(CodeTurnReviewPreview);
 /**
  * Put the checkout's files back the way a checkpoint recorded them.
  *
@@ -912,9 +947,18 @@ const PrepareReviewTarget = Schema.Struct({
   kind: Schema.Literal("prepare-review-target"),
   ...OperationScope,
   reviewOperationId: CodeOperationId,
+  /** Exact immutable preview frame; absent for ordinary captured checkout/branch comparisons. */
+  captureCursor: Schema.optional(Schema.Int.pipe(Schema.positive())),
   path: CodeRelativePath,
   side: Schema.Literal("original", "modified"),
   line: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+const ObserveTurnReview = Schema.Struct({
+  kind: Schema.Literal("observe-turn-review"),
+  ...OperationScope,
+  turnOperationId: CodeOperationId,
+  /** False reads durable metadata only. True explicitly requests a bounded fresh capture of this live turn. */
+  refresh: Schema.Boolean,
 }).annotations(strict);
 const ListReviewFindings = Schema.Struct({
   kind: Schema.Literal("list-review-findings"),
@@ -1030,6 +1074,7 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "create-review-finding",
   "update-review-finding",
   "prepare-review-target",
+  "observe-turn-review",
   "list-review-findings",
   "prepare-review-correction",
   "start-provider-turn",
@@ -1040,6 +1085,7 @@ export const CODE_OPERATION_COMMAND_KINDS = [
 
 export const CodeOperationCommand = Schema.Union(
   PrepareReviewTarget,
+  ObserveTurnReview,
   ListReviewFindings,
   PrepareReviewCorrection,
   ReviewRun,
@@ -1461,6 +1507,14 @@ const ReviewTargetResult = Schema.Struct({
   anchorState: Schema.Literal("current", "outdated", "unavailable"),
   explanation: boundedNonEmptyText(512),
 }).annotations(strict);
+const TurnReviewPreviewResult = Schema.Struct({
+  kind: Schema.Literal("turn-review-preview"),
+  operationId: CodeOperationId,
+  turnOperationId: CodeOperationId,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  preview: CodeTurnReviewPreview,
+}).annotations(strict);
 const ReviewFindingsResult = Schema.Struct({
   kind: Schema.Literal("review-findings-state"),
   operationId: CodeOperationId,
@@ -1597,6 +1651,7 @@ const ThreadRewoundResult = Schema.Struct({
 
 export const CodeOperationResult = Schema.Union(
   ReviewTargetResult,
+  TurnReviewPreviewResult,
   ReviewFindingsResult,
   ReviewCorrectionResult,
   RunReviewResult,
@@ -1754,6 +1809,10 @@ const QuestionEvent = Schema.Struct({
 const ConversationTurnChangedFilesEvent = Schema.Struct({
   kind: Schema.Literal("conversation-turn-changed-files"),
   changedFiles: CodeTurnChangedFiles,
+}).annotations(strict);
+const ConversationTurnReviewPreviewEvent = Schema.Struct({
+  kind: Schema.Literal("conversation-turn-review-preview"),
+  preview: CodeTurnReviewPreview,
 }).annotations(strict);
 const FileChangeEvent = Schema.Struct({
   kind: Schema.Literal("file-change"),
@@ -2073,6 +2132,7 @@ export const CodeOperationEvent = Schema.Union(
   ForkContextDeliveredEvent,
   ConversationTurnStartedEvent,
   ConversationTurnChangedFilesEvent,
+  ConversationTurnReviewPreviewEvent,
   OperationStateEvent,
   ContentEvent,
   TerminalOutputEvent,
@@ -2203,6 +2263,7 @@ export const CodeConversationTurn = Schema.Struct({
   prompt: CodeEvidenceReference,
   checkoutId: Schema.optional(CodeCheckoutId),
   reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
+  reviewPreview: Schema.optional(CodeTurnReviewPreview),
   /** Images the user attached to this turn. Absent when it attached none. */
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),

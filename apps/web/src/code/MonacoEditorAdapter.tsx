@@ -105,6 +105,7 @@ export interface MonacoDiffSession {
   readonly setColors?: (colors: EditorColorProjection) => void;
   readonly setTypography?: (typography: EditorTypographyProjection) => void;
   readonly setValues: (values: { readonly original: string; readonly modified: string }) => void;
+  readonly setIgnoreTrimWhitespace?: (ignore: boolean) => void;
 }
 
 export interface MonacoDiffRuntime {
@@ -117,6 +118,7 @@ export interface MonacoDiffRuntime {
       readonly original: string;
       readonly modified: string;
       readonly renderSideBySide: boolean;
+      readonly ignoreTrimWhitespace?: boolean;
       readonly onSelectLine?: (selection: {
         readonly side: "original" | "modified";
         readonly line: number;

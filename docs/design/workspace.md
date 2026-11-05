@@ -480,8 +480,55 @@ Local review findings belong to the Code thread and checkout that supplied the
 comparison. A completed turn's changed-file row opens that file in Review only
 when its recorded checkout is still the thread's binding. Older receipts that
 did not record a checkout say so; a rebind never retargets their files. Review
-shows its current captured comparison, not a frozen diff of that turn.
+shows its current captured comparison for an unversioned receipt. A receipt with a
+retained turn capture opens that exact version instead; it never substitutes
+today’s Working tree for missing captured evidence.
 Changed-file receipts and Review cover the checkout only, not extra Project folders.
+
+A running local Code turn can publish versioned comparisons from the durable
+working-tree checkpoint recorded when it started. Each capture names its turn,
+checkout, starting tree, captured tree, immutable journal cursor, version and
+capture time. These are checkout observations that can include another person’s
+or agent’s writes, never proof of exclusive authorship. Relevant normalized file
+edit/diff events and admitted app-managed terminal write completion or timeout
+request captures; text tokens, generic tool progress and passive metadata reads
+do not. Bursts coalesce for 500 ms, background captures start at most once per
+five seconds, and one in-flight capture owns a twenty-second deadline. Explicit
+**Capture now** requests one bounded current comparison of the same live turn.
+Every capture rechecks current standing Project access, operation, model,
+checkout and writable posture, including after queued native work. The existing
+root authority must still resolve the original Project binding, repository and
+checkout, including the admitted physical directory identity; replacing a root
+under the same IDs cannot authorize fresh capture. Plan can read
+retained captures but creates no scratch-index capture. Missing baselines,
+server/unreadable checkouts, changed bindings, expired authority and failed
+capture have explicit unavailable states; none silently reopens another source.
+
+A capture retains at most the existing 256 KiB diff limit in the bounded,
+deduplicating Code evidence store. Binary files, omitted paths and truncated
+patches are visible; partial captures cannot anchor a new line finding. The last
+valid version remains readable while another capture runs or fails. A delayed
+failure notice belongs only to its own capture attempt and cannot supersede a
+newer successful version. Final
+capture precedes a settled receipt when authority and the original baseline are
+still available; otherwise the missing final capture is explained. Temporary
+native checkpoint anchors are released even after cancellation. Host close or a
+purged/rebound owner permits no late fresh preview or orphaned captured bytes.
+These observations create no execution grant or persistent unattended owner.
+
+Captured Review pins the person’s displayed immutable version. Newer and final
+versions are announced separately and replace it only when the person chooses
+**View newer capture** or **View final capture**, after the bytes’ length, digest
+and UTF-8 are validated. File selection and scroll survive refresh/reconnect;
+a selected path absent from the chosen version requires a new selection.
+Existing notes retain their original capture and never follow the displayed
+version silently. The shared whitespace preference is preserved, but this view
+labels its bounded display-only behavior **Ignore edge whitespace**: paired
+leading/trailing-whitespace-only changes are unhighlighted in unified view and
+Monaco ignores trim whitespace. This does not claim full Git `-w` equivalence;
+canonical bytes, source line numbers, captured version and note references stay
+unchanged. Opening the current file in an editor remains separate from reading
+its captured compared regions.
 
 The person selects a real source line on the original or modified side of a
 retained Working tree or run diff. The host binds the local finding to its own
