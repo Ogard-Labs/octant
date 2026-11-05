@@ -11528,10 +11528,13 @@ access` agree); a thread's own change is journaled as
     arbitrary runtimes or a hostile recipient at Full access.
     A normal Code task's `octant_command` tool selects only a binding ID;
     the Code conversation offers the same review/run service to the person.
-    Every run needs a separate one-use human approval within three minutes,
-    current Full access, and the originating registered local window. Plan and
-    all other access levels refuse this channel; their command-credential
-    acceptance remains unimplemented. No routine, managed-child tool set,
+    Every run needs a separate one-use credential approval within three minutes,
+    the originating registered local window, and ordinary Code command policy.
+    Ask for approvals and Auto-accept edits keep the recipient OS-confined;
+    Full access permits ordinary unrestricted commands. Plan and unknown postures
+    refuse. Ordinary approvals and Auto Shield remain additional to credential
+    consent; saving a binding never approves an ordinary command or destination.
+    No routine, managed-child tool set,
     paired scope or headless caller inherits it.
     The server derives the current Project, checkout, profile, provider and
     active-turn posture. After process preparation it rechecks Project/checkout
@@ -11543,7 +11546,7 @@ access` agree); a thread's own change is journaled as
     The broker's fixed `/v1/secret-stores/command-use` route validates references
     and link revision only. It cannot launch a process or return a secret.
     The existing owned process port executes `op run --account ID --` followed
-    by a fixed host bootstrap and the reviewed recipient arguments, with
+    by the host-prepared target and the reviewed recipient arguments, with
     references, a sanitized inherited baseline, bounded output and a
     1–300 second run timeout. The approval deadline stops governing after actual
     child start. After any credential-tool authentication wait, the bootstrap
@@ -11559,8 +11562,27 @@ access` agree); a thread's own change is journaled as
     variables are excluded before startup, and bootstrap-only Electron flags
     are removed before the recipient. The runtime remains part of the trusted
     host installation; its replacement is not covered by the recipient pin.
-    The recipient and descendants have ordinary Full access and
-    receive credentials directly from `op`; default vendor concealment cannot
+    Below Full access, `op` authenticates outside confinement and can launch only
+    the already prepared Seatbelt or Bubblewrap target. The policy, read roots
+    and pin derive from the recipient, not `op`. The capsule runs only fixed
+    host code before the recipient: native env promotes the launch proxy URL
+    inside confinement and removes its private source, then the host runtime
+    verifies the recipient pin. The confined bootstrap preserves only the
+    host-owned `NODE_USE_ENV_PROXY=1` activation; user mappings cannot set Node,
+    Bun, Electron or proxy configuration variables. The auth parent receives no
+    ordinary proxy variables. Recipient network uses the current per-launch
+    egress rules and one-use confirmed hosts; closure and audit/taint summary
+    settle before output may return. Ordinary authority/posture and forge branch
+    checks run again at final parent admission. Recognizable forge writes below
+    Full access require the structured tools. Failed audit withholds output.
+    A missing wrapper, unsupported runtime or preparation failure never retries
+    without confinement. Ordinary system reads remain permitted; this is not a
+    denial of every path outside the Project. Protected provider accounts lose
+    their own-account exemption, and the default `~/.op` and `~/.config/op`
+    directories stay denied even beneath broader roots. Credentials remain in
+    the recipient environment; no file or callback returns them to Octant.
+    At Full access the recipient and descendants have ordinary Full access.
+    All postures receive credentials directly from `op`; default vendor concealment cannot
     prevent encoding, file writes or network disclosure. Octant does not claim
     exact-value redaction for values it never receives.
     Cancellation before spawn has no command effect. After spawn, cancellation

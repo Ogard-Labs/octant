@@ -126,8 +126,8 @@ export function CommandCredentialRequests(props: {
     <details className="credential-requests">
       <summary>Credential commands{requests.length > 0 ? " · Review required" : ""}</summary>
       <p>
-        Saved commands for this Code Project. Each run needs current Full access and a separate
-        human approval. Other access levels are unsupported here.
+        Saved commands for this Code Project. Each run follows the task’s ordinary command approvals
+        and needs a separate human approval for credential use. Plan refuses runs.
       </p>
       {view?.bindings.length === 0 ? (
         <p>Save a fixed binding in Settings → Secret stores.</p>
@@ -184,8 +184,10 @@ export function CommandCredentialRequests(props: {
             ))}
           </ul>
           <p>
-            This executable and its descendants receive the credentials and ordinary Full access,
-            including network access. Output masking cannot prevent deliberate disclosure. Approval
+            {request.executionPolicy === "full-access"
+              ? "Full access: this executable and its descendants receive the credentials with ordinary Full access, including network access."
+              : `${request.executionPolicy === "approval-gated" ? "Ask for approvals" : "Auto-accept edits"}: the credential tool authenticates outside the sandbox; this executable and its descendants remain OS-confined under the task’s file and network rules. Network access uses the approved per-command proxy.`}{" "}
+            Output masking cannot prevent deliberate disclosure to an allowed destination. Approval
             expires at {new Date(request.expiresAt).toLocaleTimeString()} if the process has not
             started. A fresh request does not mean an earlier process stopped.
           </p>

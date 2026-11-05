@@ -36,6 +36,7 @@ const pending = {
   threadId: id(4),
   expiresAt: new Date(Date.now() + 180000).toISOString(),
   state: "pending" as const,
+  executionPolicy: "full-access" as const,
 };
 const view = decodeCommandCredentialResult({
   kind: "command-credential-view" as const,

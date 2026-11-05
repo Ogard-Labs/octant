@@ -1,4 +1,5 @@
 import { isToolAllowedByAllowlist } from "@octant/domain";
+import { commandCredentialPostureAllowed } from "@octant/domain/command-credential-policy";
 import { CommandCredentialBindings } from "./secretStores/commandCredentialBindings";
 import { commandCredentialContext } from "./secretStores/commandCredentialContext";
 import { commandCredentialRoutes } from "./secretStores/commandCredentialRoutes";
@@ -487,6 +488,7 @@ export function startOctantServer(
       beginGoogleCliChange,
       recoverGoogleCliCommands,
       credentialCommandProcess,
+      prepareCredentialCommand,
       personMemorySweep,
       runtimeForgeChanges,
       followUpCreation,
@@ -1227,6 +1229,7 @@ export function startOctantServer(
       execute: createCommandCredentialExecution({
         process: credentialCommandProcess,
         broker: commandBroker,
+        prepare: prepareCredentialCommand,
       }),
       record: (record) => commandJournal.record(record),
       records: readCommandCredentialHistory(persistence.journal),
@@ -1274,11 +1277,13 @@ export function startOctantServer(
                   thread.toolConstraints,
                 ]) &&
               current.lifecycle === "active" &&
-              (
-                codeOperationRuntime?.threadWithActiveTurnPosture?.(
-                  codeSessionAuthority.effectiveThread(windowId, current),
-                ) ?? codeSessionAuthority.effectiveThread(windowId, current)
-              ).executionPolicy === "full-access" &&
+              commandCredentialPostureAllowed(
+                (
+                  codeOperationRuntime?.threadWithActiveTurnPosture?.(
+                    codeSessionAuthority.effectiveThread(windowId, current),
+                  ) ?? codeSessionAuthority.effectiveThread(windowId, current)
+                ).executionPolicy,
+              ) &&
               canAccessCodeProject(windowId, current.projectId) &&
               String(current.projectId) === String(thread.projectId)
             );

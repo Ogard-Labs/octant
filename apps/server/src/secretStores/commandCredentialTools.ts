@@ -19,7 +19,7 @@ export function commandCredentialTools(options: {
           {
             name: "octant_command",
             description:
-              "List saved credential commands for this Code Project or request one named command. A person must review and approve each run. Full access only. No secret values are returned by the credential store; the recipient has ordinary Full access and masking cannot prevent deliberate disclosure.",
+              "List saved credential commands for this Code Project or request one named command. A person must review and approve credential use in addition to ordinary command approvals. Plan refuses. Below Full access, the recipient remains OS-confined under current file and network rules while the credential tool authenticates outside the sandbox. Full access remains unrestricted. No secret values are returned by the credential store; masking cannot prevent deliberate disclosure to allowed destinations.",
             inputSchema: {
               type: "object",
               properties: {
