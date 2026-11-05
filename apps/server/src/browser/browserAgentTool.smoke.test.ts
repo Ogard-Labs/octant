@@ -113,6 +113,10 @@ const pages: Record<string, string> = {
         const start = performance.now(); while (performance.now() - start < 150) {}
       }, 100));
     </script></html>`,
+  "/panel": `<!doctype html><title>Panel</title>
+    <style>#box { width: 160px; height: 90px; background: rgb(200, 40, 40); }</style>
+    <button id="paint" onclick="document.getElementById('box').style.background = 'rgb(40, 160, 60)'; setTimeout(() => { document.getElementById('box').style.background = 'rgb(40, 60, 200)'; document.getElementById('note').textContent = 'Done'; document.title = 'Painted'; }, 400)">Paint</button>
+    <div id="box"></div><p id="note"></p>`,
   "/downloads": `<!doctype html><title>Downloads</title>
     <a id="report" href="/dl/report.pdf">Report</a>
     <a id="elf" href="/dl/notes.txt">Notes</a>
@@ -277,6 +281,8 @@ function agentTool(
     /** How the person answers an origin question; approved when absent. */
     readonly originAnswer?: "approved" | "denied";
     readonly plan?: boolean;
+    /** Where the thread keeps captures; absent, none are kept. */
+    readonly captures?: ConstructorParameters<typeof BrowserAutomationService>[0]["captures"];
   } = {},
 ) {
   const asked: Array<Record<string, unknown>> = [];
@@ -286,6 +292,7 @@ function agentTool(
     authority: { canAccessWindow: () => true, resolve: () => authority },
     agentDownloadsEnabled: () => options.downloads === true,
     downloads: journal,
+    ...(options.captures === undefined ? {} : { captures: options.captures }),
     uuid: () => randomUUID(),
     clock: () => new Date().toISOString(),
     now: () => Date.now(),
@@ -883,6 +890,93 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       { type: "alert", message: "kept", answer: "accepted" },
     ]);
     await tool.stop();
+  });
+
+  it("records a batch as an animated PNG the thread keeps, and never a page with a credential field", async () => {
+    const kept: Array<{ readonly dataUrl: string; readonly recording?: unknown }> = [];
+    const tool = agentTool({
+      captures: {
+        keep: async (input) => {
+          kept.push({
+            dataUrl: input.dataUrl,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          });
+          return {
+            status: "kept",
+            captureId: randomUUID() as never,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          };
+        },
+      },
+    });
+    const opened = await tool.call({ operation: "navigate", url: `${origin}/panel` });
+    const revision = opened.result.page?.observationRevision;
+    const recorded = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [
+        // Named from the read before the recording: starting one leaves the
+        // page's revision where it was.
+        { operation: "click", selector: "#paint", expectedObservationRevision: revision },
+        { operation: "wait", conditions: [{ text: "Done", present: true }], timeoutMs: 5_000 },
+      ],
+    });
+    expect(recorded.isError).toBe(false);
+    const recording = (recorded.result as { readonly recording?: Record<string, unknown> })
+      .recording;
+    expect(recording).toMatchObject({ captureId: expect.any(String) });
+    expect(Number(recording?.frames)).toBeGreaterThanOrEqual(2);
+    expect(Number(recording?.durationMs)).toBeGreaterThan(0);
+    // The file is an animated PNG with as many frames as the answer says,
+    // each no wider or taller than a recording's edge.
+    const bytes = Buffer.from(kept[0]?.dataUrl.split(",")[1] ?? "", "base64");
+    expect(kept[0]?.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
+    const actl = bytes.indexOf("acTL");
+    expect(actl).toBeGreaterThan(0);
+    expect(bytes.readUInt32BE(actl + 4)).toBe(recording?.frames);
+    expect(Math.max(bytes.readUInt32BE(16), bytes.readUInt32BE(20))).toBeLessThanOrEqual(800);
+    // The revision the batch answered with is still current after the stop.
+    const after = await tool.call({
+      operation: "click",
+      selector: "#paint",
+      expectedObservationRevision: recorded.result.page?.observationRevision,
+    });
+    expect(after.isError).toBe(false);
+
+    await tool.call({ operation: "navigate", url: `${origin}/login` });
+    const withheld = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [{ operation: "click", selector: "button" }],
+    });
+    expect((withheld.result as { readonly recordingNotKept?: string }).recordingNotKept).toBe(
+      "no-picture",
+    );
+    expect(kept).toHaveLength(1);
+    await tool.stop();
+  });
+
+  it("refuses to record in Plan, or before a page is open", async () => {
+    const planned = agentTool({ plan: true });
+    const refused = await planned.call({
+      operation: "steps",
+      record: true,
+      steps: [{ operation: "snapshot" }],
+    });
+    expect(refused.result).toEqual({
+      error: "recording-refused",
+      answer: { error: "plan-mode-read-only" },
+    });
+    const fresh = agentTool();
+    const unopened = await fresh.call({
+      operation: "steps",
+      record: true,
+      steps: [{ operation: "snapshot" }],
+    });
+    expect(unopened.result).toEqual({
+      error: "recording-refused",
+      answer: { error: "browser-navigation-required" },
+    });
   });
 
   it("resizes the agent's page within bounds and restores it", async () => {

@@ -3983,7 +3983,9 @@ flowchart LR
     carries that reason.
 - **Browser captures.** Only a screenshot the agent asks for with the browser
   tool, or the person takes with the Browser pane's Screenshot control, is kept
-  with the thread that owns the Browser. The bytes live in the host's managed
+  with the thread that owns the Browser, and so is a short recording (an
+  animated PNG) of the agent's page during one call that asked for it with
+  `record`. The bytes live in the host's managed
   attachment store and the journal holds only a reference, the page origin, URL,
   title, content hash, and time. A thread keeps its newest 32 captures and they
   are erased with the thread. Only a local window that can open the thread reads

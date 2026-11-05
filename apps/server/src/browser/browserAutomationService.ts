@@ -81,11 +81,13 @@ import { saveBrowserDownload, type BrowserDownloadFacts } from "./browserDownloa
 import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
+  BrowserRecordingUnavailableError,
   BrowserTargetStaleError,
   BrowserWaitTimedOutError,
   type BrowserPointObservation,
   type BrowserRuntimeAction,
   type BrowserRuntimePort,
+  type BrowserRuntimeRecording,
 } from "./browserRuntimePort";
 
 export interface BrowserAuthorityResolver {
@@ -313,6 +315,16 @@ const PERSON_GUARDED_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Se
   "select",
   "drag",
   "upload",
+]);
+/**
+ * The actions that start and end an agent's recording. They read the page as
+ * a screenshot does and change nothing on it, so they leave the observation
+ * revision where it was: a call recorded around a batch must not make the
+ * batch's first step stale, nor the revision the batch answered with.
+ */
+const RECORDING_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
+  "record-start",
+  "record-stop",
 ]);
 /** The person's pane actions that change what the page shows or holds. */
 const PERSON_PAGE_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
@@ -1044,7 +1056,10 @@ export class BrowserAutomationService {
             owned.status,
           );
         const result = await this.#actOwned(owned, input);
-        if (input.capturedBy === "agent") {
+        // Starting and stopping a recording are not steps of the check: the
+        // recording is a capture, and the proof shows it after the steps it
+        // covered, as it shows a screenshot no step names.
+        if (input.capturedBy === "agent" && !RECORDING_ACTIONS.has(input.request.kind)) {
           this.#recordStep(owned, input.request, element, before, result);
         }
         return result;
@@ -1202,6 +1217,16 @@ export class BrowserAutomationService {
       return this.#failure(
         owned,
         { category: "policy-denied", message: "An upload needs the agent's approved files." },
+        "failed",
+      );
+    }
+    // A recording happens only because the agent tool asked for one around a
+    // call of its own. The pane, a paired device, and an unnamed caller reach
+    // this service through the ordinary action route, which names no one.
+    if (RECORDING_ACTIONS.has(input.request.kind) && input.capturedBy !== "agent") {
+      return this.#failure(
+        owned,
+        { category: "policy-denied", message: "Only the agent's own call can record the page." },
         "failed",
       );
     }
@@ -1396,7 +1421,9 @@ export class BrowserAutomationService {
                 ),
               ),
             }),
-        revision: ++owned.observationRevision,
+        revision: RECORDING_ACTIONS.has(input.request.kind)
+          ? owned.observationRevision
+          : ++owned.observationRevision,
         observedAt: this.#clock() as BrowserObservation["observedAt"],
         stale: false,
       };
@@ -1494,6 +1521,9 @@ export class BrowserAutomationService {
       }
       if (!interrupted && error instanceof BrowserNavigationBlockedError) {
         return this.#failure(owned, browserOriginRefusal(new URL(error.url).origin), "failed");
+      }
+      if (!interrupted && error instanceof BrowserRecordingUnavailableError) {
+        return this.#failure(owned, { category: "unavailable", message: error.message }, "failed");
       }
       return this.#failure(
         owned,
@@ -1686,21 +1716,39 @@ export class BrowserAutomationService {
     },
     observed: {
       readonly screenshotDataUrl?: string;
+      readonly recording?: BrowserRuntimeRecording;
       readonly url?: string;
       readonly title?: string;
     },
   ): Promise<BrowserCaptureOutcome | undefined> {
     const takenBy = browserCaptureTaker(input.request.kind, input.capturedBy);
     if (takenBy === undefined || this.#captures === undefined) return undefined;
-    // Someone asked for a capture and the runtime withheld the picture. Saying
+    const recording = input.request.kind === "record-stop" ? observed.recording : undefined;
+    const dataUrl =
+      input.request.kind === "record-stop"
+        ? recording?.status === "recorded"
+          ? recording.dataUrl
+          : undefined
+        : observed.screenshotDataUrl;
+    // Someone asked for a capture and the runtime withheld the picture (or a
+    // recording's page painted nothing, or showed a credential field). Saying
     // nothing here left the pane looking as if the capture had been kept.
-    if (observed.screenshotDataUrl === undefined) {
+    if (dataUrl === undefined) {
       return { status: "not-kept", reason: "no-picture" };
     }
     try {
       return await this.#captures.keep({
         threadId: owned.threadId,
-        dataUrl: observed.screenshotDataUrl,
+        dataUrl,
+        ...(recording?.status === "recorded"
+          ? {
+              recording: {
+                frames: recording.frames,
+                durationMs: recording.durationMs,
+                ...(recording.truncated === undefined ? {} : { truncated: recording.truncated }),
+              },
+            }
+          : {}),
         url: observed.url,
         title: observed.title,
         takenBy,
@@ -3242,7 +3290,8 @@ function describeChange(
     kind === "snapshot" ||
     kind === "screenshot" ||
     kind === "observe-diagnostics" ||
-    kind === "audit"
+    kind === "audit" ||
+    RECORDING_ACTIONS.has(kind)
   ) {
     return undefined;
   }

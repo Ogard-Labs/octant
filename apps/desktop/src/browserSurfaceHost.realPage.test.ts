@@ -267,6 +267,9 @@ async function pageView(): Promise<{
     opened.on("Page.javascriptDialogOpening", (params) => {
       for (const listener of messageListeners) listener({}, "Page.javascriptDialogOpening", params);
     });
+    opened.on("Page.screencastFrame", (params) => {
+      for (const listener of messageListeners) listener({}, "Page.screencastFrame", params);
+    });
     session = opened;
     return opened;
   };
@@ -922,6 +925,39 @@ describe.skipIf(chrome === undefined)(
         destination: "#done",
       });
       expect(dragged.title).toBe("Dropped card");
+      await page.close();
+    });
+
+    it("records the agent's actions as an animated PNG and lets the debugger go when the recording ends", async () => {
+      const { host, contextId, page, view } = await surface("/controls");
+      await host.act(contextId, { kind: "record-start" });
+      // The recording holds the attachment between actions, as an emulation does.
+      expect(view.webContents.debugger.isAttached()).toBe(true);
+      await host.act(contextId, { kind: "select", target: "#size", value: "l" });
+      await host.act(contextId, { kind: "hover", target: "#menu" });
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      expect(view.webContents.debugger.isAttached()).toBe(false);
+      const recording = stopped.recording;
+      if (recording?.status !== "recorded") throw new Error(`not recorded: ${recording?.status}`);
+      expect(recording.frames).toBeGreaterThanOrEqual(1);
+      const bytes = Buffer.from(recording.dataUrl.split(",")[1] ?? "", "base64");
+      const actl = bytes.indexOf("acTL");
+      expect(actl).toBeGreaterThan(0);
+      expect(bytes.readUInt32BE(actl + 4)).toBe(recording.frames);
+      expect(Math.max(bytes.readUInt32BE(16), bytes.readUInt32BE(20))).toBeLessThanOrEqual(800);
+      // A stop with nothing running is empty, not an error.
+      expect((await host.act(contextId, { kind: "record-stop" })).recording).toEqual({
+        status: "empty",
+      });
+      await page.close();
+    });
+
+    it("withholds a recording of a page that holds a credential field", async () => {
+      const { host, contextId, page } = await surface("/login");
+      await host.act(contextId, { kind: "record-start" });
+      await host.act(contextId, { kind: "hover", target: "button" });
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      expect(stopped.recording).toEqual({ status: "withheld" });
       await page.close();
     });
 

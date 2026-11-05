@@ -1553,3 +1553,204 @@ describe("bounded page script input", () => {
       expect(parse(input)).toBeUndefined();
   });
 });
+
+describe("octant_browser recording", () => {
+  const context = {
+    contextId: "50000000-0000-4000-8000-000000000001" as never,
+    threadId,
+    actionId: "60000000-0000-4000-8000-000000000001" as never,
+    correlationId: "70000000-0000-4000-8000-000000000001" as never,
+    authority,
+    policy: {
+      profileMode: "isolated" as const,
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 8,
+      sessionTimeoutMs: 600_000,
+    },
+    state: "active" as const,
+    createdAt: "2026-09-09T10:00:00.000Z" as never,
+  };
+  const captureId = "6f1c2f0e-8a58-4c53-9a1b-3a4f0f6f7a10";
+  const recording = { frames: 9, durationMs: 2_250 };
+
+  function recordingTools(
+    answer: (kind: string) => BrowserAutomationSnapshot,
+    executionPolicy: "approval-gated" | "plan" = "approval-gated",
+  ) {
+    const running = snapshot({ status: "running", context, observation: { revision: 4 } as never });
+    const act = vi.fn(async (input: { readonly request: { readonly kind: string } }) =>
+      answer(input.request.kind),
+    );
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy,
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => running,
+        create: vi.fn(async () => running),
+        act: act as never,
+        releaseThread: vi.fn(async () => running),
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    const kinds = () =>
+      act.mock.calls.map((call) => (call[0] as { request: { kind: string } }).request.kind);
+    return { act, tools, kinds };
+  }
+
+  const kept = (kind: string) =>
+    snapshot({
+      status: "running",
+      context,
+      observation: {
+        revision: 5,
+        ...(kind === "record-stop"
+          ? { capture: { status: "kept", captureId, recording } }
+          : { change: "The page's text changed." }),
+      } as never,
+    });
+
+  it("records the page around a batch and answers with the recording the thread kept", async () => {
+    const { act, tools, kinds } = recordingTools(kept);
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        record: true,
+        steps: [{ operation: "click", selector: "#save" }],
+      }),
+    });
+    expect(kinds()).toEqual(["record-start", "click", "record-stop"]);
+    for (const call of act.mock.calls) {
+      expect(call[0]).toMatchObject({ capturedBy: "agent" });
+    }
+    expect(result).toMatchObject({
+      isError: false,
+      result: { recording: { captureId, ...recording }, steps: [{ step: 1, operation: "click" }] },
+    });
+  });
+
+  it("records a flow replay the same way", async () => {
+    const { kinds, tools } = recordingTools(kept);
+    await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "flow-run", name: "Check the form", record: true }),
+    });
+    // This host keeps no flows, so the replay itself is refused; the recording
+    // around it still starts and ends.
+    expect(kinds()).toEqual(["record-start", "record-stop"]);
+  });
+
+  it("still ends the recording when a step fails, and says why none was kept", async () => {
+    const { tools, kinds } = recordingTools((kind) =>
+      kind === "click"
+        ? snapshot({
+            status: "failed",
+            context,
+            failure: { category: "failed", message: "The browser action failed." },
+          })
+        : kind === "record-stop"
+          ? snapshot({
+              status: "running",
+              context,
+              observation: {
+                revision: 5,
+                capture: { status: "not-kept", reason: "no-picture" },
+              } as never,
+            })
+          : kept(kind),
+    );
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        record: true,
+        steps: [
+          { operation: "click", selector: "#save" },
+          { operation: "click", selector: "#next" },
+        ],
+      }),
+    });
+    expect(kinds()).toEqual(["record-start", "click", "record-stop"]);
+    expect(result).toMatchObject({
+      isError: true,
+      result: { failedStep: { step: 1 }, recordingNotKept: "no-picture" },
+    });
+  });
+
+  it("runs nothing when the Browser cannot record", async () => {
+    const { tools, kinds } = recordingTools((kind) =>
+      kind === "record-start"
+        ? snapshot({
+            status: "failed",
+            context,
+            failure: { category: "unavailable", message: "This Browser cannot record the page." },
+          })
+        : kept(kind),
+    );
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        record: true,
+        steps: [{ operation: "click", selector: "#save" }],
+      }),
+    });
+    expect(kinds()).toEqual(["record-start"]);
+    expect(result).toMatchObject({
+      isError: true,
+      result: {
+        error: "recording-refused",
+        answer: { failure: { category: "unavailable" } },
+      },
+    });
+  });
+
+  it("refuses a recording in Plan, as it refuses a screenshot there", async () => {
+    const { act, tools } = recordingTools(kept, "plan");
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        record: true,
+        steps: [{ operation: "screenshot" }],
+      }),
+    });
+    expect(result.result).toEqual({
+      error: "recording-refused",
+      answer: { error: "plan-mode-read-only" },
+    });
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("reads record only as a boolean on steps and flow-run, and never as an operation", () => {
+    const parse = (input: unknown) =>
+      parseBrowserToolInput(JSON.stringify(input), { allowProfile: true });
+    expect(
+      parse({ operation: "steps", record: true, steps: [{ operation: "snapshot" }] }),
+    ).toMatchObject({ record: true });
+    expect(
+      parse({ operation: "steps", record: false, steps: [{ operation: "snapshot" }] }),
+    ).not.toHaveProperty("record");
+    expect(parse({ operation: "flow-run", name: "Check", record: true })).toMatchObject({
+      record: true,
+    });
+    for (const input of [
+      { operation: "steps", record: "yes", steps: [{ operation: "snapshot" }] },
+      { operation: "steps", steps: [{ operation: "snapshot", record: true }] },
+      { operation: "flow-save", name: "Check", record: true },
+      { operation: "screenshot", record: true },
+      { operation: "record-start" },
+      { operation: "record-stop" },
+      { operation: "steps", steps: [{ operation: "record-start" }] },
+    ])
+      expect(parse(input), JSON.stringify(input)).toBeUndefined();
+  });
+});

@@ -22,6 +22,7 @@ import type {
   BrowserContextPolicy,
   BrowserEmulationReport,
   BrowserPresentationKind,
+  BrowserRecordingTruncation,
   BrowserThreadId,
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
@@ -84,6 +85,37 @@ export interface BrowserRuntimeObservation {
   readonly audit?: BrowserPageAuditReading;
   /** Downloads the page started while an action that allowed them ran. */
   readonly downloads?: ReadonlyArray<BrowserDownloadReport>;
+  /** Only a `record-stop` fills this: the recording that ended; see the contract. */
+  readonly recording?: BrowserRuntimeRecording;
+}
+
+/**
+ * What a `record-stop` hands back. A recorded animation is an animated PNG as
+ * a data URL, the same transport a screenshot takes; it is kept as a thread
+ * capture and never handed to the model. `withheld` is a recording whose every
+ * frame showed a page that held a credential field (or could not be checked),
+ * and `empty` a page that painted nothing.
+ */
+export type BrowserRuntimeRecording =
+  | {
+      readonly status: "recorded";
+      readonly dataUrl: string;
+      readonly frames: number;
+      readonly durationMs: number;
+      readonly truncated?: BrowserRecordingTruncation;
+    }
+  | { readonly status: "withheld" }
+  | { readonly status: "empty" };
+
+/**
+ * This Browser cannot record its page: it has no screencast to take frames
+ * from. The action did not run, and the agent is told so in words.
+ */
+export class BrowserRecordingUnavailableError extends Error {
+  constructor() {
+    super("This Browser cannot record the page.");
+    this.name = "BrowserRecordingUnavailableError";
+  }
 }
 
 export interface BrowserTargetInspection {

@@ -494,7 +494,9 @@ without its query, and the result; never typed text or field values). GitHub
 cannot take pictures from here, so the screenshots are not uploaded: **Save
 screenshots…** in the Octant desktop app asks you for a folder and writes them
 as `browser-check-01.png`, `-02`, and so on, and the section names those files so
-you can drag them into the description. A paired device cannot read, include, or
+you can drag them into the description. A recording the agent kept of a check
+is saved the same way as an animated `.png`, and GitHub plays it in the
+description. A paired device cannot read, include, or
 save the proof. See [Browser proof](../advanced/browser-and-computer-use.md#browser-proof).
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.

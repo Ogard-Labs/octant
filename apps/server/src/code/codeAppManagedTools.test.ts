@@ -2945,7 +2945,10 @@ describe("Code tool families", () => {
     // window and crash arguments added about 210 bytes; their usage is in help.
     // The audit operation and its kind argument added about 95 bytes; their
     // usage is in help.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_420);
+    // Recording a call added its record argument and one short sentence on
+    // when to use it (showing a reviewer a UI change), about 145 bytes; the
+    // bounds and the answer are in help.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_570);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(

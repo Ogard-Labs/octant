@@ -13,11 +13,13 @@ import {
   EventName,
   MAX_BROWSER_CAPTURE_BYTES,
   MAX_BROWSER_CAPTURES_PER_THREAD,
+  MAX_BROWSER_RECORDING_BYTES,
   MAX_BROWSER_STEPS_PER_THREAD,
   UtcTimestamp,
   type BrowserCapture,
   type BrowserCaptureId,
   type BrowserCaptureOutcome,
+  type BrowserRecordingFacts,
   type BrowserStep,
   type BrowserThreadId,
   type CorrelationId,
@@ -52,11 +54,18 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 const MAX_APPEND_ATTEMPTS = 3;
 const SCREENSHOT_DATA_URL = /^data:image\/(?:png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/;
+/** A recording is always an animated PNG; the store still sniffs the bytes. */
+const RECORDING_DATA_URL = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/;
 
 export interface KeepBrowserCaptureInput {
   readonly threadId: BrowserThreadId;
   /** The screenshot as the browser runtime produced it. Never written to the journal. */
   readonly dataUrl: string;
+  /**
+   * Present when the picture is a recording: an animated PNG of the agent's
+   * call, which keeps the recording's size bound rather than a screenshot's.
+   */
+  readonly recording?: BrowserRecordingFacts;
   readonly url: string | undefined;
   readonly title: string | undefined;
   readonly takenBy: BrowserCaptureTaker;
@@ -119,10 +128,15 @@ export class BrowserCaptureService {
     if (origin === undefined || input.url === undefined) {
       return { status: "not-kept", reason: "no-page-origin" };
     }
-    const encoded = SCREENSHOT_DATA_URL.exec(input.dataUrl)?.[1];
+    const encoded = (input.recording === undefined ? SCREENSHOT_DATA_URL : RECORDING_DATA_URL).exec(
+      input.dataUrl,
+    )?.[1];
     if (encoded === undefined) return { status: "not-kept", reason: "not-an-image" };
     const bytes = Uint8Array.from(Buffer.from(encoded, "base64"));
-    if (bytes.length > MAX_BROWSER_CAPTURE_BYTES) {
+    if (
+      bytes.length >
+      (input.recording === undefined ? MAX_BROWSER_CAPTURE_BYTES : MAX_BROWSER_RECORDING_BYTES)
+    ) {
       return { status: "not-kept", reason: "too-large" };
     }
 
@@ -143,6 +157,7 @@ export class BrowserCaptureService {
           mime: finalized.mime,
           capturedAt: this.#clock(),
           ...(input.profile === undefined ? {} : { profile: input.profile }),
+          ...(input.recording === undefined ? {} : { recording: input.recording }),
         }),
         input,
       );
@@ -159,7 +174,11 @@ export class BrowserCaptureService {
     // The capture is journaled from here on. Dropping the oldest one is
     // cleanup that recovery repeats, so a failure must not undo this capture.
     await this.#dropOlderThan(input.threadId, version).catch(() => undefined);
-    return { status: "kept", captureId };
+    return {
+      status: "kept",
+      captureId,
+      ...(input.recording === undefined ? {} : { recording: input.recording }),
+    };
   }
 
   /**

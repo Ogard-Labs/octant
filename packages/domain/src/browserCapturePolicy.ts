@@ -6,16 +6,18 @@ import { imageFileExtension } from "./imageGenerationInvocationPolicy";
 export type BrowserCaptureTaker = "agent" | "person";
 
 /**
- * Which browser actions leave a capture behind. Only an explicit `screenshot`
- * keeps one: every other action also yields a picture for the model, and
+ * Which browser actions leave a capture behind. An explicit `screenshot`
+ * keeps one, and so does the `record-stop` that ends a recording the agent
+ * asked for: every other action may also yield a picture for the model, and
  * keeping those would fill the thread's allowance with page states nobody
  * asked to remember. A caller that does not say who asked keeps nothing, so a
- * new call site is silent until it opts in.
+ * new call site is silent until it opts in. Only the agent records.
  */
 export function browserCaptureTaker(
   kind: BrowserActionKind,
   takenBy: BrowserCaptureTaker | undefined,
 ): BrowserCaptureTaker | undefined {
+  if (kind === "record-stop") return takenBy === "agent" ? takenBy : undefined;
   return kind === "screenshot" ? takenBy : undefined;
 }
 

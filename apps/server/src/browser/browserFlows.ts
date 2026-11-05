@@ -33,6 +33,7 @@ import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
   isBrowserToolFlowInput,
+  isBrowserToolRecordingInput,
   parseBrowserToolInput,
   type BrowserToolAnswer,
   type BrowserToolFlowInput,
@@ -340,6 +341,9 @@ const UNSTORED_OPERATIONS: ReadonlySet<string> = new Set([
   "audit",
   "tab-list",
   "help",
+  // A recording belongs to the call that asked for it, never to a replay.
+  "record-start",
+  "record-stop",
 ]);
 
 /**
@@ -705,6 +709,7 @@ async function replayBrowserFlow(
       parsed.operation === "sign-in" ||
       parsed.operation === "run-script" ||
       parsed.operation === "download-save" ||
+      isBrowserToolRecordingInput(parsed) ||
       isBrowserToolFlowInput(parsed)
     ) {
       return stopped(index, stored.operation, { reason: "step-not-valid" });

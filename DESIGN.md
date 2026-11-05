@@ -1091,7 +1091,13 @@ section label (`oct-section-label`, "Browser captures"), not a card group: each
 row is a hairline-ringed object with a 72 x 48 picture, the page title in the
 medium weight, and the origin as mono meta, and the whole row is one `bare`
 button that opens the full picture. It uses the neutral hairline and surface
-tokens only, adds no colour, and draws no fill on hover or when open.
+tokens only, adds no colour, and draws no fill on hover or when open. A
+recording's picture is its first frame, still, with a play mark in its lower
+left corner: a filled triangle and the length ("2.5 s") in extra-small
+tabular figures on a pill of the card surface with a hairline ring, so it
+reads by shape and word, never by colour. It moves only once opened, where a
+ghost **Stop**/**Play** sits before the caption; reduced motion opens it on
+its first frame.
 
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact

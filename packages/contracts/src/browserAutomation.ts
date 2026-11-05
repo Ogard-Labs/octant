@@ -150,6 +150,10 @@ export const BrowserActionKind = Schema.Literal(
   "tab-close",
   "resize",
   "audit",
+  // Only the agent tool starts and stops a recording, around one call it
+  // asked to record; see the recording bounds below.
+  "record-start",
+  "record-stop",
 );
 export type BrowserActionKind = typeof BrowserActionKind.Type;
 
@@ -590,10 +594,48 @@ export const BrowserCaptureNotKeptReason = Schema.Literal(
 );
 export type BrowserCaptureNotKeptReason = typeof BrowserCaptureNotKeptReason.Type;
 
+/**
+ * The bounds of one Browser recording: a short moving picture of the agent's
+ * page while one call it asked to record runs. Frames are sampled at most
+ * every `BROWSER_RECORDING_FRAME_INTERVAL_MS`, scaled to fit
+ * `MAX_BROWSER_RECORDING_EDGE` on their longer side, and an animation stops
+ * taking frames at whichever bound it reaches first. The byte bound stays
+ * below a Canvas design asset's, so a recording can be drawn wherever a
+ * screenshot can.
+ */
+export const MAX_BROWSER_RECORDING_MS = 30_000;
+export const BROWSER_RECORDING_FRAME_INTERVAL_MS = 250;
+export const MAX_BROWSER_RECORDING_FRAMES =
+  MAX_BROWSER_RECORDING_MS / BROWSER_RECORDING_FRAME_INTERVAL_MS;
+export const MAX_BROWSER_RECORDING_EDGE = 800;
+export const MAX_BROWSER_RECORDING_BYTES = 2 * 1024 * 1024;
+
+/** Why a recording stopped taking frames before the call it covered ended. */
+export const BrowserRecordingTruncation = Schema.Literal(
+  "duration-limit",
+  "frame-limit",
+  "size-limit",
+  // The page's picture changed size mid-recording (a resize); an animation
+  // keeps one size, so it ends at the last frame of the old one.
+  "viewport-changed",
+);
+export type BrowserRecordingTruncation = typeof BrowserRecordingTruncation.Type;
+
+/** What a kept recording holds, as the capture and the tool result report it. */
+export const BrowserRecordingFacts = Schema.Struct({
+  frames: Schema.Int.pipe(Schema.between(1, MAX_BROWSER_RECORDING_FRAMES)),
+  durationMs: Schema.Int.pipe(Schema.between(0, MAX_BROWSER_RECORDING_MS)),
+  truncated: Schema.optional(BrowserRecordingTruncation),
+}).annotations(strict);
+export type BrowserRecordingFacts = typeof BrowserRecordingFacts.Type;
+
 export const BrowserCaptureOutcome = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("kept"), captureId: BrowserCaptureId }).annotations(
-    strict,
-  ),
+  Schema.Struct({
+    status: Schema.Literal("kept"),
+    captureId: BrowserCaptureId,
+    /** Present when the capture is a recording rather than a screenshot. */
+    recording: Schema.optional(BrowserRecordingFacts),
+  }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("not-kept"),
     reason: BrowserCaptureNotKeptReason,
@@ -672,7 +714,10 @@ export const BrowserObservation = Schema.Struct({
       }).annotations(strict),
     ).pipe(Schema.maxItems(16)),
   ),
-  /** Present only on an explicit `screenshot` action that the host was asked to keep. */
+  /**
+   * Present only on an explicit `screenshot` action that the host was asked
+   * to keep, and on the `record-stop` that ends an agent's recording.
+   */
   capture: Schema.optional(BrowserCaptureOutcome),
   revision: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   observedAt: UtcTimestamp,

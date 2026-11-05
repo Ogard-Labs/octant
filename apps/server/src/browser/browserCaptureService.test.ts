@@ -7,6 +7,7 @@ import {
   decodeBrowserThreadId,
   MAX_BROWSER_CAPTURE_BYTES,
   MAX_BROWSER_CAPTURES_PER_THREAD,
+  MAX_BROWSER_RECORDING_BYTES,
   MAX_BROWSER_STEPS_PER_THREAD,
   type BrowserCaptureOutcome,
   type BrowserThreadId,
@@ -250,6 +251,33 @@ describe("BrowserCaptureService", () => {
       reason: "too-large",
     });
     expect(journalRows(connection)).toEqual([]);
+  });
+
+  it("keeps a recording past the screenshot envelope, with its facts, up to the recording bound", async () => {
+    const { connection, service } = open();
+    const facts = { frames: 30, durationMs: 7_500, truncated: "frame-limit" as const };
+    const animation = Buffer.concat([PNG, Buffer.alloc(MAX_BROWSER_CAPTURE_BYTES)]);
+    const outcome = await service.keep(
+      request({ dataUrl: pngDataUrl(animation), recording: facts }),
+    );
+    const captureId = kept(outcome);
+    expect(outcome).toEqual({ status: "kept", captureId, recording: facts });
+    const payload = JSON.parse(journalRows(connection)[0]?.payload_json ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(payload).toMatchObject({ captureId, mime: "image/png", recording: facts });
+    expect(service.list(threadA)[0]?.recording).toEqual(facts);
+    expect((await service.read(threadA, captureId))?.bytes.length).toBe(animation.length);
+
+    const tooLong = Buffer.concat([PNG, Buffer.alloc(MAX_BROWSER_RECORDING_BYTES)]);
+    expect(await service.keep(request({ dataUrl: pngDataUrl(tooLong), recording: facts }))).toEqual(
+      { status: "not-kept", reason: "too-large" },
+    );
+    expect(
+      await service.keep(request({ dataUrl: "data:image/jpeg;base64,/9j/4AAQ", recording: facts })),
+    ).toEqual({ status: "not-kept", reason: "not-an-image" });
+    expect(journalRows(connection)).toHaveLength(1);
   });
 
   it("refuses a page with no web origin", async () => {

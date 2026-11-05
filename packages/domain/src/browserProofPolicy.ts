@@ -233,11 +233,16 @@ export function browserProofPullRequestSection(
       lines.push(`${entry.number}. ${escapeLine(browserStepLine(entry.step))}`);
     } else {
       lines.push(
-        `   - Screenshot: ${browserProofScreenshotFileName(entry.fileNumber, entry.capture.mime)}`,
+        `   - ${entry.capture.recording === undefined ? "Screenshot" : "Recording"}: ${browserProofScreenshotFileName(entry.fileNumber, entry.capture.mime)}`,
       );
     }
   }
-  if (captures.length > 0) {
+  if (captures.some((capture) => capture.recording !== undefined)) {
+    lines.push(
+      "",
+      "Screenshots and recordings are not embedded. Drag the saved files of the same names into this description; a recording plays there as an animation.",
+    );
+  } else if (captures.length > 0) {
     lines.push(
       "",
       "Screenshots are not embedded. Drag the saved files of the same names into this description.",

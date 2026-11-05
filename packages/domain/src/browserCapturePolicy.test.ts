@@ -33,6 +33,13 @@ describe("browserCaptureTaker", () => {
   it("keeps nothing when the caller does not say who asked", () => {
     expect(browserCaptureTaker("screenshot", undefined)).toBeUndefined();
   });
+
+  it("keeps a recording only when the agent's own call ends one", () => {
+    expect(browserCaptureTaker("record-stop", "agent")).toBe("agent");
+    expect(browserCaptureTaker("record-stop", "person")).toBeUndefined();
+    expect(browserCaptureTaker("record-stop", undefined)).toBeUndefined();
+    expect(browserCaptureTaker("record-start", "agent")).toBeUndefined();
+  });
 });
 
 describe("browserCapturePageOrigin", () => {
