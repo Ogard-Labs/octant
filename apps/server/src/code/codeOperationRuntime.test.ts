@@ -97,10 +97,6 @@ import {
   readCodeReviewFinding,
   readCodeReviewFindings,
 } from "../persistence/codeProjection";
-import {
-  AGENT_MESSAGE_TOOL_NAME,
-  createAgentMessageTools,
-} from "../agentMessage/agentMessageTools";
 import { AgentMessageService } from "../agentMessage/agentMessageService";
 import { AgentMessageProjection } from "../agentMessage/agentMessageProjection";
 import { AgentMessageBodyStore } from "../agentMessage/agentMessageBodyStore";
@@ -117,15 +113,16 @@ import { CodeProjectAccess } from "../codeProjectAccess";
 import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
 import {
   SiblingThreadsService,
-  createSiblingThreadTools,
+  createThreadsTools,
   type SiblingThreadOutcome,
   type SiblingThreadSource,
 } from "../siblingThreads/siblingThreadTools";
+import type { CodePlannerToolPort } from "./codePlannerTools";
 import { defaultWindowWorkspace, contextKeyForProject } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import type { PrincipalRouteContext } from "../principalRouteContext";
-import { CODE_BOARD_TOOL_NAME, CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
+import { CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
 import { GhPullRequestPort, type GhCommandPort } from "./ghPullRequestPort";
 import { createCodeLanguageAgentTools } from "./codeLanguageAgentTools";
 import type { CodeLanguageAgentReadResult } from "./codeLanguageService";
@@ -7553,7 +7550,6 @@ function runtimeFixture(options: {
   resolveSelectedExtensions?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["resolveSelectedExtensions"];
-  agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
   shield?: Parameters<typeof createCodeOperationRuntime>[0]["shield"];
   chosenAutoReviewer?: Parameters<typeof createCodeOperationRuntime>[0]["chosenAutoReviewer"];
   resolveProviderCapabilities?: Parameters<
@@ -7562,7 +7558,7 @@ function runtimeFixture(options: {
   readThreadExternalContentTaint?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["readThreadExternalContentTaint"];
-  siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
+  threads?: Parameters<typeof createCodeOperationRuntime>[0]["threads"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
   serverCodeTurn?: Parameters<typeof createCodeOperationRuntime>[0]["serverCodeTurn"];
   holdsServerThread?: Parameters<typeof createCodeOperationRuntime>[0]["holdsServerThread"];
@@ -7924,7 +7920,6 @@ function runtimeFixture(options: {
     ...(options.resolveSelectedExtensions === undefined
       ? {}
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
-    ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
     ...(options.shield === undefined ? {} : { shield: options.shield }),
     ...(options.chosenAutoReviewer === undefined
       ? {}
@@ -7935,7 +7930,7 @@ function runtimeFixture(options: {
     ...(options.readThreadExternalContentTaint === undefined
       ? {}
       : { readThreadExternalContentTaint: options.readThreadExternalContentTaint }),
-    ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
+    ...(options.threads === undefined ? {} : { threads: options.threads }),
     ...(options.serverCodeTurn === undefined ? {} : { serverCodeTurn: options.serverCodeTurn }),
     ...(options.holdsServerThread === undefined
       ? {}
@@ -8858,29 +8853,24 @@ it("offers the Computer tool and its host line on a Code turn whose send has no 
   fixture.close();
 });
 
-it("offers the agent message tool to a Code turn and withholds it from one in Plan", async () => {
+it("offers messaging in the threads tool to a Code turn and withholds it from one in Plan", async () => {
   const offered = async (executionPolicy: CodeThread["executionPolicy"], operation: number) => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const starts: Array<ProviderSessionStart> = [];
     const fixture = runtimeFixture({
       provider: providerDriver(providerConnection(queue, starts)),
       supportsAppManagedTools: true,
-      agentMessages: ({ thread: sender, readPosture }) =>
-        createAgentMessageTools({
-          service: {
-            send: async () => [],
-            recordRefusedSend: async () => undefined,
-            acknowledge: async () => ({
-              status: "refused",
-              reason: "unauthorized",
-              message: "Unavailable",
-            }),
-            statusForSender: () => [],
-          },
-          senderThreadId: String(sender.id),
+      threads: ({ windowId: turnWindowId, thread: sender, readPosture }) =>
+        createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
+          service: { answer: async () => Promise.reject(new Error("unused")) },
+          source: noSiblings,
+          callerThreadId: String(sender.id),
           toolConstraints: [],
           profileDisplayName: "the bound profile",
           readPosture,
+          messaging: quietMessaging,
         }),
     });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy }));
@@ -8893,13 +8883,15 @@ it("offers the agent message tool to a Code turn and withholds it from one in Pl
       prompt: fixture.prompt,
     });
     fixture.close();
-    return starts[0]?.tools?.map((tool) => tool.name) ?? [];
+    return threadsOperations(starts[0]?.tools);
   };
 
-  expect(await offered("approval-gated", 83)).toContain(AGENT_MESSAGE_TOOL_NAME);
+  expect(await offered("approval-gated", 83)).toContain("send");
   // Plan is read-only, and sending stores a body and journals: the provider
-  // is never told the tool exists.
-  expect(await offered("plan", 84)).not.toContain(AGENT_MESSAGE_TOOL_NAME);
+  // is never told the operation exists.
+  const plan = await offered("plan", 84);
+  expect(plan).toContain("list");
+  expect(plan).not.toContain("send");
 });
 
 describe("language reads on Code turns", () => {
@@ -9006,7 +8998,7 @@ describe("language reads on Code turns", () => {
   });
 });
 
-describe("sibling-threads tool on Code turns", () => {
+describe("the threads tool on Code turns", () => {
   const siblingId = decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1");
   const siblingReference = `${String(siblingId)}@${String(thread().projectId)}`;
   const quietSource: SiblingThreadSource = {
@@ -9030,30 +9022,17 @@ describe("sibling-threads tool on Code turns", () => {
       const fixture = runtimeFixture({
         provider: providerDriver(providerConnection(queue, starts)),
         supportsAppManagedTools: true,
-        agentMessages: ({ thread: sender, readPosture }) =>
-          createAgentMessageTools({
-            service: {
-              send: async () => [],
-              recordRefusedSend: async () => undefined,
-              acknowledge: async () => ({
-                status: "refused",
-                reason: "unauthorized",
-                message: "Unavailable",
-              }),
-              statusForSender: () => [],
-            },
-            senderThreadId: String(sender.id),
-            toolConstraints: sender.toolConstraints ?? [],
-            profileDisplayName: "the bound profile",
-            readPosture,
-          }),
-        siblingThreads: ({ thread: caller }) =>
-          createSiblingThreadTools({
+        threads: ({ windowId: turnWindowId, thread: caller, readPosture }) =>
+          createThreadsTools({
+            mode: "code",
+            windowId: turnWindowId,
             service: { answer: async () => waited() },
             source: quietSource,
             callerThreadId: String(caller.id),
             toolConstraints: caller.toolConstraints ?? [],
             profileDisplayName: "Reviewer",
+            readPosture,
+            messaging: quietMessaging,
           }),
       });
       fixture.setThread(decodeCodeThread({ ...thread(), ...overrides }));
@@ -9066,7 +9045,10 @@ describe("sibling-threads tool on Code turns", () => {
         prompt: fixture.prompt,
       });
       fixture.close();
-      return starts[0]?.tools?.map((tool) => tool.name) ?? [];
+      return {
+        names: starts[0]?.tools?.map((tool) => tool.name) ?? [],
+        operations: threadsOperations(starts[0]?.tools),
+      };
     };
 
     for (const [executionPolicy, operation] of [
@@ -9074,40 +9056,53 @@ describe("sibling-threads tool on Code turns", () => {
       ["auto-accept-edits", 1202],
       ["full-access", 1203],
     ] as const) {
-      expect(await offered({ executionPolicy }, operation)).toEqual(
-        expect.arrayContaining([SIBLING_THREADS_TOOL_NAME, AGENT_MESSAGE_TOOL_NAME]),
+      expect((await offered({ executionPolicy }, operation)).operations).toEqual(
+        expect.arrayContaining(["list", "read", "wait", "send"]),
       );
     }
     // Plan reads its siblings like any other posture; messaging stays withheld.
     const plan = await offered({ executionPolicy: "plan" }, 1204);
-    expect(plan).toContain(SIBLING_THREADS_TOOL_NAME);
-    expect(plan).not.toContain(AGENT_MESSAGE_TOOL_NAME);
-    // A profile allowlist that does not name the tool keeps it off the turn.
-    const narrowed = await offered({ toolConstraints: [AGENT_MESSAGE_TOOL_NAME] }, 1205);
-    expect(narrowed).toContain(AGENT_MESSAGE_TOOL_NAME);
-    expect(narrowed).not.toContain(SIBLING_THREADS_TOOL_NAME);
-    expect(await offered({ toolConstraints: [SIBLING_THREADS_TOOL_NAME] }, 1206)).toContain(
+    expect(plan.operations).toEqual(["help", "list", "read", "wait"]);
+    // A profile allowlist names each group on its own, and one that names
+    // neither keeps the tool off the turn.
+    expect((await offered({ toolConstraints: ["octant_threads.send"] }, 1205)).operations).toEqual([
+      "help",
+      "send",
+      "acknowledge",
+      "receipts",
+    ]);
+    expect(
+      (await offered({ toolConstraints: [SIBLING_THREADS_TOOL_NAME] }, 1206)).operations,
+    ).toEqual(["help", "list", "read", "wait"]);
+    expect((await offered({ toolConstraints: ["octant_terminal"] }, 1207)).names).not.toContain(
       SIBLING_THREADS_TOOL_NAME,
     );
+    // None of the tools this one replaced reaches a turn under its old name.
+    for (const retired of ["octant_agent_message", "octant_board", "octant_propose_thread"]) {
+      expect((await offered({}, 1208)).names).not.toContain(retired);
+    }
   });
 
   it("gives each turn its own read and wait bounds", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const answer = vi.fn(async () => waited());
-    const toolSets = vi.fn(({ thread: caller }: { readonly thread: CodeThread }) =>
-      createSiblingThreadTools({
-        service: { answer },
-        source: quietSource,
-        callerThreadId: String(caller.id),
-        toolConstraints: [],
-        profileDisplayName: "Reviewer",
-      }),
+    const toolSets = vi.fn(
+      ({ windowId: turnWindowId, thread: caller }: { windowId: WindowId; thread: CodeThread }) =>
+        createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
+          service: { answer },
+          source: quietSource,
+          callerThreadId: String(caller.id),
+          toolConstraints: [],
+          profileDisplayName: "Reviewer",
+        }),
     );
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
       supportsAppManagedTools: true,
-      siblingThreads: toolSets,
+      threads: toolSets,
     });
     const answers = () =>
       vi
@@ -9122,7 +9117,7 @@ describe("sibling-threads tool on Code turns", () => {
               kind: "tool-request",
               requestId: `${prefix}-${String(index)}`,
               toolName: SIBLING_THREADS_TOOL_NAME,
-              inputJson: JSON.stringify({ action, reference: siblingReference }),
+              inputJson: JSON.stringify({ operation: action, reference: siblingReference }),
             }),
           ),
         );
@@ -9250,7 +9245,7 @@ describe("sibling-threads tool on Code turns", () => {
         ? responsesToolCallStream(
             "call_sibling",
             SIBLING_THREADS_TOOL_NAME,
-            JSON.stringify({ action: "read", reference: siblingReference }),
+            JSON.stringify({ operation: "read", reference: siblingReference }),
           )
         : responsesTextStream("done");
     });
@@ -9284,8 +9279,10 @@ describe("sibling-threads tool on Code turns", () => {
       provider: driver,
       supportsAppManagedTools: true,
       codeProjectAccess: access,
-      siblingThreads: ({ thread: caller }) =>
-        createSiblingThreadTools({
+      threads: ({ windowId: turnWindowId, thread: caller }) =>
+        createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
           service,
           source,
           callerThreadId: String(caller.id),
@@ -9396,13 +9393,17 @@ it("reports an explicit recipient receipt through the real turn tool path after 
   const fixture = runtimeFixture({
     provider: providerDriver(provider),
     supportsAppManagedTools: true,
-    agentMessages: ({ thread: current, readPosture }) =>
-      createAgentMessageTools({
-        service,
-        senderThreadId: String(current.id),
+    threads: ({ windowId: turnWindowId, thread: current, readPosture }) =>
+      createThreadsTools({
+        mode: "code",
+        windowId: turnWindowId,
+        service: { answer: async () => Promise.reject(new Error("unused")) },
+        source: noSiblings,
+        callerThreadId: String(current.id),
         toolConstraints: current.toolConstraints ?? [],
         profileDisplayName: "Worker",
         readPosture,
+        messaging: service,
       }),
     carryAgentMessages: (id) => service.carryIntoTurn(id),
     confirmAgentMessagesDelivered: (ids) => service.confirmDelivered(ids),
@@ -9439,8 +9440,8 @@ it("reports an explicit recipient receipt through the real turn tool path after 
         providerEvent({
           kind: "tool-request",
           requestId: "receipt-1",
-          toolName: AGENT_MESSAGE_TOOL_NAME,
-          inputJson: JSON.stringify({ action: "acknowledge", messageIds: [messageId] }),
+          toolName: SIBLING_THREADS_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "acknowledge", messageIds: [messageId] }),
         }),
       ),
     );
@@ -9460,9 +9461,9 @@ it("reports an explicit recipient receipt through the real turn tool path after 
         providerEvent({
           kind: "tool-request",
           requestId: "receipt-forgery",
-          toolName: AGENT_MESSAGE_TOOL_NAME,
+          toolName: SIBLING_THREADS_TOOL_NAME,
           inputJson: JSON.stringify({
-            action: "acknowledge",
+            operation: "acknowledge",
             messageIds: [messageId],
             recipientThreadId: String(senderId),
           }),
@@ -9478,8 +9479,8 @@ it("reports an explicit recipient receipt through the real turn tool path after 
         providerEvent({
           kind: "tool-request",
           requestId: "receipt-again",
-          toolName: AGENT_MESSAGE_TOOL_NAME,
-          inputJson: JSON.stringify({ action: "acknowledge", messageIds: [messageId] }),
+          toolName: SIBLING_THREADS_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "acknowledge", messageIds: [messageId] }),
         }),
       ),
     );
@@ -9821,7 +9822,7 @@ describe("Project access inside a Code turn's tool calls", () => {
   const read = { name: CODE_TERMINAL_TOOL_NAME, input: { operation: "read" } };
   const write = { name: CODE_TERMINAL_TOOL_NAME, input: { operation: "write", command: "ls" } };
   const stop = { name: CODE_TERMINAL_TOOL_NAME, input: { operation: "stop" } };
-  const board = { name: CODE_BOARD_TOOL_NAME, input: { operation: "read" } };
+  const board = { name: SIBLING_THREADS_TOOL_NAME, input: { operation: "board" } };
 
   /** The host's access, reading the window's persisted Code binding on every check. */
   function windowBoundTo(
@@ -9865,6 +9866,27 @@ describe("Project access inside a Code turn's tool calls", () => {
     };
   }
 
+  /** The threads tool of a planner turn, which reads the board through the runtime's planner. */
+  const plannerThreads = ({
+    windowId: turnWindowId,
+    thread: caller,
+    planner,
+  }: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly planner?: CodePlannerToolPort;
+  }) =>
+    createThreadsTools({
+      mode: "code",
+      windowId: turnWindowId,
+      service: { answer: async () => Promise.reject(new Error("unused")) },
+      source: noSiblings,
+      callerThreadId: String(caller.id),
+      toolConstraints: [],
+      profileDisplayName: "Reviewer",
+      ...(planner === undefined ? {} : { planner }),
+    });
+
   /** The terminal answer a provider got back, reduced to what it says about access. */
   function terminalOutcome(answer: string | undefined): string {
     const parsed = JSON.parse(answer ?? "{}") as {
@@ -9886,6 +9908,7 @@ describe("Project access inside a Code turn's tool calls", () => {
       codeProjectAccess: access,
       terminalExit: { exitCode: 0 },
       planner: boardStandIn(access, boardDecisions),
+      threads: plannerThreads,
     });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
     try {
@@ -9914,7 +9937,7 @@ describe("Project access inside a Code turn's tool calls", () => {
       expect(answers.map(terminalOutcome)).toEqual([
         "running",
         "running",
-        "stand-in",
+        "refused",
         "interrupted",
       ]);
       expect(boardDecisions).toEqual([true]);
@@ -10084,6 +10107,7 @@ describe("Project access inside a Code turn's tool calls", () => {
       codeProjectAccess: access,
       terminalExit: { exitCode: 0 },
       planner: boardStandIn(access, boardDecisions),
+      threads: plannerThreads,
     });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
     try {
@@ -12293,3 +12317,30 @@ it.each(
     }
   },
 );
+
+/** The operations a turn's threads tool offered the provider, in enum order. */
+function threadsOperations(
+  tools: ReadonlyArray<{ readonly name: string; readonly inputSchema: unknown }> | undefined,
+): ReadonlyArray<string> {
+  const schema = tools?.find((tool) => tool.name === SIBLING_THREADS_TOOL_NAME)?.inputSchema as
+    | { readonly properties?: { readonly operation?: { readonly enum?: ReadonlyArray<string> } } }
+    | undefined;
+  return schema?.properties?.operation?.enum ?? [];
+}
+
+/** Message delivery that admits nothing, for turns that only need to be offered messaging. */
+const quietMessaging: Pick<
+  AgentMessageService,
+  "send" | "recordRefusedSend" | "acknowledge" | "statusForSender"
+> = {
+  send: async () => [],
+  recordRefusedSend: async () => undefined,
+  acknowledge: async () => ({ status: "refused", reason: "unauthorized", message: "Unavailable" }),
+  statusForSender: () => [],
+};
+
+const noSiblings: SiblingThreadSource = {
+  thread: () => undefined,
+  projectThreads: () => [],
+  readTranscript: async () => undefined,
+};

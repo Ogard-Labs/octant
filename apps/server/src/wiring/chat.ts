@@ -641,6 +641,7 @@ export function wireChat(deps: ChatDependencies) {
       resolveChatTargets: (windowId, threadIds) =>
         threadMentionService.chatDialogueTargets(windowId, threadIds),
       readChatThread: (threadId) => chatService.read(threadId),
+      isChatThread: (threadId) => persistence.readChatThread(threadId as never) !== undefined,
       executeChat: (command, context) => chatService.execute(command, context),
       // Unfinished claims count as sidecars too: the thread they name is
       // already a Side Chat, even before its selection is confirmed.

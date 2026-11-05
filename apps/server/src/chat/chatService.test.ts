@@ -8187,7 +8187,7 @@ describe("ChatService", () => {
           : {
               definitions: [
                 {
-                  name: "octant_thread_message",
+                  name: "octant_ask_thread",
                   inputSchema: { type: "object", properties: {}, required: [] },
                 },
               ],
@@ -8218,9 +8218,7 @@ describe("ChatService", () => {
       { windowId },
     );
 
-    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).toContain(
-      "octant_thread_message",
-    );
+    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).toContain("octant_ask_thread");
     expect(resolveAppManagedTools).toHaveBeenCalledWith(
       expect.objectContaining({ threadMentionIds: [targetThreadId] }),
     );

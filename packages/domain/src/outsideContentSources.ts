@@ -36,11 +36,10 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "simulator-screen": "A simulator screen sent as feedback",
   "subagent-result": "A subagent's result",
   "thread-mention": "A thread mentioned in a message",
-  octant_agent_message: "A message from another agent",
   octant_agents: "Results from helper agents",
+  octant_ask_thread: "A reply from another thread",
   octant_android: "The Android emulator",
   octant_apple: "Apple builds, the iOS Simulator, and paired devices",
-  octant_board: "The Project's work board",
   octant_browser: "Pages seen in the browser",
   octant_canvas: "A Canvas document",
   octant_computer: "Apps on your desktop",
@@ -48,15 +47,21 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   octant_github: "GitHub issues, pull requests and projects",
   octant_offer_side_task: "A side task offer",
   octant_propose_routine: "A proposed routine",
-  octant_propose_thread: "A proposed thread",
   octant_pull_request: "This thread's pull request",
   octant_routines: "Routines and their runs",
   octant_side_chat_list_files: "Files listed for a side chat",
   octant_side_chat_read_file: "A file read for a side chat",
   octant_side_chat_search_files: "A file search for a side chat",
   octant_terminal: "Terminal output",
-  octant_thread_message: "A reply from another thread",
+  octant_threads: "The Project's work board",
   octant_web_research: "Web research",
+  // Tools since folded into `octant_threads`, `octant_offer_side_task`, and
+  // `octant_ask_thread`. No turn is offered them any more, but marks recorded
+  // under their names stay in the journal and still show in words.
+  octant_agent_message: "A message from another agent",
+  octant_board: "The Project's work board",
+  octant_propose_thread: "A proposed thread",
+  octant_thread_message: "A reply from another thread",
   // The harness's own tools. Only some bring in outside content, but a name
   // the catalog does not know taints, so each has words.
   read: "Files read",

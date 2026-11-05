@@ -87,6 +87,8 @@ Type `#` in the composer to pick a thread you can already open. Octant inserts a
 
 A chip you can no longer open is marked unavailable and contributes no content. Cross-mode mentions are read-only context, not mixed execution — mentioning a Work or Code thread from Chat does not grant that thread's filesystem or shell.
 
+When you mention another Chat thread and ask the agent to check with it, the agent can ask that thread one question at a time and wait for its reply, up to three times in one message. The thread it asks answers on its own provider and cannot ask onward; if that thread is already busy, the agent tells you instead of interrupting it. Mentioning only Work or Code threads does not offer this.
+
 ## Attaching a window capture
 
 In the macOS desktop app, the composer's paperclip opens a menu: **Choose file…** or **Capture window…**. Capture window lists your open windows by title and attaches a picture of the one you choose, as an image like any other, so the model's image support and the per-turn image limits apply. The first time, Octant explains why macOS needs Screen Recording permission and asks only when you press **Continue**; if you turned it off, Octant opens System Settings instead. Octant reads a window only after you choose it. The web app and the phone app do not offer it.

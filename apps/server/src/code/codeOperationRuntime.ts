@@ -217,6 +217,7 @@ import {
   type CodeDeviceApprovalEffect,
   type PullRequestToolCommand,
 } from "./codeAppManagedTools";
+import type { CodePlannerToolPort } from "./codePlannerTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import {
@@ -508,8 +509,10 @@ export interface CodeOperationRuntimeOptions {
   /**
    * The planner capability: a Project-board read and an advisory work
    * proposal, both answered only for the Project's designated planner thread.
+   * The runtime hands it to the threads tool (`board`) and the side-task tool
+   * (target `board`) of each turn.
    */
-  readonly planner?: CodeAppManagedToolsOptions["planner"];
+  readonly planner?: CodePlannerToolPort;
   /** Optional Project-fixed, read-only GitHub tools composed per active turn. */
   readonly githubReadTools?: (input: {
     readonly windowId: WindowId;
@@ -517,28 +520,27 @@ export interface CodeOperationRuntimeOptions {
     readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
   }) => AppManagedToolSet | undefined;
   /**
-   * The agent-message tool set for this thread, when the host admits agent
-   * messaging. The service is server-owned; the tool only
-   * petitions it. `readPosture` is the turn's access posture at the moment it
-   * is asked, so a turn in Plan is neither offered the tool nor able to send.
+   * The threads tool for one turn: a view of the other Code threads of this
+   * thread's Project, messaging them where the host admits it, and the
+   * planner's board. Asked once per turn, so its read and wait bounds are the
+   * turn's. `readPosture` is the turn's access posture at the moment it is
+   * asked, so a turn in Plan is neither offered messaging nor able to send.
    */
-  readonly agentMessages?: (input: {
-    readonly thread: CodeThread;
-    readonly readPosture: () => CodeThread["executionPolicy"];
-  }) => AppManagedToolSet | undefined;
-  /**
-   * The sibling-threads tool set for one turn: a read-only view of the other
-   * Code threads of this thread's Project, answered by the server for the
-   * turn's window. Asked once per turn, so its read and wait bounds are the
-   * turn's. Offered in Plan too, since no action changes anything outside the
-   * caller's own record.
-   */
-  readonly siblingThreads?: (input: {
+  readonly threads?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
+    readonly readPosture: () => CodeThread["executionPolicy"];
+    readonly planner?: CodePlannerToolPort;
   }) => AppManagedToolSet | undefined;
-  /** Lets the model offer out-of-scope work as a side task the person may start. */
-  readonly sideTasks?: (input: { readonly thread: CodeThread }) => AppManagedToolSet | undefined;
+  /**
+   * Lets the model offer out-of-scope work as a side task the person may
+   * start, and the designated planner offer one to the Project board.
+   */
+  readonly sideTasks?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly planner?: CodePlannerToolPort;
+  }) => AppManagedToolSet | undefined;
   /**
    * Tool sets that areas built after this runtime add to each turn, such as
    * the language server's reads. `readThread` is the thread as the turn's
@@ -4446,14 +4448,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.androidToolchain === undefined
             ? {}
             : { android: this.#options.androidToolchain }),
-          ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
         this.#options.githubReadTools?.({
           windowId: active.windowId,
           thread: active.thread,
           readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
         }),
-        this.#options.agentMessages?.({
+        this.#options.threads?.({
+          windowId: active.windowId,
           thread: active.thread,
           readPosture: () =>
             clampTurnAccessPosture({
@@ -4462,8 +4464,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
                 active.thread.executionPolicy,
             }),
+          ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
-        this.#options.siblingThreads?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.contributedTools?.({
           windowId: active.windowId,
           thread: active.thread,
@@ -4471,7 +4473,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           folders: [active.checkoutRoot, ...active.extraFolders],
           ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
         }),
-        this.#options.sideTasks?.({ thread: active.thread }),
+        this.#options.sideTasks?.({
+          windowId: active.windowId,
+          thread: active.thread,
+          ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
+        }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.nativeHarnessTools?.({

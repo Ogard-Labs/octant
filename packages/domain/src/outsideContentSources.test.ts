@@ -43,6 +43,7 @@ const RECORDED_LABELS: ReadonlyArray<string> = [
   ...NATIVE_HARNESS_TOOL_NAMES,
   "octant_agent_message",
   "octant_agents",
+  "octant_ask_thread",
   "octant_android",
   "octant_apple",
   "octant_board",
@@ -59,6 +60,8 @@ const RECORDED_LABELS: ReadonlyArray<string> = [
   "octant_side_chat_read_file",
   "octant_side_chat_search_files",
   "octant_terminal",
+  "octant_threads",
+  // Recorded by tools since folded into others; their marks still replay.
   "octant_thread_message",
   "octant_web_research",
   "octant_zen_search_threads",

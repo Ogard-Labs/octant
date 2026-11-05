@@ -39,11 +39,9 @@ import type {
   BrowserAutomationSnapshot,
   BrowserThreadId,
   CodeApprovalId,
-  CodeBoardView,
   CodeMergeStandingSource,
   CodeOperationCommand,
   CodeOperationResult,
-  CodePlannerWorkProposal,
   CodeProjectPullRequestSwitchTarget,
   CodeTerminalId,
   CodeThread,
@@ -103,48 +101,13 @@ export const CODE_BROWSER_TOOL_NAME = BROWSER_TOOL_DEFINITION.name;
 export const CODE_TERMINAL_TOOL_NAME = "octant_terminal";
 export const CODE_APPLE_TOOL_NAME = "octant_apple";
 export const CODE_ANDROID_TOOL_NAME = "octant_android";
-export const CODE_BOARD_TOOL_NAME = "octant_board";
-export const CODE_PROPOSE_THREAD_TOOL_NAME = "octant_propose_thread";
 export const CODE_PULL_REQUEST_TOOL_NAME = "octant_pull_request";
-
-/**
- * Ceiling on cards one board read hands the provider. The board is ordered by
- * most recent meaningful activity, so the planner always sees the live end of
- * a Project that has outgrown the bound.
- */
-const MAX_BOARD_TOOL_CARDS = 100;
 
 /** How long one agent-driven Apple action may run before it is given up on. */
 const APPLE_BUILD_TIMEOUT_MS = 15 * 60_000;
 const APPLE_BOOT_TIMEOUT_MS = 120_000;
 const APPLE_SIMULATOR_TIMEOUT_MS = 30_000;
 const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
-
-const boardDefinition = {
-  name: CODE_BOARD_TOOL_NAME,
-  description:
-    "Read the current Project's server-authoritative task board as its designated planner. Use the returned task states, delivery evidence, checks, and child-agent activity to decide what needs attention. The result is a bounded recent list; check truncation before claiming it covers every task. This tool does not change task status or create work.",
-  inputSchema: {
-    type: "object",
-    properties: { operation: { type: "string", enum: ["read"] } },
-    required: ["operation"],
-  },
-} as const;
-
-const proposeThreadDefinition = {
-  name: CODE_PROPOSE_THREAD_TOOL_NAME,
-  description:
-    "Propose a new Code task to the user from the current Project's designated planner. Supply a clear title, the intended outcome in intent, and an optional rationale. The proposal waits for user acceptance; it does not create or start a task, checkout, or pull request. Report proposed work as proposed, not running or completed.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      title: { type: "string" },
-      intent: { type: "string" },
-      rationale: { type: "string" },
-    },
-    required: ["title", "intent"],
-  },
-} as const;
 
 const pullRequestDefinition = {
   name: CODE_PULL_REQUEST_TOOL_NAME,
@@ -643,42 +606,10 @@ export interface CodeAppManagedToolsOptions {
   };
   readonly apple?: CodeAppleToolPort;
   readonly android?: CodeAndroidToolPort;
-  /**
-   * What the planner capability lends one thread's agent: a read of its own
-   * Project's server-authoritative board, and an advisory work proposal that
-   * waits for the user. Both re-resolve the planner designation on every call,
-   * so only the currently designated planner thread ever gets an answer, and
-   * neither can mutate a thread, a checkout, or GitHub.
-   */
-  readonly planner?: CodePlannerToolPort;
   readonly wait?: (milliseconds: number) => Promise<void>;
   readonly recordExternalContentIngestion?: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
-}
-
-export interface CodePlannerToolPort {
-  /**
-   * Whether this thread is currently its Project's designated planner. Used
-   * only to decide whether the planner tools are advertised at all; every
-   * call still re-validates through {@link board} and {@link propose}.
-   */
-  readonly isPlannerThread: (threadId: CodeThread["id"]) => boolean;
-  readonly board: (
-    windowId: WindowId,
-    threadId: CodeThread["id"],
-  ) => Promise<
-    | { readonly status: "ok"; readonly board: CodeBoardView }
-    | { readonly status: "refused"; readonly reason: string; readonly message: string }
-  >;
-  readonly propose: (
-    windowId: WindowId,
-    threadId: CodeThread["id"],
-    draft: { readonly title: string; readonly intent: string; readonly rationale?: string },
-  ) => Promise<
-    | { readonly status: "proposed"; readonly proposal: CodePlannerWorkProposal }
-    | { readonly status: "refused"; readonly reason: string; readonly message: string }
-  >;
 }
 
 export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): AppManagedToolSet {
@@ -692,12 +623,6 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       ...(options.apple === undefined ? [] : [appleDefinition]),
       ...(options.android === undefined ? [] : [androidDefinition]),
       ...(options.pullRequestApproval === undefined ? [] : [pullRequestDefinition]),
-      // The planner tools appear only in the currently designated planner
-      // thread. Any other thread that calls them anyway is refused by name
-      // below with a value, never a throw.
-      ...(options.planner !== undefined && options.planner.isPlannerThread(options.thread.id)
-        ? [boardDefinition, proposeThreadDefinition]
-        : []),
     ].filter((definition) => isToolAllowedByAllowlist(allowlist, definition.name)),
     execute: async ({ name, inputJson, signal }) => {
       if (signal?.aborted) return failure("tool-interrupted");
@@ -706,15 +631,6 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       const profileFailure = profileToolConstraintFailure(options.thread, name);
       if (profileFailure !== undefined) {
         return failure("profile-tool-refused", profileFailure);
-      }
-      // The planner tools sit before the posture gate: a board read and an
-      // advisory proposal work under any posture, because neither has an
-      // effect an approval could gate. Designation is re-validated inside.
-      if (name === CODE_BOARD_TOOL_NAME && options.planner !== undefined) {
-        return plannerBoardTool(options, parseBoardInput(inputJson));
-      }
-      if (name === CODE_PROPOSE_THREAD_TOOL_NAME && options.planner !== undefined) {
-        return plannerProposeTool(options, parseProposeThreadInput(inputJson));
       }
       if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
         return browserTool(
@@ -765,73 +681,6 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
         }),
     CODE_TOOL_HELP,
   );
-}
-
-async function plannerBoardTool(
-  options: CodeAppManagedToolsOptions,
-  input: { readonly operation: "read" } | undefined,
-) {
-  if (input === undefined || options.planner === undefined) return failure("invalid-board-input");
-  let outcome: Awaited<ReturnType<CodePlannerToolPort["board"]>>;
-  try {
-    outcome = await options.planner.board(options.windowId, options.thread.id);
-  } catch {
-    return failure("planner-unavailable");
-  }
-  if (outcome.status === "refused") return failure(outcome.reason, outcome.message);
-  const cards = outcome.board.cards.slice(0, MAX_BOARD_TOOL_CARDS);
-  return {
-    result: {
-      generatedAt: String(outcome.board.generatedAt),
-      cards: cards.map((card) => ({
-        threadId: String(card.threadId),
-        title: card.title,
-        status: card.status,
-        statusReason: card.statusReason,
-        outcomeKind: card.outcomeKind,
-        deliverySatisfaction: card.deliverySatisfaction,
-        executing: card.executing,
-        changedFiles: card.changedFiles,
-        linkedPullRequest: card.linkedPullRequest,
-        checks: card.checks,
-        reviewState: card.reviewState,
-        childAgents: card.childAgents,
-        planProgress: card.planProgress,
-        followUp: card.followUp,
-        ...(card.blockingReason === undefined ? {} : { blockingReason: card.blockingReason }),
-        lastMeaningfulActivityAt: card.lastMeaningfulActivityAt,
-      })),
-      ...(outcome.board.cards.length > cards.length ? { truncated: true } : {}),
-    },
-    isError: false,
-  };
-}
-
-async function plannerProposeTool(
-  options: CodeAppManagedToolsOptions,
-  input: ProposeThreadToolInput | undefined,
-) {
-  if (input === undefined || options.planner === undefined) {
-    return failure("invalid-proposal-input");
-  }
-  let outcome: Awaited<ReturnType<CodePlannerToolPort["propose"]>>;
-  try {
-    outcome = await options.planner.propose(options.windowId, options.thread.id, input);
-  } catch {
-    return failure("planner-unavailable");
-  }
-  if (outcome.status === "refused") return failure(outcome.reason, outcome.message);
-  return {
-    result: {
-      status: "pending-user-confirmation",
-      proposalId: String(outcome.proposal.id),
-      title: outcome.proposal.title,
-      // The proposal executes nothing; only the user's explicit confirmation
-      // creates the thread, through the ordinary creation command.
-      note: "Proposed. The user decides whether this thread is created.",
-    },
-    isError: false,
-  };
 }
 
 export type PullRequestToolCommand = Extract<
@@ -2605,30 +2454,6 @@ interface AndroidToolInput {
   readonly packageName?: string;
   readonly sinceSeconds?: number;
   readonly includeCrashes?: boolean;
-}
-
-interface ProposeThreadToolInput {
-  readonly title: string;
-  readonly intent: string;
-  readonly rationale?: string;
-}
-
-function parseBoardInput(value: string): { readonly operation: "read" } | undefined {
-  const parsed = parseObject(value, new Set(["operation"]));
-  if (parsed === undefined || parsed.operation !== "read") return undefined;
-  return { operation: "read" };
-}
-
-function parseProposeThreadInput(value: string): ProposeThreadToolInput | undefined {
-  const parsed = parseObject(value, new Set(["title", "intent", "rationale"]));
-  if (parsed === undefined) return undefined;
-  if (typeof parsed.title !== "string" || typeof parsed.intent !== "string") return undefined;
-  if (parsed.rationale !== undefined && typeof parsed.rationale !== "string") return undefined;
-  return {
-    title: parsed.title,
-    intent: parsed.intent,
-    ...(typeof parsed.rationale === "string" ? { rationale: parsed.rationale } : {}),
-  };
 }
 
 function parsePullRequestInput(value: string): PullRequestToolInput | undefined {

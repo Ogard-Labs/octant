@@ -1,5 +1,9 @@
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "./sideChatReturn";
-import type { SideChatSourceReceipt, SideChatDraftReturnReference } from "@octant/contracts";
+import {
+  THREAD_DIALOGUE_TOOL_NAME,
+  type SideChatDraftReturnReference,
+  type SideChatSourceReceipt,
+} from "@octant/contracts";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
@@ -4187,7 +4191,8 @@ export class ChatService {
       thread.id,
       threadMentionIds,
       executionContext,
-      tools?.definitions.some((definition) => definition.name === "octant_thread_message") === true,
+      tools?.definitions.some((definition) => definition.name === THREAD_DIALOGUE_TOOL_NAME) ===
+        true,
     );
     // A continued harness session already holds the conversation, but it is
     // still planned in full: the plan is what admission and capacity size the
