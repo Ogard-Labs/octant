@@ -976,6 +976,7 @@ class CombinedOutputCapture {
    * failure.
    */
   #dropOldest(): void {
+    if (this.#retained <= this.#maximum) return;
     let oldest = this.#chunks[0];
     while (oldest !== undefined && this.#retained > this.#maximum) {
       const excess = this.#retained - this.#maximum;
@@ -985,12 +986,21 @@ class CombinedOutputCapture {
         oldest = this.#chunks[0];
         continue;
       }
-      let start = excess;
+      oldest.bytes = oldest.bytes.subarray(excess);
+      this.#retained -= excess;
+    }
+    // A dropped whole chunk can end inside a character as well as a partial
+    // cut can, so the first retained bytes are checked either way.
+    while (oldest !== undefined) {
+      let start = 0;
       while (start < oldest.bytes.byteLength && ((oldest.bytes[start] ?? 0) & 0xc0) === 0x80) {
         start += 1;
       }
       oldest.bytes = oldest.bytes.subarray(start);
       this.#retained -= start;
+      if (oldest.bytes.byteLength > 0) return;
+      this.#chunks.shift();
+      oldest = this.#chunks[0];
     }
   }
 

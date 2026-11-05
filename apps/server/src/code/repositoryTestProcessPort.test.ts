@@ -1002,6 +1002,26 @@ describe("RepositoryTestProcessPort", () => {
     // The three bytes kept from "aé\nb" would start inside "é"; the cut drops its rest.
     expect(new TextDecoder().decode(splitResult.stdout)).toBe("\nb");
     expect(splitResult.parserFailed).toBe(false);
+
+    // Dropping a whole chunk that ends inside "é" leaves the next chunk
+    // starting with its continuation byte, and no partial cut follows.
+    const whole = fakeChild(4323);
+    const wholePort = new RepositoryTestProcessPort(
+      confinedOptions({ spawn: vi.fn(() => whole), maxOutputBytes: 4 }),
+    );
+    const wholeExecution = wholePort.execute({
+      argv: ["/usr/bin/test"],
+      cwd: "/repo",
+      environment: {},
+      timeoutMs: 5_000,
+      outputRetention: "newest",
+    });
+    whole.stdout.write(new Uint8Array([97, 98, 99, 195]));
+    whole.stdout.write(new Uint8Array([169, 120, 120, 120, 120]));
+    whole.close(0, null);
+    const wholeResult = await wholeExecution;
+    expect(new TextDecoder().decode(wholeResult.stdout)).toBe("xxxx");
+    expect(wholeResult.parserFailed).toBe(false);
   });
 
   it("escalates timeout and cancellation from process-group TERM to KILL", async () => {
