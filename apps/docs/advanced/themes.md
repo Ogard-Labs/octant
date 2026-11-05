@@ -36,7 +36,8 @@ list icon in a Chat thread's header, or among the controls under a Work or
 Code thread's message box) and choose a level, or **Use default** to follow
 this setting again. A thread's own level stays with it after a reload and on
 your other windows, your phone and a paired browser, and changing the default
-does not move it. **⌘/Ctrl+Shift+D** steps the thread in front through the
+does not move it. Another open window shows the change when you switch back to
+it, and deleting a thread for good removes its level too. **⌘/Ctrl+Shift+D** steps the thread in front through the
 levels, and the command palette can set either the thread's level or the
 default.
 

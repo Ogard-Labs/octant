@@ -34,6 +34,7 @@ import {
   withThreadReplyDetail,
 } from "@octant/domain/reply-detail-policy";
 import { useReplyDetailShortcut } from "./shell/useReplyDetailShortcut";
+import { replyDetailThreadInFront } from "./transcript/replyDetailTarget";
 import { ImageJobChangeRevisionContext } from "./image/ImageJobChangeRevision";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
@@ -2223,14 +2224,36 @@ function LaunchedShell(
     }),
     [replyDetailSettings, updateShellSettings],
   );
-  const replyDetailThread: ReplyDetailThread | undefined =
-    activeMode === "chat" && activeChatThreadId !== undefined
-      ? { mode: "chat", threadId: String(activeChatThreadId) }
-      : activeMode === "work" && activeWorkThreadId !== undefined
-        ? { mode: "work", threadId: String(activeWorkThreadId) }
-        : activeMode === "code" && activeCodeThreadId !== undefined
-          ? { mode: "code", threadId: String(activeCodeThreadId) }
-          : undefined;
+  const automationCenterVisible =
+    automationCenterOpen && (activeMode === "code" || activeMode === "work");
+  const agentsCenterVisible = agentsCenterOpen;
+  const workspaceHidden =
+    projectsListOpen ||
+    railPlaceholder !== undefined ||
+    codeBoardOpen ||
+    codePullRequestsOpen ||
+    inboxOpen ||
+    reviewOpen ||
+    githubIssuesOpen ||
+    linearIssuesOpen ||
+    workBoardOpen ||
+    archiveOpen ||
+    automationCenterVisible ||
+    agentsCenterVisible ||
+    // These two cover the workspace like every page above, but
+    // were left out of this list, so the thread underneath
+    // stayed in the tab order and the page had two h1s.
+    artifactLibraryOpen ||
+    imageLibraryOpen;
+  // Only a thread on screen: Settings, Usage, Zen, and the pages that cover
+  // the workspace leave its active thread ids behind them.
+  const replyDetailThread = replyDetailThreadInFront({
+    activeMode,
+    chatThreadId: activeChatThreadId === undefined ? undefined : String(activeChatThreadId),
+    workThreadId: activeWorkThreadId === undefined ? undefined : String(activeWorkThreadId),
+    codeThreadId: activeCodeThreadId === undefined ? undefined : String(activeCodeThreadId),
+    covered: workspaceHidden || controller.settingsOpen || usageOpen || zen.active,
+  });
   const [replyDetailNotice, setReplyDetailNotice] = useState<ReplyDetailLevel>();
   useEffect(() => {
     if (replyDetailNotice === undefined) return;
@@ -5263,9 +5286,6 @@ function LaunchedShell(
         controller.workspace.activePaneIds[activeMode],
         navigationModel.liveThreadTitles,
       );
-  const automationCenterVisible =
-    automationCenterOpen && (activeMode === "code" || activeMode === "work");
-  const agentsCenterVisible = agentsCenterOpen;
   const visibleComputerUseSessions =
     controller.settingsOpen ||
     zen.active ||
@@ -6934,24 +6954,6 @@ function LaunchedShell(
     dockToolReads(surface, "codeThreadView"),
   );
   const codeDiffLayout = codeController.bootstrap?.settings.defaultDiffLayout;
-  const workspaceHidden =
-    projectsListOpen ||
-    railPlaceholder !== undefined ||
-    codeBoardOpen ||
-    codePullRequestsOpen ||
-    inboxOpen ||
-    reviewOpen ||
-    githubIssuesOpen ||
-    linearIssuesOpen ||
-    workBoardOpen ||
-    archiveOpen ||
-    automationCenterVisible ||
-    agentsCenterVisible ||
-    // These two cover the workspace like every page above, but
-    // were left out of this list, so the thread underneath
-    // stayed in the tab order and the page had two h1s.
-    artifactLibraryOpen ||
-    imageLibraryOpen;
   const browserToolThreadId =
     dockThreadId === undefined || !(sharedBrowserInDock || sharedBrowserInBottomPanel)
       ? undefined

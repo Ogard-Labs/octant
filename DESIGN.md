@@ -1004,8 +1004,10 @@ level, a paired browser, shows no menu.
 default, remappable in Settings › Keyboard shortcuts) steps the thread in front
 through Low, Medium, High and back to Low, setting its own level, and says so
 in a status toast ("Reply detail: Medium" over "This thread:" and the level's
-sentence). With no thread in front the chord does nothing and is left to the
-browser. Mod+Shift+D is held by no other default, no desktop menu item, and no
+sentence). A thread is in front only while it is on screen: behind Settings,
+Usage, Review, Zen, or any other page that covers the workspace, the chord does
+nothing and is left to the browser, and the palette offers only the default's
+commands. Mod+Shift+D is held by no other default, no desktop menu item, and no
 macOS or Windows system chord; in a browser it is Bookmark all tabs (Safari:
 Add to Reading List), which the page takes only when it changes a thread. The
 command palette offers the same cycle (showing the chord), each level not in
@@ -1032,9 +1034,13 @@ journal, so forks, exports and provider context never see it; and host export
 does not carry it. Code's pin is the one per-thread presentation choice kept on
 a thread's own record, and Chat and Work have no such record to share, so a
 level on three mode journals would have put a presentation choice where thread
-authority lives. The list holds at most 500 threads; setting one more drops the
-longest-standing choice. Other open windows pick up a change the next time they
-read settings. The phone and a paired browser read the two fields, and nothing
+authority lives. Purging a thread, alone, with its Project, or past the
+retention window, removes its level in the same pass, so no level outlives its
+thread; the host writes that change itself, with no window to name. The list
+also holds at most 500 threads, and setting one more drops the longest-standing
+choice, a backstop should that write lose a race. The host has no settings push,
+so another open window picks up a change when it regains focus: it re-reads the
+shell settings behind any edit it is still saving. The phone and a paired browser read the two fields, and nothing
 else from the settings document, through `GET /api/reply-detail`
 (`settings.read-non-secret`, read-only, at most 128 KiB): the phone when a
 thread opens and when the app returns to the foreground, a paired browser when

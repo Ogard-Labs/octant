@@ -83,6 +83,14 @@ export function withThreadReplyDetail(
   return [...kept, { mode: thread.mode, threadId: thread.threadId, level }];
 }
 
+/** The list without any choice made by these threads, as when they are erased. */
+export function withoutThreadReplyDetails(
+  threads: ThreadReplyDetails,
+  erased: ReadonlyArray<ReplyDetailThread>,
+): ThreadReplyDetails {
+  return threads.filter((entry) => !erased.some((thread) => sameThread(entry, thread)));
+}
+
 /** Longest preview kept; a row's own ellipsis clips it on screen. */
 const THINKING_PREVIEW_LIMIT = 160;
 

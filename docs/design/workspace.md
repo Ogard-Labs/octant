@@ -165,7 +165,9 @@ interaction.
 
 The `reply-detail-cycle` keybinding (Mod+Shift+D by default) and the palette's
 Reply detail commands act on the thread in the active pane, setting that
-thread's own level; the palette also sets the default. The levels, the thread
+thread's own level, and only while that thread is on screen: a page or Settings
+covering the workspace leaves no thread in front. The palette also sets the
+default. The levels, the thread
 menu, and where the levels are kept are owned by
 [DESIGN.md: Transcript](../../DESIGN.md#transcript).
 
