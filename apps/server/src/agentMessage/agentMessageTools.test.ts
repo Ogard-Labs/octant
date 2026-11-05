@@ -265,6 +265,64 @@ describe("messaging through the threads tool", () => {
     });
   });
 
+  it("refuses a send naming more recipients than the bound as a whole, even when most are malformed", async () => {
+    const { tools, sendMessage, recordRefusedSend } = fixture();
+    const wrongProject = `${recipientThreadId}@${otherProjectId}`;
+
+    const outcome = await tools.execute(
+      send({ recipients: [wrongProject, "x", "y@", "@z", "not a reference"] }),
+    );
+
+    expect(outcome).toMatchObject({
+      isError: true,
+      result: { status: "refused", reason: "policy", message: expect.stringContaining("at most") },
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(recordRefusedSend).toHaveBeenCalledExactlyOnceWith({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }],
+      reason: "policy",
+      refusalBudget: expect.anything(),
+    });
+  });
+
+  it("refuses a whole send that names a malformed reference beside one of another Project, sending to no one", async () => {
+    const { tools, sendMessage, recordRefusedSend } = fixture();
+    const wrongProject = `${recipientThreadId}@${otherProjectId}`;
+
+    const outcome = await tools.execute(send({ recipients: [recipient, "x", wrongProject] }));
+
+    expect(outcome).toMatchObject({ isError: true, result: { status: "refused" } });
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(recordRefusedSend).toHaveBeenCalled();
+  });
+
+  it("refuses a whole send that names one reference of another Project beside a good one, sending to no one", async () => {
+    const { tools, sendMessage, recordRefusedSend } = fixture();
+    const otherThreadId = "c0000000-0000-4000-8000-00000000000c";
+    const wrongProject = `${otherThreadId}@${otherProjectId}`;
+
+    const outcome = await tools.execute(send({ recipients: [recipient, wrongProject] }));
+
+    expect(outcome.isError).toBe(true);
+    expect(outcome.result).toEqual([
+      expect.objectContaining({ status: "refused", recipient, reason: "policy" }),
+      {
+        status: "refused",
+        recipient: wrongProject,
+        reason: "unauthorized",
+        message: AGENT_MESSAGE_UNREACHABLE,
+      },
+    ]);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(recordRefusedSend).toHaveBeenCalledWith({
+      senderThreadId,
+      recipients: [{ threadId: otherThreadId }],
+      reason: "unauthorized",
+      refusalBudget: expect.anything(),
+    });
+  });
+
   it("does not offer send to a turn that starts in Plan, and a send from one is refused and journaled", async () => {
     const { tools, operations, sendMessage, recordRefusedSend } = fixture({ posture: "plan" });
 

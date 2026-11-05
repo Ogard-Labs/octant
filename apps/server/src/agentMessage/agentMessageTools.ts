@@ -109,24 +109,38 @@ export function createAgentMessageOperations(input: {
         await journalRefusedCall(raw, "policy");
         return policyRefusal("A recipient reference and a message are required.");
       }
+      // The raw list is judged as a whole before anything reaches the service:
+      // a send that fails any check is refused entirely, never narrowed to the
+      // recipients that passed. Filtering first let one wrong-Project reference
+      // padded with malformed strings slip under both the recipient bound and
+      // the Project check.
+      if (recipients.length > MAX_AGENT_MESSAGE_RECIPIENTS) {
+        await journalRefusedCall(raw, "policy");
+        return policyRefusal(
+          `An agent message may name at most ${String(MAX_AGENT_MESSAGE_RECIPIENTS)} recipients.`,
+        );
+      }
       const projectId = input.senderProjectId();
-      const resolved = recipients.map((reference) => {
+      const resolved: Array<{
+        readonly reference: string;
+        readonly threadId: AgentMessageEndpointId;
+        readonly inProject: boolean;
+      }> = [];
+      for (const reference of recipients) {
         const named = parseSiblingThreadReference(String(reference));
-        return {
+        if (named === undefined) {
+          await journalRefusedCall(raw, "policy");
+          return policyRefusal(
+            "Every recipient must be a `<thread id>@<project id>` reference from list.",
+          );
+        }
+        resolved.push({
           reference: String(reference),
-          threadId: named === undefined ? undefined : decodeAgentMessageEndpointId(named.threadId),
-          inProject:
-            named !== undefined && projectId !== undefined && named.projectId === projectId,
-        };
-      });
-      const addressed = resolved.flatMap((recipient) =>
-        recipient.threadId === undefined ? [] : [{ ...recipient, threadId: recipient.threadId }],
-      );
-      // A send naming more recipients than the bound is refused as a whole by
-      // the service, which journals its first ones; it must see them all.
-      const overBound = recipients.length > MAX_AGENT_MESSAGE_RECIPIENTS;
-      const admitted = overBound ? addressed : addressed.filter((recipient) => recipient.inProject);
-      const outsideProject = overBound ? [] : addressed.filter((recipient) => !recipient.inProject);
+          threadId: decodeAgentMessageEndpointId(named.threadId),
+          inProject: projectId !== undefined && named.projectId === projectId,
+        });
+      }
+      const outsideProject = resolved.filter((recipient) => !recipient.inProject);
       if (outsideProject.length > 0) {
         try {
           await input.service.recordRefusedSend({
@@ -138,45 +152,57 @@ export function createAgentMessageOperations(input: {
         } catch {
           // As above: the sender's answer does not depend on the journal.
         }
+        // Only a reference of another Project is answered as unreachable; the
+        // others learn just that this send was refused, which says nothing
+        // about whether their threads exist.
+        return {
+          result: resolved.map((recipient) =>
+            recipient.inProject
+              ? {
+                  status: "refused",
+                  recipient: recipient.reference,
+                  reason: "policy",
+                  message: "Nothing was sent: another recipient of this send was refused.",
+                }
+              : {
+                  status: "refused",
+                  recipient: recipient.reference,
+                  reason: "unauthorized",
+                  message: AGENT_MESSAGE_UNREACHABLE,
+                },
+          ),
+          isError: true,
+        };
       }
       const referenceOf = new Map(
-        addressed.map((recipient) => [String(recipient.threadId), recipient.reference]),
+        resolved.map((recipient) => [String(recipient.threadId), recipient.reference]),
       );
-      const outcomes: Array<Record<string, unknown>> = resolved
-        .filter((recipient) => !overBound && !recipient.inProject)
-        .map((recipient) => ({
-          status: "refused",
-          recipient: recipient.reference,
-          reason: "unauthorized",
-          message: AGENT_MESSAGE_UNREACHABLE,
-        }));
-      if (admitted.length > 0) {
-        try {
-          const sent = await input.service.send({
-            senderThreadId,
-            recipients: admitted.map((recipient) => ({ threadId: recipient.threadId })),
-            body: message,
-            refusalBudget,
+      const outcomes: Array<Record<string, unknown>> = [];
+      try {
+        const sent = await input.service.send({
+          senderThreadId,
+          recipients: resolved.map((recipient) => ({ threadId: recipient.threadId })),
+          body: message,
+          refusalBudget,
+        });
+        for (const outcome of sent) {
+          const { recipientThreadId, ...rest } = outcome;
+          outcomes.push({
+            ...rest,
+            recipient: referenceOf.get(String(recipientThreadId)) ?? String(recipientThreadId),
           });
-          for (const outcome of sent) {
-            const { recipientThreadId, ...rest } = outcome;
-            outcomes.push({
-              ...rest,
-              recipient: referenceOf.get(String(recipientThreadId)) ?? String(recipientThreadId),
-            });
-          }
-        } catch (error) {
-          return {
-            result: {
-              status: "failed",
-              message:
-                error instanceof Error && error.message.length > 0
-                  ? error.message
-                  : "The message could not be sent.",
-            },
-            isError: true,
-          };
         }
+      } catch (error) {
+        return {
+          result: {
+            status: "failed",
+            message:
+              error instanceof Error && error.message.length > 0
+                ? error.message
+                : "The message could not be sent.",
+          },
+          isError: true,
+        };
       }
       // Each recipient's outcome is the answer, sent or refused, as the
       // service gives it; the call itself did not fail.

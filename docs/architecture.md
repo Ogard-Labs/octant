@@ -3327,7 +3327,10 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   is not the sender's current Project refuses `unauthorized` in the same
   words, even when its thread part names a thread the sender could reach, and
   is journaled as `agent.message-refused@1` like any refusal that names a
-  recipient.
+  recipient. The tool judges the raw recipient list before the delivery
+  service sees it: more than four entries, any malformed reference, or any
+  reference of another Project refuses the whole send, and nothing is sent to
+  the rest.
 - **Sending.** The messaging operations are left out of the enum of a turn in
   Plan and of a profile whose non-empty tool allowlist does not name
   `octant_threads.send`, and a call made anyway, or after the thread dropped to
