@@ -149,6 +149,36 @@ function refusal(result: ProjectBrowserResult) {
 const open = (url = "https://example.com/start") => ({ kind: "open", projectId, url }) as const;
 
 describe("Project browsers", () => {
+  it("checks live native Project ownership without observing the page and refuses a delayed session expiry", async () => {
+    const { service, runtime, advance } = harness();
+    runtime.presentation = "native-live";
+    const opened = await service.execute(windowId, "local-window", open());
+    if (opened.kind !== "project-browser" || opened.browser.context === undefined)
+      throw new Error("Expected fixture Project page");
+    const contextId = opened.browser.context.contextId;
+    const subject = opened.browser.subjectId;
+    const peeks = runtime.peeks;
+    expect(service.ownsHumanPresentation(windowId, contextId, subject)).toBe(true);
+    expect(service.ownsHumanPresentation(otherWindowId, contextId, subject)).toBe(false);
+    advance(600_000);
+    expect(service.ownsHumanPresentation(windowId, contextId, subject)).toBe(false);
+    expect(runtime.peeks).toBe(peeks);
+  });
+
+  it("does not authorize human native presentation for a headless Project page", async () => {
+    const { service } = harness();
+    const opened = await service.execute(windowId, "local-window", open());
+    if (opened.kind !== "project-browser" || opened.browser.context === undefined)
+      throw new Error("Expected fixture Project page");
+    expect(
+      service.ownsHumanPresentation(
+        windowId,
+        opened.browser.context.contextId,
+        opened.browser.subjectId,
+      ),
+    ).toBe(false);
+  });
+
   it("opens the person's page in an isolated context owned by the Project, never by a thread", async () => {
     const { service, runtime } = harness();
 

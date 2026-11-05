@@ -1363,6 +1363,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           className="browser-workspace__native"
           ref={nativeSurface.mount}
         >
+          {nativeSurface.embedded}
           {nativeSurface.failed ? (
             <OctantAlert className="browser-workspace__native-error" tone="danger">
               <p>The live Chromium page could not attach to this pane.</p>

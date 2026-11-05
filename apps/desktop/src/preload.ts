@@ -1,3 +1,11 @@
+import type {
+  HumanBrowserRequest,
+  HumanBrowserResult,
+} from "@octant/contracts/browser-presentation";
+import {
+  decodeHumanBrowserIpcRequest,
+  decodeHumanBrowserIpcResult,
+} from "./browserPresentationIpc";
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
 import {
@@ -226,6 +234,7 @@ export interface OctantHostBridge {
    * checks.
    */
   readonly subscribeCanvasPrototypeEvents: (listener: (event: unknown) => void) => () => void;
+  readonly presentBrowser: (request: HumanBrowserRequest) => Promise<HumanBrowserResult>;
   readonly attachBrowserSurface: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
@@ -529,6 +538,13 @@ export function createHostBridge(
     acknowledgeCanvasPrototypeFrame: async (surfaceId: string) => {
       await ipc.invoke(IPC_CHANNELS.canvasPrototypeDrawn, surfaceId);
     },
+    presentBrowser: async (request: HumanBrowserRequest) =>
+      decodeHumanBrowserIpcResult(
+        await ipc.invoke(
+          IPC_CHANNELS.browserHumanPresentation,
+          decodeHumanBrowserIpcRequest(request),
+        ),
+      ),
     attachBrowserSurface: async (request: BrowserSurfaceRequest) => {
       validateBrowserSurfaceRequest(request);
       return decodeBrowserSurfaceState(
@@ -680,6 +696,7 @@ export function createHostBridge(
       return Object.freeze({
         sidebarVibrancySupported: value.sidebarVibrancySupported,
         liveBrowserSupported: value.liveBrowserSupported,
+        ...(value.embeddedBrowserSupported === true ? { embeddedBrowserSupported: true } : {}),
         liveSimulatorFrameSupported: value.liveSimulatorFrameSupported,
         liveAndroidFrameSupported: value.liveAndroidFrameSupported,
       });

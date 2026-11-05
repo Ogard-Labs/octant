@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { createContext, runInContext } from "node:vm";
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
 import { decodeOwnerBrowserNativeCommand } from "@octant/contracts/owner-browser";
+import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 import {
   BrowserTargetStaleError,
@@ -779,6 +780,76 @@ describe("BrowserSurfaceHost", () => {
     await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
   });
 
+  it("hides expired embedded profiles and isolates listeners while closing owned views", async () => {
+    let available = true;
+    const base = view();
+    const created = { ...base, webContents: { ...base.webContents, id: 701 } };
+    const input = vi.fn();
+    const visible = vi.fn();
+    const close = vi.fn();
+    const source = { input, visible, bounds: vi.fn(), frames: () => () => {} };
+    const host = createBrowserSurfaceHost({
+      createView: () => ({ ...created, human: source, close }),
+      isOwnerWindowAvailable: () => available,
+      isEmbeddedOwner: () => available,
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    await host.humanPresentation(
+      request({
+        kind: "layout",
+        presentationId: attached.presentationId,
+        layout: { width: 800, height: 600, visible: true },
+      }),
+      "window-a",
+    );
+    expect(host.profileTabs({ kind: "personal" }, "window-a")).toHaveLength(1);
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(
+      await host.humanPresentation(
+        request({ kind: "command", presentationId: attached.presentationId, command: "reload" }),
+        "window-a",
+        aborted.signal,
+      ),
+    ).toEqual({ status: "refused" });
+    expect(created.webContents.reload).not.toHaveBeenCalled();
+    available = false;
+    expect(host.profileTabs({ kind: "personal" }, "window-a")).toMatchObject([{ active: false }]);
+    expect(
+      await host.openProfileTab({ kind: "personal" }, "window-a", "https://example.com/"),
+    ).toEqual({ status: "no-page" });
+    expect(
+      await host.humanPresentation(
+        request({ kind: "frame", presentationId: attached.presentationId, acknowledgement: 0 }),
+        "window-a",
+      ),
+    ).toEqual({ status: "refused" });
+    const sibling = vi.fn();
+    host.onContextGone(() => {
+      throw new Error("observer failed");
+    });
+    host.onContextGone(sibling);
+    await host.closeOwnerContexts("window-a");
+    expect(visible).toHaveBeenLastCalledWith(false);
+    expect(close).toHaveBeenCalledOnce();
+    expect(sibling).toHaveBeenCalledWith(contextId);
+  });
+
   it("refuses certificate acceptance it cannot bind to this surface's one origin", async () => {
     // Local-certificate acceptance is bounded to the exact origin this tab was
     // opened for.
@@ -825,6 +896,7 @@ describe("BrowserSurfaceHost", () => {
     });
 
     expect(createView).toHaveBeenCalledWith({
+      owner: { windowId: "window-a", threadId },
       partition: `octant-browser-${contextId}`,
       webPreferences: {
         allowRunningInsecureContent: false,
@@ -1090,6 +1162,87 @@ describe("BrowserSurfaceHost", () => {
       "octant:browser-surface:state",
       expect.objectContaining({ control: "user" }),
     );
+  });
+
+  it("delivers the person's embedded keys and releases while an agent action is in flight", async () => {
+    const created = view();
+    let releaseAction!: () => void;
+    const action = new Promise<{ x: number; y: number }>((resolve) => {
+      releaseAction = () => resolve({ x: 20, y: 30 });
+    });
+    let offer:
+      | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
+      | undefined;
+    const delivered = vi.fn();
+    const source = {
+      input: delivered,
+      visible: vi.fn(),
+      bounds: vi.fn(),
+      frames: (listener: NonNullable<typeof offer>) => {
+        offer = listener;
+        return () => {};
+      },
+    };
+    const host = createBrowserSurfaceHost({
+      createView: () => ({ ...created, human: source, close: vi.fn() }),
+      isEmbeddedOwner: () => true,
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const presentationId = attached.presentationId;
+    await host.humanPresentation(
+      request({
+        kind: "layout",
+        presentationId,
+        layout: { width: 800, height: 600, visible: true },
+      }),
+      "window-a",
+    );
+    offer?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => Uint8Array.from([1]) });
+    expect(
+      await host.humanPresentation(
+        request({ kind: "frame", presentationId, acknowledgement: 0 }),
+        "window-a",
+      ),
+    ).toMatchObject({ status: "frame", sequence: 1 });
+    const key = (type: "keyDown" | "keyUp" | "char", keyCode: string) =>
+      host.humanPresentation(
+        request({ kind: "input", presentationId, frameSequence: 1, input: { type, keyCode } }),
+        "window-a",
+      );
+    expect(await key("keyDown", "Shift")).toEqual({ status: "accepted" });
+
+    const personInput = vi.fn();
+    const stopListening = host.onPersonInput(personInput);
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementationOnce(
+      async () => action,
+    );
+    const agentAction = host.act(contextId, { kind: "snapshot" });
+    await vi.waitFor(() =>
+      expect(created.webContents.executeJavaScriptInIsolatedWorld).toHaveBeenCalled(),
+    );
+    // A held modifier released mid-action is released in the page, and new
+    // typing is delivered and reported so the agent's snapshot goes stale.
+    expect(await key("keyUp", "Shift")).toEqual({ status: "accepted" });
+    expect(await key("keyDown", "a")).toEqual({ status: "accepted" });
+    expect(delivered).toHaveBeenLastCalledWith({ type: "keyDown", keyCode: "a" });
+    expect(personInput).toHaveBeenCalledWith(contextId);
+    stopListening();
+    releaseAction();
+    await agentAction.catch(() => undefined);
   });
 
   it("refuses an agent keystroke or click the moment the person has typed, until the agent reads the page", async () => {

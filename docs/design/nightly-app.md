@@ -13,10 +13,11 @@ foundations are implemented. A compatible authenticated Stable app can register
 an ordinary Nightly window and give its own bundled renderer a short-lived host
 capability. Development, ad-hoc and incompatible builds refuse. Nightly never
 imports the host-owning desktop module, initializes host credentials, starts a
-host or migrates shared data. Embedded Browser and other native broker parity
-remain unfinished; this is not yet a usable second app.
+host or migrates shared data. The bounded embedded Browser frame/input path is implemented. Complete Browser
+and other native broker parity remain unfinished; this is not yet a usable
+second app.
 
-The remaining delivery includes the embedded per-window native presentation,
+The remaining delivery includes complete embedded browsing parity,
 stable host-only launch and retention, shared sign-in operations, the complete
 `octant-nightly` command, the installer and removal controls, Nightly labels,
 and the functional release preflight. Coexistence, reconnect and rollback
@@ -82,9 +83,50 @@ as a credential-bearing human display/input channel. Local client/process
 attestation and the production transport still require their own implementation
 and authority checks.
 
-The current foundation remains publication-gated while the functional bridge
-and input, IME, accessibility, and native-popup parity need implementation and
-evidence. An isolated synthetic fixture is feasibility evidence only; it is not
+The current implementation routes an authenticated native window's human
+presentation through the host's existing Browser ownership. Stable alone creates
+the offscreen window and opens its profile partition. A pure current-context
+check requires the same window, thread or Project, native backend, active
+binding and unexpired context before any presentation operation and after an
+await. Creating a presentation never creates a Browser context or grants an
+origin or permission.
+
+The closed human route additionally authenticates a main-only renderer identity
+header against the current native window lease. Ordinary renderer request
+headers strip that header and never add it. Nightly main supplies it only after
+checking its actual owned, visible and focused window; neither a renderer body
+flag nor an ordinary shell identity header grants human presentation. The private
+Browser broker secret stays in Stable. Agent reads, screenshots and custody
+never consume these human frames, and an agent observation hold does not blank
+the person's display.
+
+Each presentation has a fresh epoch bound to its active tab and document. It
+retains one published frame for retransmission until its exact acknowledgement
+and only the newest pending image. Images are bounded before encoding and JPEG
+bodies are bounded before decoding; display and input share CSS-sized coordinates,
+with a maximum of 1920 by 1200 pixels and 4 MiB encoded image bytes. Hidden,
+expired, replaced or detached epochs cannot publish pixels or accept new input.
+A retired detach cannot hide its successor, and expiry also removes the profile's
+visible-page eligibility. Observer failures cannot skip presentation cleanup.
+
+Pointer motion may coalesce, while accepted key/button releases retain their
+ordering and bypass the bounded replaceable queue. Key, character, button and
+wheel events are never coalesced: they queue in order under their own larger
+bound, so a slow frame request cannot drop typed text. The person's input is
+delivered while an agent action runs, as in a native Browser view; it counts as
+person input, so the agent must read the page again before its next keystroke
+or click. Releases match an accepted
+hold in the same presentation epoch, including across frame advance. New stale
+coordinate actions refuse. The renderer remembers each physical key's original
+down value so a modifier change cannot strand its release. Enter sends its
+required carriage-return character only while Enter or Return is held. Tab stays
+inside the page; Control-Escape moves focus out and retires the presentation to
+release held inputs. Normal pointer-capture completion keeps the presentation
+attached; unexpected capture loss or blur retires it.
+
+The current foundation remains publication-gated while IME, accessibility,
+native-popup parity, other native brokers and the remaining lifecycle behavior
+need implementation and evidence. An isolated synthetic fixture is feasibility evidence only; it is not
 packaged coexistence, signed-in browsing, or native identity verification.
 
 ## Fixed packaged entry
@@ -242,9 +284,10 @@ own existing renderer/preload and installs the trusted renderer-header registry
 for the returned host origin. Its administrative secret is never a renderer
 argument. Window creation, navigation guards, expiry and renewal use the real
 client path. Native contributions that are not connected to their owning broker
-refuse explicitly; live Browser and device panes remain unavailable in this
-bootstrap slice. The required next step is the stable-owned embedded Browser,
-not a companion window or a second opening of persistent profiles.
+refuse explicitly. The connected Browser uses the separate bounded human
+presentation path above; device panes remain unavailable. This does not establish
+complete Browser parity or allow a companion window or a second opening of
+persistent profiles.
 
 Unsigned native refusal and mechanical lifecycle tests are separate from
 Developer ID same-Team admission. Actual signed-pair registration, active-owner

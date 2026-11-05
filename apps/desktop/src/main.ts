@@ -1,4 +1,5 @@
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
+import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import {
@@ -1731,11 +1732,16 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     );
     browserSurfaceHost ??= createBrowserSurfaceHost({
       ...(browserDownloadRoot === undefined ? {} : { downloadRoot: browserDownloadRoot }),
-      isOwnerWindowAvailable: (windowId) => desktopWindows.hasWindowId(windowId),
-      createView: ({ partition, webPreferences }) =>
-        new WebContentsView({
-          webPreferences: { partition, ...webPreferences },
-        }) as unknown as BrowserSurfaceViewPort,
+      isOwnerWindowAvailable: (windowId) =>
+        desktopWindows.hasWindowId(windowId) || nightlyWindowLeases?.hasWindow(windowId) === true,
+      isEmbeddedOwner: (windowId) => nightlyWindowLeases?.hasWindow(windowId) === true,
+      createView: (options) => {
+        if (nightlyWindowLeases?.hasWindow(options.owner.windowId) === true)
+          return createOffscreenBrowserSurface(options);
+        return new WebContentsView({
+          webPreferences: { partition: options.partition, ...options.webPreferences },
+        }) as unknown as BrowserSurfaceViewPort;
+      },
     });
     const surfaceHost = browserSurfaceHost;
     const profileStore = createBrowserProfileStore({

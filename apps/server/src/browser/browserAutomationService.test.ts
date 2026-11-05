@@ -741,6 +741,24 @@ describe("BrowserAutomationService", () => {
     });
   });
 
+  it("uses current thread authority and deadline for human presentation without an agent observation", async () => {
+    const fixture = harness();
+    vi.spyOn(fixture.runtime, "createContext").mockImplementation(async (id) => {
+      fixture.contexts.add(id);
+      return "native-live";
+    });
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const peek = fixture.runtime.peek;
+    if (peek === undefined) throw new Error("Expected fixture peek");
+    const peeks = vi.mocked(peek).mock.calls.length;
+    expect(fixture.service.ownsHumanPresentation(windowId, contextOne, threadOne)).toBe(true);
+    expect(fixture.service.ownsHumanPresentation(otherWindowId, contextOne, threadOne)).toBe(false);
+    expect(fixture.service.ownsHumanPresentation(windowId, contextOne, threadTwo)).toBe(false);
+    fixture.advance(policy.sessionTimeoutMs);
+    expect(fixture.service.ownsHumanPresentation(windowId, contextOne, threadOne)).toBe(false);
+    expect(vi.mocked(peek).mock.calls).toHaveLength(peeks);
+  });
+
   it("refuses to create a context when the window is not scoped to the thread", async () => {
     const fixture = harness({ access: false });
     const result = await fixture.service.create({

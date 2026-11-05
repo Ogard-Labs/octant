@@ -351,6 +351,25 @@ export class WindowAuthorityStore {
     }
   }
 
+  nativePresentationAuthority(
+    capability: string,
+    rawNow: number,
+  ):
+    | {
+        readonly windowId: WindowId;
+        readonly source: NativeWindowSource;
+        readonly signal: AbortSignal;
+      }
+    | undefined {
+    const record = this.#authenticateRecord(capability, this.#clampNow(rawNow));
+    if (record.native === undefined) return undefined;
+    return {
+      windowId: record.windowId,
+      source: { ...record.native.source },
+      signal: record.native.lifetime.signal,
+    };
+  }
+
   nativeRequestSignal(capability: string, rawNow: number): AbortSignal | undefined {
     const native = this.#byCapability.get(capability)?.native;
     if (native === undefined) return undefined;

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { EmbeddedBrowserSurface } from "./EmbeddedBrowserSurface";
+import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
 import type { BrowserSurfaceState, OctantHostBridge } from "../shell/hostBridge";
 
 /**
@@ -43,6 +44,7 @@ export interface NativeBrowserSurfaceInput {
 }
 
 export interface NativeBrowserSurface {
+  readonly embedded?: ReactNode;
   /** Attach the element this ref lands on; its rectangle places the page. */
   readonly mount: React.RefObject<HTMLDivElement | null>;
   readonly state: BrowserSurfaceState | undefined;
@@ -66,9 +68,29 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
   const [state, setState] = useState<BrowserSurfaceState>();
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [embedded, setEmbedded] = useState<boolean>();
   const bridge = input.hostBridge;
   const contextId = input.contextId;
   const threadId = input.threadId;
+
+  useEffect(() => {
+    let current = true;
+    if (bridge?.getHostCapabilities === undefined) {
+      setEmbedded(false);
+      return;
+    }
+    void Promise.resolve(bridge.getHostCapabilities()).then(
+      (capabilities) => {
+        if (current) setEmbedded(capabilities.embeddedBrowserSupported === true);
+      },
+      () => {
+        if (current) setEmbedded(false);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [bridge]);
 
   useEffect(() => {
     if (bridge?.subscribeBrowserSurfaceState === undefined) return;
@@ -84,6 +106,7 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
     const detach = bridge?.detachBrowserSurface;
     if (
       !input.enabled ||
+      embedded !== false ||
       attach === undefined ||
       update === undefined ||
       detach === undefined ||
@@ -157,9 +180,24 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
       window.removeEventListener("resize", sync);
       if (attached) void detach({ contextId, threadId }).catch(() => undefined);
     };
-  }, [attempt, bridge, contextId, input.enabled, input.overlaySelector, threadId]);
+  }, [attempt, bridge, contextId, input.enabled, input.overlaySelector, embedded, threadId]);
 
   return {
+    ...(embedded === true &&
+    input.enabled &&
+    bridge?.presentBrowser !== undefined &&
+    contextId !== undefined &&
+    threadId !== undefined
+      ? {
+          embedded: createElement(EmbeddedBrowserSurface, {
+            bridge,
+            contextId,
+            threadId,
+            overlaySelector: input.overlaySelector,
+            onState: setState,
+          }),
+        }
+      : {}),
     mount,
     state,
     failed,
