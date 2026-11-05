@@ -12,6 +12,7 @@ import {
   type DesktopHostRole,
   type DesktopIdentity,
 } from "@octant/host-runtime";
+import type { KeychainServiceFamily } from "./keychainCredentialStore";
 
 const MAX_CHOICE_BYTES = 1_024;
 
@@ -84,24 +85,86 @@ export function resolveStartupHostRole(options: {
   );
 }
 
+export type HostOwningStartup =
+  | {
+      readonly kind: "start";
+      /** Undefined keeps Octant's own default data folder. */
+      readonly configuredDataDirectory: string | undefined;
+      readonly serverPort: number | undefined;
+      readonly logsDirectory: string | undefined;
+      readonly keychainServiceFamily: KeychainServiceFamily;
+    }
+  | { readonly kind: "refused"; readonly message: string };
+
 /**
- * Nightly's test host never shares Octant's folder. Only an explicit
- * `OCTANT_DATA_DIR`, a developer's own choice, bypasses this.
+ * What the host-owning desktop may start. A Nightly process that reaches it
+ * without a test-host role (its choice changed or became unreadable after the
+ * entry read it) refuses: Nightly never falls back to Octant's data folder or
+ * port. Linux refuses too, because its Secret Service items carry no store
+ * scope and would be shared with Octant's. Only an explicit `OCTANT_DATA_DIR`,
+ * a developer's own choice, bypasses the overlap refusal.
  */
-export function refuseTestDataInsideOctantData(options: {
+export function resolveHostOwningStartup(options: {
+  readonly identity: DesktopIdentity;
   readonly role: DesktopHostRole;
-  readonly octantDataDirectory: string;
-  readonly explicitDataDirectory: string | undefined;
-}): { readonly kind: "apart" } | { readonly kind: "refused"; readonly message: string } {
-  if (options.role.kind !== "test-host" || options.explicitDataDirectory !== undefined)
-    return { kind: "apart" };
-  return desktopDataDirectoriesOverlap(options.role.dataDirectory, options.octantDataDirectory)
-    ? {
-        kind: "refused",
-        message:
-          "Octant Nightly refused to start its test host: its test data folder overlaps Octant's data folder.",
-      }
-    : { kind: "apart" };
+  readonly platform: NodeJS.Platform;
+  readonly appDataDirectory: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+}): HostOwningStartup {
+  const explicit = options.env.OCTANT_DATA_DIR;
+  if (options.identity.testHost === null)
+    return {
+      kind: "start",
+      configuredDataDirectory: explicit,
+      serverPort: undefined,
+      logsDirectory: undefined,
+      keychainServiceFamily: "octant",
+    };
+  if (options.role.kind !== "test-host")
+    return {
+      kind: "refused",
+      message:
+        "Octant Nightly refused to start a host: separate test data is no longer selected. Open Octant Nightly again.",
+    };
+  if (options.platform !== "darwin")
+    return {
+      kind: "refused",
+      message:
+        "Octant Nightly refused to start its test host: separate test data is available on macOS only.",
+    };
+  const home = desktopHomeDirectory(options.appDataDirectory, options.platform);
+  if (
+    explicit === undefined &&
+    desktopDataDirectoriesOverlap(options.role.dataDirectory, octantDefaultDataDirectory(home))
+  )
+    return {
+      kind: "refused",
+      message:
+        "Octant Nightly refused to start its test host: its test data folder overlaps Octant's data folder.",
+    };
+  return {
+    kind: "start",
+    configuredDataDirectory: explicit ?? options.role.dataDirectory,
+    serverPort: options.role.serverPort,
+    logsDirectory: join(home, "Library", "Logs", options.identity.productName),
+    keychainServiceFamily: options.role.keychainServiceFamily,
+  };
+}
+
+/**
+ * Octant's default macOS data folder, named without touching it: resolving it
+ * through the host-runtime resolver would create the folder.
+ */
+function octantDefaultDataDirectory(home: string): string {
+  return join(home, "Library", "Application Support", "Octant");
+}
+
+/** Separate test data is offered only where its credentials stay apart. */
+export function nightlyTestDataSupported(
+  identity: DesktopIdentity,
+  platform: NodeJS.Platform,
+): boolean {
+  return identity.testHost !== null && platform === "darwin";
 }
 
 export type TestDataRemoval =
@@ -124,11 +187,13 @@ export async function removeNightlyTestData(options: {
   readonly platform: NodeJS.Platform;
   readonly appDataDirectory: string;
   readonly env: Readonly<Record<string, string | undefined>>;
-  readonly octantDataDirectory: string;
   readonly trashItem: (path: string) => Promise<void>;
 }): Promise<TestDataRemoval> {
   if (options.role.kind === "test-host") return { kind: "refused", reason: "test-host-running" };
-  if (options.role.kind !== "octant-client" || options.identity.testHost === null)
+  if (
+    options.role.kind !== "octant-client" ||
+    !nightlyTestDataSupported(options.identity, options.platform)
+  )
     return { kind: "refused", reason: "not-nightly" };
   const target = resolveDesktopHostRole(options.identity, "test-data", {
     platform: options.platform,
@@ -136,7 +201,8 @@ export async function removeNightlyTestData(options: {
     env: options.env,
   });
   if (target.kind !== "test-host") return { kind: "refused", reason: "not-nightly" };
-  if (desktopDataDirectoriesOverlap(target.dataDirectory, options.octantDataDirectory))
+  const home = desktopHomeDirectory(options.appDataDirectory, options.platform);
+  if (desktopDataDirectoriesOverlap(target.dataDirectory, octantDefaultDataDirectory(home)))
     return { kind: "refused", reason: "unsafe-folder" };
   let metadata;
   try {

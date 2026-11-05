@@ -106,10 +106,13 @@ export function resolveHostRuntimePaths(input: HostRuntimePathInput): HostRuntim
               join(home, ".local", "state"),
             "octant",
           );
+  // Octant Nightly's own test host sets this, so its service log never
+  // shares Octant's ~/Library/Logs/Octant file.
   const logsDirectory =
-    input.platform === "darwin"
+    optionalAbsolutePath("OCTANT_LOGS_DIR", input.env.OCTANT_LOGS_DIR, input.platform) ??
+    (input.platform === "darwin"
       ? join(home, "Library", "Logs", "Octant")
-      : join(stateDirectory, "logs");
+      : join(stateDirectory, "logs"));
 
   // Ownership cannot depend on caller-specific TMPDIR/XDG_RUNTIME_DIR values:
   // desktop, CLI, and service entry points may inherit different environments.

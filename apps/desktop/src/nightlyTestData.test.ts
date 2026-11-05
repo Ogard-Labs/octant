@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { desktopIdentity } from "@octant/host-runtime";
 import {
   readStoredDesktopDataChoice,
-  refuseTestDataInsideOctantData,
+  resolveHostOwningStartup,
   removeNightlyTestData,
   resolveStartupHostRole,
   storeDesktopDataChoice,
@@ -73,36 +73,79 @@ describe("Nightly's stored Data choice", () => {
     await storeDesktopDataChoice(storage, "test-data");
     expect(startupRole(stable)).toEqual({ kind: "octant-host" });
   });
+});
+
+describe("what the host-owning desktop may start", () => {
+  const testHost = (dataDirectory: string) => ({
+    kind: "test-host" as const,
+    dataDirectory,
+    serverPort: 13_774,
+    keychainServiceFamily: "octant-nightly-test-data" as const,
+  });
+  function startup(
+    role: Parameters<typeof resolveHostOwningStartup>[0]["role"],
+    overrides: {
+      identity?: typeof nightly;
+      platform?: NodeJS.Platform;
+      env?: Record<string, string>;
+    } = {},
+  ) {
+    return resolveHostOwningStartup({
+      identity: overrides.identity ?? nightly,
+      role,
+      platform: overrides.platform ?? "darwin",
+      appDataDirectory: appData,
+      env: overrides.env ?? {},
+    });
+  }
+
+  it("never falls back to Octant's folder or port when Nightly has no test-host role", () => {
+    expect(startup({ kind: "octant-client" })).toEqual({
+      kind: "refused",
+      message: expect.stringMatching(/^Octant Nightly refused to start a host/),
+    });
+    expect(startup({ kind: "octant-host" })).toMatchObject({ kind: "refused" });
+  });
+
+  it("starts the test host on its own folder, port, logs and Keychain services", () => {
+    expect(startup(testHost(testData))).toEqual({
+      kind: "start",
+      configuredDataDirectory: testData,
+      serverPort: 13_774,
+      logsDirectory: join(home, "Library", "Logs", "Octant Nightly"),
+      keychainServiceFamily: "octant-nightly-test-data",
+    });
+  });
+
+  it("keeps Octant on its own defaults", () => {
+    expect(startup({ kind: "octant-host" }, { identity: stable })).toEqual({
+      kind: "start",
+      configuredDataDirectory: undefined,
+      serverPort: undefined,
+      logsDirectory: undefined,
+      keychainServiceFamily: "octant",
+    });
+  });
+
+  it("refuses the test host on Linux, where credentials would be shared", () => {
+    expect(
+      startup(testHost("/home/test/.local/share/octant-nightly/test-data"), { platform: "linux" }),
+    ).toEqual({
+      kind: "refused",
+      message: expect.stringContaining("macOS only"),
+    });
+  });
 
   it("refuses a test folder that overlaps Octant's unless the data folder was set explicitly", () => {
-    const role = {
-      kind: "test-host" as const,
-      dataDirectory: join(appData, "Octant", "Test Data"),
-      serverPort: 13_774,
-      keychainServiceFamily: "octant-nightly-test-data" as const,
-    };
-    const octantDataDirectory = join(appData, "Octant");
-    expect(
-      refuseTestDataInsideOctantData({
-        role,
-        octantDataDirectory,
-        explicitDataDirectory: undefined,
-      }),
-    ).toMatchObject({ kind: "refused" });
-    expect(
-      refuseTestDataInsideOctantData({
-        role,
-        octantDataDirectory,
-        explicitDataDirectory: role.dataDirectory,
-      }),
-    ).toEqual({ kind: "apart" });
-    expect(
-      refuseTestDataInsideOctantData({
-        role: { ...role, dataDirectory: testData },
-        octantDataDirectory,
-        explicitDataDirectory: undefined,
-      }),
-    ).toEqual({ kind: "apart" });
+    const inside = join(appData, "Octant", "Test Data");
+    expect(startup(testHost(inside))).toEqual({
+      kind: "refused",
+      message: expect.stringContaining("overlaps Octant's data folder"),
+    });
+    expect(startup(testHost(inside), { env: { OCTANT_DATA_DIR: inside } })).toMatchObject({
+      kind: "start",
+      configuredDataDirectory: inside,
+    });
   });
 });
 
@@ -117,7 +160,6 @@ describe("removing Nightly's test data", () => {
         platform: "darwin",
         appDataDirectory: appData,
         env: {},
-        octantDataDirectory: join(appData, "Octant"),
         trashItem,
       }),
     };

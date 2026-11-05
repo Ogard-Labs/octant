@@ -124,7 +124,7 @@ import type {
 } from "@octant/contracts/desktop-bridge";
 import { createAppUpdateService } from "./appUpdateService";
 import { createNightlyInstaller } from "./nightlyInstaller";
-import { refuseTestDataInsideOctantData, resolveStartupHostRole } from "./nightlyTestData";
+import { resolveHostOwningStartup, resolveStartupHostRole } from "./nightlyTestData";
 import {
   createPortableImagePort,
   defaultProcessIsAlive,
@@ -1185,6 +1185,7 @@ function resolveDesktopHostRuntimePaths(
       XDG_DATA_HOME: env.XDG_DATA_HOME,
       XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
       XDG_STATE_HOME: env.XDG_STATE_HOME,
+      OCTANT_LOGS_DIR: env.OCTANT_LOGS_DIR,
     },
     platform,
     home,
@@ -1235,24 +1236,28 @@ const desktopHostRole = resolveStartupHostRole({
   platform: process.platform,
   env: process.env,
 });
+const resolvedHostStartup = resolveHostOwningStartup({
+  identity: applicationIdentity,
+  role: desktopHostRole,
+  platform: process.platform,
+  appDataDirectory: app.getPath("appData"),
+  env: process.env,
+});
+// Refuses before any host path is resolved or created.
+if (resolvedHostStartup.kind === "refused") throw new Error(resolvedHostStartup.message);
+const desktopHostStartup = resolvedHostStartup;
 const desktopMayStartHost =
   applicationIdentity.mayStartHost || desktopHostRole.kind === "test-host";
-if (desktopHostRole.kind === "test-host") {
-  const apart = refuseTestDataInsideOctantData({
-    role: desktopHostRole,
-    octantDataDirectory: resolveDesktopDataDirectory(undefined, app.getPath("appData")),
-    explicitDataDirectory: process.env.OCTANT_DATA_DIR,
-  });
-  if (apart.kind === "refused") throw new Error(apart.message);
-}
 const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
-  process.env.OCTANT_DATA_DIR ??
-    (desktopHostRole.kind === "test-host" ? desktopHostRole.dataDirectory : undefined),
+  desktopHostStartup.configuredDataDirectory,
   app.getPath("appData"),
+  process.platform,
+  desktopHostStartup.logsDirectory === undefined
+    ? process.env
+    : { ...process.env, OCTANT_LOGS_DIR: desktopHostStartup.logsDirectory },
 );
 const desktopDataDirectory = desktopHostRuntimePaths.dataDirectory;
-const desktopKeychainServiceFamily =
-  desktopHostRole.kind === "test-host" ? desktopHostRole.keychainServiceFamily : "octant";
+const desktopKeychainServiceFamily = desktopHostStartup.keychainServiceFamily;
 const desktopHostId = deriveHostRuntimeHostId(desktopDataDirectory);
 app.setPath(
   "userData",
@@ -1743,10 +1748,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   await prepareHostRuntimePaths(desktopHostRuntimePaths);
   const root = repositoryRoot();
   const portReservation = await reserveLoopbackPort(
-    resolveConfiguredServerPort(
-      process.env,
-      desktopHostRole.kind === "test-host" ? desktopHostRole.serverPort : undefined,
-    ),
+    resolveConfiguredServerPort(process.env, desktopHostStartup.serverPort),
   );
   const serverUrl = resolveManagedServerUrl({
     needsServerStart: true,
@@ -1924,7 +1926,13 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
             resourcesPath: process.resourcesPath,
             execPath: process.execPath,
           }),
-          env: { ...process.env, OCTANT_DATA_DIR: desktopDataDirectory },
+          env: {
+            ...process.env,
+            OCTANT_DATA_DIR: desktopDataDirectory,
+            ...(desktopHostStartup.logsDirectory === undefined
+              ? {}
+              : { OCTANT_LOGS_DIR: desktopHostStartup.logsDirectory }),
+          },
         });
         return spawn(spec.command, spec.args, {
           env: spec.env,

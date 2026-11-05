@@ -129,10 +129,17 @@ never Octant's:
   `{"data":"test-data"}` selects test data; a missing, oversized, linked or
   malformed file means Octant's data. The main process reads it once at launch
   and no renderer request changes the running role.
-- On Linux the test data lives in `$XDG_DATA_HOME/octant-nightly/test-data`
-  (default `~/.local/share`). Nightly refuses to start its test host when that
-  folder is, or lies inside, Octant's data folder, or contains it, unless
-  `OCTANT_DATA_DIR` set the folder explicitly.
+- Separate test data is macOS only for now. Linux Secret Service items carry no
+  store scope, so a Linux test host would share Octant's credentials; Nightly
+  does not offer the choice there, and a stored choice refuses with a message
+  instead of starting a host.
+- Nightly refuses to start its test host when its folder is, or lies inside,
+  Octant's data folder, or contains it, unless `OCTANT_DATA_DIR` set the folder
+  explicitly. A Nightly process that reaches the host-owning desktop without a
+  test-host role (its choice changed or became unreadable during launch)
+  refuses and quits; it never falls back to Octant's folder or port `13773`.
+- The test host's service log is `~/Library/Logs/Octant Nightly/service.log`,
+  passed to its host as `OCTANT_LOGS_DIR`, so it never shares Octant's log.
 - The test host's macOS Keychain services are named
   `app.octant.desktop.nightly.test-data.*` rather than `app.octant.*`. Because
   Octant's unscoped legacy items live only under Octant's names, the helper's
