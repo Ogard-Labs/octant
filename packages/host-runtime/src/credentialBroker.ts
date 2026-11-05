@@ -112,6 +112,7 @@ const ROUTES = new Set([
   "/v1/oauth/status",
   "/v1/oauth/refresh",
   "/v1/oauth/access",
+  "/v1/oauth/github-actions-source",
   "/v1/oauth/revoke",
   "/v1/cloud-iam/begin",
   "/v1/cloud-iam/status",

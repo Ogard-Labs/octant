@@ -8989,6 +8989,37 @@ or GitHub App installation engine is introduced. Tool/account/org eligibility
 and actual approved private reads/writes remain live acceptance gates; fine-grained
 GitHub Apps are an optional separately selected capability.
 
+The registered GitHub repository connection also has a host-private Actions
+metadata reader for later routine-source integration. Its factory captures the
+host-verified generated component, consented grant/registration, numeric account
+and prepared repository numeric/node IDs; a displayed name or caller reference
+cannot select a grant. Source reads additionally require the host's current
+effective activation witness for that exact MCP component; a missing witness or
+an already disabled/untrusted source refuses before broker/API reads, and late
+reads cannot publish after activation is retired. Application configuration and
+account consent keep their separate registration policy. The broker constructs only fixed GitHub API GETs for
+`/user`, repository identity and completed workflow-run pages, under that exact
+repository-profile grant, with existing User-Agent/API version and strict redirect
+refusal. No gh/PAT fallback, broader profile or arbitrary URL/header is accepted.
+Expiry joins the existing refresh owner and retirement waits out an issued refresh
+write before deletion. Original ownership/generation is checked across reads;
+a known account/repository or permission change invalidates the source. Malformed
+identity/body or unknown access does not prove account change. A rate-limited 403
+or 429 preserves the source with bounded advertised/reset delay, distinct from
+actual permission denial. Broker/transport reads have a 20-second stage bound,
+and the host source caller retains its separate 10-second stage bound.
+
+Metadata is bounded to 100 runs per page, at most 5 selectable pages and 2 MiB raw
+body per response, with closed same-endpoint next-page validation. Only normalized
+run ID, positive attempt, workflow/repository IDs, head/branch, conclusion,
+timestamps and same-repository URL leave the broker; no token, logs or arbitrary
+response body does. It reports the **latest observed completed attempt**, not all
+unseen reruns. This reader does not yet create routine occurrences or start a
+provider. Durable scheduler/catch-up/gap/loop integration and actual live-account
+Actions eligibility remain separate acceptance: a first-seen attempt above 1 or
+attempt-number gap must be held/disclosed unless bounded attempt history proves
+coverage. Existing manual CI-follow-up markers remain manual obligations.
+
 Scopes
 follow the RFC 6749 scope-token grammar, so a URL-shaped scope survives. An
 issuer may grant an access token without a refresh token; such a grant lasts

@@ -30,6 +30,12 @@ import {
   decodeGithubMcpAccount,
   githubMcpReportedAccount,
 } from "./githubMcpOAuth";
+import {
+  decodeGithubActionsSourceRead,
+  readGithubActionsSource,
+  type GithubActionsSourceRead,
+  type GithubActionsSourceResult,
+} from "./githubActionsSource";
 import type { McpOAuthAccount } from "./mcpOAuthAccount";
 import {
   GOOGLE_WORKSPACE_MCP_OAUTH,
@@ -380,6 +386,9 @@ export type HostOAuthAccessResult =
   | { readonly kind: "unavailable" };
 
 export interface HostOAuthRuntime {
+  readonly githubActionsSource: (
+    input: GithubActionsSourceRead,
+  ) => Promise<GithubActionsSourceResult>;
   readonly begin: (input: {
     readonly descriptor: HostOAuthDescriptor;
     readonly actorId: string;
@@ -2003,6 +2012,7 @@ export function createHostOAuthRuntime(options: {
   const attempts = new Map<string, Attempt>();
   const inflightRefresh = new Map<string, Promise<HostOAuthRefreshResult>>();
   const retiringMcpGrants = new Set<string>();
+  const sourceReads = new Set<AbortController>();
   // The ChatGPT plan dialect memoizes the issuer's JWKS here so a refresh
   // does not re-fetch keys the issuer already published.
   const siwcJwks: { current: JwksCache | undefined } = { current: undefined };
@@ -3045,6 +3055,95 @@ export function createHostOAuthRuntime(options: {
     }
   };
 
+  const refresh = (credentialRef: string): Promise<HostOAuthRefreshResult> => {
+    if (retiringMcpGrants.has(credentialRef)) return Promise.resolve({ kind: "unavailable" });
+    const existing = inflightRefresh.get(credentialRef);
+    if (existing !== undefined) return existing;
+    const run = refreshOnce(credentialRef).finally(() => {
+      inflightRefresh.delete(credentialRef);
+    });
+    inflightRefresh.set(credentialRef, run);
+    return run;
+  };
+  const githubActionsSource = async (
+    raw: GithubActionsSourceRead,
+  ): Promise<GithubActionsSourceResult> => {
+    const request = decodeGithubActionsSourceRead(raw);
+    if (request === undefined) return { kind: "refused", reason: "invalid-request" };
+    const controller = new AbortController();
+    sourceReads.add(controller);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const available = () =>
+      !closed && !controller.signal.aborted && !retiringMcpGrants.has(request.credentialRef);
+    const admits = (grant: StoredGrant) =>
+      available() &&
+      grant.dialect === GITHUB_MCP_DIALECT &&
+      grant.mcpPermissionProfile === GITHUB_MCP_REPOSITORY_PROFILE &&
+      isGithubMcpGrantBinding(grant) &&
+      grant.clientId === request.clientId &&
+      grant.clientAuthentication?.secretRef === request.secretRef &&
+      grant.mcpAccount?.userId === request.accountId;
+    const perform = async (): Promise<GithubActionsSourceResult> => {
+      try {
+        if (!available()) return { kind: "refused", reason: "connection-unavailable" };
+        let grant = decodeGrant(await options.store.resolve(request.credentialRef));
+        if (!admits(grant)) return { kind: "refused", reason: "connection-unavailable" };
+        if (grant.expiresAt === undefined || grant.expiresAt <= now()) {
+          if ((await refresh(request.credentialRef)).kind !== "refreshed" || !available())
+            return { kind: "refused", reason: "connection-unavailable" };
+          grant = decodeGrant(await options.store.resolve(request.credentialRef));
+          if (!admits(grant) || grant.expiresAt === undefined || grant.expiresAt <= now())
+            return { kind: "refused", reason: "connection-unavailable" };
+        }
+        const captured = grant;
+        const current = async () => {
+          if (!available()) return false;
+          try {
+            const latest = decodeGrant(await options.store.resolve(request.credentialRef));
+            return (
+              admits(latest) &&
+              latest.generation === captured.generation &&
+              latest.accessToken === captured.accessToken &&
+              latest.expiresAt !== undefined &&
+              latest.expiresAt > now() &&
+              available()
+            );
+          } catch {
+            return false;
+          }
+        };
+        const result = await readGithubActionsSource({
+          request,
+          accessToken: captured.accessToken,
+          fetch: fetchImpl,
+          signal: controller.signal,
+          current,
+          now,
+        });
+        if (result.kind === "refused" && result.reason === "account-changed" && (await current()))
+          await retireMcpGrant(request.credentialRef);
+        return result;
+      } catch {
+        return { kind: "refused", reason: "connection-unavailable" };
+      }
+    };
+    try {
+      return await Promise.race([
+        perform(),
+        new Promise<GithubActionsSourceResult>((resolve) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            resolve({ kind: "refused", reason: "connection-unavailable" });
+          }, 20_000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+      sourceReads.delete(controller);
+    }
+  };
+
   return Object.freeze({
     begin,
     cancel,
@@ -3052,16 +3151,8 @@ export function createHostOAuthRuntime(options: {
       const attempt = attempts.get(attemptId);
       return attempt === undefined ? { kind: "unknown" } : attempt.status;
     },
-    refresh: (credentialRef: string): Promise<HostOAuthRefreshResult> => {
-      if (retiringMcpGrants.has(credentialRef)) return Promise.resolve({ kind: "unavailable" });
-      const existing = inflightRefresh.get(credentialRef);
-      if (existing !== undefined) return existing;
-      const run = refreshOnce(credentialRef).finally(() => {
-        inflightRefresh.delete(credentialRef);
-      });
-      inflightRefresh.set(credentialRef, run);
-      return run;
-    },
+    refresh,
+    githubActionsSource,
     access: async (
       credentialRef: string,
       binding?: HostOAuthDirectoryBinding,
@@ -3128,6 +3219,7 @@ export function createHostOAuthRuntime(options: {
     },
     close: async () => {
       closed = true;
+      for (const controller of sourceReads) controller.abort();
       const cleanups: Promise<boolean>[] = [];
       for (const attempt of attempts.values()) {
         attempt.closed = true;
@@ -3153,6 +3245,12 @@ export async function handleHostOAuthBrokerRoute(
   if (decoded.kind === "too-large") return Response.json({ error: "too-large" }, { status: 413 });
   if (decoded.kind === "invalid")
     return Response.json({ error: "invalid-request" }, { status: 400 });
+  if (pathname === "/v1/oauth/github-actions-source") {
+    const input = decodeGithubActionsSourceRead(decoded.value);
+    return input === undefined
+      ? Response.json({ error: "invalid-request" }, { status: 400 })
+      : Response.json(await runtime.githubActionsSource(input));
+  }
   if (pathname === "/v1/oauth/begin") return beginRoute(decoded.value, runtime);
   if (pathname === "/v1/oauth/cancel") return cancelRoute(decoded.value, runtime);
   if (pathname === "/v1/oauth/status") return statusRoute(decoded.value, runtime);

@@ -1,3 +1,9 @@
+import {
+  decodeGithubActionsSourceRead,
+  decodeGithubActionsSourceResult,
+  type GithubActionsSourceRead,
+  type GithubActionsSourceResult,
+} from "@octant/host-runtime";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export interface HostOAuthBrokerDescriptor {
@@ -61,6 +67,9 @@ export type HostOAuthBrokerBinding =
     };
 
 export interface HostOAuthBrokerPort {
+  readonly githubActionsSource?: (
+    request: GithubActionsSourceRead,
+  ) => Promise<GithubActionsSourceResult>;
   readonly begin: (input: {
     readonly descriptor: HostOAuthBrokerDescriptor;
     readonly actorId: string;
@@ -115,6 +124,34 @@ export function makeHostOAuthBrokerClient(options: {
   };
 
   const client: HostOAuthBrokerPort = {
+    githubActionsSource: async (request) => {
+      const decoded = decodeGithubActionsSourceRead(request);
+      if (decoded === undefined) return { kind: "refused", reason: "invalid-request" };
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          post("/v1/oauth/github-actions-source", decoded, controller.signal),
+          new Promise<undefined>((resolve) => {
+            timer = setTimeout(() => {
+              controller.abort();
+              resolve(undefined);
+            }, 20_000);
+          }),
+        ]);
+        return (
+          decodeGithubActionsSourceResult(result) ?? {
+            kind: "refused",
+            reason: "connection-unavailable",
+          }
+        );
+      } catch {
+        return { kind: "refused", reason: "connection-unavailable" };
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+      }
+    },
     begin: (input) => {
       if (!UUID_PATTERN.test(input.actorId)) {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));

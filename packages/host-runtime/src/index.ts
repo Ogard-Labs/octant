@@ -255,3 +255,13 @@ export {
   isGithubMcpCallbackUri,
   decodeGithubMcpAccount,
 } from "./githubMcpOAuth";
+
+export {
+  decodeGithubActionsSourceRead,
+  decodeGithubActionsSourceResult,
+  type GithubActionsSourceRead,
+  type GithubActionsSourceResult,
+  type GithubActionsSourceOwner,
+  type GithubActionsRepository,
+  type GithubActionsCompletedRun,
+} from "./githubActionsSource";
