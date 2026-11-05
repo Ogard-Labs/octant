@@ -13,6 +13,7 @@ import {
 import { createRendererNavigationPolicy } from "./rendererNavigationPolicy";
 import { openNightlyClientWindow } from "./nightlyClientWindow";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
+import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
 import { DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
 
 /** Ordinary client entry: this module never imports the host-owning main. */
@@ -105,6 +106,16 @@ export async function runNightlyClient(
   register(DESKTOP_IPC_CHANNELS.projectWindowCapability, (event) =>
     capabilities.get(event.sender.id),
   );
+  supported.add(DESKTOP_IPC_CHANNELS.nativeMenu);
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.nativeMenu, async (event, request: unknown) => {
+    const window = owns(event);
+    const outcome = await popupNativeMenu(window, request);
+    try {
+      return owns(event) === window ? outcome : { kind: "refused" };
+    } catch {
+      return { kind: "refused" };
+    }
+  });
   // The shared renderer's other native contributions are still awaiting their
   // typed owning broker. Refusal is explicit; no arbitrary channel is proxied.
   for (const channel of Object.values(DESKTOP_IPC_CHANNELS)) {
@@ -156,6 +167,7 @@ export async function runNightlyClient(
         }),
       );
       const id = window.webContents.id;
+      installNativeEditingMenus(window);
       const browserClient = createBrowserPresentationClient({
         baseUrl: bootstrap.hostOrigin,
         windowCapability: bootstrap.capability,

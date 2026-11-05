@@ -570,13 +570,22 @@ describe.skipIf(chrome === undefined)(
         await page.goto(origin + "/ime-editors");
         const read = () =>
           readBrowserEditableTarget(view.webContents.executeJavaScriptInIsolatedWorld);
+        const readAvailable = async () => {
+          let observed: Awaited<ReturnType<typeof read>>;
+          // Each sample still fails closed at the production deadline. Like the
+          // viewer, retry transient unavailability on a busy protocol transport.
+          await expect
+            .poll(async () => (observed = await read()), { timeout: 5_000 })
+            .toBeDefined();
+          return observed;
+        };
         await page.locator("#a").focus();
-        const first = await read();
+        const first = await readAvailable();
         expect(first).toBeDefined();
         expect(JSON.stringify(first)).not.toContain("private-fixture");
         await page.locator("#b").focus();
         await page.locator("#a").focus();
-        const next = await read();
+        const next = await readAvailable();
         expect(next?.id).not.toBe(first?.id);
         for (const selector of ["#password", "#custom", "#readonly"]) {
           await page.locator(selector).focus();
