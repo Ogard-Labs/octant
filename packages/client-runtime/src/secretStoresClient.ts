@@ -1,3 +1,7 @@
+import {
+  createCommandCredentialsClient,
+  type CommandCredentialsClient,
+} from "./commandCredentialsClient";
 import { type SecretStoresCommand, SecretStoresResult } from "@octant/contracts/secret-stores";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -9,6 +13,7 @@ export interface SecretStoresClientOptions {
 }
 
 export interface SecretStoresClient {
+  readonly commandBindings?: CommandCredentialsClient;
   /** Which secret stores this host can link, and whether each is linked. */
   read(signal?: AbortSignal): Promise<SecretStoresResult>;
   /** Link or unlink a store, check an item reference, or point a provider's key at an item. */
@@ -67,6 +72,7 @@ export function createSecretStoresClient(options: SecretStoresClientOptions): Se
   }
 
   return {
+    commandBindings: createCommandCredentialsClient(options),
     async read(signal) {
       const body = await send(settingsUrl, {
         method: "GET",

@@ -31,6 +31,7 @@ import type { SecretStoresJournal } from "./secretStoresJournal";
 export interface SecretStoresServiceOptions {
   /** Undefined on a host with no credential broker. */
   readonly broker: SecretStoreBrokerClient | undefined;
+  readonly onLinkChange?: () => void;
   readonly journal: SecretStoresJournal;
   readonly beginGoogleCliChange?: () => () => void;
   readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
@@ -172,6 +173,7 @@ export function createSecretStoresService(
     linkStore: (windowId, store) =>
       serialized(async () => {
         if (broker === undefined) return secretStoresRefusal("broker-unavailable");
+        options.onLinkChange?.();
         const linked = await broker.link(store);
         if (linked.status === "broker-unavailable")
           return secretStoresRefusal("broker-unavailable");
@@ -188,6 +190,7 @@ export function createSecretStoresService(
     unlinkStore: (windowId, store) =>
       changingGoogle(async () => {
         if (broker === undefined) return secretStoresRefusal("broker-unavailable");
+        options.onLinkChange?.();
         const unlinked = await broker.unlink(store);
         if (unlinked.status === "broker-unavailable") {
           return secretStoresRefusal("broker-unavailable");

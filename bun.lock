@@ -224,6 +224,9 @@
     },
     "packages/host-runtime": {
       "name": "@octant/host-runtime",
+      "dependencies": {
+        "@octant/contracts": "workspace:*",
+      },
       "devDependencies": {
         "tsdown": "0.22.5",
         "typescript": "catalog:",

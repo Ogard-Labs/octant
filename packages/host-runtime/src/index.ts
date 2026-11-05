@@ -230,3 +230,7 @@ export {
 } from "./slackMcpOAuth";
 
 export type { BrowserCredentialItemPin, BrowserItemMetadata } from "./onePasswordBrowserMetadata";
+
+export { onePasswordCommandCredentials } from "./onePasswordCommandCredentials";
+
+export { resolveOnePasswordExecutable } from "./linkedSecretStores";

@@ -130,7 +130,8 @@
     "./turn-metrics-policy": "./src/turnMetricsPolicy.ts",
     "./live-turn-policy": "./src/liveTurnPolicy.ts",
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
-    "./local-usage-pricing": "./src/localUsagePricing.ts"
+    "./local-usage-pricing": "./src/localUsagePricing.ts",
+    "./command-credential-policy": "./src/commandCredentialPolicy.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

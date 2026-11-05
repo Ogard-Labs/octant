@@ -1,3 +1,9 @@
+import {
+  decodeCommandCredentialHostRequest,
+  decodeCommandCredentialHostResult,
+  type CommandCredentialHostRequest,
+  type CommandCredentialHostResult,
+} from "@octant/contracts/command-credentials";
 /**
  * The server's handle on the host credential broker's linked-secret-store
  * routes. Every call answers with a value: a broker that is down, refuses, or
@@ -128,6 +134,9 @@ export interface SecretStoreBrokerClient {
     signal?: AbortSignal,
   ) => Promise<GoogleCliSessionAnswer | SecretStoreBrokerDown>;
   readonly browserMetadata?: (item: BrowserCredentialItem) => Promise<BrowserMetadataAnswer>;
+  readonly commandUse?: (
+    request: CommandCredentialHostRequest,
+  ) => Promise<CommandCredentialHostResult>;
   readonly awsCliReference: () => Promise<AwsCliReferenceAnswer | SecretStoreBrokerDown>;
   /** Points the AWS command line at two items, after the broker proved both resolve now. */
   readonly pointAwsCli: (
@@ -401,6 +410,44 @@ export function makeSecretStoreBrokerClient(
         status === "changed"
         ? { status }
         : { status: "unavailable" };
+    },
+    commandUse: async (request) => {
+      try {
+        const body = decodeCommandCredentialHostRequest(request);
+        const response = await fetchPort(
+          new URL("/v1/secret-stores/command-use", options.url).toString(),
+          {
+            method: "POST",
+            redirect: "error",
+            headers: {
+              "content-type": "application/json",
+              "x-octant-credential-broker-token": options.token,
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(10000),
+          },
+        );
+        if (!response.ok || response.body === null) return { status: "unavailable" };
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let bytes = 0;
+        try {
+          while (true) {
+            const part = await reader.read();
+            if (part.done) break;
+            bytes += part.value.byteLength;
+            if (bytes > 4096) return { status: "unavailable" };
+            chunks.push(part.value);
+          }
+          return decodeCommandCredentialHostResult(
+            JSON.parse(Buffer.concat(chunks).toString("utf8")),
+          );
+        } finally {
+          await reader.cancel().catch(() => undefined);
+        }
+      } catch {
+        return { status: "unavailable" };
+      }
     },
     awsCliReference: async () => {
       const answer = await post(`${AWS}reference`, {});

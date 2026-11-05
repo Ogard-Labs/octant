@@ -1,4 +1,5 @@
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
+import { CommandCredentialRequests } from "../credentials/CommandCredentialRequests";
 import { CredentialRequests } from "../credentials/CredentialRequests";
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import type { AutoReview } from "./autoReview";
@@ -1503,12 +1504,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         <SelectionThreadScope mode="code" projectId={view?.thread.projectId}>
           <TranscriptWindow
             trail={
-              <CredentialRequests
-                key={String(props.threadId)}
-                threadId={String(props.threadId)}
-                serverUrl={props.serverUrl}
-                windowCapability={props.windowCapability}
-              />
+              <>
+                <CommandCredentialRequests
+                  threadId={String(props.threadId)}
+                  projectId={
+                    view?.thread.projectId === undefined ? undefined : String(view.thread.projectId)
+                  }
+                  serverUrl={props.serverUrl}
+                  windowCapability={props.windowCapability}
+                />
+                <CredentialRequests
+                  key={String(props.threadId)}
+                  threadId={String(props.threadId)}
+                  serverUrl={props.serverUrl}
+                  windowCapability={props.windowCapability}
+                />
+              </>
             }
             className="code-thread-workspace__conversation transcript-scroll"
             estimateSize={96}

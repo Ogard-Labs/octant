@@ -144,7 +144,7 @@ const SIGN_IN_LOOK_MS = 30_000;
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
 const STARTUP_CERTIFICATE_CHECK_MS = 60 * 1_000;
 
-export type RemoteDependencies = Pick<
+export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void } & Pick<
   ServerStart,
   "options" | "persistence" | "serve" | "startedAt" | "version"
 > &
@@ -973,6 +973,9 @@ export function wireRemote(deps: RemoteDependencies) {
   const secretStoresRoutes = createSecretStoresRouteHandler({
     service: createSecretStoresService({
       beginGoogleCliChange: deps.beginGoogleCliChange,
+      ...(deps.onSecretStoreLinkChange === undefined
+        ? {}
+        : { onLinkChange: deps.onSecretStoreLinkChange }),
       broker:
         options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
           ? undefined

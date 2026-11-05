@@ -1,3 +1,4 @@
+import { decodeCommandCredentialHostRequest } from "@octant/contracts/command-credentials";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -46,6 +47,7 @@ const BODY_LIMIT = 16 * 1_024;
 const TOKEN_HEADER = "x-octant-credential-broker-token";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ROUTES = new Set([
+  "/v1/secret-stores/command-use",
   "/v1/credentials/has",
   "/v1/credentials/resolve",
   "/v1/credentials/set",
@@ -490,6 +492,31 @@ async function handleBrokerRequest(
     );
   }
 
+  if (url.pathname === "/v1/secret-stores/command-use") {
+    if (linked?.stores.commandLinkRevision === undefined)
+      return Response.json({ status: "unavailable" });
+    const body = await readJsonRecord(request);
+    if (body.kind !== "ok") return failure("invalid-request", 400);
+    let command;
+    try {
+      command = decodeCommandCredentialHostRequest(body.value);
+    } catch {
+      return failure("invalid-request", 400);
+    }
+    const revision = await linked.stores.commandLinkRevision();
+    if (revision === undefined) return Response.json({ status: "not-linked" });
+    if (command.expectedRevision !== undefined && command.expectedRevision !== revision)
+      return Response.json({ status: "changed" });
+    for (const field of command.environment) {
+      const reference = `op://${field.vaultId}/${field.itemId}/${field.sectionId === undefined ? "" : `${field.sectionId}/`}${field.fieldId}`;
+      if (!linked.stores.isValidReference("onepassword", reference))
+        return Response.json({ status: "invalid" });
+    }
+    const final = await linked.stores.commandLinkRevision();
+    return Response.json(
+      final === revision ? { status: "authorized", revision } : { status: "changed" },
+    );
+  }
   if (url.pathname.startsWith(SECRET_STORE_PREFIX)) {
     if (url.pathname === `${SECRET_STORE_PREFIX}unlink`) linked?.googleCli.forget();
     if (linked === undefined) return failure("not-found", 404);

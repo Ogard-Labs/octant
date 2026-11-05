@@ -1798,7 +1798,9 @@ A local person can enter a token in a conversation card for one fixed integratio
 - Submission consumes the request once, checks current thread and window authority, and sends no response content or raw error to the agent.
 - The compact card shows the destination and one-use scope, with masked input, an explicit reveal control and right-aligned actions. Accepted submissions stay disabled until the host settles them.
 - Expiry, decline, cancellation and restart prevent future use. The host cannot recall a token already transmitted.
-- The first consumer is a read-only Linear account check in Code. Command credentials, linked-store selection and administrator authentication remain separate work.
+- The first card consumer is a read-only Linear account check in Code. Linked-store selection and administrator authentication remain separate work.
+- Separate named command bindings are built for normal local Code tasks at Full access: Settings fixes the Project, recipient/CLI digests, arguments, directory, account and immutable references; the person approves every run through the same service used by the provider tool. Other access levels remain unimplemented for this command channel.
+- Command approval IDs are one-use and never restored. Preparation replay is memory-scoped; a newly prepared request always needs fresh approval and cannot establish that an earlier process stopped. The recipient has Full access; vendor output concealment is not protection from deliberate disclosure. See the owning linked-store rules for custody, invalidation and cancellation limits.
 
 Status: Partially built. Since: 2026-11-03. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
 
