@@ -41,6 +41,7 @@ interface OwnedWindow {
   };
   expiresElapsed: number;
   active: boolean;
+  acknowledged: boolean;
   cancelExpiry: () => void;
   acquisition?: Promise<void>;
   cleanup?: Promise<void>;
@@ -58,6 +59,7 @@ export function ownNightlyWindowLeases(options: {
   readonly elapsedNow?: () => number;
   readonly schedule?: (delay: number, callback: () => void) => () => void;
   readonly closeOwnerContexts: (windowId: string) => Promise<void>;
+  readonly onActiveWindowCountChanged?: (count: number) => void;
 }) {
   const fetch = options.fetch ?? globalThis.fetch;
   const elapsedNow = options.elapsedNow ?? (() => uptime() * 1_000);
@@ -75,6 +77,30 @@ export function ownNightlyWindowLeases(options: {
   let closing = false;
   let close: Promise<{ readonly kind: "closed" | "failed" }> | undefined;
   const keyOf = (peer: string, windowId: string) => `${peer}:${windowId}`;
+  const activeWindows = (): ReadonlyArray<OwnedWindow> => {
+    if (closing) return [];
+    const instance = options.host()?.instanceId;
+    const elapsed = elapsedNow();
+    return [...windows.values()].filter(
+      (owned) =>
+        owned.active &&
+        owned.acknowledged &&
+        owned.host.instanceId === instance &&
+        owned.expiresElapsed > elapsed,
+    );
+  };
+  let publishedCount = 0;
+  const publishCount = (): void => {
+    const count = activeWindows().length;
+    if (count === publishedCount) return;
+    publishedCount = count;
+    try {
+      options.onActiveWindowCountChanged?.(count);
+    } catch {
+      console.warn("Octant could not notify its Nightly client lifetime.");
+    }
+  };
+
   const revoke = (owned: OwnedWindow): Promise<void> => {
     if (owned.cleanup !== undefined) return owned.cleanup;
     owned.active = false;
@@ -130,6 +156,7 @@ export function ownNightlyWindowLeases(options: {
   const closeOwned = async (key: string, owned: OwnedWindow): Promise<void> => {
     if (windows.get(key) === owned) windows.delete(key);
     closingWindows.add(key);
+    publishCount();
     await revoke(owned);
     closingWindows.delete(key);
   };
@@ -172,6 +199,7 @@ export function ownNightlyWindowLeases(options: {
     const input = event.request;
     const key = keyOf(input.peer, input.windowId);
     const host = options.host();
+    publishCount();
     if (closing || host === undefined) {
       options.native.replyWindow(input.requestId, { kind: "refused", reason: "unavailable" });
       return;
@@ -193,6 +221,7 @@ export function ownNightlyWindowLeases(options: {
         host,
         expiresElapsed: elapsedNow() + 15_000,
         active: false,
+        acknowledged: false,
         cancelExpiry: () => {},
         capability: randomBytes(32).toString("base64url"),
         rendererIdentity: randomBytes(32).toString("base64url"),
@@ -227,6 +256,9 @@ export function ownNightlyWindowLeases(options: {
           !options.native.replyWindow(input.requestId, bootstrap)
         ) {
           await closeOwned(key, owned);
+        } else {
+          owned.acknowledged = true;
+          publishCount();
         }
       } catch {
         if (windows.get(key) === owned) windows.delete(key);
@@ -296,18 +328,13 @@ export function ownNightlyWindowLeases(options: {
   });
   return {
     ready,
+    activeWindowCount: (): number => activeWindows().length,
     hasWindow: (windowId: string): boolean =>
-      !closing &&
-      [...windows.values()].some(
-        (owned) =>
-          owned.active &&
-          owned.host.instanceId === options.host()?.instanceId &&
-          owned.expiresElapsed > elapsedNow() &&
-          owned.windowId === windowId,
-      ),
+      activeWindows().some((owned) => owned.windowId === windowId),
     close: () => {
       close ??= (async () => {
         closing = true;
+        publishCount();
         const stopped = await options.native.stopWindows().catch(() => ({ kind: "failed" }));
         await Promise.allSettled(pending);
         const owned = [...windows.entries()];
