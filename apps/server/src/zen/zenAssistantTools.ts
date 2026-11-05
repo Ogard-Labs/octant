@@ -21,6 +21,7 @@ import {
 import { Schema } from "effect";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
 import { withToolFamilyHelp } from "../providers/appManagedToolSet";
+import type { ZenLayoutReadPort } from "./zenLayoutReadPort";
 import type { ZenService } from "./zenService";
 
 export interface ZenAssistantToolsDependencies {
@@ -36,6 +37,7 @@ export interface ZenAssistantToolsDependencies {
     | "createTimerWidget"
     | "previewRecipe"
   >;
+  readonly zenLayout: ZenLayoutReadPort;
 }
 
 const isOperation = Schema.is(ZenAssistantOperation);
@@ -101,22 +103,14 @@ export class ZenAssistantTools {
     switch (operation) {
       case "get-space": {
         decodeZenAssistantGetSpaceInput(input);
-        const space = zen.bootstrap(windowId).space;
-        if (space === null) throw new ZenError({ reason: "unknown-space" });
+        const layout = this.#layout(windowId);
         return decodeZenAssistantToolResult({
           action: "get-space",
           status: "ok",
-          version: space.version,
-          dimming: space.appearance.dimming,
-          elementOpacity: space.appearance.elementOpacity,
-          elements: space.elements.map((element) => ({
-            elementId: element.elementId,
-            kind: element.kind,
-            ...("title" in element && element.title !== undefined ? { title: element.title } : {}),
-            geometry: element.geometry,
-            zIndex: element.zIndex,
-            minimized: element.minimized,
-          })),
+          version: layout.version,
+          dimming: layout.dimming,
+          elementOpacity: layout.elementOpacity,
+          elements: layout.elements,
         });
       }
       case "search-threads": {
@@ -219,14 +213,20 @@ export class ZenAssistantTools {
     }
   }
 
+  #layout(windowId: WindowId) {
+    const layout = this.dependencies.zenLayout.layout(windowId);
+    if (layout.status === "refused") throw new ZenError({ reason: layout.reason });
+    return layout;
+  }
+
   #failureFor(windowId: WindowId, action: ZenAssistantAction, error: unknown) {
     const reason = error instanceof ZenError ? error.reason : "invalid-input";
     const message = error instanceof Error ? error.message : "Zen action failed.";
     if (reason === "stale-version") {
       // The model never saw the change that beat it, so the conflict says
       // which version is current; without it a model fails its retry too.
-      const current = this.dependencies.zenService.bootstrap(windowId).space;
-      if (current !== null) {
+      const current = this.dependencies.zenLayout.layout(windowId);
+      if (current.status === "ok") {
         return failure({
           action,
           status: "conflict",
