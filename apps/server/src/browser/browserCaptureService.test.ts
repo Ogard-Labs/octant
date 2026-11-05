@@ -317,8 +317,10 @@ describe("BrowserCaptureService steps", () => {
       event_name: "browser.step-recorded@1",
       actor_kind: "agent",
     });
-    // The address keeps its origin and path; no query, fragment, or secret.
-    expect(row?.payload_json).not.toContain("abc");
+    // The address keeps its origin and path; no query, fragment, or secret. Match the
+    // query text itself: the random step id is hex and can contain "abc" on its own.
+    expect(row?.payload_json).not.toContain("token=");
+    expect(row?.payload_json).not.toContain("page=2");
     expect(row?.payload_json).not.toContain("#x");
     expect(service.listSteps(threadA)).toMatchObject([
       {
