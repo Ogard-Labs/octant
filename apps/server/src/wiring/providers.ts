@@ -2,6 +2,7 @@ import { createLocalUsageHistoryCheckpointStore } from "../persistence/localUsag
 import { createLocalUsageHistoryLastReadStore } from "../persistence/localUsageHistoryLastReadStore";
 import { createSelectedExtensionResolver } from "../extensions/selectedExtensions";
 import { randomUUID } from "node:crypto";
+import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPolicy";
 import { lstatSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -846,22 +847,15 @@ export function wireProviders(deps: ProvidersDependencies) {
         ),
       );
       if (policy === undefined) return undefined;
-      return {
-        ...policy,
-        current: () => {
-          const current = extensionLifecycleService
+      return bindGeneratedMcpSignInPolicy({
+        policy,
+        packageState,
+        componentId,
+        readPackage: () =>
+          extensionLifecycleService
             .snapshot()
-            .packages.find((candidate) => String(candidate.extensionId) === extensionId);
-          return (
-            policy.current() &&
-            current?.activation.installed === true &&
-            current.packageId === packageState.packageId &&
-            current.stateVersion === packageState.stateVersion &&
-            current.digest === packageState.digest &&
-            current.version === packageState.version
-          );
-        },
-      };
+            .packages.find((candidate) => String(candidate.extensionId) === extensionId),
+      });
     };
     const mcpServerSignInAddress = async (
       extensionId: string,
@@ -1430,6 +1424,9 @@ export function wireProviders(deps: ProvidersDependencies) {
         oauth: hostOAuth,
         access: (credentialRef) => oauthBroker.access(credentialRef),
         refresh: (credentialRef) => oauthBroker.refresh(credentialRef),
+        ...(oauthBroker.githubActionsSource === undefined
+          ? {}
+          : { githubActionsSource: oauthBroker.githubActionsSource }),
         actorId: OCTANT_LOCAL_ACTOR_ID,
         serverUrl: mcpServerSignInAddress,
         serverPolicy: mcpServerSignInPolicy,

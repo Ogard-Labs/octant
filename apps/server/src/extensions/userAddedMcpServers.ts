@@ -72,6 +72,8 @@ export interface LinkedSecretPointers {
 }
 
 export interface GeneratedMcpSignInPolicy {
+  /** Source reads require effective activation; registration and consent use current alone. */
+  readonly sourceCurrent?: () => boolean;
   readonly url: string;
   readonly mcpPermissionProfile?: GithubMcpPermissionProfile;
   readonly current: () => boolean;

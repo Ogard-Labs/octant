@@ -19,6 +19,11 @@ import type {
 import {
   GOOGLE_WORKSPACE_MCP_OAUTH,
   googleWorkspaceMcpScopes,
+  type GithubActionsSourceRead,
+  type GithubActionsSourceResult,
+  type GithubActionsRepository,
+  decodeGithubActionsSourceResult,
+  GITHUB_MCP_REPOSITORY_PROFILE,
   SLACK_MCP_USER_OAUTH,
   GITHUB_MCP_OAUTH_APP,
   githubMcpRequiredScopes,
@@ -67,7 +72,21 @@ interface PersistedSignIns {
   readonly registrations?: Readonly<Record<string, McpOAuthClientRegistration>>;
 }
 
+export interface GithubActionsSource {
+  readonly current: () => boolean;
+  readonly accountId: string;
+  readonly repository: GithubActionsRepository;
+  readonly runs: (input?: {
+    readonly page?: number;
+    readonly workflowId?: number;
+    readonly branch?: string;
+  }) => Promise<GithubActionsSourceResult>;
+}
+
 export interface McpServerSignInOptions {
+  readonly githubActionsSource?: (
+    request: GithubActionsSourceRead,
+  ) => Promise<GithubActionsSourceResult>;
   readonly statePath: string;
   readonly oauth: HostOAuthService;
   /** The broker's access route: the bearer for a stored grant, refreshed as needed. */
@@ -1376,6 +1395,127 @@ export class McpServerSignIn {
       });
     for (const key of this.#serverResources.keys())
       if (key.startsWith(prefix)) this.#serverResources.delete(key);
+  }
+
+  /** Host-only source capture; the renderer cannot select a credential reference. */
+  async bindGithubActionsSource(
+    extensionId: string,
+    componentId: string,
+    selection: {
+      readonly owner: string;
+      readonly name: string;
+      readonly expected?: GithubActionsRepository;
+    },
+  ): Promise<GithubActionsSource | undefined> {
+    const readSource = this.#options.githubActionsSource;
+    const selected = {
+      owner: selection.owner,
+      name: selection.name,
+      expected: selection.expected === undefined ? undefined : { ...selection.expected },
+    };
+    if (this.#options.serverPolicy === undefined || readSource === undefined) return undefined;
+    await this.#load();
+    const key = signInKey(extensionId, componentId);
+    const record = this.#signIns.get(key);
+    if (
+      record === undefined ||
+      !this.#currentGrant(key, record) ||
+      this.#removals.has(extensionId) ||
+      record.descriptor.dialect !== GITHUB_MCP_OAUTH_APP.dialect ||
+      record.descriptor.mcpPermissionProfile !== GITHUB_MCP_REPOSITORY_PROFILE ||
+      !isGithubMcpDescriptorBinding(record.descriptor) ||
+      record.descriptor.clientId === undefined ||
+      record.descriptor.clientAuthentication === undefined ||
+      decodeGithubMcpAccount(record.account, GITHUB_MCP_REPOSITORY_PROFILE) === undefined ||
+      record.account?.userId === undefined ||
+      !/^[1-9]\d{0,15}$/.test(record.account.userId) ||
+      !Number.isSafeInteger(Number(record.account.userId))
+    )
+      return undefined;
+    const url = await this.#credentialStage(() =>
+      this.#options.serverUrl(extensionId, componentId),
+    ).catch(() => undefined);
+    if (url !== GITHUB_MCP_OAUTH_APP.transportUrl) return undefined;
+    const policy = await this.#readServerPolicy(extensionId, componentId, url);
+    if (
+      policy?.mcpPermissionProfile !== GITHUB_MCP_REPOSITORY_PROFILE ||
+      policy.sourceCurrent?.() !== true
+    )
+      return undefined;
+    let live = true;
+    const current = () => {
+      try {
+        return (
+          live &&
+          policy.current() &&
+          policy.sourceCurrent?.() === true &&
+          !this.#removals.has(extensionId) &&
+          this.#currentGrant(key, record)
+        );
+      } catch {
+        return false;
+      }
+    };
+    if (!current()) return undefined;
+    const owner = {
+      credentialRef: record.credentialRef,
+      clientId: record.descriptor.clientId,
+      secretRef: record.descriptor.clientAuthentication.secretRef,
+      accountId: record.account.userId,
+    };
+    const read = async (request: GithubActionsSourceRead): Promise<GithubActionsSourceResult> => {
+      if (!current()) return { kind: "refused", reason: "connection-unavailable" };
+      try {
+        const result = await this.#credentialStage(() => readSource(request));
+        if (!current()) return { kind: "refused", reason: "connection-unavailable" };
+        const decoded = decodeGithubActionsSourceResult(result) ?? {
+          kind: "refused" as const,
+          reason: "source-unavailable" as const,
+        };
+        if (
+          decoded.kind === "refused" &&
+          (decoded.reason === "account-changed" ||
+            decoded.reason === "repository-changed" ||
+            decoded.reason === "permission-denied")
+        )
+          live = false;
+        return decoded;
+      } catch {
+        return { kind: "refused", reason: "connection-unavailable" };
+      }
+    };
+    const prepared = await read({
+      ...owner,
+      kind: "repository",
+      owner: selected.owner,
+      name: selected.name,
+    });
+    if (
+      prepared.kind !== "repository" ||
+      !current() ||
+      prepared.accountId !== owner.accountId ||
+      (selected.expected !== undefined &&
+        (prepared.repository.id !== selected.expected.id ||
+          prepared.repository.nodeId !== selected.expected.nodeId ||
+          prepared.repository.owner.toLowerCase() !== selected.expected.owner.toLowerCase() ||
+          prepared.repository.name.toLowerCase() !== selected.expected.name.toLowerCase()))
+    )
+      return undefined;
+    const repository = Object.freeze({ ...prepared.repository });
+    return Object.freeze({
+      current,
+      accountId: owner.accountId,
+      repository,
+      runs: (input?: Parameters<GithubActionsSource["runs"]>[0]) =>
+        read({
+          ...owner,
+          kind: "runs",
+          repository,
+          page: input?.page ?? 1,
+          ...(input?.workflowId === undefined ? {} : { workflowId: input.workflowId }),
+          ...(input?.branch === undefined ? {} : { branch: input.branch }),
+        }),
+    });
   }
 
   /** Captures this exact grant owner and a digest, never a reusable caller-selected ref. */
