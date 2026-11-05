@@ -977,9 +977,11 @@ class CombinedOutputCapture {
    */
   #dropOldest(): void {
     if (this.#retained <= this.#maximum) return;
+    const cut = new Set<"stdout" | "stderr">();
     let oldest = this.#chunks[0];
     while (oldest !== undefined && this.#retained > this.#maximum) {
       const excess = this.#retained - this.#maximum;
+      cut.add(oldest.target);
       if (oldest.bytes.byteLength <= excess) {
         this.#chunks.shift();
         this.#retained -= oldest.bytes.byteLength;
@@ -990,17 +992,25 @@ class CombinedOutputCapture {
       this.#retained -= excess;
     }
     // A dropped whole chunk can end inside a character as well as a partial
-    // cut can, so the first retained bytes are checked either way.
-    while (oldest !== undefined) {
-      let start = 0;
-      while (start < oldest.bytes.byteLength && ((oldest.bytes[start] ?? 0) & 0xc0) === 0x80) {
-        start += 1;
+    // cut can, and stdout and stderr interleave, so each stream that lost
+    // bytes has its first retained bytes checked, oldest chunk overall or not.
+    for (const target of cut) {
+      for (let index = 0; index < this.#chunks.length;) {
+        const chunk = this.#chunks[index];
+        if (chunk === undefined) break;
+        if (chunk.target !== target) {
+          index += 1;
+          continue;
+        }
+        let start = 0;
+        while (start < chunk.bytes.byteLength && ((chunk.bytes[start] ?? 0) & 0xc0) === 0x80) {
+          start += 1;
+        }
+        chunk.bytes = chunk.bytes.subarray(start);
+        this.#retained -= start;
+        if (chunk.bytes.byteLength > 0) break;
+        this.#chunks.splice(index, 1);
       }
-      oldest.bytes = oldest.bytes.subarray(start);
-      this.#retained -= start;
-      if (oldest.bytes.byteLength > 0) return;
-      this.#chunks.shift();
-      oldest = this.#chunks[0];
     }
   }
 

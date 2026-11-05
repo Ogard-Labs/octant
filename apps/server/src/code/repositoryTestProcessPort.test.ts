@@ -1022,6 +1022,28 @@ describe("RepositoryTestProcessPort", () => {
     const wholeResult = await wholeExecution;
     expect(new TextDecoder().decode(wholeResult.stdout)).toBe("xxxx");
     expect(wholeResult.parserFailed).toBe(false);
+
+    // With stderr between them, the stdout chunk left starting inside "é" is
+    // not the oldest chunk retained, and is repaired all the same.
+    const interleaved = fakeChild(4324);
+    const interleavedPort = new RepositoryTestProcessPort(
+      confinedOptions({ spawn: vi.fn(() => interleaved), maxOutputBytes: 5 }),
+    );
+    const interleavedExecution = interleavedPort.execute({
+      argv: ["/usr/bin/test"],
+      cwd: "/repo",
+      environment: {},
+      timeoutMs: 5_000,
+      outputRetention: "newest",
+    });
+    interleaved.stdout.write(new Uint8Array([97, 98, 99, 195]));
+    interleaved.stderr.write(new Uint8Array([119]));
+    interleaved.stdout.write(new Uint8Array([169, 120, 120, 120, 120]));
+    interleaved.close(0, null);
+    const interleavedResult = await interleavedExecution;
+    expect(new TextDecoder().decode(interleavedResult.stdout)).toBe("xxxx");
+    expect(new TextDecoder().decode(interleavedResult.stderr)).toBe("w");
+    expect(interleavedResult.parserFailed).toBe(false);
   });
 
   it("escalates timeout and cancellation from process-group TERM to KILL", async () => {
