@@ -1,13 +1,4 @@
 import {
-  boundedAgentRunChildren,
-  type AgentRunDelegationResult,
-  type AgentRunFollowUpInput,
-  type AgentRunFollowUpResult,
-  type AgentRunDelegationInput,
-  type agentRunDelegationCapabilities,
-} from "../agentRun/agentRunDelegation";
-import type { AgentRunParentSummaryRoute } from "../agentRun/agentRunProjection";
-import {
   decodeUtcTimestamp,
   MAX_NATIVE_HARNESS_TOOL_DETAIL,
   NATIVE_HARNESS_TOOL_DEFINITIONS,
@@ -18,7 +9,6 @@ import {
   type NativeHarnessAskUserArguments,
   type NativeHarnessBashArguments,
   type NativeHarnessContextRemaining,
-  type NativeHarnessDelegateArguments,
   type NativeHarnessEditArguments,
   type NativeHarnessGlobArguments,
   type NativeHarnessGoalArguments,
@@ -55,7 +45,6 @@ const DEFAULT_SHELL_TIMEOUT_MS = 120_000;
 /** A criterion's check is often a whole test suite; it gets longer than an ad hoc command. */
 const GOAL_CHECK_TIMEOUT_MS = 600_000;
 const MAX_FETCH_TEXT_BYTES = 128 * 1024;
-const DEFAULT_DELEGATE_WAIT_MS = 60_000;
 
 function shellExtraRoots(filesystem: { readonly extraRoots?: ReadonlyArray<string> }): {
   readonly extraRoots?: ReadonlyArray<string>;
@@ -98,65 +87,6 @@ export interface NativeHarnessWebSearchResult {
   readonly title: string;
   readonly url: string;
   readonly snippet: string;
-}
-
-export type NativeHarnessDelegateStart = AgentRunDelegationResult;
-
-export interface NativeHarnessDelegateChild {
-  readonly runId: string;
-  readonly role: string;
-  readonly task: string;
-  readonly lifecycleStatus: string;
-  readonly resultAvailable: boolean;
-  readonly version?: number;
-  readonly generation?: number;
-  readonly route?: AgentRunParentSummaryRoute;
-  readonly reasoning?: string;
-  /** The runs this child waits for, when it was started with `after`. */
-  readonly after?: ReadonlyArray<string>;
-  /** Why a child is waiting, failed, or was interrupted. */
-  readonly reason?: string;
-}
-
-export type NativeHarnessDelegateCollect =
-  | {
-      readonly status: "completed";
-      readonly text: string;
-      readonly truncated: boolean;
-      readonly version?: number;
-      readonly generation?: number;
-    }
-  | {
-      readonly status: "not-ready";
-      readonly lifecycleStatus: string;
-      readonly version?: number;
-      readonly generation?: number;
-    }
-  | { readonly status: "refused"; readonly reason: string; readonly message?: string };
-
-/**
- * Delegation as the tool set sees it. The port owns admission: role→slot
- * routing, the creation posture, authority clamps, and capacity all happen
- * behind it, and a refusal comes back as a value the model can read.
- */
-export interface NativeHarnessDelegatePort {
-  capabilities(): Promise<ReturnType<typeof agentRunDelegationCapabilities>>;
-  start(input: AgentRunDelegationInput): Promise<NativeHarnessDelegateStart>;
-  followUp?(input: AgentRunFollowUpInput): Promise<AgentRunFollowUpResult>;
-  status(): Promise<ReadonlyArray<NativeHarnessDelegateChild>>;
-  collect(runId: string): Promise<NativeHarnessDelegateCollect>;
-  /**
-   * Waits until every named child (every child, when none are named) has
-   * finished for good, or the time runs out; reports each one either way.
-   */
-  wait(input: {
-    readonly runIds?: ReadonlyArray<string> | undefined;
-    readonly timeoutMs: number;
-    readonly signal?: AbortSignal | undefined;
-  }): Promise<{
-    readonly finished: boolean;
-    readonly children: ReadonlyArray<NativeHarnessDelegateChild>;
-  }>;
 }
 
 export interface NativeHarnessWebFetchResult {
@@ -203,7 +133,6 @@ export interface NativeHarnessToolPorts {
     readonly question: string;
     readonly signal?: AbortSignal;
   }) => Promise<string | { readonly refused: string; readonly message?: string } | undefined>;
-  readonly delegate?: NativeHarnessDelegatePort;
   /**
    * Asks the person to allow a call the policy would only allow with their
    * say-so, and waits. Absent means such a call is refused outright.
@@ -399,12 +328,6 @@ export function createNativeHarnessTools(
       // left for the command is let go here rather than when a shell starts.
       options.ports.callEnded?.(String(request.actionId));
     }
-    // A collected child reply was budgeted to fit the provider limit exactly, so
-    // a note added now could push it into a lossy preview and be lost with it.
-    // Leave the notes queued for the next tool result.
-    if (name === "delegate" && (args as NativeHarnessDelegateArguments).operation === "collect") {
-      return outcome;
-    }
     const notes = options.ports.steering?.() ?? [];
     if (notes.length === 0 || typeof outcome.result !== "object" || outcome.result === null) {
       return outcome;
@@ -449,8 +372,6 @@ function isOffered(
       return ports.journalLookup !== undefined;
     case "second-opinion":
       return ports.secondOpinion !== undefined;
-    case "delegate":
-      return ports.delegate !== undefined;
     case "ask-user":
       return ports.askUser !== undefined;
     case "goal":
@@ -568,57 +489,6 @@ async function execute(
       });
       if (answer === undefined) return refused("advisor-unavailable");
       return typeof answer === "string" ? ok({ answer }) : refused(answer.refused, answer.message);
-    }
-    case "delegate": {
-      const input = args as NativeHarnessDelegateArguments;
-      const port = ports.delegate!;
-      if (input.operation === "capabilities") return ok(await port.capabilities());
-      if (input.operation === "start") {
-        const started = await port.start({
-          role: input.role,
-          task: input.task,
-          includeParentContext: input.includeParentContext === true,
-          ...(input.providerInstanceId === undefined
-            ? {}
-            : { providerInstanceId: input.providerInstanceId }),
-          ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
-          ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
-          ...(input.after === undefined ? {} : { after: input.after.map(String) }),
-          ...(input.targetMemberId === undefined
-            ? {}
-            : { targetMemberId: String(input.targetMemberId) }),
-          ...(input.targetProjectId === undefined
-            ? {}
-            : { targetProjectId: String(input.targetProjectId) }),
-        });
-        return started.status === "accepted" || started.status === "delegated-remote"
-          ? ok(started)
-          : refused(started.reason, started.message);
-      }
-      if (input.operation === "follow-up") {
-        if (port.followUp === undefined) return refused("follow-up-unavailable");
-        const result = await port.followUp({
-          runId: input.runId,
-          expectedVersion: input.expectedVersion,
-          message: input.message,
-        });
-        return result.status === "accepted" ? ok(result) : refused(result.reason, result.message);
-      }
-      if (input.operation === "status") {
-        return ok(boundedAgentRunChildren(await port.status(), {}));
-      }
-      if (input.operation === "wait") {
-        const waited = await port.wait({
-          ...(input.runIds === undefined ? {} : { runIds: input.runIds.map(String) }),
-          timeoutMs: input.timeoutMs ?? DEFAULT_DELEGATE_WAIT_MS,
-          signal,
-        });
-        return ok(boundedAgentRunChildren(waited.children, { finished: waited.finished }));
-      }
-      const collected = await port.collect(input.runId);
-      return collected.status === "refused"
-        ? refused(collected.reason, collected.message)
-        : ok(collected);
     }
     case "ask-user": {
       const input = args as NativeHarnessAskUserArguments;

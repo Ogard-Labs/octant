@@ -542,11 +542,14 @@ export interface CodeOperationRuntimeOptions {
    * Tool sets that areas built after this runtime add to each turn, such as
    * the language server's reads. `readThread` is the thread as the turn's
    * window sees it when a call runs, the running turn's posture included.
+   * `folders` are the turn's checkout root and extra folders, for a set that
+   * is offered only where it can answer for their files.
    */
   readonly contributedTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
     readonly readThread: () => CodeThread | undefined;
+    readonly folders: ReadonlyArray<string>;
   }) => AppManagedToolSet | undefined;
   /** Lets the model author a Canvas bound to this thread's checkout. */
   readonly canvas?: (input: {
@@ -4459,6 +4462,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           windowId: active.windowId,
           thread: active.thread,
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
+          folders: [active.checkoutRoot, ...active.extraFolders],
         }),
         this.#options.sideTasks?.({ thread: active.thread }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),

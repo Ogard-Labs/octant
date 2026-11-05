@@ -63,7 +63,6 @@ import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 import { createNativeHarnessTodoPort } from "./nativeHarnessTodo";
 import {
   createNativeHarnessTools,
-  type NativeHarnessDelegatePort,
   type NativeHarnessShellPort,
   type NativeHarnessShellRun,
   type NativeHarnessToolPorts,
@@ -213,14 +212,6 @@ export interface NativeHarnessCompositionOptions {
     readonly projectId?: ProjectId | undefined;
     readonly lead: NativeHarnessSlotCandidate;
   }) => NonNullable<NativeHarnessToolPorts["secondOpinion"]>;
-  /** Delegation for a lead thread; absent on a host that cannot admit children. */
-  readonly delegate?: (scope: {
-    readonly parentThreadId: string;
-    readonly windowId: string;
-    readonly mode: OctantMode;
-    readonly projectId?: ProjectId | undefined;
-    readonly lead: NativeHarnessSlotCandidate;
-  }) => NativeHarnessDelegatePort;
   readonly hostId: ToolActionAuthority["hostId"];
   readonly readThreadTaint: (threadId: string) => boolean;
   /** Questions to the person; absent on a host with no surface to answer them. */
@@ -300,8 +291,9 @@ export interface NativeHarnessComposition {
     readonly windowId: string;
     /**
      * The thread is a Side Chat sidecar. It is a side conversation about one
-     * source thread, so it gets no task list, goal, question, or delegation:
-     * those belong to the lead of a thread the person is steering.
+     * source thread, so it gets no task list, goal, or question: those belong
+     * to the lead of a thread the person is steering. Its Chat wiring withholds
+     * `octant_agents` for the same reason.
      */
     readonly sideChat?: boolean;
   }) => AppManagedToolSet | undefined;
@@ -367,18 +359,8 @@ export interface NativeHarnessComposition {
 export function createNativeHarnessComposition(
   options: NativeHarnessCompositionOptions,
 ): NativeHarnessComposition {
-  const resultTaintsThread = (
-    call: { readonly name: string; readonly inputJson: string },
-    result: unknown,
-  ) => {
-    let args: unknown;
-    try {
-      args = call.inputJson.trim().length === 0 ? {} : JSON.parse(call.inputJson);
-    } catch {
-      args = undefined;
-    }
-    return nativeHarnessResultTaintsThread({ toolName: call.name, arguments: args, result });
-  };
+  const resultTaintsThread = (call: { readonly name: string }) =>
+    nativeHarnessResultTaintsThread({ toolName: call.name });
   const contextRemaining =
     options.contextHarness === undefined
       ? undefined
@@ -876,14 +858,6 @@ export function createNativeHarnessComposition(
       ),
       () => options.readWorkExecutionPolicy?.(scope.threadId) === "full-access",
     );
-  const delegateFor = (scope: {
-    readonly parentThreadId: string;
-    readonly windowId: string;
-    readonly mode: OctantMode;
-    readonly projectId?: ProjectId | undefined;
-    readonly lead: NativeHarnessSlotCandidate;
-  }): Pick<NativeHarnessToolPorts, "delegate"> =>
-    options.delegate === undefined ? {} : { delegate: options.delegate(scope) };
   /**
    * `journal-lookup` for a lead, reading the session `latestSession` names
    * when a call runs. Chat and Work turns resolve no credential values, so
@@ -1003,7 +977,7 @@ export function createNativeHarnessComposition(
         },
       };
     },
-    forChat: ({ thread, windowId, sideChat = false }) => {
+    forChat: ({ thread, sideChat = false }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const { askUser, ...approvalPorts } = askUserFor({
@@ -1017,15 +991,6 @@ export function createNativeHarnessComposition(
         mode: "chat",
         ports: {
           ...(sideChat ? {} : shared(threadId)),
-          ...(sideChat
-            ? {}
-            : delegateFor({
-                parentThreadId: threadId,
-                windowId,
-                mode: "chat",
-                projectId: thread.projectId,
-                lead: leadOf(thread),
-              })),
           ...approvalPorts,
           ...(sideChat || askUser === undefined ? {} : { askUser }),
           // Research is the user's grant for a Chat thread to reach the web,
@@ -1050,7 +1015,7 @@ export function createNativeHarnessComposition(
         },
       });
     },
-    forWork: ({ thread, projectRoot, extraFolders, windowId }) => {
+    forWork: ({ thread, projectRoot, extraFolders }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const shell = workShell({ threadId, projectId: String(thread.projectId) });
@@ -1059,13 +1024,6 @@ export function createNativeHarnessComposition(
         mode: "work",
         ports: {
           ...shared(threadId),
-          ...delegateFor({
-            parentThreadId: threadId,
-            windowId,
-            mode: "work",
-            projectId: thread.projectId,
-            lead: leadOf(thread),
-          }),
           ...askUserFor({
             parentThreadId: threadId,
             mode: "work",
@@ -1113,13 +1071,6 @@ export function createNativeHarnessComposition(
         turnExecutionPolicy: () => options.readCodeExecutionPolicy?.(threadId, windowId),
         ports: {
           ...shared(threadId),
-          ...delegateFor({
-            parentThreadId: threadId,
-            windowId,
-            mode: "code",
-            projectId: thread.projectId,
-            lead: leadOf(thread),
-          }),
           ...askUserFor({
             parentThreadId: threadId,
             mode: "code",

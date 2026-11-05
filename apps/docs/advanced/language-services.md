@@ -120,19 +120,27 @@ Files the server does not read, such as Markdown or Python, show nothing.
 
 ## Agents
 
-An agent in a Code thread can ask the same server two things: the problems in
-a file (`octant_code_diagnostics`) and where a name in it is defined
-(`octant_code_definition`). It can do this in Plan mode too, since both only
-read. They are offered on providers that can carry Octant's own tools, the
-same ones listed for the other Octant tools in [Code](/guide/code), and a
-profile whose tool list leaves them out does not offer them.
+An agent in a Code thread can ask the same server three things through one
+tool, `octant_code`: the problems in a file, where a name in it is defined,
+and where that name is used across the checkout (at most 200 places; the
+agent is told when there were more). It can do this in Plan mode too, since
+all three only read, and nothing asks you first.
+
+The tool is offered only where it can help: on providers that can carry
+Octant's own tools, the same ones listed for the other Octant tools in
+[Code](/guide/code), and only when a server the agent may start reads some
+file in the checkout. Today that is the bundled TypeScript and JavaScript
+server, or a server you added that does not run the repository's tooling. A
+Python or Rust repository with no such server, or a checkout whose server you
+turned off in **Settings › Code**, is not offered the tool at all. A profile
+whose tool list leaves out `octant_code` does not offer it either.
 
 - The agent gets answers for the file as saved, with lines counted from 1, so
   they match what it reads. If you have unsaved changes in that file, the
   agent is told to wait for you to save; your text stays as you typed it and
   is never sent to the provider.
-- A definition outside the checkout is named only as a library or "elsewhere",
-  never by its host path.
+- A definition or use outside the checkout is named only as a library or
+  "elsewhere", never by its host path.
 - An agent can start the bundled server, but is never served by one that runs
   the repository's own tooling, even one you allowed and have open in the
   editor, and it never restarts a server that stopped:

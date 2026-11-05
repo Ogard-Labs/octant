@@ -1,6 +1,5 @@
 import { Schema } from "effect";
 import { AggregateId, CorrelationId, UtcTimestamp } from "./events";
-import { MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS } from "./nativeHarness";
 import type { ProviderToolDefinition } from "./providers";
 import {
   MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES,
@@ -56,7 +55,7 @@ export const MAX_SIBLING_THREAD_WAITS_PER_TURN = 4;
 /** How long `wait` blocks when the caller names no timeout; the child-run `wait` default. */
 export const DEFAULT_SIBLING_THREAD_WAIT_MS = 30_000;
 /** The longest one `wait` blocks: the same bound a child-run `wait` has. */
-export const MAX_SIBLING_THREAD_WAIT_MS = MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS;
+export const MAX_SIBLING_THREAD_WAIT_MS = 120_000;
 
 const SiblingThreadTitle = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400));
 

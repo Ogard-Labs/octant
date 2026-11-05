@@ -26,8 +26,7 @@ import { delimiter, join, resolve } from "node:path";
 import {
   ActorId,
   decodeAgentMessageEndpointId,
-  CODE_DEFINITION_TOOL_NAME,
-  CODE_DIAGNOSTICS_TOOL_NAME,
+  CODE_LANGUAGE_TOOL_NAME,
   decodeCodeFileId,
   decodeCodeRelativePath,
   CodeOperationEventFrame,
@@ -8931,14 +8930,15 @@ describe("language reads on Code turns", () => {
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
       supportsAppManagedTools,
-      contributedTools: ({ windowId: turnWindow, thread: turnThread, readThread }) =>
+      contributedTools: ({ windowId: turnWindow, thread: turnThread, readThread, folders }) =>
         createCodeLanguageAgentTools({
           windowId: turnWindow,
           thread: turnThread,
           readThread,
+          folders,
           authority: () => authority,
           externalContentIngested: () => false,
-          language: { readForAgent },
+          language: { readForAgent, servesAgentsIn: () => true },
           uuid: randomUUID,
         }),
     });
@@ -8954,12 +8954,12 @@ describe("language reads on Code turns", () => {
     return { queue, starts, connection, readForAgent, fixture };
   }
 
-  it("offers a Plan turn the diagnostics and definition reads and answers one from the language service", async () => {
+  it("offers a Plan turn the language reads and answers one from the language service", async () => {
     const { queue, starts, connection, readForAgent, fixture } = await planTurn(true, 1301);
     try {
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
       expect(starts[0]?.tools?.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining([CODE_DIAGNOSTICS_TOOL_NAME, CODE_DEFINITION_TOOL_NAME]),
+        expect.arrayContaining([CODE_LANGUAGE_TOOL_NAME]),
       );
       await Effect.runPromise(
         Queue.offer(
@@ -8967,8 +8967,8 @@ describe("language reads on Code turns", () => {
           providerEvent({
             kind: "tool-request",
             requestId: "language-1",
-            toolName: CODE_DIAGNOSTICS_TOOL_NAME,
-            inputJson: JSON.stringify({ path: "src/b.ts" }),
+            toolName: CODE_LANGUAGE_TOOL_NAME,
+            inputJson: JSON.stringify({ operation: "diagnostics", path: "src/b.ts" }),
           }),
         ),
       );
@@ -8992,15 +8992,12 @@ describe("language reads on Code turns", () => {
     }
   });
 
-  it("offers neither read to a provider that cannot carry app-managed tools", async () => {
+  it("offers no language read to a provider that cannot carry app-managed tools", async () => {
     const { starts, connection, fixture } = await planTurn(false, 1302);
     try {
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
       expect(starts[0]?.tools?.map((tool) => tool.name) ?? []).not.toEqual(
-        expect.arrayContaining([CODE_DIAGNOSTICS_TOOL_NAME]),
-      );
-      expect(starts[0]?.tools?.map((tool) => tool.name) ?? []).not.toEqual(
-        expect.arrayContaining([CODE_DEFINITION_TOOL_NAME]),
+        expect.arrayContaining([CODE_LANGUAGE_TOOL_NAME]),
       );
     } finally {
       await fixture.runtime.close();

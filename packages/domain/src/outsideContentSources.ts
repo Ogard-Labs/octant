@@ -70,6 +70,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "context-remaining": "The context estimate",
   "journal-lookup": "Earlier messages of this conversation",
   "second-opinion": "A second opinion from another model",
+  // Retired: journals written while the harness offered `delegate` still name it.
   delegate: "A helper agent's reply",
   "ask-user": "Your answer to a question",
   goal: "The thread's goal",

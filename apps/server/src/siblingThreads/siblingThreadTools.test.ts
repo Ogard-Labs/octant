@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   EventActor,
   GlobalSequence,
-  MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS,
+  MAX_SIBLING_THREAD_WAIT_MS,
   MAX_SIBLING_THREAD_READS_PER_TURN,
   MAX_SIBLING_THREAD_WAITS_PER_TURN,
   MAX_THREAD_MENTION_TRANSCRIPT_CHARACTERS,
@@ -410,14 +410,14 @@ describe("the sibling threads tool", () => {
     await call({
       action: "wait",
       reference: referenceTo(ids.working),
-      timeoutMs: MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS,
+      timeoutMs: MAX_SIBLING_THREAD_WAIT_MS,
     });
-    expect(slept.reduce((total, ms) => total + ms, 0)).toBe(MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS);
+    expect(slept.reduce((total, ms) => total + ms, 0)).toBe(MAX_SIBLING_THREAD_WAIT_MS);
 
     const beyond = await call({
       action: "wait",
       reference: referenceTo(ids.working),
-      timeoutMs: MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS + 1,
+      timeoutMs: MAX_SIBLING_THREAD_WAIT_MS + 1,
     });
     expect(beyond.result).toMatchObject({ status: "refused", reason: "policy" });
   });
