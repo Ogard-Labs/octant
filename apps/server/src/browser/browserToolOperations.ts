@@ -9,6 +9,7 @@ import {
   BROWSER_RESIZE_BOUNDS,
   BrowserColorScheme,
   MAX_BROWSER_FLOW_NAME_LENGTH,
+  type BrowserAuditKind,
   MAX_BROWSER_UPLOAD_FILES,
   MAX_BROWSER_WAIT_MS,
   type BrowserDevicePreset,
@@ -85,6 +86,7 @@ export type BrowserToolInput = {
   | ({ readonly operation: "read-page" } & Partial<BrowserToolTarget>)
   | { readonly operation: "snapshot" | "screenshot" | "stop" }
   | { readonly operation: "diagnostics"; readonly since?: number; readonly warnings?: boolean }
+  | { readonly operation: "audit"; readonly kind: BrowserAuditKind }
   | { readonly operation: "scroll"; readonly deltaX?: number; readonly deltaY?: number }
   | ({ readonly operation: "click" } & BrowserToolTarget)
   | ({ readonly operation: "wait" } & BrowserToolTarget)
@@ -416,6 +418,11 @@ function parseBrowserToolRecord(
       ...(typeof warnings === "boolean" ? { warnings } : {}),
     };
   }
+  if (operation === "audit" && only("kind")) {
+    return record.kind === "accessibility" || record.kind === "performance"
+      ? { ...common, operation, kind: record.kind }
+      : undefined;
+  }
   if ((operation === "snapshot" || operation === "screenshot" || operation === "stop") && only())
     return { ...common, operation };
   return undefined;
@@ -603,6 +610,8 @@ export function browserToolAction(
         ...(input.since === undefined ? {} : { diagnosticsSince: input.since }),
         ...(input.warnings === undefined ? {} : { diagnosticsWarnings: input.warnings }),
       };
+    case "audit":
+      return { ...base, kind: "audit", auditKind: input.kind };
     case "hover":
       return { ...base, kind: "hover", ...element(input) };
     case "select":
@@ -852,6 +861,7 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.diagnosticsCursor === undefined
                 ? {}
                 : { diagnosticsCursor: observation.diagnosticsCursor }),
+              ...(observation.audit === undefined ? {} : { audit: observation.audit }),
               ...(includeScreenshot && image === undefined
                 ? { screenshotOmitted: "invalid-or-too-large" as const }
                 : {}),

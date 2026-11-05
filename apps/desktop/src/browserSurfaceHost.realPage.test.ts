@@ -90,6 +90,31 @@ const pages: Record<string, string> = {
     <iframe title="Sign-in" src="{{other}}/remote-login"></iframe>`,
   "/remote-login": `<!doctype html><title>Remote sign-in</title>
     <label for="code">Password</label><input id="code" type="password" value="hunter2">`,
+  "/audit": `<!doctype html><html><head><title>Audit</title>
+    <style>.faint { color: #aaaaaa; background: #ffffff } .hero { background: linear-gradient(#000, #333); color: #fff }</style></head>
+    <body><h1>Shop</h1><h3>Deals</h3>
+    <img id="bare" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'/%3E">
+    <img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'/%3E">
+    <button id="icon"><svg aria-hidden="true" width="20" height="20"></svg></button>
+    <button><img alt="Search" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'/%3E"></button>
+    <button aria-label="Close">×</button>
+    <p>See <a id="empty" href="/form"></a> and our <a href="/form">deals</a> today.</p>
+    <input id="unlabelled"><label for="mail">Email</label><input id="mail"><input placeholder="Search">
+    <p class="faint">Faint words</p><p>Plain words</p><div class="hero">Over a gradient</div>
+    <div aria-hidden="true"><a href="/form">Hidden link</a><a href="/form" tabindex="-1">Skipped</a></div>
+    <span id="hint">Hint</span><span id="hint">Again</span><input aria-describedby="hint" aria-label="Code">
+    <div><button id="tiny-a" style="width:16px;height:16px;padding:0;border:0">A</button><button id="tiny-b" style="width:16px;height:16px;padding:0;border:0;margin-left:2px">B</button></div>
+    <iframe title="Ad" srcdoc="<p>Ad</p>"></iframe></body></html>`,
+  "/perf": `<!doctype html><html lang="en"><title>Perf</title>
+    <div id="above"></div>
+    <h1 style="font-size:64px">Fast enough</h1>
+    <img src="/pixel.svg?token=s3cret" width="300" height="200" alt="Pixel">
+    <script>
+      addEventListener("load", () => setTimeout(() => {
+        document.getElementById("above").style.height = "120px";
+        const start = performance.now(); while (performance.now() - start < 150) {}
+      }, 100));
+    </script></html>`,
   "/form": `<!doctype html><title>Form</title>
     <label>Name <input id="name"></label>
     <button id="save" onclick="document.title = 'Saved ' + document.getElementById('name').value">Save</button>
@@ -117,6 +142,13 @@ beforeAll(async () => {
         "content-disposition": `attachment; filename="${attachment.name}"`,
       });
       response.end(attachment.body);
+      return;
+    }
+    if (path === "/pixel.svg") {
+      response.writeHead(200, { "content-type": "image/svg+xml" });
+      response.end(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='200'><rect width='300' height='200'/></svg>",
+      );
       return;
     }
     // A frame on the server's other name is on another site, in its own process.
@@ -874,6 +906,98 @@ describe.skipIf(chrome === undefined)(
       const restored = await host.act(contextId, { kind: "resize" });
       expect(restored.emulation).toEqual(baseline);
       expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(false);
+      await page.close();
+    });
+
+    it("audits a page's accessibility with the fixed reader, finding each planted problem and no clean element", async () => {
+      const { host, contextId, page } = await surface("/audit");
+      const read = async () => {
+        const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+        if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+        return { observed, reading: observed.audit.reading };
+      };
+      const { observed, reading } = await read();
+      expect(observed.url).toBe(`${origin}/audit`);
+      const count = (rule: string) => reading.found.find((entry) => entry.rule === rule)?.count;
+      expect(Object.fromEntries(reading.found.map((entry) => [entry.rule, entry.count]))).toEqual({
+        "image-alt": 1,
+        "button-name": 1,
+        "link-name": 1,
+        "field-name": 1,
+        "heading-order": 1,
+        "document-lang": 1,
+        "duplicate-id-aria": 1,
+        "focusable-hidden": 1,
+        "color-contrast": 1,
+      });
+      const finding = (rule: string) => reading.findings.find((each) => each.rule === rule);
+      expect(finding("image-alt")?.selector).toBe("#bare");
+      expect(finding("button-name")?.selector).toBe("#icon");
+      expect(finding("link-name")?.selector).toBe("#empty");
+      expect(finding("field-name")?.selector).toBe("#unlabelled");
+      expect(finding("heading-order")?.detail).toEqual({ level: 3, previousLevel: 1 });
+      expect(finding("duplicate-id-aria")?.detail).toEqual({ id: "hint", count: 2 });
+      expect(finding("focusable-hidden")?.name).toBe("Hidden link");
+      expect(finding("color-contrast")).toMatchObject({
+        text: "Faint words",
+        detail: { ratio: 2.32, required: 4.5, foreground: "#aaaaaa", background: "#ffffff" },
+      });
+      expect(reading.contrastNotMeasured).toBe(1);
+      expect(reading.frames).toBe(1);
+      expect(reading.touch).toBe(false);
+      expect(count("target-size")).toBeUndefined();
+      // On a touch device the crowded small buttons are found as well.
+      await host.act(contextId, {
+        kind: "resize",
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 3,
+        mobile: true,
+        touch: true,
+      });
+      const touched = await read();
+      expect(touched.reading.touch).toBe(true);
+      expect(
+        touched.reading.findings
+          .filter((each) => each.rule === "target-size")
+          .map((each) => each.selector),
+      ).toEqual(expect.arrayContaining(["#tiny-a", "#tiny-b"]));
+      await host.act(contextId, { kind: "resize" });
+      await page.close();
+    });
+
+    it("audits a page's load from the browser's own record without reloading it", async () => {
+      const { host, contextId, page, view } = await surface("/perf");
+      await page.waitForFunction(() => document.getElementById("above")?.style.height === "120px");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const marker = await page.evaluate(() => {
+        Reflect.set(window, "auditMarker", "kept");
+        return performance.timeOrigin;
+      });
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "performance" });
+      if (observed.audit?.kind !== "performance") throw new Error("No performance audit.");
+      const { reading, counters } = observed.audit;
+      expect(reading.navigation?.responseStart).toBeGreaterThan(0);
+      expect(reading.firstContentfulPaint).toBeGreaterThan(0);
+      expect(reading.largestContentfulPaint?.startTime).toBeGreaterThan(0);
+      expect(reading.longTasks?.some((task) => task.duration >= 150)).toBe(true);
+      expect(reading.layoutShifts?.some((shift) => shift.value > 0)).toBe(true);
+      expect(reading.resources.map((resource) => resource.url)).toContain(
+        `${origin}/pixel.svg?token=s3cret`,
+      );
+      expect(counters).toMatchObject({ status: "read", domNodes: expect.any(Number) });
+      // The same document: nothing navigated or reloaded it.
+      expect(
+        await page.evaluate(() => [Reflect.get(window, "auditMarker"), performance.timeOrigin]),
+      ).toEqual(["kept", marker]);
+      // Someone else's developer tools: the timeline is still read, the counters are not.
+      view.webContents.debugger.attach("1.3");
+      const held = await host.act(contextId, { kind: "audit", auditKind: "performance" });
+      expect(held.audit).toMatchObject({
+        kind: "performance",
+        counters: { status: "unavailable" },
+        reading: { firstContentfulPaint: expect.any(Number) },
+      });
+      expect(view.webContents.debugger.isAttached()).toBe(true);
       await page.close();
     });
 

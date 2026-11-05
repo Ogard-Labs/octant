@@ -11,11 +11,21 @@
  * snapshot named?", so a ref is checked against the role and name it was given
  * rather than trusted because a selector still matches something.
  *
+ * The page audits read through the same function (`accessibility` and
+ * `performance` modes), so a finding's selector is the one the snapshot keeps
+ * for a ref, and the server can name the finding by that ref.
+ *
  * The reader walks one document and every open shadow root in it. A frame is
  * another document, often in another process, so the reader only marks where
  * one sits; the host reads each frame it may read with the same function and
  * splices the outlines together (`readFramedBrowserSnapshot`).
  */
+
+import type {
+  BrowserAccessibilityReading,
+  BrowserAccessibilityReadingFinding,
+  BrowserPerformanceReading,
+} from "./browserPageAudit";
 
 /**
  * How a ref's selector steps into a frame or an open shadow root. Neither is
@@ -77,7 +87,15 @@ export type BrowserPageReadRequest =
       readonly refOffset?: number;
     }
   | { readonly mode: "verify"; readonly selector: string }
-  | { readonly mode: "check"; readonly conditions: ReadonlyArray<BrowserPageCondition> };
+  | { readonly mode: "check"; readonly conditions: ReadonlyArray<BrowserPageCondition> }
+  /** The accessibility audit's checks, over this document and its open shadow roots. */
+  | {
+      readonly mode: "accessibility";
+      readonly maxElements: number;
+      readonly maxPerRule: number;
+    }
+  /** The browser's own record of this document's load, read back unchanged. */
+  | { readonly mode: "performance"; readonly maxEntries: number };
 
 /** One wait condition as the page checks it, with any ref already resolved. */
 export type BrowserPageCondition =
@@ -96,7 +114,9 @@ export type BrowserPageReadResult =
       readonly mode: "verify";
       readonly element: { readonly role: string; readonly name: string } | null;
     }
-  | { readonly mode: "check"; readonly met: ReadonlyArray<boolean> };
+  | { readonly mode: "check"; readonly met: ReadonlyArray<boolean> }
+  | { readonly mode: "accessibility"; readonly reading: BrowserAccessibilityReading }
+  | { readonly mode: "performance"; readonly reading: BrowserPerformanceReading };
 
 /**
  * Runs inside the page. See the module comment: nothing outside this body is
@@ -403,6 +423,543 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       if (element.shadowRoot !== null) roots.push(element.shadowRoot);
     }
   }
+
+  if (request.mode === "performance") {
+    // Each entry type is read through an observer with `buffered`, which hands
+    // back what the browser recorded since the document began loading without
+    // waiting: the timeline is the browser's, and reading it changes nothing.
+    const supported = (type: string) => PerformanceObserver.supportedEntryTypes.includes(type);
+    const timeline = (type: string): ReadonlyArray<PerformanceEntry> => {
+      if (!supported(type)) return [];
+      const observer = new PerformanceObserver(() => undefined);
+      try {
+        observer.observe({ type, buffered: true });
+        return observer.takeRecords().slice(-request.maxEntries);
+      } catch {
+        return [];
+      } finally {
+        observer.disconnect();
+      }
+    };
+    const numberOf = (entry: PerformanceEntry, key: string): number => {
+      const value: unknown = Reflect.get(entry, key);
+      return typeof value === "number" && Number.isFinite(value) ? value : 0;
+    };
+    const stringOf = (entry: PerformanceEntry, key: string): string => {
+      const value: unknown = Reflect.get(entry, key);
+      return typeof value === "string" ? value.slice(0, 2_048) : "";
+    };
+    const navigation = performance.getEntriesByType("navigation")[0];
+    const paint = performance
+      .getEntriesByType("paint")
+      .find((entry) => entry.name === "first-contentful-paint");
+    const largest = timeline("largest-contentful-paint").at(-1);
+    const painted: unknown = largest === undefined ? undefined : Reflect.get(largest, "element");
+    const lcpUrl = largest === undefined ? "" : stringOf(largest, "url");
+    const reading: BrowserPerformanceReading = {
+      now: performance.now(),
+      ...(navigation === undefined
+        ? {}
+        : {
+            navigation: {
+              type: stringOf(navigation, "type"),
+              responseStart: numberOf(navigation, "responseStart"),
+              domContentLoaded: numberOf(navigation, "domContentLoadedEventEnd"),
+              load: numberOf(navigation, "loadEventEnd"),
+              transferSize: numberOf(navigation, "transferSize"),
+            },
+          }),
+      ...(paint === undefined ? {} : { firstContentfulPaint: paint.startTime }),
+      ...(largest === undefined
+        ? {}
+        : {
+            largestContentfulPaint: {
+              startTime: largest.startTime,
+              ...(painted instanceof Element && painted.isConnected
+                ? { selector: selectorOf(painted) }
+                : {}),
+              ...(lcpUrl === "" ? {} : { url: lcpUrl }),
+            },
+          }),
+      ...(supported("layout-shift")
+        ? {
+            layoutShifts: timeline("layout-shift").map((entry) => ({
+              startTime: entry.startTime,
+              value: numberOf(entry, "value"),
+              hadRecentInput: Reflect.get(entry, "hadRecentInput") === true,
+            })),
+          }
+        : {}),
+      ...(supported("longtask")
+        ? {
+            longTasks: timeline("longtask").map((entry) => ({
+              startTime: entry.startTime,
+              duration: entry.duration,
+            })),
+          }
+        : {}),
+      resources: performance
+        .getEntriesByType("resource")
+        .slice(0, request.maxEntries)
+        .map((entry) => ({
+          url: entry.name.slice(0, 2_048),
+          initiatorType: stringOf(entry, "initiatorType"),
+          contentType: stringOf(entry, "contentType"),
+          transferSize: numberOf(entry, "transferSize"),
+        })),
+    };
+    return { mode: "performance", reading };
+  }
+
+  if (request.mode === "accessibility") {
+    const audited: Element[] = [];
+    let truncatedAudit = false;
+    // Tree order, stepping into each open shadow root where its host sits, so
+    // headings read in the order a person meets them.
+    const pending: Element[] = document.documentElement === null ? [] : [document.documentElement];
+    while (pending.length > 0) {
+      const element = pending.pop();
+      if (element === undefined) break;
+      if (["script", "style", "noscript", "template", "head"].includes(element.localName)) continue;
+      if (audited.length >= request.maxElements) {
+        truncatedAudit = true;
+        break;
+      }
+      audited.push(element);
+      const children = [
+        ...(element.shadowRoot === null ? [] : Array.from(element.shadowRoot.children)),
+        ...Array.from(element.children),
+      ];
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        if (child !== undefined) pending.push(child);
+      }
+    }
+    const found = new Map<BrowserAccessibilityReadingFinding["rule"], number>();
+    const findings: BrowserAccessibilityReadingFinding[] = [];
+    const report = (
+      rule: BrowserAccessibilityReadingFinding["rule"],
+      element: Element,
+      detail?: BrowserAccessibilityReadingFinding["detail"],
+    ): void => {
+      const seen = (found.get(rule) ?? 0) + 1;
+      found.set(rule, seen);
+      if (seen > request.maxPerRule) return;
+      // Named as the snapshot names it; an element the snapshot gives no role
+      // is shown by its first words instead, and the page itself by neither.
+      const whole = element === document.documentElement;
+      const role = roleOf(element);
+      const name = role === undefined || whole ? "" : nameOf(element);
+      const text = name !== "" || whole ? "" : clip(readableText(element), 80);
+      findings.push({
+        rule,
+        selector: selectorOf(element),
+        ...(role === undefined ? {} : { role }),
+        ...(name === "" ? {} : { name }),
+        ...(text === "" ? {} : { text }),
+        ...(detail === undefined ? {} : { detail }),
+      });
+    };
+    // An element's ancestors through open shadow roots, itself first.
+    const ancestry = (element: Element): Element[] => {
+      const chain: Element[] = [];
+      let current: Element | null = element;
+      while (current !== null) {
+        chain.push(current);
+        const parent: ParentNode | null = current.parentNode;
+        current = current.parentElement ?? (parent instanceof ShadowRoot ? parent.host : null);
+      }
+      return chain;
+    };
+    const rendered = (element: Element): boolean =>
+      element.checkVisibility({ visibilityProperty: true });
+    const ariaHidden = (element: Element): boolean =>
+      ancestry(element).some((each) => each.getAttribute("aria-hidden") === "true");
+    // Exposed to assistive technology: drawn, and not hidden from it on purpose.
+    const exposed = (element: Element): boolean => rendered(element) && !ariaHidden(element);
+    const filled = (value: string | null | undefined): boolean =>
+      value !== null && value !== undefined && value.replace(/\s+/g, "") !== "";
+    const explicitRole = (element: Element): string =>
+      (element.getAttribute("role") ?? "").trim().split(/\s+/)[0] ?? "";
+    const pseudoText = (element: Element, which: "::before" | "::after"): string => {
+      const content = window.getComputedStyle(element, which).content;
+      return Array.from(content.matchAll(/"((?:[^"\\]|\\.)*)"/g), (match) => match[1] ?? "").join(
+        " ",
+      );
+    };
+    // The text a name is computed from: text, the alt text of images, the
+    // label of a labelled descendant, and CSS-generated text. A field's value
+    // is never read, so a control holding only a field reads as unnamed.
+    const contentText = (node: Node): string => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+      if (!(node instanceof Element)) return "";
+      if (node.getAttribute("aria-hidden") === "true") return "";
+      if (["script", "style", "template", "noscript"].includes(node.localName)) return "";
+      const label = node.getAttribute("aria-label");
+      if (filled(label)) return label ?? "";
+      const tag = node.localName;
+      if (tag === "img" || tag === "area") return node.getAttribute("alt") ?? "";
+      if (tag === "input" && (node.getAttribute("type") ?? "").toLowerCase() === "image") {
+        return node.getAttribute("alt") ?? "";
+      }
+      if (tag === "svg") return node.querySelector("title")?.textContent ?? "";
+      if (tag === "select" || isEditable(node)) return "";
+      const assigned = node instanceof HTMLSlotElement ? node.assignedNodes() : [];
+      const shown =
+        node.shadowRoot !== null
+          ? node.shadowRoot.childNodes
+          : assigned.length > 0
+            ? assigned
+            : node.childNodes;
+      return [
+        pseudoText(node, "::before"),
+        ...Array.from(shown).map(contentText),
+        pseudoText(node, "::after"),
+      ].join(" ");
+    };
+    const labelledText = (element: Element): string =>
+      (element.getAttribute("aria-labelledby") ?? "")
+        .split(/\s+/)
+        .filter((id) => id !== "")
+        .map((id) => {
+          const target = rootOf(element).getElementById(id);
+          return target === null ? "" : contentText(target);
+        })
+        .join(" ");
+    // Whether any source gives the element a name. The reader looks wider than
+    // the snapshot's own naming and reports only when every source is empty,
+    // so a finding errs toward silence rather than a false alarm.
+    const hasName = (element: Element, fromContent: boolean): boolean => {
+      if (
+        filled(element.getAttribute("aria-label")) ||
+        filled(labelledText(element)) ||
+        filled(element.getAttribute("title"))
+      ) {
+        return true;
+      }
+      const tag = element.localName;
+      const type = (element.getAttribute("type") ?? "").toLowerCase();
+      if (
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLSelectElement ||
+        element instanceof HTMLTextAreaElement
+      ) {
+        if (Array.from(element.labels ?? []).some((label) => filled(contentText(label)))) {
+          return true;
+        }
+        if (filled(element.getAttribute("placeholder"))) return true;
+        if (tag === "input" && (type === "submit" || type === "reset")) return true;
+        if (tag === "input" && type === "button") return filled(element.getAttribute("value"));
+        if (tag === "input" && type === "image") {
+          return filled(element.getAttribute("alt")) || filled(element.getAttribute("value"));
+        }
+      }
+      if (tag === "img" || tag === "area") return filled(element.getAttribute("alt"));
+      if (tag === "svg") return filled(element.querySelector("title")?.textContent);
+      return fromContent && filled(contentText(element));
+    };
+    const disabled = (element: Element): boolean =>
+      ancestry(element).some(
+        (each) => each.matches(":disabled") || each.getAttribute("aria-disabled") === "true",
+      );
+
+    const fieldTypes = new Set(["button", "submit", "reset", "image", "hidden"]);
+    const fieldRoles = new Set([
+      "textbox",
+      "searchbox",
+      "combobox",
+      "listbox",
+      "spinbutton",
+      "slider",
+      "checkbox",
+      "radio",
+      "switch",
+    ]);
+    let lastHeading: number | undefined;
+    for (const element of audited) {
+      const tag = element.localName;
+      const role = explicitRole(element);
+      const type = (element.getAttribute("type") ?? "").toLowerCase();
+      if (role === "presentation" || role === "none") continue;
+      if (tag === "img" || (tag === "input" && type === "image") || role === "img") {
+        if (exposed(element) && !(tag === "img" && element.hasAttribute("alt"))) {
+          if (!hasName(element, false)) report("image-alt", element);
+        }
+        continue;
+      }
+      if (tag === "button" || (tag === "input" && type === "button") || role === "button") {
+        if (exposed(element) && !hasName(element, true)) report("button-name", element);
+        continue;
+      }
+      if (((tag === "a" || tag === "area") && element.hasAttribute("href")) || role === "link") {
+        if (exposed(element) && !hasName(element, true)) report("link-name", element);
+        continue;
+      }
+      if (
+        (tag === "input" && !fieldTypes.has(type)) ||
+        tag === "select" ||
+        tag === "textarea" ||
+        fieldRoles.has(role)
+      ) {
+        const native = tag === "input" || tag === "select" || tag === "textarea";
+        // A custom checkbox, radio, or switch may take its name from its content.
+        const fromContent =
+          !native && (role === "checkbox" || role === "radio" || role === "switch");
+        if (exposed(element) && !hasName(element, fromContent)) report("field-name", element);
+        continue;
+      }
+      const level =
+        /^h([1-6])$/.exec(tag)?.[1] ??
+        (role === "heading" ? (element.getAttribute("aria-level") ?? "2") : undefined);
+      if (level !== undefined && exposed(element)) {
+        const number = Number.parseInt(level, 10);
+        if (Number.isInteger(number) && number >= 1) {
+          if (lastHeading !== undefined && number > lastHeading + 1) {
+            report("heading-order", element, { level: number, previousLevel: lastHeading });
+          }
+          lastHeading = number;
+        }
+      }
+    }
+
+    if (!filled(document.title) && document.documentElement !== null) {
+      report("document-title", document.documentElement);
+    }
+    if (
+      document.documentElement !== null &&
+      !filled(document.documentElement.getAttribute("lang")) &&
+      !filled(document.documentElement.getAttribute("xml:lang"))
+    ) {
+      report("document-lang", document.documentElement);
+    }
+
+    // An id a label or an aria attribute points at must be unique in its root:
+    // the reference reaches only the first element that holds it.
+    const referencing = [
+      "aria-labelledby",
+      "aria-describedby",
+      "aria-controls",
+      "aria-owns",
+      "aria-activedescendant",
+      "aria-details",
+      "aria-errormessage",
+      "aria-flowto",
+    ];
+    for (const root of roots) {
+      const referenced = new Set<string>();
+      for (const element of Array.from(root.querySelectorAll("*"))) {
+        for (const attribute of referencing) {
+          for (const id of (element.getAttribute(attribute) ?? "").split(/\s+/)) {
+            if (id !== "") referenced.add(id);
+          }
+        }
+        if (element instanceof HTMLLabelElement && element.htmlFor !== "") {
+          referenced.add(element.htmlFor);
+        }
+      }
+      for (const id of referenced) {
+        const holders = root.querySelectorAll(`#${CSS.escape(id)}`);
+        const second = holders[1];
+        if (second !== undefined) {
+          report("duplicate-id-aria", second, { id: clip(id, 64), count: holders.length });
+        }
+      }
+    }
+
+    // Keyboard focus that a screen reader cannot follow.
+    const focusableSelector =
+      "a[href], area[href], button, input:not([type=hidden]), select, textarea, iframe, summary, [contenteditable]:not([contenteditable=false]), audio[controls], video[controls], [tabindex]";
+    for (const element of audited) {
+      if (!element.matches(focusableSelector) || element.matches(":disabled")) continue;
+      const tabIndex = element.getAttribute("tabindex");
+      if (tabIndex !== null && Number.parseInt(tabIndex, 10) < 0) continue;
+      if (!rendered(element) || ancestry(element).some((each) => each.hasAttribute("inert"))) {
+        continue;
+      }
+      if (ariaHidden(element)) report("focusable-hidden", element);
+    }
+
+    // Contrast is judged only where the colours behind the text are known:
+    // solid backgrounds, composited up the ancestors. Text over an image, a
+    // gradient, a filter, partial opacity, or a layered element whose backdrop
+    // is another element is counted as not measured rather than guessed.
+    type Color = readonly [number, number, number, number];
+    const parseColor = (value: string): Color | undefined => {
+      const match =
+        /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+)(%?))?\s*\)$/.exec(
+          value.trim(),
+        );
+      if (match === null) return undefined;
+      const alpha =
+        match[4] === undefined ? 1 : match[5] === "%" ? Number(match[4]) / 100 : Number(match[4]);
+      return [Number(match[1]), Number(match[2]), Number(match[3]), alpha];
+    };
+    const over = (top: Color, bottom: Color): Color => [
+      top[0] * top[3] + bottom[0] * (1 - top[3]),
+      top[1] * top[3] + bottom[1] * (1 - top[3]),
+      top[2] * top[3] + bottom[2] * (1 - top[3]),
+      1,
+    ];
+    const canvasDark = /\bdark\b/.test(
+      window.getComputedStyle(document.documentElement).colorScheme,
+    );
+    // The colour behind an element, or null when it cannot be known.
+    const backdrops = new Map<Element, Color | null>();
+    const backdrop = (element: Element): Color | null => {
+      const known = backdrops.get(element);
+      if (known !== undefined) return known;
+      const style = window.getComputedStyle(element);
+      const own = parseColor(style.backgroundColor);
+      let result: Color | null;
+      if (
+        own === undefined ||
+        style.backgroundImage !== "none" ||
+        style.filter !== "none" ||
+        style.mixBlendMode !== "normal" ||
+        Number.parseFloat(style.opacity) < 1
+      ) {
+        result = null;
+      } else if (own[3] >= 1) {
+        result = own;
+      } else if (["absolute", "fixed", "sticky"].includes(style.position)) {
+        result = null;
+      } else {
+        const parentNode: ParentNode | null = element.parentNode;
+        const parent =
+          element.parentElement ?? (parentNode instanceof ShadowRoot ? parentNode.host : null);
+        const below: Color | null =
+          parent === null ? (canvasDark ? null : [255, 255, 255, 1]) : backdrop(parent);
+        result = below === null ? null : own[3] > 0 ? over(own, below) : below;
+      }
+      backdrops.set(element, result);
+      return result;
+    };
+    const luminance = (color: Color): number => {
+      const channel = (value: number) => {
+        const unit = value / 255;
+        return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2]);
+    };
+    const hex = (color: Color): string =>
+      `#${color
+        .slice(0, 3)
+        .map((value) => Math.round(value).toString(16).padStart(2, "0"))
+        .join("")}`;
+    let contrastNotMeasured = 0;
+    for (const element of audited) {
+      if (
+        element instanceof SVGElement ||
+        ["option", "select", "textarea"].includes(element.localName)
+      ) {
+        continue;
+      }
+      const ownText = Array.from(element.childNodes).some(
+        (node) => node.nodeType === Node.TEXT_NODE && filled(node.textContent),
+      );
+      if (!ownText || !rendered(element) || disabled(element)) continue;
+      const box = element.getBoundingClientRect();
+      // Text clipped to a point is for screen readers only.
+      if (box.width < 2 || box.height < 2) continue;
+      const style = window.getComputedStyle(element);
+      const foreground = parseColor(
+        style.getPropertyValue("-webkit-text-fill-color") || style.color,
+      );
+      if (foreground !== undefined && foreground[3] === 0) continue;
+      const behind = backdrop(element);
+      if (foreground === undefined || behind === null || style.textShadow !== "none") {
+        contrastNotMeasured += 1;
+        continue;
+      }
+      const painted = foreground[3] < 1 ? over(foreground, behind) : foreground;
+      const lighter = Math.max(luminance(painted), luminance(behind));
+      const darker = Math.min(luminance(painted), luminance(behind));
+      const ratio = (lighter + 0.05) / (darker + 0.05);
+      const size = Number.parseFloat(style.fontSize);
+      const weight = Number.parseInt(style.fontWeight, 10);
+      const large = size >= 24 || (size >= 18.66 && weight >= 700);
+      const required = large ? 3 : 4.5;
+      if (ratio < required) {
+        report("color-contrast", element, {
+          ratio: Math.floor(ratio * 100) / 100,
+          required,
+          foreground: hex(painted),
+          background: hex(behind),
+        });
+      }
+    }
+
+    // Touch targets, only where the page is a touch device: on a fine pointer
+    // the rule does not apply.
+    const touch = window.matchMedia("(pointer: coarse)").matches;
+    if (touch) {
+      const targetSelector =
+        "a[href], area[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=link], [role=checkbox], [role=radio], [role=switch], [role=tab], [role=menuitem], [role=option]";
+      const targets = audited
+        .filter(
+          (element) =>
+            element.matches(targetSelector) &&
+            exposed(element) &&
+            !disabled(element) &&
+            // A browser-drawn checkbox or radio keeps the size the browser gave it.
+            !(
+              element instanceof HTMLInputElement &&
+              (element.type === "checkbox" || element.type === "radio") &&
+              window.getComputedStyle(element).appearance !== "none"
+            ),
+        )
+        .slice(0, 1_000)
+        .map((element) => ({ element, box: element.getBoundingClientRect() }))
+        .filter(({ box }) => box.width > 0 && box.height > 0);
+      // A link in a sentence is sized by the sentence it sits in.
+      const inline = (element: Element): boolean =>
+        window.getComputedStyle(element).display === "inline" &&
+        Array.from(element.parentElement?.childNodes ?? []).some(
+          (node) => node.nodeType === Node.TEXT_NODE && filled(node.textContent),
+        );
+      const small = (box: DOMRect) => box.width < 24 || box.height < 24;
+      const centre = (box: DOMRect) => ({
+        x: box.left + box.width / 2,
+        y: box.top + box.height / 2,
+      });
+      const distanceTo = (point: { x: number; y: number }, box: DOMRect) =>
+        Math.hypot(
+          Math.max(box.left - point.x, 0, point.x - box.right),
+          Math.max(box.top - point.y, 0, point.y - box.bottom),
+        );
+      for (const target of targets) {
+        if (!small(target.box) || inline(target.element)) continue;
+        const middle = centre(target.box);
+        // The spacing exception: a 24 pixel circle on the target's centre that
+        // reaches no other target, and no other small target's circle.
+        const crowded = targets.some((other) => {
+          if (other === target || other.element.contains(target.element)) return false;
+          if (target.element.contains(other.element)) return false;
+          if (distanceTo(middle, other.box) < 12) return true;
+          if (!small(other.box)) return false;
+          const theirs = centre(other.box);
+          return Math.hypot(middle.x - theirs.x, middle.y - theirs.y) < 24;
+        });
+        if (crowded) {
+          report("target-size", target.element, {
+            width: Math.round(target.box.width),
+            height: Math.round(target.box.height),
+          });
+        }
+      }
+    }
+
+    const reading: BrowserAccessibilityReading = {
+      findings,
+      found: Array.from(found, ([rule, count]) => ({ rule, count })),
+      touch,
+      contrastNotMeasured,
+      frames: roots.reduce((sum, root) => sum + root.querySelectorAll("iframe, frame").length, 0),
+      truncated: truncatedAudit,
+    };
+    return { mode: "accessibility", reading };
+  }
+
   const holdsCredential =
     request.protectCredentials &&
     (request.withholdValues ||

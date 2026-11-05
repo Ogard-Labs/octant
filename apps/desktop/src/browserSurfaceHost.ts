@@ -47,6 +47,11 @@ import {
   type BrowserPageReadRequest,
   type BrowserPageReadResult,
   type BrowserPageSnapshotRef,
+  browserPageCounters,
+  MAX_BROWSER_AUDIT_ELEMENTS,
+  MAX_BROWSER_AUDIT_TIMELINE_ENTRIES,
+  type BrowserPageAuditReading,
+  type BrowserPageCounters,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
@@ -62,6 +67,7 @@ import {
 } from "./browserSurfaceFrames";
 import {
   DEFAULT_BROWSER_WAIT_MS,
+  MAX_BROWSER_AUDIT_FINDINGS_PER_RULE,
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
   MAX_BROWSER_WAIT_MS,
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
@@ -453,6 +459,7 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       | "colorScheme"
       | "diagnosticsSince"
       | "diagnosticsWarnings"
+      | "auditKind"
     >
   > & {
     /**
@@ -516,6 +523,8 @@ export interface BrowserSurfaceRuntimeObservation {
     readonly method?: string;
     readonly failure: string;
   }>;
+  /** Only an audit fills this: what the fixed reader measured; the server shapes it. */
+  readonly audit?: BrowserPageAuditReading;
 }
 
 const ISOLATED_WORLD_ID = 1_001;
@@ -1953,6 +1962,19 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 // the failed request is the whole answer. The next read answers
                 // what happened since this one.
                 return readDiagnostics(owned, request);
+              case "audit":
+                // A read like a snapshot: nothing is navigated, reloaded, or
+                // changed, and the address and title keep a snapshot's refs good.
+                refuseUnapprovedPage(owned, contents);
+                return {
+                  ...(contents.getURL() === ""
+                    ? {}
+                    : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
+                  ...(contents.getTitle() === ""
+                    ? {}
+                    : { title: contents.getTitle().slice(0, 1_024) }),
+                  audit: await auditOf(contentsView(owned), request.auditKind),
+                };
               case "close-tab":
                 await contents.loadURL("about:blank");
                 break;
@@ -2631,6 +2653,59 @@ async function snapshotOf(owned: OwnedSurface): Promise<{
       )
     : top.snapshot;
   return { snapshot: formatBrowserPageSnapshot(framed), snapshotRefs: framed.refs };
+}
+
+/**
+ * Audit the page in front with the fixed reader, in the isolated world. The
+ * performance timeline belongs to the window, so the isolated world reads the
+ * entries the page's own scripts would. Frames are not read: the reader counts
+ * them, and the answer says they were not audited.
+ */
+async function auditOf(
+  view: BrowserSurfaceViewPort,
+  kind: BrowserSurfaceAction["auditKind"],
+): Promise<BrowserPageAuditReading> {
+  if (kind === "accessibility") {
+    const read = await readPage(view, {
+      mode: "accessibility",
+      maxElements: MAX_BROWSER_AUDIT_ELEMENTS,
+      maxPerRule: MAX_BROWSER_AUDIT_FINDINGS_PER_RULE,
+    });
+    if (read.mode !== "accessibility") throw new Error("Browser audit is unavailable.");
+    return { kind: "accessibility", reading: read.reading };
+  }
+  if (kind !== "performance") throw new Error("An audit names which audit to run.");
+  const read = await readPage(view, {
+    mode: "performance",
+    maxEntries: MAX_BROWSER_AUDIT_TIMELINE_ENTRIES,
+  });
+  if (read.mode !== "performance") throw new Error("Browser audit is unavailable.");
+  return { kind: "performance", reading: read.reading, counters: await pageCounters(view) };
+}
+
+/**
+ * The browser's own counters for the page, through the debugger protocol.
+ * Its duration counters start when the Performance domain is enabled, so only
+ * the present-tense counts are read, and the domain is turned off again. While
+ * someone else holds the page's developer tools nothing is read.
+ */
+async function pageCounters(view: BrowserSurfaceViewPort): Promise<BrowserPageCounters> {
+  try {
+    return await withDebugger(view, async (send) => {
+      await send("Performance.enable");
+      try {
+        return browserPageCounters(await send("Performance.getMetrics"));
+      } finally {
+        await send("Performance.disable").catch(() => undefined);
+      }
+    });
+  } catch {
+    return {
+      status: "unavailable",
+      reason:
+        "The browser's counters could not be read; someone else may hold this page's developer tools.",
+    };
+  }
 }
 
 /** How page code names the element a selector reaches, open shadow roots included. */

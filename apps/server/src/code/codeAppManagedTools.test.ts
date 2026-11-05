@@ -3112,7 +3112,9 @@ describe("Code tool families", () => {
     // The script operation and its bounded source argument add about 130 bytes.
     // The device reads (describe-ui and logs), the element target, and the log
     // window and crash arguments added about 210 bytes; their usage is in help.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_320);
+    // The audit operation and its kind argument added about 95 bytes; their
+    // usage is in help.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_420);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(

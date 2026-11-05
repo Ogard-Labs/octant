@@ -490,6 +490,28 @@ describe("BrowserRuntimeBroker", () => {
     }
   });
 
+  it("passes an audit naming a known audit to the page and refuses any other", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      const audit = { kind: "audit", auditKind: "performance" };
+      const response = await broker.fetchForTest(
+        request(broker.url, broker.token, { contextId, request: audit }),
+      );
+      expect(response.status).toBe(200);
+      expect(surface.act).toHaveBeenCalledWith(contextId, audit);
+      const unknown = await broker.fetchForTest(
+        request(broker.url, broker.token, {
+          contextId,
+          request: { kind: "audit", auditKind: "everything" },
+        }),
+      );
+      expect(unknown.status).toBe(400);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("returns a picture of the page on peek without treating it as an action", async () => {
     const surface = host();
     const broker = await startBrowserRuntimeBroker(surface as never);

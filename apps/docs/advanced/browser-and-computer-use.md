@@ -271,7 +271,8 @@ a shell-launched browser. The tool can navigate, take a snapshot of the page,
 read page text, click and fill elements, hover over a menu, choose an option
 in a list, drag one element onto another, press a key or a shortcut such as
 Control+A, scroll horizontally or vertically, wait for an element, open and
-switch between tabs, take a screenshot, and stop its session.
+switch between tabs, take a screenshot, audit the page's accessibility or
+performance, and stop its session.
 
 The agent can also put files into a page's file field, for example to attach a
 report to a form. It may only send files from the thread's own folder (the
@@ -331,6 +332,21 @@ else puts the size, touch, and color scheme back. This changes only the agent's
 own page. Your own Browser window and your other pages keep their size and
 look, and a page you opened developer tools on keeps its touch and color
 scheme as they are. The agent is told what the page now reports.
+
+While you build a web app, the agent can audit the page it has open. An
+accessibility audit finds images without a text alternative, buttons, links,
+and form fields without a name, a missing page title or language, skipped
+heading levels, repeated ids that labels point at, text with too little
+contrast, focusable elements hidden from screen readers, and, after the agent
+switches the page to a phone, touch targets that are too small and too close
+together. Each problem names the element so the agent can go and fix it. A
+performance audit reports how the page loaded: time to first byte, first and
+largest paint, layout shift, and blocking time, each rated good, needs
+improvement, or poor, with the requests by type and the largest files (their
+addresses with secrets removed). An audit only reads the page: it never
+reloads it, so to measure a fresh load the agent opens the page again first.
+Audits run on this computer and send nothing anywhere, and Plan mode refuses
+them like every other Browser step.
 
 When a page needs you to sign in, the agent can hand it to you instead of
 giving up. A card in the thread says which site and why, with **Continue** and

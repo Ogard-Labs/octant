@@ -20,6 +20,10 @@ import {
   parseBrowserKeyChord,
   readBrowserPage,
   redactedBrowserUrl,
+  browserPageCounters,
+  MAX_BROWSER_AUDIT_ELEMENTS,
+  MAX_BROWSER_AUDIT_TIMELINE_ENTRIES,
+  type BrowserPageCounters,
 } from "@octant/domain";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
@@ -31,6 +35,7 @@ import type {
 } from "@octant/contracts/browser-automation";
 import {
   DEFAULT_BROWSER_WAIT_MS,
+  MAX_BROWSER_AUDIT_FINDINGS_PER_RULE,
   MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
   MAX_BROWSER_WAIT_MS,
 } from "@octant/contracts/browser-automation";
@@ -656,6 +661,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         break;
       case "observe-diagnostics":
         return readDiagnostics(required(owned, "Browser context is unavailable."), request);
+      case "audit":
+        break;
       case "wait":
         if (request.waitFor !== undefined) {
           await waitForConditions(page, request.waitFor, signal, allowedOrigins);
@@ -780,6 +787,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     if (request.kind === "snapshot") {
       return this.#snapshot(page, owned?.protectCredentials ?? true, allowedOrigins);
     }
+    if (request.kind === "audit") return this.#audit(page, request);
     const include = new Set(request.include ?? []);
     const observed = await this.#observe(
       page,
@@ -1245,6 +1253,70 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       snapshotRefs: snapshot.refs,
       ...(viewport === null ? {} : { viewport }),
     };
+  }
+
+  /**
+   * Audit the page as it stands, with the fixed reader: nothing is navigated,
+   * reloaded, or changed. The address and title come back too, so the refs of
+   * a snapshot of this same page stay good and name the findings.
+   */
+  async #audit(
+    page: PlaywrightPagePort,
+    request: BrowserRuntimeAction,
+  ): Promise<BrowserRuntimeObservation> {
+    const title = await page.title();
+    const located = {
+      ...(page.url() === "about:blank" ? {} : { url: bounded(page.url(), 4096) }),
+      ...(title.trim() === "" ? {} : { title: bounded(title, 1024) }),
+    };
+    if (request.auditKind === "accessibility") {
+      const read = await page.evaluate(readBrowserPage, {
+        mode: "accessibility",
+        maxElements: MAX_BROWSER_AUDIT_ELEMENTS,
+        maxPerRule: MAX_BROWSER_AUDIT_FINDINGS_PER_RULE,
+      });
+      if (read.mode !== "accessibility") throw new Error("Browser audit is unavailable.");
+      return { ...located, audit: { kind: "accessibility", reading: read.reading } };
+    }
+    const read = await page.evaluate(readBrowserPage, {
+      mode: "performance",
+      maxEntries: MAX_BROWSER_AUDIT_TIMELINE_ENTRIES,
+    });
+    if (read.mode !== "performance") throw new Error("Browser audit is unavailable.");
+    return {
+      ...located,
+      audit: {
+        kind: "performance",
+        reading: read.reading,
+        counters: await this.#pageCounters(page),
+      },
+    };
+  }
+
+  /**
+   * The browser's own counters for the page: its live DOM nodes, script heap,
+   * and event listeners. The protocol's duration counters start when its
+   * Performance domain is enabled, so only these present-tense counts are read,
+   * and the domain is turned off again so the page is left as it was.
+   */
+  async #pageCounters(page: PlaywrightPagePort): Promise<BrowserPageCounters> {
+    try {
+      const state = this.#emulation.get(page) ?? { deviceOverride: false, touch: false };
+      this.#emulation.set(page, state);
+      const session = state.session ?? (await page.context?.().newCDPSession(page));
+      if (session === undefined) {
+        return { status: "unavailable", reason: "This Browser cannot read its own counters." };
+      }
+      state.session = session;
+      await session.send("Performance.enable");
+      try {
+        return browserPageCounters(await session.send("Performance.getMetrics"));
+      } finally {
+        await session.send("Performance.disable").catch(() => undefined);
+      }
+    } catch {
+      return { status: "unavailable", reason: "The browser's counters could not be read." };
+    }
   }
 
   /**

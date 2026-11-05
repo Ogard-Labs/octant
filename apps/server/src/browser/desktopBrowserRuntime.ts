@@ -303,6 +303,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           ...(request.diagnosticsWarnings === undefined
             ? {}
             : { diagnosticsWarnings: request.diagnosticsWarnings }),
+          ...(request.auditKind === undefined ? {} : { auditKind: request.auditKind }),
           ...(request.downloads === undefined ? {} : { downloads: request.downloads }),
         },
       },

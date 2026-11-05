@@ -6,8 +6,10 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type {
+  BrowserAccessibilityAudit,
   BrowserContextId,
   BrowserFlow,
+  BrowserPerformanceAudit,
   BrowserThreadId,
   ToolActionAuthority,
   WindowId,
@@ -92,6 +94,25 @@ const pages: Record<string, string> = {
   "/noisy": `<!doctype html><title>Noisy</title>
     <script>console.warn("careful"); console.error("boom"); fetch("/missing-data?token=s3cret");</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
+  "/audit": `<!doctype html><html><head><title>Audit</title>
+    <style>.faint { color: #aaaaaa; background: #ffffff }</style></head>
+    <body><h1>Shop</h1><h3>Deals</h3>
+    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'/%3E">
+    <button id="icon"><svg aria-hidden="true" width="20" height="20"></svg></button>
+    <input id="unlabelled"><label for="mail">Email</label><input id="mail">
+    <p class="faint">Faint words</p><p>Plain words</p>
+    <div><button style="width:16px;height:16px;padding:0;border:0">A</button><button style="width:16px;height:16px;padding:0;border:0;margin-left:2px">B</button></div>
+    </body></html>`,
+  "/perf": `<!doctype html><html lang="en"><title>Perf</title>
+    <div id="above"></div>
+    <h1 style="font-size:64px">Fast enough</h1>
+    <img src="/pixel.svg?token=s3cret" width="300" height="200" alt="Pixel">
+    <script>
+      addEventListener("load", () => setTimeout(() => {
+        document.getElementById("above").style.height = "120px";
+        const start = performance.now(); while (performance.now() - start < 150) {}
+      }, 100));
+    </script></html>`,
   "/downloads": `<!doctype html><title>Downloads</title>
     <a id="report" href="/dl/report.pdf">Report</a>
     <a id="elf" href="/dl/notes.txt">Notes</a>
@@ -157,6 +178,13 @@ beforeAll(async () => {
           open.innerHTML = '<p><button>One</button></p><button onclick="document.title = \\'Shadow saved\\'">Shadow save</button><div><button id="deep" onclick="document.title = \\'Deep saved\\'">Deep save</button></div><p><slot name="note"></slot></p>';
           document.getElementById("closed").attachShadow({ mode: "closed" }).innerHTML = "<button>Hidden away</button>";
         </script>`);
+      return;
+    }
+    if (path === "/pixel.svg") {
+      response.writeHead(200, { "content-type": "image/svg+xml" });
+      response.end(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='200'><rect width='300' height='200'/></svg>",
+      );
       return;
     }
     if (path === "/leave") {
@@ -1085,6 +1113,73 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(after.consoleErrors).toEqual([]);
     expect(after.httpErrors).toEqual([]);
     await tool.stop();
+  });
+
+  it("audits a page's accessibility by the snapshot's refs and changes nothing it audits", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/audit` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    const unlabelled = refFor(outline, /^- textbox \[ref=e\d+\]$/);
+    const answer = await tool.call({ operation: "audit", kind: "accessibility" });
+    expect(answer.isError).toBe(false);
+    const audit = answer.result.page?.audit as BrowserAccessibilityAudit;
+    expect(audit.findings).toContainEqual(
+      expect.objectContaining({ rule: "field-name", severity: "serious", ref: unlabelled }),
+    );
+    expect(audit.findings).toContainEqual(
+      expect.objectContaining({
+        rule: "color-contrast",
+        text: "Faint words",
+        message: expect.stringContaining("2.32:1"),
+      }),
+    );
+    expect(audit.found.map((entry) => entry.rule).sort()).toEqual([
+      "button-name",
+      "color-contrast",
+      "document-lang",
+      "field-name",
+      "heading-order",
+      "image-alt",
+    ]);
+    expect(audit.notRun).toEqual([expect.objectContaining({ rule: "target-size" })]);
+    // The audit read the page and changed nothing, so the snapshot's ref still acts.
+    expect((await tool.call({ operation: "type", ref: unlabelled, text: "Ada" })).isError).toBe(
+      false,
+    );
+    await tool.call({ operation: "resize", preset: "phone" });
+    const touched = (await tool.call({ operation: "audit", kind: "accessibility" })).result.page
+      ?.audit as BrowserAccessibilityAudit;
+    expect(touched.notRun).toEqual([]);
+    expect(touched.found).toContainEqual({ rule: "target-size", count: 2 });
+    await tool.stop();
+  });
+
+  it("audits a page's load with rated vitals and redacted addresses, and refuses in Plan", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/perf` });
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const answer = await tool.call({ operation: "audit", kind: "performance" });
+    expect(answer.isError).toBe(false);
+    const audit = answer.result.page?.audit as BrowserPerformanceAudit;
+    expect(audit.vitals.map((vital) => vital.metric)).toEqual(["ttfb", "fcp", "lcp", "cls", "tbt"]);
+    const vital = (metric: string) => audit.vitals.find((each) => each.metric === metric);
+    expect(vital("tbt")?.value).toBeGreaterThanOrEqual(90);
+    expect(vital("cls")?.value).toBeGreaterThan(0);
+    expect(vital("lcp")).toMatchObject({ rating: "good" });
+    expect(audit.largestResources).toContainEqual({
+      url: `${origin}/pixel.svg?token=redacted`,
+      type: "image",
+      transferBytes: expect.any(Number),
+    });
+    expect(JSON.stringify(audit)).not.toContain("s3cret");
+    expect(audit.page?.domNodes).toBeGreaterThan(0);
+    expect(audit.notMeasured).toContainEqual(expect.objectContaining({ metric: "inp" }));
+    expect(audit.longTasks?.longestMs).toBeGreaterThanOrEqual(140);
+    await tool.stop();
+    const planned = agentTool({ plan: true });
+    expect((await planned.call({ operation: "audit", kind: "performance" })).result).toEqual({
+      error: "plan-mode-read-only",
+    });
   });
 
   describe("downloads", () => {

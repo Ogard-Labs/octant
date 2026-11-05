@@ -81,6 +81,9 @@ export function evaluateBrowserAction(
   ) {
     return { kind: "denied", reason: `A ${request.kind} action requires a tab.` };
   }
+  if ((request.kind === "audit") !== (request.auditKind !== undefined)) {
+    return { kind: "denied", reason: "An audit action names which audit, and only it does." };
+  }
   if (request.kind === "wait" && request.target === undefined && request.waitFor === undefined) {
     return { kind: "denied", reason: "Wait action requires an element or conditions." };
   }
