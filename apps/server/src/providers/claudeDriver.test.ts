@@ -7,6 +7,7 @@ import {
   type ProviderContextBlock,
   type ProviderFailure,
   type ProviderModelId,
+  type ProviderNativeSetup,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
@@ -152,10 +153,14 @@ class FakeQuery implements ClaudeQueryPort {
   );
   readonly readPlanUsage = vi.fn<ClaudeQueryPort["readPlanUsage"]>(() => Effect.succeed(undefined));
   readonly close = vi.fn(() => Effect.void);
-  readonly send = vi.fn(({ text }: Parameters<ClaudeQueryPort["send"]>[0]) =>
-    Effect.sync(() => {
-      this.sent.push(text);
-    }),
+  /** Whether the prompt hook runs for each message, as it does unless a policy turns hooks off. */
+  hookRuns = true;
+  readonly send = vi.fn(
+    ({ text, context, onContextDelivered }: Parameters<ClaudeQueryPort["send"]>[0]) =>
+      Effect.sync(() => {
+        this.sent.push(text);
+        if (this.hookRuns && context !== undefined) onContextDelivered?.();
+      }),
   );
   readonly messages: Stream.Stream<ClaudeDecodedMessage, ProviderFailure>;
   readonly sessionId: Effect.Effect<string, ProviderFailure>;
@@ -4522,10 +4527,16 @@ describe("Claude session lifecycle", () => {
     const sendWith = async (
       f: ReturnType<typeof harness>,
       context: ReadonlyArray<ProviderContextBlock>,
+      nativeSetup?: ProviderNativeSetup,
     ) => {
       const acquired = await acquire(f.driver);
       await Effect.runPromise(
-        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
       );
       await Effect.runPromise(
         acquired.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
@@ -4559,6 +4570,80 @@ describe("Claude session lifecycle", () => {
         text: renderProviderTurnPrompt({ prompt: "hei", context: [rules] }),
       });
       expect(call).not.toHaveProperty("context");
+    });
+
+    it("keeps the context inside the message when the person's own hooks are off on a release not measured to spare Octant's hook", async () => {
+      const ownSetupHooksOff: ProviderNativeSetup = {
+        subagents: false,
+        webTools: false,
+        skills: true,
+        toolServers: false,
+        hooks: false,
+        projectCode: false,
+      };
+      expect(await sendWith(harness(), [rules], ownSetupHooksOff)).toMatchObject({
+        text: "hei",
+        context: rules.text,
+      });
+      const unmeasured = await sendWith(
+        harness("subscription", "current-session", { runtimeVersion: "2.1.212" }),
+        [rules],
+        ownSetupHooksOff,
+      );
+      expect(unmeasured).toMatchObject({
+        text: renderProviderTurnPrompt({ prompt: "hei", context: [rules] }),
+      });
+      expect(unmeasured).not.toHaveProperty("context");
+    });
+
+    it("counts context as kept only when the prompt hook delivered it, and frames it in the message once the hook has missed", async () => {
+      const f = harness();
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const events: ProviderRuntimeEvent[] = [];
+      const subscription = Effect.runFork(
+        Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        ),
+      );
+      const settle = () => new Promise((done) => setTimeout(done, 20));
+      const query = f.queries[0]!;
+      const turn = async (prompt: string) => {
+        await Effect.runPromise(
+          acquired.connection.send({
+            sessionId,
+            prompt,
+            context: [rules],
+            attachments: [],
+            tools: [],
+          }),
+        );
+        await query.emit(completed("sdk-session-1"));
+        await settle();
+      };
+
+      await turn("delivered");
+      query.hookRuns = false;
+      await turn("missed");
+      await turn("framed");
+
+      expect(
+        events.flatMap((event) => (event.kind === "usage" ? [event.promptRetention] : [])),
+      ).toEqual(["kept", undefined, "kept"]);
+      expect(query.send.mock.calls.map(([call]) => call)).toEqual([
+        expect.objectContaining({ text: "delivered", context: rules.text }),
+        expect.objectContaining({ text: "missed", context: rules.text }),
+        expect.objectContaining({
+          text: renderProviderTurnPrompt({ prompt: "framed", context: [rules] }),
+        }),
+      ]);
+      expect(query.send.mock.calls[2]?.[0]).not.toHaveProperty("context");
+      await Effect.runPromise(Fiber.interrupt(subscription));
+      await acquired.close();
     });
   });
 

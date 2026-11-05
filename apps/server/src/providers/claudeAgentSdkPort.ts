@@ -436,6 +436,13 @@ export interface ClaudeUserMessage {
    * session's history across resume.
    */
   readonly context?: string;
+  /**
+   * Called once the prompt hook has handed `context` to Claude Code for this
+   * message. A hook that never runs for it (a policy that turns hooks off, a
+   * prompt Claude Code rewrote) never calls it, so the caller can tell that the
+   * context did not arrive.
+   */
+  readonly onContextDelivered?: () => void;
   readonly appManagedTools?: ReadonlyArray<ProviderToolDefinition>;
   readonly onAppToolCall?: (
     name: string,
@@ -988,7 +995,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           // order, with or without context. Matching by text alone let a
           // context-free message take the context of a later one with the
           // same text, a turn early, leaving its own turn without any.
-          const submissions: Array<{ readonly text: string; readonly context?: string }> = [];
+          const submissions: Array<
+            Pick<ClaudeUserMessage, "text" | "context" | "onContextDelivered">
+          > = [];
           let query: ClaudeAgentSdkQueryLike | undefined;
           let initializedSessionId: string | undefined;
           let costBaseline: number | undefined;
@@ -1099,6 +1108,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 if (index === -1) return {};
                 const [pending] = submissions.splice(0, index + 1).slice(-1);
                 if (pending?.context === undefined) return {};
+                pending.onContextDelivered?.();
                 return {
                   hookSpecificOutput: {
                     hookEventName: "UserPromptSubmit",
@@ -1453,7 +1463,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 catch: (error) => sanitizeFailure(error, "session discovery"),
               }),
               messages,
-              send: ({ text, context, appManagedTools = [], onAppToolCall }) =>
+              send: ({ text, context, onContextDelivered, appManagedTools = [], onAppToolCall }) =>
                 request(async () => {
                   if (appManagedTools.length > 0) {
                     if (query?.setMcpServers === undefined || onAppToolCall === undefined) {
@@ -1523,7 +1533,14 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   }
                   const messageId = crypto.randomUUID();
                   issuedMessageIds.add(messageId);
-                  const submission = context === undefined ? { text } : { text, context };
+                  const submission =
+                    context === undefined
+                      ? { text }
+                      : {
+                          text,
+                          context,
+                          ...(onContextDelivered === undefined ? {} : { onContextDelivered }),
+                        };
                   submissions.push(submission);
                   try {
                     return await prompt.offer({

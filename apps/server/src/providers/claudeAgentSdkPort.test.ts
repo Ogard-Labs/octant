@@ -666,7 +666,12 @@ describe("Claude Agent SDK port", () => {
           const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
           yield* query.send({ text: "continue" });
           yield* Effect.promise(() => iterator.next());
-          yield* query.send({ text: "continue", context: "Rules for the second turn." });
+          const delivered = vi.fn();
+          yield* query.send({
+            text: "continue",
+            context: "Rules for the second turn.",
+            onContextDelivered: delivered,
+          });
           yield* Effect.promise(() => iterator.next());
 
           const promptHook = harness.invocation?.options.hooks.UserPromptSubmit[0]?.hooks[0];
@@ -684,12 +689,15 @@ describe("Claude Agent SDK port", () => {
           expect(yield* submit("something else")).toEqual({});
           expect(yield* submit("continue", { agent_id: "agent-1" })).toEqual({});
           expect(yield* submit("continue")).toEqual({});
+          expect(delivered).not.toHaveBeenCalled();
           expect(yield* submit("continue")).toEqual({
             hookSpecificOutput: {
               hookEventName: "UserPromptSubmit",
               additionalContext: "Rules for the second turn.",
             },
           });
+          // The driver counts the context as delivered only on this word.
+          expect(delivered).toHaveBeenCalledOnce();
         }),
       ),
     );

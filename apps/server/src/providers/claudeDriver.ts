@@ -48,6 +48,7 @@ import { claudeOffersTool, isSanitizedFailure } from "./claudeAgentSdkDecoder";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { claudeAuthorityInputDigest, waitForClaudeAuthorityValue } from "./claudeAuthority";
 import {
+  claudeNativeQueryOptions,
   isClaudeEffortLevel,
   type ClaudeAgentSdkPort,
   type ClaudeDecodedMessage,
@@ -118,6 +119,32 @@ const CLAUDE_PROMPT_HOOK_RELEASE = [2, 1, 211] as const;
 const CLAUDE_PROMPT_HOOK_CONTEXT_BYTES = 10_000;
 
 /**
+ * The first release after those measured to run Octant's prompt hook while the
+ * person's own hooks are off. Turning them off sets `disableAllHooks` in the
+ * session's flag settings; on 2.1.211 that drops the hooks of settings files
+ * (a shell `UserPromptSubmit` hook in the home settings did not run) and still
+ * runs a hook passed through the SDK (its context reached the request), both
+ * measured against a local stand-in endpoint. The source agrees: only a managed
+ * policy's `disableAllHooks` skips every hook. A later release is not trusted
+ * to keep that split, so its context stays inside the message.
+ */
+const CLAUDE_PROMPT_HOOK_UNMEASURED_WITH_HOOKS_OFF = [2, 1, 212] as const;
+
+/**
+ * Whether Octant's prompt hook is known to run in a session. A session that
+ * turns the person's hooks off runs it only on a release measured to; any hook
+ * can still be skipped by a policy Octant cannot see, which the delivery check
+ * on each message catches.
+ */
+export function claudePromptHookRuns(
+  setup: ProviderNativeSetup | undefined,
+  runtimeVersion: string,
+): boolean {
+  if (claudeNativeQueryOptions(setup).settings.disableAllHooks === undefined) return true;
+  return !isAtLeastRelease(runtimeVersion, CLAUDE_PROMPT_HOOK_UNMEASURED_WITH_HOOKS_OFF);
+}
+
+/**
  * The message for one turn and the Octant context the prompt hook adds beside
  * it. The message is only what the person typed whenever the context fits the
  * hook; when it does not, Octant's own rules still go to the hook if they fit,
@@ -128,9 +155,14 @@ const CLAUDE_PROMPT_HOOK_CONTEXT_BYTES = 10_000;
 function claudeTurnMessage(
   input: ProviderTurnInput,
   runtimeVersion: string,
+  promptHookRuns: boolean,
 ): { readonly text: string; readonly context?: string } {
   const context = input.context ?? [];
-  if (context.length === 0 || !isAtLeastRelease(runtimeVersion, CLAUDE_PROMPT_HOOK_RELEASE)) {
+  if (
+    context.length === 0 ||
+    !promptHookRuns ||
+    !isAtLeastRelease(runtimeVersion, CLAUDE_PROMPT_HOOK_RELEASE)
+  ) {
     return { text: renderProviderTurnPrompt(input) };
   }
   const fits = (blocks: ReadonlyArray<ProviderContextBlock>) =>
@@ -735,6 +767,21 @@ interface ClaudePendingQuestionState extends ClaudePendingQuestion {
   readonly providerPrompts: ReadonlyArray<string>;
 }
 
+/**
+ * A turn's usage says its prompts are kept only if they arrived whole: when
+ * its context went to the prompt hook and the hook never handed it over, the
+ * context is missing from the session, so the report says nothing about
+ * retention and the session stops relying on the hook.
+ */
+function withHookDelivery(state: SessionState, event: ProviderRuntimeEvent): ProviderRuntimeEvent {
+  if (event.kind !== "usage" || event.promptRetention !== "kept") return event;
+  const turn = state.hookDeliveries[0];
+  if (turn === undefined || !turn.viaHook || turn.delivered) return event;
+  state.promptHookRuns = false;
+  const { promptRetention: _undelivered, ...withoutRetention } = event;
+  return withoutRetention;
+}
+
 interface SessionState {
   readonly sessionId: ProviderSessionId;
   readonly projectRoot: string;
@@ -766,6 +813,19 @@ interface SessionState {
   collector?: Fiber.RuntimeFiber<void, never>;
   outputAccepted: boolean;
   pendingTurns: number;
+  /**
+   * Whether this session's prompt hook can carry Octant's context. It turns
+   * false for good once a message's context went undelivered, so later turns
+   * frame their context inside the message instead.
+   */
+  promptHookRuns: boolean;
+  /**
+   * One entry per turn sent and not yet ended, in order: whether its context
+   * went to the prompt hook, and whether the hook confirmed handing it over.
+   * A turn whose hook context never arrived does not report its prompts as
+   * kept, so the held record sends that context again.
+   */
+  readonly hookDeliveries: Array<{ readonly viaHook: boolean; delivered: boolean }>;
   appToolsEnabled: boolean;
   terminal: boolean;
   active: boolean;
@@ -1756,11 +1816,12 @@ function makeConnection(
           });
           return;
         }
-        publish(mapped.event);
+        publish(withHookDelivery(state, mapped.event));
         if (isTerminalEvent(mapped.event)) {
           state.terminalResult.resolve(undefined);
           clearAuthorityState(state);
           state.pendingTurns = Math.max(0, state.pendingTurns - 1);
+          state.hookDeliveries.shift();
           if (mapped.event.kind === "completed") {
             if (state.pendingTurns > 0) {
               state.context = makeEventContext(
@@ -2493,6 +2554,8 @@ function makeConnection(
           turnToolUseIds: new Set(),
           outputAccepted: false,
           pendingTurns: 0,
+          promptHookRuns: claudePromptHookRuns(nativeSetup, runtimeVersion),
+          hookDeliveries: [],
           appToolsEnabled: false,
           terminal: false,
           active: true,
@@ -2724,6 +2787,12 @@ function makeConnection(
             failure("unavailable", "The previous tool-enabled turn is still active."),
           );
         }
+        const message = claudeTurnMessage(
+          input,
+          state.expectedRuntimeVersion,
+          state.promptHookRuns,
+        );
+        const delivery = { viaHook: message.context !== undefined, delivered: false };
         return Effect.sync(() => {
           if (state.context?.terminal === true && state.pendingTurns === 0) {
             state.context = makeEventContext(state, state.claudeSessionId!, state.context.sequence);
@@ -2735,10 +2804,18 @@ function makeConnection(
           }
           state.appToolsEnabled = input.tools.length > 0;
           state.pendingTurns += 1;
+          state.hookDeliveries.push(delivery);
         }).pipe(
           Effect.zipRight(
             state.query.send({
-              ...claudeTurnMessage(input, state.expectedRuntimeVersion),
+              ...message,
+              ...(delivery.viaHook
+                ? {
+                    onContextDelivered: () => {
+                      delivery.delivered = true;
+                    },
+                  }
+                : {}),
               ...(input.tools.length === 0
                 ? {}
                 : {
@@ -2800,6 +2877,8 @@ function makeConnection(
               });
             } else {
               state.pendingTurns = Math.max(0, state.pendingTurns - 1);
+              const index = state.hookDeliveries.indexOf(delivery);
+              if (index !== -1) state.hookDeliveries.splice(index, 1);
             }
             return Effect.fail(sanitizeFailure(providerFailure));
           }),

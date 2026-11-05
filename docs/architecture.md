@@ -5933,7 +5933,16 @@ prompt is therefore built to be appended, never rewritten:
     records it beside the message, and keeps it across resume. It saves hook context
     over 10,000 characters to a file and shows only a preview, so the context
     goes there only while it fits; otherwise Octant's own instructions go there
-    if they fit and the rest stays inside the message.
+    if they fit and the rest stays inside the message. The hook is used only
+    where it is known to run. Turning the person's own hooks off sets
+    `disableAllHooks` in the session's flag settings, which on 2.1.211 skips
+    settings-file hooks and still runs Octant's SDK hook (measured against a
+    local stand-in endpoint); on a later release with the person's hooks off,
+    the context stays inside the message. A managed policy can still skip every
+    hook, so the hook confirms each message whose context it handed over. A
+    turn whose context it never confirmed reports no prompt retention, so the
+    held record sends that context again, and the session frames its context
+    inside the message from then on.
   - _Every other runtime_, and Codex or Claude Code below those releases:
     the sections, then `Current request:` and the request, in one message
     (`renderProviderTurnPrompt`). Octant Harness instead makes `instructions`
