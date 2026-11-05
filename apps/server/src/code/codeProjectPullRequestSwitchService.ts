@@ -346,6 +346,15 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
       return { status: "unavailable", reason: "unavailable" };
     }
     if (observation.state !== "open") return { status: "refused", reason: "not-open" };
+    // Another linked thread approved at the same time may have recorded its
+    // watch during the forge read; checking here, with no await before the
+    // record, keeps the first watcher instead of silently replacing it.
+    const settled = this.#fold(target).watch;
+    if (settled.status === "on") {
+      return settled.threadId === String(input.threadId)
+        ? this.#watchingOutcome(target, true)
+        : { status: "refused", reason: "watched-by-another-thread" };
+    }
     this.#recordWatch(
       target,
       input.threadId,

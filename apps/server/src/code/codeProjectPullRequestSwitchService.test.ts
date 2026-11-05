@@ -753,4 +753,32 @@ describe("a thread watching its own pull request", () => {
     expect(ask).not.toHaveBeenCalled();
     expect(f.recorded(WATCH)).toHaveLength(1);
   });
+
+  it("keeps the first of two linked threads approved at once as the watcher, and refuses the second", async () => {
+    const otherThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000002");
+    const f = fixture({ linked: [String(threadId), String(otherThreadId)] });
+    const reads: Array<(observation: GhPullRequestSwitchObservation) => void> = [];
+    f.forge.observe.mockImplementation(
+      () => new Promise<GhPullRequestSwitchObservation>((resolve) => reads.push(resolve)),
+    );
+    const ask = vi.fn(async () => "approved" as const);
+    const first = f.service.watch({ windowId, threadId, providerInstanceId, ask, signal });
+    const second = f.service.watch({
+      windowId,
+      threadId: otherThreadId,
+      providerInstanceId,
+      ask,
+      signal,
+    });
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    reads[0]?.(activity());
+    expect(await first).toMatchObject({ status: "watching", alreadyWatching: false });
+    reads[1]?.(activity());
+    expect(await second).toEqual({ status: "refused", reason: "watched-by-another-thread" });
+    expect(f.recorded(WATCH)).toHaveLength(1);
+    expect(await f.service.unwatch({ threadId, providerInstanceId })).toEqual({
+      status: "unwatched",
+      target,
+    });
+  });
 });
