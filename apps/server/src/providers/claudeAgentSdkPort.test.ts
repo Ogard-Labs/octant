@@ -614,6 +614,95 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
+  test("hands each message's Octant context to the prompt hook for that message alone", async () => {
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+          yield* query.send({ text: "hei", context: "Octant's rules." });
+          const offered = yield* Effect.promise(() => iterator.next());
+          expect(offered.value).toMatchObject({ message: { role: "user", content: "hei" } });
+          yield* query.send({ text: "plain" });
+          yield* Effect.promise(() => iterator.next());
+
+          const promptHook = harness.invocation?.options.hooks.UserPromptSubmit[0]?.hooks[0];
+          if (promptHook === undefined) throw new Error("Expected the prompt hook.");
+          const signal = new AbortController().signal;
+          const submit = (prompt: string) =>
+            Effect.promise(() =>
+              promptHook(
+                { hook_event_name: "UserPromptSubmit", prompt, session_id: "session-1" },
+                undefined,
+                { signal },
+              ),
+            );
+          expect(yield* submit("hei")).toEqual({
+            hookSpecificOutput: {
+              hookEventName: "UserPromptSubmit",
+              additionalContext: "Octant's rules.",
+            },
+          });
+          expect(yield* submit("plain")).toEqual({});
+          expect(yield* submit("hei")).toEqual({});
+
+          yield* query.send({ text: "again", context: "Rules before the interrupt." });
+          yield* query.interrupt();
+          expect(yield* submit("again")).toEqual({});
+        }),
+      ),
+    );
+  });
+
+  test("keeps a queued message's context for that message when an earlier one has the same text", async () => {
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+          yield* query.send({ text: "continue" });
+          yield* Effect.promise(() => iterator.next());
+          const delivered = vi.fn();
+          yield* query.send({
+            text: "continue",
+            context: "Rules for the second turn.",
+            onContextDelivered: delivered,
+          });
+          yield* Effect.promise(() => iterator.next());
+
+          const promptHook = harness.invocation?.options.hooks.UserPromptSubmit[0]?.hooks[0];
+          if (promptHook === undefined) throw new Error("Expected the prompt hook.");
+          const signal = new AbortController().signal;
+          const submit = (prompt: string, extra: Record<string, unknown> = {}) =>
+            Effect.promise(() =>
+              promptHook(
+                { hook_event_name: "UserPromptSubmit", prompt, session_id: "session-1", ...extra },
+                undefined,
+                { signal },
+              ),
+            );
+          // A prompt Octant did not send, and one inside a subagent, take nothing.
+          expect(yield* submit("something else")).toEqual({});
+          expect(yield* submit("continue", { agent_id: "agent-1" })).toEqual({});
+          expect(yield* submit("continue")).toEqual({});
+          expect(delivered).not.toHaveBeenCalled();
+          expect(yield* submit("continue")).toEqual({
+            hookSpecificOutput: {
+              hookEventName: "UserPromptSubmit",
+              additionalContext: "Rules for the second turn.",
+            },
+          });
+          // The driver counts the context as delivered only on this word.
+          expect(delivered).toHaveBeenCalledOnce();
+        }),
+      ),
+    );
+  });
+
   test("interrupt clears locally queued input and prevents later prompt execution", async () => {
     const harness = makeHarness();
 

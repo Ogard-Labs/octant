@@ -572,7 +572,7 @@ async function sendSelectedSkillToGenericProvider(
     },
     loadMaterial: async (capabilityEntry) => ({
       context: {
-        kind: "instructions" as const,
+        kind: "skill-instructions" as const,
         text:
           capabilityEntry.source.kind === "plugin-package" &&
           capabilityEntry.source.componentId === "skill-swiftui-ui-patterns"
@@ -1454,7 +1454,7 @@ describe("extensions marketplace integrated exit gate", () => {
       },
       loadMaterial: async (capabilityEntry) => ({
         context: {
-          kind: "instructions" as const,
+          kind: "skill-instructions" as const,
           text:
             capabilityEntry.source.kind === "plugin-package" &&
             capabilityEntry.source.componentId === "summarize"

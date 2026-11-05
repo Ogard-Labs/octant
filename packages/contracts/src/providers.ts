@@ -1622,6 +1622,11 @@ export const ProviderContextBlock = Schema.Struct({
     // stock when it opens. Never held, so the standing instructions stay
     // byte-stable and a provider's prompt cache is never invalidated by them.
     "turn-instructions",
+    // Instructions from a skill the person enabled, whether standalone or in a
+    // plugin. Standing like Octant's own, but kept apart from them so a runtime
+    // with a higher-authority channel for Octant's rules (Codex developer
+    // context) never lifts third-party text into it.
+    "skill-instructions",
     "user-message",
     "assistant-message",
     // What Octant remembers about the person from earlier threads, framed as

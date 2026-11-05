@@ -343,7 +343,7 @@ describe("curated Build iOS Apps through the provider-neutral extension path", (
       },
       loadMaterial: async (capabilityEntry) => ({
         context: {
-          kind: "instructions" as const,
+          kind: "skill-instructions" as const,
           text:
             capabilityEntry.source.kind === "plugin-package" &&
             capabilityEntry.source.componentId === "skill-swiftui-ui-patterns"

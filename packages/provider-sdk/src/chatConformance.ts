@@ -86,6 +86,54 @@ function neutralizeContextTags(text: string): string {
 }
 
 /**
+ * Each context block as a tagged plain-text section, in the order given. The
+ * same blocks always render to the same bytes.
+ */
+export function renderProviderContextSections(
+  context: ReadonlyArray<ProviderContextBlock>,
+): string {
+  return context
+    .map(
+      (block) =>
+        `<${CONTEXT_TAG} kind="${block.kind}">\n${neutralizeContextTags(block.text)}\n</${CONTEXT_TAG}>\n`,
+    )
+    .join("\n");
+}
+
+/**
+ * Whether a block is Octant's own instruction (or the person's own, for a
+ * thread's personality), rather than a skill's text or material such as
+ * files, memory, and earlier messages.
+ */
+export function isOctantInstructionContext(block: ProviderContextBlock): boolean {
+  return block.kind === "instructions" || block.kind === "turn-instructions";
+}
+
+/**
+ * Octant's own instructions as plain paragraphs, for a channel that already
+ * marks its content as Octant's (Codex developer context, the Claude Code
+ * prompt hook). A per-block tag there only repeats what the channel says, and
+ * its kind means nothing to the model.
+ */
+export function renderOctantInstructions(blocks: ReadonlyArray<ProviderContextBlock>): string {
+  return blocks.map((block) => block.text).join("\n\n");
+}
+
+/**
+ * The context for one channel beside the request: Octant's instructions as
+ * plain paragraphs, then everything else as tagged sections, where the kind
+ * says what the text is and that it is not the person's words.
+ */
+export function renderContextBesideRequest(context: ReadonlyArray<ProviderContextBlock>): string {
+  const instructions = context.filter(isOctantInstructionContext);
+  const material = context.filter((block) => !isOctantInstructionContext(block));
+  return [
+    ...(instructions.length === 0 ? [] : [renderOctantInstructions(instructions)]),
+    ...(material.length === 0 ? [] : [renderProviderContextSections(material)]),
+  ].join("\n\n");
+}
+
+/**
  * The text a provider receives for one turn: each context block as a tagged
  * plain-text section in the order given, then the request itself.
  *
@@ -98,14 +146,9 @@ export function renderProviderTurnPrompt(
   input: Pick<ProviderTurnInput, "context" | "prompt">,
 ): string {
   if (input.context === undefined || input.context.length === 0) return input.prompt;
-  return [
-    ...input.context.map(
-      (block) =>
-        `<${CONTEXT_TAG} kind="${block.kind}">\n${neutralizeContextTags(block.text)}\n</${CONTEXT_TAG}>\n`,
-    ),
-    "Current request:",
-    input.prompt,
-  ].join("\n");
+  return [renderProviderContextSections(input.context), "Current request:", input.prompt].join(
+    "\n",
+  );
 }
 
 /**
@@ -115,6 +158,7 @@ export function renderProviderTurnPrompt(
  */
 const STANDING_CONTEXT_KINDS: ReadonlySet<ProviderContextBlock["kind"]> = new Set([
   "instructions",
+  "skill-instructions",
   "person-memory",
   "project-memory",
   "work-item",
@@ -137,7 +181,7 @@ export function providerContextIdentity(block: ProviderContextBlock): string {
 }
 
 export const PROVIDER_CONTEXT_RESTATED =
-  "Octant's standing context for this conversation changed. The Octant context in this message replaces all Octant context sent earlier in this conversation.";
+  "Octant's standing context for this conversation changed. The Octant context sent with this turn replaces all Octant context sent earlier in this conversation.";
 
 export type ProviderTurnContextDelta =
   | {
