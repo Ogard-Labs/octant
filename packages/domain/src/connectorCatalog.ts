@@ -12,6 +12,8 @@ export type ConnectorAuth =
       readonly clientSetup?: "registered";
       readonly setupGuide?: string;
       readonly requestedScopes?: readonly string[];
+      /** Plain-language authority disclosed before app consent, not a tool approval. */
+      readonly permissionNotice?: string;
     }
   /** The server takes a token the person creates with the vendor, sent in one header. */
   | {
@@ -51,6 +53,9 @@ export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string
  * metadata requires a person-owned registered confidential client and a single
  * public-search scope; no live registration/consent/tool acceptance is claimed.
  */
+export const GITHUB_REPOSITORY_PERMISSION_NOTICE =
+  "Allows read and write access to public and private repositories and related organization resources available to your account. This OAuth App permission does not select individual repositories. Reusing the same app can change permissions returned to other connections; their original access policy is retained.";
+
 const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
   {
     id: "slack",
@@ -112,6 +117,21 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     category: "popular",
     url: "https://mcp.vercel.com",
     auth: { kind: "sign-in" },
+  },
+  {
+    id: "github-repositories",
+    displayName: "GitHub repositories",
+    description: "Read and write public and private repositories with your registered OAuth App.",
+    category: "developer-tools",
+    url: "https://api.githubcopilot.com/mcp/",
+    auth: {
+      kind: "sign-in",
+      clientSetup: "registered",
+      setupGuide:
+        "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps",
+      requestedScopes: ["read:user", "repo", "offline_access"],
+      permissionNotice: GITHUB_REPOSITORY_PERMISSION_NOTICE,
+    },
   },
   {
     id: "github-oauth",

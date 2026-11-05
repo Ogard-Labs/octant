@@ -15,7 +15,7 @@ import { buildLibrary } from "./libraryModel";
 import { ConnectorsView } from "./ConnectorsView";
 import { McpServerSignInControl } from "./McpServerSignInControl";
 
-describe.each(["slack", "github-oauth"] as const)(
+describe.each(["slack", "github-oauth", "github-repositories"] as const)(
   "registered %s connector journey",
   (connectorId) => {
     const entry = connectorById(connectorId);
@@ -41,7 +41,13 @@ describe.each(["slack", "github-oauth"] as const)(
     const guideUrl = entry.auth.setupGuide;
     if (guideUrl === undefined) throw new Error("Expected a documented setup guide");
     const requestedScopes = entry.auth.requestedScopes ?? [];
-    const registration = { guideUrl, requestedScopes };
+    const registration = {
+      guideUrl,
+      requestedScopes,
+      ...(entry.auth.permissionNotice === undefined
+        ? {}
+        : { permissionNotice: entry.auth.permissionNotice }),
+    };
     beforeEach(() => localStorage.clear());
 
     function fixture() {
@@ -76,6 +82,9 @@ describe.each(["slack", "github-oauth"] as const)(
           if (request.kind === "prepare-client")
             return Response.json({
               kind: "client-setup",
+              ...(connectorId === "github-repositories"
+                ? { mcpPermissionProfile: "github-repositories-read-write" }
+                : {}),
               resource,
               issuer,
               tokenEndpoint,
@@ -125,7 +134,7 @@ describe.each(["slack", "github-oauth"] as const)(
       localHost = true,
     ) {
       const slack = connectorById(connectorId);
-      if (slack === undefined) throw new Error("Expected bundled Slack entry");
+      if (slack === undefined) throw new Error("Expected registered connector entry");
       return kind === "library" ? (
         <LibraryView
           items={buildLibrary({ snapshot: undefined, connectors: [slack] })}
@@ -234,6 +243,12 @@ describe.each(["slack", "github-oauth"] as const)(
         await connect(kind, user);
         const dialog = await screen.findByRole("dialog", { name: "Client setup" });
         expect(within(dialog).getByLabelText("Callback address")).toHaveValue(callback);
+        if (connectorId === "github-repositories")
+          expect(
+            within(dialog).getByText(
+              /allows read and write access to public and private repositories/i,
+            ),
+          ).toBeInTheDocument();
         expect(setup.requests.map((request) => request.kind)).toEqual(["status", "prepare-client"]);
         expect(setup.adds).toEqual([
           {
@@ -258,6 +273,14 @@ describe.each(["slack", "github-oauth"] as const)(
             secret: { store: "onepassword", reference: "op://Private/Slack/client secret" },
           },
         });
+        if (connectorId === "github-repositories") {
+          expect(saved).toMatchObject({
+            setup: { binding: { mcpPermissionProfile: "github-repositories-read-write" } },
+          });
+          expect(
+            screen.getByText(/allows read and write access to public and private repositories/i),
+          ).toBeInTheDocument();
+        }
         expect(setup.requests.some((request) => request.kind === "begin")).toBe(false);
         await user.click(screen.getByRole("button", { name: "Sign in" }));
         await screen.findByRole("link", { name: "Open the sign-in page" });
@@ -294,7 +317,7 @@ describe.each(["slack", "github-oauth"] as const)(
       {
         ...(connectorId === "slack" ? { workspaceId: "TTEST001" } : {}),
         userId: connectorId === "slack" ? "UTEST001" : "12345",
-        grantedScopes: requestedScopes,
+        grantedScopes: requestedScopes.filter((scope) => scope !== "offline_access"),
       },
     ])(
       "shows only reported account facts and task readiness remains unchecked (%j)",

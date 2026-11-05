@@ -2,6 +2,28 @@ import { describe, expect, it } from "vitest";
 import { connectorCatalog, featuredConnectors, searchConnectorCatalog } from "./connectorCatalog";
 
 describe("the connectors catalog", () => {
+  it("offers repository read/write as a separate explicit GitHub preset without changing PAT or profile-read identities", () => {
+    const repository = connectorCatalog().find((entry) => entry.id === "github-repositories");
+    expect(repository).toMatchObject({
+      displayName: "GitHub repositories",
+      url: "https://api.githubcopilot.com/mcp/",
+      auth: {
+        kind: "sign-in",
+        clientSetup: "registered",
+        requestedScopes: ["read:user", "repo", "offline_access"],
+      },
+    });
+    if (repository === undefined || repository.auth.kind !== "sign-in")
+      throw new Error("Expected explicit repository preset");
+    expect(repository.auth.permissionNotice).toMatch(
+      /read and write.*public and private repositories/i,
+    );
+    expect(connectorCatalog().find((entry) => entry.id === "github-oauth")?.auth).toMatchObject({
+      requestedScopes: ["read:user", "offline_access"],
+    });
+    expect(connectorCatalog().find((entry) => entry.id === "github")?.auth.kind).toBe("key");
+  });
+
   it("keeps GitHub PAT separate from the bounded registered OAuth App read profile", () => {
     const pat = connectorCatalog().find((entry) => entry.id === "github");
     const app = connectorCatalog().find((entry) => entry.id === "github-oauth");

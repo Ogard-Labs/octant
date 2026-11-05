@@ -446,6 +446,27 @@ verification asks you to review the app permissions and sign in again. Restore
 your linked secret store if rotation cannot access the app secret. Sign-out
 retains app setup and leaves an independently added PAT connection intact.
 
+### GitHub repository read and write
+
+Choose **GitHub repositories** separately when you need repository work. This
+preset requests `repo`, `read:user` and `offline_access`. GitHub's OAuth App
+`repo` permission allows reading and writing public and private repositories and
+related organization resources your account can access. It does not select
+individual repositories, and it is not a private-repository read-only grant.
+The app setup and sign-in controls show this before you save or consent.
+Use the existing PAT path if you prefer a separately configured credential.
+
+Saving app setup still starts no consent or task action. Choose **Sign in**
+explicitly, then select and approve the actually available tools in your task.
+Your profile-read and PAT entries stay in place. Reusing the same OAuth App
+can change permissions GitHub returns to other connections: if an old
+profile-read connection receives broader access during refresh, Octant asks
+you to reconnect instead of using it. Review app permissions in GitHub before
+signing in again. Separate Octant entries do not guarantee separate vendor
+consent. Organization policy and tool eligibility still apply; an OAuth token
+alone does not prove every private repository or write tool is available.
+No failed or uncertain tool call is automatically replayed.
+
 ### Sign in to a hosted server
 
 A server you added by its address can ask you to sign in instead of taking a

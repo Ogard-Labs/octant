@@ -245,6 +245,9 @@ export { resolveOnePasswordExecutable } from "./linkedSecretStores";
 
 export {
   GITHUB_MCP_OAUTH_APP,
+  GITHUB_MCP_REPOSITORY_PROFILE,
+  githubMcpRequiredScopes,
+  type GithubMcpPermissionProfile,
   isGithubMcpGrantBinding,
   isGithubMcpDescriptorBinding,
   isGithubMcpCallbackUri,

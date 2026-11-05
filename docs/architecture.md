@@ -8955,6 +8955,34 @@ under these scopes: actual GitHub eligibility, rotation and an approved MCP read
 remain separate live acceptance gates, and unsupported tools retain normal
 permission/reconnect errors. No application is registered by this entry.
 
+The separate GitHub repositories preset deliberately requests `repo`,
+`read:user` and `offline_access` for public/private repository read and write.
+Before Save and Sign in, the shared controls disclose that `repo` is broad
+repository and related organization-resource authority, not a selection of
+individual repositories or an OAuth private-read-only permission. PAT and the
+original profile-read entry keep distinct generated packages and local grants.
+A host-owned catalog receipt derives this broader profile only from the
+registered generated folder's reserved canonical path and verified configuration,
+with installed package/version/digest checks. A matching URL, plugin-supplied
+label or renderer field cannot select it. Discovery and secret linking retain
+the captured owner through their waits and the short serialized state commit;
+replaced ownership or a changed displayed profile refuses Save/Begin.
+
+The closed permission profile travels through the existing descriptor, both
+broker request/response projections, persisted grant, refresh and sign-in record.
+Absent legacy profile always means profile-read on hydration. Selected descriptor
+and returned grant profiles must match before a bearer can be attached; known
+extra/missing scopes refuse. New repository consent cannot upgrade an old read
+grant. Reusing one OAuth App may couple GitHub's vendor-side authorization:
+if an old read connection refreshes into broader permissions it requires
+reconnection instead of using them. Separate local entries are not a promise
+of independent vendor consent. A new connection/permission choice requires an
+explicit sign-in and normal task/tool approval, never a replay. No advertised
+scope union, silent installation migration, optional `public_repo` substitution
+or GitHub App installation engine is introduced. Tool/account/org eligibility
+and actual approved private reads/writes remain live acceptance gates; fine-grained
+GitHub Apps are an optional separately selected capability.
+
 Scopes
 follow the RFC 6749 scope-token grammar, so a URL-shaped scope survives. An
 issuer may grant an access token without a refresh token; such a grant lasts

@@ -137,6 +137,10 @@ export const HostOAuthDialect = Schema.Literal(
 );
 export type HostOAuthDialect = typeof HostOAuthDialect.Type;
 
+/** Closed host-selected GitHub permission policy; omission retains profile-read. */
+export const GithubMcpPermissionProfile = Schema.Literal("github-repositories-read-write");
+export type GithubMcpPermissionProfile = typeof GithubMcpPermissionProfile.Type;
+
 /**
  * The stable identifier of the host machine a ChatGPT plan sign-in is
  * registered for. Sent as `ext_agent_host_id` before the first sign-in and
@@ -196,6 +200,7 @@ export const HostOAuthDescriptor = Schema.Struct({
   /** Closed Slack user-token dialect: transport and issuer are distinct from OAuth resource. */
   mcpTransportUrl: Schema.optional(Endpoint),
   mcpIssuer: Schema.optional(Endpoint),
+  mcpPermissionProfile: Schema.optional(GithubMcpPermissionProfile),
   /**
    * MCP authorization dialect only: the loopback port the callback listens
    * on, chosen before the flow so the client registration could name it.
@@ -215,6 +220,11 @@ export const HostOAuthDescriptor = Schema.Struct({
   .pipe(
     Schema.filter(
       (descriptor) => {
+        if (
+          descriptor.mcpPermissionProfile !== undefined &&
+          descriptor.dialect !== "github-mcp-oauth-app"
+        )
+          return false;
         if (
           descriptor.dialect !== "mcp-authorization" &&
           descriptor.dialect !== "slack-mcp-user" &&
@@ -319,7 +329,10 @@ export const HostOAuthDescriptor = Schema.Struct({
               descriptor.authorizationEndpoint !== "https://github.com/login/oauth/authorize" ||
               descriptor.tokenEndpoint !== "https://github.com/login/oauth/access_token" ||
               descriptor.clientAuthentication?.method !== "client_secret_post" ||
-              descriptor.scopes.length !== 2 ||
+              descriptor.scopes.length !==
+                (descriptor.mcpPermissionProfile === undefined ? 2 : 3) ||
+              (descriptor.mcpPermissionProfile !== undefined &&
+                !descriptor.scopes.includes("repo")) ||
               !descriptor.scopes.includes("read:user") ||
               !descriptor.scopes.includes("offline_access"))
           )

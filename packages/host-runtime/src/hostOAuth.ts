@@ -22,6 +22,8 @@ import {
 
 import {
   GITHUB_MCP_OAUTH_APP,
+  GITHUB_MCP_REPOSITORY_PROFILE,
+  type GithubMcpPermissionProfile,
   isGithubMcpGrantBinding,
   isGithubMcpDescriptorBinding,
   isGithubMcpCallbackUri,
@@ -219,6 +221,7 @@ export interface HostOAuthDescriptor {
   readonly resource?: string;
   readonly mcpTransportUrl?: string;
   readonly mcpIssuer?: string;
+  readonly mcpPermissionProfile?: GithubMcpPermissionProfile;
   /**
    * MCP authorization dialect only: the loopback port the callback listens
    * on. The client registration had to name the redirect address before the
@@ -348,6 +351,7 @@ export type HostOAuthAccessResult =
       readonly kind: "granted";
       readonly accessToken: string;
       readonly mcpAccount?: McpOAuthAccount;
+      readonly mcpPermissionProfile?: GithubMcpPermissionProfile;
       readonly tokenType: string;
       /** Absent when the stored credential does not expire. */
       readonly expiresAt?: string;
@@ -448,6 +452,7 @@ interface StoredGrant {
   readonly resource?: string;
   readonly mcpTransportUrl?: string;
   readonly mcpIssuer?: string;
+  readonly mcpPermissionProfile?: GithubMcpPermissionProfile;
   readonly clientAuthentication?: McpOAuthClientAuthentication;
   /**
    * ChatGPT plan dialect only: the identity token from the last exchange or
@@ -568,6 +573,7 @@ export async function exchangeAuthorizationCode(input: {
   readonly resource?: string;
   readonly mcpTransportUrl?: string;
   readonly mcpIssuer?: string;
+  readonly mcpPermissionProfile?: GithubMcpPermissionProfile;
   /** ChatGPT plan dialect: the OIDC nonce bound to the identity token. */
   readonly nonce?: string;
   /** ChatGPT plan dialect: the issued client id captured from the callback. */
@@ -591,7 +597,8 @@ export async function exchangeAuthorizationCode(input: {
   if (
     input.dialect !== SLACK_MCP_DIALECT &&
     input.dialect !== GITHUB_MCP_DIALECT &&
-    (input.mcpTransportUrl !== undefined ||
+    (input.mcpPermissionProfile !== undefined ||
+      input.mcpTransportUrl !== undefined ||
       input.mcpIssuer !== undefined ||
       input.resource === SLACK_MCP_USER_OAUTH.resource ||
       input.tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint ||
@@ -690,6 +697,9 @@ export async function exchangeAuthorizationCode(input: {
       : {}),
     ...(input.mcpTransportUrl === undefined ? {} : { mcpTransportUrl: input.mcpTransportUrl }),
     ...(input.mcpIssuer === undefined ? {} : { mcpIssuer: input.mcpIssuer }),
+    ...(input.mcpPermissionProfile === undefined
+      ? {}
+      : { mcpPermissionProfile: input.mcpPermissionProfile }),
     ...(input.clientAuthentication === undefined
       ? {}
       : { clientAuthentication: input.clientAuthentication }),
@@ -2513,6 +2523,9 @@ export function createHostOAuthRuntime(options: {
       ...(session.descriptor.mcpIssuer === undefined
         ? {}
         : { mcpIssuer: session.descriptor.mcpIssuer }),
+      ...(session.descriptor.mcpPermissionProfile === undefined
+        ? {}
+        : { mcpPermissionProfile: session.descriptor.mcpPermissionProfile }),
       ...(session.nonce === "" ? {} : { nonce: session.nonce }),
       ...(issuedClientId === undefined ? {} : { issuedClientId }),
       ...(session.descriptor.extAgentHostId === undefined
@@ -2951,6 +2964,9 @@ export function createHostOAuthRuntime(options: {
         ? {}
         : { mcpTransportUrl: current.mcpTransportUrl }),
       ...(current.mcpIssuer === undefined ? {} : { mcpIssuer: current.mcpIssuer }),
+      ...(current.mcpPermissionProfile === undefined
+        ? {}
+        : { mcpPermissionProfile: current.mcpPermissionProfile }),
       ...(current.clientAuthentication === undefined
         ? {}
         : { clientAuthentication: current.clientAuthentication }),
@@ -3033,6 +3049,9 @@ export function createHostOAuthRuntime(options: {
           accessToken: grant.accessToken,
           tokenType: grant.tokenType,
           ...(grant.mcpAccount === undefined ? {} : { mcpAccount: grant.mcpAccount }),
+          ...(grant.mcpPermissionProfile === undefined
+            ? {}
+            : { mcpPermissionProfile: grant.mcpPermissionProfile }),
           ...(grant.expiresAt === undefined
             ? {}
             : { expiresAt: new Date(grant.expiresAt).toISOString() }),
@@ -3211,6 +3230,9 @@ async function accessRoute(
       accessToken: granted.accessToken,
       tokenType: granted.tokenType,
       ...(granted.mcpAccount === undefined ? {} : { mcpAccount: granted.mcpAccount }),
+      ...(granted.mcpPermissionProfile === undefined
+        ? {}
+        : { mcpPermissionProfile: granted.mcpPermissionProfile }),
       ...(granted.expiresAt === undefined ? {} : { expiresAt: granted.expiresAt }),
       ...(granted.subscriptionUsageGranted === undefined
         ? {}
@@ -3352,6 +3374,7 @@ async function requestTokens(input: {
   readonly resource?: string;
   readonly mcpTransportUrl?: string;
   readonly mcpIssuer?: string;
+  readonly mcpPermissionProfile?: GithubMcpPermissionProfile;
   /** MCP authorization dialect: an issuer may grant an access token alone. */
   readonly refreshTokenOptional?: boolean;
   readonly tokenDialect?: typeof SLACK_MCP_DIALECT | typeof GITHUB_MCP_DIALECT;
@@ -3489,6 +3512,9 @@ async function requestTokens(input: {
     input.tokenDialect === GITHUB_MCP_DIALECT && githubIdentity !== undefined
       ? githubMcpReportedAccount({
           token: body,
+          ...(input.mcpPermissionProfile === undefined
+            ? {}
+            : { profile: input.mcpPermissionProfile }),
           identity: githubIdentity.body,
           oauthScopes: githubIdentity.oauthScopes,
           ...(input.previousMcpAccount === undefined ? {} : { previous: input.previousMcpAccount }),
@@ -3532,6 +3558,9 @@ async function requestTokens(input: {
         : {}),
       ...(input.mcpTransportUrl === undefined ? {} : { mcpTransportUrl: input.mcpTransportUrl }),
       ...(input.mcpIssuer === undefined ? {} : { mcpIssuer: input.mcpIssuer }),
+      ...(input.mcpPermissionProfile === undefined
+        ? {}
+        : { mcpPermissionProfile: input.mcpPermissionProfile }),
       ...(input.clientAuthentication === undefined
         ? {}
         : { clientAuthentication: input.clientAuthentication }),
@@ -3654,11 +3683,17 @@ function decodeGrant(raw: string): StoredGrant {
   const clientAuthentication = parseClientAuthentication(parsed.clientAuthentication);
   const mcpTransportUrl = parsed.mcpTransportUrl;
   const mcpIssuer = parsed.mcpIssuer;
+  const mcpPermissionProfile = parsed.mcpPermissionProfile;
+  if (
+    mcpPermissionProfile !== undefined &&
+    (dialect !== GITHUB_MCP_DIALECT || mcpPermissionProfile !== GITHUB_MCP_REPOSITORY_PROFILE)
+  )
+    throw new CredentialStoreFailure("invalid");
   const mcpAccount =
     parsed.mcpAccount === undefined
       ? undefined
       : dialect === GITHUB_MCP_DIALECT
-        ? decodeGithubMcpAccount(parsed.mcpAccount)
+        ? decodeGithubMcpAccount(parsed.mcpAccount, mcpPermissionProfile)
         : decodeSlackMcpAccount(parsed.mcpAccount);
   if (
     (parsed.mcpAccount !== undefined &&
@@ -3676,6 +3711,7 @@ function decodeGrant(raw: string): StoredGrant {
   )
     throw new CredentialStoreFailure("invalid");
   const mcpBinding = {
+    mcpPermissionProfile,
     clientId,
     resource,
     tokenEndpoint,
@@ -3767,6 +3803,7 @@ function decodeGrant(raw: string): StoredGrant {
     ...(resource === undefined ? {} : { resource }),
     ...(typeof mcpTransportUrl === "string" ? { mcpTransportUrl } : {}),
     ...(typeof mcpIssuer === "string" ? { mcpIssuer } : {}),
+    ...(mcpPermissionProfile === GITHUB_MCP_REPOSITORY_PROFILE ? { mcpPermissionProfile } : {}),
     ...(mcpAccount === undefined ? {} : { mcpAccount }),
     ...(clientAuthentication === undefined ? {} : { clientAuthentication }),
     ...(dialect === undefined ? {} : { dialect }),
@@ -3788,6 +3825,12 @@ function decodeGrant(raw: string): StoredGrant {
 function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescriptor | undefined {
   if (!safeId(descriptor.descriptorId) || !safeId(descriptor.termsId)) return undefined;
   const dialect = descriptor.dialect;
+  if (
+    descriptor.mcpPermissionProfile !== undefined &&
+    (dialect !== GITHUB_MCP_DIALECT ||
+      descriptor.mcpPermissionProfile !== GITHUB_MCP_REPOSITORY_PROFILE)
+  )
+    return undefined;
   if (
     dialect !== undefined &&
     dialect !== OPENROUTER_DIALECT &&
@@ -4043,6 +4086,12 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
   const resource = value.resource;
   const mcpTransportUrl = value.mcpTransportUrl;
   const mcpIssuer = value.mcpIssuer;
+  const mcpPermissionProfile = value.mcpPermissionProfile;
+  if (
+    mcpPermissionProfile !== undefined &&
+    (dialect !== GITHUB_MCP_DIALECT || mcpPermissionProfile !== GITHUB_MCP_REPOSITORY_PROFILE)
+  )
+    return undefined;
   const redirectPort = value.redirectPort;
   const redirectHostname = value.redirectHostname;
   const tenantId = value.tenantId;
@@ -4080,6 +4129,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     ...(typeof resource === "string" ? { resource } : {}),
     ...(typeof mcpTransportUrl === "string" ? { mcpTransportUrl } : {}),
     ...(typeof mcpIssuer === "string" ? { mcpIssuer } : {}),
+    ...(mcpPermissionProfile === GITHUB_MCP_REPOSITORY_PROFILE ? { mcpPermissionProfile } : {}),
     ...(typeof redirectPort === "number" ? { redirectPort } : {}),
     ...(redirectHostname === "localhost" ? { redirectHostname } : {}),
     ...(typeof tenantId === "string" ? { tenantId } : {}),

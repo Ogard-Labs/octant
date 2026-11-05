@@ -829,15 +829,12 @@ export function wireProviders(deps: ProvidersDependencies) {
     // The address a user-added server's package names, read from the
     // installed package itself so a sign-in can only ever target the server
     // the person added.
-    const mcpServerSignInAddress = async (
-      extensionId: string,
-      componentId: string,
-    ): Promise<string | undefined> => {
+    const mcpServerSignInPolicy = async (extensionId: string, componentId: string) => {
       const packageState = extensionLifecycleService
         .snapshot()
         .packages.find((candidate) => String(candidate.extensionId) === extensionId);
       if (packageState === undefined) return undefined;
-      return userAddedMcpServers.signInAddress(packageState, componentId, () =>
+      const policy = await userAddedMcpServers.signInPolicy(packageState, componentId, () =>
         extensionPackageStore.readVerifiedConfiguration(
           {
             extensionId: packageState.extensionId,
@@ -848,7 +845,28 @@ export function wireProviders(deps: ProvidersDependencies) {
           componentId,
         ),
       );
+      if (policy === undefined) return undefined;
+      return {
+        ...policy,
+        current: () => {
+          const current = extensionLifecycleService
+            .snapshot()
+            .packages.find((candidate) => String(candidate.extensionId) === extensionId);
+          return (
+            policy.current() &&
+            current?.activation.installed === true &&
+            current.packageId === packageState.packageId &&
+            current.stateVersion === packageState.stateVersion &&
+            current.digest === packageState.digest &&
+            current.version === packageState.version
+          );
+        },
+      };
     };
+    const mcpServerSignInAddress = async (
+      extensionId: string,
+      componentId: string,
+    ): Promise<string | undefined> => (await mcpServerSignInPolicy(extensionId, componentId))?.url;
     // Settings asks about every MCP server component, so a host without the
     // broker names the missing broker only for a server that could sign in;
     // every other component, a third-party plugin's included, has nothing to
@@ -1414,6 +1432,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         refresh: (credentialRef) => oauthBroker.refresh(credentialRef),
         actorId: OCTANT_LOCAL_ACTOR_ID,
         serverUrl: mcpServerSignInAddress,
+        serverPolicy: mcpServerSignInPolicy,
         onAuthenticationChanged: (extensionId, componentId) =>
           agentPluginMcpSessionManager.invalidateAuthentication(extensionId, componentId),
         ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined

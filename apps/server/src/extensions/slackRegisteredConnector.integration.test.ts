@@ -78,9 +78,15 @@ function callback(
 
 /** Local broker/callback sockets; vendor discovery, token exchange and MCP are controlled fixtures. */
 describe.each([
-  { profile: slack, connectorId: "slack" },
-  { profile: github, connectorId: "github-oauth" },
-])("registered $connectorId through existing task authority", ({ profile, connectorId }) => {
+  { profile: slack, connectorId: "slack", mcpPermissionProfile: undefined },
+  { profile: github, connectorId: "github-oauth", mcpPermissionProfile: undefined },
+  {
+    profile: github,
+    connectorId: "github-repositories",
+    mcpPermissionProfile: "github-repositories-read-write" as const,
+  },
+])("registered $connectorId through existing task authority", (scenario) => {
+  const { profile, connectorId, mcpPermissionProfile } = scenario;
   it("configures an actual generated connector, explicitly consents, uses discovered tools and reconnects without old-bearer calls", async () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-slack-connector-"));
     const credentials = memoryStore();
@@ -91,17 +97,21 @@ describe.each([
     let currentChallenge = "";
     let currentCallback = "";
     let approvals = false;
+    let broadenReadScope = false;
     const calls: string[] = [];
     const metadataCalls: string[] = [];
     const journal: unknown[] = [];
     let clock = Date.now();
+    const grantedScopes = [
+      profile.readScope,
+      ...(mcpPermissionProfile === undefined ? [] : ["repo"]),
+    ];
     const requestedScopes =
-      profile.dialect === github.dialect
-        ? [profile.readScope, github.rotationScope]
-        : [profile.readScope];
+      profile.dialect === github.dialect ? [...grantedScopes, github.rotationScope] : grantedScopes;
+    const returnedScopes = () => (broadenReadScope ? [profile.readScope, "repo"] : grantedScopes);
     const account =
       profile.dialect === github.dialect
-        ? { userId: "12345", grantedScopes: [profile.readScope] }
+        ? { userId: "12345", grantedScopes }
         : { workspaceId: "TTEST001", userId: "UTEST001", grantedScopes: [profile.readScope] };
     const resourceMetadata =
       profile.dialect === github.dialect
@@ -119,7 +129,7 @@ describe.each([
           expect(init?.redirect).toBe("error");
           return Response.json(
             { id: 12345, login: "not-retained", email: "not-retained@example.invalid" },
-            { headers: { "x-oauth-scopes": github.readScope } },
+            { headers: { "x-oauth-scopes": returnedScopes().join(",") } },
           );
         }
         expect(String(input)).toBe(profile.tokenEndpoint);
@@ -146,7 +156,7 @@ describe.each([
           refresh_token: `synthetic-slack-refresh-${tokenCalls}`,
           expires_in: 3600,
           ...(profile.dialect === github.dialect
-            ? { scope: profile.readScope }
+            ? { scope: returnedScopes().join(",") }
             : {
                 team: { id: account.workspaceId },
                 authed_user: { id: account.userId, scope: profile.readScope },
@@ -273,7 +283,10 @@ describe.each([
             return Response.json({
               resource: profile.resource,
               authorization_servers: [profile.issuer],
-              scopes_supported: [profile.readScope],
+              scopes_supported:
+                profile.dialect === github.dialect
+                  ? [profile.readScope, "repo"]
+                  : [profile.readScope],
             });
           if (url === issuerMetadata)
             return Response.json({
@@ -306,6 +319,12 @@ describe.each([
         serverUrl: (extensionId, componentId) =>
           extensionId === manifest.extensionId && componentId === component.id
             ? servers.signInAddress(installed, componentId, () =>
+                readFile(join(registered.absolutePath, "mcp.json"), "utf8"),
+              )
+            : Promise.resolve(undefined),
+        serverPolicy: (extensionId, componentId) =>
+          extensionId === manifest.extensionId && componentId === component.id
+            ? servers.signInPolicy(installed, componentId, () =>
                 readFile(join(registered.absolutePath, "mcp.json"), "utf8"),
               )
             : Promise.resolve(undefined),
@@ -348,7 +367,15 @@ describe.each([
                   }
                 : message.method === "tools/list"
                   ? {
-                      tools: [{ name: "fixture_public_search", inputSchema: { type: "object" } }],
+                      tools: [
+                        {
+                          name:
+                            mcpPermissionProfile === undefined
+                              ? "fixture_public_search"
+                              : "fixture_repository_write",
+                          inputSchema: { type: "object" },
+                        },
+                      ],
                     }
                   : { content: [{ type: "text", text: "Synthetic public Slack result" }] },
           });
@@ -436,6 +463,9 @@ describe.each([
               issuer: prepared.issuer,
               tokenEndpoint: prepared.tokenEndpoint,
               callback: prepared.callback,
+              ...(prepared.mcpPermissionProfile === undefined
+                ? {}
+                : { mcpPermissionProfile: prepared.mcpPermissionProfile }),
             },
             kind: "registered",
             clientId: "owned-fixture-client",
@@ -493,12 +523,22 @@ describe.each([
         }
       }
       await consent();
+      const capturedRef = [...credentials.values.keys()][0];
+      if (capturedRef === undefined) throw new Error("Expected actual broker grant");
+      const access = await brokerClient.access(capturedRef);
+      expect(access).toMatchObject({
+        kind: "granted",
+        ...(mcpPermissionProfile === undefined ? {} : { mcpPermissionProfile }),
+      });
+      if (mcpPermissionProfile === undefined)
+        expect(access).not.toHaveProperty("mcpPermissionProfile");
       const resolved = await resolver({ phase: "send", thread, selections: [selection] });
       const toolSet = resolved.toolSet;
       const definition = toolSet?.definitions[0];
       if (toolSet === undefined || definition === undefined)
         throw new Error("Expected actual discovered task tool");
       const execute = () => toolSet.execute({ name: definition.name, inputJson: "{}" });
+      let currentExecute = execute;
       expect(await execute()).toMatchObject({
         isError: true,
         result: { error: "extension-tool-approval-required" },
@@ -515,13 +555,25 @@ describe.each([
         const currentTool = refreshed.toolSet?.definitions[0];
         if (refreshed.toolSet === undefined || currentTool === undefined)
           throw new Error("Expected reconciled fresh task tools");
-        expect(
-          (await refreshed.toolSet.execute({ name: currentTool.name, inputJson: "{}" })).isError,
-        ).not.toBe(true);
+        const refreshedTools = refreshed.toolSet;
+        currentExecute = () => refreshedTools.execute({ name: currentTool.name, inputJson: "{}" });
+        expect((await currentExecute()).isError).not.toBe(true);
         expect(calls).toEqual([
           "Bearer synthetic-slack-access-1",
           "Bearer synthetic-slack-access-2",
         ]);
+      }
+      if (profile.dialect === github.dialect && mcpPermissionProfile === undefined) {
+        // One OAuth App may return newly broadened grants to its old read connection.
+        broadenReadScope = true;
+        clock += 3_601_000;
+        expect((await currentExecute()).isError).toBe(true);
+        expect(calls).toHaveLength(2);
+        expect(await signIn.status(manifest.extensionId, component.id, "local-window")).toEqual({
+          kind: "sign-in-again",
+          reason: "permission-mismatch",
+        });
+        broadenReadScope = false;
       }
       const sentBeforeSignOut = calls.length;
       expect(await signIn.signOut(manifest.extensionId, component.id, "local-window")).toEqual({

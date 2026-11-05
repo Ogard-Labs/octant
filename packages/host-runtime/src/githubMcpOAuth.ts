@@ -15,7 +15,17 @@ export const GITHUB_MCP_OAUTH_APP = {
   userAgent: "Octant",
 } as const;
 
+export const GITHUB_MCP_REPOSITORY_PROFILE = "github-repositories-read-write";
+export type GithubMcpPermissionProfile = typeof GITHUB_MCP_REPOSITORY_PROFILE;
+/** An omitted profile is always the original profile-read policy. */
+export function githubMcpRequiredScopes(profile?: GithubMcpPermissionProfile): readonly string[] {
+  return profile === GITHUB_MCP_REPOSITORY_PROFILE
+    ? [GITHUB_MCP_OAUTH_APP.readScope, "repo"]
+    : [GITHUB_MCP_OAUTH_APP.readScope];
+}
+
 interface Binding {
+  readonly mcpPermissionProfile?: unknown;
   readonly clientId?: unknown;
   readonly resource?: unknown;
   readonly tokenEndpoint?: unknown;
@@ -27,6 +37,8 @@ interface Binding {
 }
 export function isGithubMcpGrantBinding(value: Binding): boolean {
   return (
+    (value.mcpPermissionProfile === undefined ||
+      value.mcpPermissionProfile === GITHUB_MCP_REPOSITORY_PROFILE) &&
     typeof value.clientId === "string" &&
     /^[^\s/?#]{1,256}$/.test(value.clientId) &&
     value.resource === GITHUB_MCP_OAUTH_APP.resource &&
@@ -59,6 +71,7 @@ export function isGithubMcpDescriptorBinding(
     readonly scopes?: unknown;
   },
 ): boolean {
+  const selected = value.scopes;
   return (
     isGithubMcpGrantBinding(value) &&
     value.authorizationEndpoint === GITHUB_MCP_OAUTH_APP.authorizationEndpoint &&
@@ -66,10 +79,14 @@ export function isGithubMcpDescriptorBinding(
     Number.isInteger(value.redirectPort) &&
     Number(value.redirectPort) >= 1024 &&
     Number(value.redirectPort) <= 65535 &&
-    Array.isArray(value.scopes) &&
-    value.scopes.length === 2 &&
-    value.scopes.includes(GITHUB_MCP_OAUTH_APP.readScope) &&
-    value.scopes.includes(GITHUB_MCP_OAUTH_APP.rotationScope)
+    Array.isArray(selected) &&
+    selected.length === (value.mcpPermissionProfile === GITHUB_MCP_REPOSITORY_PROFILE ? 3 : 2) &&
+    githubMcpRequiredScopes(
+      value.mcpPermissionProfile === GITHUB_MCP_REPOSITORY_PROFILE
+        ? value.mcpPermissionProfile
+        : undefined,
+    ).every((scope) => selected.includes(scope)) &&
+    selected.includes(GITHUB_MCP_OAUTH_APP.rotationScope)
   );
 }
 
@@ -84,25 +101,28 @@ function userId(value: unknown): value is string {
   );
 }
 /** Strict persisted projection; no login/email/repository inventory or fabricated workspace. */
-export function decodeGithubMcpAccount(value: unknown): McpOAuthAccount | undefined {
+export function decodeGithubMcpAccount(
+  value: unknown,
+  profile?: GithubMcpPermissionProfile,
+): McpOAuthAccount | undefined {
+  const expected = githubMcpRequiredScopes(profile);
   if (
     !object(value) ||
     Object.keys(value).some((key) => key !== "userId" && key !== "grantedScopes") ||
     !userId(value.userId)
   )
     return undefined;
+  const reported = value.grantedScopes;
   if (
-    value.grantedScopes !== undefined &&
-    (!Array.isArray(value.grantedScopes) ||
-      value.grantedScopes.length !== 1 ||
-      value.grantedScopes[0] !== GITHUB_MCP_OAUTH_APP.readScope)
+    reported !== undefined &&
+    (!Array.isArray(reported) ||
+      reported.length !== expected.length ||
+      !expected.every((scope) => reported.includes(scope)))
   )
     return undefined;
   return {
     userId: value.userId,
-    ...(value.grantedScopes === undefined
-      ? {}
-      : { grantedScopes: [GITHUB_MCP_OAUTH_APP.readScope] }),
+    ...(value.grantedScopes === undefined ? {} : { grantedScopes: [...expected] }),
   };
 }
 
@@ -124,7 +144,9 @@ export function githubMcpReportedAccount(input: {
   readonly identity: Readonly<Record<string, unknown>>;
   readonly oauthScopes: string | null;
   readonly previous?: McpOAuthAccount;
+  readonly profile?: GithubMcpPermissionProfile;
 }): GithubMcpAccountResult {
+  const expected = githubMcpRequiredScopes(input.profile);
   const id = input.identity.id;
   if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) return { kind: "invalid" };
   const currentId = String(id);
@@ -135,12 +157,12 @@ export function githubMcpReportedAccount(input: {
     if (value === undefined) continue;
     const parsed = scopes(value);
     if (parsed === undefined) return { kind: "invalid" };
-    if (parsed.some((entry) => entry !== GITHUB_MCP_OAUTH_APP.readScope))
-      return { kind: "permission-mismatch" };
-    if (!parsed.includes(GITHUB_MCP_OAUTH_APP.readScope)) return { kind: "permission-missing" };
+    if (parsed.some((entry) => !expected.includes(entry))) return { kind: "permission-mismatch" };
+    if (!expected.every((scope) => parsed.includes(scope))) return { kind: "permission-missing" };
     reported.push([...parsed]);
   }
   const latest = reported[reported.length - 1] ?? input.previous?.grantedScopes;
-  if (latest === undefined) return { kind: "permission-missing" };
-  return { kind: "valid", account: { userId: currentId, grantedScopes: [...latest] } };
+  if (latest === undefined || !expected.every((scope) => latest.includes(scope)))
+    return { kind: "permission-missing" };
+  return { kind: "valid", account: { userId: currentId, grantedScopes: [...expected] } };
 }
