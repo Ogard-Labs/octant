@@ -962,11 +962,15 @@ extra typed lines and visible notices is intentional. Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
 
-**Reply detail** (`replyDetail`, Settings › Appearance › Reading) chooses how
-much of a turn's work the transcript shows open. It is one `OctantToggleGroup`
-of three levels, and the row's description is the chosen level's sentence. It
-applies the same in Chat, Work, and Code, wherever `TurnActivityRows` and
-`AssistantMessageBody` draw a turn:
+**Reply detail** chooses how much of a turn's work the transcript shows open.
+Settings › Appearance › Reading › Reply detail (`replyDetail`) is the default
+every thread starts at: one `OctantToggleGroup` of three levels whose
+description reads "Where every thread starts unless it sets its own." followed
+by the chosen level's sentence. A thread may set its own level, which then
+stays with that thread: it survives a reload, every window and paired device
+of the host draws it, and changing the default never moves it. A thread that
+never chose follows the default. The levels apply the same in Chat, Work, and
+Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
 
 - **Low** (default): "Thinking stays folded, and a finished turn's tool calls
   fold behind one line." Thinking is shut, tool rows are listed while the turn
@@ -979,20 +983,65 @@ applies the same in Chat, Work, and Code, wherever `TurnActivityRows` and
   calls" fold starts open, and each row's detail stays shut.
 - **High**: "Thinking, tool calls, and each call's recorded result stay open."
   Thinking, the fold and every row start open on the summary the transcript
-  already holds, still clipped behind Show all past 1,200 characters.
+  already holds, still clipped behind Show all past 1,200 characters. While a
+  reply streams, its thinking is open and grows as it arrives, and a running
+  turn's tool rows are open; Settings › Chat › Stream replies still alone
+  decides whether the partial answer shows, at every level.
+
+The thread's own choice is a menu beside the thread's other actions: in Chat's
+header just before Thread actions, and among the leading controls of the Work and
+Code composer row. Its trigger is the shared `shell-icon-button` (`ListCollapse`) whose
+name says the level in effect and whose it is ("Reply detail: High, this
+thread's own" or "Reply detail: Low, the default"), because a menu trigger
+cannot otherwise show its selection. Its radio items are **Use default (Low)**
+(naming the current default; "Follow the level in Settings") and the three
+levels, with short descriptions that fit a phone-width menu: "Thinking and
+finished tool calls folded", "Thinking's first line, tool calls listed",
+"Thinking, tool calls, and results open". A client that cannot change the
+level, a paired browser, shows no menu.
+
+**Change reply detail in this thread** (`reply-detail-cycle`, Mod+Shift+D by
+default, remappable in Settings › Keyboard shortcuts) steps the thread in front
+through Low, Medium, High and back to Low, setting its own level, and says so
+in a status toast ("Reply detail: Medium" over "This thread:" and the level's
+sentence). With no thread in front the chord does nothing and is left to the
+browser. Mod+Shift+D is held by no other default, no desktop menu item, and no
+macOS or Windows system chord; in a browser it is Bookmark all tabs (Safari:
+Add to Reading List), which the page takes only when it changes a thread. The
+command palette offers the same cycle (showing the chord), each level not in
+effect for this thread, **Use the default reply detail in this thread** when the
+thread has its own, and **Set the default reply detail to …** for the default.
 
 The level is presentation only. It never changes what a model is asked or what
 a client fetches, and a row with no recorded summary says so rather than
 showing more. Every disclosure stays native, with `open` and `aria-expanded` in
 step, so a person can open or close any one by hand; that choice holds for that
-disclosure while the turn stays mounted and the level is unchanged, and
-changing the level puts every disclosure where the new level puts it. The first
-line beside Thinking is hidden from assistive technology: the button's name
-stays "Thinking", and the same words are read from the body once it opens.
-Nothing animates beyond the chevron's turn, which reduced motion stills. The
-command palette offers the two levels not in effect ("Show high reply detail");
-there is no keyboard chord. A paired browser, which cannot read the host's
-shell settings, draws Low.
+disclosure while the turn stays mounted and the thread's level is unchanged,
+and a change of that level (its own, or the default it follows) puts every
+disclosure where the new level puts it. The first line beside Thinking is
+hidden from assistive technology: the button's name stays "Thinking", and the
+same words are read from the body once it opens. Nothing animates beyond the
+chevron's turn, which reduced motion stills.
+
+The default and the threads' own levels live in the host's shell settings
+(`replyDetail`, `threadReplyDetail`), the document that already holds every
+other per-person presentation choice, keyed maps included. That is the
+narrowest home that keeps it a preference: it is written only by the shell
+route, which only a window on the host reaches; it is not part of any thread's
+journal, so forks, exports and provider context never see it; and host export
+does not carry it. Code's pin is the one per-thread presentation choice kept on
+a thread's own record, and Chat and Work have no such record to share, so a
+level on three mode journals would have put a presentation choice where thread
+authority lives. The list holds at most 500 threads; setting one more drops the
+longest-standing choice. Other open windows pick up a change the next time they
+read settings. The phone and a paired browser read the two fields, and nothing
+else from the settings document, through `GET /api/reply-detail`
+(`settings.read-non-secret`, read-only, at most 128 KiB): the phone when a
+thread opens and when the app returns to the foreground, a paired browser when
+its workspace opens, when the mode changes, and when the window regains focus.
+Until an answer arrives, or if none can, they draw Low. On the phone the
+reasoning panel opens at High and shows its first line at Medium, and a
+finished tool card opens at High; a change of level remounts them.
 
 The displayed partial answer coalesces updates on a fifty-millisecond beat, or
 one hundred milliseconds for long answers (at least sixteen thousand text

@@ -19,7 +19,21 @@ import {
   NewTaskDraftsContext,
 } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
-import { ReplyDetailContext } from "./transcript/replyDetail";
+import {
+  REPLY_DETAIL_DESCRIPTIONS,
+  REPLY_DETAIL_LABELS,
+  ReplyDetailContext,
+  ReplyDetailSourceContext,
+  type ReplyDetailSource,
+  type ReplyDetailThread,
+} from "./transcript/replyDetail";
+import {
+  effectiveReplyDetail,
+  nextReplyDetailLevel,
+  threadReplyDetailOverride,
+  withThreadReplyDetail,
+} from "@octant/domain/reply-detail-policy";
+import { useReplyDetailShortcut } from "./shell/useReplyDetailShortcut";
 import { ImageJobChangeRevisionContext } from "./image/ImageJobChangeRevision";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
@@ -2183,6 +2197,60 @@ function LaunchedShell(
     });
   };
   useJumpToWaitingShortcut(jumpToNextWaiting);
+
+  // Reply detail: the default and each thread's own level live in this host's
+  // shell settings, so every window and paired device draws a thread alike.
+  const replyDetailSettings = controller.settings;
+  const updateShellSettings = controller.updateSettings;
+  const replyDetailSource = useMemo<ReplyDetailSource>(
+    () => ({
+      reading: {
+        defaultLevel: replyDetailSettings?.replyDetail ?? "low",
+        threads: replyDetailSettings?.threadReplyDetail ?? [],
+      },
+      ...(replyDetailSettings === undefined
+        ? {}
+        : {
+            setThreadLevel: (thread: ReplyDetailThread, level: ReplyDetailLevel | undefined) =>
+              void updateShellSettings({
+                threadReplyDetail: withThreadReplyDetail(
+                  replyDetailSettings.threadReplyDetail,
+                  thread,
+                  level,
+                ),
+              }),
+          }),
+    }),
+    [replyDetailSettings, updateShellSettings],
+  );
+  const replyDetailThread: ReplyDetailThread | undefined =
+    activeMode === "chat" && activeChatThreadId !== undefined
+      ? { mode: "chat", threadId: String(activeChatThreadId) }
+      : activeMode === "work" && activeWorkThreadId !== undefined
+        ? { mode: "work", threadId: String(activeWorkThreadId) }
+        : activeMode === "code" && activeCodeThreadId !== undefined
+          ? { mode: "code", threadId: String(activeCodeThreadId) }
+          : undefined;
+  const [replyDetailNotice, setReplyDetailNotice] = useState<ReplyDetailLevel>();
+  useEffect(() => {
+    if (replyDetailNotice === undefined) return;
+    const timer = setTimeout(() => setReplyDetailNotice(undefined), 4_000);
+    return () => clearTimeout(timer);
+  }, [replyDetailNotice]);
+  const setCurrentThreadReplyDetail = (level: ReplyDetailLevel | undefined): void => {
+    if (replyDetailThread === undefined) return;
+    replyDetailSource.setThreadLevel?.(replyDetailThread, level);
+  };
+  useReplyDetailShortcut(() => {
+    const setThreadLevel = replyDetailSource.setThreadLevel;
+    if (replyDetailThread === undefined || setThreadLevel === undefined) return false;
+    const next = nextReplyDetailLevel(
+      effectiveReplyDetail(replyDetailSource.reading, replyDetailThread),
+    );
+    setThreadLevel(replyDetailThread, next);
+    setReplyDetailNotice(next);
+    return true;
+  });
   useThreadAttentionNotifications({
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
     signals: attentionSignals,
@@ -6767,9 +6835,23 @@ function LaunchedShell(
     ...(controller.settings === undefined
       ? {}
       : {
-          replyDetail: controller.settings.replyDetail,
-          onSetReplyDetail: (replyDetail: ReplyDetailLevel) =>
-            void controller.updateSettings({ replyDetail }),
+          replyDetail: {
+            defaultLevel: replyDetailSource.reading.defaultLevel,
+            onSetDefault: (replyDetail: ReplyDetailLevel) =>
+              void controller.updateSettings({ replyDetail }),
+            ...(replyDetailThread === undefined
+              ? {}
+              : {
+                  thread: {
+                    level: effectiveReplyDetail(replyDetailSource.reading, replyDetailThread),
+                    override: threadReplyDetailOverride(
+                      replyDetailSource.reading.threads,
+                      replyDetailThread,
+                    ),
+                    onSet: setCurrentThreadReplyDetail,
+                  },
+                }),
+          },
         }),
     onOpenReview: openReview,
     ...(nextWaiting === undefined ? {} : { onJumpToNextWaiting: jumpToNextWaiting }),
@@ -7458,6 +7540,7 @@ function LaunchedShell(
         />
       </ShellFrame>
       {threadExportNotice !== undefined ||
+      replyDetailNotice !== undefined ||
       updateReadyNotice ||
       quitHintVisible ||
       hostMemoryNotice !== undefined ? (
@@ -7493,6 +7576,13 @@ function LaunchedShell(
               title="Quit Octant?"
             />
           ) : null}
+          {replyDetailNotice === undefined ? null : (
+            <OctantToast
+              detail={`This thread: ${REPLY_DETAIL_DESCRIPTIONS[replyDetailNotice]}`}
+              onDismiss={() => setReplyDetailNotice(undefined)}
+              title={`Reply detail: ${REPLY_DETAIL_LABELS[replyDetailNotice]}`}
+            />
+          )}
           {threadExportNotice === undefined ? null : (
             <OctantToast
               detail={threadExportNotice}
@@ -7554,41 +7644,43 @@ function LaunchedShell(
                           <StreamRepliesContext.Provider
                             value={controller.settings?.streamReplies !== false}
                           >
-                            <ReplyDetailContext.Provider
-                              value={controller.settings?.replyDetail ?? "low"}
-                            >
-                              {/* The floor for every rendered link: panes that can host a
+                            <ReplyDetailSourceContext.Provider value={replyDetailSource}>
+                              <ReplyDetailContext.Provider
+                                value={replyDetailSource.reading.defaultLevel}
+                              >
+                                {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                              <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                                <WorkKindChoiceContext.Provider value={workKindChoice}>
-                                  <ModelToolVerificationContext.Provider
-                                    value={providerController.verifyModelTools}
-                                  >
-                                    <HostFederationStackContext.Provider value={federation}>
-                                      <PlanUsageProvider
-                                        barStyle={controller.settings?.usageBars ?? "smooth"}
-                                        client={launchedClients.providerUsageLimitsClient}
-                                      >
-                                        <HostPlatformContext.Provider value={hostPlatform}>
-                                          <ServerCodeProjectsContext.Provider
-                                            value={serverCodeProjects}
-                                          >
-                                            <CodeDebugWindowProvider
-                                              origin={new URL(props.launch.serverUrl).origin}
-                                              windowId={String(props.launch.windowId)}
+                                <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                                  <WorkKindChoiceContext.Provider value={workKindChoice}>
+                                    <ModelToolVerificationContext.Provider
+                                      value={providerController.verifyModelTools}
+                                    >
+                                      <HostFederationStackContext.Provider value={federation}>
+                                        <PlanUsageProvider
+                                          barStyle={controller.settings?.usageBars ?? "smooth"}
+                                          client={launchedClients.providerUsageLimitsClient}
+                                        >
+                                          <HostPlatformContext.Provider value={hostPlatform}>
+                                            <ServerCodeProjectsContext.Provider
+                                              value={serverCodeProjects}
                                             >
-                                              {shell}
-                                            </CodeDebugWindowProvider>
-                                          </ServerCodeProjectsContext.Provider>
-                                        </HostPlatformContext.Provider>
-                                      </PlanUsageProvider>
-                                    </HostFederationStackContext.Provider>
-                                  </ModelToolVerificationContext.Provider>
-                                </WorkKindChoiceContext.Provider>
-                              </MarkdownLinkActionsContext.Provider>
-                            </ReplyDetailContext.Provider>
+                                              <CodeDebugWindowProvider
+                                                origin={new URL(props.launch.serverUrl).origin}
+                                                windowId={String(props.launch.windowId)}
+                                              >
+                                                {shell}
+                                              </CodeDebugWindowProvider>
+                                            </ServerCodeProjectsContext.Provider>
+                                          </HostPlatformContext.Provider>
+                                        </PlanUsageProvider>
+                                      </HostFederationStackContext.Provider>
+                                    </ModelToolVerificationContext.Provider>
+                                  </WorkKindChoiceContext.Provider>
+                                </MarkdownLinkActionsContext.Provider>
+                              </ReplyDetailContext.Provider>
+                            </ReplyDetailSourceContext.Provider>
                           </StreamRepliesContext.Provider>
                         </NewTaskDraftsContext.Provider>
                       </ProjectThreadsProvider>

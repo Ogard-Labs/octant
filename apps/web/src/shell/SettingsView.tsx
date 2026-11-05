@@ -2299,7 +2299,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
         ) : null}
         {isAvailable("reply-detail") ? (
           <SettingRow
-            description={REPLY_DETAIL_DESCRIPTIONS[props.settings.replyDetail]}
+            description={`Where every thread starts unless it sets its own. ${REPLY_DETAIL_DESCRIPTIONS[props.settings.replyDetail]}`}
             focused={focusedSetting === settingId("reply-detail")}
             label="Reply detail"
             scope="app"

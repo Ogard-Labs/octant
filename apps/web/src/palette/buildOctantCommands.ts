@@ -1,5 +1,6 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
+import { nextReplyDetailLevel } from "@octant/domain/reply-detail-policy";
 import {
   REPLY_DETAIL_DESCRIPTIONS,
   REPLY_DETAIL_LABELS,
@@ -22,11 +23,10 @@ export interface OctantCommandSources {
   readonly onOpenSearch: () => void;
   readonly onOpenSettings: () => void;
   /**
-   * The Reply detail level in effect and the save Settings › Appearance uses.
-   * Absent while the window has no settings to change.
+   * Reply detail: the default and, when a thread is in front, that thread's
+   * level. Absent while the window has no settings to change.
    */
-  readonly replyDetail?: ReplyDetailLevel;
-  readonly onSetReplyDetail?: (level: ReplyDetailLevel) => void;
+  readonly replyDetail?: CommandReplyDetail;
   /** Opens the Review page for the finished threads the person has not looked at. */
   readonly onOpenReview?: () => void;
   /** Jumps to the next thread waiting on the person. Absent when none waits. */
@@ -53,6 +53,18 @@ export interface OctantCommandSources {
    */
   readonly projectActions?: ReadonlyArray<CommandProjectAction>;
   readonly onRunProjectAction?: (action: CommandProjectAction) => void;
+}
+
+export interface CommandReplyDetail {
+  readonly defaultLevel: ReplyDetailLevel;
+  readonly onSetDefault: (level: ReplyDetailLevel) => void;
+  readonly thread?: {
+    /** The level the thread is drawn at: its own, else the default. */
+    readonly level: ReplyDetailLevel;
+    readonly override: ReplyDetailLevel | undefined;
+    /** Sets the thread's own level, or `undefined` to follow the default again. */
+    readonly onSet: (level: ReplyDetailLevel | undefined) => void;
+  };
 }
 
 export interface CommandProjectAction {
@@ -250,19 +262,52 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
     action: { kind: "run", run: sources.onOpenSettings },
   });
 
-  const setReplyDetail = sources.onSetReplyDetail;
-  if (setReplyDetail !== undefined) {
-    // The other levels only, as with modes: choosing the level already in
-    // effect would do nothing.
+  const replyDetail = sources.replyDetail;
+  if (replyDetail !== undefined) {
+    const keywords = ["reply detail", "thinking", "tool calls", "expand", "collapse"];
+    const thread = replyDetail.thread;
+    if (thread !== undefined) {
+      commands.push({
+        id: "thread:reply-detail-cycle",
+        title: "Change reply detail in this thread",
+        group: "Threads",
+        detail: `Now ${REPLY_DETAIL_LABELS[thread.level]}`,
+        keywords: [...keywords, "cycle", "next"],
+        action: { kind: "run", run: () => thread.onSet(nextReplyDetailLevel(thread.level)) },
+      });
+      // The other levels only, as with modes: choosing the level already in
+      // effect would do nothing.
+      for (const level of REPLY_DETAIL_LEVELS) {
+        if (level === thread.level) continue;
+        commands.push({
+          id: `thread:reply-detail:${level}`,
+          title: `Show ${REPLY_DETAIL_LABELS[level].toLowerCase()} reply detail in this thread`,
+          group: "Threads",
+          detail: REPLY_DETAIL_DESCRIPTIONS[level],
+          keywords: [...keywords, level],
+          action: { kind: "run", run: () => thread.onSet(level) },
+        });
+      }
+      if (thread.override !== undefined) {
+        commands.push({
+          id: "thread:reply-detail:default",
+          title: "Use the default reply detail in this thread",
+          group: "Threads",
+          detail: `Default: ${REPLY_DETAIL_LABELS[replyDetail.defaultLevel]}`,
+          keywords: [...keywords, "default"],
+          action: { kind: "run", run: () => thread.onSet(undefined) },
+        });
+      }
+    }
     for (const level of REPLY_DETAIL_LEVELS) {
-      if (level === sources.replyDetail) continue;
+      if (level === replyDetail.defaultLevel) continue;
       commands.push({
         id: `settings:reply-detail:${level}`,
-        title: `Show ${REPLY_DETAIL_LABELS[level].toLowerCase()} reply detail`,
+        title: `Set the default reply detail to ${REPLY_DETAIL_LABELS[level]}`,
         group: "Settings",
-        detail: REPLY_DETAIL_DESCRIPTIONS[level],
-        keywords: ["reply detail", "thinking", "tool calls", "expand", "collapse", level],
-        action: { kind: "run", run: () => setReplyDetail(level) },
+        detail: "Threads without their own level follow it",
+        keywords: [...keywords, "default", level],
+        action: { kind: "run", run: () => replyDetail.onSetDefault(level) },
       });
     }
   }

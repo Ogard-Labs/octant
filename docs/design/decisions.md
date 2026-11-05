@@ -1977,12 +1977,15 @@ Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](../../DE
 
 ### Reply detail
 
-One Appearance setting, Reply detail, chooses how much of a turn's thinking and tool calls the transcript shows open: Low, Medium or High, with Low the default and the transcript as it was before.
+Reply detail chooses how much of a turn's thinking and tool calls the transcript shows open: Low, Medium or High. The Appearance setting is the default every thread starts at, Low unless changed; a thread may set its own level, which stays with it.
 
-- Low keeps thinking shut and folds a settled turn's tool calls behind "N tool calls"; Medium keeps thinking shut with its first line beside the name and leaves the tool calls listed; High opens thinking, the tool calls and each row's recorded summary.
-- It is presentation only: it never changes what a model is asked or what a client fetches, and shows nothing the transcript does not already hold.
-- It is the same in Chat, Work and Code. It persists in the host's shell settings with the other Appearance choices, and settings saved without it read as Low.
-- A disclosure opened or closed by hand keeps that state while its turn stays mounted and the level is unchanged; changing the level resets every disclosure to the new level.
+- Low keeps thinking shut and folds a settled turn's tool calls behind "N tool calls"; Medium keeps thinking shut with its first line beside the name and leaves the tool calls listed; High opens thinking, the tool calls and each row's recorded summary, including while a reply streams.
+- It is presentation only: it never changes what a model is asked or what a client fetches, shows nothing the transcript does not already hold, and leaves Stream replies in charge of the partial answer.
+- A thread's own level wins over the default, survives a reload, and is drawn alike by every window, the phone and a paired browser; changing the default never moves a thread that chose. Use default returns a thread to following the default.
+- The default and the threads' own levels (at most 500, oldest dropped first) live in the host's shell settings, written only through the shell route from a window on the host, kept out of thread journals and host export. Settings saved without either field read as Low with no thread levels.
+- The phone and a paired browser read only these two fields through `GET /api/reply-detail`, a read-only, authenticated route classified `settings.read-non-secret`; neither can change a level, and both draw Low until the host answers.
+- The thread menu, the palette and the remappable `reply-detail-cycle` chord (Mod+Shift+D by default, chosen clear of every other default, the desktop menus and system chords) change the thread in front; the chord announces the new level in a status toast. Keybinding overrides saved before the action existed read unchanged.
+- A disclosure opened or closed by hand keeps that state while its turn stays mounted and the thread's level is unchanged; a change of that level resets every disclosure to the new level.
 - The thinking preview is hidden from assistive technology so it is never read twice, and every disclosure keeps `open` and `aria-expanded` in step.
 
 Status: Built. Since: —. Detail: [DESIGN.md: Transcript](../../DESIGN.md#transcript).

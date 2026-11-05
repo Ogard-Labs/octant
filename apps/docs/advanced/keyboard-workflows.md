@@ -98,6 +98,9 @@ The remappable set:
 - **Show or hide the sidebar** — **⌘/Ctrl+\\**
 - **Go to the home screen** — **⌘/Ctrl+Shift+H**
 - **Jump to the next thread that needs you** — **⌘/Ctrl+Shift+J**
+- **Change reply detail in this thread** — **⌘/Ctrl+Shift+D**: steps the thread
+  in front through Low, Medium and High and back, keeps that level for the
+  thread, and shows the new level in a notice
 - **Show the next focus space** — **⌘/Ctrl+Alt+]**
 - **Show the previous focus space** — **⌘/Ctrl+Alt+[**
 - **Find a file by name** — **⌘/Ctrl+P**, in the active Code thread

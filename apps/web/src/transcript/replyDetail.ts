@@ -1,37 +1,70 @@
-import type { ReplyDetailLevel } from "@octant/contracts/shell";
+import type { ReplyDetailLevel, ReplyDetailReading } from "@octant/contracts/shell";
+import {
+  effectiveReplyDetail,
+  replyDetailOpening,
+  threadReplyDetailOverride,
+  type ReplyDetailOpening,
+  type ReplyDetailThread,
+} from "@octant/domain/reply-detail-policy";
 import { createContext, useContext, useState } from "react";
 
+export {
+  REPLY_DETAIL_LEVELS,
+  replyDetailOpening,
+  thinkingPreviewLine,
+  type ReplyDetailOpening,
+  type ReplyDetailThread,
+} from "@octant/domain/reply-detail-policy";
+
 /**
- * The person's Reply detail level (Settings › Appearance › Reading). A surface
- * with no provider, such as a paired browser that cannot read the host's shell
- * settings, reads the quiet default.
+ * The Reply detail level a transcript draws at: inside a thread, that
+ * thread's own level or else the default; elsewhere (the Review page) the
+ * default. A surface with no provider reads the quiet default.
  */
 export const ReplyDetailContext = createContext<ReplyDetailLevel>("low");
 
-/** Which of a turn's disclosures a level shows open before anyone touches one. */
-export interface ReplyDetailOpening {
-  readonly thinking: boolean;
-  /** Whether a closed thinking disclosure shows its first line beside its name. */
-  readonly thinkingPreview: boolean;
-  /** Whether a settled turn's "N tool calls" fold stays open. */
-  readonly toolCalls: boolean;
-  /** Whether each tool row shows the summary the transcript already holds. */
-  readonly toolDetail: boolean;
+/**
+ * Where Reply detail comes from and how it changes. A local window reads and
+ * writes the host's shell settings; a paired browser reads the host's answer
+ * and cannot change it, so it carries no setters.
+ */
+export interface ReplyDetailSource {
+  readonly reading: ReplyDetailReading;
+  /** Sets a thread's own level, or clears it so the thread follows the default. */
+  readonly setThreadLevel?: (
+    thread: ReplyDetailThread,
+    level: ReplyDetailLevel | undefined,
+  ) => void;
 }
 
-const OPENING: Readonly<Record<ReplyDetailLevel, ReplyDetailOpening>> = {
-  low: { thinking: false, thinkingPreview: false, toolCalls: false, toolDetail: false },
-  medium: { thinking: false, thinkingPreview: true, toolCalls: true, toolDetail: false },
-  high: { thinking: true, thinkingPreview: false, toolCalls: true, toolDetail: true },
-};
+const QUIET_SOURCE: ReplyDetailSource = { reading: { defaultLevel: "low", threads: [] } };
 
-export function replyDetailOpening(level: ReplyDetailLevel): ReplyDetailOpening {
-  return OPENING[level];
+export const ReplyDetailSourceContext = createContext<ReplyDetailSource>(QUIET_SOURCE);
+
+/** One thread's Reply detail: what it is drawn at, and whether it chose that itself. */
+export interface ThreadReplyDetailState {
+  readonly thread: ReplyDetailThread;
+  readonly level: ReplyDetailLevel;
+  readonly override: ReplyDetailLevel | undefined;
+  readonly defaultLevel: ReplyDetailLevel;
+  readonly setLevel?: (level: ReplyDetailLevel | undefined) => void;
 }
 
-export const REPLY_DETAIL_LEVELS: ReadonlyArray<ReplyDetailLevel> = ["low", "medium", "high"];
+export function useThreadReplyDetail(thread: ReplyDetailThread): ThreadReplyDetailState {
+  const source = useContext(ReplyDetailSourceContext);
+  const setThreadLevel = source.setThreadLevel;
+  return {
+    thread,
+    level: effectiveReplyDetail(source.reading, thread),
+    override: threadReplyDetailOverride(source.reading.threads, thread),
+    defaultLevel: source.reading.defaultLevel,
+    ...(setThreadLevel === undefined
+      ? {}
+      : { setLevel: (level: ReplyDetailLevel | undefined) => setThreadLevel(thread, level) }),
+  };
+}
 
-/** The words Settings and the command palette use for each level. */
+/** The words Settings, the thread menu, and the command palette use for each level. */
 export const REPLY_DETAIL_LABELS: Readonly<Record<ReplyDetailLevel, string>> = {
   low: "Low",
   medium: "Medium",
@@ -42,6 +75,13 @@ export const REPLY_DETAIL_DESCRIPTIONS: Readonly<Record<ReplyDetailLevel, string
   low: "Thinking stays folded, and a finished turn's tool calls fold behind one line.",
   medium: "Thinking stays folded with its first line showing, and tool calls stay listed.",
   high: "Thinking, tool calls, and each call's recorded result stay open.",
+};
+
+/** The same levels said short enough for a menu row at phone width. */
+export const REPLY_DETAIL_MENU_DESCRIPTIONS: Readonly<Record<ReplyDetailLevel, string>> = {
+  low: "Thinking and finished tool calls folded",
+  medium: "Thinking's first line, tool calls listed",
+  high: "Thinking, tool calls, and results open",
 };
 
 const NO_CHOICES: ReadonlyMap<string, boolean> = new Map();
@@ -63,11 +103,11 @@ export interface ReplyDisclosures {
  * Open and closed state for one turn's disclosures.
  *
  * Opening or closing a disclosure by hand wins for that disclosure until the
- * level changes, which puts every disclosure back where the new level puts it:
- * someone who just asked for more or less detail expects to see that level.
- * The choices live in this component, so a remount forgets them too, as it
- * always has. Keeping them across a level change would leave a reader unable
- * to tell what the level they chose looks like.
+ * level this transcript draws at changes (the thread's own level, or the
+ * default it follows), which puts every disclosure back where the new level
+ * puts it: someone who just asked for more or less detail expects to see that
+ * level. The choices live in this component, so a remount forgets them too,
+ * as it always has.
  */
 export function useReplyDisclosures(): ReplyDisclosures {
   const level = useContext(ReplyDetailContext);
@@ -89,26 +129,4 @@ export function useReplyDisclosures(): ReplyDisclosures {
         return { level, open: next };
       }),
   };
-}
-
-/** Longest preview kept in the document; the row's own ellipsis clips it on screen. */
-const THINKING_PREVIEW_LIMIT = 160;
-
-/**
- * The first line of a turn's thinking, as plain words: block markers and
- * emphasis marks are dropped because the preview is not rendered as Markdown.
- */
-export function thinkingPreviewLine(text: string): string {
-  const line =
-    text
-      .split("\n")
-      .map((candidate) => candidate.trim())
-      .find((candidate) => candidate.length > 0) ?? "";
-  const plain = line
-    .replace(/^(?:#{1,6}|>|[-*+]|\d+[.)])\s+/, "")
-    .replace(/\*\*|__|`/g, "")
-    .trim();
-  return plain.length <= THINKING_PREVIEW_LIMIT
-    ? plain
-    : `${plain.slice(0, THINKING_PREVIEW_LIMIT - 1)}…`;
 }

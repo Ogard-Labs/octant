@@ -12,6 +12,7 @@ import {
   decodeShellCommand,
   decodeShellCommandResult,
   decodeShellFailure,
+  decodeReplyDetailReading,
   decodeShellSettings,
   decodeShellSettingsReplaced,
   decodeWindowWorkspace,
@@ -19,6 +20,7 @@ import {
   decodeWorkspaceLayoutReplaced,
   decodeWorkspaceSurfaceCatalog,
   decodeWorkspaceTab,
+  MAX_THREAD_REPLY_DETAILS,
   SidebarDestinationCustomization,
 } from "./shell";
 import { MAX_AVATAR_IMAGE_CHARACTERS } from "./userProfile";
@@ -60,6 +62,7 @@ const settings = {
   transcriptWidth: "narrow",
   usageBars: "smooth",
   replyDetail: "low",
+  threadReplyDetail: [],
   showThreadProviderIcons: true,
   showThreadStats: true,
   homeCards: { order: [], visibility: [] },
@@ -182,6 +185,43 @@ describe("shell bootstrap contracts", () => {
     expect(decodeShellSettings(withoutReplyDetail).replyDetail).toBe("low");
     expect(decodeShellSettings({ ...settings, replyDetail: "high" }).replyDetail).toBe("high");
     expect(() => decodeShellSettings({ ...settings, replyDetail: "verbose" })).toThrow();
+  });
+
+  it("reads settings saved before per-thread reply detail as every thread following the default", () => {
+    const { threadReplyDetail: _omitted, ...withoutThreadLevels } = settings;
+    expect(decodeShellSettings(withoutThreadLevels).threadReplyDetail).toEqual([]);
+    const chosen = [{ mode: "work", threadId: "thread-1", level: "high" }] as const;
+    expect(
+      decodeShellSettings({ ...settings, threadReplyDetail: chosen }).threadReplyDetail,
+    ).toEqual(chosen);
+  });
+
+  it("refuses two levels for one thread and more threads than the bound", () => {
+    const entry = { mode: "chat", threadId: "thread-1", level: "low" } as const;
+    expect(() =>
+      decodeShellSettings({
+        ...settings,
+        threadReplyDetail: [entry, { ...entry, level: "high" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeShellSettings({
+        ...settings,
+        threadReplyDetail: Array.from({ length: MAX_THREAD_REPLY_DETAILS + 1 }, (_, index) => ({
+          ...entry,
+          threadId: `thread-${index}`,
+        })),
+      }),
+    ).toThrow();
+  });
+
+  it("reads the paired device's reply detail answer and nothing beyond it", () => {
+    const reading = {
+      defaultLevel: "medium",
+      threads: [{ mode: "code", threadId: "thread-1", level: "high" }],
+    };
+    expect(decodeReplyDetailReading(reading)).toEqual(reading);
+    expect(() => decodeReplyDetailReading({ ...reading, streamReplies: false })).toThrow();
   });
 
   it("shows the thread stats line unless someone turned it off", () => {

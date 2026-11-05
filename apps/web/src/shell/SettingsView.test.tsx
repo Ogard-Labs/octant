@@ -252,7 +252,7 @@ describe("SettingsView", () => {
       "true",
     );
     expect(screen.getByRole("group", { name: "Reply detail setting" })).toHaveAccessibleDescription(
-      "Thinking stays folded, and a finished turn's tool calls fold behind one line.",
+      "Where every thread starts unless it sets its own. Thinking stays folded, and a finished turn's tool calls fold behind one line.",
     );
     await user.click(within(replyDetail).getByRole("button", { name: "High" }));
 
