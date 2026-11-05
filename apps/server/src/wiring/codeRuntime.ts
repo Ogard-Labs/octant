@@ -964,6 +964,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             const artifact = await appleToolchainService.readScreenshotArtifact(reference, context);
             return artifact.kind === "found" ? artifact.bytes : undefined;
           },
+          readLog: async (windowId, scope, reference) => {
+            const context = await resolveAppleContext(windowId, scope, {
+              kind: "apple-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            return await appleToolchainService.readLogArtifact(reference, context);
+          },
           snapshot: async (windowId, scope) => {
             const context = await resolveAppleContext(windowId, scope, {
               kind: "apple-snapshot-request",
@@ -1046,6 +1056,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               context,
             );
             return artifact.kind === "found" ? artifact.bytes : undefined;
+          },
+          readLog: async (windowId, scope, reference) => {
+            const context = await resolveAndroidContext(windowId, scope, {
+              kind: "android-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            return await androidToolchainService.readLogArtifact(reference, context);
           },
           snapshot: async (windowId, scope) => {
             const context = await resolveAndroidContext(windowId, scope, {

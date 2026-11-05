@@ -1052,8 +1052,18 @@ effect confirmed per recording. **Open URL** opens a credential-free
 `http`/`https` address a person asked for; it is an effect confirmed per
 address (Allow input never covers it), and evidence keeps only the origin. **Rotate** turns the device between portrait
 and landscape for a person who asked; it is an effect confirmed on its own
-(Allow input never covers it). Pane states, discovery, capture, input
-delivery, keyboard layouts, and the managed streaming tools are specified in
+(Allow input never covers it). An agent can also read a device without a
+picture: `octant_android` `describe-ui` lists the labelled elements on screen
+with centres in tap pixels, and its `tap` takes an element `target` matched
+exactly by resource-id, then content-desc, then text, refusing none or several
+matches; both tools' `logs` return a bounded tail of an app's own log, with
+the crash buffer or the app's newest crash reports when asked. The text comes
+back in the tool result and is kept as a log artifact under the screenshot
+rules; durable evidence records only a one-line note. Describing the UI and
+tapping an element by name are Android-only: the iOS Simulator's element
+lookup needs the native device helper, so a Simulator tap by `target` is
+refused. Pane states, discovery, capture, input delivery, keyboard layouts,
+inspection, and the managed streaming tools are specified in
 [Device workbench](design/device-workbench.md). Octant drives the iOS
 Simulator only. Physical iPhones and iPads, and App Store Connect upload,
 submission, and release, are out of scope (maintainer decision, 2026-10-29):
@@ -1081,8 +1091,9 @@ On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it.
 The agent's `octant_apple` and `octant_android` tools follow the thread's
 turn posture per operation, not a Full-access gate on the whole tool:
-`discover`, `status`, and `screenshot` are reads and run under every posture,
-Plan included, as is `open` of a destination already booted or booting: it only
+`discover`, `status`, `screenshot`, `logs`, and Android's `describe-ui` are
+reads and run under every posture, Plan included, as is `open` of a destination
+already booted or booting: it only
 shows the pane, changes nothing on the device, and has no host action an
 approval could bind to. Every other operation is an effect, including `open` of
 a shut-down destination, which boots it. Plan refuses it; Full access

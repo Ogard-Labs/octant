@@ -2260,6 +2260,61 @@ describe("the Apple capability as an agent tool", () => {
     });
   });
 
+  it("reads a Simulator app's log under Plan without asking, returning the text itself", async () => {
+    const request = vi.fn();
+    const readLog = vi.fn(async () => "Fixture[42:7] launched");
+    const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => ({
+      ...(appleEvidence() as unknown as Record<string, unknown>),
+      kind: "logs",
+      truncated: false,
+      artifacts: [{ kind: "log", reference: "apple-log-1" }],
+    }));
+    const { tools } = appleTools(
+      { execute, readLog } as never,
+      { executionPolicy: "plan" } as never,
+      { request },
+    );
+
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({
+        operation: "logs",
+        simulatorId,
+        bundleIdentifier: "app.octant.fixture",
+        sinceSeconds: 60,
+        includeCrashes: true,
+      }),
+    });
+
+    expect(request).not.toHaveBeenCalled();
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "logs",
+      bundleIdentifier: "app.octant.fixture",
+      sinceSeconds: 60,
+      includeCrashes: true,
+      approval: { kind: "not-required" },
+    });
+    expect(outcome).toMatchObject({
+      isError: false,
+      result: { truncated: false, text: "Fixture[42:7] launched" },
+    });
+    expect(readLog).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ threadId, checkoutId }),
+      "apple-log-1",
+    );
+  });
+
+  it("says in its usage that tapping an element by name and describing the UI are Android-only", async () => {
+    const { tools } = appleTools();
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "help" }),
+    });
+    expect((outcome.result as { help: string }).help).toContain(
+      "Tapping an element by name (target) and describing the UI are Android-only for now",
+    );
+  });
   it.each(["plan", "approval-gated"] as const)(
     "shows an already-booted Simulator's pane under %s without asking, since nothing on the device changes",
     async (executionPolicy) => {
@@ -2623,6 +2678,104 @@ describe("the Android capability as an agent tool", () => {
     expect(definition?.description).toContain("Android emulator pane");
     expect(definition?.description).toContain("never start an external emulator window");
   });
+
+  it("describes the screen and reads an app's log under Plan without asking, returning the text itself", async () => {
+    const request = vi.fn();
+    const readLog = vi.fn(async () => 'Button text="Sign in" center=(540,1050)');
+    const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => ({
+      ...(androidEvidence() as unknown as Record<string, unknown>),
+      kind: "describe-ui",
+      truncated: true,
+      artifacts: [{ kind: "log", reference: "android-log-1" }],
+    }));
+    const { tools } = androidTools(
+      { execute, readLog } as never,
+      { executionPolicy: "plan" } as never,
+      { request },
+    );
+
+    const described = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "describe-ui", emulatorId: "Pixel_Test" }),
+    });
+    const logs = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({
+        operation: "logs",
+        emulatorId: "Pixel_Test",
+        packageName: "com.example.app",
+        sinceSeconds: 120,
+        includeCrashes: true,
+      }),
+    });
+
+    expect(request).not.toHaveBeenCalled();
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "describe-ui",
+      approval: { kind: "not-required" },
+    });
+    expect(execute.mock.calls[1]?.[1]).toMatchObject({
+      kind: "logs",
+      packageName: "com.example.app",
+      sinceSeconds: 120,
+      includeCrashes: true,
+    });
+    expect(described).toMatchObject({
+      isError: false,
+      result: { truncated: true, text: 'Button text="Sign in" center=(540,1050)' },
+    });
+    expect(logs.isError).toBe(false);
+    expect(readLog).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ threadId, checkoutId }),
+      "android-log-1",
+    );
+  });
+
+  it("asks before an approval-gated tap on a named element and sends the element, not a point", async () => {
+    const approvalId = "d0000000-0000-4000-8000-000000000002";
+    const request = vi.fn(async (_effect: unknown) => ({
+      status: "approved" as const,
+      approvalId: approvalId as never,
+    }));
+    const { execute, tools } = androidTools({}, { executionPolicy: "approval-gated" } as never, {
+      request,
+    });
+
+    await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "tap", emulatorId: "Pixel_Test", target: "Sign in" }),
+    });
+
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      kind: "android-action",
+      request: { kind: "tap", target: "Sign in" },
+    });
+    const sent = execute.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(sent).toMatchObject({ kind: "tap", target: "Sign in", approval: { approvalId } });
+    expect(sent.point).toBeUndefined();
+  });
+
+  it.each([
+    ["a tap naming both an element and a point", { operation: "tap", target: "OK", x: 1, y: 2 }],
+    ["a log read without a package", { operation: "logs" }],
+    [
+      "a log window past ten minutes",
+      { operation: "logs", packageName: "com.example.app", sinceSeconds: 601 },
+    ],
+    [
+      "a crash choice that is not a yes or no",
+      { operation: "logs", packageName: "com.example.app", includeCrashes: "yes" },
+    ],
+  ])("refuses %s before reaching the host", async (_name, input) => {
+    const { execute, tools } = androidTools();
+    const outcome = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ ...input, emulatorId: "Pixel_Test" }),
+    });
+    expect(outcome).toMatchObject({ isError: true, result: { error: "invalid-android-input" } });
+    expect(execute).not.toHaveBeenCalled();
+  });
 });
 
 function androidEvidence() {
@@ -2957,7 +3110,9 @@ describe("Code tool families", () => {
     // 305 bytes, most of it their two short value lists.
     // The download-save operation and its downloadId added about 45 bytes.
     // The script operation and its bounded source argument add about 130 bytes.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_100);
+    // The device reads (describe-ui and logs), the element target, and the log
+    // window and crash arguments added about 210 bytes; their usage is in help.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_320);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(
