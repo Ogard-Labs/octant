@@ -868,8 +868,12 @@ frames are not recovered after host restart.
 - A name counts from every source a browser uses that the reader can see:
   `aria-labelledby`, `aria-label`, labels, title, placeholder, the default
   name of a submit or reset button, the text of the content, alt text and
-  labels of descendants, an SVG's title, and CSS-generated text. A finding is
-  made only when every source is empty, so the rule errs toward silence.
+  labels of descendants, an SVG's title, and CSS-generated text. Content that
+  is not drawn (`hidden`, `display: none`, `visibility: hidden`) or is
+  `aria-hidden` names nothing, so `<button><span hidden>Save</span></button>`
+  is unnamed; a label or `aria-labelledby` target that is itself hidden still
+  names, as browsers name from it. A finding is made only when every source
+  is empty, so the rule errs toward silence.
 - Elements not drawn, and elements hidden from assistive technology, are not
   checked for names. Inline links in a sentence and browser-drawn checkboxes
   and radios are exempt from target size, as WCAG 2.5.8 exempts them.

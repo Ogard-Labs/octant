@@ -590,10 +590,16 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     // The text a name is computed from: text, the alt text of images, the
     // label of a labelled descendant, and CSS-generated text. A field's value
     // is never read, so a control holding only a field reads as unnamed.
-    const contentText = (node: Node): string => {
+    // Text that is not drawn, or is hidden from assistive technology, names
+    // nothing: `<button><span hidden>Save</span></button>` is unnamed. A label
+    // or `aria-labelledby` target that is itself hidden still names, as
+    // browsers name from it, and then so does everything inside it.
+    const contentText = (node: Node, includeHidden: boolean): string => {
       if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
       if (!(node instanceof Element)) return "";
-      if (node.getAttribute("aria-hidden") === "true") return "";
+      // The element's own style, not `checkVisibility`: a slot or any other
+      // `display: contents` element has no box of its own yet shows its text.
+      if (!includeHidden && hidden(node)) return "";
       if (["script", "style", "template", "noscript"].includes(node.localName)) return "";
       const label = node.getAttribute("aria-label");
       if (filled(label)) return label ?? "";
@@ -613,7 +619,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
             : node.childNodes;
       return [
         pseudoText(node, "::before"),
-        ...Array.from(shown).map(contentText),
+        ...Array.from(shown, (each) => contentText(each, includeHidden)),
         pseudoText(node, "::after"),
       ].join(" ");
     };
@@ -623,7 +629,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
         .filter((id) => id !== "")
         .map((id) => {
           const target = rootOf(element).getElementById(id);
-          return target === null ? "" : contentText(target);
+          return target === null ? "" : contentText(target, !exposed(target));
         })
         .join(" ");
     // Whether any source gives the element a name. The reader looks wider than
@@ -644,7 +650,11 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
         element instanceof HTMLSelectElement ||
         element instanceof HTMLTextAreaElement
       ) {
-        if (Array.from(element.labels ?? []).some((label) => filled(contentText(label)))) {
+        if (
+          Array.from(element.labels ?? []).some((label) =>
+            filled(contentText(label, !exposed(label))),
+          )
+        ) {
           return true;
         }
         if (filled(element.getAttribute("placeholder"))) return true;
@@ -656,7 +666,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       }
       if (tag === "img" || tag === "area") return filled(element.getAttribute("alt"));
       if (tag === "svg") return filled(element.querySelector("title")?.textContent);
-      return fromContent && filled(contentText(element));
+      return fromContent && filled(contentText(element, false));
     };
     const disabled = (element: Element): boolean =>
       ancestry(element).some(

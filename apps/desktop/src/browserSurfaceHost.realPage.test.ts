@@ -98,6 +98,9 @@ const pages: Record<string, string> = {
     <button id="icon"><svg aria-hidden="true" width="20" height="20"></svg></button>
     <button><img alt="Search" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'/%3E"></button>
     <button aria-label="Close">×</button>
+    <button id="ghost"><span hidden>Save</span><span style="display:none">Save</span></button>
+    <button id="muted"><span aria-hidden="true">Mute</span></button>
+    <span id="draft-label" hidden>Save draft</span><button aria-labelledby="draft-label"></button>
     <p>See <a id="empty" href="/form"></a> and our <a href="/form">deals</a> today.</p>
     <input id="unlabelled"><label for="mail">Email</label><input id="mail"><input placeholder="Search">
     <p class="faint">Faint words</p><p>Plain words</p><div class="hero">Over a gradient</div>
@@ -926,7 +929,7 @@ describe.skipIf(chrome === undefined)(
       const count = (rule: string) => reading.found.find((entry) => entry.rule === rule)?.count;
       expect(Object.fromEntries(reading.found.map((entry) => [entry.rule, entry.count]))).toEqual({
         "image-alt": 1,
-        "button-name": 1,
+        "button-name": 3,
         "link-name": 1,
         "field-name": 1,
         "heading-order": 1,
@@ -937,7 +940,10 @@ describe.skipIf(chrome === undefined)(
       });
       const finding = (rule: string) => reading.findings.find((each) => each.rule === rule);
       expect(finding("image-alt")?.selector).toBe("#bare");
-      expect(finding("button-name")?.selector).toBe("#icon");
+      // Text hidden inside a button names nothing; a hidden labelledby target does.
+      expect(
+        reading.findings.filter((each) => each.rule === "button-name").map((each) => each.selector),
+      ).toEqual(["#icon", "#ghost", "#muted"]);
       expect(finding("link-name")?.selector).toBe("#empty");
       expect(finding("field-name")?.selector).toBe("#unlabelled");
       expect(finding("heading-order")?.detail).toEqual({ level: 3, previousLevel: 1 });
