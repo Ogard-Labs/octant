@@ -9,7 +9,10 @@ import {
   type CommandCredentialRequest,
   type CommandCredentialResult,
 } from "@octant/contracts/command-credentials";
-import { commandCredentialDefinitionAllowed } from "@octant/domain/command-credential-policy";
+import {
+  commandCredentialDefinitionAllowed,
+  commandCredentialPostureAllowed,
+} from "@octant/domain/command-credential-policy";
 import { decodeWindowId } from "@octant/contracts";
 export interface CommandCredentialContext {
   readonly windowId: string;
@@ -229,10 +232,10 @@ export class CommandCredentialBindings {
       this.#bindings.get(bindingId) !== binding
     )
       return refused("unauthorized", "This command is not available to this Code task.");
-    if (context.executionPolicy !== "full-access")
+    if (!commandCredentialPostureAllowed(context.executionPolicy))
       return refused(
-        "full-access-required",
-        "Credential commands currently require Full access. Other access levels remain unsupported.",
+        "posture-unsupported",
+        "Credential commands are unavailable in Plan or an unsupported access posture.",
       );
     if (
       this.#pending.size >= 64 ||
@@ -247,6 +250,7 @@ export class CommandCredentialBindings {
       binding,
       threadId,
       expiresAt: new Date(Date.now() + 180000).toISOString(),
+      executionPolicy: context.executionPolicy,
       state: "pending",
     });
     let finish: ((value: CommandCredentialReceipt) => void) | undefined;
@@ -400,7 +404,7 @@ export class CommandCredentialBindings {
       (entry.started || this.#options.now() < entry.ends) &&
       this.#bindings.get(entry.request.binding.bindingId) === entry.binding &&
       this.#visible(entry) &&
-      entry.context.executionPolicy === "full-access"
+      commandCredentialPostureAllowed(entry.context.executionPolicy)
     );
   }
   #invalidate(bindingId: string): void {

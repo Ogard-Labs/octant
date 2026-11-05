@@ -85,6 +85,35 @@ function fixture(extra: Partial<CommandCredentialBindingsOptions> = {}) {
   };
 }
 describe("explicit named credential commands", () => {
+  it.each(["approval-gated", "auto-accept-edits"])(
+    "prepares a separately approved fixed credential command at %s without widening its posture",
+    async (executionPolicy) => {
+      const f = fixture({
+        context: async (windowId, threadId) => ({
+          windowId,
+          threadId,
+          projectId: String(definition.projectId),
+          root: "/fixture",
+          authorityKey: executionPolicy,
+          executionPolicy,
+          current: () => true,
+          revalidate: async () => true,
+        }),
+      });
+      try {
+        const saved = await f.service.save(id(2), definition);
+        if (saved.kind !== "command-credential-view" || !saved.bindings[0])
+          throw Error("Expected saved binding");
+        expect(
+          await f.service.review(id(2), id(3), saved.bindings[0].bindingId, id(4)),
+        ).toMatchObject({ kind: "command-credential-view", requests: [{ state: "pending" }] });
+        expect(f.execute).not.toHaveBeenCalled();
+      } finally {
+        f.service.close();
+      }
+    },
+  );
+
   it("runs the reviewed fixed binding only after one approval and replays its receipt without another process", async () => {
     const f = fixture();
     const saved = await f.service.save(id(2), definition);

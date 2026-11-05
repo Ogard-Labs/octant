@@ -198,7 +198,7 @@ describe("person and provider command authorization", () => {
     f.narrow();
     expect(
       await f.service.review(f.window, f.thread, f.binding.bindingId, randomUUID()),
-    ).toMatchObject({ reason: "full-access-required" });
+    ).toMatchObject({ reason: "posture-unsupported" });
   });
   it("cancels a pending provider request when its tool lifetime ends", async () => {
     const f = await fixture();

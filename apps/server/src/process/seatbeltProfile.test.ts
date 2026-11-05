@@ -53,6 +53,26 @@ function temporaryRoot(): string {
 }
 
 describe("shared Seatbelt profile builder", () => {
+  it("keeps credential denials for a recipient whose binary parent overlaps an account home", () => {
+    const base = temporaryRoot();
+    const home = join(base, "home");
+    const project = join(base, "project");
+    mkdirSync(home);
+    mkdirSync(project);
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: project,
+      temporaryDirectory: project,
+      networkEgress: "none",
+      homeDirectory: home,
+      usersDirectory: base,
+      readRoots: [home],
+      ownAccountAccess: "none",
+    });
+    expect(profile).toContain(
+      `(deny file-read* file-write* (subpath "${escapeSeatbeltPath(join(home, ".codex/auth.json"))}"))`,
+    );
+  });
+
   it.skipIf(process.platform !== "darwin")(
     "starts the system shell without a shell-selection warning",
     () => {
@@ -921,6 +941,40 @@ describe("shared Seatbelt profile builder", () => {
       command: "/usr/bin/sandbox-exec",
       args: ["-p", "(version 1)\n(deny default)\n", "--", "/usr/bin/git", "status"],
     });
+  });
+
+  it("places fixed recipient admission and proxy promotion inside the prepared sandbox", () => {
+    const root = temporaryRoot();
+    const sandboxPath = join(root, "sandbox-exec");
+    writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
+    const confinement = makeProcessConfinementLive({ platform: "darwin", sandboxPath });
+    const input = {
+      executable: "/bin/echo",
+      args: ["literal recipient argument"],
+      boundRoot: root,
+      temporaryDirectory: root,
+      networkEgress: {
+        kind: "proxied" as const,
+        endpoint: { kind: "loopback" as const, port: 8735 },
+      },
+      recipientAdmission: { digest: "0".repeat(64), identity: "fixture-identity" },
+      ownAccountAccess: "none" as const,
+    };
+    const launch = confinement.prepare(input);
+    expect(launch.command).toBe(sandboxPath);
+    expect(launch.args.slice(0, 1)).toEqual(["-p"]);
+    const boundary = launch.args.indexOf("--");
+    expect(launch.args[boundary + 1]).toBe("/usr/bin/env");
+    expect(launch.args).toContain("-e");
+    expect(launch.args.slice(-4)).toEqual([
+      "/bin/echo",
+      "0".repeat(64),
+      "fixture-identity",
+      "literal recipient argument",
+    ]);
+    expect(() => confinement.prepare({ ...input, networkEgress: "allow" })).toThrow(
+      ProcessConfinementError,
+    );
   });
 
   it("fails closed when sandbox-exec is missing or not executable", () => {

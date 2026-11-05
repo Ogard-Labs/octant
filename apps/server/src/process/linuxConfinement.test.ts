@@ -58,6 +58,40 @@ function fixture(): {
   return { root, boundRoot, temporaryDirectory, bwrapPath };
 }
 
+describe("pinned recipient admission in a Linux capsule", () => {
+  it("starts the fixed runtime bootstrap only after the capsule and forwarder", () => {
+    const f = fixture();
+    const sockets = join(f.root, "egress");
+    mkdirSync(sockets);
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/echo",
+        args: ["fixed argument"],
+        boundRoot: f.boundRoot,
+        temporaryDirectory: f.temporaryDirectory,
+        networkEgress: {
+          kind: "proxied",
+          endpoint: { kind: "unix-socket", path: join(sockets, "proxy.sock") },
+        },
+        ownAccountAccess: "none",
+        recipientAdmission: { digest: "0".repeat(64), identity: "fixture-identity" },
+      },
+      { bwrapPath: f.bwrapPath },
+    );
+    expect(launch.command).toBe(f.bwrapPath);
+    expect(launch.args).toContain("-e");
+    expect(launch.args.some((argument) => argument.includes("${OCTANT_COMMAND_PROXY_URL}"))).toBe(
+      true,
+    );
+    expect(launch.args.slice(-4)).toEqual([
+      "/bin/echo",
+      "0".repeat(64),
+      "fixture-identity",
+      "fixed argument",
+    ]);
+  });
+});
+
 function canRunHostBwrap(): boolean {
   try {
     accessSync(DEFAULT_BWRAP_PATH, constants.X_OK);

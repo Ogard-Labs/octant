@@ -13,7 +13,7 @@ The 1Password command line tool (`op`) is supported today. Other tools can be
 added without changing how this works.
 
 The provider-key path below keeps values out of the agent. The separately
-approved Full access command channel later in this guide gives credentials
+approved named-command channel later in this guide gives credentials
 directly to its recipient and has different disclosure limits.
 
 ## What Octant keeps, and what it does not
@@ -189,7 +189,7 @@ continue to work separately.
 
 ## Run a named command with linked credentials
 
-For a normal Code task at **Full access**, you can save a command binding in
+For a normal local Code task, you can save a command binding in
 **Settings › Secret stores › Credential commands**. Choose its Code Project,
 absolute recipient executable, fixed arguments (one per line), directory within
 the Project and explicit 1Password account ID. Add one to eight environment
@@ -209,13 +209,21 @@ Open **Credential commands** in the Code conversation and choose **Review**.
 An agent can request the same review with `octant_command`; it cannot approve
 it. Check the executable, arguments, directory, account, reference mappings and
 timeout, then choose **Approve one run**, **Deny**, or **Cancel command**.
-Approval expires after three minutes if the child has not started. A started
+The task's ordinary command approval and Auto Shield still apply in addition
+to this credential approval. A binding cannot approve a command or a new
+network destination. Approval expires after three minutes if the child has not started. A started
 command keeps its displayed timeout, up to five minutes.
 
-The recipient and its descendants receive the credentials and ordinary Full
-access, including network access. Choose a recipient you trust. `op run`
+At **Ask for approvals** and **Auto-accept edits**, the credential tool signs
+in outside the recipient's sandbox. It can launch only the prepared confined
+recipient, with the task's write rules and approved per-command network proxy.
+Ordinary system reads remain possible; protected credential stores stay denied.
+Missing confinement or execution support refuses without an unrestricted retry.
+At **Full access**, the recipient and its descendants have ordinary Full access,
+including network access. In every supported posture they receive the
+credentials directly. Choose a recipient you trust. `op run`
 conceals secrets in ordinary output by default, but a recipient can encode,
-write or send them elsewhere. Octant cannot promise complete redaction of
+write or send them to destinations its posture allows. Octant cannot promise complete redaction of
 values it never receives. The broker returns only reference authorization;
 it does not return resolved command credentials to the server or renderer.
 
@@ -235,6 +243,6 @@ A missing, replaced or unsupported CLI refuses; a locked store or invalid item
 may instead make the command exit nonzero. Octant does not label every nonzero
 exit as an authentication failure and does not retry automatically.
 
-This command channel currently refuses below Full access. It is unavailable to
+Plan refuses this command channel. It is unavailable to
 routines, managed subagents, paired clients and headless callers. It does not
 change the AWS temporary-session channel or the one-time HTTPS token card.

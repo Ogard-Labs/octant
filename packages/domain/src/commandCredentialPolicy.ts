@@ -1,6 +1,11 @@
 import type { CommandCredentialDefinition } from "@octant/contracts/command-credentials";
 const RESERVED =
-  /^(?:OP_|OCTANT_|LD_|DYLD_|GIT_|SSH_|BASH_|NODE_|BUN_|ELECTRON_|NO_COLOR$|TERM$|ENV$|BASH_ENV$|PATH$|HOME$|SHELL$|TMPDIR$|TEMP$|TMP$|PYTHONPATH$|PYTHONHOME$|PYTHONSTARTUP$|PYTHONINSPECT$|RUBYOPT$|RUBYLIB$|PERL5OPT$|PERL5LIB$|PERLLIB$|JAVA_TOOL_OPTIONS$|JDK_JAVA_OPTIONS$|CLASSPATH$)/;
+  /^(?:OP_|OCTANT_|LD_|DYLD_|GIT_|SSH_|BASH_|NODE_|BUN_|ELECTRON_|HTTP_PROXY$|HTTPS_PROXY$|ALL_PROXY$|NO_PROXY$|NO_COLOR$|TERM$|ENV$|BASH_ENV$|PATH$|HOME$|SHELL$|TMPDIR$|TEMP$|TMP$|PYTHONPATH$|PYTHONHOME$|PYTHONSTARTUP$|PYTHONINSPECT$|RUBYOPT$|RUBYLIB$|PERL5OPT$|PERL5LIB$|PERLLIB$|JAVA_TOOL_OPTIONS$|JDK_JAVA_OPTIONS$|CLASSPATH$)/;
+export function commandCredentialPostureAllowed(posture: string): boolean {
+  return (
+    posture === "full-access" || posture === "approval-gated" || posture === "auto-accept-edits"
+  );
+}
 export function commandCredentialDefinitionAllowed(
   definition: CommandCredentialDefinition,
 ): boolean {

@@ -48,6 +48,7 @@ export const CommandCredentialRequest = Schema.Struct({
   binding: CommandCredentialBinding,
   threadId: CodeThreadId,
   expiresAt: UtcTimestamp,
+  executionPolicy: Schema.Literal("full-access", "approval-gated", "auto-accept-edits"),
   state: Schema.Literal("pending", "running", "settled"),
 }).annotations(strict);
 export type CommandCredentialRequest = typeof CommandCredentialRequest.Type;
@@ -108,7 +109,7 @@ export const CommandCredentialResult = Schema.Union(
     kind: Schema.Literal("command-credential-refused"),
     reason: Schema.Literal(
       "unauthorized",
-      "full-access-required",
+      "posture-unsupported",
       "invalid",
       "stale",
       "not-linked",

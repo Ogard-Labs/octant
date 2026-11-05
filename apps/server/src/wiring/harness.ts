@@ -1,6 +1,7 @@
 import { ServerPreviewTunnels } from "../serverProjects/serverPreviewTunnel";
 import { createServerPreviewTunnelRoutes } from "../serverProjects/serverPreviewTunnelRoutes";
 import { readOwnedProcessReceipts } from "../process/nodeOwnedProcessReceipt";
+import { createCommandCredentialPreparation } from "../secretStores/commandCredentialPreparation";
 import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -950,6 +951,16 @@ export function wireHarness(deps: HarnessDependencies) {
   // A managed child's harness tools come first in its tool set, ahead of
   // what later areas add.
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
+  const prepareCredentialCommand = createCommandCredentialPreparation({
+    readThread: (id) => persistence.readCodeThread(id),
+    ordinary: nativeHarnessComposition,
+    egress: toolEgressRules,
+    endpoint: harnessEgressEndpoint,
+    fullAccessProcess: harnessFullAccessProcessPort,
+    temporaryDirectory: harnessWorkDirectory,
+    receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+    uuid: randomUUID,
+  });
   return {
     readHarnessProcessReceipts: async () =>
       (
@@ -962,6 +973,7 @@ export function wireHarness(deps: HarnessDependencies) {
     beginGoogleCliChange: googleCliCommands.beginChange,
     recoverGoogleCliCommands: () => googleCliCommands.recover(() => harnessProcessPort.reconcile()),
     credentialCommandProcess: harnessFullAccessProcessPort,
+    prepareCredentialCommand,
     personMemorySweep,
     runtimeForgeChanges,
     followUpCreation,

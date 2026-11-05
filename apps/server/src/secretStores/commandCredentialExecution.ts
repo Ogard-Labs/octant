@@ -3,7 +3,10 @@ import { constants, statSync, type Stats } from "node:fs";
 import { access, open, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { onePasswordCommandCredentials, resolveOnePasswordExecutable } from "@octant/host-runtime";
-import { commandCredentialDefinitionAllowed } from "@octant/domain/command-credential-policy";
+import {
+  commandCredentialDefinitionAllowed,
+  commandCredentialPostureAllowed,
+} from "@octant/domain/command-credential-policy";
 import {
   decodeCommandCredentialHostRequest,
   type CommandCredentialBinding,
@@ -13,7 +16,22 @@ import type { RepositoryTestProcessInput } from "../code/repositoryTestProcessPo
 import type { RepositoryTestProcessResult } from "../code/repositoryTestRunner";
 import type { CommandCredentialContext } from "./commandCredentialBindings";
 import type { SecretStoreBrokerClient } from "./secretStoreBrokerClient";
-import { COMMAND_CREDENTIAL_RECIPIENT_BOOTSTRAP } from "./commandCredentialRecipientBootstrap";
+import { COMMAND_CREDENTIAL_RECIPIENT_BOOTSTRAP } from "../process/pinnedRecipientBootstrap";
+export interface PreparedCredentialCommand {
+  readonly mode: "full-access" | "confined";
+  readonly process: {
+    execute: (
+      input: RepositoryTestProcessInput,
+      signal?: AbortSignal,
+    ) => Promise<RepositoryTestProcessResult>;
+  };
+  readonly environment: Readonly<Record<string, string>>;
+  readonly admitStart: () => boolean;
+  readonly finish: (input: {
+    readonly started: boolean;
+    readonly exitCode?: number;
+  }) => Promise<boolean>;
+}
 const identity = (details: Pick<Stats, "dev" | "ino" | "size" | "mtimeMs" | "ctimeMs">) =>
   `${details.dev}:${details.ino}:${details.size}:${details.mtimeMs}:${details.ctimeMs}`;
 export async function pinCommandExecutable(
@@ -57,6 +75,15 @@ export function createCommandCredentialExecution(options: {
     ) => Promise<RepositoryTestProcessResult>;
   };
   readonly broker: Pick<SecretStoreBrokerClient, "commandUse"> | undefined;
+  readonly prepare?: (input: {
+    readonly binding: CommandCredentialBinding;
+    readonly context: CommandCredentialContext;
+    readonly recipientIdentity: string;
+    readonly signal: AbortSignal;
+  }) => Promise<
+    | { readonly status: "admitted"; readonly command: PreparedCredentialCommand }
+    | { readonly status: "refused" }
+  >;
 }) {
   return async (
     binding: CommandCredentialBinding,
@@ -75,7 +102,8 @@ export function createCommandCredentialExecution(options: {
     if (
       !current() ||
       signal.aborted ||
-      context.executionPolicy !== "full-access" ||
+      !commandCredentialPostureAllowed(context.executionPolicy) ||
+      (context.executionPolicy !== "full-access" && options.prepare === undefined) ||
       !commandCredentialDefinitionAllowed(binding.definition)
     )
       return { ...none, status: "refused" };
@@ -148,6 +176,14 @@ export function createCommandCredentialExecution(options: {
         return { ...none, status: "refused" };
       const opIdentity = op.identity;
       const opPath = op.executable;
+      const prepared = await options.prepare?.({
+        binding,
+        context,
+        recipientIdentity: recipient.identity,
+        signal,
+      });
+      if (prepared?.status === "refused") return { ...none, status: "refused" };
+      const command = prepared?.command;
       const admitStart = async () => {
         const linked = await options.broker?.commandUse?.({
           ...request,
@@ -159,36 +195,55 @@ export function createCommandCredentialExecution(options: {
           return (
             current() &&
             !signal.aborted &&
-            context.executionPolicy === "full-access" &&
+            commandCredentialPostureAllowed(context.executionPolicy) &&
             identity(statSync(opPath)) === opIdentity &&
             identity(statSync(runtime)) === runtimeIdentity &&
             identity(statSync(recipient.executable)) === recipient.identity &&
             identity(statSync(root)) === rootIdentity &&
-            identity(statSync(directory)) === directoryIdentity
+            identity(statSync(directory)) === directoryIdentity &&
+            (command?.admitStart() ?? true)
           );
         } catch {
           return false;
         }
       };
-      const result = await options.process.execute(
-        {
-          argv: [opPath, ...launch.args],
-          cwd: directory,
-          environment: {
-            ...launch.environment,
-            NO_COLOR: "1",
-            TERM: "dumb",
-            ...(process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: "1" }),
+      let result: RepositoryTestProcessResult;
+      try {
+        result = await (command?.process ?? options.process).execute(
+          {
+            argv:
+              command?.mode === "confined"
+                ? [recipient.executable, ...binding.definition.args]
+                : [opPath, ...launch.args],
+            cwd: directory,
+            environment: {
+              ...launch.environment,
+              NO_COLOR: "1",
+              TERM: "dumb",
+              ...(process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: "1" }),
+              ...command?.environment,
+            },
+            timeoutMs: binding.definition.timeoutMs,
+            admitStart,
+            onStarted: () => {
+              started = true;
+              onStart();
+            },
           },
-          timeoutMs: binding.definition.timeoutMs,
-          admitStart,
-          onStarted: () => {
-            started = true;
-            onStart();
-          },
-        },
-        signal,
-      );
+          signal,
+        );
+      } catch (error) {
+        await command?.finish({ started });
+        throw error;
+      }
+      if (
+        command !== undefined &&
+        !(await command.finish({
+          started,
+          ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
+        }))
+      )
+        return { ...none, status: "failed", effect: started ? "possible" : "none" };
       const raw = Buffer.concat([Buffer.from(result.stdout), Buffer.from(result.stderr)]);
       const bytes = raw.subarray(0, 24 * 1024);
       const output = bytes.toString("utf8");
