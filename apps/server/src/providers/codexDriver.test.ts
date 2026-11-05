@@ -1512,10 +1512,7 @@ describe("Codex thread and turn lifecycle", () => {
       additionalContext: {
         octant_instructions: {
           kind: "application",
-          value: renderProviderContextSections([
-            { kind: "instructions", text: "Offer follow-ups only when useful." },
-            { kind: "turn-instructions", text: "Take stock first." },
-          ]),
+          value: "Offer follow-ups only when useful.\n\nTake stock first.",
         },
         octant_context: {
           kind: "untrusted",

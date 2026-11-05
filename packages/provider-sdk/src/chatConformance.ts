@@ -110,6 +110,30 @@ export function isOctantInstructionContext(block: ProviderContextBlock): boolean
 }
 
 /**
+ * Octant's own instructions as plain paragraphs, for a channel that already
+ * marks its content as Octant's (Codex developer context, the Claude Code
+ * prompt hook). A per-block tag there only repeats what the channel says, and
+ * its kind means nothing to the model.
+ */
+export function renderOctantInstructions(blocks: ReadonlyArray<ProviderContextBlock>): string {
+  return blocks.map((block) => block.text).join("\n\n");
+}
+
+/**
+ * The context for one channel beside the request: Octant's instructions as
+ * plain paragraphs, then everything else as tagged sections, where the kind
+ * says what the text is and that it is not the person's words.
+ */
+export function renderContextBesideRequest(context: ReadonlyArray<ProviderContextBlock>): string {
+  const instructions = context.filter(isOctantInstructionContext);
+  const material = context.filter((block) => !isOctantInstructionContext(block));
+  return [
+    ...(instructions.length === 0 ? [] : [renderOctantInstructions(instructions)]),
+    ...(material.length === 0 ? [] : [renderProviderContextSections(material)]),
+  ].join("\n\n");
+}
+
+/**
  * The text a provider receives for one turn: each context block as a tagged
  * plain-text section in the order given, then the request itself.
  *

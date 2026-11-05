@@ -33,6 +33,7 @@ import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-fa
 import {
   attachmentMediaTypeToModality,
   isOctantInstructionContext,
+  renderOctantInstructions,
   renderProviderContextSections,
   renderProviderTurnPrompt,
   unsupportedChatCapabilities,
@@ -597,7 +598,7 @@ function codexTurnRequest(
         : {
             [CODEX_INSTRUCTIONS_KEY]: {
               kind: "application",
-              value: renderProviderContextSections(instructions),
+              value: renderOctantInstructions(instructions),
             },
           }),
       ...(material.length === 0

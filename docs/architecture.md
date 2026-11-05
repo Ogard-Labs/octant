@@ -5896,7 +5896,12 @@ message it is sent and sends it again with every later request. Octant's turn
 prompt is therefore built to be appended, never rewritten:
 
 - **Framing.** `renderProviderContextSections` writes each context block as a
-  `<octant-context kind="…">` section of plain text, in the order given. The
+  `<octant-context kind="…">` section of plain text, in the order given. A
+  channel that already marks its content as Octant's carries Octant's own
+  instructions as plain paragraphs instead (`renderContextBesideRequest`),
+  because a per-block tag there repeats the channel and its kind means nothing
+  to the model; material keeps its sections, where the kind says what the text
+  is and that the person did not write it. The
   framing holds nothing but the blocks' own text, so the same blocks render to
   the same bytes every turn. A block's text cannot open or close a section:
   `<octant-context` and `</octant-context` inside it are written with `&lt;`.
@@ -5910,16 +5915,18 @@ prompt is therefore built to be appended, never rewritten:
   the cached prefix of earlier turns.
   - _Codex_ 0.140.0 and later: `turn/start.additionalContext`. Octant's own
     instructions (`instructions`, `turn-instructions`) go as one
-    `application` entry, which Codex records as a developer message; skills
+    `application` entry of plain paragraphs, which Codex records as a
+    developer message; skills
     and material go as one `untrusted` entry, a user message, so third-party
     text keeps the user-level authority it had inside the request. Codex sends
     an entry only when its value changed, which can skip only a value that is
     already the latest of its kind in the thread; a compaction clears both the
     entries and that memory. 0.130.0 accepted the field and dropped it, so an
     older install keeps the context inside the request.
-  - _Claude Code_ 2.1.211 and later: the `UserPromptSubmit` hook. Claude Code
-    shows the context to the model as a reminder in the same user turn, records
-    it beside the message, and keeps it across resume. It saves hook context
+  - _Claude Code_ 2.1.211 and later: the `UserPromptSubmit` hook, carrying
+    Octant's instructions as plain paragraphs and the rest as sections. Claude
+    Code shows the context to the model as a reminder in the same user turn,
+    records it beside the message, and keeps it across resume. It saves hook context
     over 10,000 characters to a file and shows only a preview, so the context
     goes there only while it fits; otherwise Octant's own instructions go there
     if they fit and the rest stays inside the message.

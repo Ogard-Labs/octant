@@ -36,7 +36,8 @@ import type {
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   isOctantInstructionContext,
-  renderProviderContextSections,
+  renderContextBesideRequest,
+  renderOctantInstructions,
   renderProviderTurnPrompt,
   unsupportedChatCapabilities,
   validateChatTurnInput,
@@ -133,10 +134,10 @@ function claudeTurnMessage(
     return { text: renderProviderTurnPrompt(input) };
   }
   const fits = (blocks: ReadonlyArray<ProviderContextBlock>) =>
-    Buffer.byteLength(renderProviderContextSections(blocks), "utf8") <=
+    Buffer.byteLength(renderContextBesideRequest(blocks), "utf8") <=
     CLAUDE_PROMPT_HOOK_CONTEXT_BYTES;
   if (fits(context)) {
-    return { text: input.prompt, context: renderProviderContextSections(context) };
+    return { text: input.prompt, context: renderContextBesideRequest(context) };
   }
   const instructions = context.filter(isOctantInstructionContext);
   if (instructions.length === 0 || !fits(instructions)) {
@@ -147,7 +148,7 @@ function claudeTurnMessage(
       prompt: input.prompt,
       context: context.filter((block) => !isOctantInstructionContext(block)),
     }),
-    context: renderProviderContextSections(instructions),
+    context: renderOctantInstructions(instructions),
   };
 }
 

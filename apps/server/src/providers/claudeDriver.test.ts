@@ -4538,7 +4538,7 @@ describe("Claude session lifecycle", () => {
     it("hands the context to the prompt hook and sends only what the person typed", async () => {
       expect(await sendWith(harness(), [rules, status])).toMatchObject({
         text: "hei",
-        context: renderProviderContextSections([rules, status]),
+        context: `${rules.text}\n\n${renderProviderContextSections([status])}`,
       });
     });
 
@@ -4546,7 +4546,7 @@ describe("Claude session lifecycle", () => {
       const large = { kind: "user-message", text: "x".repeat(12_000) } as const;
       expect(await sendWith(harness(), [rules, large])).toMatchObject({
         text: renderProviderTurnPrompt({ prompt: "hei", context: [large] }),
-        context: renderProviderContextSections([rules]),
+        context: rules.text,
       });
     });
 
