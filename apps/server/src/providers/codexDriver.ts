@@ -19,6 +19,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderRateLimitWindow,
   type ProviderServiceLimits,
+  type ProviderResumeCursor,
   type ProviderSessionId,
   type ProviderToolDefinition,
   type ProviderTurnInput,
@@ -455,6 +456,12 @@ interface SessionState {
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
+  /**
+   * The app tools the thread started with, which Codex keeps for good: a
+   * resume that offers others is accepted and ignored (measured on 0.164.0).
+   * Undefined when a resumed cursor predates the record.
+   */
+  readonly carriedTools: ReadonlySet<string> | undefined;
   activeTurnId?: string;
   outputAccepted: boolean;
   terminal: boolean;
@@ -545,6 +552,27 @@ function codexChatCapabilities(
       code: sessionCompaction,
     },
   };
+}
+
+/**
+ * The turn without rules about app tools the thread cannot call. Octant builds
+ * those rules from the tools each turn offers, but a Codex thread keeps the
+ * tools it started with, so a tool first offered later would otherwise be
+ * described to a model that cannot call it.
+ */
+function withCarriedToolRules(
+  input: ProviderTurnInput,
+  carried: ReadonlySet<string> | undefined,
+): ProviderTurnInput {
+  if (carried === undefined || input.context === undefined) return input;
+  return {
+    ...input,
+    context: input.context.filter((block) => block.tool === undefined || carried.has(block.tool)),
+  };
+}
+
+function carriedToolsOf(cursor: ProviderResumeCursor): ReadonlySet<string> | undefined {
+  return cursor.tools === undefined ? undefined : new Set(cursor.tools);
 }
 
 /**
@@ -1947,6 +1975,7 @@ function makeConnection(
       },
       thread: CodexThreadResult,
       modelId: string,
+      carriedTools: ReadonlySet<string> | undefined,
       turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">,
     ) => {
       const previous = sessions.get(input.sessionId);
@@ -1965,6 +1994,7 @@ function makeConnection(
         autoApprove: input.autoApprove,
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
+        carriedTools,
         correlationId: factories.makeCorrelation() as CorrelationId,
         outputAccepted: false,
         terminal: false,
@@ -2032,12 +2062,14 @@ function makeConnection(
                 failure("unauthorized", "Codex thread belongs to a different Project root."),
               );
             }
-            register(input, thread, input.modelId);
+            const toolNames = (input.tools ?? []).map((tool) => tool.name);
+            register(input, thread, input.modelId, new Set(toolNames));
             return {
               sessionId: input.sessionId,
               resumeCursor: {
                 driverKind: "codex" as const,
                 value: thread.thread.id,
+                tools: toolNames,
                 binding: providerResumeBinding({
                   instanceId: options.instanceId,
                   sessionId: input.sessionId,
@@ -2138,7 +2170,7 @@ function makeConnection(
             // so the new model and its reasoning ride on every turn instead.
             const modelId = input.modelId === undefined ? thread.model : String(input.modelId);
             if (modelId === thread.model) {
-              register(input, thread, thread.model);
+              register(input, thread, thread.model, carriedToolsOf(input.resumeCursor));
               return { sessionId: input.sessionId, resumeCursor: input.resumeCursor };
             }
             const switchedModel = options.runtimeRegistry
@@ -2157,7 +2189,7 @@ function makeConnection(
                 ? undefined
                 : codexModelOptionSettings(switchedModel, input.modelOptionValues).config
                     ?.model_reasoning_effort;
-            register(input, thread, modelId, {
+            register(input, thread, modelId, carriedToolsOf(input.resumeCursor), {
               model: modelId,
               ...(effort === undefined ? {} : { effort }),
             });
@@ -2192,7 +2224,7 @@ function makeConnection(
                   try {
                     const turn = await client.turnStart({
                       threadId: state.threadId,
-                      ...codexTurnRequest(input, version),
+                      ...codexTurnRequest(withCarriedToolRules(input, state.carriedTools), version),
                       ...codexTurnExecutionSettings(state.executionPolicy, state.autoApprove),
                       ...state.turnOverrides,
                       ...(mode === "chat" ? { environments: [] as const } : {}),

@@ -6052,6 +6052,16 @@ prompt is therefore built to be appended, never rewritten:
   in every mode: orientation, the reply formats it introduces, the mode's own
   rules (Work's folder rule, document delivery, the status file), tool notes,
   and finally anything for the current turn alone.
+- **Rules follow the tools the session can call.** A block that describes an
+  app tool (the Canvas delivery rule, the Browser and Computer notes) names
+  that tool, and a driver whose session cannot call it leaves the block out.
+  Codex needs this: a thread keeps the tools it started with for good, since
+  `thread/resume` accepts other tools and ignores them, and nothing reports
+  them back (0.164.0 against a local stand-in endpoint). The Codex driver
+  records the thread's starting tools in its resume cursor, so a resume after
+  a restart still knows them; a cursor written before that record keeps every
+  rule. Without it, a tool first offered later in a thread was described to a
+  model that could not call it.
 - **Standing text stays fixed.** Anything that varies from turn to turn is a
   `turn-instructions` block or a keyed block, never a change to a standing
   instruction's text. Changing that text withdraws the held block, which

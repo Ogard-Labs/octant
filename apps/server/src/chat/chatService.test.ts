@@ -1303,6 +1303,7 @@ describe("ChatService", () => {
     expect(fakeDriver.sentTurns[0]?.context).toContainEqual({
       kind: "instructions",
       text: expect.stringContaining("as a Canvas with the octant_canvas"),
+      tool: "octant_canvas",
     });
     expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).not.toContain("octant_canvas");
     expect(JSON.stringify(fakeDriver.sentTurns[1]?.context)).not.toContain("octant_canvas");

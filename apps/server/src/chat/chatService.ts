@@ -7,7 +7,8 @@ import {
   CANVAS_DELIVERY_INSTRUCTIONS,
   offersCanvasTool,
 } from "../canvas/canvasDeliveryInstructions";
-import { appToolHostLines } from "../providers/appToolHostLines";
+import { CANVAS_TOOL_NAME } from "../canvas/canvasAgentTools";
+import { appToolHostLines, type AppToolHostLine } from "../providers/appToolHostLines";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import { createHash } from "node:crypto";
 import {
@@ -5250,7 +5251,7 @@ export class ChatService {
      * offered neither.
      */
     canvasOffered = false,
-    toolHostLines: ReadonlyArray<string> = [],
+    toolHostLines: ReadonlyArray<AppToolHostLine> = [],
     /** What Octant remembers about the person, placed before Project memory. */
     personMemoryText?: string,
   ): ChatTurnContextPlan {
@@ -5603,7 +5604,7 @@ export class ChatService {
                 "required",
                 { kind: "instruction", referenceId: "octant-canvas-delivery" },
               ),
-              { kind: "instructions", text: CANVAS_DELIVERY_INSTRUCTIONS },
+              { kind: "instructions", text: CANVAS_DELIVERY_INSTRUCTIONS, tool: CANVAS_TOOL_NAME },
             ),
           ]
         : []),
@@ -5612,12 +5613,12 @@ export class ChatService {
           this.#contextEntry(
             thread,
             "octant-policy",
-            line,
-            Math.max(16, Math.ceil(line.length / 4)),
+            line.text,
+            Math.max(16, Math.ceil(line.text.length / 4)),
             "required",
             { kind: "instruction", referenceId: `octant-tool-host-line:${index}` },
           ),
-          { kind: "instructions", text: line },
+          { kind: "instructions", text: line.text, tool: line.tool },
         ),
       ),
       ...(personMemoryText === undefined

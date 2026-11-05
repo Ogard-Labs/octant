@@ -1645,6 +1645,12 @@ export const ProviderContextBlock = Schema.Struct({
    * the newer one appended; it is not a withdrawal, so nothing is restated.
    */
   key: Schema.optional(BoundedProviderContextKey),
+  /**
+   * The app tool this block describes, such as the Canvas delivery rule or the
+   * Browser note. A driver whose session cannot call that tool leaves the
+   * block out, so the model is never told about a tool it does not have.
+   */
+  tool: Schema.optional(BoundedProviderToolName),
 }).annotations(strict);
 export type ProviderContextBlock = typeof ProviderContextBlock.Type;
 
@@ -2424,6 +2430,13 @@ export const ProviderResumeCursor = Schema.Struct({
       modelId: ProviderModelId,
     }).annotations(strict),
   ),
+  /**
+   * The app tools a runtime fixed for this session when it started and cannot
+   * change later (Codex keeps a thread's starting tools across every resume),
+   * so a resumed session still knows which tool rules it can carry. Absent
+   * means unknown, and every rule is kept.
+   */
+  tools: Schema.optional(Schema.Array(BoundedProviderToolName).pipe(Schema.maxItems(256))),
 }).annotations(strict);
 export type ProviderResumeCursor = typeof ProviderResumeCursor.Type;
 

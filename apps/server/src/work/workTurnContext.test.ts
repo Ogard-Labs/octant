@@ -301,7 +301,11 @@ describe("planWorkTurnContext", () => {
     if (withCanvas.kind !== "ok") throw new Error("The instructions fit their budget");
     expect(withCanvas.context).toEqual([
       { kind: "instructions", text: expect.stringContaining("this task's folder") },
-      { kind: "instructions", text: expect.stringContaining("as a Canvas with the octant_canvas") },
+      {
+        kind: "instructions",
+        text: expect.stringContaining("as a Canvas with the octant_canvas"),
+        tool: "octant_canvas",
+      },
     ]);
     expect(withCanvas.manifest.entries).toContainEqual(
       expect.objectContaining({
@@ -321,7 +325,7 @@ describe("planWorkTurnContext", () => {
     if (withoutCanvas.kind !== "ok") throw new Error("The instructions fit their budget");
     expect(withoutCanvas.context).toEqual([
       { kind: "instructions", text: expect.stringContaining("this task's folder") },
-      { kind: "instructions", text: BROWSER_TOOL_HOST_LINE },
+      { kind: "instructions", text: BROWSER_TOOL_HOST_LINE, tool: "octant_browser" },
     ]);
     expect(JSON.stringify(withoutCanvas.context)).not.toContain("octant_canvas");
   });

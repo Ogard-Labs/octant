@@ -223,6 +223,7 @@ import {
   PROVIDER_CONTEXT_RESTATED,
   type ProviderTurnContextDelta,
 } from "@octant/provider-sdk/chat-conformance";
+import { CANVAS_TOOL_NAME } from "../canvas/canvasAgentTools";
 import {
   documentDeliveryInstructions,
   offersCanvasTool,
@@ -4559,14 +4560,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // Only a thread whose person chose the runtime's artifact tool is told to
     // use it; the turn runner starts that thread's session with the same
     // choice, and every other thread keeps Canvas.
+    const artifactToolName =
+      active.thread.documentDelivery === "native-artifacts"
+        ? active.driver.nativeArtifactTool?.({
+            mode: "code",
+            executionPolicy: active.thread.executionPolicy,
+          })
+        : undefined;
     const deliveryInstructions = documentDeliveryInstructions({
-      artifactToolName:
-        active.thread.documentDelivery === "native-artifacts"
-          ? active.driver.nativeArtifactTool?.({
-              mode: "code",
-              executionPolicy: active.thread.executionPolicy,
-            })
-          : undefined,
+      artifactToolName,
       canvasOffered: offersCanvasTool(appManagedTools?.definitions),
     });
     const extraFolderInstructions = projectExtraFoldersInstructions(active.extraFolders);
@@ -4574,13 +4576,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const hostGuidance = [
       ...(deliveryInstructions === undefined
         ? []
-        : [{ kind: "instructions" as const, text: deliveryInstructions }]),
+        : [
+            {
+              kind: "instructions" as const,
+              text: deliveryInstructions,
+              ...(artifactToolName === undefined ? { tool: CANVAS_TOOL_NAME } : {}),
+            },
+          ]),
       ...(extraFolderInstructions === undefined
         ? []
         : [{ kind: "instructions" as const, text: extraFolderInstructions }]),
-      ...appToolHostLines(appManagedTools?.definitions).map((text) => ({
+      ...appToolHostLines(appManagedTools?.definitions).map((line) => ({
         kind: "instructions" as const,
-        text,
+        text: line.text,
+        tool: line.tool,
       })),
     ];
     const personMemoryText = this.#options.personMemoryBlock?.({
