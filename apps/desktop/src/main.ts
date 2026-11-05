@@ -1,4 +1,5 @@
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
+import { resolvePackagedDesktopLaunch } from "./desktopLaunch";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
@@ -4368,18 +4369,20 @@ async function stopHostForQuit(): Promise<void> {
     native,
     windows,
   ]);
-  if (windowsResult.status === "rejected" || windowsResult.value?.kind === "failed")
-    logQuitProblem("Octant could not finish closing its Nightly window leases.");
-  if (
-    nativeResult.status === "rejected" ||
-    (nativeResult.value !== undefined && nativeResult.value.kind === "failed")
-  )
-    logQuitProblem("Octant could not finish closing its desktop status endpoint.");
+  const windowsFailed =
+    windowsResult.status === "rejected" || windowsResult.value?.kind === "failed";
+  const nativeFailed = nativeResult.status === "rejected" || nativeResult.value?.kind === "failed";
+  if (windowsFailed) logQuitProblem("Octant could not finish closing its Nightly window leases.");
+  if (nativeFailed) logQuitProblem("Octant could not finish closing its desktop status endpoint.");
   if (hostResult.status === "rejected") throw hostResult.reason;
   if (prototypeResult.status === "rejected") throw prototypeResult.reason;
   if (prototypeResult.value?.status === "failed") {
     throw new Error(`Canvas prototype shutdown failed: ${prototypeResult.value.reason}.`);
   }
+  // Native close can retain an OS launch after its deadline. Report failure
+  // only after every sibling has settled, so quit never records it as clean.
+  if (windowsFailed || nativeFailed)
+    throw new Error("Octant could not finish closing its native desktop owners.");
 }
 
 function finishQuit(): void {
@@ -4546,7 +4549,13 @@ function startDesktopInstance(): void {
     acceptCodeDeepLink(url);
     requestActiveWindow();
   });
+  const hostOnly = (args: ReadonlyArray<string>) =>
+    app.isPackaged &&
+    process.platform === "darwin" &&
+    resolvePackagedDesktopLaunch(applicationIdentity, args).kind === "host-only";
   app.on("second-instance", (_event, commandLine) => {
+    // A concurrent Nightly launch joins this owner without opening its shell.
+    if (hostOnly(commandLine.slice(1))) return;
     for (const argument of commandLine)
       if (argument.startsWith(`${applicationIdentity.scheme}://`)) acceptCodeDeepLink(argument);
     requestActiveWindow();
@@ -4555,7 +4564,9 @@ function startDesktopInstance(): void {
     if (argument.startsWith(`${applicationIdentity.scheme}://`)) acceptCodeDeepLink(argument);
   void app
     .whenReady()
-    .then(() => {
+    .then(async () => {
+      const withoutWindow = hostOnly(process.argv.slice(1));
+      if (withoutWindow) await startHostFromMenu();
       if (!preparingQuit && !quitPrepared && applicationIdentity.flavor === "stable") {
         const native = loadDesktopPeerStatus({
           packaged: app.isPackaged,
@@ -4583,7 +4594,7 @@ function startDesktopInstance(): void {
         }
       }
       installApplicationMenu();
-      return requestActiveWindow();
+      if (!withoutWindow) await requestActiveWindow();
     })
     .catch(handleFatalStartup);
 }

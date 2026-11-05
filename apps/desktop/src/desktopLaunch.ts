@@ -43,6 +43,14 @@ export async function launchDesktopApplication(
           message =
             "This development build cannot connect to Octant. A signed release build is required.";
           break;
+        case "incompatible-host":
+          message =
+            "Needs a newer Octant. The installed app does not support this Nightly connection or host-only launch.";
+          break;
+        case "not-installed":
+          message =
+            "Install Octant before opening Octant Nightly. Nightly uses Octant's host and never starts its own.";
+          break;
         case "not-running":
           message =
             "Open a signed Octant that supports Nightly. Octant may be closed or too old to answer this status check.";
@@ -68,10 +76,13 @@ export async function launchDesktopApplication(
   return { kind: "started" };
 }
 
+export const DESKTOP_HOST_ONLY_SWITCH = "--octant-host-only";
+
 export const DESKTOP_TERMINAL_SWITCH = "--octant-terminal-cli";
 
 export type PackagedDesktopLaunch =
   | { readonly kind: "desktop" }
+  | { readonly kind: "host-only" }
   | { readonly kind: "canvas" }
   | { readonly kind: "terminal"; readonly args: ReadonlyArray<string> }
   | { readonly kind: "refused"; readonly message: string };
@@ -87,6 +98,14 @@ export function resolvePackagedDesktopLaunch(
   };
   if (args.length > 64 || args.some((arg) => arg.length > 16_384 || arg.includes("\0")))
     return refused;
+  if (
+    identity.flavor === "stable" &&
+    args.includes(DESKTOP_HOST_ONLY_SWITCH) &&
+    args.filter((arg) => arg === DESKTOP_HOST_ONLY_SWITCH).length === 1 &&
+    args.filter((arg) => /^-psn_[0-9]+_[0-9]+$/.test(arg)).length <= 1 &&
+    args.every((arg) => arg === DESKTOP_HOST_ONLY_SWITCH || /^-psn_[0-9]+_[0-9]+$/.test(arg))
+  )
+    return { kind: "host-only" };
   if (
     identity.flavor === "stable" &&
     args.length === 1 &&

@@ -1,6 +1,10 @@
 import { desktopIdentity } from "@octant/host-runtime";
 import { describe, expect, it, vi } from "vitest";
-import { launchDesktopApplication, resolvePackagedDesktopLaunch } from "./desktopLaunch";
+import {
+  DESKTOP_HOST_ONLY_SWITCH,
+  launchDesktopApplication,
+  resolvePackagedDesktopLaunch,
+} from "./desktopLaunch";
 
 describe("packaged desktop launch", () => {
   it("refuses Nightly before loading the module that initializes credentials and shared host paths", async () => {
@@ -124,4 +128,34 @@ it("accepts only Stable's fixed packaged roles and refuses a caller-selected scr
   ]) {
     expect(resolvePackagedDesktopLaunch(desktopIdentity("stable"), args).kind).toBe("refused");
   }
+});
+
+it("accepts a host-only role only for Stable without mixed entries or runtime options", () => {
+  for (const args of [[DESKTOP_HOST_ONLY_SWITCH], ["-psn_0_123", DESKTOP_HOST_ONLY_SWITCH]]) {
+    expect(resolvePackagedDesktopLaunch(desktopIdentity("stable"), args)).toEqual({
+      kind: "host-only",
+    });
+    expect(resolvePackagedDesktopLaunch(desktopIdentity("nightly"), args).kind).toBe("refused");
+  }
+  for (const args of [
+    [DESKTOP_HOST_ONLY_SWITCH, DESKTOP_HOST_ONLY_SWITCH],
+    [DESKTOP_HOST_ONLY_SWITCH, "--inspect"],
+    [DESKTOP_HOST_ONLY_SWITCH, "octant://code/project/123e4567-e89b-42d3-a456-426614174000"],
+    [DESKTOP_HOST_ONLY_SWITCH, "-psn_0_1", "-psn_0_2"],
+  ])
+    expect(resolvePackagedDesktopLaunch(desktopIdentity("stable"), args).kind).toBe("refused");
+});
+
+it("names the newer-host prerequisite when the installed Stable lacks host-only launch", async () => {
+  const host = vi.fn(async () => undefined);
+  expect(
+    await launchDesktopApplication(desktopIdentity("nightly"), host, async () => ({
+      kind: "refused",
+      reason: "incompatible-host",
+    })),
+  ).toMatchObject({
+    kind: "client-bridge-required",
+    message: expect.stringContaining("Needs a newer Octant"),
+  });
+  expect(host).not.toHaveBeenCalled();
 });
