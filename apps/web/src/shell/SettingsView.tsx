@@ -66,6 +66,11 @@ import type { BrowserAutomationClient } from "@octant/client-runtime/browser-aut
 import type { RememberedBrowserProfileSite } from "@octant/contracts/shell";
 import { browserProfileKey } from "@octant/domain";
 import { ChatSettingsView } from "../chat/ChatSettingsView";
+import {
+  REPLY_DETAIL_DESCRIPTIONS,
+  REPLY_DETAIL_LABELS,
+  REPLY_DETAIL_LEVELS,
+} from "../transcript/replyDetail";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
 import { CodeSettingsView } from "../code/CodeSettingsView";
@@ -2289,6 +2294,30 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               <OctantToggleGroupItem value="narrow">Narrow</OctantToggleGroupItem>
               <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
               <OctantToggleGroupItem value="wide">Wide</OctantToggleGroupItem>
+            </OctantToggleGroup>
+          </SettingRow>
+        ) : null}
+        {isAvailable("reply-detail") ? (
+          <SettingRow
+            description={REPLY_DETAIL_DESCRIPTIONS[props.settings.replyDetail]}
+            focused={focusedSetting === settingId("reply-detail")}
+            label="Reply detail"
+            scope="app"
+            settingId="reply-detail"
+          >
+            <OctantToggleGroup<ShellSettings["replyDetail"]>
+              aria-label="Reply detail"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) props.onSettingsChange({ replyDetail: selected });
+              }}
+              value={[props.settings.replyDetail]}
+            >
+              {REPLY_DETAIL_LEVELS.map((level) => (
+                <OctantToggleGroupItem key={level} value={level}>
+                  {REPLY_DETAIL_LABELS[level]}
+                </OctantToggleGroupItem>
+              ))}
             </OctantToggleGroup>
           </SettingRow>
         ) : null}

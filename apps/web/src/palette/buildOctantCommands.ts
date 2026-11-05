@@ -1,4 +1,10 @@
 import type { OctantMode } from "@octant/contracts/modes";
+import type { ReplyDetailLevel } from "@octant/contracts/shell";
+import {
+  REPLY_DETAIL_DESCRIPTIONS,
+  REPLY_DETAIL_LABELS,
+  REPLY_DETAIL_LEVELS,
+} from "../transcript/replyDetail";
 import type { OctantCommand } from "./commandModel";
 
 /**
@@ -15,6 +21,12 @@ export interface OctantCommandSources {
   readonly onNewThread: () => void;
   readonly onOpenSearch: () => void;
   readonly onOpenSettings: () => void;
+  /**
+   * The Reply detail level in effect and the save Settings › Appearance uses.
+   * Absent while the window has no settings to change.
+   */
+  readonly replyDetail?: ReplyDetailLevel;
+  readonly onSetReplyDetail?: (level: ReplyDetailLevel) => void;
   /** Opens the Review page for the finished threads the person has not looked at. */
   readonly onOpenReview?: () => void;
   /** Jumps to the next thread waiting on the person. Absent when none waits. */
@@ -237,6 +249,23 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
     keywords: ["preferences", "providers", "appearance"],
     action: { kind: "run", run: sources.onOpenSettings },
   });
+
+  const setReplyDetail = sources.onSetReplyDetail;
+  if (setReplyDetail !== undefined) {
+    // The other levels only, as with modes: choosing the level already in
+    // effect would do nothing.
+    for (const level of REPLY_DETAIL_LEVELS) {
+      if (level === sources.replyDetail) continue;
+      commands.push({
+        id: `settings:reply-detail:${level}`,
+        title: `Show ${REPLY_DETAIL_LABELS[level].toLowerCase()} reply detail`,
+        group: "Settings",
+        detail: REPLY_DETAIL_DESCRIPTIONS[level],
+        keywords: ["reply detail", "thinking", "tool calls", "expand", "collapse", level],
+        action: { kind: "run", run: () => setReplyDetail(level) },
+      });
+    }
+  }
 
   if (sources.onOpenZen !== undefined) {
     commands.push({

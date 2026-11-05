@@ -16,9 +16,25 @@ The **Appearance** page covers the color scheme and presets, UI/editor/terminal
 typography, theme accessibility, and theme import and export, then **Window**
 (Glass), **Background**, **Sidebar** (width, destinations, the More row, the
 mode switcher, provider icons), **Sidebar thread rows**, and **Reading**
-(transcript text size and width, the stats line, and how the composer's usage
-bars are drawn). **Reset to default**, at the right of the page
+(transcript text size and width, **Reply detail**, the stats line, and how the
+composer's usage bars are drawn). **Reset to default**, at the right of the page
 title, returns every appearance setting to its default.
+
+**Reply detail** chooses how much of an agent's work a thread shows open, the
+same in Chat, Work, and Code:
+
+- **Low** (the default): thinking stays folded, and a finished turn's tool
+  calls fold behind one line such as "3 tool calls".
+- **Medium**: thinking stays folded but shows its first line, and a finished
+  turn's tool calls stay listed.
+- **High**: thinking, the tool calls, and each call's recorded result stay
+  open.
+
+It only changes what is open on screen: the model is asked for nothing more,
+and a tool call shows only the summary Octant already recorded. You can still
+open or close any single disclosure; it stays that way until you change the
+level. The command palette can switch the level too ("Show high reply
+detail").
 
 Every Settings page is laid out the same way: an icon tile, the page title and
 a one-line description, then sections. A page with three or more sections adds

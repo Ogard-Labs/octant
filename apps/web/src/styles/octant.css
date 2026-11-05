@@ -7236,6 +7236,17 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 .thinking[open] > summary .chev {
   transform: rotate(90deg);
 }
+/* Reply detail at medium: the first line of shut reasoning, clipped to the row.
+   The zero width keeps its longest word out of the row's min-content: without
+   it the reply's grid widened past a 390px column instead of clipping. */
+.thinking-preview {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .thinking-body {
   margin-top: var(--oct-space-2);
   font-family: var(--oct-font-transcript);

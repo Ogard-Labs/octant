@@ -357,7 +357,8 @@ sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Look & feel holds Appearance (theme, window glass, background,
-text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
+text, accessibility, and Reading: transcript text size and width, Reply detail,
+the stats line and the usage bars) and a separate Sidebar page (layout, destinations, sidebar
 background, and a thread-row grid of detail by list). A page names its scope once, under its title, and a row names
 its own only when it differs. Settings folds long choices it does not need
 open: the built-in background pictures sit behind the current one and a
@@ -937,8 +938,9 @@ as the composer; markdown headings inside it are labels
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the
 name at the body size and the state at the right as detail text with a 12px
-mark (spinner, check, cross), parted by hairlines and indented together; a
-settled turn folds them behind "N tool calls". An approval Octant Shield
+mark (spinner, check, cross), parted by hairlines and indented together; at
+the default Reply detail (below) a settled turn folds them behind "N tool
+calls". An approval Octant Shield
 answered is a 28px line among them, not a disclosure: a 14px shield mark
 (check, alert, or cross, the cross in the danger ink), "Octant Shield
 allowed", "asked you", or "denied", the call in detail-size mono, the
@@ -959,6 +961,38 @@ diff values stay blank, and unavailable checkout actions are not shown. Input gr
 extra typed lines and visible notices is intentional. Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
+
+**Reply detail** (`replyDetail`, Settings › Appearance › Reading) chooses how
+much of a turn's work the transcript shows open. It is one `OctantToggleGroup`
+of three levels, and the row's description is the chosen level's sentence. It
+applies the same in Chat, Work, and Code, wherever `TurnActivityRows` and
+`AssistantMessageBody` draw a turn:
+
+- **Low** (default): "Thinking stays folded, and a finished turn's tool calls
+  fold behind one line." Thinking is shut, tool rows are listed while the turn
+  runs and fold behind "N tool calls" once it settles, and each row's detail is
+  shut. This is the transcript as it was before the setting.
+- **Medium**: "Thinking stays folded with its first line showing, and tool
+  calls stay listed." A shut Thinking row carries the reasoning's first line
+  after its name, as plain words in the muted ink, clipped to the row with an
+  ellipsis; it goes away while Thinking is open. A settled turn's "N tool
+  calls" fold starts open, and each row's detail stays shut.
+- **High**: "Thinking, tool calls, and each call's recorded result stay open."
+  Thinking, the fold and every row start open on the summary the transcript
+  already holds, still clipped behind Show all past 1,200 characters.
+
+The level is presentation only. It never changes what a model is asked or what
+a client fetches, and a row with no recorded summary says so rather than
+showing more. Every disclosure stays native, with `open` and `aria-expanded` in
+step, so a person can open or close any one by hand; that choice holds for that
+disclosure while the turn stays mounted and the level is unchanged, and
+changing the level puts every disclosure where the new level puts it. The first
+line beside Thinking is hidden from assistive technology: the button's name
+stays "Thinking", and the same words are read from the body once it opens.
+Nothing animates beyond the chevron's turn, which reduced motion stills. The
+command palette offers the two levels not in effect ("Show high reply detail");
+there is no keyboard chord. A paired browser, which cannot read the host's
+shell settings, draws Low.
 
 The displayed partial answer coalesces updates on a fifty-millisecond beat, or
 one hundred milliseconds for long answers (at least sixteen thousand text

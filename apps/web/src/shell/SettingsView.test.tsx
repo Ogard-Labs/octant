@@ -241,6 +241,24 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({ usageBars: "pixelated" });
   });
 
+  it("shows replies at low detail until another level is chosen in Appearance", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    navigateTo("Appearance");
+
+    const replyDetail = screen.getByRole("group", { name: "Reply detail" });
+    expect(within(replyDetail).getByRole("button", { name: "Low" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("group", { name: "Reply detail setting" })).toHaveAccessibleDescription(
+      "Thinking stays folded, and a finished turn's tool calls fold behind one line.",
+    );
+    await user.click(within(replyDetail).getByRole("button", { name: "High" }));
+
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ replyDetail: "high" });
+  });
+
   it("shows the stats line switch off when the saved preference is off", () => {
     renderSettings({ settings: { ...defaultShellSettings(), showThreadStats: false } });
     navigateTo("Appearance");

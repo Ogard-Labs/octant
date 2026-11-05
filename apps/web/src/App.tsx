@@ -19,6 +19,7 @@ import {
   NewTaskDraftsContext,
 } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
+import { ReplyDetailContext } from "./transcript/replyDetail";
 import { ImageJobChangeRevisionContext } from "./image/ImageJobChangeRevision";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
@@ -135,7 +136,12 @@ import type {
   RunningService,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
-import { decodeWorkspaceTabId, type PaneId, type WindowId } from "@octant/contracts/shell";
+import {
+  decodeWorkspaceTabId,
+  type PaneId,
+  type ReplyDetailLevel,
+  type WindowId,
+} from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ThemeTypography } from "@octant/contracts/theme";
@@ -6758,6 +6764,13 @@ function LaunchedShell(
     onNewThread: () => startNewThreadDraft(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
+    ...(controller.settings === undefined
+      ? {}
+      : {
+          replyDetail: controller.settings.replyDetail,
+          onSetReplyDetail: (replyDetail: ReplyDetailLevel) =>
+            void controller.updateSettings({ replyDetail }),
+        }),
     onOpenReview: openReview,
     ...(nextWaiting === undefined ? {} : { onJumpToNextWaiting: jumpToNextWaiting }),
     onOpenZen: () => {
@@ -7541,37 +7554,41 @@ function LaunchedShell(
                           <StreamRepliesContext.Provider
                             value={controller.settings?.streamReplies !== false}
                           >
-                            {/* The floor for every rendered link: panes that can host a
+                            <ReplyDetailContext.Provider
+                              value={controller.settings?.replyDetail ?? "low"}
+                            >
+                              {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                            <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                              <WorkKindChoiceContext.Provider value={workKindChoice}>
-                                <ModelToolVerificationContext.Provider
-                                  value={providerController.verifyModelTools}
-                                >
-                                  <HostFederationStackContext.Provider value={federation}>
-                                    <PlanUsageProvider
-                                      barStyle={controller.settings?.usageBars ?? "smooth"}
-                                      client={launchedClients.providerUsageLimitsClient}
-                                    >
-                                      <HostPlatformContext.Provider value={hostPlatform}>
-                                        <ServerCodeProjectsContext.Provider
-                                          value={serverCodeProjects}
-                                        >
-                                          <CodeDebugWindowProvider
-                                            origin={new URL(props.launch.serverUrl).origin}
-                                            windowId={String(props.launch.windowId)}
+                              <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                                <WorkKindChoiceContext.Provider value={workKindChoice}>
+                                  <ModelToolVerificationContext.Provider
+                                    value={providerController.verifyModelTools}
+                                  >
+                                    <HostFederationStackContext.Provider value={federation}>
+                                      <PlanUsageProvider
+                                        barStyle={controller.settings?.usageBars ?? "smooth"}
+                                        client={launchedClients.providerUsageLimitsClient}
+                                      >
+                                        <HostPlatformContext.Provider value={hostPlatform}>
+                                          <ServerCodeProjectsContext.Provider
+                                            value={serverCodeProjects}
                                           >
-                                            {shell}
-                                          </CodeDebugWindowProvider>
-                                        </ServerCodeProjectsContext.Provider>
-                                      </HostPlatformContext.Provider>
-                                    </PlanUsageProvider>
-                                  </HostFederationStackContext.Provider>
-                                </ModelToolVerificationContext.Provider>
-                              </WorkKindChoiceContext.Provider>
-                            </MarkdownLinkActionsContext.Provider>
+                                            <CodeDebugWindowProvider
+                                              origin={new URL(props.launch.serverUrl).origin}
+                                              windowId={String(props.launch.windowId)}
+                                            >
+                                              {shell}
+                                            </CodeDebugWindowProvider>
+                                          </ServerCodeProjectsContext.Provider>
+                                        </HostPlatformContext.Provider>
+                                      </PlanUsageProvider>
+                                    </HostFederationStackContext.Provider>
+                                  </ModelToolVerificationContext.Provider>
+                                </WorkKindChoiceContext.Provider>
+                              </MarkdownLinkActionsContext.Provider>
+                            </ReplyDetailContext.Provider>
                           </StreamRepliesContext.Provider>
                         </NewTaskDraftsContext.Provider>
                       </ProjectThreadsProvider>

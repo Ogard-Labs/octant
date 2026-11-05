@@ -59,6 +59,7 @@ const settings = {
   transcriptTextSize: "medium",
   transcriptWidth: "narrow",
   usageBars: "smooth",
+  replyDetail: "low",
   showThreadProviderIcons: true,
   showThreadStats: true,
   homeCards: { order: [], visibility: [] },
@@ -174,6 +175,13 @@ describe("shell bootstrap contracts", () => {
       "pixelated",
     );
     expect(() => decodeShellSettings({ ...settings, usageBars: "dotted" })).toThrow();
+  });
+
+  it("reads settings saved before reply detail existed at the quiet low level", () => {
+    const { replyDetail: _omitted, ...withoutReplyDetail } = settings;
+    expect(decodeShellSettings(withoutReplyDetail).replyDetail).toBe("low");
+    expect(decodeShellSettings({ ...settings, replyDetail: "high" }).replyDetail).toBe("high");
+    expect(() => decodeShellSettings({ ...settings, replyDetail: "verbose" })).toThrow();
   });
 
   it("shows the thread stats line unless someone turned it off", () => {

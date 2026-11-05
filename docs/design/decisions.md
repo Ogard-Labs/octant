@@ -53,7 +53,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 6       | 2            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
-| [Design system](#design-system)                                                       | 9         | 9       | 0            | 0                   |
+| [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **223**   | **189** | **31**       | **3**               |
+| **All areas**                                                                         | **224**   | **190** | **31**       | **3**               |
 
 ## Principles and hard lines
 
@@ -1974,6 +1974,18 @@ The Usage page reports what was measured and shows each provider with a bundled 
 - Provider logos are locally bundled and licensed, never fetched at runtime, and never drawn approximately. Unknown providers get a truthful fallback.
 
 Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](../../DESIGN.md#usage-surface-ownership) and [Iconography and provider marks](../../DESIGN.md#iconography-and-provider-marks).
+
+### Reply detail
+
+One Appearance setting, Reply detail, chooses how much of a turn's thinking and tool calls the transcript shows open: Low, Medium or High, with Low the default and the transcript as it was before.
+
+- Low keeps thinking shut and folds a settled turn's tool calls behind "N tool calls"; Medium keeps thinking shut with its first line beside the name and leaves the tool calls listed; High opens thinking, the tool calls and each row's recorded summary.
+- It is presentation only: it never changes what a model is asked or what a client fetches, and shows nothing the transcript does not already hold.
+- It is the same in Chat, Work and Code. It persists in the host's shell settings with the other Appearance choices, and settings saved without it read as Low.
+- A disclosure opened or closed by hand keeps that state while its turn stays mounted and the level is unchanged; changing the level resets every disclosure to the new level.
+- The thinking preview is hidden from assistive technology so it is never read twice, and every disclosure keeps `open` and `aria-expanded` in step.
+
+Status: Built. Since: —. Detail: [DESIGN.md: Transcript](../../DESIGN.md#transcript).
 
 ## Workspace
 

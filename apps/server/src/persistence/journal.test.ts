@@ -200,6 +200,7 @@ describe("Journal", () => {
         transcriptTextSize: "medium",
         transcriptWidth: "narrow",
         usageBars: "smooth",
+        replyDetail: "low",
         showThreadProviderIcons: true,
         showThreadStats: true,
         homeCards: { order: [], visibility: [] },

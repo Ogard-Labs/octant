@@ -454,6 +454,12 @@ export type TranscriptWidth = typeof TranscriptWidth.Type;
 /** How the composer's plan-usage meters draw their bar: a smooth fill or square cells. */
 export const UsageBarStyle = Schema.Literal("smooth", "pixelated");
 export type UsageBarStyle = typeof UsageBarStyle.Type;
+/**
+ * How much of an agent's work a transcript shows open. Presentation only: it
+ * never changes what is asked of a model or what a client fetches.
+ */
+export const ReplyDetailLevel = Schema.Literal("low", "medium", "high");
+export type ReplyDetailLevel = typeof ReplyDetailLevel.Type;
 
 export const MIN_COMPLETED_THREAD_ARCHIVE_DAYS = 1;
 export const MAX_COMPLETED_THREAD_ARCHIVE_DAYS = 365;
@@ -651,6 +657,12 @@ export const ShellSettings = Schema.Struct({
    * before the setting shipped decodes to the smooth bar.
    */
   usageBars: Schema.optionalWith(UsageBarStyle, { default: () => "smooth" as const }),
+  /**
+   * How much of a turn's thinking and tool calls the transcript shows open.
+   * A store persisted before the setting shipped decodes to low, the quiet
+   * folding every transcript had before.
+   */
+  replyDetail: Schema.optionalWith(ReplyDetailLevel, { default: () => "low" as const }),
   showThreadProviderIcons: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
    * Whether the quiet stats line (tokens, cache hit, speed, first-token time,

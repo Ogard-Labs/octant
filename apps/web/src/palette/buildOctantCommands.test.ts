@@ -45,6 +45,32 @@ describe("the Apple workbench command", () => {
   });
 });
 
+describe("the Reply detail commands", () => {
+  it("offers the levels not in effect and saves the chosen one through the settings save", () => {
+    const onSetReplyDetail = vi.fn();
+    const commands = buildOctantCommands(sources({ replyDetail: "low", onSetReplyDetail })).filter(
+      (candidate) => candidate.id.startsWith("settings:reply-detail:"),
+    );
+
+    expect(commands.map((command) => command.title)).toEqual([
+      "Show medium reply detail",
+      "Show high reply detail",
+    ]);
+    const high = commands[1];
+    if (high?.action.kind !== "run") throw new Error("expected a run command");
+    high.action.run();
+    expect(onSetReplyDetail).toHaveBeenCalledWith("high");
+  });
+
+  it("offers none while the window has no settings to change", () => {
+    expect(
+      buildOctantCommands(sources()).some((command) =>
+        command.id.startsWith("settings:reply-detail:"),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("the Zen command", () => {
   it("toggles Zen through the same callback the identity menu uses", () => {
     const onOpenZen = vi.fn();
