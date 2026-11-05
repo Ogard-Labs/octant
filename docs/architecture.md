@@ -683,7 +683,8 @@ never remembered.
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
 `octant_browser`, `octant_computer`, `octant_threads` in Work and Code, and in
-Code `octant_terminal`, `octant_apple`, and `octant_android` — with its actions
+Code `octant_terminal`, `octant_apple`, `octant_android`, and
+`octant_pull_request` — with its actions
 in an `operation` enum. The always-visible tool prefix stays small and
 cache-stable, so a family's description says only what an agent must know
 before its first call, and its `help` operation returns the full usage on
@@ -2290,7 +2291,8 @@ hold for every action in it:
   request may only target
   the branch of the thread or linked thread it stacks on.
 - **Refusals.** Plan mode refuses every action, and so does revoked forge
-  access.
+  access. The tool's `help` operation is not an action: it returns the
+  tool's own usage text in any posture, asks nothing, and reaches no forge.
 - **Force-push.** Rewriting the thread's own branch uses force-with-lease
   (`push-git` with `force`), which names the remote head it replaces, so a
   branch someone else moved is refused by Git. The host accepts a force only on
