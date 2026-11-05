@@ -230,6 +230,14 @@ The design rests on a small set of invariants that every package obeys:
   powers on a host only after a fresh unlock on that device; agents, routines,
   and peer hosts never do
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
+- **Owner Browser control is a separate person capability.** An enrolled owner
+  may unlock one already-open visible native Code Private page for at most
+  60 seconds. Signed target/frame/sequence checks preserve the original local
+  window and task authority. Credential-bearing frames use a volatile human
+  response, never an agent observation or artifact. Stop, disconnect and expiry
+  leave the existing person hold; explicit Hand back requires the agent to read
+  again. Other resources and ordinary paired callers remain refused. The owning
+  rules are [Owner control of an open Code page](design/browser-agent-tool.md#owner-control-of-an-open-code-page).
 - **Privacy is about third parties.** Preserve local-first and
   privacy-preserving defaults. Add telemetry, external calls, credential
   exposure, or cloud dependencies only when the request authorizes them and the

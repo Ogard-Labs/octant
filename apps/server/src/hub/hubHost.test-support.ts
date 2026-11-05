@@ -42,6 +42,7 @@ import { createDelegationStateStore, type DelegationStatePort } from "./delegati
 import { FailoverService } from "./failoverService";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
+import type { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
 import { TestCredentialBroker, TestPostureHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
 import { createPeerCredentialRouteHandler } from "./peerCredentialRoutes";
@@ -224,6 +225,7 @@ export interface HubTestHost {
 }
 
 export async function startHubTestHost(input: {
+  readonly ownerBrowser?: OwnerBrowserControlService;
   readonly name: string;
   readonly address: string;
   readonly network: HubTestNetwork;
@@ -374,7 +376,10 @@ export async function startHubTestHost(input: {
     listener: () => listener,
     pairing: hubPairing,
     transport: input.hubTransport?.(transport) ?? transport,
-    record: (change) => records.push(change),
+    record: (change) => {
+      records.push(change);
+      input.ownerBrowser?.revalidateAuthority();
+    },
     now: Date.now,
   });
   const spoke = new SpokeLinkService({
@@ -396,7 +401,10 @@ export async function startHubTestHost(input: {
         deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
       };
     },
-    record: (change) => records.push(change),
+    record: (change) => {
+      records.push(change);
+      input.ownerBrowser?.revalidateAuthority();
+    },
     serverBuildVersion: "0.1.0",
     now: input.now ?? input.wakeClock ?? Date.now,
   });
@@ -674,6 +682,7 @@ export async function startHubTestHost(input: {
     record: (change) => records.push(change),
   });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
+    ...(input.ownerBrowser === undefined ? {} : { browser: input.ownerBrowser }),
     hub,
     spoke,
     unlock: ownerUnlock,

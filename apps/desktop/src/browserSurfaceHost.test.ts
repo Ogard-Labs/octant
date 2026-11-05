@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { createContext, runInContext } from "node:vm";
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
+import { decodeOwnerBrowserNativeCommand } from "@octant/contracts/owner-browser";
 import { describe, expect, it, vi } from "vitest";
 import {
   BrowserTargetStaleError,
@@ -64,6 +65,151 @@ function view(): BrowserSurfaceViewPort {
 }
 
 describe("BrowserSurfaceHost", () => {
+  it("keeps owner frames volatile, fences earlier agent captures and lets local input reclaim the exact native page", async () => {
+    const created = view();
+    created.webContents.insertText = vi.fn(async () => undefined);
+    vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(
+      async (method, params) => {
+        // Actual Electron emits before-mouse-event for CDP mouse dispatch too.
+        if (method === "Input.dispatchMouseEvent" && params?.type === "mousePressed") {
+          vi.mocked(created.webContents.on).mock.calls.find(
+            ([event]) => event === "before-mouse-event",
+          )?.[1]({}, { type: "mouseDown" });
+        }
+        return undefined;
+      },
+    );
+    const started = Promise.withResolvers<void>();
+    const captured = Promise.withResolvers<void>();
+    let delay = true;
+    vi.mocked(created.webContents.capturePage).mockImplementation(async () => {
+      started.resolve();
+      if (delay) await captured.promise;
+      return {
+        isEmpty: () => false,
+        getSize: () => ({ width: 800, height: 600 }),
+        toJPEG: () => Uint8Array.from([1, 2, 3]),
+      };
+    });
+    const owner = { windowId: "a7880000-0000-4000-8000-000000000001", threadId };
+    const host = createBrowserSurfaceHost({
+      createView: () => created,
+      isOwnerWindowAvailable: () => true,
+    });
+    const id = "a7880000-0000-4000-8000-000000000002";
+    const run = (command: Readonly<Record<string, unknown>>) =>
+      host.ownerControl(decodeOwnerBrowserNativeCommand({ contextId, owner, ...command }));
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60_000,
+        },
+      });
+      expect(await run({ operation: "inspect" })).toEqual({ status: "refused" });
+      host.attach(
+        contextId,
+        owner,
+        {
+          contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+          isDestroyed: () => false,
+          isVisible: () => true,
+          webContents: { send: vi.fn() },
+        },
+        { x: 0, y: 0, width: 800, height: 600 },
+      );
+      const inspect = await run({ operation: "inspect" });
+      if (inspect.status !== "target") throw new Error("Expected visible native target");
+      const pending = host.peek(contextId);
+      // Attach rejection handling before the deliberately delayed capture settles.
+      const withheld = expect(pending).rejects.toThrow(
+        "Owner Browser control holds agent observations",
+      );
+      await started.promise;
+      expect(
+        await run({
+          operation: "claim",
+          controlId: id,
+          target: inspect.target,
+          expiresAt: new Date(Date.now() + 50_000).toISOString(),
+        }),
+      ).toEqual({ status: "claimed" });
+      expect(
+        (await host.prepareCredentialFill(contextId, owner, "https://example.com")).status,
+      ).toBe("refused");
+      expect(await run({ operation: "release", controlId: id, disposition: "revoke" })).toEqual({
+        status: "released",
+      });
+      captured.resolve();
+      await withheld;
+      delay = false;
+      expect(
+        (
+          await run({
+            operation: "claim",
+            controlId: id,
+            target: inspect.target,
+            expiresAt: new Date(Date.now() + 50_000).toISOString(),
+          })
+        ).status,
+      ).toBe("claimed");
+      expect((await run({ operation: "frame", controlId: id, sequence: 1 })).status).toBe("frame");
+      await expect(host.peek(contextId)).rejects.toThrow(
+        "Owner Browser control holds agent observations",
+      );
+      expect(
+        await run({
+          operation: "input",
+          controlId: id,
+          sequence: 2,
+          expectedFrame: 1,
+          input: { kind: "press", key: "Tab" },
+        }),
+      ).toEqual({ status: "input", effect: "completed" });
+      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
+        "Input.dispatchKeyEvent",
+        expect.objectContaining({ type: "keyDown", key: "Tab" }),
+      );
+      expect((await run({ operation: "frame", controlId: id, sequence: 3 })).status).toBe("frame");
+      expect(
+        await run({
+          operation: "input",
+          controlId: id,
+          sequence: 4,
+          expectedFrame: 3,
+          input: { kind: "tap", x: 0.5, y: 0.5 },
+        }),
+      ).toEqual({ status: "input", effect: "completed" });
+      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
+        "Input.dispatchTouchEvent",
+        expect.objectContaining({ type: "touchStart" }),
+      );
+      expect((await run({ operation: "frame", controlId: id, sequence: 5 })).status).toBe("frame");
+      const reclaim = vi
+        .mocked(created.webContents.on)
+        .mock.calls.find(([event]) => event === "before-input-event")?.[1];
+      reclaim?.({}, { type: "keyDown" });
+      expect(
+        (
+          await run({
+            operation: "input",
+            controlId: id,
+            sequence: 6,
+            expectedFrame: 5,
+            input: { kind: "press", key: "Enter" },
+          })
+        ).status,
+      ).toBe("refused");
+    } finally {
+      captured.resolve();
+      await host.closeAll();
+    }
+  });
   it.each([
     ["https://example.com"],
     ["https://identity.example:8443"],

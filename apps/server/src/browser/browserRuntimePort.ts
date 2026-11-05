@@ -1,4 +1,8 @@
 import type {
+  OwnerBrowserNativeCommand,
+  OwnerBrowserNativeResult,
+} from "@octant/contracts/owner-browser";
+import type {
   BrowserPageScriptNativeCommand,
   BrowserPageScriptPreparation,
 } from "@octant/contracts/browser-page-script";
@@ -240,6 +244,10 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
   };
 
 export interface BrowserRuntimePort {
+  readonly ownerControl?: (
+    command: OwnerBrowserNativeCommand,
+    signal: AbortSignal,
+  ) => Promise<OwnerBrowserNativeResult>;
   readonly runPageScript?: (
     command: BrowserPageScriptNativeCommand,
     signal: AbortSignal,

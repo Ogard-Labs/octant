@@ -347,10 +347,44 @@ looked at the page afresh, so it never writes over what you were typing.
 To work on the page without the agent, press **Take over** in the Browser's
 toolbar. The agent's Browser calls are refused while you have the page, and the
 toolbar says "You have the page". Press **Hand back** when you are done; the
-agent's next step is answered with a fresh look at the page you left. Only you,
-at this computer, can take over or hand back: a turn started from your phone,
+agent's next step is answered with a fresh look at the page you left. These toolbar
+controls are local: a turn started from your phone,
 a routine, a subagent, or a program in a terminal cannot. If you walk away, a
 page you took over closes after 11 minutes without use, like any other page.
+
+### Use an open page from an owner browser
+
+An enrolled owner browser can control an already-open **Code Private** page on
+the host Mac. Keep that page visible in its original Octant window. Open that
+host's own web app and go to **Settings → Remote access → Hub**, then find
+**Owner Browser** for that host. This requires an owner identity and passkey
+already confirmed on the host; ordinary paired access is not enough.
+
+Choose **List open pages**, check the exact thread, site and Private profile,
+then **Unlock and take over** for that page. This always asks for a fresh owner
+unlock, even if you opened an administration session. Control lasts at most
+60 seconds and names the active owner on both screens.
+
+The frame is for you and may show account content or credentials. Octant does
+not save it as a screenshot, send it to the agent, or put it in the journal.
+Tap a point in the picture, use the key or scroll buttons, or type into the
+masked text box and choose **Type text**. The box clears after you send it.
+Each input needs a current frame. A changed page, tab or viewport ends that
+target's control; list and unlock the current page again.
+
+**Stop remote control** leaves the page held for a person. **Hand back to the
+agent** explicitly releases that hold, and the agent must read the page again
+before acting. At the host Mac, **Reclaim locally**, or local page input, stops
+remote control while preserving local use. An input already sent may have taken
+effect; Octant never retries it automatically or claims it was undone.
+
+Hiding or leaving the owner view aborts its pending requests and sends a stop
+without another unlock. If the host cannot be reached, its finite control lease
+can remain until expiry. The page still stays held for a person after expiry.
+An unsettled native input cannot be treated as a confirmed handback. Finish on
+the host Mac when a device-local authenticator, popup or unsupported form needs
+it. Work, stored profiles, embedded or hidden pages, headless pages, transfers,
+new tabs and address navigation are not part of this control path.
 
 To find out why a page misbehaves, the agent can read the page's console
 errors (and warnings if it asks), requests that failed, and requests that came

@@ -1,4 +1,5 @@
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
+import { decodeOwnerBrowserNativeCommand } from "@octant/contracts/owner-browser";
 import { describe, expect, it, vi } from "vitest";
 import { DesktopBrowserOwnerUnavailable } from "./desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "./routingBrowserRuntime";
@@ -20,6 +21,7 @@ function runtime(presentation: "native-live" | "headless" = "native-live") {
   let exit: (() => void) | undefined;
   return {
     available: vi.fn(async () => true),
+    ownerControl: vi.fn(async () => ({ status: "refused" as const })),
     runPageScript: vi.fn(async () => ({
       status: "completed" as const,
       effect: "possible" as const,
@@ -42,7 +44,7 @@ function runtime(presentation: "native-live" | "headless" = "native-live") {
 }
 
 describe("RoutingBrowserRuntime", () => {
-  it("refuses script execution for a headless fallback instead of borrowing the native owner's page", async () => {
+  it("refuses native-only control for a headless fallback instead of borrowing the native owner's page", async () => {
     const native = runtime();
     native.available.mockResolvedValue(false);
     const headless = runtime("headless");
@@ -61,6 +63,14 @@ describe("RoutingBrowserRuntime", () => {
     });
     expect(native.runPageScript).not.toHaveBeenCalled();
     expect(headless.runPageScript).not.toHaveBeenCalled();
+    expect(
+      await router.ownerControl(
+        decodeOwnerBrowserNativeCommand({ operation: "inspect", contextId, owner }),
+        new AbortController().signal,
+      ),
+    ).toEqual({ status: "refused" });
+    expect(native.ownerControl).not.toHaveBeenCalled();
+    expect(headless.ownerControl).not.toHaveBeenCalled();
     await router.closeAll();
   });
 

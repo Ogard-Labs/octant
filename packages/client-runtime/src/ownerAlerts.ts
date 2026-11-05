@@ -3,6 +3,7 @@
 // on one, and say plainly how the action went. The protocol is in hubOwnerClient.
 
 import type { HeldMember, NewMemberAlert } from "@octant/contracts";
+import type { OwnerBrowserClient } from "./ownerBrowser";
 import {
   describeOwnerRefusal,
   type OwnerActionResult,
@@ -16,6 +17,7 @@ export interface OwnerSpoke {
   readonly name: string;
   readonly client: OwnerClient &
     Partial<Pick<OwnerAdministrationClient, "listPostures" | "changePosture">>;
+  readonly browser?: OwnerBrowserClient;
   /**
    * Set when this client can only read: a browser's passkey belongs to the one
    * origin that served its page, so acting on this computer happens on its own

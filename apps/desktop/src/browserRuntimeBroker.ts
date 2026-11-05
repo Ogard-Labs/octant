@@ -1,4 +1,9 @@
 import {
+  decodeOwnerBrowserNativeCommand,
+  decodeOwnerBrowserNativeResult,
+  MAX_OWNER_BROWSER_FRAME_BYTES,
+} from "@octant/contracts/owner-browser";
+import {
   decodeBrowserPageScriptNativeCommand,
   decodeBrowserPageScriptPreparation,
 } from "@octant/contracts/browser-page-script";
@@ -43,6 +48,7 @@ const ROUTES = new Set([
   "/v1/contexts/peek",
   "/v1/contexts/credential-fill",
   "/v1/contexts/page-script",
+  "/v1/contexts/owner-control",
   "/v1/contexts/download-claim",
   "/v1/contexts/download-discard",
   "/v1/contexts/close",
@@ -230,6 +236,28 @@ async function handleBrokerRequest(
       const cookies = importedCookiesOf(body.cookies);
       if (target === undefined || cookies === undefined) return failure("invalid-request", 400);
       return Response.json(await profiles.importCookies(target, cookies));
+    }
+    if (url.pathname === "/v1/contexts/owner-control") {
+      const command = (() => {
+        try {
+          return decodeOwnerBrowserNativeCommand(body);
+        } catch {
+          return undefined;
+        }
+      })();
+      if (command === undefined) return failure("invalid-request", 400);
+      const result = decodeOwnerBrowserNativeResult(
+        await host.ownerControl(command, signal ?? request.signal),
+      );
+      const json = JSON.stringify(result);
+      if (
+        Buffer.byteLength(json, "utf8") >
+        Math.ceil((MAX_OWNER_BROWSER_FRAME_BYTES * 4) / 3) + 1024
+      )
+        return Response.json({ status: "refused" }, { headers: { "cache-control": "no-store" } });
+      return new Response(json, {
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
     }
     if (url.pathname === "/v1/contexts/page-script") {
       const command = (() => {

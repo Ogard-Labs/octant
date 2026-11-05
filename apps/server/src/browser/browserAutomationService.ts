@@ -1,3 +1,11 @@
+import {
+  decodeOwnerBrowserTarget,
+  type OwnerBrowserControlId,
+  type OwnerBrowserNativeCommand,
+  type OwnerBrowserTarget,
+} from "@octant/contracts/owner-browser";
+import type { HubMemberId, UtcTimestamp } from "@octant/contracts";
+import type { OwnerBrowserHost } from "./ownerBrowserControl";
 import type {
   BrowserPageScriptReceipt,
   BrowserPageScriptRefusalReason,
@@ -239,6 +247,7 @@ interface OwnedContext {
   waitingForPerson: "sign-in" | "take-over" | undefined;
   /** Ends a take-over (Hand back). Absent for a sign-in, which only its card ends. */
   releaseTakeOver: (() => void) | undefined;
+  ownerController: { readonly name: string; readonly expiresAt: UtcTimestamp } | undefined;
   /**
    * How many times the person used the page (typed, clicked, or took it over
    * and handed it back). The agent's refs are good only while this has not
@@ -348,6 +357,15 @@ export class BrowserAutomationService {
   readonly #schedule: (delayMs: number, callback: () => void) => () => void;
   readonly #contexts = new Map<BrowserContextId, OwnedContext>();
   readonly #taskProfileSwitches = new Set<string>();
+  readonly #ownerControllers = new Map<
+    BrowserContextId,
+    {
+      readonly id: OwnerBrowserControlId;
+      readonly target: OwnerBrowserTarget;
+      readonly expiresAt: number;
+    }
+  >();
+  readonly #ownerReclaimed = new Set<(contextId: BrowserContextId) => void>();
   readonly #expiredContexts = new Map<
     BrowserContextId,
     {
@@ -494,6 +512,7 @@ export class BrowserAutomationService {
       agentActedAt: undefined,
       waitingForPerson: undefined,
       releaseTakeOver: undefined,
+      ownerController: undefined,
       personInputs: 0,
       snapshotPersonInputs: 0,
       announcedPersonInputs: 0,
@@ -2471,6 +2490,7 @@ export class BrowserAutomationService {
     this.#removePersonInputListener?.();
     for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
     for (const owned of this.#contexts.values()) {
+      this.#reclaimOwnerController(owned.record.contextId);
       owned.abort.abort();
       owned.cancelExpiry?.();
       owned.cancelExpiry = undefined;
@@ -2610,6 +2630,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    this.#reclaimOwnerController(owned.record.contextId);
     if (owned.waitingForPerson === "take-over") return snapshot(owned);
     if (owned.waitingForPerson !== undefined) {
       return failedSnapshot(
@@ -2648,6 +2669,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    this.#reclaimOwnerController(owned.record.contextId);
     // Only a take-over ends here; the agent's sign-in ask ends with its card.
     if (owned.releaseTakeOver === undefined) return snapshot(owned);
     owned.releaseTakeOver();
@@ -2690,6 +2712,232 @@ export class BrowserAutomationService {
       this.#scheduleExpiry(owned);
     }
     return true;
+  }
+
+  onOwnerControlReclaimed(listener: (contextId: BrowserContextId) => void): () => void {
+    this.#ownerReclaimed.add(listener);
+    return () => this.#ownerReclaimed.delete(listener);
+  }
+
+  #reclaimOwnerController(contextId: BrowserContextId): void {
+    this.#ownerControllers.delete(contextId);
+    const owned = this.#contexts.get(contextId);
+    if (owned !== undefined) owned.ownerController = undefined;
+    for (const listener of this.#ownerReclaimed) listener(contextId);
+  }
+
+  /** Owner interaction names the original resource, never borrows its window capability. */
+  ownerBrowserHost(options: {
+    readonly hostMemberId: () => HubMemberId;
+    readonly threadTitle: (threadId: string) => string | undefined;
+  }): OwnerBrowserHost {
+    const eligible = (owned: OwnedContext | undefined): owned is OwnedContext =>
+      owned !== undefined &&
+      owned.record.state === "active" &&
+      !owned.dedicated &&
+      owned.record.authority.mode === "code" &&
+      owned.record.presentation === "native-live" &&
+      !owned.abort.signal.aborted &&
+      !this.#isUnattendedScope(owned.windowId) &&
+      this.#authorityIsActive(owned) &&
+      (owned.record.policy.profile?.kind ?? "private") === "private" &&
+      owned.record.policy.profileMode === "isolated" &&
+      this.#runtime.ownerControl !== undefined &&
+      options.threadTitle(String(owned.threadId)) !== undefined;
+    const inspect = async (
+      target: Pick<OwnerBrowserTarget, "contextId">,
+    ): Promise<OwnerBrowserTarget | undefined> => {
+      const owned = this.#contexts.get(target.contextId);
+      if (!eligible(owned)) return undefined;
+      const record = owned.record;
+      const result = await this.#runtime.ownerControl?.(
+        {
+          operation: "inspect",
+          contextId: target.contextId,
+          owner: { windowId: owned.windowId, threadId: owned.threadId },
+        },
+        owned.abort.signal,
+      );
+      if (
+        result?.status !== "target" ||
+        this.#contexts.get(target.contextId) !== owned ||
+        owned.record !== record ||
+        !eligible(owned)
+      )
+        return undefined;
+      return decodeOwnerBrowserTarget({
+        hostMemberId: options.hostMemberId(),
+        threadId: owned.threadId,
+        contextId: target.contextId,
+        profile: "private",
+        ...result.target,
+      });
+    };
+    const native = async (
+      target: OwnerBrowserTarget,
+      make: (owned: OwnedContext) => OwnerBrowserNativeCommand,
+      signal?: AbortSignal,
+    ) => {
+      const owned = this.#contexts.get(target.contextId);
+      if (
+        !eligible(owned) ||
+        String(target.hostMemberId) !== String(options.hostMemberId()) ||
+        String(target.threadId) !== String(owned.threadId)
+      )
+        return { status: "refused" as const };
+      return (
+        this.#runtime.ownerControl?.(
+          make(owned),
+          signal === undefined ? owned.abort.signal : AbortSignal.any([signal, owned.abort.signal]),
+        ) ?? { status: "refused" as const }
+      );
+    };
+    return {
+      authorityCurrent: (target) => {
+        const owned = this.#contexts.get(target.contextId);
+        return (
+          eligible(owned) &&
+          String(owned.threadId) === String(target.threadId) &&
+          String(target.hostMemberId) === String(options.hostMemberId())
+        );
+      },
+      targets: async () => {
+        const targets = [];
+        for (const owned of this.#contexts.values()) {
+          if (!eligible(owned) || targets.length >= 16) continue;
+          const target = await inspect({ contextId: owned.record.contextId });
+          const title = options.threadTitle(String(owned.threadId));
+          if (target !== undefined && title !== undefined)
+            targets.push({
+              target,
+              threadTitle: title.slice(0, 200),
+              ...(owned.ownerController === undefined
+                ? {}
+                : { controllerName: owned.ownerController.name }),
+            });
+        }
+        return targets;
+      },
+      inspect,
+      privateHeld: (target) => {
+        const owned = this.#contexts.get(target.contextId);
+        return (
+          !eligible(owned) ||
+          owned.credentialFill !== undefined ||
+          owned.agentActions > 0 ||
+          owned.waitingForPerson === "sign-in"
+        );
+      },
+      claim: async (target, id, ownerName, expiresAt) => {
+        const owned = this.#contexts.get(target.contextId);
+        const previous = this.#ownerControllers.get(target.contextId);
+        if (previous !== undefined && previous.expiresAt <= Date.now())
+          this.#ownerControllers.delete(target.contextId);
+        if (
+          !eligible(owned) ||
+          owned.agentActions > 0 ||
+          owned.credentialFill !== undefined ||
+          owned.waitingForPerson === "sign-in" ||
+          this.#ownerControllers.has(target.contextId)
+        )
+          return false;
+        if (owned.waitingForPerson === undefined) {
+          const release = this.holdForPerson(owned.windowId, owned.threadId, "take-over");
+          if (release === undefined) return false;
+          owned.releaseTakeOver = release;
+          this.#notePersonInput(owned);
+        }
+        this.#ownerControllers.set(target.contextId, {
+          id,
+          target,
+          expiresAt: Date.parse(expiresAt),
+        });
+        owned.ownerController = { name: ownerName.slice(0, 128), expiresAt };
+        const result = await native(target, (resource) => ({
+          operation: "claim",
+          contextId: target.contextId,
+          owner: { windowId: resource.windowId, threadId: resource.threadId },
+          controlId: id,
+          target: {
+            targetVersion: target.targetVersion,
+            documentRevision: target.documentRevision,
+            origin: target.origin,
+          },
+          expiresAt,
+        }));
+        return result.status === "claimed";
+      },
+      frame: async (target, id, sequence, signal) => {
+        if (this.#ownerControllers.get(target.contextId)?.id !== id) return { status: "refused" };
+        const result = await native(
+          target,
+          (resource) => ({
+            operation: "frame",
+            contextId: target.contextId,
+            owner: { windowId: resource.windowId, threadId: resource.threadId },
+            controlId: id,
+            sequence,
+          }),
+          signal,
+        );
+        return result.status === "frame" ? result : { status: "refused" };
+      },
+      input: async (target, id, sequence, expectedFrame, input, signal) => {
+        if (this.#ownerControllers.get(target.contextId)?.id !== id) return { status: "refused" };
+        const result = await native(
+          target,
+          (resource) => ({
+            operation: "input",
+            contextId: target.contextId,
+            owner: { windowId: resource.windowId, threadId: resource.threadId },
+            controlId: id,
+            sequence,
+            expectedFrame,
+            input,
+          }),
+          signal,
+        );
+        return result.status === "input" ? result : { status: "refused" };
+      },
+      release: async (target, id, disposition) => {
+        const owned = this.#contexts.get(target.contextId);
+        const held = this.#ownerControllers.get(target.contextId);
+        if (owned === undefined || String(owned.threadId) !== String(target.threadId))
+          return { status: "refused" };
+        // Revocation invalidates a concurrent handback before either native reply.
+        if (disposition === "revoke" && held?.id === id) {
+          this.#ownerControllers.delete(target.contextId);
+          owned.ownerController = undefined;
+        }
+        const result = await this.#runtime.ownerControl?.(
+          {
+            operation: "release",
+            contextId: target.contextId,
+            owner: { windowId: owned.windowId, threadId: owned.threadId },
+            controlId: id,
+            disposition,
+          },
+          AbortSignal.timeout(3_000),
+        );
+        if (result?.status !== "released") return { status: "refused" };
+        const stillOwned = held?.id === id && this.#ownerControllers.get(target.contextId) === held;
+        if (stillOwned) {
+          this.#ownerControllers.delete(target.contextId);
+          owned.ownerController = undefined;
+        }
+        if (
+          disposition === "hand-back" &&
+          stillOwned &&
+          this.#contexts.get(target.contextId) === owned &&
+          eligible(owned)
+        ) {
+          owned.releaseTakeOver?.();
+          owned.handedBack = true;
+          this.#notePersonInput(owned);
+        }
+        return { status: "released" };
+      },
+    };
   }
 
   /** Say once, on an agent action's answer, that the person used the page. */
@@ -2871,6 +3119,7 @@ export class BrowserAutomationService {
   }
 
   async #safeClose(contextId: BrowserContextId): Promise<void> {
+    this.#reclaimOwnerController(contextId);
     this.#releaseUploads(contextId);
     try {
       await this.#runtime.closeContext(contextId);
@@ -3102,6 +3351,7 @@ function snapshot(owned: OwnedContext): BrowserAutomationSnapshot {
     evidence: [...owned.evidence],
     ...(owned.failure === undefined ? {} : { failure: owned.failure }),
     ...(owned.waitingForPerson === undefined ? {} : { waitingForPerson: owned.waitingForPerson }),
+    ...(owned.ownerController === undefined ? {} : { ownerController: owned.ownerController }),
   };
 }
 
@@ -3145,6 +3395,7 @@ function threadSnapshotFromSnapshots(
     ...(primary.waitingForPerson === undefined
       ? {}
       : { waitingForPerson: primary.waitingForPerson }),
+    ...(primary.ownerController === undefined ? {} : { ownerController: primary.ownerController }),
   };
 }
 

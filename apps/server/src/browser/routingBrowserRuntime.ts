@@ -64,6 +64,12 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
     }
   }
 
+  ownerControl: NonNullable<BrowserRuntimePort["ownerControl"]> = async (command, signal) => {
+    const owner = this.#owned(command.contextId);
+    if (owner !== this.#native || owner.ownerControl === undefined) return { status: "refused" };
+    return owner.ownerControl(command, signal);
+  };
+
   runPageScript: NonNullable<BrowserRuntimePort["runPageScript"]> = async (command, signal) => {
     const owner = this.#owned(command.contextId);
     if (owner !== this.#native || owner.runPageScript === undefined)

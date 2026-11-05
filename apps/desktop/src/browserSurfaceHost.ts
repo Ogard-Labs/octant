@@ -1,4 +1,11 @@
 import { BrowserPageScript, type PageScriptTarget } from "./browserPageScript";
+import { BrowserOwnerControl } from "./browserOwnerControl";
+import {
+  OwnerBrowserTargetVersion,
+  type OwnerBrowserNativeCommand,
+  type OwnerBrowserNativeResult,
+} from "@octant/contracts/owner-browser";
+import { Schema } from "effect";
 import type {
   BrowserPageScriptNativeCommand,
   BrowserPageScriptPreparation,
@@ -99,6 +106,7 @@ export interface BrowserSurfaceShellWindowPort {
     removeChildView(view: BrowserSurfaceViewPort): void;
   };
   readonly isDestroyed: () => boolean;
+  readonly isVisible?: () => boolean;
   readonly webContents: { readonly send: (channel: string, payload: unknown) => void };
 }
 
@@ -183,6 +191,7 @@ export interface BrowserSurfaceViewPort {
     /** Electron's id for the page; the key a session-wide request report names. */
     readonly id?: number;
     capturePage(): Promise<BrowserSurfaceImage>;
+    insertText?(text: string): Promise<void>;
     close(): void;
     readonly debugger: {
       attach(protocolVersion?: string): void;
@@ -311,6 +320,8 @@ interface OwnedSurface {
   extensionLoads: number;
   actionTail: Promise<void>;
   control: BrowserSurfaceState["control"];
+  /** Remote owner input never turns delayed page navigation into a local person's origin grant. */
+  ownerNavigationRestricted: boolean;
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
   /** Last top-level navigation the allowlist guard cancelled during the current action. */
   blockedNavigationUrl: string | undefined;
@@ -526,6 +537,149 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       readonly listener: SurfaceProtocolListener;
     }
   >();
+  const ownerControls = new BrowserOwnerControl({
+    page: (command) => {
+      const owned = surfaces.get(command.contextId);
+      if (
+        owned === undefined ||
+        owned.owner.windowId !== command.owner.windowId ||
+        String(owned.owner.threadId) !== String(command.owner.threadId) ||
+        options.isOwnerWindowAvailable?.(owned.owner.windowId) !== true ||
+        owned.policy.profileMode !== "isolated" ||
+        (owned.policy.profile?.kind ?? "private") !== "private" ||
+        owned.shellWindow === undefined ||
+        owned.shellWindow.isDestroyed() ||
+        owned.shellWindow.isVisible?.() !== true ||
+        owned.lastBounds === undefined ||
+        owned.tabs.length === 0
+      )
+        return undefined;
+      const view = contentsView(owned);
+      const contents = owned.tabs.find((tab) => tab.view === view)?.contents;
+      if (
+        contents === undefined ||
+        contents.isDestroyed() ||
+        contents.isLoading() ||
+        contents.insertText === undefined
+      )
+        return undefined;
+      const origin = originOf(contents.getURL());
+      if (origin === undefined || !originAllowed(contents.getURL(), owned.policy.allowedOrigins))
+        return undefined;
+      const documentRevision = scriptGenerations.get(view) ?? 0;
+      const targetVersion = Schema.decodeUnknownSync(OwnerBrowserTargetVersion)(
+        createHash("sha256")
+          .update(
+            JSON.stringify([
+              command.contextId,
+              owned.activeTabId,
+              contents.id,
+              documentRevision,
+              contents.getURL(),
+              owned.policy,
+              owned.lastBounds.width,
+              owned.lastBounds.height,
+            ]),
+          )
+          .digest("hex"),
+      );
+      return {
+        identity: owned,
+        target: { targetVersion, documentRevision, origin },
+        personInputs: owned.personInputs,
+        width: owned.lastBounds.width,
+        height: owned.lastBounds.height,
+        capture: () => contents.capturePage(),
+        observe: () => privateObservation(owned),
+        input: async (input, width, height, canContinue) => {
+          const check = privateObservation(owned);
+          const current = () => {
+            check();
+            if (
+              surfaces.get(command.contextId) !== owned ||
+              owned.tabs.length === 0 ||
+              contentsView(owned) !== view ||
+              contents.isDestroyed() ||
+              (scriptGenerations.get(view) ?? 0) !== documentRevision ||
+              !ownerControls.active(owned)
+            )
+              throw new Error("Owner Browser target changed before input.");
+          };
+          await withDebugger(view, async (send) => {
+            current();
+            owned.personInputs += 1;
+            for (const listener of personInputListeners) listener(String(command.contextId));
+            owned.control = "user";
+            if (input.kind === "type") {
+              await contents.insertText?.(input.text);
+              return;
+            }
+            if (input.kind === "press") {
+              const key = input.key === "Space" ? " " : input.key;
+              const windowsVirtualKeyCode = {
+                Enter: 13,
+                Tab: 9,
+                Backspace: 8,
+                Delete: 46,
+                Escape: 27,
+                ArrowLeft: 37,
+                ArrowUp: 38,
+                ArrowRight: 39,
+                ArrowDown: 40,
+                Home: 36,
+                End: 35,
+                Space: 32,
+              }[input.key];
+              await send("Input.dispatchKeyEvent", {
+                type: "keyDown",
+                key,
+                code: input.key,
+                windowsVirtualKeyCode,
+              });
+              await send("Input.dispatchKeyEvent", {
+                type: "keyUp",
+                key,
+                code: input.key,
+                windowsVirtualKeyCode,
+              });
+              return;
+            }
+            const x = Math.min(width - 1, Math.max(0, Math.floor(input.x * width)));
+            const y = Math.min(height - 1, Math.max(0, Math.floor(input.y * height)));
+            const cancelTouch = async () => {
+              const client = contents.debugger;
+              if (!contents.isDestroyed() && client.isAttached() && agentDebuggers.has(client))
+                await send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+            };
+            try {
+              if (input.kind === "scroll") {
+                await send("Input.synthesizeScrollGesture", {
+                  x,
+                  y,
+                  xDistance: -input.deltaX,
+                  yDistance: -input.deltaY,
+                  gestureSourceType: "touch",
+                  speed: 800,
+                });
+                if (!canContinue()) throw new Error("Owner Browser control changed during scroll.");
+              } else {
+                await send("Input.dispatchTouchEvent", {
+                  type: "touchStart",
+                  touchPoints: [{ x, y }],
+                });
+                current();
+                if (!canContinue()) throw new Error("Owner Browser control changed during tap.");
+                await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+              }
+            } catch (error) {
+              await cancelTouch().catch(() => undefined);
+              throw error;
+            }
+          });
+        },
+      };
+    },
+  });
   const retireScriptView = (view: BrowserSurfaceViewPort) => {
     const state = scriptWorlds.get(view);
     if (state === undefined || !state.contents.isDestroyed()) return;
@@ -578,6 +732,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (
         owned === undefined ||
         scriptHolds.has(owned) ||
+        ownerControls.holdsPage(owned) ||
         owned.owner.windowId !== owner.windowId ||
         String(owned.owner.threadId) !== String(owner.threadId) ||
         options.isOwnerWindowAvailable?.(owner.windowId) === false ||
@@ -595,7 +750,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     execute: (view, code) => execute(view, code, true),
   });
 
-  const observation = (owned: OwnedSurface) => {
+  const privateObservation = (owned: OwnedSurface) => {
     const fill = credentialFill.observation(owned);
     const epoch = scriptEpochs.get(owned) ?? 0;
     const check = () => {
@@ -605,6 +760,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     };
     check();
     return check;
+  };
+  const observation = (owned: OwnedSurface) => {
+    const privateCheck = privateObservation(owned);
+    const ownerCheck = ownerControls.observation(owned);
+    return () => {
+      privateCheck();
+      ownerCheck();
+    };
   };
   const scriptOwnerKey = (command: BrowserPageScriptNativeCommand) =>
     JSON.stringify([command.contextId, command.owner.windowId, command.owner.threadId]);
@@ -686,7 +849,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             } catch {
               return undefined;
             }
-            if (!current() || scriptHolds.has(owned)) return undefined;
+            if (!current() || scriptHolds.has(owned) || ownerControls.holdsPage(owned))
+              return undefined;
             const hold = {};
             scriptHolds.set(owned, hold);
             scriptEpochs.set(owned, (scriptEpochs.get(owned) ?? 0) + 1);
@@ -861,7 +1025,9 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         const top = navigationMainFrame(event, details, knownMainFrame);
         if (
           typeof target === "string" &&
-          admitNavigation(owned, target, top ? view : undefined, !scriptHolds.has(owned))
+          (owned.ownerNavigationRestricted || ownerControls.holdsPage(owned)
+            ? originAllowed(target, owned.policy.allowedOrigins)
+            : admitNavigation(owned, target, top ? view : undefined, !scriptHolds.has(owned)))
         )
           return;
         (event as { preventDefault?: () => void }).preventDefault?.();
@@ -915,6 +1081,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     // server learns of it so the agent's snapshot is not trusted afterwards.
     const gateUserInput = (_event: unknown, input?: unknown) => {
       if (isPersonInput(input)) {
+        ownerControls.reclaim(owned);
+        owned.ownerNavigationRestricted = false;
         owned.personInputs += 1;
         for (const listener of personInputListeners) listener(contextId);
       }
@@ -988,6 +1156,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         extensionLoads: 0,
         actionTail: Promise.resolve(),
         control: "idle",
+        ownerNavigationRestricted: false,
         shellWindow: undefined,
         blockedNavigationUrl: undefined,
         unreportedDialogs: [],
@@ -1049,6 +1218,19 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       owned.shellWindow = undefined;
     },
     runPageScript,
+    ownerControl: async (
+      command: OwnerBrowserNativeCommand,
+      signal?: AbortSignal,
+    ): Promise<OwnerBrowserNativeResult> => {
+      const owned = surfaces.get(command.contextId);
+      if ((command.operation === "claim" || command.operation === "input") && owned !== undefined)
+        return queueSurfaceAction(owned, async () => {
+          const result = await ownerControls.execute(command, signal);
+          if (result.status === "claimed") owned.ownerNavigationRestricted = true;
+          return result;
+        });
+      return ownerControls.execute(command, signal);
+    },
     prepareCredentialFill: (contextId: string, owner: BrowserSurfaceOwner, origin: string) =>
       credentialFill.prepare(contextId, owner, origin),
     reserveCredentialFill: (
@@ -1673,6 +1855,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   async function closeContext(contextId: BrowserContextId | string): Promise<void> {
     const owned = surfaces.get(contextId);
     if (owned === undefined) return;
+    ownerControls.reclaim(owned);
     credentialFill.forget(owned);
     surfaces.delete(contextId);
     const closing = owned.tabs;

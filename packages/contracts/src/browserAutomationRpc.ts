@@ -194,6 +194,12 @@ export const BrowserAutomationSnapshot = Schema.Struct({
    * thread brings its Browser forward), `take-over` when the person took it.
    */
   waitingForPerson: Schema.optional(Schema.Literal("sign-in", "take-over")),
+  ownerController: Schema.optional(
+    Schema.Struct({
+      name: Schema.String.pipe(Schema.maxLength(128)),
+      expiresAt: UtcTimestamp,
+    }).annotations(strict),
+  ),
   /**
    * Set on an agent action's answer once: the person used the page since the
    * agent last looked (`used`), or took the page and handed it back so the

@@ -1409,6 +1409,7 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
+      ownerBrowserControlService,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
@@ -1425,6 +1426,7 @@ export function startOctantServer(
     } = wireRemote({
       beginGoogleCliChange,
       onSecretStoreLinkChange: () => commands.linkChanged(),
+      browserAutomationService,
       codeService,
       projectService,
       browserExtensionService,
@@ -1480,6 +1482,7 @@ export function startOctantServer(
       agentRunAdmission,
     });
 
+    yield* Effect.addFinalizer(() => Effect.promise(() => ownerBrowserControlService.close()));
     let remoteListenerError: PrivateListenerFailureCode | undefined;
     // Retained so shutdown can settle warming before the runtime registry
     // closes: an acquisition that lands after `closeAll()` would leave a warm
