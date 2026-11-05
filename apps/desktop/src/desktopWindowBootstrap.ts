@@ -85,6 +85,8 @@ export function createMainBrowserWindowOptions(options: {
   readonly initialThreadId?: string;
   readonly localUpdatePreferences?: boolean;
   readonly applicationFlavor?: "stable" | "nightly";
+  /** Nightly's running Data role; present only where Nightly offers the choice. */
+  readonly applicationData?: "octant" | "test-data";
   readonly preloadPath: string;
   readonly browserWindow: WindowPresentation["browserWindow"];
 }): BrowserWindowConstructorOptions {
@@ -113,6 +115,9 @@ export function createMainBrowserWindowOptions(options: {
           ? [
               "--octant-application-flavor=nightly",
               `--octant-application-name=${DESKTOP_FLAVOR_IDENTITIES.nightly.productName}`,
+              ...(options.applicationData === undefined
+                ? []
+                : [`--octant-application-data=${options.applicationData}`]),
             ]
           : []),
         ...(options.localUpdatePreferences === true ? ["--octant-local-update-preferences"] : []),

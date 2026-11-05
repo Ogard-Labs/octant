@@ -82,6 +82,8 @@ import type {
   AppUpdateState,
   AppUpdateStatus,
   AppVersion,
+  NightlyDataChoice,
+  NightlyDataState,
   NightlyInstallRefusal,
   NightlyInstallState,
 } from "@octant/contracts/app-updates";
@@ -273,7 +275,17 @@ export interface OctantHostBridge {
   readonly applicationIdentity?: Readonly<{
     readonly flavor: "nightly";
     readonly productName: "Octant Nightly";
+    /** The Data role this launch runs with, where Nightly offers the choice. */
+    readonly data?: NightlyDataChoice;
   }>;
+  /**
+   * Nightly's Data setting. Present only where Nightly offers separate test
+   * data; its main process owns the folder, the role and the relaunch.
+   */
+  readonly readNightlyData?: () => Promise<NightlyDataState>;
+  readonly chooseNightlyData?: (choice: NightlyDataChoice) => Promise<NightlyDataState>;
+  readonly removeNightlyTestData?: () => Promise<NightlyDataState>;
+  readonly relaunchNightly?: () => Promise<{ readonly kind: "relaunching" | "unchanged" }>;
   readonly readBundledWhatsNew: () => Promise<BundledWhatsNew>;
   readonly acknowledgeWhatsNew: () => Promise<void>;
   readonly openBrowserExternal: (url: string) => Promise<void>;
@@ -774,6 +786,23 @@ export function createHostBridge(
     },
     cancelCodeOperationApproval: () => invoke(IPC_CHANNELS.cancelCodeOperationApproval),
     ...(applicationIdentity === undefined ? {} : { applicationIdentity }),
+    ...(applicationIdentity?.data === undefined
+      ? {}
+      : {
+          readNightlyData: async () =>
+            decodeNightlyDataState(await ipc.invoke(IPC_CHANNELS.nightlyDataState)),
+          chooseNightlyData: async (choice: NightlyDataChoice) =>
+            decodeNightlyDataState(await ipc.invoke(IPC_CHANNELS.nightlyDataChoose, choice)),
+          removeNightlyTestData: async () =>
+            decodeNightlyDataState(await ipc.invoke(IPC_CHANNELS.nightlyDataRemove)),
+          relaunchNightly: async () => {
+            const outcome: unknown = await ipc.invoke(IPC_CHANNELS.nightlyDataRelaunch);
+            const kind = isRecord(outcome) ? outcome.kind : undefined;
+            if (kind !== "relaunching" && kind !== "unchanged")
+              throw new Error("Octant Nightly returned an invalid relaunch outcome.");
+            return Object.freeze({ kind });
+          },
+        }),
     ...(localUpdatePreferences ? { appUpdatePreferenceScope: "local" as const } : {}),
     // Nightly never offers to install, open or remove itself, so its bridge
     // carries none of the row's requests.
@@ -2214,6 +2243,41 @@ const NIGHTLY_INSTALL_STATUSES = [
 ] as const;
 
 /** Hand-validated for the same reason as the update state: no runtime imports here. */
+const NIGHTLY_DATA_REMOVALS = [
+  "removed",
+  "absent",
+  "test-host-running",
+  "unsafe-folder",
+  "not-nightly",
+  "failed",
+] as const;
+
+function decodeNightlyDataState(value: unknown): NightlyDataState {
+  const choice = (candidate: unknown): candidate is NightlyDataChoice =>
+    candidate === "octant" || candidate === "test-data";
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some(
+      (key) => !["running", "chosen", "testDataPresent", "removal"].includes(key),
+    ) ||
+    !choice(value.running) ||
+    !choice(value.chosen) ||
+    typeof value.testDataPresent !== "boolean" ||
+    (value.removal !== undefined &&
+      !(NIGHTLY_DATA_REMOVALS as ReadonlyArray<unknown>).includes(value.removal))
+  ) {
+    throw new TypeError("Invalid Octant Nightly Data state.");
+  }
+  return Object.freeze({
+    running: value.running,
+    chosen: value.chosen,
+    testDataPresent: value.testDataPresent,
+    ...(value.removal === undefined
+      ? {}
+      : { removal: value.removal as NonNullable<NightlyDataState["removal"]> }),
+  });
+}
+
 function decodeNightlyInstallState(value: unknown): NightlyInstallState {
   if (
     !isRecord(value) ||
@@ -2590,14 +2654,22 @@ function applicationIdentityArgument(
   const flavors = argv.filter((argument) => argument.startsWith("--octant-application-flavor="));
   const names = argv.filter((argument) => argument.startsWith("--octant-application-name="));
   const productName = names[0]?.slice("--octant-application-name=".length);
+  const data = argv.filter((argument) => argument.startsWith("--octant-application-data="));
+  const role = data[0]?.slice("--octant-application-data=".length);
   if (
     flavors.length !== 1 ||
     flavors[0] !== "--octant-application-flavor=nightly" ||
     names.length !== 1 ||
-    productName !== "Octant Nightly"
+    productName !== "Octant Nightly" ||
+    data.length > 1 ||
+    (role !== undefined && role !== "octant" && role !== "test-data")
   )
     return undefined;
-  return Object.freeze({ flavor: "nightly", productName });
+  return Object.freeze(
+    role === undefined
+      ? { flavor: "nightly", productName }
+      : { flavor: "nightly", productName, data: role },
+  );
 }
 
 export function installHostBridge(

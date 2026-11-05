@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { desktopIdentity } from "@octant/host-runtime";
 import {
   readStoredDesktopDataChoice,
+  createNightlyDataControl,
   resolveHostOwningStartup,
   removeNightlyTestData,
   resolveStartupHostRole,
@@ -199,5 +200,56 @@ describe("removing Nightly's test data", () => {
 
   it("reports nothing to remove when there is no test data", async () => {
     await expect(remove({ kind: "octant-client" }).result).resolves.toEqual({ kind: "absent" });
+  });
+});
+
+describe("Nightly's Data control", () => {
+  function control(role: Parameters<typeof createNightlyDataControl>[0]["role"]) {
+    const relaunch = vi.fn();
+    const trashItem = vi.fn(async (_path: string) => undefined);
+    return {
+      relaunch,
+      trashItem,
+      data: createNightlyDataControl({
+        identity: nightly,
+        role,
+        platform: "darwin",
+        appDataDirectory: appData,
+        windowStorageDirectory: storage,
+        env: {},
+        trashItem,
+        relaunch,
+      }),
+    };
+  }
+
+  it("stores only the two fixed choices and relaunches only when the choice changed", async () => {
+    const { data, relaunch } = control({ kind: "octant-client" });
+    await expect(data.state()).resolves.toEqual({
+      running: "octant",
+      chosen: "octant",
+      testDataPresent: false,
+    });
+    expect(data.relaunch()).toEqual({ kind: "unchanged" });
+    await expect(data.choose("/Users/test/Library/Application Support/Octant")).rejects.toThrow();
+    await expect(data.choose("test-data")).resolves.toMatchObject({ chosen: "test-data" });
+    expect(data.relaunch()).toEqual({ kind: "relaunching" });
+    expect(relaunch).toHaveBeenCalledOnce();
+  });
+
+  it("reports a refused removal while the test host runs", async () => {
+    await mkdir(testData);
+    const { data, trashItem } = control({
+      kind: "test-host",
+      dataDirectory: testData,
+      serverPort: 13_774,
+      keychainServiceFamily: "octant-nightly-test-data",
+    });
+    await expect(data.remove()).resolves.toMatchObject({
+      running: "test-data",
+      testDataPresent: true,
+      removal: "test-host-running",
+    });
+    expect(trashItem).not.toHaveBeenCalled();
   });
 });

@@ -12,6 +12,7 @@ import {
   type DesktopHostRole,
   type DesktopIdentity,
 } from "@octant/host-runtime";
+import type { NightlyDataState } from "@octant/contracts/app-updates";
 import type { KeychainServiceFamily } from "./keychainCredentialStore";
 
 const MAX_CHOICE_BYTES = 1_024;
@@ -218,4 +219,67 @@ export async function removeNightlyTestData(options: {
   } catch {
     return { kind: "failed" };
   }
+}
+
+/**
+ * Nightly's Data setting, owned by its main process. The renderer can only
+ * choose between the two fixed values, ask for a relaunch, or ask to remove
+ * the fixed test folder; it never names a folder, a port or a role.
+ */
+export function createNightlyDataControl(options: {
+  readonly identity: DesktopIdentity;
+  readonly role: DesktopHostRole;
+  readonly platform: NodeJS.Platform;
+  readonly appDataDirectory: string;
+  readonly windowStorageDirectory: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly trashItem: (path: string) => Promise<void>;
+  readonly relaunch: () => void;
+}) {
+  const running: DesktopDataChoice = options.role.kind === "test-host" ? "test-data" : "octant";
+  const testDataDirectory = (): string | undefined => {
+    const target = resolveDesktopHostRole(options.identity, "test-data", {
+      platform: options.platform,
+      home: desktopHomeDirectory(options.appDataDirectory, options.platform),
+      env: options.env,
+    });
+    return target.kind === "test-host" ? target.dataDirectory : undefined;
+  };
+  const state = async (removal?: NightlyDataState["removal"]): Promise<NightlyDataState> => {
+    const directory = testDataDirectory();
+    let testDataPresent = false;
+    if (directory !== undefined) {
+      try {
+        testDataPresent = (await lstat(directory)).isDirectory();
+      } catch {
+        testDataPresent = false;
+      }
+    }
+    return {
+      running,
+      chosen: readStoredDesktopDataChoice(options.windowStorageDirectory),
+      testDataPresent,
+      ...(removal === undefined ? {} : { removal }),
+    };
+  };
+  return {
+    state: () => state(),
+    choose: async (value: unknown): Promise<NightlyDataState> => {
+      if (value !== "octant" && value !== "test-data")
+        throw new TypeError("Octant Nightly rejected an invalid Data choice.");
+      await storeDesktopDataChoice(options.windowStorageDirectory, value);
+      return state();
+    },
+    remove: async (): Promise<NightlyDataState> => {
+      const outcome = await removeNightlyTestData(options);
+      return state(outcome.kind === "refused" ? outcome.reason : outcome.kind);
+    },
+    /** Relaunches only when the stored choice differs from this launch's role. */
+    relaunch: (): { readonly kind: "relaunching" | "unchanged" } => {
+      if (readStoredDesktopDataChoice(options.windowStorageDirectory) === running)
+        return { kind: "unchanged" };
+      options.relaunch();
+      return { kind: "relaunching" };
+    },
+  };
 }

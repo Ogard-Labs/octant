@@ -8,6 +8,7 @@ import {
   dialog,
   ipcMain,
   session,
+  shell,
 } from "electron";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,7 @@ import {
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
 import { DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
+import { createNightlyDataControl, nightlyTestDataSupported } from "./nightlyTestData";
 
 /** Ordinary client entry: this module never imports the host-owning main. */
 export async function runNightlyClient(
@@ -189,6 +191,30 @@ export async function runNightlyClient(
   });
   register(DESKTOP_IPC_CHANNELS.appUpdateWhatsNew, () => loadBundledWhatsNew(notesOptions()));
   register(DESKTOP_IPC_CHANNELS.appUpdateWhatsNewAck, () => acknowledgeWhatsNew(notesOptions()));
+  const offersTestData = nightlyTestDataSupported(identity, process.platform);
+  if (offersTestData) {
+    const data = createNightlyDataControl({
+      identity,
+      role: { kind: "octant-client" },
+      platform: process.platform,
+      appDataDirectory: app.getPath("appData"),
+      windowStorageDirectory: app.getPath("userData"),
+      env: process.env,
+      trashItem: (path) => shell.trashItem(path),
+      relaunch: () => {
+        app.relaunch();
+        app.quit();
+      },
+    });
+    register(DESKTOP_IPC_CHANNELS.nightlyDataState, () => data.state());
+    register(DESKTOP_IPC_CHANNELS.nightlyDataRemove, () => data.remove());
+    register(DESKTOP_IPC_CHANNELS.nightlyDataRelaunch, () => data.relaunch());
+    supported.add(DESKTOP_IPC_CHANNELS.nightlyDataChoose);
+    ipcMain.handle(DESKTOP_IPC_CHANNELS.nightlyDataChoose, (event, value: unknown) => {
+      owns(event);
+      return data.choose(value);
+    });
+  }
   // The shared renderer's other native contributions are still awaiting their
   // typed owning broker. Refusal is explicit; no arbitrary channel is proxied.
   for (const channel of Object.values(DESKTOP_IPC_CHANNELS)) {
@@ -262,6 +288,7 @@ export async function runNightlyClient(
                 bounds,
                 localUpdatePreferences: true,
                 applicationFlavor: identity.flavor,
+                ...(offersTestData ? { applicationData: "octant" as const } : {}),
                 productName: identity.productName,
                 capability: bootstrap.capability,
                 windowId: bootstrap.windowId,

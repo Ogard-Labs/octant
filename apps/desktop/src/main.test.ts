@@ -248,6 +248,18 @@ describe("Project window BrowserWindow construction", () => {
     expect(createMainBrowserWindowOptions(input).webPreferences?.additionalArguments).not.toContain(
       "--octant-application-flavor=nightly",
     );
+    expect(
+      createMainBrowserWindowOptions({
+        ...input,
+        applicationFlavor: "nightly",
+        productName: DESKTOP_FLAVOR_IDENTITIES.nightly.productName,
+        applicationData: "test-data",
+      }).webPreferences?.additionalArguments,
+    ).toContain("--octant-application-data=test-data");
+    expect(
+      createMainBrowserWindowOptions({ ...input, applicationData: "test-data" }).webPreferences
+        ?.additionalArguments,
+    ).not.toContain("--octant-application-data=test-data");
   });
 
   it("consumes the resolved native presentation without overriding the frameless contract", () => {

@@ -20,6 +20,49 @@ const projectWindowCapability = "C".repeat(43);
 const projectId = "00000000-0000-4000-8000-000000000203";
 
 describe("desktop preload bridge", () => {
+  it("offers Nightly's Data requests only with a Data role and sends only the fixed choice", async () => {
+    const invoke = vi.fn(
+      async (channel: string): Promise<unknown> =>
+        channel === IPC_CHANNELS.nightlyDataRelaunch
+          ? { kind: "relaunching" }
+          : { running: "octant", chosen: "test-data", testDataPresent: false },
+    );
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
+      { flavor: "nightly", productName: "Octant Nightly", data: "octant" },
+    );
+    await expect(bridge.chooseNightlyData?.("test-data")).resolves.toEqual({
+      running: "octant",
+      chosen: "test-data",
+      testDataPresent: false,
+    });
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.nightlyDataChoose, "test-data");
+    await expect(bridge.relaunchNightly?.()).resolves.toEqual({ kind: "relaunching" });
+    expect(bridge.readNightlyInstall).toBeUndefined();
+    const withoutRole = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
+      { flavor: "nightly", productName: "Octant Nightly" },
+    );
+    expect(withoutRole.readNightlyData).toBeUndefined();
+    invoke.mockResolvedValueOnce({
+      running: "octant",
+      chosen: "test-data",
+      testDataPresent: false,
+      folder: "/x",
+    });
+    await expect(bridge.readNightlyData?.()).rejects.toThrow();
+  });
+
   it.each([
     {
       arguments: [
@@ -27,6 +70,31 @@ describe("desktop preload bridge", () => {
         "--octant-application-name=Octant Nightly",
       ],
       expected: { flavor: "nightly", productName: "Octant Nightly" },
+    },
+    {
+      arguments: [
+        "--octant-application-flavor=nightly",
+        "--octant-application-name=Octant Nightly",
+        "--octant-application-data=test-data",
+      ],
+      expected: { flavor: "nightly", productName: "Octant Nightly", data: "test-data" },
+    },
+    {
+      arguments: [
+        "--octant-application-flavor=nightly",
+        "--octant-application-name=Octant Nightly",
+        "--octant-application-data=/Users/test/Library/Application Support/Octant",
+      ],
+      expected: undefined,
+    },
+    {
+      arguments: [
+        "--octant-application-flavor=nightly",
+        "--octant-application-name=Octant Nightly",
+        "--octant-application-data=octant",
+        "--octant-application-data=test-data",
+      ],
+      expected: undefined,
     },
     { arguments: [], expected: undefined },
     { arguments: ["--octant-application-flavor=nightly"], expected: undefined },

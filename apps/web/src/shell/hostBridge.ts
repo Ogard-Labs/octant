@@ -3,6 +3,8 @@ import type { CodeOperationApprovalRequest } from "@octant/contracts/code-operat
 import type {
   AppReleaseRing,
   AppUpdateState,
+  NightlyDataChoice,
+  NightlyDataState,
   NightlyInstallState,
 } from "@octant/contracts/app-updates";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
@@ -433,7 +435,17 @@ export interface OctantHostBridge
   readonly applicationIdentity?: Readonly<{
     readonly flavor: "nightly";
     readonly productName: "Octant Nightly";
+    /** The Data role this launch runs with, where Nightly offers the choice. */
+    readonly data?: NightlyDataChoice;
   }>;
+  /**
+   * Nightly's Data setting. Present only where Nightly offers separate test
+   * data; its main process owns the folder, the role and the relaunch.
+   */
+  readonly readNightlyData?: () => Promise<NightlyDataState>;
+  readonly chooseNightlyData?: (choice: NightlyDataChoice) => Promise<NightlyDataState>;
+  readonly removeNightlyTestData?: () => Promise<NightlyDataState>;
+  readonly relaunchNightly?: () => Promise<{ readonly kind: "relaunching" | "unchanged" }>;
   readonly downloadAppUpdate?: () => Promise<AppUpdateState>;
   readonly installAppUpdate?: () => Promise<AppUpdateInstallOutcome>;
   readonly setAutomaticAppUpdateChecks?: (enabled: boolean) => Promise<AppUpdateState>;

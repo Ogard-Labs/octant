@@ -124,7 +124,11 @@ import type {
 } from "@octant/contracts/desktop-bridge";
 import { createAppUpdateService } from "./appUpdateService";
 import { createNightlyInstaller } from "./nightlyInstaller";
-import { resolveHostOwningStartup, resolveStartupHostRole } from "./nightlyTestData";
+import {
+  createNightlyDataControl,
+  resolveHostOwningStartup,
+  resolveStartupHostRole,
+} from "./nightlyTestData";
 import {
   createPortableImagePort,
   defaultProcessIsAlive,
@@ -1258,6 +1262,35 @@ const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
 );
 const desktopDataDirectory = desktopHostRuntimePaths.dataDirectory;
 const desktopKeychainServiceFamily = desktopHostStartup.keychainServiceFamily;
+const nightlyDataControl =
+  desktopHostRole.kind === "test-host"
+    ? createNightlyDataControl({
+        identity: applicationIdentity,
+        role: desktopHostRole,
+        platform: process.platform,
+        appDataDirectory: app.getPath("appData"),
+        windowStorageDirectory: desktopWindowStorageDirectory(
+          applicationIdentity,
+          "",
+          app.getPath("appData"),
+        ),
+        env: process.env,
+        trashItem: (path) => shell.trashItem(path),
+        relaunch: () => {
+          app.relaunch();
+          app.quit();
+        },
+      })
+    : undefined;
+/** The Nightly label and its "Test data" label for the test host's windows. */
+const nightlyWindowIdentity =
+  desktopHostRole.kind === "test-host"
+    ? {
+        applicationFlavor: "nightly" as const,
+        productName: applicationIdentity.productName,
+        applicationData: "test-data" as const,
+      }
+    : {};
 const desktopHostId = deriveHostRuntimeHostId(desktopDataDirectory);
 app.setPath(
   "userData",
@@ -2211,6 +2244,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
           bounds: state.bounds,
           capability,
           windowId: state.windowId,
+          ...nightlyWindowIdentity,
           preloadPath: resolve(dirname(fileURLToPath(import.meta.url)), DESKTOP_PRELOAD_FILENAME),
           browserWindow: presentation.browserWindow,
         }),
@@ -2504,6 +2538,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
             ...(target.kind === "project-thread"
               ? { initialThreadMode: target.mode, initialThreadId: target.threadId }
               : {}),
+            ...nightlyWindowIdentity,
             preloadPath: resolve(dirname(fileURLToPath(import.meta.url)), DESKTOP_PRELOAD_FILENAME),
             browserWindow: presentation.browserWindow,
           }),
@@ -3660,6 +3695,26 @@ function installIpcHandlers(): void {
       ownedTopLevelWindowContext(event);
       if (rest.length !== 0) throw new Error("Octant rejected an Octant Nightly request.");
       return request();
+    });
+  }
+  // Nightly's test host keeps its Data setting here; the choice, relaunch and
+  // removal requests carry nothing but the fixed choice values.
+  if (nightlyDataControl !== undefined) {
+    const data = nightlyDataControl;
+    for (const [channel, request] of [
+      [IPC_CHANNELS.nightlyDataState, () => data.state()],
+      [IPC_CHANNELS.nightlyDataRemove, () => data.remove()],
+      [IPC_CHANNELS.nightlyDataRelaunch, () => data.relaunch()],
+    ] as const) {
+      ipcMain.handle(channel, (event, ...rest: ReadonlyArray<unknown>) => {
+        ownedTopLevelWindowContext(event);
+        if (rest.length !== 0) throw new Error("Octant Nightly rejected a Data request.");
+        return request();
+      });
+    }
+    ipcMain.handle(IPC_CHANNELS.nightlyDataChoose, (event, value: unknown) => {
+      ownedTopLevelWindowContext(event);
+      return data.choose(value);
     });
   }
   ipcMain.handle(IPC_CHANNELS.appUpdateWhatsNew, async (event) => {
