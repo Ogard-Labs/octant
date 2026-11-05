@@ -416,7 +416,10 @@ in the thread, and you can create one yourself with **New routine** under
 Routines here, which lists all of this Project's routines; see
 [Routines from a thread](/guide/work#routines-from-a-thread). A Code routine
 runs in this thread's checkout, asks before effects, and cannot be proposed
-from Plan. A Code thread can also [follow up later](/guide/work#follow-up-later)
+from Plan. The agent can also read this Project's routines, ask you to pause
+or archive this thread's own, and report how a routine's run went; see
+[What the agent can do with routines](/guide/work#what-the-agent-can-do-with-routines).
+In Plan it can read routines but asks for no change. A Code thread can also [follow up later](/guide/work#follow-up-later)
 in the same thread; that turn asks before effects even if the thread has
 since been given more access, and does not run if the thread has Full access.
 

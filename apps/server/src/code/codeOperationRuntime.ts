@@ -58,6 +58,7 @@ import {
   type CodeMergeStandingSource,
   type CodeProjectPullRequestSwitchTarget,
   type CodeThreadId,
+  type AutomationRunReference,
   type EventActor,
   type PendingRequest,
   type ProviderCapabilities,
@@ -550,6 +551,8 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readThread: () => CodeThread | undefined;
     readonly folders: ReadonlyArray<string>;
+    /** The routine run this turn was started for, from the dispatcher only. */
+    readonly routineRun?: AutomationRunReference;
   }) => AppManagedToolSet | undefined;
   /** Lets the model author a Canvas bound to this thread's checkout. */
   readonly canvas?: (input: {
@@ -2406,6 +2409,8 @@ interface ActiveTurn {
   >;
   readonly windowId: WindowId;
   readonly thread: CodeThread;
+  /** The routine run this turn was started for, from the dispatcher only. */
+  readonly routineRun?: AutomationRunReference;
   readonly operationId: CodeOperationId;
   readonly sessionId: string;
   readonly requestedSessionId: string;
@@ -3084,6 +3089,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         : { extensionSelections: command.extensionSelections }),
       windowId: input.windowId,
       thread: input.thread,
+      ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),
       operationId: command.operationId,
       sessionId:
         previous?.kind === "provider-session-ready" && providerSwitch === undefined
@@ -4463,6 +4469,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
           folders: [active.checkoutRoot, ...active.extraFolders],
+          ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
         }),
         this.#options.sideTasks?.({ thread: active.thread }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),

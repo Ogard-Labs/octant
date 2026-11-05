@@ -202,6 +202,7 @@ export function startOctantServer(
       agentRunParentAuthority,
       agentRunPersistence,
       androidInputGrants,
+      automationEventStore,
       bindingReceiptStore,
       browserCaptureStore,
       browserCaptures,
@@ -933,6 +934,7 @@ export function startOctantServer(
       agentRunPersistence,
       agentsManagedToolsFor,
       authorizeWorkThreadForWindow,
+      automationEventStore,
       browserAuthority,
       browserCaptures,
       browserModelBindings,
@@ -1098,6 +1100,7 @@ export function startOctantServer(
       pushGatewaySetting,
       pushNotificationTokenStore,
     } = wireAutomation({
+      automationEventStore,
       agentRunOrchestration,
       externalContentIngestionStore,
       readHarnessProcessReceipts,

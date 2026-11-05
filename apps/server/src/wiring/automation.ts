@@ -40,11 +40,12 @@ import {
 import { createAutomationChatDispatchPort } from "../automation/automationChatDispatchPort";
 import { createAutomationWorkDispatchPort } from "../automation/automationWorkDispatchPort";
 import { AutomationDispatchService } from "../automation/automationDispatchService";
-import { AutomationEventStore } from "../automation/automationEventStore";
 import { hydrateAutomationProjection } from "../automation/automationProjection";
 import { createAutomationRouteHandler } from "../automation/automationRoutes";
 import { AutomationSchedulerService } from "../automation/automationSchedulerService";
 import { createRoutineProposalTools } from "../automation/routineProposalTools";
+import { createRoutineTools } from "../automation/routineTools";
+import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { buildThreadRoutineDraft } from "../automation/threadRoutineDraft";
 import { isRoutineHostScope } from "../routineHostScope";
 import {
@@ -84,7 +85,10 @@ import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
 export type AutomationDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "liveTurns" | "routineProposalService" | "windowAuthorityStore"> &
+  Pick<
+    AuthorityWiring,
+    "automationEventStore" | "liveTurns" | "routineProposalService" | "windowAuthorityStore"
+  > &
   Pick<
     AgentRunsWiring,
     "capacityScheduler" | "agentRunOrchestration" | "externalContentIngestionStore"
@@ -101,6 +105,7 @@ export type AutomationDependencies = Pick<ServerStart, "persistence"> &
 
 export function wireAutomation(deps: AutomationDependencies) {
   const {
+    automationEventStore,
     capacityScheduler,
     agentRunOrchestration,
     externalContentIngestionStore,
@@ -121,11 +126,6 @@ export function wireAutomation(deps: AutomationDependencies) {
     workTurnService,
   } = deps;
 
-  const automationEventStore = new AutomationEventStore({
-    journal: persistence.journal,
-    uuid: randomUUID,
-    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-  });
   // The Automation projection is in-memory; rebuild it from the
   // authoritative journal on every startup. Hydration fails closed: a
   // hostile or undecodable frame, or history past the scan cap, leaves the
@@ -256,11 +256,11 @@ export function wireAutomation(deps: AutomationDependencies) {
       },
     },
     operations: {
-      execute: async (windowId, command) => {
+      execute: async (windowId, command, options) => {
         if (routeCodeService.executeOperation === undefined) {
           throw new Error("Code operation runtime is unavailable.");
         }
-        return routeCodeService.executeOperation(windowId, command as never);
+        return routeCodeService.executeOperation(windowId, command as never, options);
       },
     },
     evidence: automationCodeEvidenceFromText(),
@@ -596,19 +596,34 @@ export function wireAutomation(deps: AutomationDependencies) {
       (persistence.readShellSettings()?.settings ?? defaultShellSettings())
         .completedThreadArchiveAfterDays,
   });
-  // A Code turn's routine proposals ride the seam later areas use to add
-  // tools to a Code turn; the Work turn adds the same tool where it composes
-  // its own. Each run's own turn, which acts as the host, is refused it.
-  contributeCodeTools(({ windowId, thread, readThread }) =>
-    createRoutineProposalTools({
+  // A Code turn's routine tools ride the seam later areas use to add tools to
+  // a Code turn; the Work turn adds the same tools where it composes its own.
+  // Each run's own turn, which acts as the host, is refused proposals and
+  // change requests, and is the only turn handed its run to report on.
+  contributeCodeTools(({ windowId, thread, readThread, routineRun }) => {
+    const turn = {
       windowId,
-      thread: { id: String(thread.id), mode: "code", projectId: String(thread.projectId) },
+      thread: { id: String(thread.id), mode: "code" as const, projectId: String(thread.projectId) },
       readPosture: () => readThread()?.executionPolicy ?? thread.executionPolicy,
       isAutomationOrigin: isRoutineHostScope(windowId),
-      proposals: routineProposalService,
       now: Date.now,
-    }),
-  );
+    };
+    return combineAppManagedToolSets(
+      createRoutineProposalTools({ ...turn, proposals: routineProposalService }),
+      createRoutineTools({
+        ...turn,
+        ...(routineRun === undefined ? {} : { routineRun }),
+        routines: {
+          hostId: LOCAL_HOST_ID,
+          projection: persistence.automationProjection,
+          store: automationEventStore,
+          changes: routineProposalService,
+        },
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
+        uuid: randomUUID,
+      }),
+    );
+  });
   const automationRoutes = createAutomationRouteHandler({
     projection: persistence.automationProjection,
     commands: {

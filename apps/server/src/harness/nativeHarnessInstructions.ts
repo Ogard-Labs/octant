@@ -62,6 +62,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_propose_thread: "propose a new thread on the Project board",
   octant_pull_request:
     "open or change this thread's own pull request (draft, stacked, ready) when the user asks, or watch it to be woken when checks finish or reviews arrive instead of polling",
+  octant_routines:
+    "see this Project's routines, ask the user to pause or archive one this thread started, or report a routine run's result",
   octant_terminal: "run long-lived processes such as dev servers and read their output",
   octant_threads: "see this Project's other threads: list them, read one, or wait for one to stop",
   octant_thread_message: "ask a mentioned thread something and wait for its reply",

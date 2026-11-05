@@ -827,6 +827,16 @@ with only its prompt, so a reader can tell it was scheduled and not typed. The
 sidebar row shows no mark for a pending follow-up: no existing row mark fits a
 scheduled turn, and the Environment row is where it is managed.
 
+An agent's request to pause or archive one of its thread's routines waits in
+the same place, labelled "Pause routine · asked by the agent" or "Archive
+routine · asked by the agent" ("Cancel follow-up" for a follow-up). It states
+the routine's name, what the change does, and the agent's reason in its own
+words. Its one action does it as the person; dismissing it leaves the routine
+as it was and the agent is told so. In Automation Center's run
+history, a run whose agent reported a result shows "Agent reported:" with the
+outcome and summary beside the run's own status, in the warning colour for
+Needs attention and Did not succeed; the latest-run line carries the outcome.
+
 ### Subagents
 
 Environment belongs to a

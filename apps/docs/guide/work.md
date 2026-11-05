@@ -294,6 +294,26 @@ routine's own run cannot propose more routines. A provider that cannot use
 Octant's tools does not get this; create the routine in Automation Center
 instead.
 
+### What the agent can do with routines
+
+The agent can look at this Project's routines: their schedules, whether they
+are running or paused, their prompts, and how recent runs went. It can also
+ask you to pause or archive a routine that belongs to this thread, one it
+proposed or you created here, or the routine whose run started this thread.
+The request shows at the foot of the thread like a proposal, with the
+agent's reason; nothing changes until you click **Pause routine** or
+**Archive routine** (**Cancel follow-up** for a follow-up), and dismissing it
+keeps the routine as it is. The agent cannot resume, edit, or run a routine,
+and it cannot ask about another thread's routine; you do those in Automation
+Center.
+
+When a routine runs, its agent can report how the run went: succeeded,
+nothing to do, needs attention, or did not succeed, with a short summary. It
+shows beside that run in Automation Center's run history, as "Agent
+reported: …", and does not change the run's own status. A run cannot pause or
+archive its own routine, because nobody is there to confirm; it reports needs
+attention and says why, and you decide.
+
 ### Follow up later
 
 A follow-up is a one-time turn sent back into the same thread at a time you
