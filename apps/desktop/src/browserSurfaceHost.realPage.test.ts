@@ -120,6 +120,19 @@ const pages: Record<string, string> = {
       document.getElementById("dark").attachShadow({ mode: "open" }).innerHTML = '<div style="background:#000"><slot></slot></div>';
       document.getElementById("faded").attachShadow({ mode: "open" }).innerHTML = '<div style="opacity:0.5"><slot></slot></div>';
     </script></body></html>`,
+  // A shadow root that draws its host's heading before its own, and its host's text over its backdrop.
+  "/audit-slots": `<!doctype html><html lang="en"><title>Slots</title><body style="background:#fff">
+    <h1>Shop</h1>
+    <slot-panel id="panel"><h2>Summary</h2></slot-panel>
+    <slot-card id="words">Host words</slot-card>
+    <script>
+      document.getElementById("panel").attachShadow({ mode: "open" }).innerHTML = '<slot></slot><h3>Details</h3>';
+      document.getElementById("words").attachShadow({ mode: "open" }).innerHTML = '<div style="background:#000;color:#555"><slot></slot></div>';
+    </script></body></html>`,
+  // More touch targets than any one slice, with the only crowded pair last.
+  "/audit-targets": `<!doctype html><html lang="en"><title>Targets</title><body>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">${'<button style="width:32px;height:32px">x</button>'.repeat(1_100)}</div>
+    <div><button id="late-a" style="width:16px;height:16px;padding:0;border:0">A</button><button id="late-b" style="width:16px;height:16px;padding:0;border:0;margin-left:2px">B</button></div></body></html>`,
   // More elements than the audit reads, with a referenced duplicate id past the end.
   "/audit-large": `<!doctype html><html lang="en"><title>Large</title><body>
     ${"<div></div>".repeat(6_100)}
@@ -1014,6 +1027,44 @@ describe.skipIf(chrome === undefined)(
       });
       // The text drawn through the half-transparent slot.
       expect(reading.contrastNotMeasured).toBe(1);
+      await page.close();
+    });
+
+    it("reads a shadow root's slotted heading where the slot draws it, and judges a host's text in the slot's colours", async () => {
+      const { host, contextId, page } = await surface("/audit-slots");
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      const { reading } = observed.audit;
+      // h1, then the slotted h2, then the shadow root's h3: no level is skipped.
+      expect(reading.findings.filter((each) => each.rule === "heading-order")).toEqual([]);
+      expect(reading.findings.filter((each) => each.rule === "color-contrast")).toEqual([
+        expect.objectContaining({
+          text: "Host words",
+          detail: expect.objectContaining({ foreground: "#555555", background: "#000000" }),
+        }),
+      ]);
+      expect(reading.truncated).toBe(false);
+      await page.close();
+    });
+
+    it("checks the spacing of every touch target the audit reads, past the first thousand", async () => {
+      const { host, contextId, page } = await surface("/audit-targets");
+      await host.act(contextId, {
+        kind: "resize",
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 3,
+        mobile: true,
+        touch: true,
+      });
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      const { reading } = observed.audit;
+      expect(reading.touch).toBe(true);
+      expect(reading.truncated).toBe(false);
+      expect(
+        reading.findings.filter((each) => each.rule === "target-size").map((each) => each.selector),
+      ).toEqual(["#late-a", "#late-b"]);
+      await host.act(contextId, { kind: "resize" });
       await page.close();
     });
 

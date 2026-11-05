@@ -164,6 +164,19 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     const parentNode: ParentNode | null = element.parentNode;
     return element.parentElement ?? (parentNode instanceof ShadowRoot ? parentNode.host : null);
   };
+  // The nodes drawn inside an element, in the order a person meets them: an
+  // open shadow root's in place of the host's own, and a slot's assigned
+  // nodes in place of its fallback. The inverse of `renderedParent`.
+  const shownNodes = (element: Element): ReadonlyArray<Node> => {
+    if (element.shadowRoot !== null) return Array.from(element.shadowRoot.childNodes);
+    if (element instanceof HTMLSlotElement) {
+      const assigned = element.assignedNodes();
+      if (assigned.length > 0) return assigned;
+    }
+    return Array.from(element.childNodes);
+  };
+  const shownChildren = (element: Element): ReadonlyArray<Element> =>
+    shownNodes(element).filter((node): node is Element => node instanceof Element);
   // Inside an editable element, every descendant's text is what was typed:
   // `<div contenteditable><span>secret</span></div>` reads "secret" from the
   // span. The walk reaches every parent too: a slotted element's chain climbs
@@ -224,14 +237,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
     if (!(node instanceof Element)) return "";
     if (node.localName === "select" || isEditable(node)) return "";
-    const assigned = node instanceof HTMLSlotElement ? node.assignedNodes() : [];
-    const shown =
-      node.shadowRoot !== null
-        ? node.shadowRoot.childNodes
-        : assigned.length > 0
-          ? assigned
-          : node.childNodes;
-    return Array.from(shown).map(readableText).join(" ");
+    return shownNodes(node).map(readableText).join(" ");
   };
   // Ids and labels are looked up in the element's own root, which for an
   // element inside a shadow root is that root, not the document.
@@ -533,8 +539,10 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
   if (request.mode === "accessibility") {
     const audited: Element[] = [];
     let truncatedAudit = false;
-    // Tree order, stepping into each open shadow root where its host sits, so
-    // headings read in the order a person meets them.
+    // Rendered order, as the snapshot walks it: a host's shadow root in place
+    // of its own children, and a slot's assigned elements where the slot sits,
+    // so headings read in the order a person meets them. Light-DOM children no
+    // slot takes are not drawn and are not audited.
     const pending: Element[] = document.documentElement === null ? [] : [document.documentElement];
     while (pending.length > 0) {
       const element = pending.pop();
@@ -545,10 +553,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
         break;
       }
       audited.push(element);
-      const children = [
-        ...(element.shadowRoot === null ? [] : Array.from(element.shadowRoot.children)),
-        ...Array.from(element.children),
-      ];
+      const children = shownChildren(element);
       for (let index = children.length - 1; index >= 0; index -= 1) {
         const child = children[index];
         if (child !== undefined) pending.push(child);
@@ -582,14 +587,14 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
         ...(detail === undefined ? {} : { detail }),
       });
     };
-    // An element's ancestors through open shadow roots, itself first.
+    // An element's rendered ancestors, itself first: through the slot that
+    // draws it and the hosts of open shadow roots, so `aria-hidden`, `inert`,
+    // and a disabled wrapper around a slot reach what the slot draws.
     const ancestry = (element: Element): Element[] => {
       const chain: Element[] = [];
-      let current: Element | null = element;
-      while (current !== null) {
+      for (let current: Element | null = element; current !== null;) {
         chain.push(current);
-        const parent: ParentNode | null = current.parentNode;
-        current = current.parentElement ?? (parent instanceof ShadowRoot ? parent.host : null);
+        current = renderedParent(current);
       }
       return chain;
     };
@@ -638,16 +643,9 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       }
       if (tag === "svg") return node.querySelector("title")?.textContent ?? "";
       if (tag === "select" || isEditable(node)) return "";
-      const assigned = node instanceof HTMLSlotElement ? node.assignedNodes() : [];
-      const shown =
-        node.shadowRoot !== null
-          ? node.shadowRoot.childNodes
-          : assigned.length > 0
-            ? assigned
-            : node.childNodes;
       return [
         pseudoText(node, "::before"),
-        ...Array.from(shown, (each) => contentText(each, includeHidden)),
+        ...shownNodes(node).map((each) => contentText(each, includeHidden)),
         pseudoText(node, "::after"),
       ].join(" ");
     };
@@ -916,11 +914,21 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       ) {
         continue;
       }
-      const ownText = Array.from(element.childNodes).some(
+      // Text is judged where it is drawn: a host's own text is drawn by the
+      // slot it is assigned to, in the slot's colours, and not at all if no
+      // slot takes it. A slot, like any `display: contents` element, has no
+      // box of its own, so the nearest ancestor with one stands for it.
+      const ownText = shownNodes(element).some(
         (node) => node.nodeType === Node.TEXT_NODE && filled(node.textContent),
       );
-      if (!ownText || !rendered(element) || disabled(element)) continue;
-      const box = element.getBoundingClientRect();
+      if (!ownText || disabled(element)) continue;
+      let drawn: Element | null = element;
+      while (drawn !== null && window.getComputedStyle(drawn).display === "contents") {
+        drawn = renderedParent(drawn);
+      }
+      if (drawn === null || !rendered(drawn)) continue;
+      if (drawn !== element && window.getComputedStyle(element).visibility !== "visible") continue;
+      const box = drawn.getBoundingClientRect();
       // Text clipped to a point is for screen readers only.
       if (box.width < 2 || box.height < 2) continue;
       const style = window.getComputedStyle(element);
@@ -975,15 +983,20 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
               window.getComputedStyle(element).appearance !== "none"
             ),
         )
-        .slice(0, 1_000)
         .map((element) => ({ element, box: element.getBoundingClientRect() }))
         .filter(({ box }) => box.width > 0 && box.height > 0);
-      // A link in a sentence is sized by the sentence it sits in.
-      const inline = (element: Element): boolean =>
-        window.getComputedStyle(element).display === "inline" &&
-        Array.from(element.parentElement?.childNodes ?? []).some(
+      // A link in a sentence is sized by the sentence it sits in: the nodes
+      // drawn beside it, which for a slotted link are the slot's.
+      const inline = (element: Element): boolean => {
+        if (window.getComputedStyle(element).display !== "inline") return false;
+        const parent = renderedParent(element);
+        return (parent === null ? [] : shownNodes(parent)).some(
           (node) => node.nodeType === Node.TEXT_NODE && filled(node.textContent),
         );
+      };
+      // Whether one element is drawn inside another, across slots and hosts.
+      const drawnInside = (inner: Element, outer: Element): boolean =>
+        ancestry(inner).includes(outer);
       const small = (box: DOMRect) => box.width < 24 || box.height < 24;
       const centre = (box: DOMRect) => ({
         x: box.left + box.width / 2,
@@ -994,18 +1007,64 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
           Math.max(box.left - point.x, 0, point.x - box.right),
           Math.max(box.top - point.y, 0, point.y - box.bottom),
         );
+      // Every target the audit read is checked, but only against the targets
+      // near it: each is filed in the 24 pixel cells its box, widened by the
+      // 12 pixel reach of a neighbour's circle, covers, and a small target
+      // looks only in the cells around its centre. A page whose boxes would
+      // fill more cells, or put more targets side by side, than the budgets
+      // allow says it was cut rather than answering from part of it.
+      const cell = 24;
+      const cells = new Map<string, Array<(typeof targets)[number]>>();
+      let filed = 0;
+      let compared = 0;
+      const placed: Array<(typeof targets)[number]> = [];
       for (const target of targets) {
+        const left = Math.floor((target.box.left - 12) / cell);
+        const right = Math.floor((target.box.right + 12) / cell);
+        const top = Math.floor((target.box.top - 12) / cell);
+        const bottom = Math.floor((target.box.bottom + 12) / cell);
+        filed += (right - left + 1) * (bottom - top + 1);
+        if (filed > 100_000) {
+          truncatedAudit = true;
+          break;
+        }
+        for (let x = left; x <= right; x += 1) {
+          for (let y = top; y <= bottom; y += 1) {
+            const key = `${String(x)},${String(y)}`;
+            const held = cells.get(key);
+            if (held === undefined) cells.set(key, [target]);
+            else held.push(target);
+          }
+        }
+        placed.push(target);
+      }
+      for (const target of placed) {
         if (!small(target.box) || inline(target.element)) continue;
         const middle = centre(target.box);
+        const near = new Set<(typeof targets)[number]>();
+        for (let x = Math.floor((middle.x - cell) / cell); x * cell <= middle.x + cell; x += 1) {
+          for (let y = Math.floor((middle.y - cell) / cell); y * cell <= middle.y + cell; y += 1) {
+            for (const other of cells.get(`${String(x)},${String(y)}`) ?? []) near.add(other);
+          }
+        }
+        compared += near.size;
+        if (compared > 200_000) {
+          truncatedAudit = true;
+          break;
+        }
         // The spacing exception: a 24 pixel circle on the target's centre that
         // reaches no other target, and no other small target's circle.
-        const crowded = targets.some((other) => {
-          if (other === target || other.element.contains(target.element)) return false;
-          if (target.element.contains(other.element)) return false;
-          if (distanceTo(middle, other.box) < 12) return true;
-          if (!small(other.box)) return false;
-          const theirs = centre(other.box);
-          return Math.hypot(middle.x - theirs.x, middle.y - theirs.y) < 24;
+        const crowded = Array.from(near).some((other) => {
+          if (other === target) return false;
+          const reaches =
+            distanceTo(middle, other.box) < 12 ||
+            (small(other.box) &&
+              Math.hypot(middle.x - centre(other.box).x, middle.y - centre(other.box).y) < 24);
+          return (
+            reaches &&
+            !drawnInside(target.element, other.element) &&
+            !drawnInside(other.element, target.element)
+          );
         });
         if (crowded) {
           report("target-size", target.element, {
@@ -1035,16 +1094,6 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
   const refs: BrowserPageSnapshotRef[] = [];
   const refOffset = request.refOffset ?? 0;
   let truncated = false;
-  // The children a person sees: an open shadow root's instead of the host's
-  // own, and a slot's assigned elements in place of its fallback.
-  const shownChildren = (element: Element): ReadonlyArray<Element> => {
-    if (element.shadowRoot !== null) return Array.from(element.shadowRoot.children);
-    if (element instanceof HTMLSlotElement) {
-      const assigned = element.assignedElements();
-      if (assigned.length > 0) return assigned;
-    }
-    return Array.from(element.children);
-  };
   const visit = (element: Element, depth: number): void => {
     if (truncated) return;
     if (["script", "style", "noscript", "template", "svg", "head"].includes(element.localName)) {
