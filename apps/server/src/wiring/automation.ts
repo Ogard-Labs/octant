@@ -619,6 +619,8 @@ export function wireAutomation(deps: AutomationDependencies) {
           store: automationEventStore,
           changes: routineProposalService,
         },
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
+        uuid: randomUUID,
       }),
     );
   });

@@ -488,6 +488,9 @@ export function wireWork(deps: WorkDependencies) {
                   store: automationEventStore,
                   changes: routineProposalService,
                 },
+                recordExternalContentIngestion: (mark) =>
+                  externalContentIngestionStore.record(mark),
+                uuid: randomUUID,
               }),
             );
         const agentsTools = !browserSupported

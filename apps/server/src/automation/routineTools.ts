@@ -22,7 +22,12 @@ import {
   isRoutineVisibleToTurn,
   type RoutineAgentTurn,
 } from "@octant/domain";
+import type {
+  ExternalContentIngestionResult,
+  RecordExternalContentIngestionInput,
+} from "../context/externalContentIngestionStore";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { AutomationEventStoreError, type AutomationEventStore } from "./automationEventStore";
 import type { AutomationProjection } from "./automationProjection";
 import type { RoutineProposalService } from "./routineProposalService";
@@ -109,6 +114,11 @@ export function createRoutineTools(input: {
   /** The run the dispatcher started this turn for; absent for every other turn. */
   readonly routineRun?: AutomationRunReference;
   readonly routines: RoutineToolPorts;
+  /** Marks the thread before a read's routines and runs reach the model. */
+  readonly recordExternalContentIngestion: (
+    input: RecordExternalContentIngestionInput,
+  ) => ExternalContentIngestionResult;
+  readonly uuid: () => string;
   readonly now: () => number;
 }): AppManagedToolSet {
   const mode = input.thread.mode;
@@ -286,7 +296,23 @@ export function createRoutineTools(input: {
       }
     },
   };
-  return withToolFamilyHelp(set, { [ROUTINES_TOOL_NAME]: HELP });
+  // A read carries other agents' words: a run's reported summary, and a
+  // prompt and name an agent may have proposed. Every list and get marks the
+  // thread and passes the Watcher before the model sees it, as a sibling
+  // thread's list and read do, and a mark that cannot be journaled withholds
+  // the read. Change requests and reports answer with the host's own words.
+  // Help is static text, so it is answered outside the wrapper.
+  const marked = taintAppManagedToolResults({
+    tools: set,
+    threadId: input.thread.id,
+    recordExternalContentIngestion: input.recordExternalContentIngestion,
+    uuid: input.uuid,
+    resultTaintsThread: (call) => {
+      const operation = parseFields(call.inputJson)?.get("operation");
+      return operation === "list" || operation === "get";
+    },
+  });
+  return withToolFamilyHelp(marked, { [ROUTINES_TOOL_NAME]: HELP });
 }
 
 function reportResult(
