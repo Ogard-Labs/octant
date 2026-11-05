@@ -766,6 +766,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       "flow-run": { name: "Check the form" },
       resize: { width: 390, height: 844 },
       "sign-in": { reason: "The dashboard needs your account." },
+      "run-script": { source: "42", expectedObservationRevision: 1 },
       "download-save": { downloadId: "d1" },
       "read-page": {},
       click: { selector: "#go" },
@@ -1431,5 +1432,34 @@ describe("octant_browser flow operations", () => {
     expect(decide({ operation: "navigate", url: "https://example.com/?page=2#top" })).toBe(
       "stored",
     );
+  });
+});
+
+describe("bounded page script input", () => {
+  it("requires an observed revision and bounds source bytes while refusing script batches", () => {
+    const parse = (input: unknown) =>
+      parseBrowserToolInput(JSON.stringify(input), { allowProfile: true });
+    expect(
+      parse({ operation: "run-script", source: "document.title", expectedObservationRevision: 1 }),
+    ).toEqual({
+      operation: "run-script",
+      source: "document.title",
+      expectedObservationRevision: 1,
+    });
+    for (const input of [
+      { operation: "run-script", source: "42" },
+      { operation: "run-script", source: "😀".repeat(2049), expectedObservationRevision: 1 },
+      {
+        operation: "run-script",
+        source: "42",
+        expectedObservationRevision: 1,
+        profile: "personal",
+      },
+      {
+        operation: "steps",
+        steps: [{ operation: "run-script", source: "42", expectedObservationRevision: 1 }],
+      },
+    ])
+      expect(parse(input)).toBeUndefined();
   });
 });

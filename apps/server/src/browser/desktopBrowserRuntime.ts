@@ -1,4 +1,8 @@
 import {
+  decodeBrowserPageScriptPreparation,
+  type BrowserPageScriptNativeCommand,
+} from "@octant/contracts/browser-page-script";
+import {
   decodeBrowserCredentialNativeResult,
   type BrowserCredentialFillPreparation,
 } from "@octant/contracts/browser-credential-use";
@@ -214,6 +218,15 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
         expiresAt,
       }),
     );
+  }
+
+  async runPageScript(command: BrowserPageScriptNativeCommand, signal: AbortSignal) {
+    const reply = await this.#request<unknown>("/v1/contexts/page-script", command, signal);
+    try {
+      return decodeBrowserPageScriptPreparation(reply);
+    } catch {
+      throw new Error("Octant desktop Browser rejected the page script reply.");
+    }
   }
 
   inspectTarget(

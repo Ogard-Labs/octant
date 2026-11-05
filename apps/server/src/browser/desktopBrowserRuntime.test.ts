@@ -1,3 +1,4 @@
+import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
 import { describe, expect, it, vi } from "vitest";
 import { DesktopBrowserRuntime } from "./desktopBrowserRuntime";
 
@@ -11,6 +12,55 @@ const policy = {
 };
 
 describe("DesktopBrowserRuntime", () => {
+  it("sends pinned script source only during preparation and rejects malformed native replies without their contents", async () => {
+    const sent: unknown[] = [];
+    let malformed = false;
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch: async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        sent.push(body);
+        return Response.json(
+          malformed
+            ? {
+                status: "completed",
+                effect: "possible",
+                valueJson: "private-marker" + "x".repeat(24577),
+              }
+            : body.operation === "prepare"
+              ? { status: "prepared", planId: contextId }
+              : { status: "completed", effect: "possible", valueJson: "42" },
+        );
+      },
+    });
+    const base = { contextId, owner: { windowId: contextId, threadId: contextId } };
+    const prepare = decodeBrowserPageScriptNativeCommand({
+      ...base,
+      operation: "prepare",
+      source: "42",
+      expectedUrl: "https://example.com/",
+    });
+    const execute = decodeBrowserPageScriptNativeCommand({
+      ...base,
+      operation: "execute",
+      planId: contextId,
+    });
+    expect((await runtime.runPageScript(prepare, new AbortController().signal)).status).toBe(
+      "prepared",
+    );
+    expect((await runtime.runPageScript(execute, new AbortController().signal)).status).toBe(
+      "completed",
+    );
+    expect(sent).toEqual([prepare, execute]);
+    malformed = true;
+    const error = await runtime
+      .runPageScript(execute, new AbortController().signal)
+      .catch((error) => error);
+    expect(String(error)).toContain("rejected the page script reply");
+    expect(String(error)).not.toContain("private-marker");
+  });
+
   it("sends only scoped form references and the finite deadline to native credential operations", async () => {
     const sent: Array<Readonly<Record<string, unknown>>> = [];
     const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {

@@ -702,6 +702,7 @@ async function replayBrowserFlow(
       parsed.operation === "upload" ||
       parsed.operation === "stop" ||
       parsed.operation === "sign-in" ||
+      parsed.operation === "run-script" ||
       parsed.operation === "download-save" ||
       isBrowserToolFlowInput(parsed)
     ) {

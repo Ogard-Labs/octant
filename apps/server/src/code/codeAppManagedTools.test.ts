@@ -487,6 +487,79 @@ describe("Code app-managed tools", () => {
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(64 * 1024);
   });
 
+  it("uses the existing Browser script consumer only at Full access and withholds a reply after posture changes", async () => {
+    let current = thread();
+    const initial = current;
+    const snapshot = browserSnapshot(browserAuthority());
+    if (snapshot.context === undefined) throw new Error("expected Browser context");
+    const active = {
+      ...snapshot,
+      context: { ...snapshot.context, presentation: "native-live" as const },
+    };
+    const runScript = vi.fn(
+      async (
+        _input: import("../browser/browserAutomationService").BrowserPageScriptInput,
+      ): Promise<import("@octant/contracts/browser-page-script").BrowserPageScriptReceipt> => ({
+        status: "completed",
+        effect: "possible",
+        valueJson: "42",
+      }),
+    );
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: initial,
+      readThread: () => current,
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => active,
+        create: vi.fn(),
+        act: vi.fn(),
+        releaseThread: vi.fn(),
+        runScript,
+      },
+      browserSignIn: { refusal: () => undefined, request: vi.fn() },
+    });
+    const input = {
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "run-script",
+        source: "42",
+        expectedObservationRevision: 3,
+      }),
+    };
+    expect(await tools.execute(input)).toMatchObject({
+      isError: false,
+      result: { script: { status: "completed", valueJson: "42" } },
+    });
+    runScript.mockResolvedValue({
+      status: "completed",
+      effect: "possible",
+      valueJson: JSON.stringify("\u0000".repeat(4000)),
+    });
+    const bounded = await tools.execute(input);
+    expect(bounded).toMatchObject({
+      isError: false,
+      result: { script: { status: "truncated", effect: "possible" } },
+    });
+    expect(Buffer.byteLength(JSON.stringify(bounded.result))).toBeLessThanOrEqual(24576);
+    runScript.mockImplementation(async () => {
+      current = thread({ executionPolicy: "plan" });
+      return { status: "completed", effect: "possible", valueJson: '"late-private-result"' };
+    });
+    const result = await tools.execute(input);
+    expect(result).toMatchObject({
+      isError: true,
+      result: { script: { status: "refused", effect: "possible" } },
+    });
+    expect(JSON.stringify(result)).not.toContain("late-private-result");
+    runScript.mockClear();
+    expect((await tools.execute(input)).isError).toBe(true);
+    expect(runScript).not.toHaveBeenCalled();
+  });
+
   it("creates and controls the same thread-owned browser context visible to the UI", async () => {
     const authority = browserAuthority();
     const active = browserSnapshot(authority);
@@ -2880,7 +2953,8 @@ describe("Code tool families", () => {
     // Device emulation's preset, touch, and colorScheme arguments added about
     // 305 bytes, most of it their two short value lists.
     // The download-save operation and its downloadId added about 45 bytes.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(5_970);
+    // The script operation and its bounded source argument add about 130 bytes.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_100);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(

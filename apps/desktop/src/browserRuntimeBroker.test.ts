@@ -1,3 +1,4 @@
+import { decodeBrowserPageScriptPlanId } from "@octant/contracts/browser-page-script";
 import { describe, expect, it, vi } from "vitest";
 import { startBrowserRuntimeBroker } from "./browserRuntimeBroker";
 import { BrowserNavigationBlockedError, BrowserTargetStaleError } from "./browserSurfaceHost";
@@ -8,6 +9,16 @@ function host() {
   const personInput: Array<(contextId: string) => void> = [];
   return {
     personInput,
+    runPageScript: vi.fn(
+      async (
+        _command: import("@octant/contracts/browser-page-script").BrowserPageScriptNativeCommand,
+        _signal: AbortSignal,
+      ): Promise<import("@octant/contracts/browser-page-script").BrowserPageScriptPreparation> => ({
+        status: "completed",
+        effect: "possible",
+        valueJson: "42",
+      }),
+    ),
     prepareCredentialFill: vi.fn(async () => ({
       status: "prepared",
       planId: contextId,
@@ -43,6 +54,167 @@ function host() {
 }
 
 describe("BrowserRuntimeBroker", () => {
+  it("keeps a normally completed HTTP preparation current for its subsequent execute request", async () => {
+    const surface = host();
+    let preparationSignal: AbortSignal | undefined;
+    surface.runPageScript.mockImplementation(async (command, signal) => {
+      if (command.operation === "prepare") {
+        preparationSignal = signal;
+        return { status: "prepared", planId: decodeBrowserPageScriptPlanId(contextId) };
+      }
+      return preparationSignal?.aborted === false && !signal.aborted
+        ? { status: "completed", effect: "possible", valueJson: "42" }
+        : { status: "cancelled", effect: "none" };
+    });
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    const owner = { windowId: contextId, threadId: contextId };
+    try {
+      const prepared = await fetch(
+        request(
+          broker.url,
+          broker.token,
+          {
+            operation: "prepare",
+            contextId,
+            owner,
+            source: "42",
+            expectedUrl: "https://example.com/",
+          },
+          "v1/contexts/page-script",
+        ),
+      );
+      expect((await prepared.json()).status).toBe("prepared");
+      expect(preparationSignal?.aborted).toBe(false);
+      const result = await fetch(
+        request(
+          broker.url,
+          broker.token,
+          { operation: "execute", contextId, owner, planId: contextId },
+          "v1/contexts/page-script",
+        ),
+      );
+      expect(await result.json()).toEqual({
+        status: "completed",
+        effect: "possible",
+        valueJson: "42",
+      });
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("cancels an owned script after a complete HTTP POST disconnects before effect admission", async () => {
+    const surface = host();
+    let release: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = false,
+      starts = 0,
+      settled = false;
+    let nativeSignal: AbortSignal | undefined;
+    surface.runPageScript.mockImplementation(async (_command, signal) => {
+      entered = true;
+      nativeSignal = signal;
+      await waiting;
+      if (signal.aborted) {
+        settled = true;
+        return { status: "cancelled", effect: "none" };
+      }
+      starts++;
+      settled = true;
+      return { status: "completed", effect: "possible", valueJson: "42" };
+    });
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    const abort = new AbortController();
+    const pending = fetch(
+      request(
+        broker.url,
+        broker.token,
+        {
+          operation: "execute",
+          contextId,
+          owner: { windowId: contextId, threadId: contextId },
+          planId: contextId,
+        },
+        "v1/contexts/page-script",
+      ),
+      { signal: abort.signal },
+    ).catch(() => undefined);
+    try {
+      await vi.waitFor(() => expect(entered).toBe(true));
+      abort.abort();
+      await pending;
+      await vi.waitFor(() => expect(nativeSignal?.aborted).toBe(true));
+      release?.();
+      await vi.waitFor(() => expect(settled).toBe(true));
+      expect(starts).toBe(0);
+    } finally {
+      release?.();
+      await pending;
+      await broker.close();
+    }
+  });
+
+  it("requires private native authentication, strict script phases and a bounded final reply", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    const command = {
+      operation: "prepare",
+      contextId,
+      owner: { windowId: contextId, threadId: contextId },
+      source: "42",
+      expectedUrl: "https://example.com/",
+    };
+    const path = "v1/contexts/page-script";
+    try {
+      expect((await broker.fetchForTest(request(broker.url, "wrong", command, path))).status).toBe(
+        401,
+      );
+      expect(
+        (
+          await broker.fetchForTest(
+            request(broker.url, broker.token, { ...command, source: "😀".repeat(2049) }, path),
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await broker.fetchForTest(
+            request(
+              broker.url,
+              broker.token,
+              {
+                operation: "execute",
+                contextId,
+                owner: command.owner,
+                planId: contextId,
+                source: "unapproved-change",
+              },
+              path,
+            ),
+          )
+        ).status,
+      ).toBe(400);
+      expect(surface.runPageScript).not.toHaveBeenCalled();
+      const valid = await broker.fetchForTest(request(broker.url, broker.token, command, path));
+      expect(await valid.json()).toEqual({
+        status: "completed",
+        effect: "possible",
+        valueJson: "42",
+      });
+      surface.runPageScript.mockResolvedValue({
+        status: "completed",
+        effect: "possible",
+        valueJson: "\u0000".repeat(6000),
+      });
+      const bounded = await broker.fetchForTest(request(broker.url, broker.token, command, path));
+      expect(await bounded.json()).toEqual({ status: "truncated", effect: "possible" });
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("authenticates and strictly decodes reference-only credential form requests", async () => {
     const surface = host();
     const broker = await startBrowserRuntimeBroker(surface as never);

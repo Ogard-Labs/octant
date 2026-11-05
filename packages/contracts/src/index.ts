@@ -201,3 +201,5 @@ export * from "./terminalSessions";
 export * from "./sideChatReturn";
 export * from "./gitHunks";
 export * from "./browserCredentialUse";
+
+export * from "./browserPageScript";

@@ -1,3 +1,12 @@
+import { decodeBrowserPageScriptPreparation } from "@octant/contracts/browser-page-script";
+function importPlanId() {
+  const result = decodeBrowserPageScriptPreparation({
+    status: "prepared",
+    planId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  });
+  if (result.status !== "prepared") throw new Error("expected prepared");
+  return result.planId;
+}
 import type {
   BrowserActionRequest,
   BrowserCaptureId,
@@ -76,6 +85,9 @@ function request(overrides: Partial<BrowserActionRequest> = {}): BrowserActionRe
 function harness(
   options: {
     readonly access?: boolean;
+    readonly pageScriptPolicy?: ConstructorParameters<
+      typeof BrowserAutomationService
+    >[0]["pageScriptPolicy"];
     readonly recordExternalContentIngestion?: ConstructorParameters<
       typeof BrowserAutomationService
     >[0]["recordExternalContentIngestion"];
@@ -101,6 +113,7 @@ function harness(
     inspectTarget: vi.fn(async () => ({ sensitive: false })),
     ...(options.describePoint === undefined ? {} : { describePoint: options.describePoint }),
     validateCredentialFill: vi.fn(async () => true),
+    runPageScript: vi.fn(async () => ({ status: "refused" as const, effect: "none" as const })),
     act: vi.fn(async (contextId, input) => {
       if (!contexts.has(contextId)) throw new Error("missing context");
       return {
@@ -139,6 +152,9 @@ function harness(
   const ids = [contextOne, "30000000-0000-4000-8000-000000000002"];
   const service = new BrowserAutomationService({
     runtime,
+    ...(options.pageScriptPolicy === undefined
+      ? {}
+      : { pageScriptPolicy: options.pageScriptPolicy }),
     authority: {
       canAccessWindow: () => options.access ?? true,
       resolve: (threadId) =>
@@ -186,6 +202,188 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it("rechecks Full access after native realm preparation and cancels the unstarted script when revoked", async () => {
+    let full = true;
+    const f = harness({ pageScriptPolicy: () => (full ? "full-access" : "approval-gated") });
+    let finishPrepare:
+      | ((value: {
+          readonly status: "prepared";
+          readonly planId: import("@octant/contracts/browser-page-script").BrowserPageScriptPlanId;
+        }) => void)
+      | undefined;
+    const prepared = new Promise<{
+      readonly status: "prepared";
+      readonly planId: import("@octant/contracts/browser-page-script").BrowserPageScriptPlanId;
+    }>((resolve) => {
+      finishPrepare = resolve;
+    });
+    const planId = importPlanId();
+    const calls: string[] = [];
+    if (f.runtime.runPageScript === undefined) throw new Error("native script fake missing");
+    vi.mocked(f.runtime.runPageScript).mockImplementation(async (command) => {
+      calls.push(command.operation);
+      return command.operation === "prepare" ? prepared : { status: "cancelled", effect: "none" };
+    });
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const observed = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      capturedBy: "agent",
+      request: request(),
+    });
+    expect(observed.failure).toBeUndefined();
+    expect(observed.observation).toBeDefined();
+    const run = f.service.runScript({
+      windowId,
+      threadId: threadOne,
+      contextId: contextOne,
+      source: "document.body.dataset.effect='ran'",
+      expectedObservationRevision: observed.observation?.revision ?? 0,
+      turnExecutionPolicy: "full-access",
+      callerIsCurrent: () => true,
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["prepare"]));
+    full = false;
+    finishPrepare?.({ status: "prepared", planId });
+    expect(await run).toMatchObject({
+      status: "refused",
+      effect: "none",
+      reason: "full-access-required",
+    });
+    expect(calls).toEqual(["prepare", "cancel"]);
+    await f.service.close();
+  });
+
+  it("refuses a stale observation even when its new revision is obtained from the public snapshot", async () => {
+    const f = harness({ pageScriptPolicy: () => "full-access" });
+    const native = f.runtime.runPageScript;
+    if (native === undefined) throw new Error("expected native script fake");
+    vi.mocked(native).mockImplementation(async (command) =>
+      command.operation === "prepare"
+        ? { status: "prepared", planId: importPlanId() }
+        : { status: "completed", effect: "possible", valueJson: "42" },
+    );
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const observed = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      capturedBy: "agent",
+      request: request(),
+    });
+    const input = {
+      windowId,
+      threadId: threadOne,
+      contextId: contextOne,
+      source: "42",
+      turnExecutionPolicy: "full-access" as const,
+      callerIsCurrent: () => true,
+    };
+    expect(
+      (
+        await f.service.runScript({
+          ...input,
+          expectedObservationRevision: observed.observation?.revision ?? 0,
+        })
+      ).status,
+    ).toBe("completed");
+    const exposed = f.service.inspectThread(windowId, threadOne).observation;
+    expect(exposed?.stale).toBe(true);
+    expect(
+      await f.service.runScript({ ...input, expectedObservationRevision: exposed?.revision ?? 0 }),
+    ).toMatchObject({ status: "refused", effect: "none", reason: "stale" });
+    expect(native).toHaveBeenCalledTimes(2);
+    await f.service.close();
+  });
+
+  it("records only script provenance before publishing page data and withholds it when journaling refuses", async () => {
+    let refuse = false;
+    const record = vi.fn(
+      (): import("../context/externalContentIngestionStore").ExternalContentIngestionResult =>
+        refuse
+          ? { kind: "refused", reason: "contended" }
+          : {
+              kind: "recorded",
+              taint: { externalContentIngested: true, ingestedSources: ["browser-observation"] },
+            },
+    );
+    const f = harness({
+      pageScriptPolicy: () => "full-access",
+      recordExternalContentIngestion: record,
+    });
+    const native = f.runtime.runPageScript;
+    if (native === undefined) throw new Error("expected native script fake");
+    vi.mocked(native).mockImplementation(async (command) =>
+      command.operation === "prepare"
+        ? { status: "prepared", planId: importPlanId() }
+        : { status: "completed", effect: "possible", valueJson: '"private-script-result"' },
+    );
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const observed = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      capturedBy: "agent",
+      request: request(),
+    });
+    record.mockClear();
+    refuse = true;
+    const receipt = await f.service.runScript({
+      windowId,
+      threadId: threadOne,
+      contextId: contextOne,
+      source: "document.body.textContent",
+      expectedObservationRevision: observed.observation?.revision ?? 0,
+      turnExecutionPolicy: "full-access",
+      callerIsCurrent: () => true,
+    });
+    expect(receipt).toMatchObject({ status: "refused", effect: "possible" });
+    expect(record).toHaveBeenCalledOnce();
+    expect(JSON.stringify(record.mock.calls)).not.toContain("private-script-result");
+    expect(JSON.stringify(record.mock.calls)).not.toContain("document.body.textContent");
+    expect(JSON.stringify(receipt)).not.toContain("private-script-result");
+    await f.service.close();
+  });
+
+  it("withholds a completed script value when a person takes and hands back the page during its reply", async () => {
+    const f = harness({ pageScriptPolicy: () => "full-access" });
+    let finish:
+      | ((value: import("@octant/contracts/browser-page-script").BrowserPageScriptReceipt) => void)
+      | undefined;
+    const result = new Promise<
+      import("@octant/contracts/browser-page-script").BrowserPageScriptReceipt
+    >((resolve) => {
+      finish = resolve;
+    });
+    const native = f.runtime.runPageScript;
+    if (native === undefined) throw new Error("native script fake missing");
+    vi.mocked(native).mockImplementation(async (command) =>
+      command.operation === "prepare" ? { status: "prepared", planId: importPlanId() } : result,
+    );
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const observed = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      capturedBy: "agent",
+      request: request(),
+    });
+    const pending = f.service.runScript({
+      windowId,
+      threadId: threadOne,
+      contextId: contextOne,
+      source: "document.body.textContent",
+      expectedObservationRevision: observed.observation?.revision ?? 0,
+      turnExecutionPolicy: "full-access",
+      callerIsCurrent: () => true,
+    });
+    await vi.waitFor(() => expect(native).toHaveBeenCalledTimes(2));
+    f.service.takeOver(windowId, threadOne);
+    f.service.handBack(windowId, threadOne);
+    finish?.({ status: "completed", effect: "possible", valueJson: '"late-private-page-value"' });
+    const receipt = await pending;
+    expect(receipt).toMatchObject({ status: "refused", effect: "possible" });
+    expect(JSON.stringify(receipt)).not.toContain("late-private-page-value");
+    await f.service.close();
+  });
+
   it("withholds a peek that overlaps a fill epoch even after release and defers handing the page back", async () => {
     const f = harness();
     vi.mocked(f.runtime.createContext).mockImplementation(async (id) => {

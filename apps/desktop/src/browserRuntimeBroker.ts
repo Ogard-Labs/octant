@@ -1,9 +1,13 @@
 import {
+  decodeBrowserPageScriptNativeCommand,
+  decodeBrowserPageScriptPreparation,
+} from "@octant/contracts/browser-page-script";
+import {
   decodeBrowserCredentialNativeCommand,
   decodeBrowserCredentialNativeResult,
 } from "@octant/contracts/browser-credential-use";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/contracts";
 import {
@@ -38,6 +42,7 @@ const ROUTES = new Set([
   "/v1/contexts/act",
   "/v1/contexts/peek",
   "/v1/contexts/credential-fill",
+  "/v1/contexts/page-script",
   "/v1/contexts/download-claim",
   "/v1/contexts/download-discard",
   "/v1/contexts/close",
@@ -75,14 +80,16 @@ export async function startBrowserRuntimeBroker(
   );
   let brokerUrl: string | undefined;
   const server = createServer((incoming, outgoing) => {
-    void handleIncoming(incoming, brokerUrl, token, host, events, profiles).then(
+    void handleIncoming(incoming, brokerUrl, token, host, events, profiles, outgoing).then(
       async (response) => {
+        if (outgoing.destroyed) return;
         const headers: Record<string, string> = {};
         response.headers.forEach((value, name) => (headers[name] = value));
         outgoing.writeHead(response.status, headers);
         outgoing.end(Buffer.from(await response.arrayBuffer()));
       },
       () => {
+        if (outgoing.destroyed) return;
         outgoing.writeHead(500, { "content-type": "application/json" });
         outgoing.end(JSON.stringify({ error: "browser-broker-unavailable" }));
       },
@@ -127,33 +134,45 @@ async function handleIncoming(
   host: ReturnTypeOfBrowserSurfaceHost,
   events: BrokerEvents,
   profiles: BrowserProfileStore | undefined,
+  outgoing: ServerResponse,
 ): Promise<Response> {
   if (brokerUrl === undefined) return failure("unavailable", 503);
-  const bytes = await readBody(incoming, bodyLimitFor(incoming.url));
-  if (bytes === undefined) return failure("too-large", 413);
-  const headers = new Headers();
-  for (const [name, value] of Object.entries(incoming.headers)) {
-    if (Array.isArray(value)) value.forEach((item) => headers.append(name, item));
-    else if (value !== undefined) headers.set(name, value);
-  }
-  const request = new Request(new URL(incoming.url ?? "/", brokerUrl), {
-    method: incoming.method ?? "POST",
-    headers,
-    ...(incoming.method === "GET" || incoming.method === "HEAD"
-      ? {}
-      : { body: Buffer.from(bytes) }),
-  });
   const abort = new AbortController();
-  incoming.once("aborted", () => abort.abort(new Error("Browser broker request was cancelled.")));
-  return handleBrokerRequest(
-    request,
-    incoming.socket.remoteAddress ?? "",
-    token,
-    host,
-    events,
-    profiles,
-    abort.signal,
-  );
+  const cancelled = () => abort.abort(new Error("Browser broker request was cancelled."));
+  // A complete POST can disconnect while its response is pending without IncomingMessage.aborted.
+  const responseClosed = () => {
+    if (!outgoing.writableFinished) cancelled();
+  };
+  incoming.once("aborted", cancelled);
+  outgoing.once("close", responseClosed);
+  try {
+    const bytes = await readBody(incoming, bodyLimitFor(incoming.url));
+    if (bytes === undefined) return failure("too-large", 413);
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(incoming.headers)) {
+      if (Array.isArray(value)) value.forEach((item) => headers.append(name, item));
+      else if (value !== undefined) headers.set(name, value);
+    }
+    const request = new Request(new URL(incoming.url ?? "/", brokerUrl), {
+      method: incoming.method ?? "POST",
+      headers,
+      ...(incoming.method === "GET" || incoming.method === "HEAD"
+        ? {}
+        : { body: Buffer.from(bytes) }),
+    });
+    return await handleBrokerRequest(
+      request,
+      incoming.socket.remoteAddress ?? "",
+      token,
+      host,
+      events,
+      profiles,
+      abort.signal,
+    );
+  } finally {
+    incoming.removeListener("aborted", cancelled);
+    outgoing.removeListener("close", responseClosed);
+  }
 }
 
 async function handleBrokerRequest(
@@ -211,6 +230,30 @@ async function handleBrokerRequest(
       const cookies = importedCookiesOf(body.cookies);
       if (target === undefined || cookies === undefined) return failure("invalid-request", 400);
       return Response.json(await profiles.importCookies(target, cookies));
+    }
+    if (url.pathname === "/v1/contexts/page-script") {
+      const command = (() => {
+        try {
+          return decodeBrowserPageScriptNativeCommand(body);
+        } catch {
+          return undefined;
+        }
+      })();
+      if (
+        command === undefined ||
+        (command.operation === "prepare" && Buffer.byteLength(command.source, "utf8") > 8192)
+      )
+        return failure("invalid-request", 400);
+      const result = decodeBrowserPageScriptPreparation(
+        await host.runPageScript(command, signal ?? request.signal),
+      );
+      const json = JSON.stringify(result);
+      if (Buffer.byteLength(json, "utf8") > 32768)
+        return Response.json({
+          status: "truncated",
+          effect: result.status === "prepared" ? "none" : result.effect,
+        });
+      return new Response(json, { headers: { "content-type": "application/json" } });
     }
     if (url.pathname === "/v1/contexts/credential-fill") {
       const command = (() => {

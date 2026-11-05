@@ -13,14 +13,16 @@ action is re-authorized before any effect.
 Open **Browser** from a Work or Code thread's tool launcher. The host requires
 exactly one owning thread before it can create an isolated context.
 
-- Each context is an isolated incognito context scoped to exactly one owning
+- A new context is Private unless you approve a Project or Personal profile.
+  Each context is scoped to exactly one owning
   thread (thread, host, mode, Project or root, provider, action, correlation,
   and window authority are re-resolved server-side before any effect).
 - An **origin allowlist** governs navigation; an empty allowlist fails
   closed. Disallowed origins and redirects, popup tabs, and cross-thread or
   cross-window use are denied.
-- **Credential-field protection** is always on: password and credential
-  fields are blocked.
+- **Credential-field protection** applies to fixed actions and readers:
+  they refuse password entry and redact protected values. Full-access scripts
+  have the separate DOM/account authority described below.
 - Session settings include a max concurrent tab count and a session timeout
   (5 minutes in the interface).
 
@@ -125,7 +127,35 @@ sees only "Signed-in page — open it on this Mac." If a turn you started from
 your phone needs such a site, its question waits for a window on this Mac. While
 the agent drives a signed-in page, the Browser's status label and the floating
 preview name the profile. Plan mode refuses the Browser as it always did, and
-password and one-time-code fields stay protected.
+fixed readers keep password and one-time-code values protected.
+
+### Synchronous page scripts
+
+For a local native Code page already at **Full access**, the agent can use
+`run-script` when the fixed actions cannot express the task. It supplies source
+and the revision from a fresh page read. Existing site/profile approval still
+applies; no additional script prompt appears. Work, headless, paired, routine,
+subagent, terminal and Plan callers are refused. Scripts below Full access are
+currently unavailable because Octant cannot establish whether a Private page
+is signed in. Private means temporary storage, not a signed-out account.
+
+A script has normal page DOM and account access. It can read values a form
+populated or reflected and install callbacks that survive the call. Those
+values can reach the requesting provider. The fixed-reader and credential
+broker protections do not make arbitrary scripts unable to observe passwords.
+The page's main-world CSP does not constrain isolated-world script execution.
+
+Source is limited to 8KiB UTF-8 and native execution/serialization to 150ms.
+Results are synchronous and bounded, and may be truncated. Promises, functions
+and DOM handles are unsupported results. There is no Node, Electron IPC, host
+filesystem or raw debugging access. Scripts cannot run in batches or flows.
+Read the page again after possible effects before reusing refs or revisions.
+
+Fill/private credential use and scripts exclude each other while held. An
+uncertain result means execution could have affected the page; cancellation
+cannot undo it or remove callbacks. If a native connection failed, agent reads
+may remain held until the actual context ends. Stop that owned Browser page to
+retire it before opening another; this does not clear profile cookies or data.
 
 ### Browser extensions
 

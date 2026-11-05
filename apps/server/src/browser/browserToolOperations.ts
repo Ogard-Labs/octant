@@ -1,3 +1,4 @@
+import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-script";
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
@@ -46,6 +47,7 @@ export type BrowserToolStep = Exclude<
       | "upload"
       | "stop"
       | "sign-in"
+      | "run-script"
       | "download-save"
       | "flow-save"
       | "flow-list"
@@ -109,6 +111,11 @@ export type BrowserToolInput = {
   | { readonly operation: "tab-switch" | "tab-close"; readonly tabId: string }
   | { readonly operation: "steps"; readonly steps: ReadonlyArray<BrowserToolStep> }
   | { readonly operation: "sign-in"; readonly reason?: string }
+  | {
+      readonly operation: "run-script";
+      readonly source: string;
+      readonly expectedObservationRevision: number;
+    }
   /** Save a download the page started, named by the id an answer reported. */
   | { readonly operation: "download-save"; readonly downloadId: string }
   | { readonly operation: "flow-save" | "flow-run"; readonly name: string }
@@ -155,6 +162,7 @@ export function parseBrowserToolInput(
       one.operation === "upload" ||
       one.operation === "stop" ||
       one.operation === "sign-in" ||
+      one.operation === "run-script" ||
       one.operation === "download-save" ||
       isBrowserToolFlowInput(one)
     )
@@ -344,6 +352,16 @@ function parseBrowserToolRecord(
       name.length <= MAX_BROWSER_FLOW_NAME_LENGTH
       ? { ...common, operation, name }
       : undefined;
+  }
+  if (
+    operation === "run-script" &&
+    only("source") &&
+    revision !== undefined &&
+    text("source", 8192)
+  ) {
+    const source = record.source;
+    if (typeof source !== "string" || Buffer.byteLength(source, "utf8") > 8192) return undefined;
+    return { operation, source, expectedObservationRevision: revision };
   }
   if (operation === "sign-in" && only("reason")) {
     if (record.reason !== undefined && !text("reason", 300)) return undefined;
@@ -614,6 +632,7 @@ export function browserToolAction(
       return { ...base, kind: "tab-close", tabId: input.tabId };
     case "stop":
     case "steps":
+    case "run-script":
     case "sign-in":
     case "download-save":
     case "flow-save":
@@ -865,4 +884,11 @@ export function browserDownloadSavedResult(saved: {
     },
     isError: false,
   };
+}
+
+export function browserPageScriptToolResult(receipt: BrowserPageScriptReceipt): BrowserToolAnswer {
+  const result = { script: receipt };
+  if (Buffer.byteLength(JSON.stringify(result), "utf8") > MAX_TEXT_RESULT_BYTES)
+    return { result: { script: { status: "truncated", effect: receipt.effect } }, isError: false };
+  return { result, isError: receipt.status !== "completed" && receipt.status !== "truncated" };
 }

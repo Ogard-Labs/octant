@@ -176,6 +176,12 @@ export function createBrowserAppManagedTools(
     if (initialAuthority !== undefined && !sameToolActionAuthority(initialAuthority, authority)) {
       return failure("browser-authority-stale");
     }
+    if (input.operation === "run-script") {
+      // The Work/terminal adapter has no live Full-access script admission yet.
+      return failure(
+        options.executionPolicy === "plan" ? "plan-mode-read-only" : "script-unavailable",
+      );
+    }
     if (input.operation === "stop") {
       const snapshot = options.browser.inspectThread(options.windowId, options.threadId);
       if (snapshot.context !== undefined) {

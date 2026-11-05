@@ -1,3 +1,6 @@
+import { EventEmitter } from "node:events";
+import { createContext, runInContext } from "node:vm";
+import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
 import { describe, expect, it, vi } from "vitest";
 import {
   BrowserTargetStaleError,
@@ -1856,5 +1859,248 @@ describe("BrowserSurfaceHost stored profiles", () => {
         status: "no-page",
       });
     });
+  });
+});
+
+function scriptView() {
+  const base = view();
+  const protocol = new EventEmitter();
+  const events = new EventEmitter();
+  let attached = false;
+  let unique = 1;
+  let realm = createContext({ TextEncoder });
+  let reply: ((expression: string) => Promise<unknown>) | undefined;
+  const context = () => ({
+    id: unique,
+    uniqueId: `document-${unique}`,
+    name: "octant-page-scripts",
+  });
+  const created: BrowserSurfaceViewPort = {
+    ...base,
+    webContents: {
+      ...base.webContents,
+      on: vi.fn((event, listener) => {
+        events.on(event, listener);
+      }),
+      debugger: {
+        attach: vi.fn(() => {
+          attached = true;
+        }),
+        detach: vi.fn(() => {
+          attached = false;
+        }),
+        isAttached: () => attached,
+        on: (event, listener) => {
+          protocol.on(event, listener);
+        },
+        removeListener: (event, listener) => {
+          protocol.removeListener(event, listener);
+        },
+        sendCommand: vi.fn(async (method, params) => {
+          if (method === "Runtime.enable")
+            protocol.emit("message", {}, "Runtime.executionContextCreated", { context: context() });
+          if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "top" } } };
+          if (method === "Page.createIsolatedWorld") {
+            protocol.emit("message", {}, "Runtime.executionContextCreated", { context: context() });
+            return { executionContextId: unique };
+          }
+          if (method === "Runtime.evaluate") {
+            const expression = String(params?.expression);
+            if (reply !== undefined && expression.startsWith("this.__octantBoundedScript("))
+              return reply(expression);
+            return { result: { value: runInContext(expression, realm, { timeout: 150 }) } };
+          }
+          return undefined;
+        }),
+      },
+    },
+  };
+  return {
+    created,
+    events,
+    protocol,
+    setReply: (next: typeof reply) => {
+      reply = next;
+    },
+    nextDocument: () => {
+      unique++;
+      realm = createContext({ TextEncoder });
+    },
+  };
+}
+const scriptOwner = { windowId: "10000000-0000-4000-8000-000000000001", threadId };
+function scriptCommand(input: Record<string, unknown>) {
+  return decodeBrowserPageScriptNativeCommand({ contextId, owner: scriptOwner, ...input });
+}
+async function scriptHost() {
+  const fixture = scriptView();
+  const host = createBrowserSurfaceHost({ createView: () => fixture.created });
+  await host.createContext({
+    contextId,
+    owner: scriptOwner,
+    policy: {
+      profileMode: "isolated",
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 1,
+      sessionTimeoutMs: 300000,
+    },
+  });
+  return { ...fixture, host };
+}
+async function preparedScript(host: ReturnType<typeof createBrowserSurfaceHost>, source = "42") {
+  const prepared = await host.runPageScript(
+    scriptCommand({ operation: "prepare", source, expectedUrl: "https://example.com/" }),
+    new AbortController().signal,
+  );
+  if (prepared.status !== "prepared") throw new Error("Expected prepared native script");
+  return prepared.planId;
+}
+
+describe("native page script ownership", () => {
+  it("reuses the private kernel after debugger reattachment and bounds retained unknown documents", async () => {
+    const f = await scriptHost();
+    try {
+      const first = await preparedScript(f.host, "JSON.stringify=()=>{while(true){}};42");
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({ operation: "execute", planId: first }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "completed", valueJson: "42" });
+      const next = await preparedScript(f.host);
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({ operation: "execute", planId: next }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "completed", valueJson: "42" });
+      for (let i = 0; i < 30; i++) {
+        f.nextDocument();
+        const plan = await preparedScript(f.host);
+        await f.host.runPageScript(
+          scriptCommand({ operation: "cancel", planId: plan }),
+          new AbortController().signal,
+        );
+      }
+      f.nextDocument();
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({
+            operation: "prepare",
+            source: "42",
+            expectedUrl: "https://example.com/",
+          }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "refused", effect: "none", reason: "unavailable" });
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("prepares a script on a hash-routed page whose snapshot reported the redacted address", async () => {
+    const f = await scriptHost();
+    try {
+      vi.mocked(f.created.webContents.getURL).mockReturnValue(
+        "https://example.com/app?token=fixture#/dashboard",
+      );
+      const prepared = await f.host.runPageScript(
+        scriptCommand({
+          operation: "prepare",
+          source: "42",
+          expectedUrl: "https://example.com/app?token=redacted",
+        }),
+        new AbortController().signal,
+      );
+      expect(prepared).toMatchObject({ status: "prepared" });
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({
+            operation: "prepare",
+            source: "42",
+            expectedUrl: "https://example.com/elsewhere",
+          }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "refused", effect: "none", reason: "stale" });
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("does not mint a person origin grant for script navigation even if focus changes while held", async () => {
+    const f = await scriptHost();
+    const preventDefault = vi.fn();
+    try {
+      const planId = await preparedScript(f.host);
+      f.setReply(async () => {
+        f.events.emit("focus");
+        f.events.emit("will-navigate", {
+          url: "https://unapproved.example/",
+          isMainFrame: true,
+          preventDefault,
+        });
+        return { result: { value: '{"status":"completed","value":42}' } };
+      });
+      await f.host.runPageScript(
+        scriptCommand({ operation: "execute", planId }),
+        new AbortController().signal,
+      );
+      expect(preventDefault).toHaveBeenCalledOnce();
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("retires a quarantined document after the view drops its WebContents wrapper", async () => {
+    const f = await scriptHost();
+    const contents = f.created.webContents;
+    const gone = vi.fn();
+    f.host.onContextGone(gone);
+    const planId = await preparedScript(f.host);
+    f.setReply(async () => {
+      throw new Error("transport disconnected");
+    });
+    await f.host.runPageScript(
+      scriptCommand({ operation: "execute", planId }),
+      new AbortController().signal,
+    );
+    vi.mocked(contents.isDestroyed).mockReturnValue(true);
+    Object.defineProperty(f.created, "webContents", { value: undefined });
+    expect(() => f.events.emit("destroyed")).not.toThrow();
+    expect(gone).toHaveBeenCalledWith(contextId);
+    await f.host.closeAll();
+  });
+
+  it("keeps uncertain script custody through navigation notifications until the exact context is destroyed", async () => {
+    const f = await scriptHost();
+    try {
+      const planId = await preparedScript(f.host);
+      f.setReply(async () => {
+        throw new Error("transport disconnected");
+      });
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({ operation: "execute", planId }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "execution-uncertain", effect: "possible" });
+      f.events.emit("did-start-navigation");
+      f.events.emit("did-navigate");
+      await expect(f.host.peek(contextId)).rejects.toThrow("script holds agent observations");
+      f.protocol.emit("message", {}, "Runtime.executionContextDestroyed", {
+        executionContextId: 1,
+        executionContextUniqueId: "other-document",
+      });
+      await expect(f.host.peek(contextId)).rejects.toThrow("script holds agent observations");
+      f.protocol.emit("message", {}, "Runtime.executionContextDestroyed", {
+        executionContextId: 1,
+        executionContextUniqueId: "document-1",
+      });
+      await expect(f.host.peek(contextId)).resolves.toBeDefined();
+    } finally {
+      await f.host.closeAll();
+    }
   });
 });

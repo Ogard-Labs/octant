@@ -1,3 +1,4 @@
+import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
 import { describe, expect, it, vi } from "vitest";
 import { DesktopBrowserOwnerUnavailable } from "./desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "./routingBrowserRuntime";
@@ -19,6 +20,11 @@ function runtime(presentation: "native-live" | "headless" = "native-live") {
   let exit: (() => void) | undefined;
   return {
     available: vi.fn(async () => true),
+    runPageScript: vi.fn(async () => ({
+      status: "completed" as const,
+      effect: "possible" as const,
+      valueJson: "42",
+    })),
     createContext: vi.fn(async () => presentation),
     inspectTarget: vi.fn(async () => ({ sensitive: false })),
     act: vi.fn(async () => ({ title: "Example" })),
@@ -36,6 +42,28 @@ function runtime(presentation: "native-live" | "headless" = "native-live") {
 }
 
 describe("RoutingBrowserRuntime", () => {
+  it("refuses script execution for a headless fallback instead of borrowing the native owner's page", async () => {
+    const native = runtime();
+    native.available.mockResolvedValue(false);
+    const headless = runtime("headless");
+    const router = new RoutingBrowserRuntime({ native, headless });
+    await router.createContext(contextId, policy, new AbortController().signal, owner);
+    const command = decodeBrowserPageScriptNativeCommand({
+      operation: "prepare",
+      contextId,
+      owner,
+      source: "42",
+      expectedUrl: "https://example.com/",
+    });
+    expect(await router.runPageScript(command, new AbortController().signal)).toMatchObject({
+      status: "refused",
+      effect: "none",
+    });
+    expect(native.runPageScript).not.toHaveBeenCalled();
+    expect(headless.runPageScript).not.toHaveBeenCalled();
+    await router.closeAll();
+  });
+
   it("uses the native page for a verified Electron owner", async () => {
     const native = runtime();
     const headless = runtime("headless");

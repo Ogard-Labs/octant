@@ -785,14 +785,88 @@ Several threads of one Project may each drive their own page at the same time.
   promise true on both Browsers. The 15-second linger keeps the mark steady
   while a model thinks between steps.
 
+## Bounded page scripts
+
+`run-script` reaches the same owned native page as the fixed actions when a
+local Code thread already has Full access. It takes `source` and the
+`expectedObservationRevision` from a fresh page read. It opens no page or
+profile and takes no additional script approval at Full access. Existing site,
+profile, model, window, Project and thread authority still apply. Work,
+headless, paired, routine, managed-subagent and terminal-grant callers are
+currently refused. Scripts cannot enter `steps` or saved/replayed flows.
+
+The accepted permission matrix also permits one exact-source approval for a
+proved non-signed-in Private page below Full access. That part is not built:
+Private describes storage lifetime, not authentication. The server currently
+has no general evidence that a Private page is not signed in, so unknown
+session eligibility refuses below Full access. Known signed-in pages require
+Full access even in Private, and Project/Personal pages always count as signed
+in. A clear credential-field scan or source consent cannot override this rule.
+Plan refuses arbitrary JavaScript. Below-Full credential or uncertain frame/
+shadow inspection also refuses; presence-only closed-shadow detection is not
+proof of complete credential or authentication coverage.
+
+Source has the page's normal DOM and account authority, including same-origin
+frame access and page API effects. The dispatch target is its current top
+document, not a caller-selected native frame or debugger session. It has no
+Node, Electron IPC, host filesystem or raw debugging API. The isolated world
+is separate from fixed-reader/fill world `1001`. Page main-world CSP does not
+constrain isolated-world evaluation; no CSP preservation guarantee is made.
+No browser CSP bypass or universal-access setting is enabled.
+
+Execution and fixed serialization have a native 150ms deadline. Only
+synchronous results are supported. Promises, functions, DOM and remote-object
+handles are unsupported results, not asynchronous work that was stopped.
+Callbacks and page changes may survive the call. Source is at most 8KiB UTF-8;
+fixed traversal bounds depth 5, 128 nodes, 64 keys, 2048 code units per string
+and 6000 content units, with explicit truncation including shortened or colliding
+keys. Returned value JSON is at most 24KiB UTF-8, the actual private broker
+response is at most 32KiB, and the provider tool result is at most 24KiB after
+escaping. These are return bounds, not renderer allocation or memory bounds.
+Pristine serializer intrinsics stay in a private closure across calls; source
+runs through indirect evaluation outside that closure.
+
+The private native path prepares the exact source/document/owner without
+executing source, expires that one-use preparation after 2s on a monotonic
+clock, then executes only after a fresh server policy/caller check. At most 32
+preparations/runs are retained. Source, values and exception stacks are not
+added to lifecycle journal events. Source and the allowed result naturally
+reach the requesting provider through the tool conversation.
+
+A script and private credential use cannot acquire each other's native hold.
+Agent actions and observations refuse while script custody is held. A result
+that began before hold acquisition and finishes after release still needs the
+observation epoch check. Human page presentation and input remain available;
+focus or input during a script does not mint a person-origin grant for script
+navigation. Point cancellation cannot release script or fill custody.
+
+Cancellation before dispatch prevents script execution and reports no page effect. After dispatch, receipts retain
+possible effects and withhold stale/cancelled values. A 2s request timeout or an
+arbitrary transport failure does not prove native execution stopped: an
+uncertain reservation remains until known native completion or actual exact
+execution-context/webContents destruction. Navigation start, committed
+navigation, BFCache and a no-longer-current page do not establish destruction.
+Unknown retained worlds are capped at 32; further script preparation refuses
+instead of accumulating state or inferring destruction. The person can stop
+that owned Browser page to retire it; no profile storage is cleared.
+
+This narrows the credential guarantee. Fixed readers redact credential fields
+and the broker never returns credential values. A Full-access script can read
+populated or reflected DOM values and install callbacks that observe later
+changes, including after a failed submit or resumed page. A saved credential
+permission does not authorize scripts, and holds do not claim to remove older
+callbacks or erase values already received by the website. After a script
+attempt with possible effects, old refs are dropped and its observation is
+stale until the page is read again.
+
 ## What the tool never does
 
-- The agent tool never receives or types a password. The person signs in
+- Fixed actions and broker APIs never return or type an agent-supplied password. The person signs in
   manually or separately approves brokered form fill and submit under the
   [held sign-in boundary](#asking-the-person-to-sign-in).
-- It runs no script an agent wrote inside the page. Every operation is a fixed
-  host action, so authority checks stay on the server and never move into page
-  code.
+- Arbitrary source never runs through a fixed action or a public renderer
+  action route. The separate bounded script operation keeps authorization on
+  the server and has the explicit DOM/account authority described above.
 - It saves no file from a page unless the person turned on "Let agents
   download files" and answers for that file ([Download](#download)); every
   other download stays blocked on every page
