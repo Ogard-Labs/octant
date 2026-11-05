@@ -160,7 +160,7 @@ export function createUnavailableSimulatorHelpers(): SimulatorDeviceHelpers {
     send: () => Promise.resolve(unavailable),
     watch: () => Promise.resolve(unavailable),
     busy: () => false,
-    dispose: () => undefined,
+    dispose: async () => ({ status: "stopped" }),
   };
 }
 
@@ -187,6 +187,7 @@ export function createManagedSimulatorHelpers(
   /** Simulators whose finger went down through the native helper. */
   const nativeFingers = new Set<string>();
   let disposed = false;
+  let disposing: ReturnType<SimulatorDeviceHelpers["dispose"]> | undefined;
   let inflight = 0;
 
   function forget(child: ChildProcess): void {
@@ -692,7 +693,9 @@ export function createManagedSimulatorHelpers(
     busy: () => inflight > 0 || native.busy(),
 
     dispose() {
+      if (disposing !== undefined) return disposing;
       disposed = true;
+      disposing = Promise.resolve().then(() => native.dispose());
       for (const child of live) child.kill("SIGTERM");
       live.clear();
       for (const pending of sessions.values()) {
@@ -707,7 +710,7 @@ export function createManagedSimulatorHelpers(
         });
       }
       sessions.clear();
-      native.dispose();
+      return disposing;
     },
   };
 }

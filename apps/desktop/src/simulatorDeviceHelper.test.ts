@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSimulatorDeviceHelpers, type DeviceHelperChild } from "./simulatorDeviceHelper";
 
@@ -12,14 +15,30 @@ function frame(value: unknown): Buffer {
 }
 
 /** A stand-in helper: records what it was sent and answers when the test says so. */
-function fakeChild() {
+function fakeChild(options: { readonly stubborn?: boolean } = {}) {
   const requests: Array<Record<string, unknown>> = [];
   let emitData: (chunk: Uint8Array) => void = () => undefined;
   let emitFrames: (chunk: Uint8Array) => void = () => undefined;
-  const listeners = new Map<string, () => void>();
+  const listeners = new Map<string, Set<() => void>>();
+  let exitCode: number | null = null;
+  let signalCode: NodeJS.Signals | null = null;
+  const emitExit = () => {
+    for (const listener of Array.from(listeners.get("exit") ?? [])) listener();
+    for (const listener of Array.from(listeners.get("close") ?? [])) listener();
+  };
   let failStdin: () => void = () => undefined;
   const child: DeviceHelperChild = {
+    pid: 123,
+    get exitCode() {
+      return exitCode;
+    },
+    get signalCode() {
+      return signalCode;
+    },
     stdin: {
+      off: () => {
+        failStdin = () => {};
+      },
       write: (chunk) => {
         const bytes = Buffer.from(chunk);
         requests.push(JSON.parse(bytes.subarray(4).toString("utf8")) as Record<string, unknown>);
@@ -31,19 +50,36 @@ function fakeChild() {
       },
     },
     stdout: {
+      off: () => {
+        emitData = () => {};
+      },
       on: (_event, listener) => {
         emitData = listener;
       },
     },
     frames: {
+      off: (event) => {
+        if (event === "data") emitFrames = () => {};
+      },
       on: (event, listener) => {
         if (event === "data") emitFrames = listener as (chunk: Uint8Array) => void;
       },
     },
     on: (event, listener) => {
-      listeners.set(event, listener);
+      const entries = listeners.get(event) ?? new Set();
+      entries.add(listener);
+      listeners.set(event, entries);
     },
-    kill: vi.fn(),
+    off: (event, listener) => {
+      listeners.get(event)?.delete(listener);
+    },
+    kill: vi.fn((signal: "SIGTERM" | "SIGKILL") => {
+      if (options.stubborn !== true) {
+        signalCode = signal;
+        emitExit();
+      }
+      return true;
+    }),
   };
   return {
     child,
@@ -54,7 +90,12 @@ function fakeChild() {
       emitData(bytes.subarray(0, 3));
       emitData(bytes.subarray(3));
     },
-    exit: () => listeners.get("exit")?.(),
+    exit: () => {
+      exitCode = 0;
+      emitExit();
+    },
+    listenerCount: () =>
+      Array.from(listeners.values()).reduce((total, entries) => total + entries.size, 0),
     frames: (...chunks: ReadonlyArray<Uint8Array>) => {
       for (const chunk of chunks) emitFrames(chunk);
     },
@@ -67,6 +108,63 @@ afterEach(() => {
 });
 
 describe("Simulator device helpers", () => {
+  it("does not attach a viewer whose stream-start answer races with shutdown", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const viewer = { onFrame: vi.fn(), onEnd: vi.fn() };
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 800, quality: 0.7, framesPerSecond: 15 },
+      viewer,
+      1000,
+    );
+    fake.answer({ id: 1, ok: true });
+    const stopping = helpers.dispose();
+    await expect(watching).resolves.toMatchObject({ status: "unavailable" });
+    await stopping;
+    fake.frames(frame({ late: true }));
+    expect(viewer.onFrame).not.toHaveBeenCalled();
+    expect(viewer.onEnd).not.toHaveBeenCalled();
+    expect(fake.listenerCount()).toBe(0);
+  });
+
+  it("keeps a stopping child owned and refuses replacement until its exit is observed", async () => {
+    const stuck = fakeChild({ stubborn: true });
+    const fresh = fakeChild();
+    const spawn = vi.fn().mockReturnValueOnce(stuck.child).mockReturnValueOnce(fresh.child);
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn, stopGraceMs: 5 });
+    const cancelled = new AbortController();
+    const first = helpers.send(simulator, { op: "hello" }, 1000, cancelled.signal);
+    cancelled.abort();
+    await expect(first).resolves.toMatchObject({ status: "unavailable" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await expect(helpers.send(simulator, { op: "hello" }, 1000)).resolves.toMatchObject({
+      status: "unavailable",
+      message: "The device helper is still stopping.",
+    });
+    expect(spawn).toHaveBeenCalledOnce();
+    stuck.exit();
+    await Promise.resolve();
+    expect(stuck.listenerCount()).toBe(0);
+    const next = helpers.send(simulator, { op: "hello" }, 1000);
+    fresh.answer({ id: 1, ok: true });
+    await expect(next).resolves.toEqual({ status: "delivered" });
+    const disposing = helpers.dispose();
+    expect(helpers.dispose()).toBe(disposing);
+    await expect(disposing).resolves.toEqual({ status: "stopped" });
+  });
+
+  it("settles an initial native spawn failure without leaving a pending request", async () => {
+    const helpers = createSimulatorDeviceHelpers({
+      helperPath: "/nonexistent/octant-helper",
+      stopGraceMs: 10,
+    });
+    await expect(helpers.send(simulator, { op: "hello" }, 1000)).resolves.toMatchObject({
+      status: "unavailable",
+    });
+    await expect(helpers.dispose()).resolves.toEqual({ status: "stopped" });
+  });
+
   it("starts one helper per Simulator and reuses it for the next input", async () => {
     const fake = fakeChild();
     const spawn = vi.fn(() => fake.child);
@@ -493,4 +591,46 @@ describe("Simulator device helpers", () => {
     fake.exit();
     expect(onEnd).not.toHaveBeenCalled();
   });
+});
+
+it("awaits the exit of a real Simulator helper that ignores stdin closing and SIGTERM", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "octant-device-shutdown-"));
+  const helperPath = join(directory, "helper");
+  const pidFile = join(directory, "pid");
+  await writeFile(
+    helperPath,
+    `#!${process.execPath}
+require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+process.on("SIGTERM", () => {});
+process.stdin.on("end", () => {});
+let bytes = Buffer.alloc(0);
+process.stdin.on("data", chunk => {
+  bytes = Buffer.concat([bytes, chunk]);
+  while (bytes.length >= 4 && bytes.length >= 4 + bytes.readUInt32BE(0)) {
+    const length = bytes.readUInt32BE(0);
+    const request = JSON.parse(bytes.subarray(4, 4 + length));
+    bytes = bytes.subarray(4 + length);
+    const payload = Buffer.from(JSON.stringify({ id: request.id, ok: true }));
+    const header = Buffer.alloc(4); header.writeUInt32BE(payload.length);
+    process.stdout.write(Buffer.concat([header, payload]));
+  }
+});
+setInterval(() => {}, 1000);
+`,
+    { mode: 0o700 },
+  );
+  const helpers = createSimulatorDeviceHelpers({ helperPath, stopGraceMs: 100 });
+  try {
+    await expect(helpers.send(simulator, { op: "hello" }, 2000)).resolves.toEqual({
+      status: "delivered",
+    });
+    const stopping = helpers.dispose();
+    expect(helpers.dispose()).toBe(stopping);
+    await expect(stopping).resolves.toEqual({ status: "stopped" });
+    const pid = Number(await readFile(pidFile, "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow();
+  } finally {
+    await helpers.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

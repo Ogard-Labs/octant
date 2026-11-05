@@ -23,8 +23,20 @@ function fakeHost() {
   const sent: Array<CanvasPrototypeHostCommand> = [];
   let emit: ((event: CanvasPrototypeHostEvent) => void) | undefined;
   let exit: (() => void) | undefined;
-  const stop = vi.fn();
+  let settleExit = () => {};
+  const exited = new Promise<void>((resolve) => {
+    settleExit = resolve;
+  });
+  const finish = () => {
+    settleExit();
+    exit?.();
+  };
+  const stop = vi.fn(async () => {
+    finish();
+    return { status: "stopped" } as const;
+  });
   const connection: CanvasPrototypeHostConnection = {
+    exited,
     send: (command) => sent.push(command),
     onEvent: (listener) => {
       emit = listener;
@@ -39,7 +51,7 @@ function fakeHost() {
     sent,
     stop,
     emit: (event: CanvasPrototypeHostEvent) => emit?.(event),
-    exit: () => exit?.(),
+    exit: finish,
   };
 }
 
@@ -94,6 +106,44 @@ const request = (fields: Record<string, unknown> = {}) => ({
 });
 
 describe("starting the prototype host", () => {
+  it("waits for the old host to exit and cancels a replacement when its window leaves", async () => {
+    const old = fakeHost();
+    const fresh = fakeHost();
+    let finish = () => {};
+    const stopping = new Promise<{ readonly status: "stopped" }>((resolve) => {
+      finish = () => {
+        old.exit();
+        resolve({ status: "stopped" });
+      };
+    });
+    const launchHost = vi
+      .fn()
+      .mockReturnValueOnce({ ...old.connection, stop: () => stopping })
+      .mockReturnValueOnce(fresh.connection);
+    const made = createCanvasPrototypeSurface({
+      launchHost,
+      serverUrl: () => server,
+      fetch,
+      platform: "darwin",
+    });
+    const preparing = made.prepare(preparer);
+    old.emit({ kind: "ready" });
+    await preparing;
+    const closing = made.closeOwnedBy(preparer.id);
+    const returning = made.prepare(preparer);
+    expect(launchHost).toHaveBeenCalledOnce();
+    const cancelled = made.closeOwnedBy(preparer.id);
+    finish();
+    await closing;
+    await cancelled;
+    await expect(returning).resolves.toMatchObject({ status: "unavailable" });
+    expect(launchHost).toHaveBeenCalledOnce();
+    const next = made.prepare(preparer);
+    fresh.emit({ kind: "ready" });
+    await expect(next).resolves.toEqual({ status: "ready" });
+    await made.stop();
+  });
+
   it("is ready only once the host reads back that its network and resolver are closed", async () => {
     const { surface: made, hosts } = surface();
     const preparing = made.prepare(preparer);
@@ -388,8 +438,10 @@ describe("a window whose renderer exits", () => {
     expect(hosts[0]?.sent.at(-1)).toEqual({ kind: "close", surfaceId });
     expect(hosts[0]?.stop).toHaveBeenCalledOnce();
     // The window's next page starts a new host.
-    void made.prepare(window.port);
-    expect(hosts).toHaveLength(2);
+    const next = made.prepare(window.port);
+    await vi.waitFor(() => expect(hosts).toHaveLength(2));
+    hosts[1]?.emit({ kind: "ready" });
+    await expect(next).resolves.toEqual({ status: "ready" });
   });
 
   it("leaves another window's prototypes and the host running, and a page that stays is not a new one", async () => {
@@ -422,6 +474,21 @@ describe("a window whose renderer exits", () => {
 });
 
 describe("the prototype host process's lifetime", () => {
+  it("reports an initial spawn failure once and replays it to a late observer", async () => {
+    const connection = spawnCanvasPrototypeHost(
+      { executable: "/nonexistent/octant-helper", args: [] },
+      { quitGraceMs: 10 },
+    );
+    const first = vi.fn();
+    connection.onExit(first);
+    await connection.exited;
+    const late = vi.fn();
+    connection.onExit(late);
+    await expect(connection.stop()).resolves.toEqual({ status: "stopped" });
+    await vi.waitFor(() => expect(late).toHaveBeenCalledOnce());
+    expect(first).toHaveBeenCalledOnce();
+  });
+
   // A stand-in host that ignores its channel closing and SIGTERM, as a host
   // held by a page's `beforeunload` once did, and says when it is listening.
   const stubborn = [
@@ -446,8 +513,16 @@ describe("the prototype host process's lifetime", () => {
   it("ends a host that ignores its channel closing and SIGTERM", async () => {
     const { connection, ready, exited } = started();
     await ready;
-    connection.stop();
-    await exited;
+    try {
+      const stopping = connection.stop();
+      expect(stopping).toBeInstanceOf(Promise);
+      expect(connection.stop()).toBe(stopping);
+      await expect(stopping).resolves.toEqual({ status: "stopped" });
+      await exited;
+    } finally {
+      connection.stop();
+      await exited;
+    }
   });
 
   it("kills a host still running as the app exits", async () => {

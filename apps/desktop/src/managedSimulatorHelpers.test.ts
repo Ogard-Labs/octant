@@ -38,7 +38,7 @@ function nativeHelpers(): SimulatorDeviceHelpers & {
     send: vi.fn(async (): Promise<DeviceHelperReply> => ({ status: "delivered" })),
     watch: vi.fn(async () => ({ status: "unavailable" as const, message: "native watch" })),
     busy: () => false,
-    dispose: vi.fn(() => undefined),
+    dispose: vi.fn(async () => ({ status: "stopped" }) as const),
   };
 }
 
@@ -718,4 +718,28 @@ describe("Device Hub input notification", () => {
     expect(readInputConnection("")).toBe("unknown");
     expect(readInputConnection("com.apple.coredevice.dtuhidd.active 17")).toBe("unknown");
   });
+});
+
+it("keeps the native helper shutdown completion through the managed adapter", async () => {
+  const native = nativeHelpers();
+  let finish = () => {};
+  native.dispose = vi.fn(
+    () =>
+      new Promise<{ readonly status: "stopped" }>((resolve) => {
+        finish = () => resolve({ status: "stopped" });
+      }),
+  );
+  const helpers = createManagedSimulatorHelpers(native, tools());
+  const stopping = helpers.dispose();
+  expect(helpers.dispose()).toBe(stopping);
+  await Promise.resolve();
+  let completed = false;
+  void stopping.then(() => {
+    completed = true;
+  });
+  await Promise.resolve();
+  expect(completed).toBe(false);
+  finish();
+  await expect(stopping).resolves.toEqual({ status: "stopped" });
+  expect(native.dispose).toHaveBeenCalledOnce();
 });

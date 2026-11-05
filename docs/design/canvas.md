@@ -1398,7 +1398,14 @@ answers every name with not-found among them:
   runs while a window that prepared it or opened a prototype keeps its page:
   when the last such window closes, loads another page, or its renderer exits,
   the app stops the host, even one still starting, and the next run starts a
-  new one.
+  new one only after the previous child's exit is observed. Stop calls share a
+  bounded completion: channel disconnect, SIGTERM, then SIGKILL. A signal sent
+  is not evidence of exit; unconfirmed exit refuses replacement. Accepted app
+  quit waits for this completion alongside host shutdown. A cancelled quit
+  leaves the host running. Pending opens are cancelled, and late readiness or
+  frames from a retired host cannot reach a new owner. Message listeners and
+  app-exit hooks are removed after exit; an error guard may remain until the
+  child reports its channels closed to absorb a late IPC failure.
 - **Preparing.** A run is two separate facts: whether it is contained (what the
   person is told) and where it is drawn (the desktop's own surface, or a frame).
   Whatever builds the run, a prototype drawn on the surface is not asked for a

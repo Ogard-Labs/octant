@@ -1,4 +1,9 @@
 import { spawn as spawnProcess } from "node:child_process";
+import {
+  createNativeHelperShutdown,
+  type NativeHelperChild,
+  type NativeHelperStopOutcome,
+} from "./nativeHelperShutdown";
 
 /**
  * Input the device helper delivers to one booted Simulator. Coordinates are
@@ -72,7 +77,7 @@ export interface DeviceWatchOptions {
 export interface DeviceViewer {
   /** One whole JPEG of the Simulator's screen. */
   readonly onFrame: (jpeg: Uint8Array) => void;
-  /** The helper stopped; no more frames will come. Not called after `stop()`. */
+  /** The stream ended; no more frames will come. Not called after `stop()`. */
   readonly onEnd: () => void;
 }
 
@@ -87,20 +92,24 @@ export type DeviceWatch =
   | { readonly status: "unavailable"; readonly message: string };
 
 /** The part of a child process this module uses, so a test can stand one in. */
-export interface DeviceHelperChild {
+export interface DeviceHelperChild extends NativeHelperChild {
   readonly stdin: {
     write(chunk: Uint8Array): unknown;
     end(): unknown;
     on(event: "error", listener: () => void): unknown;
+    off(event: "error", listener: () => void): unknown;
   };
-  readonly stdout: { on(event: "data", listener: (chunk: Uint8Array) => void): unknown };
+  readonly stdout: {
+    on(event: "data", listener: (chunk: Uint8Array) => void): unknown;
+    off(event: "data", listener: (chunk: Uint8Array) => void): unknown;
+  };
   /** File descriptor 3: length-prefixed JPEG frames while a stream is running. */
   readonly frames: {
     on(event: "data", listener: (chunk: Uint8Array) => void): unknown;
+    off(event: "data", listener: (chunk: Uint8Array) => void): unknown;
     on(event: "error", listener: () => void): unknown;
+    off(event: "error", listener: () => void): unknown;
   };
-  on(event: "exit" | "error", listener: () => void): unknown;
-  kill(): unknown;
 }
 
 export interface SimulatorDeviceHelpersOptions {
@@ -108,6 +117,7 @@ export interface SimulatorDeviceHelpersOptions {
   readonly spawn?: (helperPath: string, simulatorId: string) => DeviceHelperChild;
   /** A helper with no request for this long is stopped; the next request starts a new one. */
   readonly idleMs?: number;
+  readonly stopGraceMs?: number;
 }
 
 interface PendingReply {
@@ -124,6 +134,8 @@ interface PendingReply {
 
 interface RunningHelper {
   readonly child: DeviceHelperChild;
+  readonly shutdown: ReturnType<typeof createNativeHelperShutdown>;
+  stopping: boolean;
   readonly pending: Map<number, PendingReply>;
   readonly viewers: Set<DeviceViewer>;
   buffered: Buffer;
@@ -200,19 +212,35 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
         throw new Error("The device helper started without its pipes.");
       }
       return {
+        get pid() {
+          return child.pid;
+        },
+        get exitCode() {
+          return child.exitCode;
+        },
+        get signalCode() {
+          return child.signalCode;
+        },
         stdin: child.stdin,
         stdout: child.stdout,
         frames,
         on: (event, listener) => child.on(event, listener),
-        kill: () => child.kill(),
+        off: (event, listener) => child.off(event, listener),
+        kill: (signal) => child.kill(signal),
       };
     });
   const idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
   const running = new Map<string, RunningHelper>();
   let disposed = false;
+  let disposing: Promise<NativeHelperStopOutcome> | undefined;
 
-  function stop(simulatorId: string, helper: RunningHelper, message: string): void {
-    if (running.get(simulatorId) === helper) running.delete(simulatorId);
+  function stop(
+    simulatorId: string,
+    helper: RunningHelper,
+    message: string,
+  ): Promise<NativeHelperStopOutcome> {
+    if (helper.stopping) return helper.shutdown.stop();
+    helper.stopping = true;
     if (helper.idle !== undefined) clearTimeout(helper.idle);
     for (const [, waiting] of helper.pending) {
       clearTimeout(waiting.timer);
@@ -222,12 +250,7 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     const viewers = [...helper.viewers];
     helper.viewers.clear();
     for (const viewer of viewers) viewer.onEnd();
-    try {
-      helper.child.stdin.end();
-    } catch {
-      // Already closed: the helper is gone, which is the goal.
-    }
-    helper.child.kill();
+    return helper.shutdown.stop();
   }
 
   /**
@@ -262,8 +285,20 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
   }
 
   function start(simulatorId: string): RunningHelper {
+    const child = spawn(options.helperPath, simulatorId);
+    const shutdown = createNativeHelperShutdown({
+      child,
+      closeGracefully: () => {
+        child.stdin.end();
+      },
+      gracefulMs: 0,
+      terminateMs: options.stopGraceMs ?? 2_000,
+      killMs: options.stopGraceMs ?? 2_000,
+    });
     const helper: RunningHelper = {
-      child: spawn(options.helperPath, simulatorId),
+      child,
+      shutdown,
+      stopping: false,
       pending: new Map(),
       viewers: new Set(),
       buffered: Buffer.alloc(0),
@@ -273,7 +308,8 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       idle: undefined,
       streaming: undefined,
     };
-    helper.child.frames.on("data", (chunk) => {
+    const receiveFrames = (chunk: Uint8Array) => {
+      if (helper.stopping || shutdown.state() === "exited") return;
       helper.bufferedFrames = Buffer.concat([helper.bufferedFrames, chunk]);
       while (helper.bufferedFrames.length >= 4) {
         const length = helper.bufferedFrames.readUInt32BE(0);
@@ -292,8 +328,10 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
         if (helper.viewers.size > 0 || helper.streaming !== undefined) helper.latestFrame = jpeg;
         for (const viewer of helper.viewers) viewer.onFrame(jpeg);
       }
-    });
-    helper.child.stdout.on("data", (chunk) => {
+    };
+    helper.child.frames.on("data", receiveFrames);
+    const receiveReplies = (chunk: Uint8Array) => {
+      if (helper.stopping || shutdown.state() === "exited") return;
       helper.buffered = Buffer.concat([helper.buffered, chunk]);
       while (helper.buffered.length >= 4) {
         const length = helper.buffered.readUInt32BE(0);
@@ -320,15 +358,28 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
         else beginDeadlines(simulatorId, helper);
         waiting.settle(replyFrom(value));
       }
-    });
+    };
+    helper.child.stdout.on("data", receiveReplies);
     const gone = () => stop(simulatorId, helper, "The device helper stopped before it answered.");
     helper.child.on("exit", gone);
     helper.child.on("error", gone);
+    void shutdown.exited.then(() => {
+      stop(simulatorId, helper, "The device helper stopped before it answered.");
+      helper.child.stdout.off("data", receiveReplies);
+      helper.child.frames.off("data", receiveFrames);
+      helper.child.off("exit", gone);
+      if (running.get(simulatorId) === helper) running.delete(simulatorId);
+    });
     // A helper that dies under a write reports EPIPE on the stream, later, and
     // not from `write`. With no listener that is an unhandled error event,
     // which would take the desktop's main process down with the helper.
     helper.child.stdin.on("error", gone);
     helper.child.frames.on("error", gone);
+    void shutdown.closed.then(() => {
+      helper.child.off("error", gone);
+      helper.child.stdin.off("error", gone);
+      helper.child.frames.off("error", gone);
+    });
     running.set(simulatorId, helper);
     return helper;
   }
@@ -340,6 +391,12 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     timeoutMs: number,
     cancelled?: AbortSignal,
   ): Promise<DeviceHelperReply> {
+    if (helper.stopping || helper.shutdown.state() !== "running") {
+      return Promise.resolve({
+        status: "unavailable",
+        message: "The device helper is still stopping.",
+      });
+    }
     // A helper with a request in hand is not idle, however long the request
     // takes; the clock starts again when the last answer arrives.
     if (helper.idle !== undefined) clearTimeout(helper.idle);
@@ -410,7 +467,14 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       }
       let helper: RunningHelper;
       try {
-        helper = running.get(simulatorId) ?? start(simulatorId);
+        const existing = running.get(simulatorId);
+        if (existing?.shutdown.state() === "stopping") {
+          return Promise.resolve({
+            status: "unavailable",
+            message: "The device helper is still stopping.",
+          });
+        }
+        helper = existing?.shutdown.state() === "running" ? existing : start(simulatorId);
       } catch {
         return Promise.resolve({
           status: "unavailable",
@@ -441,7 +505,11 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       }
       let helper: RunningHelper;
       try {
-        helper = running.get(simulatorId) ?? start(simulatorId);
+        const existing = running.get(simulatorId);
+        if (existing?.shutdown.state() === "stopping") {
+          return { status: "unavailable", message: "The device helper is still stopping." };
+        }
+        helper = existing?.shutdown.state() === "running" ? existing : start(simulatorId);
       } catch {
         return { status: "unavailable", message: "The device helper could not be started." };
       }
@@ -456,7 +524,11 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
         if (running.get(simulatorId) === helper) helper.streaming = undefined;
         return started;
       }
-      if (running.get(simulatorId) !== helper) {
+      if (
+        running.get(simulatorId) !== helper ||
+        helper.stopping ||
+        helper.shutdown.state() === "exited"
+      ) {
         return { status: "unavailable", message: "The device helper stopped before it answered." };
       }
       helper.viewers.add(viewer);
@@ -485,11 +557,21 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       return false;
     },
 
-    dispose(): void {
+    dispose(): Promise<NativeHelperStopOutcome> {
+      if (disposing !== undefined) return disposing;
+      let settle: (outcome: NativeHelperStopOutcome) => void = () => {};
+      disposing = new Promise((resolve) => {
+        settle = resolve;
+      });
       disposed = true;
-      for (const [simulatorId, helper] of running) {
-        stop(simulatorId, helper, "The desktop is shutting down.");
-      }
+      void Promise.all(
+        Array.from(running, ([simulatorId, helper]) =>
+          stop(simulatorId, helper, "The desktop is shutting down."),
+        ),
+      ).then((outcomes) => {
+        settle(outcomes.find((outcome) => outcome.status === "failed") ?? { status: "stopped" });
+      });
+      return disposing;
     },
   };
 }

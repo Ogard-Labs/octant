@@ -127,6 +127,13 @@ Linux, and headless clients say the native frame is not attachable instead of
 hanging or inventing a picture. Closing the tab unmounts the view only; it
 does not shut down, erase, or transfer the destination.
 
+When the desktop's native device helper is stopping after a cancelled or
+timed-out action, another action reports that it is still stopping until its
+exit is confirmed. It cannot silently queue behind an old action or start a
+replacement alongside it. Quitting Octant waits briefly for its native helpers
+to exit, escalating when they do not respond. This does not shut down or erase
+the Simulator itself.
+
 An agent's `octant_apple` `boot`, `run`, or `open` opens that pane beside the
 transcript. `open` boots a shut-down destination and otherwise only shows the
 pane. Do not launch Simulator.app, `open -a Simulator`, or serve-sim. The
