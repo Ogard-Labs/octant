@@ -10,7 +10,7 @@ import type {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import type { PullRequestWatchOutcome } from "./codeProjectPullRequestSwitchService";
+import type { PullRequestWatchOutcome } from "./pullRequestWatchPort";
 import {
   CODE_BOARD_TOOL_NAME,
   CODE_BROWSER_TOOL_NAME,

@@ -148,7 +148,7 @@ import {
   type CodeTurnPendingRequest,
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
-import type { CodeProjectPullRequestSwitchService } from "./codeProjectPullRequestSwitchService";
+import type { PullRequestWatchPort } from "./pullRequestWatchPort";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import type {
   NativeHarnessTurnAdmission,
@@ -357,7 +357,7 @@ export interface CodeOperationRuntimeOptions {
   /** The standing merge permissions the person has stored for a thread; absent reads none. */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
   /** A thread's watch on its own pull request; absent, the tool refuses watch and unwatch. */
-  readonly pullRequestWatch?: Pick<CodeProjectPullRequestSwitchService, "watch" | "unwatch">;
+  readonly pullRequestWatch?: PullRequestWatchPort;
   readonly reviewFiles: ReviewFindingFilePort;
   readonly evidence: CodeOperationEvidencePort;
   /** The images Code threads have staged for their next turn. */

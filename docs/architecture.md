@@ -2585,6 +2585,14 @@ statusCheckRollup,reviews,comments,…` (every check on the head, not only
   host restart a watch stays quiet, with its clock still running, until a
   window shows the pull request's review or the thread's agent asks to watch
   it again from a window that may act on it.
+- **Watch reach.** GitHub is a separable integration
+  ([Plugin boundaries](#plugin-boundaries-and-remaining-extraction)), so the
+  Code runtime and its pull-request tool hold only a watch port (`watch`,
+  `unwatch`, and the outcomes above), never the switch service. The server's
+  composition root binds that port to the switch service, which also wakes
+  the thread through the runtime's follow-up path; an extracted GitHub package
+  satisfies the same port, and moving the switch service behind it is
+  separate extraction work.
 - **Record.** Every switch change and every wake appends one event on the
   `code-project-pull-request-switches` aggregate type, each its own aggregate:
   `code.project-pull-request-merge-when-ready-recorded@1` (enabled with method

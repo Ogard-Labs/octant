@@ -53,6 +53,11 @@ import type {
   GhPullRequestSwitchReads,
   GhPullRequestSwitchRequest,
 } from "./ghPullRequestSwitchPort";
+import type {
+  PullRequestWatchAnswer,
+  PullRequestWatchOutcome,
+  PullRequestWatchPort,
+} from "./pullRequestWatchPort";
 
 /**
  * How long a keystroke in a thread's composer holds Auto-fix back. The
@@ -88,37 +93,6 @@ export interface PullRequestSwitchAuthority {
     threadId: CodeThreadId,
   ): Promise<ReadonlyArray<CodeProjectPullRequestSwitchTarget>>;
 }
-
-/** The person's answer to one request to watch a pull request. */
-export type PullRequestWatchAnswer =
-  | "approved"
-  | "denied"
-  | "cancelled"
-  | "expired"
-  | "unavailable";
-
-/** What a thread's agent hears back when it asks to watch or stop watching. */
-export type PullRequestWatchOutcome =
-  | {
-      readonly status: "watching";
-      readonly target: CodeProjectPullRequestSwitchTarget;
-      readonly until: string;
-      readonly alreadyWatching: boolean;
-    }
-  | { readonly status: "unwatched"; readonly target: CodeProjectPullRequestSwitchTarget }
-  | { readonly status: "not-watching" }
-  | { readonly status: "declined"; readonly answer: Exclude<PullRequestWatchAnswer, "approved"> }
-  | {
-      readonly status: "refused";
-      readonly reason:
-        | "no-pull-request"
-        | "ambiguous-pull-request"
-        | "not-authorized"
-        | "not-open"
-        | "thread-unavailable"
-        | "watched-by-another-thread";
-    }
-  | { readonly status: "unavailable"; readonly reason: "disconnected" | "unavailable" };
 
 export interface PullRequestSwitchForge {
   readAutoMergeSettings(
@@ -177,7 +151,7 @@ export interface PullRequestAutoFixThreads {
  * what changed. Every change and every wake is journaled, and the state is
  * rebuilt from the journal on start.
  */
-export class CodeProjectPullRequestSwitchService {
+export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort {
   readonly #authority: PullRequestSwitchAuthority;
   readonly #forge: PullRequestSwitchForge;
   readonly #threads: PullRequestAutoFixThreads;

@@ -29,6 +29,7 @@ import {
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
 import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
+import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -440,7 +441,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   return Effect.gen(function* () {
     // A host started with its own runtime uses it; otherwise it is built below.
     let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
-    let pullRequestWatchService: CodeProjectPullRequestSwitchService | undefined;
+    let pullRequestWatchService: PullRequestWatchPort | undefined;
     // Areas built after this one add tools to a Code turn here, as they do to
     // a Chat thread, so the runtime never holds the services behind them.
     const codeToolContributors: Array<

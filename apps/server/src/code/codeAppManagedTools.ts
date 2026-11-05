@@ -89,10 +89,7 @@ import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { pullRequestChangeNeedsPerActApproval } from "@octant/domain/code-pull-request-action-policy";
 import { isRoutineHostScope } from "../routineHostScope";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
-import type {
-  PullRequestWatchAnswer,
-  PullRequestWatchOutcome,
-} from "./codeProjectPullRequestSwitchService";
+import type { PullRequestWatchAnswer, PullRequestWatchOutcome } from "./pullRequestWatchPort";
 
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
 // A pull-request body is often longer than any other tool input.
