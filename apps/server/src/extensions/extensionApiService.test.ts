@@ -100,6 +100,39 @@ function lifecycle(captured: Array<InspectedExtensionPackage>): ExtensionLifecyc
 }
 
 describe("extension inspection and lifecycle API service", () => {
+  it("keeps an owned user-added package installed until sign-in cancellation is confirmed and releases preflight on later failure", async () => {
+    const state = lifecycle([]);
+    const installed = {
+      ...emptySnapshot,
+      packages: [{ extensionId, source: { kind: "local-folder", sourceRef: "owned-server" } }],
+    } as unknown as ExtensionSnapshot;
+    state.snapshot = () => installed;
+    state.uninstall = vi.fn(async () => emptySnapshot);
+    const remove = vi.fn(async () => undefined);
+    const release = vi.fn();
+    const prepareRemoval = vi.fn(async () => release);
+    const service = new ExtensionApiService({
+      lifecycle: state,
+      resolver: { resolve: async () => resolvedPackage() },
+      userAddedMcpServers: { owns: (ref) => ref === "owned-server", prepareRemoval, remove },
+    });
+    prepareRemoval.mockRejectedValueOnce(new Error("synthetic broker unavailable"));
+    expect(
+      await service.execute({ kind: "uninstall-package", extensionId } as never),
+    ).toMatchObject({
+      failure: { category: "blocked", message: expect.stringContaining("retry removal") },
+    });
+    expect(state.uninstall).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    await service.execute({ kind: "uninstall-package", extensionId } as never);
+    expect(state.uninstall).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith("owned-server", extensionId);
+    expect(release).toHaveBeenCalledTimes(1);
+    vi.mocked(state.uninstall).mockRejectedValueOnce(new Error("synthetic lifecycle failure"));
+    await service.execute({ kind: "uninstall-package", extensionId } as never);
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
   it("includes bounded bundled skill instructions in the pre-trust package preview", async () => {
     const instructions = "Never disclose secrets. Review every change before applying it.";
     const entries: ReadonlyArray<ExtensionArchiveEntry> = [

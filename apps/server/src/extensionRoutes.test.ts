@@ -1412,6 +1412,8 @@ describe("servers and plugins found on this computer", () => {
 describe("signing in to a hosted server from Settings", () => {
   const target = { extensionId, componentId: "mcp-docs" };
   const signIn = {
+    prepareClient: vi.fn(async () => ({ kind: "signed-out" })),
+    saveClient: vi.fn(async () => ({ kind: "client-configured" })),
     configureClient: vi.fn(async () => ({ kind: "signed-out" })),
     status: vi.fn(async () => ({ kind: "signed-out" })),
     begin: vi.fn(async (_e: string, _c: string, principal: string) =>
@@ -1431,6 +1433,80 @@ describe("signing in to a hosted server from Settings", () => {
     poll: vi.fn(async () => ({ kind: "signed-in", issuer: "auth.example" })),
     signOut: vi.fn(async () => ({ kind: "signed-out" })),
   };
+
+  it("authorizes explicit application setup separately and rejects remote, anonymous and secret-value requests", async () => {
+    signIn.prepareClient.mockClear();
+    signIn.saveClient.mockClear();
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerSignIn: signIn as never,
+      now: () => now,
+    });
+    const setup = {
+      binding: {
+        resource: "https://mcp.example/mcp",
+        issuer: "https://auth.example",
+        tokenEndpoint: "https://auth.example/token",
+        callback: "http://127.0.0.1:43125/oauth/callback",
+      },
+      kind: "registered",
+      clientId: "owned-client",
+      authentication: "client_secret_post",
+      secret: { store: "onepassword", reference: "op://Private/App/client secret" },
+    };
+    const prepared = await handler(
+      request("/api/extensions/sign-in", { kind: "prepare-client", ...target }),
+    );
+    expect(prepared?.status).toBe(200);
+    expect(signIn.prepareClient).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
+    const saved = await handler(
+      request("/api/extensions/sign-in", { kind: "save-client", ...target, setup }),
+    );
+    expect(saved?.status).toBe(200);
+    expect(signIn.saveClient).toHaveBeenCalledWith(extensionId, "mcp-docs", setup, "local-window");
+    signIn.prepareClient.mockClear();
+    signIn.saveClient.mockClear();
+    for (const body of [
+      { kind: "prepare-client", ...target },
+      { kind: "save-client", ...target, setup },
+    ]) {
+      expect((await handler(pairedDeviceRequest("/api/extensions/sign-in", body)))?.status).toBe(
+        401,
+      );
+      expect(
+        (
+          await handler(
+            request("/api/extensions/sign-in", body, { "x-octant-window-capability": "wrong" }),
+          )
+        )?.status,
+      ).toBe(401);
+    }
+    expect(
+      (
+        await handler(
+          request("/api/extensions/sign-in", {
+            kind: "save-client",
+            ...target,
+            setup: { ...setup, clientSecret: "do-not-dispatch" },
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          request("/api/extensions/sign-in", {
+            kind: "save-client",
+            ...target,
+            setup: { ...setup, secret: { ...setup.secret, value: "do-not-dispatch" } },
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(signIn.prepareClient).not.toHaveBeenCalled();
+    expect(signIn.saveClient).not.toHaveBeenCalled();
+  });
 
   it("lets a local window begin, poll and sign out, and tells a paired device to use the host", async () => {
     const handler = createExtensionRouteHandler({

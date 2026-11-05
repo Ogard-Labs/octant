@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname } from "node:path";
-import type { McpServerSignInView } from "@octant/contracts/extension-rpc";
+import type { McpClientSetupInput, McpServerSignInView } from "@octant/contracts/extension-rpc";
 import { decodeMcpOAuthClientRegistration } from "@octant/contracts/host-oauth";
 import type {
   McpOAuthClientRegistration,
@@ -16,11 +16,18 @@ import {
   isSlackMcpUserDescriptorBinding,
 } from "@octant/host-runtime";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
+import type { LinkedSecretPointers } from "./userAddedMcpServers";
 import type { HostOAuthService } from "../providers/oauth/hostOAuthService";
 
 const TERMS_ID = "mcp-sign-in-terms-1";
 const METADATA_BYTES = 64 * 1_024;
 const REQUEST_TIMEOUT_MS = 10_000;
+// Begin runs inside the resource queue, so a broker that accepts Begin and never
+// answers would otherwise hold sign-out, setup and removal for that server
+// forever. The bound stays under the renderer's 30-second request deadline.
+const BEGIN_TIMEOUT_MS = 20_000;
+const MAX_CLIENT_SECRET_REFERENCES = 256;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // RFC 6749 §3.3 scope-token: a resource may advertise URL-shaped scopes, and
 // dropping one silently would register and authorize without it.
 const SCOPE_TOKEN_PATTERN = /^[\x21\x23-\x5B\x5D-\x7E]{1,256}$/;
@@ -40,6 +47,8 @@ type AwaitingConsent = Extract<McpServerSignInView, { kind: "awaiting-consent" }
 interface PersistedSignIns {
   readonly schemaVersion: 1;
   readonly signIns: Readonly<Record<string, McpServerSignInRecord>>;
+  readonly retiredClientSecrets?: ReadonlyArray<string>;
+  readonly callbackPorts?: Readonly<Record<string, number>>;
   readonly registrations?: Readonly<Record<string, McpOAuthClientRegistration>>;
 }
 
@@ -53,8 +62,15 @@ export interface McpServerSignInOptions {
   readonly fetch?: typeof fetch;
   readonly actorId: string;
   readonly now?: () => Date;
+  /** Existing MCP broker pointer ingress; it handles item addresses, never secret values. */
+  readonly linkedSecrets?: LinkedSecretPointers;
   /** Picks the loopback port the callback will listen on; the default binds and releases a free one. */
   readonly pickPort?: () => Promise<number>;
+  readonly pointTimeoutMs?: number;
+  readonly retirementTimeoutMs?: number;
+  readonly beginTimeoutMs?: number;
+  /** State replacement boundary; the default writes an owner-only file then atomically renames it. */
+  readonly replaceState?: (path: string, contents: string) => Promise<void>;
 }
 
 type Discovered =
@@ -90,6 +106,9 @@ export class McpServerSignIn {
   readonly #options: McpServerSignInOptions;
   readonly #fetch: typeof fetch;
   #signIns = new Map<string, McpServerSignInRecord>();
+  readonly #retiredClientSecrets = new Set<string>();
+  readonly #retirementStarted = new Set<string>();
+  readonly #callbackPorts = new Map<string, number>();
   readonly #registrations = new Map<string, McpOAuthClientRegistration>();
   readonly #attempts = new Map<
     string,
@@ -99,20 +118,423 @@ export class McpServerSignIn {
       readonly descriptor: HostOAuthDescriptor;
       /** The last state shown, so a paired device can read it without polling. */
       readonly view: AwaitingConsent;
+      cancelPending?: boolean;
+      statusUnavailable?: boolean;
     }
   >();
-  #loaded = false;
+  #loading: Promise<void> | undefined;
+  readonly #operations = new Map<string, Promise<unknown>>();
+  /** Known component/resource queue ownership lets uninstall wait for an in-flight Begin. */
+  readonly #serverResources = new Map<string, Set<string>>();
+  readonly #removals = new Map<string, number>();
+  #commits: Promise<unknown> = Promise.resolve();
 
   constructor(options: McpServerSignInOptions) {
     this.#options = options;
     this.#fetch = options.fetch ?? globalThis.fetch;
   }
 
-  async configureForServer(
+  // Setup and consent for one resource cannot interleave while discovery or
+  // secret linking is pending. Other resources and ordinary bearer reads remain usable.
+  #serialized<T>(resource: string, operation: () => Promise<T>): Promise<T> {
+    const run = (this.#operations.get(resource) ?? Promise.resolve()).then(operation);
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#operations.set(resource, settled);
+    void settled.then(() => {
+      if (this.#operations.get(resource) === settled) this.#operations.delete(resource);
+    });
+    return run;
+  }
+
+  async #forServer(
+    extensionId: string,
+    componentId: string,
+    operation: () => Promise<McpServerSignInView>,
+  ): Promise<McpServerSignInView> {
+    const url = await this.#options.serverUrl(extensionId, componentId);
+    const key = signInKey(extensionId, componentId);
+    const resource = url === undefined ? key : mcpOAuthResourceForTransport(canonicalResource(url));
+    const resources = this.#serverResources.get(key) ?? new Set<string>();
+    resources.add(resource);
+    this.#serverResources.set(key, resources);
+    return this.#serialized(resource, operation);
+  }
+
+  // Whole mutations, including rollback, own this short queue until the atomic
+  // state replacement ends. No discovery, token access/refresh or item lookup runs here.
+  #commit<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.#commits.then(operation);
+    this.#commits = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  prepareClient(
+    extensionId: string,
+    componentId: string,
+    principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
+    return this.#forServer(extensionId, componentId, () =>
+      this.#prepareClient(extensionId, componentId, principalKind),
+    );
+  }
+  saveClient(
+    extensionId: string,
+    componentId: string,
+    setup: McpClientSetupInput,
+    principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
+    if (this.#removals.has(extensionId))
+      return Promise.resolve(
+        refused("unavailable", "Finish removing this server before starting another sign-in."),
+      );
+    return this.#forServer(extensionId, componentId, () =>
+      this.#saveClient(extensionId, componentId, setup, principalKind),
+    );
+  }
+  configureForServer(
     extensionId: string,
     componentId: string,
     registration: McpOAuthClientRegistration,
     principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
+    return this.#forServer(extensionId, componentId, () =>
+      this.#configureForServer(extensionId, componentId, registration, principalKind),
+    );
+  }
+  configureClient(
+    input: unknown,
+    principalKind: PrincipalKind,
+  ): Promise<{ readonly kind: "configured" } | Extract<McpServerSignInView, { kind: "refused" }>> {
+    let resource: string;
+    try {
+      resource = canonicalResource(decodeMcpOAuthClientRegistration(input).resource);
+    } catch {
+      return this.#configureClient(input, principalKind);
+    }
+    return this.#serialized(resource, () => this.#configureClient(input, principalKind));
+  }
+  status(
+    extensionId: string,
+    componentId: string,
+    principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
+    return this.#status(extensionId, componentId, principalKind);
+  }
+  begin(
+    extensionId: string,
+    componentId: string,
+    principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
+    if (this.#removals.has(extensionId))
+      return Promise.resolve(
+        refused("unavailable", "Finish removing this server before starting another sign-in."),
+      );
+    return this.#forServer(extensionId, componentId, () =>
+      this.#begin(extensionId, componentId, principalKind),
+    );
+  }
+  poll(
+    extensionId: string,
+    componentId: string,
+    attemptId: string,
+    principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
+    return this.#forServer(extensionId, componentId, () =>
+      this.#pollForServer(extensionId, componentId, attemptId, principalKind),
+    );
+  }
+  signOut(
+    extensionId: string,
+    componentId: string,
+    principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
+    return this.#forServer(extensionId, componentId, () =>
+      this.#signOut(extensionId, componentId, principalKind),
+    );
+  }
+  async preparePackageRemoval(extensionId: string): Promise<() => void> {
+    this.#removals.set(extensionId, (this.#removals.get(extensionId) ?? 0) + 1);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      const remaining = (this.#removals.get(extensionId) ?? 1) - 1;
+      if (remaining === 0) this.#removals.delete(extensionId);
+      else this.#removals.set(extensionId, remaining);
+    };
+    try {
+      await this.#load();
+      const prefix = `${extensionId}:`;
+      for (const resource of this.#packageResources(extensionId))
+        await this.#serialized(resource, async () => {
+          for (const [key, pending] of Array.from(this.#attempts))
+            if (key.startsWith(prefix) && pending.discovered.resource === resource) {
+              if (!(await this.#cancelPending(key, "local-window")))
+                throw new Error(
+                  "Sign-in cancellation is not confirmed. Restore the credential broker and retry removal.",
+                );
+            }
+        });
+      return release;
+    } catch (error) {
+      release();
+      throw error;
+    }
+  }
+  forgetPackage(extensionId: string): Promise<void> {
+    return this.#forgetPackage(extensionId);
+  }
+  attachBearer(
+    extensionId: string,
+    componentId: string,
+    launch: AgentPluginsMcpLaunchSpec,
+  ): Promise<AgentPluginsMcpLaunchSpec> {
+    return this.#attachBearer(extensionId, componentId, launch);
+  }
+
+  /** Explicit setup discovery neither registers a client nor starts account consent. */
+  async #prepareClient(
+    extensionId: string,
+    componentId: string,
+    principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
+    if (principalKind !== "local-window")
+      return refused("local-host-required", "Set up the client on this host.");
+    const url = await this.#options.serverUrl(extensionId, componentId);
+    if (url === undefined) return { kind: "not-applicable" };
+    const discovered = await this.#discover(url);
+    if (discovered.kind === "no-sign-in-offered")
+      return refused("no-sign-in-offered", "This server does not offer browser sign-in.");
+    if (discovered.kind !== "discovered") return refused(discovered.kind, discovered.message);
+    await this.#load();
+    const registration = this.#registrations.get(discovered.resource);
+    let port = registration?.redirectPort ?? this.#callbackPorts.get(discovered.resource);
+    if (port === undefined) {
+      try {
+        port = await (this.#options.pickPort ?? pickFreePort)();
+        const selected = port;
+        await this.#commit(async () => {
+          this.#callbackPorts.set(discovered.resource, selected);
+          try {
+            await this.#persist();
+          } catch (error) {
+            this.#callbackPorts.delete(discovered.resource);
+            throw error;
+          }
+        });
+      } catch {
+        return refused("unavailable", "The sign-in callback could not be prepared. Try again.");
+      }
+    }
+    return {
+      kind: "client-setup",
+      resource: discovered.resource,
+      issuer: discovered.issuerUrl,
+      tokenEndpoint: discovered.tokenEndpoint,
+      callback: `http://${discovered.mcpDialect === SLACK_MCP_USER_OAUTH.dialect ? "localhost" : "127.0.0.1"}:${port}/oauth/callback`,
+      metadataClientSupported: discovered.metadataClientSupported,
+      authenticationMethods: discovered.tokenAuthenticationMethods.filter(
+        (method): method is "none" | "client_secret_post" | "client_secret_basic" =>
+          method === "none" || method === "client_secret_post" || method === "client_secret_basic",
+      ),
+      secretStoreAvailable: this.#options.linkedSecrets !== undefined,
+      ...(registration === undefined ? {} : { registration }),
+    };
+  }
+
+  async #saveClient(
+    extensionId: string,
+    componentId: string,
+    input: McpClientSetupInput,
+    principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
+    if (this.#removals.has(extensionId))
+      return refused("unavailable", "Finish removing this server before starting another sign-in.");
+    if (principalKind !== "local-window")
+      return refused("local-host-required", "Set up the client on this host.");
+    if (this.#attempts.has(signInKey(extensionId, componentId)))
+      return refused("unavailable", "Finish the pending sign-in before changing client setup.");
+    const prepared = await this.#prepareClient(extensionId, componentId, principalKind);
+    if (prepared.kind !== "client-setup") return prepared;
+    if (
+      Array.from(this.#attempts.values()).some(
+        (pending) => pending.discovered.resource === prepared.resource,
+      )
+    )
+      return refused(
+        "unavailable",
+        "Finish the pending sign-in for this server before changing client setup.",
+      );
+    if (
+      input.binding.resource !== prepared.resource ||
+      input.binding.issuer !== prepared.issuer ||
+      input.binding.tokenEndpoint !== prepared.tokenEndpoint ||
+      input.binding.callback !== prepared.callback
+    )
+      return refused(
+        "invalid",
+        "The server's client setup changed. Reopen Client setup and check its addresses before saving.",
+      );
+    if (
+      !prepared.authenticationMethods.includes(input.authentication) ||
+      (input.kind === "metadata-document" &&
+        (!prepared.metadataClientSupported || input.authentication !== "none"))
+    )
+      return refused(
+        "issuer-unsupported",
+        "The authorization server does not support this client setup.",
+      );
+    if (input.authentication === "none" && input.secret !== undefined)
+      return refused("invalid", "A public client does not use a client secret.");
+    const existing = prepared.registration?.clientAuthentication;
+    const reuseSecret =
+      input.secret === undefined &&
+      prepared.registration?.clientId === input.clientId &&
+      prepared.registration.issuer === prepared.issuer &&
+      existing?.method === input.authentication &&
+      existing.tokenEndpoint === prepared.tokenEndpoint;
+    if (
+      input.authentication !== "none" &&
+      !reuseSecret &&
+      (input.secret === undefined || this.#options.linkedSecrets === undefined)
+    )
+      return refused(
+        "unavailable",
+        "Choose a client secret from a linked secret store on this host.",
+      );
+    const secretRef =
+      input.authentication === "none"
+        ? undefined
+        : reuseSecret
+          ? existing?.secretRef
+          : randomUUID();
+    let registration: McpOAuthClientRegistration;
+    try {
+      registration = decodeMcpOAuthClientRegistration({
+        kind: input.kind,
+        resource: prepared.resource,
+        issuer: prepared.issuer,
+        clientId: input.clientId,
+        redirectPort: Number(new URL(prepared.callback).port),
+        ...(prepared.resource === SLACK_MCP_USER_OAUTH.resource
+          ? { redirectHostname: "localhost" }
+          : {}),
+        ...(secretRef === undefined
+          ? {}
+          : {
+              clientAuthentication: {
+                method: input.authentication,
+                secretRef,
+                tokenEndpoint: prepared.tokenEndpoint,
+              },
+            }),
+      });
+    } catch {
+      return refused("invalid", "Enter a valid client ID for this registration method.");
+    }
+    if (!reuseSecret && secretRef !== undefined && input.secret !== undefined) {
+      const reserved = await this.#commit(async () => {
+        if (this.#trackedClientSecrets().size >= MAX_CLIENT_SECRET_REFERENCES) return false;
+        this.#retiredClientSecrets.add(secretRef);
+        try {
+          await this.#persist();
+          return true;
+        } catch {
+          this.#retiredClientSecrets.delete(secretRef);
+          return false;
+        }
+      });
+      if (!reserved)
+        return refused(
+          "unavailable",
+          "Client-secret cleanup or storage needs attention. See “Recover retired client-secret references” in the Plugins and skills guide before adding another secret.",
+        );
+      // A failed/lost point reply does not cancel the broker's delayed set. A
+      // later clear:none therefore cannot prove that this UUID is safe to reuse.
+      const linking = this.#options.linkedSecrets?.point(secretRef, input.secret).catch(() => ({
+        status: "uncertain" as const,
+        message: "The linked secret store is unavailable.",
+      }));
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let pointed: Awaited<typeof linking>;
+      try {
+        pointed = await Promise.race([
+          linking,
+          new Promise<undefined>((resolve) => {
+            timer = setTimeout(
+              () => resolve(undefined),
+              this.#options.pointTimeoutMs ?? REQUEST_TIMEOUT_MS,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (pointed === undefined) {
+        this.#retirementStarted.add(secretRef);
+        // Only the original operation's definitive completion may schedule
+        // retirement. It never configures a client after the caller timed out.
+        void linking
+          ?.then(async (late) => {
+            if (late?.status !== "pointed" && late?.status !== "refused") return;
+            this.#retirementStarted.delete(secretRef);
+            await this.#retireUnusedSecret(secretRef);
+          })
+          .catch(() => undefined);
+        return refused(
+          "unavailable",
+          "The secret store did not finish. Your client setup was not changed. Try again; the pending reference will not be reused.",
+        );
+      }
+      if (pointed.status === "uncertain") {
+        this.#retirementStarted.add(secretRef);
+        return refused(
+          "unavailable",
+          "The client secret lookup could not be confirmed. Your client setup was not changed. Retry to link a fresh reference.",
+        );
+      }
+      if (pointed.status !== "pointed") {
+        await this.#retireUnusedSecret(secretRef);
+        return refused("unavailable", pointed.message);
+      }
+    }
+    try {
+      const saved = await this.#configureForServer(
+        extensionId,
+        componentId,
+        registration,
+        principalKind,
+        !reuseSecret ? secretRef : undefined,
+      );
+      if (
+        saved.kind !== "signed-out" &&
+        saved.kind !== "signed-in" &&
+        saved.kind !== "sign-in-again"
+      ) {
+        if (!reuseSecret && secretRef !== undefined) await this.#retireUnusedSecret(secretRef);
+        return saved.kind === "refused"
+          ? saved
+          : refused("unavailable", "The server is no longer available for client setup.");
+      }
+      return { kind: "client-configured" };
+    } catch {
+      if (!reuseSecret && secretRef !== undefined) await this.#retireUnusedSecret(secretRef);
+      return refused("unavailable", "The client setup could not be saved. Try again.");
+    }
+  }
+
+  async #configureForServer(
+    extensionId: string,
+    componentId: string,
+    registration: McpOAuthClientRegistration,
+    principalKind: PrincipalKind,
+    reservedSecretRef?: string,
   ): Promise<McpServerSignInView> {
     if (principalKind !== "local-window")
       return refused("local-host-required", "Set up the client on this host.");
@@ -133,7 +555,7 @@ export class McpServerSignIn {
         "issuer-unsupported",
         "This server advertises a registered client using client_secret_post; public-client compatibility is not established.",
       );
-    const result = await this.configureClient(registration, principalKind);
+    const result = await this.#configureClient(registration, principalKind, reservedSecretRef);
     if (result.kind !== "configured") return result;
     const key = signInKey(extensionId, componentId);
     const pending = this.#attempts.get(key);
@@ -143,9 +565,10 @@ export class McpServerSignIn {
   }
 
   /** Saves application setup only; consent and account grants remain separate host actions. */
-  async configureClient(
+  async #configureClient(
     input: unknown,
     principalKind: PrincipalKind,
+    reservedSecretRef?: string,
   ): Promise<{ readonly kind: "configured" } | Extract<McpServerSignInView, { kind: "refused" }>> {
     if (principalKind !== "local-window")
       return {
@@ -170,9 +593,134 @@ export class McpServerSignIn {
         message: "The client setup needs https issuer and resource addresses.",
       };
     await this.#load();
-    this.#registrations.set(canonicalResource(registration.resource), registration);
-    await this.#persist();
-    return { kind: "configured" };
+    let superseded: string | undefined;
+    const result = await this.#commit(async () => {
+      const key = canonicalResource(registration.resource);
+      if (
+        Array.from(this.#attempts.values()).some((pending) => pending.discovered.resource === key)
+      )
+        return refused(
+          "unavailable",
+          "Finish the pending sign-in for this server before changing client setup.",
+        );
+      const nextRef = registration.clientAuthentication?.secretRef;
+      if (
+        nextRef !== undefined &&
+        this.#retiredClientSecrets.has(nextRef) &&
+        nextRef !== reservedSecretRef
+      )
+        return refused(
+          "invalid",
+          "That client-secret reference is retired. Link the item again to use a fresh reference.",
+        );
+      const tracked = this.#trackedClientSecrets();
+      if (
+        nextRef !== undefined &&
+        !tracked.has(nextRef) &&
+        tracked.size >= MAX_CLIENT_SECRET_REFERENCES
+      )
+        return refused(
+          "unavailable",
+          "Client-secret cleanup needs attention. See “Recover retired client-secret references” in the Plugins and skills guide before adding another secret.",
+        );
+      const previous = this.#registrations.get(key);
+      const oldRef = previous?.clientAuthentication?.secretRef;
+      const previouslyReserved = nextRef !== undefined && this.#retiredClientSecrets.has(nextRef);
+      this.#registrations.set(key, registration);
+      if (nextRef !== undefined) this.#retiredClientSecrets.delete(nextRef);
+      const reservedOld = this.#reserveUnownedSecret(oldRef);
+      try {
+        await this.#persist();
+      } catch {
+        if (previous === undefined) this.#registrations.delete(key);
+        else this.#registrations.set(key, previous);
+        if (previouslyReserved && nextRef !== undefined) this.#retiredClientSecrets.add(nextRef);
+        if (reservedOld && oldRef !== undefined) this.#retiredClientSecrets.delete(oldRef);
+        return refused("unavailable", "The client setup could not be saved. Try again.");
+      }
+      superseded = previous?.clientAuthentication?.secretRef;
+      return { kind: "configured" as const };
+    });
+    if (result.kind === "configured") await this.#retireUnusedSecret(superseded);
+    return result;
+  }
+
+  #ownedClientSecrets(): Set<string> {
+    const references = new Set<string>();
+    for (const entry of this.#registrations.values())
+      if (entry.clientAuthentication !== undefined)
+        references.add(entry.clientAuthentication.secretRef);
+    for (const entry of this.#signIns.values())
+      if (entry.descriptor.clientAuthentication !== undefined)
+        references.add(entry.descriptor.clientAuthentication.secretRef);
+    for (const entry of this.#attempts.values())
+      if (entry.descriptor.clientAuthentication !== undefined)
+        references.add(entry.descriptor.clientAuthentication.secretRef);
+    return references;
+  }
+
+  #trackedClientSecrets(): Set<string> {
+    return new Set([...this.#ownedClientSecrets(), ...this.#retiredClientSecrets]);
+  }
+
+  /** Transfer the last owner to a durable reservation in the same commit. */
+  #reserveUnownedSecret(secretRef: string | undefined): boolean {
+    if (
+      secretRef === undefined ||
+      this.#ownedClientSecrets().has(secretRef) ||
+      this.#retiredClientSecrets.has(secretRef)
+    )
+      return false;
+    this.#retiredClientSecrets.add(secretRef);
+    return true;
+  }
+
+  /** Only the original definitive clear may release its reservation; unknown outcomes are never replayed. */
+  async #retireUnusedSecret(secretRef: string | undefined): Promise<void> {
+    if (secretRef === undefined || this.#options.linkedSecrets === undefined) return;
+    const start = await this.#commit(async () => {
+      if (this.#ownedClientSecrets().has(secretRef) || this.#retirementStarted.has(secretRef))
+        return false;
+      if (this.#reserveUnownedSecret(secretRef)) await this.#persist();
+      this.#retirementStarted.add(secretRef);
+      return true;
+    });
+    if (!start) return;
+    // No broker operation runs under the shared commit queue. If the reply is
+    // lost or exceeds the deadline, this opaque id stays reserved across restart.
+    const clear = (async () => {
+      try {
+        if (this.#options.linkedSecrets?.retire !== undefined)
+          return await this.#options.linkedSecrets.retire(secretRef);
+        await this.#options.linkedSecrets?.forget(secretRef);
+      } catch {
+        /* The deletion outcome remains unknown. */
+      }
+      return "uncertain";
+    })();
+    const completed = clear.then(async (outcome) => {
+      if (outcome !== "cleared") return;
+      await this.#commit(async () => {
+        this.#retiredClientSecrets.delete(secretRef);
+        try {
+          await this.#persist();
+          this.#retirementStarted.delete(secretRef);
+        } catch {
+          this.#retiredClientSecrets.add(secretRef);
+        }
+      });
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        completed,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, this.#options.retirementTimeoutMs ?? REQUEST_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -181,7 +729,7 @@ export class McpServerSignIn {
    * sign-in is a host action (observed: a remote status read used to poll
    * as the local window and could persist the grant).
    */
-  async status(
+  async #status(
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
@@ -190,9 +738,12 @@ export class McpServerSignIn {
     const key = signInKey(extensionId, componentId);
     const pending = this.#attempts.get(key);
     if (pending !== undefined) {
+      if (pending.cancelPending) return cancellationPending();
       return principalKind === "local-window"
-        ? this.#poll(key, pending.attemptId, principalKind)
-        : pending.view;
+        ? this.poll(extensionId, componentId, pending.attemptId, principalKind)
+        : pending.statusUnavailable
+          ? statusUnavailable()
+          : pending.view;
     }
     const record = this.#signIns.get(key);
     if (record !== undefined) return recordView(record);
@@ -201,16 +752,25 @@ export class McpServerSignIn {
     return { kind: "signed-out" };
   }
 
-  async begin(
+  async #begin(
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
   ): Promise<McpServerSignInView> {
+    if (this.#removals.has(extensionId))
+      return refused("unavailable", "Finish removing this server before starting another sign-in.");
     await this.#load();
     if (principalKind !== "local-window") {
       return refused("local-host-required", "Sign in from the Octant window on this host.");
     }
     const key = signInKey(extensionId, componentId);
+    const existing = this.#attempts.get(key);
+    if (existing !== undefined)
+      return existing.cancelPending
+        ? cancellationPending()
+        : existing.statusUnavailable
+          ? statusUnavailable()
+          : existing.view;
     const url = await this.#options.serverUrl(extensionId, componentId);
     if (url === undefined) return { kind: "not-applicable" };
     const discovered = await this.#discover(url);
@@ -303,11 +863,9 @@ export class McpServerSignIn {
       descriptor,
     });
     if (acknowledged.kind === "refused") return fromRefusal(acknowledged.reason);
-    const state = await this.#options.oauth.begin({
-      principalKind,
-      actorId: this.#options.actorId,
-      descriptor,
-    });
+    const state = await this.#boundedBegin(principalKind, descriptor);
+    if (state === "timed-out")
+      return refused("unavailable", "The credential broker did not start the sign-in. Try again.");
     if (state.kind === "awaiting-consent" && state.flow === "authorization-code-pkce") {
       const view: AwaitingConsent = {
         kind: "awaiting-consent",
@@ -321,7 +879,47 @@ export class McpServerSignIn {
     return viewOf(state, discovered.issuer);
   }
 
-  async poll(
+  /**
+   * A Begin the broker answers after the deadline names an attempt nobody owns;
+   * it is cancelled so its callback and retained port are released rather than
+   * left until the attempt expires.
+   */
+  async #boundedBegin(
+    principalKind: PrincipalKind,
+    descriptor: HostOAuthDescriptor,
+  ): Promise<HostOAuthSignInState | "timed-out"> {
+    const started = this.#options.oauth.begin({
+      principalKind,
+      actorId: this.#options.actorId,
+      descriptor,
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      started,
+      new Promise<"timed-out">((resolve) => {
+        timer = setTimeout(
+          () => resolve("timed-out"),
+          this.#options.beginTimeoutMs ?? BEGIN_TIMEOUT_MS,
+        );
+      }),
+    ]).finally(() => clearTimeout(timer));
+    if (outcome !== "timed-out") return outcome;
+    void started
+      .then((late) =>
+        late.kind === "awaiting-consent"
+          ? this.#options.oauth.cancel({
+              principalKind,
+              actorId: this.#options.actorId,
+              attemptId: late.attemptId,
+              descriptor,
+            })
+          : undefined,
+      )
+      .catch(() => undefined);
+    return "timed-out";
+  }
+
+  async #pollForServer(
     extensionId: string,
     componentId: string,
     attemptId: string,
@@ -346,22 +944,65 @@ export class McpServerSignIn {
     if (principalKind !== "local-window") {
       return refused("local-host-required", "Sign in from the Octant window on this host.");
     }
+    if (pending.cancelPending) return cancellationPending();
     const state = await this.#options.oauth.status({
       principalKind,
       attemptId,
       descriptor: pending.descriptor,
     });
+    if (pending.cancelPending) return cancellationPending();
+    if (this.#attempts.get(key) !== pending) {
+      const record = this.#signIns.get(key);
+      return record === undefined ? { kind: "signed-out" } : recordView(record);
+    }
+    const terminal =
+      state.kind === "refused" &&
+      ["denied", "timeout", "state-mismatch", "verifier-mismatch", "exchange-refused"].includes(
+        state.reason,
+      );
+    if (
+      !(
+        state.kind === "signed-in" ||
+        (state.kind === "awaiting-consent" && state.flow === "authorization-code-pkce") ||
+        terminal
+      )
+    ) {
+      pending.statusUnavailable = true;
+      return statusUnavailable();
+    }
+    pending.statusUnavailable = false;
     if (state.kind === "signed-in") {
-      this.#attempts.delete(key);
-      this.#signIns.set(key, {
-        credentialRef: state.credentialRef,
-        descriptor: pending.descriptor,
-        issuer: pending.discovered.issuer,
+      let previousRef: string | undefined;
+      let committed = false;
+      await this.#commit(async () => {
+        if (this.#attempts.get(key) !== pending || pending.cancelPending) return;
+        previousRef = this.#signIns.get(key)?.descriptor.clientAuthentication?.secretRef;
+        this.#attempts.delete(key);
+        this.#signIns.set(key, {
+          credentialRef: state.credentialRef,
+          descriptor: pending.descriptor,
+          issuer: pending.discovered.issuer,
+        });
+        this.#reserveUnownedSecret(previousRef);
+        await this.#persist();
+        committed = true;
       });
-      await this.#persist();
+      if (!committed) return pending.cancelPending ? cancellationPending() : { kind: "signed-out" };
+      await this.#retireUnusedSecret(previousRef);
       return { kind: "signed-in", issuer: pending.discovered.issuer };
     }
-    if (state.kind === "refused") this.#attempts.delete(key);
+    if (state.kind === "refused") {
+      let removed = false;
+      await this.#commit(async () => {
+        if (this.#attempts.get(key) !== pending || pending.cancelPending) return;
+        this.#attempts.delete(key);
+        removed = true;
+        if (this.#reserveUnownedSecret(pending.descriptor.clientAuthentication?.secretRef))
+          await this.#persist();
+      });
+      if (!removed) return pending.cancelPending ? cancellationPending() : { kind: "signed-out" };
+      await this.#retireUnusedSecret(pending.descriptor.clientAuthentication?.secretRef);
+    }
     if (state.kind === "awaiting-consent" && state.flow === "authorization-code-pkce") {
       const view: AwaitingConsent = {
         kind: "awaiting-consent",
@@ -375,7 +1016,32 @@ export class McpServerSignIn {
     return viewOf(state, pending.discovered.issuer);
   }
 
-  async signOut(
+  async #cancelPending(key: string, principalKind: PrincipalKind): Promise<boolean> {
+    const pending = this.#attempts.get(key);
+    if (pending === undefined) return true;
+    pending.cancelPending = true;
+    let result: Awaited<ReturnType<HostOAuthService["cancel"]>>;
+    try {
+      result = await this.#options.oauth.cancel({
+        principalKind,
+        actorId: this.#options.actorId,
+        attemptId: pending.attemptId,
+        descriptor: pending.descriptor,
+      });
+    } catch {
+      return false;
+    }
+    if (result.kind !== "cancelled") return false;
+    await this.#commit(async () => {
+      if (this.#attempts.get(key) === pending) this.#attempts.delete(key);
+      if (this.#reserveUnownedSecret(pending.descriptor.clientAuthentication?.secretRef))
+        await this.#persist();
+    });
+    await this.#retireUnusedSecret(pending.descriptor.clientAuthentication?.secretRef);
+    return true;
+  }
+
+  async #signOut(
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
@@ -385,7 +1051,7 @@ export class McpServerSignIn {
       return refused("local-host-required", "Sign out from the Octant window on this host.");
     }
     const key = signInKey(extensionId, componentId);
-    this.#attempts.delete(key);
+    if (!(await this.#cancelPending(key, principalKind))) return cancellationPending();
     const record = this.#signIns.get(key);
     if (record === undefined) return { kind: "signed-out" };
     // The grant is revoked at the issuer where it can be and forgotten
@@ -397,27 +1063,49 @@ export class McpServerSignIn {
       credentialRef: record.credentialRef,
       forgetWhenNotRevoked: true,
     });
-    this.#signIns.delete(key);
-    await this.#persist();
+    await this.#commit(async () => {
+      if (this.#signIns.get(key) === record) this.#signIns.delete(key);
+      this.#reserveUnownedSecret(record.descriptor.clientAuthentication?.secretRef);
+      await this.#persist();
+    });
+    await this.#retireUnusedSecret(record.descriptor.clientAuthentication?.secretRef);
     return { kind: "signed-out" };
   }
 
+  #packageResources(extensionId: string): Set<string> {
+    const prefix = `${extensionId}:`;
+    const resources = new Set<string>();
+    for (const [key, known] of this.#serverResources)
+      if (key.startsWith(prefix)) for (const resource of known) resources.add(resource);
+    for (const [key, pending] of this.#attempts)
+      if (key.startsWith(prefix)) resources.add(pending.discovered.resource);
+    for (const [key, record] of this.#signIns)
+      if (key.startsWith(prefix) && record.descriptor.resource !== undefined)
+        resources.add(record.descriptor.resource);
+    return resources;
+  }
+
   /** Forgets a package's sign-ins once it is uninstalled; the grants are revoked where possible. */
-  async forgetPackage(extensionId: string): Promise<void> {
+  async #forgetPackage(extensionId: string): Promise<void> {
     await this.#load();
-    for (const [key, record] of Array.from(this.#signIns)) {
-      if (!key.startsWith(`${extensionId}:`)) continue;
-      await this.#options.oauth
-        .signOut({
-          principalKind: "local-window",
-          descriptor: record.descriptor,
-          credentialRef: record.credentialRef,
-          forgetWhenNotRevoked: true,
-        })
-        .catch(() => undefined);
-      this.#signIns.delete(key);
-    }
-    await this.#persist();
+    const prefix = `${extensionId}:`;
+    const resources = this.#packageResources(extensionId);
+    for (const resource of resources)
+      await this.#serialized(resource, async () => {
+        const keys = new Set<string>();
+        for (const [key, pending] of this.#attempts)
+          if (key.startsWith(prefix) && pending.discovered.resource === resource) keys.add(key);
+        for (const [key, record] of this.#signIns)
+          if (key.startsWith(prefix) && record.descriptor.resource === resource) keys.add(key);
+        for (const key of keys) {
+          const componentId = key.slice(prefix.length);
+          const result = await this.#signOut(extensionId, componentId, "local-window");
+          if (result.kind !== "signed-out")
+            throw new Error("Finish cancelling this server sign-in before removing its setup.");
+        }
+      });
+    for (const key of this.#serverResources.keys())
+      if (key.startsWith(prefix)) this.#serverResources.delete(key);
   }
 
   /**
@@ -426,7 +1114,7 @@ export class McpServerSignIn {
    * marked so Settings shows Sign in again; the launch goes out bare and the
    * server answers 401. A broker that is merely unavailable changes nothing.
    */
-  async attachBearer(
+  async #attachBearer(
     extensionId: string,
     componentId: string,
     launch: AgentPluginsMcpLaunchSpec,
@@ -454,12 +1142,15 @@ export class McpServerSignIn {
     } catch {
       return launch;
     }
-    if (!isRecord(answer)) return launch;
+    if (!isRecord(answer) || this.#signIns.get(key) !== record) return launch;
     if (answer.kind === "sign-in-again") {
       const reason = signInAgainReason(answer.reason);
       if (reason !== undefined && record.signInAgain !== reason) {
-        this.#signIns.set(key, { ...record, signInAgain: reason });
-        await this.#persist();
+        await this.#commit(async () => {
+          if (this.#signIns.get(key) !== record) return;
+          this.#signIns.set(key, { ...record, signInAgain: reason });
+          await this.#persist();
+        });
       }
       return launch;
     }
@@ -702,9 +1393,12 @@ export class McpServerSignIn {
     });
   }
 
-  async #load(): Promise<void> {
-    if (this.#loaded) return;
-    this.#loaded = true;
+  #load(): Promise<void> {
+    this.#loading ??= this.#readState();
+    return this.#loading;
+  }
+
+  async #readState(): Promise<void> {
     let raw: string;
     try {
       raw = await readFile(this.#options.statePath, "utf8");
@@ -714,6 +1408,16 @@ export class McpServerSignIn {
     try {
       const parsed = JSON.parse(raw) as PersistedSignIns;
       if (parsed.schemaVersion !== 1 || !isRecord(parsed.signIns)) return;
+      for (const reference of parsed.retiredClientSecrets ?? []) {
+        if (typeof reference === "string" && UUID_PATTERN.test(reference)) {
+          this.#retiredClientSecrets.add(reference);
+          this.#retirementStarted.add(reference);
+        }
+      }
+      for (const [key, port] of Object.entries(parsed.callbackPorts ?? {})) {
+        if (Number.isInteger(port) && port >= 1024 && port <= 65535)
+          this.#callbackPorts.set(key, port);
+      }
       for (const [key, registration] of Object.entries(parsed.registrations ?? {})) {
         try {
           this.#registrations.set(key, decodeMcpOAuthClientRegistration(registration));
@@ -736,9 +1440,22 @@ export class McpServerSignIn {
       schemaVersion: 1,
       signIns: Object.fromEntries(this.#signIns),
       registrations: Object.fromEntries(this.#registrations),
+      callbackPorts: Object.fromEntries(this.#callbackPorts),
+      retiredClientSecrets: Array.from(this.#retiredClientSecrets),
     };
     await mkdir(dirname(this.#options.statePath), { recursive: true, mode: 0o700 });
-    await writeFile(this.#options.statePath, JSON.stringify(payload), { mode: 0o600 });
+    const contents = JSON.stringify(payload);
+    if (this.#options.replaceState !== undefined) {
+      await this.#options.replaceState(this.#options.statePath, contents);
+      return;
+    }
+    const staging = `${this.#options.statePath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(staging, contents, { mode: 0o600, flag: "wx" });
+      await rename(staging, this.#options.statePath);
+    } finally {
+      await rm(staging, { force: true });
+    }
   }
 }
 
@@ -749,7 +1466,7 @@ function signInKey(extensionId: string, componentId: string): string {
 function refused(
   reason: Extract<McpServerSignInView, { kind: "refused" }>["reason"],
   message: string,
-): McpServerSignInView {
+): Extract<McpServerSignInView, { kind: "refused" }> {
   return { kind: "refused", reason, message };
 }
 
@@ -883,4 +1600,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function digest(text: string): string {
   return createHash("sha256").update(text).digest("hex").slice(0, 32);
+}
+
+function cancellationPending(): Extract<McpServerSignInView, { readonly kind: "cancel-pending" }> {
+  return {
+    kind: "cancel-pending",
+    message:
+      "Sign-in cancellation is not confirmed. Restore the credential broker and try Cancel sign-in again.",
+  };
+}
+
+function statusUnavailable(): Extract<
+  McpServerSignInView,
+  { readonly kind: "status-unavailable" }
+> {
+  return {
+    kind: "status-unavailable",
+    message:
+      "Sign-in status is unavailable. Restore the credential broker, then check sign-in or cancel this attempt.",
+  };
 }

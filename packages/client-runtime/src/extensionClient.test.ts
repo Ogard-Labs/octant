@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createExtensionClient, ExtensionClientFailure } from "./extensionClient";
 
 const capability = "window-capability";
@@ -11,6 +11,47 @@ function response(body: unknown, status = 200): Response {
 }
 
 describe("extension client", () => {
+  it("bounds a never-settling MCP sign-in response without replaying it or adopting a late response", async () => {
+    vi.useFakeTimers();
+    const held = Promise.withResolvers<Response>();
+    let calls = 0;
+    let signal: AbortSignal | null | undefined;
+    const client = createExtensionClient({
+      baseUrl: "http://127.0.0.1:9",
+      windowCapability: capability,
+      fetch: async (_input, init) => {
+        signal = init?.signal;
+        return calls++ === 0 ? held.promise : response({ kind: "signed-out" });
+      },
+    });
+    const target = {
+      extensionId: "44000000-0000-4000-8000-000000000002" as never,
+      componentId: "mcp-fixture" as never,
+    };
+    let observed: unknown;
+    const pending = client.mcpServerSignIn({ kind: "sign-out", ...target }).catch((error) => {
+      observed = error;
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(30_001);
+      await pending;
+      expect(observed).toBeInstanceOf(ExtensionClientFailure);
+      expect(observed).toMatchObject({ category: "unavailable" });
+      expect(signal?.aborted).toBe(true);
+      expect(calls).toBe(1);
+      held.resolve(response({ kind: "signed-in", issuer: "late.example" }));
+      await Promise.resolve();
+      expect(observed).toBeInstanceOf(ExtensionClientFailure);
+      expect(await client.mcpServerSignIn({ kind: "status", ...target })).toEqual({
+        kind: "signed-out",
+      });
+      expect(calls).toBe(2);
+    } finally {
+      held.resolve(response({ kind: "signed-out" }));
+      await pending;
+      vi.useRealTimers();
+    }
+  });
   it("resolves only an opaque local native skill receipt without installing or changing settings", async () => {
     const calls: { url: string; init: RequestInit | undefined }[] = [];
     const fetch: typeof globalThis.fetch = async (input, init) => {

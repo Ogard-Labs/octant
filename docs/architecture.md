@@ -8690,7 +8690,49 @@ that exact resource and issuer. Setup is a local-window-only
 it accepts only a generated hosted MCP server at that resource, and does not
 begin consent or alter an existing account grant. Safe registration metadata
 lives separately from account grants in the existing MCP sign-in state file,
-so sign-out and ordinary restarts retain the registration. A pre-registered
+so sign-out and ordinary restarts retain the registration. The shared component
+control offers **Client setup** independently of **Sign in**. Only that explicit
+setup action discovers the issuer and available authentication methods and
+prepares a retained, copyable exact callback; it neither dynamically registers
+an app nor starts consent. **Save client setup** rechecks the discovered resource,
+issuer and token endpoint and the prepared callback and refuses changed bindings. It accepts a
+registered public ID or an advertised HTTPS metadata-document identity. A
+confidential client chooses an item reference in an already linked secret store,
+using the same broker pointer validation and MCP credential namespace as a
+server's secret header; the host creates the opaque reference, and no raw
+secret or caller-created reference is entered in this form. An unavailable,
+locked or missing item refuses the save. Saving an unchanged identity can keep
+its existing secret reference; replacing the registration does not rewrite an
+existing account grant or replay consent. Setup is refused during a pending
+sign-in. Setup and consent mutations are ordered per resource; ordinary bearer
+reads and other resources do not wait on interactive discovery or secret lookup.
+A broker Begin holds that per-resource order for at most twenty seconds; a later
+answer naming an attempt is cancelled, so an unanswered Begin cannot block
+sign-out, setup or removal of the server.
+Shared-state mutations and rollback use one short commit queue and owner-only
+atomic file replacement. Broker deletion never holds that global queue. Before
+linking, a fresh client-secret UUID is reserved durably in the same state file;
+committing the registration consumes the reservation atomically, and removing
+the last owner transfers its UUID to a retirement reservation in that same
+commit. No setup changes while any component using that resource awaits
+consent. Terminal consent removal also checks the last pointer owner.
+
+At most 256 distinct owned or reserved client-secret UUIDs may be tracked;
+existing owners remain usable at the limit, and another secret is refused
+before provisioning. Both pointing and deletion wait at most ten seconds.
+A lost or uncertain point reply may precede a late broker set: no clear or
+absence reply can settle it, so its UUID remains reserved. A definitive original
+point completion after timeout may only retire the pointer, never configure an
+app or start consent; another explicit Save uses a fresh UUID. Only a definitive
+reply from the original clear releases its reservation; an uncertain outcome
+is retained across restart and is never silently evicted, replayed or accepted
+as a new setup reference. Relinking an external item always creates a fresh
+UUID. The bounded operator recovery procedure in the Plugins and skills guide
+requires stopping host and broker, proving each retired pointer has no owner,
+and deleting that exact scoped broker item before removing its reservation;
+sign-out does not promise to repair uncertain cleanup. A superseded pointer
+stays while any registration, retained grant or pending attempt references it.
+Late bearer replies cannot mark or attach a replaced grant. A pre-registered
 client supplies its public client ID and an exact callback
 `http://127.0.0.1:<configured-port>/oauth/callback`. A metadata-document client
 uses an HTTPS document URL as its public client ID only when issuer metadata
@@ -8744,7 +8786,11 @@ A broker status read has a ten-second bound at the HTTP client and service
 boundary. Timeout or transport failure is unknown status, not proof that the
 consent/exchange ended; its owner must be retained for a later explicit status
 check or cancellation. A late response to the expired read does not become a
-new sign-in result.
+new sign-in result. The renderer's MCP sign-in fetch/body has its own
+thirty-second caller bound, aborting where possible and ignoring a late answer
+even if an adapter ignores abort. This does not assert that a host operation
+stopped or that a setup save failed; an unknown save is checked by reopening
+setup. Other extension RPCs keep their existing policy.
 
 The authenticated broker also accepts cancellation of a retained MCP PKCE
 attempt only under the actor and descriptor recorded at Begin. It takes no
@@ -8756,15 +8802,30 @@ unavailable cleanup is not confirmed cancellation. Its retained attempt keeps
 ownership for an explicit retry rather than replaying an exchange or deleting
 before an original write finishes. This ownership is in broker memory, not a
 new durable recovery system: broker/process loss and native store failures
-still need honest recovery handling. The server's pending Sign out/uninstall
-consumers must use this result before dropping their pending owner; their
-integration reuses the existing application-setup operation queues.
+still need honest recovery handling. Pending Sign out and the explicit Cancel sign-in control use this result
+before dropping their pending owner. An unavailable cancellation stays visible
+with a retry action and blocks replacement consent or setup for that resource.
+An unavailable/unknown status also retains the pending owner and its secret;
+only a confirmed terminal broker result retires it. Check sign-in can explicitly
+collect a later confirmed result, or Cancel sign-in can clean up that same
+attempt, without starting consent again. Background polling never disables
+Cancel, and an operation generation prevents an older poll from restoring a
+signed-in or awaiting state after cancellation. A lost host reply retains the
+appropriate Check/Cancel recovery actions rather than keeping the control busy
+forever. These mutations reuse the existing application-setup resource queue; unrelated
+resources and ordinary bearer/status reads stay usable. A host-owned generated
+server's uninstall prepares cancellation before its lifecycle removes local
+retry access, blocks new Begin during that request, and releases the gate in
+finally. Pending cancellation failure leaves the package installed with an
+actionable retry; folders/secrets and already-established grants are not removed
+until lifecycle removal actually succeeds.
 
 This supplies a callback contract and protected registration route, not an
-advertised Slack connection or a catalog entry. The reusable app-setup view
-must select and save this same hostname after checking its displayed callback;
-that integration is separate concrete code while its owning stack remains
-under review. Eligible app registration, consent and a permitted tool read
+advertised Slack connection or a catalog entry. The reusable app-setup view selects and displays this host-owned callback,
+then Save retains the same hostname only after rechecking the shown binding.
+A secret-only issuer selects its advertised confidential method rather than
+pretending public authentication is available. Save remains separate from
+account consent, and cancellation/sign-out retain the application identity. Eligible app registration, consent and a permitted tool read
 require separate live verification. No app is registered or shared secret
 shipped by this dialect. Scopes
 follow the RFC 6749 scope-token grammar, so a URL-shaped scope survives. An

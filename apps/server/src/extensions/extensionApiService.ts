@@ -87,6 +87,7 @@ export class ExtensionApiService {
     | {
         owns(sourceRef: string): boolean;
         localSetupId?(sourceRef: string): "paper" | undefined;
+        prepareRemoval?(extensionId: string): Promise<() => void>;
         remove(sourceRef: string, extensionId: string): Promise<void>;
       }
     | undefined;
@@ -107,6 +108,7 @@ export class ExtensionApiService {
     readonly userAddedMcpServers?: {
       owns(sourceRef: string): boolean;
       localSetupId?(sourceRef: string): "paper" | undefined;
+      prepareRemoval?(extensionId: string): Promise<() => void>;
       remove(sourceRef: string, extensionId: string): Promise<void>;
     };
   }) {
@@ -275,18 +277,37 @@ export class ExtensionApiService {
           const source = this.#lifecycle
             .snapshot()
             .packages.find((candidate) => candidate.extensionId === command.extensionId)?.source;
-          const snapshot = await this.#lifecycle.uninstall(command.extensionId);
-          // The generated folder and its secrets go only once the package is
-          // really gone; a waiting uninstall keeps them for the retry.
-          if (
+          const owned =
             source !== undefined &&
             "sourceRef" in source &&
-            this.#userAddedMcpServers?.owns(source.sourceRef) === true &&
-            !snapshot.packages.some((candidate) => candidate.extensionId === command.extensionId)
-          ) {
-            await this.#userAddedMcpServers?.remove(source.sourceRef, command.extensionId);
+            this.#userAddedMcpServers?.owns(source.sourceRef) === true;
+          let release: (() => void) | undefined;
+          try {
+            release = owned
+              ? await this.#userAddedMcpServers?.prepareRemoval?.(command.extensionId)
+              : undefined;
+          } catch {
+            return failure(
+              "blocked",
+              "Sign-in cancellation is not confirmed. Restore the credential broker and retry removal.",
+            );
           }
-          return await this.#stateUpdated(snapshot, command);
+          try {
+            const snapshot = await this.#lifecycle.uninstall(command.extensionId);
+            // The generated folder and its secrets go only once the package is
+            // really gone; a waiting uninstall keeps them for the retry.
+            if (
+              source !== undefined &&
+              "sourceRef" in source &&
+              this.#userAddedMcpServers?.owns(source.sourceRef) === true &&
+              !snapshot.packages.some((candidate) => candidate.extensionId === command.extensionId)
+            ) {
+              await this.#userAddedMcpServers?.remove(source.sourceRef, command.extensionId);
+            }
+            return await this.#stateUpdated(snapshot, command);
+          } finally {
+            release?.();
+          }
         }
         case "set-plugin-desired":
           return await this.#stateUpdated(await this.#lifecycle.setPluginDesired(command), command);

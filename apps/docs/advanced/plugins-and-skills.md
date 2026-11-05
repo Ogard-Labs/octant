@@ -442,6 +442,22 @@ server with a key in a header. Support for each service's setup and account
 eligibility is added separately. Signing in and out work only from the Octant
 window on this host.
 
+Choose **Client setup** to use an app identity you registered yourself. The dialog
+shows the server and authorization server and an exact **Callback address** you
+can copy into your app registration. Enter the public **Client ID**, or choose
+**Client metadata URL** only when the authorization server supports it. A public
+client needs no client secret. For a confidential client, choose the advertised
+POST or Basic authentication method and an item reference from your linked
+1Password store; link the store in Settings first. This form takes the item
+address, never the secret value, and a locked or missing item must be restored
+before saving. An unchanged saved identity can keep its existing secret.
+**Save client setup** saves only the app identity; choose **Sign in** separately
+to consent to account access. If the server's addresses change while the dialog
+is open, reopen setup and check them before saving. Setup cannot change while a
+sign-in is pending, and sign-out preserves the app identity. Each service still
+needs its supported client type, callback policy, app eligibility and permissions;
+this form does not register an app with the service.
+
 For an integration configured with a registered client, its callback address
 stays the same after restarting Octant or signing out. If another program uses
 that callback port, close the conflicting listener and try again; Octant does
@@ -460,8 +476,77 @@ registered client with a secret sent by POST; general public-PKCE guidance is
 not proof that a public client works through this endpoint. The closed wire
 support selects only `search:read.public`, and refuses when it is not
 advertised. It requests no write permission and adds no Slack Library entry.
-The reusable app-setup view still needs to select and save this callback
-choice. Real app eligibility, consent and tool access need verification.
+Client setup shows this exact callback and saves it separately from consent.
+While a browser sign-in is pending, **Cancel sign-in** closes that attempt. If
+cancellation cannot be confirmed, restore the credential broker and use that
+same button to retry; a new consent attempt stays blocked. If status cannot be
+read, **Check sign-in** collects that existing attempt again, or use **Cancel
+sign-in**. A background status check does not disable cancellation. A slow or
+lost host reply stops waiting after thirty seconds and keeps these recovery
+actions; it does not start consent again. If a setup save reply is lost, reopen
+**Client setup** to check the saved identity before saving again. Removing a server
+waits for pending cancellation before removing your local retry access.
+Application setup remains after cancellation or sign-out. Real app eligibility,
+consent and tool access still need verification.
+
+### Recover retired client-secret references
+
+A failed or slow broker point or deletion can leave a retired reference whose
+outcome Octant cannot safely infer. Each waits at most ten seconds; a delayed
+point cannot configure an app after timeout. A lost point reply may precede a
+late write, so even a later absence reply is not proof that it finished. Octant keeps it across restarts and never reuses it.
+A definitive reply can release it; signing out does not repair an uncertain
+reply. Owned and reserved client-secret references share a limit of 256. At
+the limit, linking another secret is refused before the secret store is touched;
+existing accounts and public client setup remain usable. Relinking the same
+external item creates a new reference.
+
+This is operator maintenance when cleanup or local storage has failed, not a
+normal sign-in step. Do not clear the entire MCP credential namespace: other
+servers and account grants may still need its entries.
+
+1. Fully quit Octant and stop its host **and credential broker**, allowing their
+   existing child operations to finish or stop. Keep them stopped throughout
+   recovery, so an old request cannot delete an item after it is reclaimed.
+   Unlock the operating system credential store if necessary.
+2. Back up `extensions/mcp-server-sign-ins.json` beneath this host's provider
+   data directory, preserving its owner-only permissions. Read the
+   `retiredClientSecrets` UUIDs. Exclude any UUID still named by
+   `registrations[*].clientAuthentication.secretRef` or
+   `signIns[*].descriptor.clientAuthentication.secretRef`, or an
+   `${OCTANT_SECRET:UUID}` reference in a generated MCP package's headers or
+   environment. Never delete an owned pointer or infer that an unavailable broker means it is absent.
+3. Delete only the proven unowned UUID from this host's MCP namespace, using
+   the existing credential-store backend. This deletes Octant's pointer, not
+   the external 1Password item, and must not resolve or print its value.
+   On macOS the installed `OctantKeychainHelper` accepts this request on stdin:
+
+   ```json
+   {
+     "version": 1,
+     "storeScope": "HOST_STORE_UUID",
+     "namespace": "mcp-server-credential",
+     "operation": "delete",
+     "secretId": "RETIRED_UUID"
+   }
+   ```
+
+   Use the same host/store scope as that installation, derived by
+   `deriveHostRuntimeHostId` for its data directory, not a guessed UUID. Only
+   an `ok: true` reply proves completion. On Linux the same backend uses
+   `secret-tool clear service octant.mcp-server-credentials.v1 account RETIRED_UUID`;
+   require successful completion. These exact backend operations are local
+   and do not contact the vendor or change the external item.
+
+4. Only after confirmed deletion, with host and broker still stopped, remove
+   that UUID from `retiredClientSecrets` in the backed-up state file's active
+   copy. Keep every other field and unknown reservation, preserve mode `0600`,
+   and check that the file remains valid JSON. A failed or unknown deletion
+   leaves its reservation in place; do not make room by dropping it.
+5. Restart Octant and its host. Choose the external item again in Client setup
+   if needed; it gets a fresh UUID. If the operator cannot prove completion or
+   storage is still unavailable, keep the refusal and repair that concrete
+   backend/storage failure before linking more secrets.
 
 ### Found on this computer
 

@@ -8,7 +8,7 @@ import {
   type CredentialStore,
 } from "@octant/host-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { McpServerSignIn } from "./mcpServerSignIn";
+import { McpServerSignIn, type McpServerSignInOptions } from "./mcpServerSignIn";
 
 const extension = "44000000-0000-4000-8000-000000000002";
 const component = "slack-fixture";
@@ -101,12 +101,20 @@ async function fixture(
     readonly transport?: string;
     readonly metadata?: Parameters<typeof metadataFetch>[0];
     readonly access?: (credential: string) => Promise<unknown>;
+    readonly linkedSecrets?: McpServerSignInOptions["linkedSecrets"];
+    readonly serverUrl?: McpServerSignInOptions["serverUrl"];
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "octant-slack-wire-"));
   directories.push(directory);
   const statePath = join(directory, "sign-ins.json");
-  const oauth = { begin: vi.fn(), acknowledgeTerms: vi.fn(), status: vi.fn(), signOut: vi.fn() };
+  const oauth = {
+    begin: vi.fn(),
+    cancel: vi.fn(async () => ({ kind: "cancelled" })),
+    acknowledgeTerms: vi.fn(),
+    status: vi.fn(),
+    signOut: vi.fn(),
+  };
   const metadata = metadataFetch({
     ...options.metadata,
     ...(options.transport === undefined ? {} : { transport: options.transport }),
@@ -115,7 +123,8 @@ async function fixture(
   const service = new McpServerSignIn({
     statePath,
     oauth: oauth as never,
-    serverUrl: async () => options.transport ?? slack.transportUrl,
+    serverUrl: options.serverUrl ?? (async () => options.transport ?? slack.transportUrl),
+    ...(options.linkedSecrets === undefined ? {} : { linkedSecrets: options.linkedSecrets }),
     fetch: metadata.fetchImpl,
     access,
     actorId: credentialRef,
@@ -361,5 +370,170 @@ describe("closed Slack MCP transport and OAuth resource", () => {
     } finally {
       await runtime.close();
     }
+  });
+});
+
+describe("registered Slack setup and pending cancellation integration", () => {
+  it("prepares and saves the displayed localhost callback through the linked-secret setup owner without consent", async () => {
+    const point = vi.fn(async () => ({ status: "pointed" as const }));
+    const { service, oauth, statePath } = await fixture({
+      linkedSecrets: { point, forget: async () => undefined },
+    });
+    const prepared = await service.prepareClient(extension, component, "local-window");
+    expect(prepared).toMatchObject({
+      kind: "client-setup",
+      callback: "http://localhost:43125/oauth/callback",
+      authenticationMethods: ["client_secret_post"],
+    });
+    if (prepared.kind !== "client-setup") return;
+    const input = {
+      binding: {
+        resource: prepared.resource,
+        issuer: prepared.issuer,
+        tokenEndpoint: prepared.tokenEndpoint,
+        callback: prepared.callback,
+      },
+      kind: "registered",
+      clientId: "owned-fixture-client",
+      authentication: "client_secret_post",
+      secret: { store: "onepassword", reference: "op://Private/Slack/client secret" },
+    } as const;
+    expect(
+      await service.saveClient(
+        extension,
+        component,
+        {
+          ...input,
+          binding: { ...input.binding, callback: "http://127.0.0.1:43125/oauth/callback" },
+        },
+        "local-window",
+      ),
+    ).toMatchObject({ kind: "refused", reason: "invalid" });
+    expect(point).not.toHaveBeenCalled();
+    expect(await service.saveClient(extension, component, input, "remote-device")).toMatchObject({
+      kind: "refused",
+      reason: "local-host-required",
+    });
+    expect(await service.saveClient(extension, component, input, "local-window")).toEqual({
+      kind: "client-configured",
+    });
+    expect(oauth.begin).not.toHaveBeenCalled();
+    expect(oauth.acknowledgeTerms).not.toHaveBeenCalled();
+    const persisted = JSON.parse(await readFile(statePath, "utf8"));
+    expect(persisted.registrations[slack.resource]).toMatchObject({
+      redirectHostname: "localhost",
+      redirectPort: 43125,
+      clientAuthentication: { method: "client_secret_post" },
+    });
+    expect(JSON.stringify(persisted)).not.toContain("op://");
+    const restarted = new McpServerSignIn({
+      statePath,
+      oauth: oauth as never,
+      serverUrl: async () => slack.transportUrl,
+      fetch: metadataFetch().fetchImpl,
+      access: async () => ({ kind: "unavailable" }),
+      actorId: credentialRef,
+      pickPort: async () => {
+        throw new Error("Retained callback must be reused");
+      },
+    });
+    expect(await restarted.prepareClient(extension, component, "local-window")).toMatchObject({
+      callback: prepared.callback,
+      registration: { redirectHostname: "localhost" },
+    });
+  });
+  it("keeps failed cancellation owned, blocks replacement consent and permits explicit retry without losing registration", async () => {
+    const { service, oauth, statePath } = await fixture();
+    await service.configureForServer(
+      extension,
+      component,
+      { ...registration(), redirectHostname: "localhost" },
+      "local-window",
+    );
+    oauth.acknowledgeTerms.mockReturnValue({ kind: "recorded" });
+    oauth.begin.mockResolvedValue({
+      kind: "awaiting-consent",
+      flow: "authorization-code-pkce",
+      attemptId: credentialRef,
+      authorizationUrl: slack.authorizationEndpoint,
+      expiresAt: "2026-11-02T01:00:00.000Z",
+    });
+    await service.begin(extension, component, "local-window");
+    oauth.cancel.mockResolvedValueOnce({ kind: "unavailable" });
+    expect(await service.signOut(extension, component, "remote-device")).toMatchObject({
+      reason: "local-host-required",
+    });
+    expect(oauth.cancel).not.toHaveBeenCalled();
+    expect(await service.signOut(extension, component, "local-window")).toMatchObject({
+      kind: "cancel-pending",
+    });
+    expect(await service.status(extension, component, "local-window")).toMatchObject({
+      kind: "cancel-pending",
+    });
+    expect(await service.begin(extension, component, "local-window")).toMatchObject({
+      kind: "cancel-pending",
+    });
+    expect(oauth.begin).toHaveBeenCalledTimes(1);
+    expect(oauth.status).not.toHaveBeenCalled();
+    expect(await service.signOut(extension, component, "local-window")).toEqual({
+      kind: "signed-out",
+    });
+    expect(oauth.cancel).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        actorId: credentialRef,
+        attemptId: credentialRef,
+        descriptor: expect.objectContaining({ mcpIssuer: slack.issuer }),
+      }),
+    );
+    expect(
+      JSON.parse(await readFile(statePath, "utf8")).registrations[slack.resource].redirectHostname,
+    ).toBe("localhost");
+  });
+  it("waits for an in-flight Begin on the existing resource queue before uninstall cancels its exact attempt", async () => {
+    let release: (value: unknown) => void = () => undefined;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    const { service, oauth } = await fixture();
+    await service.configureForServer(
+      extension,
+      component,
+      { ...registration(), redirectHostname: "localhost" },
+      "local-window",
+    );
+    oauth.acknowledgeTerms.mockReturnValue({ kind: "recorded" });
+    oauth.begin.mockImplementation(() => held);
+    const pending = service.begin(extension, component, "local-window");
+    await vi.waitFor(() => expect(oauth.begin).toHaveBeenCalledTimes(1));
+    let removed = false;
+    const uninstall = service.preparePackageRemoval(extension).then((release) => {
+      removed = true;
+      return release;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(removed).toBe(false);
+    expect(await service.begin(extension, component, "local-window")).toMatchObject({
+      kind: "refused",
+      reason: "unavailable",
+    });
+    release({
+      kind: "awaiting-consent",
+      flow: "authorization-code-pkce",
+      attemptId: credentialRef,
+      authorizationUrl: slack.authorizationEndpoint,
+      expiresAt: "2026-11-02T01:00:00.000Z",
+    });
+    await pending;
+    const releaseRemoval = await uninstall;
+    expect(oauth.cancel).toHaveBeenCalledTimes(1);
+    expect(await service.begin(extension, component, "local-window")).toMatchObject({
+      kind: "refused",
+      reason: "unavailable",
+    });
+    releaseRemoval();
+    await service.forgetPackage(extension);
+    expect(await service.status(extension, component, "local-window")).toEqual({
+      kind: "signed-out",
+    });
   });
 });

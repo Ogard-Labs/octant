@@ -1,6 +1,7 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { McpServerSignInView } from "@octant/contracts/extension-rpc";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { McpClientSetupControl } from "./McpClientSetupControl";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface McpServerSignInControlProps {
@@ -26,23 +27,50 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
   const { client, extensionId, componentId } = props;
   const target = { extensionId: extensionId as never, componentId: componentId as never };
   const polling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const requestGeneration = useRef(0);
 
   const ask = useCallback(
-    async (request: Parameters<typeof client.mcpServerSignIn>[0]) => {
-      setBusy(true);
+    async (request: Parameters<typeof client.mcpServerSignIn>[0], interactive = true) => {
+      const generation = interactive ? ++requestGeneration.current : requestGeneration.current;
+      if (interactive) {
+        clearTimeout(polling.current);
+        polling.current = undefined;
+        setBusy(true);
+      }
       try {
         const next = await client.mcpServerSignIn(request);
+        if (generation !== requestGeneration.current) return undefined;
         setView(next);
         return next;
       } catch {
-        setView({
-          kind: "refused",
-          reason: "unavailable",
-          message: "Sign-in is unavailable right now.",
+        if (generation !== requestGeneration.current) return undefined;
+        setView((current) => {
+          if (request.kind === "poll" || request.kind === "status")
+            return {
+              kind: "status-unavailable",
+              message:
+                "Sign-in status is unavailable. Check sign-in or cancel this attempt when the host is available.",
+            };
+          if (
+            request.kind === "sign-out" &&
+            (current?.kind === "awaiting-consent" ||
+              current?.kind === "cancel-pending" ||
+              current?.kind === "status-unavailable")
+          )
+            return {
+              kind: "cancel-pending",
+              message:
+                "Sign-in cancellation is not confirmed. Try Cancel sign-in again when the host is available.",
+            };
+          return {
+            kind: "refused",
+            reason: "unavailable",
+            message: "Sign-in is unavailable right now.",
+          };
         });
         return undefined;
       } finally {
-        setBusy(false);
+        if (interactive && generation === requestGeneration.current) setBusy(false);
       }
     },
     [client],
@@ -50,10 +78,12 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
 
   useEffect(() => {
     let cancelled = false;
+    const generation = ++requestGeneration.current;
+    setBusy(false);
     client
       .mcpServerSignIn({ kind: "status", ...target })
       .then((next) => {
-        if (cancelled) return;
+        if (cancelled || generation !== requestGeneration.current) return;
         if (next.kind === "signed-out" && props.autoBegin === true) {
           void ask({ kind: "begin", ...target });
           return;
@@ -61,10 +91,11 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
         setView(next);
       })
       .catch(() => {
-        if (!cancelled) setView(undefined);
+        if (!cancelled && generation === requestGeneration.current) setView(undefined);
       });
     return () => {
       cancelled = true;
+      ++requestGeneration.current;
     };
     // The target is the two ids; a new object each render must not re-ask.
   }, [client, extensionId, componentId]);
@@ -72,13 +103,33 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
   useEffect(() => {
     if (view?.kind !== "awaiting-consent") return;
     const attemptId = view.attemptId;
+    const scheduledGeneration = requestGeneration.current;
     polling.current = setTimeout(() => {
-      void ask({ kind: "poll", ...target, attemptId });
+      if (scheduledGeneration !== requestGeneration.current) return;
+      void ask({ kind: "poll", ...target, attemptId }, false);
     }, props.pollIntervalMs ?? 2_000);
     return () => clearTimeout(polling.current);
   }, [view, ask, props.pollIntervalMs]);
 
-  if (view === undefined || view.kind === "not-applicable") return null;
+  if (
+    view === undefined ||
+    view.kind === "not-applicable" ||
+    view.kind === "client-setup" ||
+    view.kind === "client-configured"
+  )
+    return null;
+  const setup = (
+    <McpClientSetupControl
+      key={`${extensionId}:${componentId}`}
+      client={client}
+      extensionId={extensionId}
+      componentId={componentId}
+      disabled={props.disabled || busy}
+      onSaved={() => {
+        setView((current) => (current?.kind === "refused" ? { kind: "signed-out" } : current));
+      }}
+    />
+  );
   const signIn = (
     <OctantButton
       disabled={props.disabled || busy}
@@ -95,6 +146,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
       <div className="mcp-sign-in">
         <span className="mcp-sign-in__state">Not signed in</span>
         {signIn}
+        {setup}
       </div>
     );
   }
@@ -105,18 +157,49 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
           {view.reason === "revoked" ? "Access was revoked" : "The sign-in expired"}
         </span>
         {signIn}
+        {setup}
       </div>
     );
   }
-  if (view.kind === "awaiting-consent") {
+  if (
+    view.kind === "awaiting-consent" ||
+    view.kind === "cancel-pending" ||
+    view.kind === "status-unavailable"
+  ) {
     return (
       <div className="mcp-sign-in">
         <span className="mcp-sign-in__state" role="status">
-          Finish signing in in your browser.{" "}
-          <a href={view.authorizationUrl} rel="noreferrer" target="_blank">
-            Open the sign-in page
-          </a>
+          {view.kind !== "awaiting-consent" ? (
+            view.message
+          ) : (
+            <>
+              Finish signing in in your browser.{" "}
+              <a href={view.authorizationUrl} rel="noreferrer" target="_blank">
+                Open the sign-in page
+              </a>
+            </>
+          )}
         </span>
+        {view.kind === "status-unavailable" ? (
+          <OctantButton
+            disabled={props.disabled || busy}
+            onClick={() => void ask({ kind: "status", ...target })}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Check sign-in
+          </OctantButton>
+        ) : null}
+        <OctantButton
+          disabled={props.disabled || busy}
+          onClick={() => void ask({ kind: "sign-out", ...target })}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Cancel sign-in
+        </OctantButton>
       </div>
     );
   }
@@ -135,6 +218,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
         >
           Sign out
         </OctantButton>
+        {setup}
       </div>
     );
   }
@@ -143,7 +227,12 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
       <span className="mcp-sign-in__state" role="status">
         {view.message}
       </span>
-      {view.reason === "no-sign-in-offered" ? null : signIn}
+      {view.kind === "refused" && view.reason === "no-sign-in-offered" ? null : (
+        <>
+          {signIn}
+          {setup}
+        </>
+      )}
     </div>
   );
 }
