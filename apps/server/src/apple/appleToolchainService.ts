@@ -2636,12 +2636,27 @@ async function readCrashReportHead(
     if (!info.isFile() || info.size > MAX_CRASH_REPORT_BYTES) return undefined;
     const buffer = new Uint8Array(Math.min(info.size, CRASH_REPORT_HEAD_BYTES));
     const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, 0);
-    return { text: text(buffer.subarray(0, bytesRead)), truncated: info.size > bytesRead };
+    const truncated = info.size > bytesRead;
+    const head = buffer.subarray(0, bytesRead);
+    // The fatal decoder turns a character split by the cut into an empty
+    // report, whose header then names no app; end the head before it instead.
+    return { text: text(truncated ? withoutSplitCharacter(head) : head), truncated };
   } catch {
     return undefined;
   } finally {
     await handle?.close().catch(() => undefined);
   }
+}
+
+/** The bytes before a UTF-8 character the end of `bytes` cuts short. */
+function withoutSplitCharacter(bytes: Uint8Array): Uint8Array {
+  for (let back = 1; back <= Math.min(4, bytes.byteLength); back += 1) {
+    const byte = bytes[bytes.byteLength - back] ?? 0;
+    if ((byte & 0xc0) === 0x80) continue;
+    const length = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+    return length > back ? bytes.subarray(0, bytes.byteLength - back) : bytes;
+  }
+  return bytes;
 }
 
 function safeReason(reason: string): string {

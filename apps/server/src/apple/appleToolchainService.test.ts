@@ -1114,6 +1114,48 @@ describe("AppleToolchainService lifecycle", () => {
     }
   });
 
+  it("keeps a crash report whose first 8 KiB end inside a character", async () => {
+    const reports = await mkdtemp(join(tmpdir(), "octant-crash-reports-"));
+    try {
+      const header = `${JSON.stringify({ app_name: "Fixture", bundleID: "app.octant.fixture" })}\n`;
+      // "é" is two bytes and starts at byte 8191, so the read stops between them.
+      const body = `${header}${"x".repeat(8_191 - header.length)}é${"y".repeat(100)}`;
+      await writeFile(join(reports, "Fixture-1.ips"), body);
+
+      const base = discoveryExecutor();
+      const written: Uint8Array[] = [];
+      const service = new AppleToolchainService({
+        execute: vi.fn(async (input: Parameters<typeof base>[0]) => {
+          const command = input.argv.join(" ");
+          if (command.startsWith("xcrun simctl appinfo")) {
+            return processResult("{\n    CFBundleExecutable = Fixture;\n}\n");
+          }
+          if (command.includes("log show")) return processResult("a line\n");
+          return base(input);
+        }),
+        writeArtifact: async (_reference: string, bytes: Uint8Array) => {
+          written.push(bytes);
+        },
+        diagnosticReportsDirectory: reports,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      const evidence = await service.execute(simulatorRequest({ includeCrashes: true }), context);
+      expect(evidence).toMatchObject({ outcome: "succeeded", truncated: true });
+      expect(evidence.diagnostics[0].message).toBe(
+        "logs returned 1 line from app.octant.fixture and 1 crash reports",
+      );
+      const log = new TextDecoder().decode(written[0]);
+      expect(log).toContain("--- Fixture-1.ips ");
+      expect(log).toContain("x".repeat(100));
+      expect(log).not.toContain("é");
+    } finally {
+      rmSync(reports, { recursive: true, force: true });
+    }
+  });
+
   it("reconciles the shared Simulator state after owned boot and shutdown", async () => {
     const execute = discoveryExecutor();
     const service = new AppleToolchainService({

@@ -333,10 +333,12 @@ export function boundedDeviceLogTail(
   let truncated = false;
   for (let index = all.length - 1; index >= 0; index -= 1) {
     const whole = all[index] ?? "";
-    const line =
-      whole.length > DEVICE_LOG_LINE_CHARACTERS
-        ? whole.slice(0, DEVICE_LOG_LINE_CHARACTERS)
-        : whole;
+    // A limit that falls between a surrogate pair would leave half a
+    // character, which is written out as a replacement mark.
+    const cut = /[\uD800-\uDBFF]/.test(whole.charAt(DEVICE_LOG_LINE_CHARACTERS - 1))
+      ? DEVICE_LOG_LINE_CHARACTERS - 1
+      : DEVICE_LOG_LINE_CHARACTERS;
+    const line = whole.length > DEVICE_LOG_LINE_CHARACTERS ? whole.slice(0, cut) : whole;
     const size = encoder.encode(line).byteLength + 1;
     if (kept.length >= budget.lines || bytes + size > budget.bytes) {
       truncated = true;

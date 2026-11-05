@@ -405,6 +405,12 @@ describe("a device log read", () => {
     expect(bounded.truncated).toBe(true);
   });
 
+  it("shortens an overlong line before a character the limit would split, not inside it", () => {
+    const bounded = boundedDeviceLogTail(`${"x".repeat(2_047)}😀tail`, DEVICE_LOG_BUDGET);
+    expect(bounded.text).toBe("x".repeat(2_047));
+    expect(bounded.truncated).toBe(true);
+  });
+
   it("returns a short log whole and unmarked", () => {
     expect(boundedDeviceLogTail("a\r\nb\n", DEVICE_LOG_BUDGET)).toEqual({
       text: "a\nb",
