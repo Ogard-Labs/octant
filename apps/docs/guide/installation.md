@@ -100,8 +100,12 @@ for development. It is not yet a usable second app. On macOS, ordinary Nightly
 startup first authenticates a status check with a compatible signed Octant in
 the same login session. Development/ad-hoc builds refuse this connection; a
 missing response can mean Octant is closed or too old. A successful status check
-still reports the unfinished desktop client bridge before opening host data or
-initializing credentials. Installation and publication remain pending.
+is followed by separate authenticated window registration. A compatible host
+issues only that window's short-lived capability; Nightly loads its own screens
+without owning host data or credentials. Its renderer closes when it cannot
+renew the lease. Embedded Browser, shared native brokers and host retention are
+still unfinished, so this is not a usable Nightly release. Installation and
+publication remain pending.
 
 A local desktop package defaults to Octant. An explicitly selected
 `OCTANT_PACKAGE_FLAVOR=nightly` requires a matching dated preview or candidate

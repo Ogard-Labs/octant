@@ -61,7 +61,9 @@ function refused(value: unknown): {
 
 // The native worker checks its own deadline around Security/filesystem work.
 // This bound also prevents a late result from changing the startup decision.
-async function bounded(operation: () => Promise<unknown>): Promise<unknown> {
+export async function boundedDesktopPeerOperation(
+  operation: () => Promise<unknown>,
+): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -80,7 +82,7 @@ async function bounded(operation: () => Promise<unknown>): Promise<unknown> {
 export async function desktopPeerPreflight(
   native: Pick<NativeDesktopPeerStatus, "status">,
 ): Promise<DesktopPeerPreflight> {
-  const value = await bounded(() => native.status());
+  const value = await boundedDesktopPeerOperation(() => native.status());
   if (typeof value !== "object" || value === null || !("kind" in value)) return refused(value);
   if (value.kind === "refused") return refused(value);
   if (
@@ -100,7 +102,7 @@ export function ownDesktopPeerStatus(native: Pick<NativeDesktopPeerStatus, "star
   readonly ready: Promise<DesktopPeerStart>;
   readonly close: () => Promise<DesktopPeerClose>;
 } {
-  const ready = bounded(() => native.start()).then(
+  const ready = boundedDesktopPeerOperation(() => native.start()).then(
     (value): DesktopPeerStart =>
       typeof value === "object" && value !== null && "kind" in value && value.kind === "started"
         ? { kind: "started" }
@@ -124,7 +126,7 @@ export function ownDesktopPeerStatus(native: Pick<NativeDesktopPeerStatus, "star
 export async function closeDesktopPeerStatus(
   native: Pick<NativeDesktopPeerStatus, "close">,
 ): Promise<DesktopPeerClose> {
-  const value = await bounded(() => native.close());
+  const value = await boundedDesktopPeerOperation(() => native.close());
   if (typeof value === "object" && value !== null && "kind" in value) {
     if (value.kind === "closed") return { kind: "closed" };
     if ("reason" in value && value.reason === "deadline-exceeded")

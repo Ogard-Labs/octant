@@ -1,0 +1,186 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  ownNightlyWindowLeases,
+  type NativeWindowEvent,
+  type NativeWindowReply,
+} from "./nightlyBrowserLease";
+
+const clientHandle = "00000000-0000-4000-8000-000000000593";
+const peer = "a".repeat(64);
+function fixture() {
+  let receive: (event: unknown) => void = () => {};
+  let elapsed = 0;
+  let expire = () => {};
+  let host = {
+    origin: "http://127.0.0.1:13773",
+    instanceId: "00000000-0000-4000-8000-000000000594",
+    desktopBridgeSecret: "private-admin",
+  };
+  const responses = new Map<number, (reply: NativeWindowReply) => void>();
+  const replies = vi.fn((id: number, reply: NativeWindowReply) => {
+    responses.get(id)?.(reply);
+    return true;
+  });
+  const closeContexts = vi.fn(async (_id: string) => {});
+  const requests: Array<{ readonly method: string; readonly body: Record<string, unknown> }> = [];
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    const body: unknown = JSON.parse(String(init?.body));
+    if (typeof body !== "object" || body === null) throw new Error("invalid fixture request");
+    requests.push({ method: init?.method ?? "", body: Object.fromEntries(Object.entries(body)) });
+    return init?.method === "DELETE"
+      ? new Response(null, { status: 204 })
+      : Response.json(
+          { expiresAt: 15_000, generation: 1, leaseMs: 15_000 },
+          { status: init?.method === "POST" ? 201 : 200 },
+        );
+  });
+  const owner = ownNightlyWindowLeases({
+    native: {
+      listenWindows: async (listener) => {
+        receive = listener;
+        return { kind: "started" };
+      },
+      replyWindow: replies,
+      stopWindows: async () => ({ kind: "closed" }),
+    },
+    host: () => host,
+    elapsedNow: () => elapsed,
+    schedule: (_delay, callback) => {
+      expire = callback;
+      return () => {};
+    },
+    closeOwnerContexts: closeContexts,
+    fetch,
+  });
+  const send = (requestId: number, operation: "register" | "renew" | "revoke") =>
+    new Promise<NativeWindowReply>((resolve) => {
+      responses.set(requestId, resolve);
+      receive({
+        kind: "request",
+        request: { requestId, peer, windowId: clientHandle, generation: 1, operation },
+      } satisfies NativeWindowEvent);
+    });
+  return {
+    owner,
+    send,
+    fetch,
+    requests,
+    closeContexts,
+    replies,
+    exitPeer: () => receive({ kind: "peer-exited", peer }),
+    expire: () => {
+      elapsed = 15_000;
+      expire();
+    },
+    replaceHost: () => {
+      host = { ...host, instanceId: "00000000-0000-4000-8000-000000000595" };
+    },
+  };
+}
+
+describe("Nightly native window lease ownership", () => {
+  it("issues a fresh server window ID and returns only its scoped bootstrap", async () => {
+    const f = fixture();
+    try {
+      const reply = await f.send(1, "register");
+      expect(reply.kind).toBe("registered");
+      if (reply.kind !== "registered") throw new Error("Fixture registration failed");
+      expect(reply.windowId).not.toBe(clientHandle);
+      expect(f.owner.hasWindow(reply.windowId)).toBe(true);
+      expect(JSON.stringify(reply)).not.toContain("private-admin");
+      expect(f.requests[0]?.body.windowId).toBe(reply.windowId);
+      f.replaceHost();
+      expect(f.owner.hasWindow(reply.windowId)).toBe(false);
+    } finally {
+      await f.owner.close();
+    }
+  });
+
+  it("drops native availability and closes the issued context on local expiry", async () => {
+    const f = fixture();
+    try {
+      const reply = await f.send(1, "register");
+      if (reply.kind !== "registered") throw new Error("Fixture registration failed");
+      f.expire();
+      expect(f.owner.hasWindow(reply.windowId)).toBe(false);
+      await f.owner.close();
+      expect(f.closeContexts).toHaveBeenCalledWith(reply.windowId);
+      expect(
+        f.requests.some(
+          (request) => request.method === "DELETE" && request.body.windowId === reply.windowId,
+        ),
+      ).toBe(true);
+    } finally {
+      await f.owner.close();
+    }
+  });
+
+  it("never closes a context after a refused registration that established no ownership", async () => {
+    const f = fixture();
+    f.fetch.mockImplementationOnce(async () => new Response(null, { status: 409 }));
+    try {
+      expect((await f.send(1, "register")).kind).toBe("refused");
+      expect(f.closeContexts).not.toHaveBeenCalled();
+    } finally {
+      await f.owner.close();
+    }
+  });
+
+  it("revokes a late successful acquisition after its owner exits, without skipping sibling cleanup", async () => {
+    const f = fixture();
+    let finish = () => {};
+    let acquired = false;
+    const normalFetch = f.fetch.getMockImplementation();
+    f.fetch.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      acquired = true;
+      return Response.json({ expiresAt: 15_000, generation: 1, leaseMs: 15_000 }, { status: 201 });
+    });
+    f.fetch.mockImplementation(async (input, init) => {
+      if (init?.method === "DELETE") expect(acquired).toBe(true);
+      if (normalFetch === undefined) throw new Error("Fixture fetch missing");
+      return normalFetch(input, init);
+    });
+    try {
+      void f.send(1, "register");
+      f.exitPeer();
+      expect(f.closeContexts).not.toHaveBeenCalled();
+      finish();
+      await f.owner.close();
+      expect(f.closeContexts).toHaveBeenCalledOnce();
+      expect(f.requests.filter((request) => request.method === "DELETE")).toHaveLength(1);
+    } finally {
+      finish();
+      await f.owner.close();
+    }
+  });
+
+  it("reserves a closing client handle until its previous context cleanup finishes", async () => {
+    const f = fixture();
+    let finish = () => {};
+    f.closeContexts.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    try {
+      await f.send(1, "register");
+      const revoked = f.send(2, "revoke");
+      expect((await f.send(3, "register")).kind).toBe("refused");
+      finish();
+      expect((await revoked).kind).toBe("revoked");
+      expect((await f.send(4, "register")).kind).toBe("registered");
+      expect(
+        f.requests
+          .filter((request) => request.method === "POST")
+          .map((request) => request.body.windowId),
+      ).toHaveLength(2);
+    } finally {
+      finish();
+      await f.owner.close();
+    }
+  });
+});

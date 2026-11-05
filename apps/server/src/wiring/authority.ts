@@ -1,3 +1,4 @@
+import { notifyWindowRevocations } from "../windowRevocations";
 import { randomUUID } from "node:crypto";
 import {
   type AgentRun,
@@ -252,17 +253,22 @@ export function wireAuthority(deps: AuthorityDependencies) {
   };
   const windowAuthorityStore = new WindowAuthorityStore(
     (windowId) => {
-      codeApprovalStore.revokeWindow(windowId);
-      simulatorInputGrants.revokeWindow(String(windowId));
-      androidInputGrants.revokeWindow(String(windowId));
-      extensionToolApprovalService.revokeWindow(windowId);
-      routineProposalService.revokeWindow(windowId);
-      codeSessionAuthority.revokeWindow(windowId);
-      for (const [requestId, binding] of agentRunExecutionWindows) {
-        if (String(binding.windowId) === String(windowId))
-          agentRunExecutionWindows.delete(requestId);
-      }
-      for (const revoke of windowRevocations) revoke(windowId);
+      const notified = notifyWindowRevocations(windowId, [
+        (id) => codeApprovalStore.revokeWindow(id),
+        (id) => simulatorInputGrants.revokeWindow(String(id)),
+        (id) => androidInputGrants.revokeWindow(String(id)),
+        (id) => extensionToolApprovalService.revokeWindow(id),
+        (id) => routineProposalService.revokeWindow(id),
+        (id) => codeSessionAuthority.revokeWindow(id),
+        (id) => {
+          for (const [requestId, binding] of agentRunExecutionWindows) {
+            if (String(binding.windowId) === String(id)) agentRunExecutionWindows.delete(requestId);
+          }
+        },
+        ...windowRevocations,
+      ]);
+      if (notified.kind === "failed")
+        throw new Error("Octant could not notify every revoked window owner.");
     },
     {
       clampNow: processAuthorityNow,

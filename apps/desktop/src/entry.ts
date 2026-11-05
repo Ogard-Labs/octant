@@ -1,6 +1,6 @@
 import { CANVAS_PROTOTYPE_HOST_SWITCH, runCanvasPrototypeHost } from "./canvasPrototypeHost";
 import { app, dialog } from "electron";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   desktopIdentity,
@@ -37,6 +37,18 @@ if (identity.flavor === "nightly" || (app.isPackaged && process.platform === "da
       stderr: process.stderr,
     });
     app.exit(code);
+  } else if (identity.flavor === "nightly") {
+    // Electron waits for ESM evaluation before ready. The signed client path
+    // needs ready to create its window, so it must not hold this module open.
+    void launchDesktop().catch(() => {
+      void app.whenReady().then(() => {
+        dialog.showErrorBox(
+          identity.productName,
+          "Octant Nightly could not open its authenticated client window.",
+        );
+        app.quit();
+      });
+    });
   } else {
     await launchDesktop();
   }
@@ -47,19 +59,33 @@ if (identity.flavor === "nightly" || (app.isPackaged && process.platform === "da
 }
 
 async function launchDesktop(): Promise<void> {
+  if (identity.flavor === "nightly") {
+    app.setName(identity.productName);
+    const storage = desktopWindowStorageDirectory(identity, "", app.getPath("appData"));
+    mkdirSync(storage, { recursive: true, mode: 0o700 });
+    app.setPath("userData", storage);
+    app.setPath("sessionData", storage);
+  }
+  const native =
+    identity.flavor === "nightly"
+      ? loadDesktopPeerStatus({
+          packaged: app.isPackaged,
+          platform: process.platform,
+          resourcesPath: process.resourcesPath,
+        })
+      : undefined;
   const outcome = await launchDesktopApplication(
     identity,
     () => import(new URL("./main.mjs", import.meta.url).href),
     async () => {
-      const native = loadDesktopPeerStatus({
-        packaged: app.isPackaged,
-        platform: process.platform,
-        resourcesPath: process.resourcesPath,
-      });
       if (native === undefined) return { kind: "refused", reason: "native-unavailable" };
       const status = await desktopPeerPreflight(native);
       const closed = await closeDesktopPeerStatus(native);
       return closed.kind === "closed" ? status : { kind: "refused", reason: closed.reason };
+    },
+    async () => {
+      const { runNightlyClient } = await import("./nightlyClient");
+      return runNightlyClient(identity, native);
     },
   );
   if (outcome.kind === "client-bridge-required") {

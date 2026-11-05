@@ -1,3 +1,4 @@
+import { dispatchNativeWindowRequest } from "../nativeWindowRequest";
 import { observedRpcLatency, slowRequestRoute, withServerTiming } from "../latencyStatsProjection";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { compareRemoteForwardListToClassifier } from "../remoteForwardListClassifierGate";
@@ -347,7 +348,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await agentMessageRoutes(request)) ??
     (await themeRoutes(request));
 
-  const dispatchMeasuredProductRoutes = async (request: Request): Promise<Response | undefined> => {
+  const measureProductRoutes = async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const measurement = observedRpcLatency(url.pathname);
     if (measurement === undefined) return dispatchProductRoutes(request);
@@ -367,6 +368,9 @@ export function wireRoutes(deps: RoutesDependencies) {
     }
     return withServerTiming(response, measurement, durationMs);
   };
+
+  const dispatchMeasuredProductRoutes = (request: Request): Promise<Response | undefined> =>
+    dispatchNativeWindowRequest(request, windowAuthorityStore, Date.now(), measureProductRoutes);
 
   const forwardListDrift = compareRemoteForwardListToClassifier();
   if (forwardListDrift.length > 0) {
