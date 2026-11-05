@@ -615,6 +615,16 @@ servers and account grants may still need its entries.
    storage is still unavailable, keep the refusal and repair that concrete
    backend/storage failure before linking more secrets.
 
+### Google Workspace preview
+
+Gmail, Google Drive and Google Calendar have separate read-only preview
+connections using your own agentic Desktop OAuth client. Their setup explains
+the enrolled-account and project requirements, the exact permissions and the
+actions each connection refuses. They are not generally available; Google's
+preview terms and public-distribution restrictions still apply. Follow the
+[Google Workspace preview guide](/advanced/google-workspace) before attempting
+account consent.
+
 ### Found on this computer
 
 Below the extension packages, **Found on this computer** (**Found on this

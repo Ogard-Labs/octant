@@ -1,3 +1,5 @@
+import { GOOGLE_WORKSPACE_SERVICES } from "./googleWorkspaceConnectors";
+
 /**
  * The connectors catalog: hosted MCP servers a person can connect from
  * Settings by name. Every entry is data the app ships with, naming only the
@@ -52,11 +54,30 @@ export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string
  * up in the UI. Slack is separately documented on 2026-11-02: its exact dedicated
  * metadata requires a person-owned registered confidential client and a single
  * public-search scope; no live registration/consent/tool acceptance is claimed.
+ * Google entries are Developer Preview: the 2026-11-03 documentation establishes
+ * agentic Desktop public clients and per-service read scopes, not live acceptance
+ * or permission for public distribution.
  */
 export const GITHUB_REPOSITORY_PERMISSION_NOTICE =
   "Allows read and write access to public and private repositories and related organization resources available to your account. This OAuth App permission does not select individual repositories. Reusing the same app can change permissions returned to other connections; their original access policy is retained.";
 
 const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
+  ...GOOGLE_WORKSPACE_SERVICES.map(
+    (service): ConnectorCatalogEntry => ({
+      id: service.id,
+      displayName: `${service.displayName} preview`,
+      description: service.description,
+      category: "business",
+      url: service.resource,
+      auth: {
+        kind: "sign-in",
+        clientSetup: "registered",
+        setupGuide: "https://developers.google.com/workspace/guides/create-credentials#desktop-app",
+        requestedScopes: service.scopes,
+        permissionNotice: `Developer Preview requires an enrolled Workspace account and project. ${service.description} Public distribution requires Google's permission or general availability.`,
+      },
+    }),
+  ),
   {
     id: "slack",
     displayName: "Slack",

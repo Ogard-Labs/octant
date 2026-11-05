@@ -17,6 +17,8 @@ import type {
   GithubMcpPermissionProfile,
 } from "@octant/contracts/host-oauth";
 import {
+  GOOGLE_WORKSPACE_MCP_OAUTH,
+  googleWorkspaceMcpScopes,
   SLACK_MCP_USER_OAUTH,
   GITHUB_MCP_OAUTH_APP,
   githubMcpRequiredScopes,
@@ -864,6 +866,14 @@ export class McpServerSignIn {
     const url = await this.#options.serverUrl(extensionId, componentId);
     if (url === undefined) return { kind: "not-applicable" };
     if (
+      googleWorkspaceMcpScopes(canonicalResource(url)) !== undefined &&
+      this.#registrations.get(canonicalResource(url)) === undefined
+    )
+      return {
+        kind: "client-setup-required",
+        message: "Set up your enrolled Google Workspace Desktop client before signing in.",
+      };
+    if (
       canonicalResource(url) === SLACK_MCP_USER_OAUTH.transportUrl &&
       !slackRegistrationReady(this.#registrations.get(SLACK_MCP_USER_OAUTH.resource))
     )
@@ -930,6 +940,16 @@ export class McpServerSignIn {
     }
     if (discovered.kind === "unavailable") return refused("unavailable", discovered.message);
     const setup = this.#registrations.get(discovered.resource);
+    if (
+      googleWorkspaceMcpScopes(discovered.resource) !== undefined &&
+      (setup?.kind !== "registered" ||
+        !/^[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com$/.test(setup.clientId) ||
+        setup.clientAuthentication !== undefined)
+    )
+      return refused(
+        "issuer-unsupported",
+        "Use an agentic Desktop app client for your enrolled Google Workspace project. No client secret is needed.",
+      );
     if (
       setup !== undefined &&
       (setup.issuer !== discovered.issuerUrl ||
@@ -1691,6 +1711,13 @@ export class McpServerSignIn {
     // different API and then receive it on connect.
     const transportUrl = canonicalResource(serverUrl);
     const resource = mcpOAuthResourceForTransport(transportUrl);
+    const googleScopes = googleWorkspaceMcpScopes(resource);
+    // Google's resource metadata names the root issuer with a slash while its
+    // OpenID document names the same root without it. No other issuer is normalized.
+    const canonicalIssuer =
+      googleScopes !== undefined && issuer === `${GOOGLE_WORKSPACE_MCP_OAUTH.issuer}/`
+        ? GOOGLE_WORKSPACE_MCP_OAUTH.issuer
+        : issuer;
     if (
       typeof metadata.resource !== "string" ||
       !isAbsoluteUrl(metadata.resource) ||
@@ -1718,7 +1745,7 @@ export class McpServerSignIn {
       issuerMetadata === undefined ||
       // RFC 8414 §3.3: the document must name the issuer it was fetched for,
       // or its endpoints may belong to another tenant (issuer mix-up).
-      issuerMetadata.issuer !== issuer ||
+      issuerMetadata.issuer !== canonicalIssuer ||
       typeof authorizationEndpoint !== "string" ||
       typeof tokenEndpoint !== "string" ||
       !isHttps(authorizationEndpoint) ||
@@ -1736,6 +1763,22 @@ export class McpServerSignIn {
         message: "The authorization server does not support PKCE with S256.",
       };
     }
+    const googleAdvertisedScopes = metadata.scopes_supported;
+    if (
+      googleScopes !== undefined &&
+      (canonicalIssuer !== GOOGLE_WORKSPACE_MCP_OAUTH.issuer ||
+        authorizationEndpoint !== GOOGLE_WORKSPACE_MCP_OAUTH.authorizationEndpoint ||
+        tokenEndpoint !== GOOGLE_WORKSPACE_MCP_OAUTH.tokenEndpoint ||
+        !Array.isArray(methods) ||
+        !methods.includes("S256") ||
+        !Array.isArray(googleAdvertisedScopes) ||
+        !googleScopes.every((scope) => googleAdvertisedScopes.includes(scope)))
+    )
+      return {
+        kind: "issuer-unsupported",
+        message:
+          "Google Workspace metadata does not support the selected read-only native-client connection.",
+      };
     const slack = transportUrl === SLACK_MCP_USER_OAUTH.transportUrl;
     const reserved =
       slack ||
@@ -1799,16 +1842,19 @@ export class McpServerSignIn {
           "GitHub authorization metadata does not support the selected OAuth App permission profile.",
       };
     const registration = issuerMetadata.registration_endpoint;
-    const scopes = github
-      ? [...githubMcpRequiredScopes(mcpPermissionProfile), GITHUB_MCP_OAUTH_APP.rotationScope]
-      : slack
-        ? [SLACK_MCP_USER_OAUTH.readScope]
-        : Array.isArray(metadata.scopes_supported)
-          ? metadata.scopes_supported
-              .filter((entry): entry is string => typeof entry === "string")
-              .filter((entry) => SCOPE_TOKEN_PATTERN.test(entry))
-              .slice(0, 16)
-          : [];
+    const scopes =
+      googleScopes !== undefined
+        ? [...googleScopes]
+        : github
+          ? [...githubMcpRequiredScopes(mcpPermissionProfile), GITHUB_MCP_OAUTH_APP.rotationScope]
+          : slack
+            ? [SLACK_MCP_USER_OAUTH.readScope]
+            : Array.isArray(metadata.scopes_supported)
+              ? metadata.scopes_supported
+                  .filter((entry): entry is string => typeof entry === "string")
+                  .filter((entry) => SCOPE_TOKEN_PATTERN.test(entry))
+                  .slice(0, 16)
+              : [];
     return {
       kind: "discovered",
       resource,
@@ -1819,20 +1865,28 @@ export class McpServerSignIn {
           ? SLACK_MCP_USER_OAUTH.dialect
           : "mcp-authorization",
       issuer: issuerUrl.host,
-      issuerUrl: issuer,
+      issuerUrl: canonicalIssuer,
       metadataClientSupported:
-        !github && issuerMetadata.client_id_metadata_document_supported === true,
-      tokenAuthenticationMethods: github
-        ? ["client_secret_post"]
-        : Array.isArray(issuerMetadata.token_endpoint_auth_methods_supported)
-          ? issuerMetadata.token_endpoint_auth_methods_supported.filter(
-              (entry): entry is string => typeof entry === "string",
-            )
-          : ["client_secret_basic"],
+        googleScopes === undefined &&
+        !github &&
+        issuerMetadata.client_id_metadata_document_supported === true,
+      tokenAuthenticationMethods:
+        googleScopes !== undefined
+          ? ["none"]
+          : github
+            ? ["client_secret_post"]
+            : Array.isArray(issuerMetadata.token_endpoint_auth_methods_supported)
+              ? issuerMetadata.token_endpoint_auth_methods_supported.filter(
+                  (entry): entry is string => typeof entry === "string",
+                )
+              : ["client_secret_basic"],
       authorizationEndpoint,
       tokenEndpoint,
       registrationEndpoint:
-        !github && typeof registration === "string" && isHttps(registration)
+        googleScopes === undefined &&
+        !github &&
+        typeof registration === "string" &&
+        isHttps(registration)
           ? registration
           : undefined,
       scopes,

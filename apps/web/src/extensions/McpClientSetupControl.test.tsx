@@ -74,6 +74,46 @@ function setup(
 }
 
 describe("MCP application identity setup", () => {
+  it("uses an agentic Desktop public client for Google and explains its read-only preview consent before saving", async () => {
+    const user = userEvent.setup();
+    const google = {
+      ...prepared,
+      resource: "https://gmailmcp.googleapis.com/mcp/v1",
+      issuer: "https://accounts.google.com",
+      tokenEndpoint: "https://oauth2.googleapis.com/token",
+      metadataClientSupported: false,
+      authenticationMethods: ["none"] as const,
+      secretStoreAvailable: false,
+    };
+    const { mcpServerSignIn } = setup({ view: google });
+    await user.click(await screen.findByRole("button", { name: "Client setup" }));
+    expect(await screen.findByText(/Developer Preview requires/)).toBeVisible();
+    expect(screen.getByText(/Cannot draft, send, label, or delete/)).toBeVisible();
+    expect(screen.getByText(/AI-powered agent/)).toBeVisible();
+    expect(screen.queryByLabelText("Client secret item reference")).toBeNull();
+    await user.type(
+      screen.getByLabelText("Desktop client ID"),
+      "123-test.apps.googleusercontent.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Save client setup" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mcpServerSignIn).toHaveBeenCalledWith({
+      kind: "save-client",
+      ...target,
+      setup: {
+        kind: "registered",
+        binding: {
+          resource: google.resource,
+          issuer: google.issuer,
+          tokenEndpoint: google.tokenEndpoint,
+          callback: google.callback,
+        },
+        clientId: "123-test.apps.googleusercontent.com",
+        authentication: "none",
+      },
+    });
+    expect(mcpServerSignIn.mock.calls.some(([request]) => request.kind === "begin")).toBe(false);
+  });
   it("selects the only advertised confidential method and saves the exact displayed localhost callback separately from consent", async () => {
     const user = userEvent.setup();
     const slack = {
