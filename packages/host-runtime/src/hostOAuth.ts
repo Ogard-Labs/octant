@@ -18,8 +18,17 @@ import {
   isSlackMcpCallbackUri,
   decodeSlackMcpAccount,
   slackMcpReportedAccount,
-  type SlackMcpAccount,
 } from "./slackMcpOAuth";
+
+import {
+  GITHUB_MCP_OAUTH_APP,
+  isGithubMcpGrantBinding,
+  isGithubMcpDescriptorBinding,
+  isGithubMcpCallbackUri,
+  decodeGithubMcpAccount,
+  githubMcpReportedAccount,
+} from "./githubMcpOAuth";
+import type { McpOAuthAccount } from "./mcpOAuthAccount";
 
 const GRANT_KIND = "host-oauth-grant";
 const CALLBACK_PATH = "/oauth/callback";
@@ -27,6 +36,12 @@ const OPENROUTER_DIALECT = "openrouter-pkce";
 const CHATGPT_PLAN_DIALECT = "chatgpt-plan-siwc";
 const MCP_DIALECT = "mcp-authorization";
 const SLACK_MCP_DIALECT = SLACK_MCP_USER_OAUTH.dialect;
+const GITHUB_MCP_DIALECT = GITHUB_MCP_OAUTH_APP.dialect;
+function isMcpDialect(
+  dialect: unknown,
+): dialect is typeof MCP_DIALECT | typeof SLACK_MCP_DIALECT | typeof GITHUB_MCP_DIALECT {
+  return dialect === MCP_DIALECT || dialect === SLACK_MCP_DIALECT || dialect === GITHUB_MCP_DIALECT;
+}
 const DIRECTORY_DIALECT = "directory-oidc";
 // The one directory authority the directory dialect signs in against. The
 // broker builds every authority URL from this host and the tenant GUID, so no
@@ -162,6 +177,7 @@ export type HostOAuthDialect =
   | "chatgpt-plan-siwc"
   | "mcp-authorization"
   | "slack-mcp-user"
+  | "github-mcp-oauth-app"
   | "directory-oidc"
   | "issuer-oidc";
 
@@ -266,7 +282,9 @@ export type HostOAuthSignInAgainReason =
   | "refresh-reused"
   | "interaction-required"
   | "account-changed"
-  | "permission-missing";
+  | "permission-missing"
+  | "permission-mismatch"
+  | "identity-unavailable";
 
 export type HostOAuthRefusalReason =
   | "state-mismatch"
@@ -329,7 +347,7 @@ export type HostOAuthAccessResult =
   | {
       readonly kind: "granted";
       readonly accessToken: string;
-      readonly mcpAccount?: SlackMcpAccount;
+      readonly mcpAccount?: McpOAuthAccount;
       readonly tokenType: string;
       /** Absent when the stored credential does not expire. */
       readonly expiresAt?: string;
@@ -407,7 +425,7 @@ interface StoredGrant {
   readonly kind: typeof GRANT_KIND;
   readonly version: 1;
   readonly accessToken: string;
-  readonly mcpAccount?: SlackMcpAccount;
+  readonly mcpAccount?: McpOAuthAccount;
   /**
    * Absent when the issuer granted no refresh token (RFC 6749 §5.1 lets it):
    * the access token is the whole grant and expiry means signing in again.
@@ -572,15 +590,23 @@ export async function exchangeAuthorizationCode(input: {
 > {
   if (
     input.dialect !== SLACK_MCP_DIALECT &&
+    input.dialect !== GITHUB_MCP_DIALECT &&
     (input.mcpTransportUrl !== undefined ||
       input.mcpIssuer !== undefined ||
       input.resource === SLACK_MCP_USER_OAUTH.resource ||
-      input.tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint)
+      input.tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint ||
+      input.resource === GITHUB_MCP_OAUTH_APP.resource ||
+      input.tokenEndpoint === GITHUB_MCP_OAUTH_APP.tokenEndpoint)
   )
     return { kind: "refused", reason: "exchange-refused" };
   if (
     input.dialect === SLACK_MCP_DIALECT &&
     (!isSlackMcpUserGrantBinding(input) || !isSlackMcpCallbackUri(input.redirectUri))
+  )
+    return { kind: "refused", reason: "exchange-refused" };
+  if (
+    input.dialect === GITHUB_MCP_DIALECT &&
+    (!isGithubMcpGrantBinding(input) || !isGithubMcpCallbackUri(input.redirectUri))
   )
     return { kind: "refused", reason: "exchange-refused" };
   if (!codeVerifierMatchesChallenge(input.verifier, input.challenge)) {
@@ -658,10 +684,10 @@ export async function exchangeAuthorizationCode(input: {
     generation: 0,
     codeExchange: true,
     ...(input.resource === undefined ? {} : { resource: input.resource }),
-    ...(input.dialect === MCP_DIALECT || input.dialect === SLACK_MCP_DIALECT
-      ? { refreshTokenOptional: true }
+    ...(isMcpDialect(input.dialect) ? { refreshTokenOptional: true } : {}),
+    ...(input.dialect === SLACK_MCP_DIALECT || input.dialect === GITHUB_MCP_DIALECT
+      ? { tokenDialect: input.dialect }
       : {}),
-    ...(input.dialect === SLACK_MCP_DIALECT ? { tokenDialect: SLACK_MCP_DIALECT } : {}),
     ...(input.mcpTransportUrl === undefined ? {} : { mcpTransportUrl: input.mcpTransportUrl }),
     ...(input.mcpIssuer === undefined ? {} : { mcpIssuer: input.mcpIssuer }),
     ...(input.clientAuthentication === undefined
@@ -2160,9 +2186,7 @@ export function createHostOAuthRuntime(options: {
     const expiresAt = now() + timeoutMs;
     const attempt: Attempt = {
       descriptorId: descriptor.descriptorId,
-      ...(descriptor.dialect === MCP_DIALECT || descriptor.dialect === SLACK_MCP_DIALECT
-        ? { cancelActorId: actorId }
-        : {}),
+      ...(isMcpDialect(descriptor.dialect) ? { cancelActorId: actorId } : {}),
       closed: false,
       listeners: [],
       timer: undefined,
@@ -2340,8 +2364,11 @@ export function createHostOAuthRuntime(options: {
       response.end("forbidden");
       return;
     }
+    const strictCallback =
+      session.descriptor.redirectHostname === "localhost" ||
+      session.descriptor.dialect === GITHUB_MCP_DIALECT;
     if (
-      session.descriptor.redirectHostname === "localhost" &&
+      strictCallback &&
       (request.headers.host !== new URL(session.redirectUri).host ||
         !request.url?.startsWith("/") ||
         request.url.startsWith("//") ||
@@ -2352,10 +2379,7 @@ export function createHostOAuthRuntime(options: {
       return;
     }
     const url = new URL(request.url ?? "/", session.redirectUri);
-    if (
-      session.descriptor.redirectHostname === "localhost" &&
-      url.origin !== new URL(session.redirectUri).origin
-    ) {
+    if (strictCallback && url.origin !== new URL(session.redirectUri).origin) {
       response.writeHead(400, { "cache-control": "no-store" });
       response.end();
       return;
@@ -2385,10 +2409,12 @@ export function createHostOAuthRuntime(options: {
       finishListener(session.attempt);
       return;
     }
-    // A reported authorization-server identity may not switch the closed Slack issuer.
+    // Closed profiles cannot switch issuer; GitHub advertises and must return it.
     if (
-      session.descriptor.dialect === SLACK_MCP_DIALECT &&
+      (session.descriptor.dialect === SLACK_MCP_DIALECT ||
+        session.descriptor.dialect === GITHUB_MCP_DIALECT) &&
       (params.getAll("iss").length > 1 ||
+        (session.descriptor.dialect === GITHUB_MCP_DIALECT && !params.has("iss")) ||
         (params.has("iss") && params.get("iss") !== session.descriptor.mcpIssuer))
     ) {
       publish(
@@ -2918,7 +2944,9 @@ export function createHostOAuthRuntime(options: {
       generation,
       codeExchange: false,
       ...(current.resource === undefined ? {} : { resource: current.resource }),
-      ...(current.dialect === SLACK_MCP_DIALECT ? { tokenDialect: SLACK_MCP_DIALECT } : {}),
+      ...(current.dialect === SLACK_MCP_DIALECT || current.dialect === GITHUB_MCP_DIALECT
+        ? { tokenDialect: current.dialect }
+        : {}),
       ...(current.mcpTransportUrl === undefined
         ? {}
         : { mcpTransportUrl: current.mcpTransportUrl }),
@@ -2934,7 +2962,8 @@ export function createHostOAuthRuntime(options: {
     if (exchanged.kind === "pending") return { kind: "transient" };
     if (exchanged.kind === "refused") {
       const reason =
-        current.dialect === SLACK_MCP_DIALECT && exchanged.signInAgain !== undefined
+        (current.dialect === SLACK_MCP_DIALECT || current.dialect === GITHUB_MCP_DIALECT) &&
+        exchanged.signInAgain !== undefined
           ? exchanged.signInAgain
           : refreshRefusal(exchanged.reason, exchanged.error);
       try {
@@ -3030,8 +3059,7 @@ export function createHostOAuthRuntime(options: {
         }
         return { kind: "unavailable" };
       }
-      if (grant.dialect === MCP_DIALECT || grant.dialect === SLACK_MCP_DIALECT)
-        return retireMcpGrant(credentialRef);
+      if (isMcpDialect(grant.dialect)) return retireMcpGrant(credentialRef);
       // Only the ChatGPT plan dialect has a revocation endpoint: the refresh
       // token is revoked at the issuer's discovery revocation_endpoint before
       // the local grant is dropped. Other dialects have nothing to revoke.
@@ -3317,7 +3345,7 @@ async function requestTokens(input: {
   readonly clientId: string;
   readonly tokenEndpoint: string;
   readonly previousRefresh: string | undefined;
-  readonly previousMcpAccount?: SlackMcpAccount;
+  readonly previousMcpAccount?: McpOAuthAccount;
   readonly generation: number;
   readonly codeExchange: boolean;
   /** MCP authorization dialect: kept on the grant so a refresh names it again. */
@@ -3326,7 +3354,7 @@ async function requestTokens(input: {
   readonly mcpIssuer?: string;
   /** MCP authorization dialect: an issuer may grant an access token alone. */
   readonly refreshTokenOptional?: boolean;
-  readonly tokenDialect?: typeof SLACK_MCP_DIALECT;
+  readonly tokenDialect?: typeof SLACK_MCP_DIALECT | typeof GITHUB_MCP_DIALECT;
   /**
    * Directory and issuer refresh: read the refusal's error code the way that
    * dialect documents it, never its description.
@@ -3338,11 +3366,17 @@ async function requestTokens(input: {
 }): Promise<TokenRequestResult> {
   if (input.tokenDialect === SLACK_MCP_DIALECT && !isSlackMcpUserGrantBinding(input))
     return { kind: "refused", reason: "exchange-refused" };
+  if (input.tokenDialect === GITHUB_MCP_DIALECT && !isGithubMcpGrantBinding(input))
+    return { kind: "refused", reason: "exchange-refused" };
   let response: Response;
   let body: Record<string, unknown> | undefined;
   try {
     const form = new URLSearchParams(input.form);
     const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded" };
+    if (input.tokenDialect === GITHUB_MCP_DIALECT) {
+      headers.accept = "application/json";
+      headers["user-agent"] = GITHUB_MCP_OAUTH_APP.userAgent;
+    }
     if (input.clientAuthentication !== undefined) {
       if (input.clientAuthentication.tokenEndpoint !== input.endpoint)
         return { kind: "refused", reason: "exchange-refused" };
@@ -3392,6 +3426,10 @@ async function requestTokens(input: {
       )
         return { kind: "refused", reason: "exchange-refused", error };
     }
+    // GitHub answers an expired or revoked refresh token with its own code and
+    // HTTP 200; retrying never succeeds, so the grant ends and asks for sign-in.
+    if (input.tokenDialect === GITHUB_MCP_DIALECT && error === "bad_refresh_token")
+      return { kind: "refused", reason: "exchange-refused", error };
     if (input.refreshErrors !== undefined && ERROR_PATTERN.test(error)) {
       return input.refreshErrors(error, body);
     }
@@ -3411,8 +3449,21 @@ async function requestTokens(input: {
       (reportedTokenType !== "user" && reportedTokenType?.toLowerCase() !== "bearer"))
   )
     return { kind: "refused", reason: "exchange-refused" };
+  if (
+    input.tokenDialect === GITHUB_MCP_DIALECT &&
+    (reportedTokenType?.toLowerCase() !== "bearer" ||
+      typeof body.expires_in !== "number" ||
+      !Number.isSafeInteger(body.expires_in) ||
+      body.expires_in <= 0 ||
+      !Number.isSafeInteger(input.now() + body.expires_in * 1000) ||
+      input.now() + body.expires_in * 1000 > 8_640_000_000_000_000 ||
+      stringField(body, "refresh_token") === undefined)
+  )
+    return { kind: "refused", reason: "exchange-refused" };
   const tokenType =
-    input.tokenDialect === SLACK_MCP_DIALECT ? "Bearer" : (reportedTokenType ?? "Bearer");
+    input.tokenDialect === SLACK_MCP_DIALECT || input.tokenDialect === GITHUB_MCP_DIALECT
+      ? "Bearer"
+      : (reportedTokenType ?? "Bearer");
   const expiresIn = numberField(body, "expires_in") ?? 3_600;
   const idToken = stringField(body, "id_token");
   if (
@@ -3424,12 +3475,33 @@ async function requestTokens(input: {
   ) {
     return { kind: "refused", reason: "exchange-refused" };
   }
+  const githubIdentity =
+    input.tokenDialect === GITHUB_MCP_DIALECT
+      ? await readGithubMcpIdentity(input.fetch, accessToken)
+      : undefined;
+  if (input.tokenDialect === GITHUB_MCP_DIALECT && githubIdentity === undefined)
+    return {
+      kind: "refused",
+      reason: "exchange-refused",
+      ...(input.codeExchange ? {} : { signInAgain: "identity-unavailable" }),
+    };
   const reported =
-    input.tokenDialect === SLACK_MCP_DIALECT
-      ? slackMcpReportedAccount(body, input.previousMcpAccount)
-      : { kind: "valid" as const };
+    input.tokenDialect === GITHUB_MCP_DIALECT && githubIdentity !== undefined
+      ? githubMcpReportedAccount({
+          token: body,
+          identity: githubIdentity.body,
+          oauthScopes: githubIdentity.oauthScopes,
+          ...(input.previousMcpAccount === undefined ? {} : { previous: input.previousMcpAccount }),
+        })
+      : input.tokenDialect === SLACK_MCP_DIALECT
+        ? slackMcpReportedAccount(body, input.previousMcpAccount)
+        : { kind: "valid" as const };
   if (reported.kind !== "valid") {
-    if (reported.kind === "account-changed" || reported.kind === "permission-missing")
+    if (
+      reported.kind === "account-changed" ||
+      reported.kind === "permission-missing" ||
+      reported.kind === "permission-mismatch"
+    )
       return {
         kind: "refused",
         reason: input.codeExchange ? "denied" : "exchange-refused",
@@ -3455,7 +3527,9 @@ async function requestTokens(input: {
       generation: input.generation + 1,
       ...(idToken === undefined ? {} : { idToken }),
       ...(input.resource === undefined ? {} : { resource: input.resource }),
-      ...(input.tokenDialect === SLACK_MCP_DIALECT ? { dialect: SLACK_MCP_DIALECT } : {}),
+      ...(input.tokenDialect === SLACK_MCP_DIALECT || input.tokenDialect === GITHUB_MCP_DIALECT
+        ? { dialect: input.tokenDialect }
+        : {}),
       ...(input.mcpTransportUrl === undefined ? {} : { mcpTransportUrl: input.mcpTransportUrl }),
       ...(input.mcpIssuer === undefined ? {} : { mcpIssuer: input.mcpIssuer }),
       ...(input.clientAuthentication === undefined
@@ -3463,6 +3537,50 @@ async function requestTokens(input: {
         : { clientAuthentication: input.clientAuthentication }),
     },
   };
+}
+
+/** Identity verification is part of this token transaction, never a Settings MCP probe. */
+async function readGithubMcpIdentity(
+  fetchPort: typeof fetch,
+  accessToken: string,
+): Promise<
+  { readonly body: Record<string, unknown>; readonly oauthScopes: string | null } | undefined
+> {
+  const signal = issuerRequestDeadline();
+  let onAbort: (() => void) | undefined;
+  try {
+    const request = (async () => {
+      const response = await fetchPort(GITHUB_MCP_OAUTH_APP.identityEndpoint, {
+        method: "GET",
+        redirect: "error",
+        signal,
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          accept: "application/vnd.github+json",
+          "user-agent": GITHUB_MCP_OAUTH_APP.userAgent,
+          "x-github-api-version": GITHUB_MCP_OAUTH_APP.apiVersion,
+        },
+      });
+      if (response.status !== 200) return undefined;
+      const body = await readResponseJson(response);
+      return body === undefined
+        ? undefined
+        : { body, oauthScopes: response.headers.get("x-oauth-scopes") };
+    })();
+    const result = await Promise.race([
+      request,
+      new Promise<undefined>((resolve) => {
+        onAbort = () => resolve(undefined);
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) resolve(undefined);
+      }),
+    ]);
+    return signal.aborted ? undefined : result;
+  } catch {
+    return undefined;
+  } finally {
+    if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 function mapTokenError(error: string, codeExchange: boolean): TokenRequestResult {
@@ -3537,25 +3655,45 @@ function decodeGrant(raw: string): StoredGrant {
   const mcpTransportUrl = parsed.mcpTransportUrl;
   const mcpIssuer = parsed.mcpIssuer;
   const mcpAccount =
-    parsed.mcpAccount === undefined ? undefined : decodeSlackMcpAccount(parsed.mcpAccount);
+    parsed.mcpAccount === undefined
+      ? undefined
+      : dialect === GITHUB_MCP_DIALECT
+        ? decodeGithubMcpAccount(parsed.mcpAccount)
+        : decodeSlackMcpAccount(parsed.mcpAccount);
   if (
-    parsed.mcpAccount !== undefined &&
-    (dialect !== SLACK_MCP_DIALECT || mcpAccount === undefined)
+    (parsed.mcpAccount !== undefined &&
+      ((dialect !== SLACK_MCP_DIALECT && dialect !== GITHUB_MCP_DIALECT) ||
+        mcpAccount === undefined)) ||
+    (dialect === GITHUB_MCP_DIALECT &&
+      (mcpAccount?.userId === undefined ||
+        typeof expiresAt !== "number" ||
+        !Number.isSafeInteger(expiresAt) ||
+        expiresAt <= 0 ||
+        expiresAt > 8_640_000_000_000_000 ||
+        typeof refreshToken !== "string" ||
+        refreshToken.length === 0 ||
+        tokenType !== "Bearer"))
   )
     throw new CredentialStoreFailure("invalid");
+  const mcpBinding = {
+    clientId,
+    resource,
+    tokenEndpoint,
+    mcpTransportUrl,
+    mcpIssuer,
+    clientAuthentication,
+  };
   if (
     dialect === SLACK_MCP_DIALECT
-      ? !isSlackMcpUserGrantBinding({
-          resource,
-          tokenEndpoint,
-          mcpTransportUrl,
-          mcpIssuer,
-          clientAuthentication,
-        })
-      : mcpTransportUrl !== undefined ||
-        mcpIssuer !== undefined ||
-        resource === SLACK_MCP_USER_OAUTH.resource ||
-        tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint
+      ? !isSlackMcpUserGrantBinding(mcpBinding)
+      : dialect === GITHUB_MCP_DIALECT
+        ? !isGithubMcpGrantBinding(mcpBinding)
+        : mcpTransportUrl !== undefined ||
+          mcpIssuer !== undefined ||
+          resource === SLACK_MCP_USER_OAUTH.resource ||
+          tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint ||
+          resource === GITHUB_MCP_OAUTH_APP.resource ||
+          tokenEndpoint === GITHUB_MCP_OAUTH_APP.tokenEndpoint
   )
     throw new CredentialStoreFailure("invalid");
   if (parsed.clientAuthentication !== undefined && clientAuthentication === undefined)
@@ -3656,6 +3794,7 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
     dialect !== CHATGPT_PLAN_DIALECT &&
     dialect !== MCP_DIALECT &&
     dialect !== SLACK_MCP_DIALECT &&
+    dialect !== GITHUB_MCP_DIALECT &&
     dialect !== DIRECTORY_DIALECT &&
     dialect !== ISSUER_DIALECT
   ) {
@@ -3663,7 +3802,7 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   }
   if (
     descriptor.clientAuthentication !== undefined &&
-    ((dialect !== MCP_DIALECT && dialect !== SLACK_MCP_DIALECT) ||
+    (!isMcpDialect(dialect) ||
       parseClientAuthentication(descriptor.clientAuthentication) === undefined ||
       descriptor.clientAuthentication.tokenEndpoint !== descriptor.tokenEndpoint)
   )
@@ -3671,12 +3810,17 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   if (
     dialect === SLACK_MCP_DIALECT
       ? !isSlackMcpUserDescriptorBinding(descriptor)
-      : descriptor.redirectHostname !== undefined ||
-        descriptor.mcpTransportUrl !== undefined ||
-        descriptor.mcpIssuer !== undefined ||
-        descriptor.resource === SLACK_MCP_USER_OAUTH.resource ||
-        descriptor.authorizationEndpoint === SLACK_MCP_USER_OAUTH.authorizationEndpoint ||
-        descriptor.tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint
+      : dialect === GITHUB_MCP_DIALECT
+        ? !isGithubMcpDescriptorBinding(descriptor)
+        : descriptor.redirectHostname !== undefined ||
+          descriptor.mcpTransportUrl !== undefined ||
+          descriptor.mcpIssuer !== undefined ||
+          descriptor.resource === SLACK_MCP_USER_OAUTH.resource ||
+          descriptor.authorizationEndpoint === SLACK_MCP_USER_OAUTH.authorizationEndpoint ||
+          descriptor.tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint ||
+          descriptor.resource === GITHUB_MCP_OAUTH_APP.resource ||
+          descriptor.authorizationEndpoint === GITHUB_MCP_OAUTH_APP.authorizationEndpoint ||
+          descriptor.tokenEndpoint === GITHUB_MCP_OAUTH_APP.tokenEndpoint
   )
     return undefined;
   if (dialect === DIRECTORY_DIALECT) return validateDirectoryDescriptor(descriptor);
@@ -3689,7 +3833,7 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   ) {
     return undefined;
   }
-  if (dialect === MCP_DIALECT || dialect === SLACK_MCP_DIALECT) {
+  if (isMcpDialect(dialect)) {
     // The MCP authorization flow registered its client before beginning and
     // names the server the token is for; a server may grant with no scope.
     if (
@@ -3888,6 +4032,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     dialect !== CHATGPT_PLAN_DIALECT &&
     dialect !== MCP_DIALECT &&
     dialect !== SLACK_MCP_DIALECT &&
+    dialect !== GITHUB_MCP_DIALECT &&
     dialect !== DIRECTORY_DIALECT &&
     dialect !== ISSUER_DIALECT
   ) {

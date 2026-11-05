@@ -199,9 +199,13 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
             ? "Check the connected account and sign in again"
             : view.reason === "permission-missing"
               ? "The account did not grant the required permission"
-              : view.reason === "revoked"
-                ? "Access was revoked"
-                : "The sign-in expired"}
+              : view.reason === "permission-mismatch"
+                ? "Review the app permissions and sign in with only the requested access"
+                : view.reason === "identity-unavailable"
+                  ? "The account could not be verified. Sign in again"
+                  : view.reason === "revoked"
+                    ? "Access was revoked"
+                    : "The sign-in expired"}
         </span>
         {registration}
         {signIn}

@@ -2,6 +2,22 @@ import { describe, expect, it } from "vitest";
 import { connectorCatalog, featuredConnectors, searchConnectorCatalog } from "./connectorCatalog";
 
 describe("the connectors catalog", () => {
+  it("keeps GitHub PAT separate from the bounded registered OAuth App read profile", () => {
+    const pat = connectorCatalog().find((entry) => entry.id === "github");
+    const app = connectorCatalog().find((entry) => entry.id === "github-oauth");
+    expect(pat?.auth).toMatchObject({ kind: "key", header: "Authorization", prefix: "Bearer" });
+    expect(app).toMatchObject({
+      displayName: "GitHub OAuth App",
+      url: pat?.url,
+      auth: {
+        kind: "sign-in",
+        clientSetup: "registered",
+        requestedScopes: ["read:user", "offline_access"],
+      },
+    });
+    expect(featuredConnectors().map((entry) => entry.id)).not.toContain("github-oauth");
+  });
+
   it("requires person-owned app setup for Slack public search at the documented transport", () => {
     expect(connectorCatalog().find((entry) => entry.id === "slack")).toMatchObject({
       displayName: "Slack",

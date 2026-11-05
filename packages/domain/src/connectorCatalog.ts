@@ -114,6 +114,21 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     auth: { kind: "sign-in" },
   },
   {
+    id: "github-oauth",
+    displayName: "GitHub OAuth App",
+    description:
+      "Connect your registered OAuth App with profile read access; tool availability varies.",
+    category: "developer-tools",
+    url: "https://api.githubcopilot.com/mcp/",
+    auth: {
+      kind: "sign-in",
+      clientSetup: "registered",
+      setupGuide:
+        "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
+      requestedScopes: ["read:user", "offline_access"],
+    },
+  },
+  {
     id: "github",
     displayName: "GitHub",
     description: "Read repositories, issues, and pull requests with a personal access token.",

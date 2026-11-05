@@ -13,6 +13,7 @@ export interface HostOAuthBrokerDescriptor {
     | "chatgpt-plan-siwc"
     | "mcp-authorization"
     | "slack-mcp-user"
+    | "github-mcp-oauth-app"
     | "directory-oidc"
     | "issuer-oidc";
   readonly flow: "authorization-code-pkce" | "device-code";

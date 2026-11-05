@@ -138,6 +138,45 @@ describe("MCP servers added by hand", () => {
     ).rejects.toMatchObject({ category: "invalid" });
   });
 
+  it("keeps an existing PAT package and secret when the same GitHub URL is added and removed as an OAuth App connector", async () => {
+    const secrets = secretsStore();
+    const { store: servers, registry } = await store({ secrets });
+    const url = "https://api.githubcopilot.com/mcp/";
+    const pat = await servers.add({
+      name: "GitHub",
+      connectorId: "github",
+      server: {
+        type: "streamable-http",
+        url,
+        headers: [{ name: "Authorization", value: "Bearer synthetic-private-pat", secret: true }],
+      },
+    });
+    const patFolder = registry.get(pat.source.sourceRef)?.absolutePath;
+    if (patFolder === undefined) throw new Error("Missing original PAT package");
+    const original = await readFile(join(patFolder, "mcp.json"), "utf8");
+    const kept = [...secrets.values];
+    const oauth = await servers.add({
+      name: "GitHub",
+      connectorId: "github-oauth",
+      server: { type: "streamable-http", url, headers: [] },
+    });
+    expect(oauth.source.sourceRef).not.toBe(pat.source.sourceRef);
+    expect(registry.get(oauth.source.sourceRef)?.absolutePath).not.toBe(patFolder);
+    expect(await readFile(join(patFolder, "mcp.json"), "utf8")).toBe(original);
+    expect([...secrets.values]).toEqual(kept);
+    await servers.remove(oauth.source.sourceRef);
+    expect(registry.get(pat.source.sourceRef)).toBeDefined();
+    expect(await readFile(join(patFolder, "mcp.json"), "utf8")).toBe(original);
+    expect([...secrets.values]).toEqual(kept);
+    const launch = await servers.resolveLaunchSecrets({
+      transport: "streamable-http",
+      name: "GitHub",
+      url,
+      headers: { Authorization: `\${OCTANT_SECRET:${kept[0]?.[0]}}` },
+    });
+    expect(launch).toMatchObject({ headers: { Authorization: "Bearer synthetic-private-pat" } });
+  });
+
   it("adds the exact registered Slack connector without inline credentials and refuses catalog binding forgeries", async () => {
     const { store: servers, registry } = await store();
     const { source } = await servers.add({
