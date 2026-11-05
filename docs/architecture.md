@@ -2561,10 +2561,13 @@ CI or reviewers should be woken, not left polling).
   request and the wake, tells the agent to decide what its task needs under its
   usual rules and how to `unwatch`, and puts everything the forge supplied
   (check names, logins, review and comment text up to 2 KB each) inside the
-  outside-content block. A pass reads `gh pr view --json
-statusCheckRollup,reviews,comments,…` (every check on the head, not only
-  required ones) and skips the required-check, review-thread, and log reads a
-  watch alone does not need.
+  outside-content block. A pass reads `gh pr view --json statusCheckRollup,…`
+  (every check on the head, not only required ones) and one GraphQL query for
+  the newest 50 reviews and 50 comments, whose bodies `gh`'s own jq cuts before
+  they reach the host. Asking `gh pr view` for reviews and comments instead
+  would page through the whole history and, past 1 MiB, fail every pass. A
+  watch skips the required-check, review-thread, and log reads it alone does
+  not need.
 - **What wakes a watch.** Checks on the head settling (none still running),
   once per head and outcome, passed or failed; the review decision changing
   from the one the thread last heard; a review or a comment posted after the

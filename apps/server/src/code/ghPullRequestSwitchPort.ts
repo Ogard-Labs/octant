@@ -99,9 +99,26 @@ export type GhPullRequestSwitchObservation =
 
 const VIEW_FIELDS =
   "state,headRefOid,headRefName,baseRefName,mergeable,autoMergeRequest,reviewDecision";
-const ACTIVITY_VIEW_FIELDS = `${VIEW_FIELDS},statusCheckRollup,reviews,comments`;
+const ACTIVITY_VIEW_FIELDS = `${VIEW_FIELDS},statusCheckRollup`;
 /** The newest reviews and comments a watch keeps from one read. */
 const MAX_ACTIVITY_ENTRIES = 50;
+/**
+ * A watch's reviews and comments come from their own query, not from
+ * `gh pr view --json reviews,comments`: that pages through the pull request's
+ * whole history, and a long enough discussion outgrows the command's 1 MiB
+ * output cap, so every pass would fail. Only the newest window is asked for.
+ */
+const DISCUSSION_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviews(last:${MAX_ACTIVITY_ENTRIES}){nodes{id author{login} state submittedAt body}} comments(last:${MAX_ACTIVITY_ENTRIES}){nodes{id author{login} createdAt body viewerDidAuthor}}}}}`;
+/**
+ * Bodies are cut inside `gh`, before they reach stdout. jq slices by code
+ * point, one past the byte clamp, so a body over the clamp still reaches
+ * `clampBytes` long enough to be marked cut. Control characters are dropped
+ * because `tojson` escapes each to six bytes; what is left costs at most four
+ * bytes per code point, so 2 × 50 bodies stay near 820 KB, under the cap
+ * however long the history is. (`tojson` is printed raw; gh's own encoder
+ * would also escape `<`, `>` and `&` to six bytes.)
+ */
+const DISCUSSION_FILTER = `def cut: (.body // "")[0:${MAX_COMMENT_BYTES + 1}] | explode | map(select(. == 9 or . == 10 or . == 13 or (. > 31 and . != 127))) | implode; .data.repository.pullRequest | {reviews: [(.reviews.nodes // [])[] | .body = cut], comments: [(.comments.nodes // [])[] | .body = cut]} | tojson`;
 const PASSING_CHECK_CONCLUSIONS = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
 const REVIEW_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:${REVIEW_THREADS_PAGE},after:$after){pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:10){nodes{author{login} body}}}}}}}`;
 
@@ -242,6 +259,12 @@ export class GhPullRequestSwitchPort {
     const reviewsPending =
       pullRequest.reviewDecision === "REVIEW_REQUIRED" ||
       pullRequest.reviewDecision === "CHANGES_REQUESTED";
+    let activity: GhPullRequestActivity | undefined;
+    if (reads.activity) {
+      const discussion = await this.#recentDiscussion(request, signal);
+      if (discussion === undefined) return { status: "unavailable" };
+      activity = pullRequestActivity(pullRequest, discussion, conflicting);
+    }
     const base = {
       status: "observed" as const,
       state,
@@ -249,7 +272,7 @@ export class GhPullRequestSwitchPort {
       headBranch: typeof pullRequest.headRefName === "string" ? pullRequest.headRefName : "",
       baseBranch: typeof pullRequest.baseRefName === "string" ? pullRequest.baseRefName : "",
       autoMergeEnabled: isRecord(pullRequest.autoMergeRequest),
-      ...(reads.activity ? { activity: pullRequestActivity(pullRequest, conflicting) } : {}),
+      ...(activity === undefined ? {} : { activity }),
     };
     if (state !== "open" || !reads.failures) return { ...base, waitingOn: [], failures: [] };
 
@@ -392,6 +415,33 @@ export class GhPullRequestSwitchPort {
     return threads;
   }
 
+  /** The newest reviews and comments, bodies already cut by `DISCUSSION_FILTER`. */
+  async #recentDiscussion(
+    request: GhPullRequestSwitchRequest,
+    signal: AbortSignal,
+  ): Promise<Record<string, unknown> | undefined> {
+    const result = await this.#run(
+      [
+        "api",
+        "graphql",
+        "-f",
+        `query=${DISCUSSION_QUERY}`,
+        "-F",
+        `owner=${request.owner}`,
+        "-F",
+        `name=${request.name}`,
+        "-F",
+        `number=${request.number}`,
+        "--jq",
+        DISCUSSION_FILTER,
+      ],
+      signal,
+    );
+    if (result === undefined || result.exitCode !== 0) return undefined;
+    const discussion = parseJson(result.stdout);
+    return isRecord(discussion) ? discussion : undefined;
+  }
+
   async #failedJobLog(
     repository: string,
     jobId: string,
@@ -442,6 +492,7 @@ function reviewThreadFailure(node: unknown): GhAutoFixFailureDetail | undefined 
 
 function pullRequestActivity(
   pullRequest: Record<string, unknown>,
+  discussion: Record<string, unknown>,
   conflicting: boolean,
 ): GhPullRequestActivity {
   let pending = false;
@@ -485,7 +536,7 @@ function pullRequestActivity(
         : pullRequest.reviewDecision === "REVIEW_REQUIRED"
           ? "review-required"
           : undefined;
-  const reviews = (Array.isArray(pullRequest.reviews) ? pullRequest.reviews : [])
+  const reviews = (Array.isArray(discussion.reviews) ? discussion.reviews : [])
     .filter(isRecord)
     .flatMap((review) =>
       // A pending review is the reviewer's unsent draft: nobody said it yet.
@@ -511,7 +562,7 @@ function pullRequestActivity(
           ],
     )
     .slice(-MAX_ACTIVITY_ENTRIES);
-  const comments = (Array.isArray(pullRequest.comments) ? pullRequest.comments : [])
+  const comments = (Array.isArray(discussion.comments) ? discussion.comments : [])
     .filter(isRecord)
     .flatMap((comment) =>
       // The host's own login wrote it: the person, or the agent posting under
