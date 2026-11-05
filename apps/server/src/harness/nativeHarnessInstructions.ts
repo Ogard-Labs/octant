@@ -53,6 +53,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_code_diagnostics: "read the language server's errors and warnings for a saved file",
   octant_computer: "operate macOS apps on the user's desktop",
   octant_create_image: "generate an image; it costs money, so only when asked",
+  octant_credential:
+    "have the person authorize a credential for a registered operation or saved command; not a command runner",
   octant_github: "read the repository's issues, pull requests, and projects",
   octant_offer_side_task: "offer the user a separate task for work outside this request",
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",

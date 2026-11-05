@@ -37,13 +37,26 @@ export const CredentialRequestAnswer = Schema.Union(
 );
 export type CredentialRequestAnswer = typeof CredentialRequestAnswer.Type;
 
-export const REQUEST_CREDENTIAL_TOOL = {
-  name: "request_credential",
+export const CREDENTIAL_TOOL_OPERATIONS = ["help", "list", "request", "run-saved"] as const;
+export type CredentialToolOperation = (typeof CREDENTIAL_TOOL_OPERATIONS)[number];
+
+/**
+ * The one agent-facing credential tool. Each operation keeps the authority of
+ * the surface behind it: `request` opens a one-use card for a registered
+ * integration operation, and `run-saved` asks the person to approve one run of
+ * a command they saved in Settings. The host narrows `operation` to what this
+ * caller can use when the turn's tools are composed.
+ */
+export const OCTANT_CREDENTIAL_TOOL = {
+  name: "octant_credential",
   description:
-    "Ask the person for a credential in Octant's private card and perform the named supported operation once. Never ask for a token in chat. No credential value or readable file is returned. Only the listed integration operations are supported; shell commands and administrator passwords are unsupported.",
+    "Use a credential the person holds without ever seeing it. request opens Octant's private card so the person can authorize one registered integration operation; run-saved asks the person to approve one run of a command they saved in Settings. Call list first: it returns names and descriptions only. No credential value or readable file is ever returned, and you cannot approve a request yourself. Never ask for a token in chat. This is not a general command runner: use the terminal or shell for ordinary commands; arbitrary commands, URLs and administrator passwords are unsupported. Plan refuses. Call operation help for full usage.",
   inputSchema: {
     type: "object",
-    properties: { operation: { type: "string", enum: [] as ReadonlyArray<string> } },
+    properties: {
+      operation: { type: "string", enum: CREDENTIAL_TOOL_OPERATIONS as ReadonlyArray<string> },
+      id: { type: "string", description: "For request and run-saved: an id that list returned." },
+    },
     required: ["operation"],
     additionalProperties: false,
   },
