@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { desktopIdentity } from "@octant/host-runtime";
 import { describe, expect, it } from "vitest";
 import {
   BUNDLED_LANGUAGE_SERVER_SIGNING_PATH,
@@ -136,7 +137,7 @@ describe("signAndNotarizeDesktop", () => {
     await signAndNotarizeDesktop({
       repositoryRoot: "/repo",
       appPath: `/repo/out/${productName}.app`,
-      productName,
+      identity: desktopIdentity(productName === "Octant" ? "stable" : "nightly"),
       archivePath: "/repo/out/Octant-0.1.0-arm64.zip",
       credentials: { identity: "Developer ID", notaryProfile: "profile", teamId: "TEAM" },
       run: async (command) => void argv.push([...command]),
@@ -162,6 +163,13 @@ describe("signAndNotarizeDesktop", () => {
       "/repo/out/Octant Nightly.app/Contents/Frameworks/Octant Nightly Helper (Renderer).app",
     );
     expect(targets.some((target) => target?.includes("/Octant Helper"))).toBe(false);
+    expect(targets).toContain(
+      "/repo/out/Octant Nightly.app/Contents/Resources/app.asar.unpacked/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
+    );
+    expect(targets).toContain(
+      "/repo/out/Octant Nightly.app/Contents/Resources/app.asar.unpacked/apps/server/node_modules/@typescript/typescript-darwin-arm64/lib/tsc",
+    );
+    expect(targets.some((target) => target?.includes("/Resources/app/"))).toBe(false);
   });
 
   it("signs every nested payload before the bundle that contains them", async () => {
