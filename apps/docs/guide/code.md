@@ -476,7 +476,11 @@ chooses another branch, and it never approves a pull request or deletes a
 branch. A thread that asks before acting
 shows you the exact change first; Full access goes ahead for the rest; Plan
 refuses. The thread's pull request shows in Review and on
-its card, stacked ones included.
+its card, stacked ones included. The agent can also ask to watch that pull
+request, so Octant starts a new turn when its checks finish or a review,
+comment, or conflict arrives; it asks you each time, and the watch ends on its
+own after ten wakes or three days
+([details](../advanced/git-worktrees.md#a-thread-watching-its-pull-request)).
 The **New pull request** form in Review has an **Include Browser proof**
 choice, off unless you turn it on. When the agent checked its work in the
 Browser, turning it on adds a **Browser check** section to the description with

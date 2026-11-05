@@ -3,11 +3,14 @@ import type {
   BrowserAutomationSnapshot,
   CodeOperationCommand,
   CodeOperationResult,
+  CodeProjectPullRequestSwitchTarget,
   CodeThread,
   ToolActionAuthority,
   WindowId,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import type { PullRequestWatchOutcome } from "./codeProjectPullRequestSwitchService";
 import {
   CODE_BOARD_TOOL_NAME,
   CODE_BROWSER_TOOL_NAME,
@@ -3325,6 +3328,126 @@ describe("the pull request as an agent tool", () => {
       result: { error: "invalid-pull-request-input" },
       isError: true,
     });
+  });
+});
+
+describe("watching the thread's own pull request as an agent tool", () => {
+  const target = {
+    projectId: "40000000-0000-4000-8000-000000000001",
+    repositoryOwner: "octant",
+    repositoryName: "octant",
+    number: 42,
+  } as unknown as CodeProjectPullRequestSwitchTarget;
+
+  function watchTools(
+    threadOverrides: Partial<CodeThread> = {},
+    answer: "approved" | "denied" = "approved",
+    scope: WindowId = windowId,
+  ) {
+    const request = vi.fn(async () => answer);
+    const watch = vi.fn(
+      async (
+        ask: (watched: CodeProjectPullRequestSwitchTarget) => Promise<string>,
+      ): Promise<PullRequestWatchOutcome> => {
+        const asked = await ask(target);
+        return asked === "approved"
+          ? {
+              status: "watching",
+              target,
+              until: "2026-11-08T10:00:00.000Z",
+              alreadyWatching: false,
+            }
+          : { status: "declined", answer: "denied" };
+      },
+    );
+    const unwatch = vi.fn(
+      async (): Promise<PullRequestWatchOutcome> => ({ status: "unwatched", target }),
+    );
+    const executeOperation = vi.fn();
+    const tools = createCodeAppManagedTools({
+      windowId: scope,
+      thread: thread(threadOverrides),
+      readThread: () => thread(threadOverrides),
+      uuid: uuidFactory(),
+      executeOperation,
+      terminal: { read: async () => ({}) as never },
+      pullRequestApproval: { request: vi.fn() },
+      pullRequestWatch: { watch, unwatch, request },
+    });
+    const run = (input: Record<string, unknown>) =>
+      tools.execute({ name: CODE_PULL_REQUEST_TOOL_NAME, inputJson: JSON.stringify(input) });
+    return { run, request, watch, unwatch, executeOperation };
+  }
+
+  it("asks the person before each watch at every access level, then watches the thread's own pull request", async () => {
+    for (const executionPolicy of ["full-access", "approval-gated"] as const) {
+      const { run, request, executeOperation } = watchTools({ executionPolicy });
+      const result = await run({ operation: "watch" });
+      expect(request).toHaveBeenCalledWith(target, undefined);
+      expect(executeOperation).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        result: { status: "watching", number: 42, until: "2026-11-08T10:00:00.000Z" },
+        isError: false,
+      });
+    }
+  });
+
+  it("watches nothing when the person declines", async () => {
+    const { run } = watchTools({}, "denied");
+    expect(await run({ operation: "watch" })).toMatchObject({
+      result: { error: "pull-request-watch-denied" },
+      isError: true,
+    });
+  });
+
+  it("refuses to watch in Plan without asking, but still stops a watch there", async () => {
+    const { run, request, watch, unwatch } = watchTools({ executionPolicy: "plan" });
+    expect(await run({ operation: "watch" })).toMatchObject({
+      result: { error: "plan-mode-read-only" },
+      isError: true,
+    });
+    expect(watch).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(await run({ operation: "unwatch" })).toMatchObject({
+      result: { status: "unwatched", number: 42 },
+      isError: false,
+    });
+    expect(unwatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to watch in a turn the host started on its own, where nobody can approve it", async () => {
+    const { run, request, watch } = watchTools({}, "approved", ROUTINE_HOST_SCOPE_ID);
+    expect(await run({ operation: "watch" })).toMatchObject({
+      result: { error: "automation-recursion" },
+      isError: true,
+    });
+    expect(watch).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("stops watching without asking the person", async () => {
+    const { run, request, unwatch } = watchTools();
+    expect(await run({ operation: "unwatch" })).toMatchObject({
+      result: { status: "unwatched", number: 42 },
+      isError: false,
+    });
+    expect(unwatch).toHaveBeenCalledTimes(1);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("refuses a watch that names a pull request, so only the thread's own can be watched", async () => {
+    const { run, watch } = watchTools();
+    for (const input of [
+      { operation: "watch", number: 7 },
+      { operation: "watch", title: "x" },
+      { operation: "unwatch", body: "stop" },
+    ]) {
+      expect(await run(input)).toMatchObject({
+        result: { error: "invalid-pull-request-input" },
+        isError: true,
+      });
+    }
+    expect(watch).not.toHaveBeenCalled();
   });
 });
 

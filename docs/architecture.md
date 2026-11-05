@@ -2202,6 +2202,16 @@ hold for every action in it:
   asking: the approval shows the whole text, and the host posts only with an
   approval for that act, at every level, because it cannot tell at Full access
   whether the person asked.
+- **Watching its own pull request.** The tool's `watch` lets the host wake the
+  thread when its pull request changes, instead of the agent polling; it is
+  not a forge change, and `unwatch` ends it. The host resolves the thread's own
+  open linked pull request (the agent names none), and `watch` asks the person
+  for that act at every level, because it lets the host start turns in the
+  thread later, when nobody may be there. Plan refuses `watch` (not `unwatch`,
+  which only takes reach away and never asks), and so does a turn the host
+  started on its own (`automation-recursion`), such as a wake: nobody is there
+  to approve it, and a wake must not renew its own watch. The rules are under
+  [Merge when ready and Auto-fix](#modes-chat-work-and-code) below.
 - **Record.** Each action journals the actor, the repository, the number, and
   the head SHA, as Octant's own record beside the forge's history.
 - **Credential.** Octant stores no forge token, as under the merge rules
@@ -2259,6 +2269,7 @@ hold for every action in it:
 | Review replies and comments                | Agent drafts; person sends                                                                   | The person approves each post at every level, Full access included, because it posts under their name and the text is shown whole | Approving or requesting changes                             | Yes (`comment-pull-request`; the person's `actions` route)                                                                                                                                                                                                                                                                                   |
 | Approve or request changes                 | Person                                                                                       | —                                                                                                                                 | The pull request's own author, by the forge's rule          | Yes: the person's `actions` route, from a local window, on the head they read                                                                                                                                                                                                                                                                |
 | Close or reopen                            | Person, or agent with approval                                                               | Asks below Full access; at Full access, done when the person asked                                                                | Deleting the branch; reopening a merged pull request        | Yes (`update-pull-request` with `state`; the person's `actions` route)                                                                                                                                                                                                                                                                       |
+| Watch its own pull request                 | Agent asks; person allows                                                                    | The person's approval for each watch, at every level; stopping it never asks                                                      | Plan; a host-started turn; another pull request             | Yes (the tool's `watch` and `unwatch`; see Merge when ready and Auto-fix)                                                                                                                                                                                                                                                                    |
 | Merge, auto-merge, or merge a stack        | Person on any of their windows, phone, or web client; Code thread when the person allowed it | The person's confirmation, request, Project setting, or routine; reviewed head SHA and required checks                            | An agent on its own initiative; hub or peer hosts           | Yes: a person merging one pull request or a stack from a window, phone, or web client; Merge when ready from a window, phone, or web client with the same confirmation; an agent's merge on request (`merge-pull-request`, asks each time), or without asking when a Project's Agents may merge switch or a routine's merge choice allows it |
 
 Which path reaches the forge depends on the thread's
@@ -2472,7 +2483,10 @@ the desktop window can do these.
 **Merge when ready and Auto-fix.** A Code thread's pull request review carries
 two switches (`POST /api/code/project-pull-requests/merge-when-ready` and
 `/auto-fix`; `POST /api/code/project-pull-requests/switches` reads them). The
-person's click is the approval; nothing else turns either on.
+person's click is the approval; nothing else turns either on. Beside them, a
+thread's agent may ask to watch its own pull request; the person's approval of
+that one act is the click (maintainer decision, 2026-11-05: an agent waiting on
+CI or reviewers should be woken, not left polling).
 
 - **Who.** Auto-fix: only a `local-window` principal; its route answers 403 to
   a paired device before decoding. Merge when ready: a `local-window`
@@ -2485,7 +2499,8 @@ person's click is the approval; nothing else turns either on.
   this window and resolves to exactly that github.com repository. These
   routes are the person's own controls: no provider, agent tool, plugin, or
   routine can reach them. (An agent's auto-merge on the
-  person's request goes through the pull-request tool and its rules above.)
+  person's request goes through the pull-request tool and its rules above, and
+  so does its watch, below.)
   Reading the switches needs only that Project check.
 - **Merge when ready** turns on the forge's own auto-merge: `gh pr merge <n>
 --auto --<method> --match-head-commit <head the person saw>`. The host first
@@ -2533,19 +2548,60 @@ person's click is the approval; nothing else turns either on.
   the pull request holds Auto-fix quiet, and after a host restart it stays
   quiet until a window shows the pull request again, because the connection
   is a per-window fact. Turning it on again starts a fresh attempt count.
+- **Watch.** The pull-request tool's `watch` (rules above) binds the
+  thread's own open pull request, the one linked to it on the board, to that
+  thread; one thread watches a pull request at a time
+  (`watched-by-another-thread`). The host checks the Project and the link,
+  asks the person, checks both again after the answer, then reads the pull
+  request once and journals what is already true (settled checks, the review
+  decision, a conflict) as the baseline it never wakes for. It shares Auto-fix's
+  pass, its pauses (a turn running or ambiguous, compaction, a minute after the
+  person typed), its outside-content mark (label `pull-request-watch`), and its
+  host path for the turn, but it fixes nothing: the turn names the pull
+  request and the wake, tells the agent to decide what its task needs under its
+  usual rules and how to `unwatch`, and puts everything the forge supplied
+  (check names, logins, review and comment text up to 2 KB each) inside the
+  outside-content block. A pass reads `gh pr view --json
+statusCheckRollup,reviews,comments,…` (every check on the head, not only
+  required ones) and skips the required-check, review-thread, and log reads a
+  watch alone does not need.
+- **What wakes a watch.** Checks on the head settling (none still running),
+  once per head and outcome, passed or failed; the review decision changing
+  from the one the thread last heard; a review or a comment posted after the
+  watch began, once per id (a pending review is not counted, nor a comment the
+  host's own `gh` login wrote, which is the person or the agent under their
+  name); a conflict with the base, once per head. Everything new on one pass
+  goes into one turn (at most 32 signals). A wake that started no turn is tried
+  again and spends nothing, as for Auto-fix.
+- **Watch limits.** A watch ends when the pull request merges or closes, when
+  the thread is archived, completed, or gone, when the Project no longer
+  connects the repository (`authority-lost`), when the agent calls `unwatch`,
+  after ten started wakes (`wake-limit`), or three days after it began
+  (`expired`), checked even while nothing vouches for it; the last two open the
+  thread's follow-up marker. Three days covers a review round across a weekend
+  without leaving a forgotten watch running. Asking again turns nothing new
+  on; after a stop it starts a fresh budget. Known gap: the vouching window is
+  not journaled, because window ids do not outlive the process, so after a
+  host restart a watch stays quiet, with its clock still running, until a
+  window shows the pull request's review or the thread's agent asks to watch
+  it again from a window that may act on it.
 - **Record.** Every switch change and every wake appends one event on the
   `code-project-pull-request-switches` aggregate type, each its own aggregate:
   `code.project-pull-request-merge-when-ready-recorded@1` (enabled with method
-  and head, disabled, merged, turned off by the forge) and
+  and head, disabled, merged, turned off by the forge),
   `code.project-pull-request-auto-fix-recorded@1` (enabled, disabled, woke
   with the head, failure identities, attempt, and whether the turn started,
   was refused, or was never sent because the mark was refused; stopped with
-  its reason). Clicks are journaled as the local user, observations as the
-  host. Payloads carry no log, comment, or credential text. The host rebuilds
-  both switches and every attempt count by replaying these events on start.
+  its reason), and `code.project-pull-request-watch-recorded@1` (enabled with
+  its baseline signals, disabled, woke with the head, signal identities, wake
+  number, and result; stopped with its reason). Clicks are journaled as the
+  local user, a watch's enabled and disabled as the thread's agent (an `agent`
+  actor naming its provider instance and thread), observations as the host. Payloads carry no log, comment, or credential text. The host rebuilds
+  both switches, every attempt count, and every watch's baseline, seen signals,
+  and wake count by replaying these events on start.
 - **Host-local.** The observation runs in the Octant server only while a
-  switch is on, through the host's `gh` login. It is not a routine and needs
-  no hosted service; a stopped host observes nothing.
+  switch or a watch is on, through the host's `gh` login. It is not a routine
+  and needs no hosted service; a stopped host observes nothing.
 
 **Delivery (publishing to a user-owned target) is dormant.** The ship service
 and its journaled events exist, but the host wires no target source, no
@@ -13052,9 +13108,10 @@ documents its authority, privacy, and release boundaries):
   or draft state; a person's merge of one pull request from a local window; a
   person's approval or request for changes there; an agent's merge on the
   person's request in the turn, after the person approves that one merge; an
-  agent's merge on a Project setting or routine; and the Merge when ready and
-  Auto-fix switches the person turns on there. The rest of the allowed actions
-  are not built yet.
+  agent's merge on a Project setting or routine; the Merge when ready and
+  Auto-fix switches the person turns on there; and a thread's watch on its own
+  pull request, which the person allows. The rest of the allowed actions are
+  not built yet.
 - Linked external secret stores, built for the 1Password CLI
   ([linked secret stores](#linked-secret-stores)): a pointer in the credential
   broker, the value fetched at use and never kept.

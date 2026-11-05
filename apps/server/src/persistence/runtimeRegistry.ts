@@ -39,6 +39,8 @@ import {
   CodeProjectPullRequestMergeWhenReadyRecorded,
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
   CodeProjectPullRequestAutoFixRecorded,
+  CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
+  CodeProjectPullRequestWatchRecorded,
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
   WorkProjectDeveloperToolsChanged,
@@ -449,6 +451,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestMergeWhenReadyRecorded,
     )
     .register(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, 1, CodeProjectPullRequestAutoFixRecorded)
+    .register(CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED, 1, CodeProjectPullRequestWatchRecorded)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)

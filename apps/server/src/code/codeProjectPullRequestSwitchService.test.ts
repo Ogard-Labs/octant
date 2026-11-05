@@ -20,6 +20,7 @@ import {
 } from "./codeProjectPullRequestSwitchService";
 import type {
   GhAutoFixFailureDetail,
+  GhPullRequestActivity,
   GhPullRequestSwitchObservation,
 } from "./ghPullRequestSwitchPort";
 
@@ -82,6 +83,7 @@ function fixture(
     readonly allowAutoMerge?: boolean;
     readonly methods?: Partial<Record<CodeProjectPullRequestMergeMethod, boolean>>;
     readonly linked?: ReadonlyArray<string>;
+    readonly threadPullRequests?: ReadonlyArray<typeof target>;
   } = {},
 ) {
   let authority: "authorized" | "not-authorized" | "disconnected" = "authorized";
@@ -126,6 +128,7 @@ function fixture(
           authority === "authorized"
             ? { status: "authorized", linkedThreadIds: options.linked ?? [String(threadId)] }
             : { status: authority },
+        linkedPullRequests: async () => options.threadPullRequests ?? [target],
       },
       forge,
       threads,
@@ -506,5 +509,248 @@ describe("Auto-fix", () => {
       status: "stopped",
       reason: "attempt-limit",
     });
+  });
+});
+
+describe("a thread watching its own pull request", () => {
+  const WATCH = "code.project-pull-request-watch-recorded@1";
+  const providerInstanceId = "60000000-0000-4000-8000-000000000001";
+
+  function activity(
+    overrides: Partial<GhPullRequestActivity> = {},
+    observation: Partial<Extract<GhPullRequestSwitchObservation, { status: "observed" }>> = {},
+  ): GhPullRequestSwitchObservation {
+    return observed({
+      autoMergeEnabled: false,
+      ...observation,
+      activity: {
+        checks: "pending",
+        failedChecks: [],
+        conflicting: false,
+        reviews: [],
+        comments: [],
+        ...overrides,
+      },
+    });
+  }
+
+  async function watching(
+    f: ReturnType<typeof fixture>,
+    answer: "approved" | "denied" = "approved",
+  ) {
+    const ask = vi.fn(async () => answer);
+    const outcome = await f.service.watch({ windowId, threadId, providerInstanceId, ask, signal });
+    return { ask, outcome };
+  }
+
+  it("watches only after the person allows it, journaled as the thread's agent with what was already true", async () => {
+    const f = fixture();
+    f.observe(activity({ checks: "passed", reviewDecision: "review-required" }));
+    const { ask, outcome } = await watching(f);
+    expect(ask).toHaveBeenCalledWith(target);
+    expect(outcome).toMatchObject({ status: "watching", target, alreadyWatching: false });
+    const [event] = f.recorded(WATCH);
+    expect(event?.actor).toMatchObject({ kind: "agent", providerInstanceId, threadId });
+    expect(event?.payload).toEqual({
+      target,
+      threadId,
+      change: {
+        kind: "enabled",
+        baseline: [
+          { kind: "checks-passed", key: "a1" },
+          { kind: "review-decision", key: "review-required" },
+        ],
+      },
+    });
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+  });
+
+  it("journals nothing when the person declines, and asks nothing without a linked pull request", async () => {
+    const declined = fixture();
+    declined.observe(activity());
+    expect((await watching(declined, "denied")).outcome).toEqual({
+      status: "declined",
+      answer: "denied",
+    });
+    expect(declined.recorded(WATCH)).toHaveLength(0);
+
+    const unlinked = fixture({ threadPullRequests: [] });
+    const { ask, outcome } = await watching(unlinked);
+    expect(outcome).toEqual({ status: "refused", reason: "no-pull-request" });
+    expect(ask).not.toHaveBeenCalled();
+    expect(unlinked.forge.observe).not.toHaveBeenCalled();
+  });
+
+  it("wakes the thread once when checks settle, with the forge's text as outside content", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    f.observe(activity({ checks: "failed", failedChecks: ["lint"] }));
+    await f.service.tick(signal);
+    await f.service.tick(signal);
+    expect(f.order).toEqual(["mark", "turn"]);
+    expect(f.threads.markOutsideContent).toHaveBeenCalledWith(
+      threadId,
+      expect.stringMatching(/^pull-request-watch:/),
+      "pull-request-watch",
+    );
+    const text = f.threads.startTurn.mock.calls[0]?.[1] ?? "";
+    expect(text).toContain("pull request #12");
+    expect(text).toContain("--- outside content begins ---");
+    expect(text.indexOf("lint")).toBeGreaterThan(text.indexOf("--- outside content begins ---"));
+    expect(text).not.toMatch(/fix it/i);
+    expect(f.recorded(WATCH).at(-1)?.payload).toMatchObject({
+      change: {
+        kind: "woke",
+        headSha: "a1",
+        signals: [{ kind: "checks-failed", key: "a1" }],
+        wake: 1,
+        result: "started",
+      },
+    });
+    expect(f.forge.observe).toHaveBeenLastCalledWith(expect.anything(), signal, {
+      failures: false,
+      activity: true,
+    });
+  });
+
+  it("puts a new review and a new comment from one pass into a single turn", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    f.advance(60_000);
+    f.observe(
+      activity({
+        reviewDecision: "changes-requested",
+        reviews: [
+          {
+            id: "PRR_1",
+            author: "rev",
+            state: "changes requested",
+            at: "2026-10-31T10:00:30.000Z",
+            body: "Rename this.",
+          },
+        ],
+        comments: [
+          { id: "IC_1", author: "teammate", at: "2026-10-31T10:00:40.000Z", body: "Ping." },
+        ],
+      }),
+    );
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(1);
+    const text = f.threads.startTurn.mock.calls[0]?.[1] ?? "";
+    expect(text).toContain("Rename this.");
+    expect(text).toContain("Ping.");
+    expect(f.recorded(WATCH).at(-1)?.payload).toMatchObject({
+      change: {
+        kind: "woke",
+        signals: [
+          { kind: "review-decision", key: "changes-requested" },
+          { kind: "review", key: "PRR_1" },
+          { kind: "comment", key: "IC_1" },
+        ],
+      },
+    });
+  });
+
+  it("holds the wake while a turn runs in the thread, then wakes", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    f.observe(activity({ checks: "passed" }));
+    f.setTurnActive(true);
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    f.setTurnActive(false);
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("ends without waking when the pull request merges", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    f.observe(activity({ checks: "passed" }, { state: "merged" }));
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    expect(f.recorded(WATCH).at(-1)?.payload).toMatchObject({
+      change: { kind: "stopped", reason: "merged" },
+    });
+    expect(f.service.watching).toBe(false);
+  });
+
+  it("ends after ten wakes and tells the person", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    for (let index = 0; index < 11; index += 1) {
+      f.observe(activity({ checks: "failed" }, { headSha: `h${index}` }));
+      await f.service.tick(signal);
+    }
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(10);
+    expect(f.recorded(WATCH).at(-1)?.payload).toMatchObject({
+      change: { kind: "stopped", reason: "wake-limit" },
+    });
+    expect(f.threads.notifyPerson).toHaveBeenCalledWith(threadId, expect.stringContaining("10"));
+  });
+
+  it("ends three days after it began, even while no window vouches for it after a restart", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    const restarted = f.restart();
+    f.advance(3 * 24 * 60 * 60 * 1000);
+    await restarted.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    expect(f.recorded(WATCH).at(-1)?.payload).toMatchObject({
+      change: { kind: "stopped", reason: "expired" },
+    });
+  });
+
+  it("stays quiet after a restart until a window shows the pull request, and never repeats a wake", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    f.observe(activity({ checks: "failed" }));
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(1);
+
+    const restarted = f.restart();
+    f.observe(activity({ checks: "failed", conflicting: true }));
+    await restarted.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(1);
+
+    await restarted.query(windowId, target);
+    await restarted.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(2);
+    expect(f.recorded(WATCH).at(-1)?.payload).toMatchObject({
+      change: { kind: "woke", signals: [{ kind: "conflict", key: "a1" }], wake: 2 },
+    });
+  });
+
+  it("stops when the thread's agent unwatches, without asking, and says so when nothing was watched", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    expect(await f.service.unwatch({ threadId, providerInstanceId })).toEqual({
+      status: "unwatched",
+      target,
+    });
+    expect(f.recorded(WATCH).at(-1)?.payload).toMatchObject({ change: { kind: "disabled" } });
+    expect(f.service.watching).toBe(false);
+    expect(await f.service.unwatch({ threadId, providerInstanceId })).toEqual({
+      status: "not-watching",
+    });
+  });
+
+  it("answers a second watch of the same pull request without asking again", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    const { ask, outcome } = await watching(f);
+    expect(outcome).toMatchObject({ status: "watching", alreadyWatching: true });
+    expect(ask).not.toHaveBeenCalled();
+    expect(f.recorded(WATCH)).toHaveLength(1);
   });
 });
