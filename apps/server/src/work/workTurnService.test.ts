@@ -990,7 +990,7 @@ describe("WorkTurnService", () => {
               {
                 providerInstanceId: decodeProviderInstanceId(ids.provider),
                 modelId: decodeProviderModelId("model-a"),
-                contextWindow: 100,
+                contextWindow: 60,
                 maxOutput: 20,
                 source: "runtime-reported",
                 confidence: "high",
@@ -3015,7 +3015,7 @@ describe("WorkTurnService", () => {
     expect(followUp.kind).toBe("accepted");
     await fixture.waitForIdle(decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac"));
     expect(sent[1]).toEqual([
-      { kind: "instructions", text: expect.stringContaining("Octant Work task") },
+      { kind: "instructions", text: expect.stringContaining("this task's folder") },
       { kind: "user-message", text: "Summarize the brief" },
       { kind: "assistant-message", text: "Revised summary" },
     ]);
@@ -3942,7 +3942,7 @@ describe("WorkTurnService", () => {
         turnRuntime: { run: resumableRun(sent) },
         resolveDriver: resumable,
       });
-      await runTurns(fixture, 3, 92);
+      await runTurns(fixture, 3, 100);
       const [first, second, third] = sent;
       // Two turns fit and the second continues the first one's session.
       expect(String(second?.providerSessionId)).toBe(String(first?.providerSessionId));
@@ -4563,7 +4563,7 @@ describe("WorkTurnService", () => {
     expect(run.mock.calls[1]?.[0]).toMatchObject({
       command: expect.objectContaining({ prompt: "Make that summary shorter" }),
       context: [
-        { kind: "instructions", text: expect.stringContaining("Octant Work task") },
+        { kind: "instructions", text: expect.stringContaining("this task's folder") },
         { kind: "user-message", text: "Summarize the brief" },
         { kind: "assistant-message", text: "Provider reply" },
       ],

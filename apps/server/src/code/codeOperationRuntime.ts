@@ -4563,7 +4563,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       canvasOffered: offersCanvasTool(appManagedTools?.definitions),
     });
     const extraFolderInstructions = projectExtraFoldersInstructions(active.extraFolders);
+    // This mode's rules before the tool notes, as in Work.
     const hostGuidance = [
+      ...(deliveryInstructions === undefined
+        ? []
+        : [{ kind: "instructions" as const, text: deliveryInstructions }]),
       ...(extraFolderInstructions === undefined
         ? []
         : [{ kind: "instructions" as const, text: extraFolderInstructions }]),
@@ -4571,9 +4575,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         kind: "instructions" as const,
         text,
       })),
-      ...(deliveryInstructions === undefined
-        ? []
-        : [{ kind: "instructions" as const, text: deliveryInstructions }]),
     ];
     const personMemoryText = this.#options.personMemoryBlock?.({
       thread: active.thread,

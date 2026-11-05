@@ -66,6 +66,7 @@ import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessE
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
 import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
+import { octantOrientation } from "../orientation/octantOrientation";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
@@ -599,7 +600,11 @@ export function wireHarness(deps: HarnessDependencies) {
       projectId: string | undefined,
       event: ProviderRuntimeEvent,
     ) => runtimeRemoteCommands.observe(threadId, projectId, event),
+    // Orientation first and the reply formats it introduces next, ahead of
+    // each mode's own rules and tool notes, so every mode and provider opens
+    // its instructions the same way.
     contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) => [
+      octantOrientation(scope.mode),
       ...nativeHarnessObserver.contextFor(scope),
       ...nativeHarnessObserver.runtimeServerNotes(scope),
       ...turnDecisionInstructions(scope.mode),
