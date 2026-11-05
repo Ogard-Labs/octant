@@ -1,3 +1,4 @@
+import type { HumanBrowserRequest, HumanBrowserResult } from "./browserPresentation";
 import type { FleetActivityThread } from "./fleetActivity";
 import type { OpenInApplicationId } from "./shell";
 
@@ -29,6 +30,7 @@ export type SidebarVibrancyMode = "off" | "subtle" | "strong";
 export interface HostCapabilities {
   readonly sidebarVibrancySupported: boolean;
   readonly liveBrowserSupported: boolean;
+  readonly embeddedBrowserSupported?: boolean;
   readonly liveSimulatorFrameSupported: boolean;
   readonly liveAndroidFrameSupported: boolean;
 }
@@ -383,3 +385,8 @@ export type PairedComputerAnswer =
     }
   | { readonly status: "refused"; readonly message: string }
   | { readonly status: "unreachable"; readonly message: string };
+
+/** Closed human presentation, available only through an authenticated native main. */
+export interface EmbeddedBrowserBridge {
+  readonly presentBrowser?: (request: HumanBrowserRequest) => Promise<HumanBrowserResult>;
+}

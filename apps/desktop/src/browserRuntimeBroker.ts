@@ -11,6 +11,7 @@ import {
   decodeBrowserCredentialNativeCommand,
   decodeBrowserCredentialNativeResult,
 } from "@octant/contracts/browser-credential-use";
+import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -39,6 +40,7 @@ import {
 const BODY_LIMIT = 96 * 1_024;
 const TOKEN_HEADER = "x-octant-browser-broker-token";
 const ROUTES = new Set([
+  "/v1/contexts/human-presentation",
   "/v1/available",
   "/v1/contexts/create",
   "/v1/contexts/inspect-target",
@@ -209,6 +211,17 @@ async function handleBrokerRequest(
   const body = await jsonBody(request);
   if (body === undefined) return failure("invalid-request", 400);
   try {
+    if (url.pathname === "/v1/contexts/human-presentation") {
+      if (
+        !isUuid(body.windowId) ||
+        Object.keys(body).some((key) => key !== "request" && key !== "windowId") ||
+        signal?.aborted
+      )
+        return failure("invalid-request", 400);
+      const command = decodeHumanBrowserRequest(body.request);
+      const result = await host.humanPresentation(command, body.windowId, signal);
+      return signal?.aborted ? failure("unavailable", 409) : Response.json(result);
+    }
     if (url.pathname === "/v1/profiles/list") {
       if (profiles === undefined) return failure("profiles-unavailable", 409);
       return Response.json({ profiles: await profiles.list() });

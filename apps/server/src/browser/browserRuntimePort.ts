@@ -7,6 +7,10 @@ import type {
   BrowserPageScriptPreparation,
 } from "@octant/contracts/browser-page-script";
 import type {
+  HumanBrowserRequest,
+  HumanBrowserResult,
+} from "@octant/contracts/browser-presentation";
+import type {
   BrowserProfileClearScope,
   ImportedCookie,
   StoredBrowserProfile,
@@ -273,6 +277,11 @@ export interface BrowserRuntimePort {
     planId: string,
     expiresAt: string,
   ) => Promise<BrowserCredentialNativeResult>;
+  readonly humanPresentation?: (
+    request: HumanBrowserRequest,
+    windowId: WindowId,
+    signal: AbortSignal,
+  ) => Promise<HumanBrowserResult>;
   readonly available: () => Promise<boolean>;
   /**
    * Whether the desktop app's own Browser can hold a page right now. Absent on a

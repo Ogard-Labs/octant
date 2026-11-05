@@ -1,3 +1,4 @@
+import type { EmbeddedBrowserBridge } from "@octant/contracts/desktop-bridge";
 import type { CodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import type { AppReleaseRing, AppUpdateState } from "@octant/contracts/app-updates";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
@@ -323,6 +324,7 @@ export type BrowserProofSaveResult =
 
 export interface OctantHostBridge
   extends
+    EmbeddedBrowserBridge,
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
     Partial<HubAdministrationBridge>,
