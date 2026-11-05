@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type {
+  BrowserContextId,
   BrowserFlow,
   BrowserThreadId,
   ToolActionAuthority,
@@ -199,7 +200,25 @@ beforeAll(async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
-});
+  // The runtime launches Chromium on its first page. On a loaded CI runner that
+  // launch alone took the first test past its 30 s budget, so it is paid here,
+  // in a hook with its own budget, and each test times only its own steps.
+  if (available) {
+    const warmup = randomUUID() as BrowserContextId;
+    await runtime.createContext(
+      warmup,
+      {
+        profileMode: "isolated",
+        allowedOrigins: [origin],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 60_000,
+      },
+      new AbortController().signal,
+    );
+    await runtime.closeContext(warmup);
+  }
+}, 120_000);
 
 afterAll(async () => {
   await runtime.closeAll();
