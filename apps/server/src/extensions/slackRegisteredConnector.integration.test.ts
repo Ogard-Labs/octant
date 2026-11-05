@@ -12,6 +12,7 @@ import {
   startCredentialBroker,
   CredentialStoreFailure,
   SLACK_MCP_USER_OAUTH as slack,
+  GITHUB_MCP_OAUTH_APP as github,
   type CredentialStore,
 } from "@octant/host-runtime";
 import { makeHostOAuthBrokerClient } from "../providers/oauth/hostOAuthBrokerClient";
@@ -44,22 +45,26 @@ function memoryStore(): CredentialStore & { readonly values: Map<string, string>
     },
   };
 }
-function callback(authorization: URL): Promise<number> {
+function callback(
+  authorization: URL,
+  issuer: string,
+  options: { readonly host?: string; readonly target?: string; readonly omitIssuer?: boolean } = {},
+): Promise<number> {
   const redirect = new URL(authorization.searchParams.get("redirect_uri") ?? "");
   const params = new URLSearchParams({
     state: authorization.searchParams.get("state") ?? "",
     code: "synthetic-fixture-code",
-    iss: slack.issuer,
+    ...(options.omitIssuer ? {} : { iss: issuer }),
   });
   return new Promise((resolve, reject) => {
     const outgoing = request(
       {
         hostname: "127.0.0.1",
         port: Number(redirect.port),
-        path: `${redirect.pathname}?${params}`,
+        path: options.target ?? `${redirect.pathname}?${params}`,
         method: "GET",
         agent: false,
-        headers: { host: redirect.host },
+        headers: { host: options.host ?? redirect.host },
       },
       (response) => {
         response.resume();
@@ -72,7 +77,10 @@ function callback(authorization: URL): Promise<number> {
 }
 
 /** Local broker/callback sockets; vendor discovery, token exchange and MCP are controlled fixtures. */
-describe("registered Slack connector through existing task authority", () => {
+describe.each([
+  { profile: slack, connectorId: "slack" },
+  { profile: github, connectorId: "github-oauth" },
+])("registered $connectorId through existing task authority", ({ profile, connectorId }) => {
   it("configures an actual generated connector, explicitly consents, uses discovered tools and reconnects without old-bearer calls", async () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-slack-connector-"));
     const credentials = memoryStore();
@@ -86,33 +94,63 @@ describe("registered Slack connector through existing task authority", () => {
     const calls: string[] = [];
     const metadataCalls: string[] = [];
     const journal: unknown[] = [];
-    const account = {
-      workspaceId: "TTEST001",
-      userId: "UTEST001",
-      grantedScopes: [slack.readScope],
-    };
+    let clock = Date.now();
+    const requestedScopes =
+      profile.dialect === github.dialect
+        ? [profile.readScope, github.rotationScope]
+        : [profile.readScope];
+    const account =
+      profile.dialect === github.dialect
+        ? { userId: "12345", grantedScopes: [profile.readScope] }
+        : { workspaceId: "TTEST001", userId: "UTEST001", grantedScopes: [profile.readScope] };
+    const resourceMetadata =
+      profile.dialect === github.dialect
+        ? "https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/"
+        : `${profile.resource}/.well-known/oauth-protected-resource`;
+    const issuerUrl = new URL(profile.issuer);
+    const issuerMetadata = `${issuerUrl.origin}/.well-known/oauth-authorization-server${issuerUrl.pathname === "/" ? "" : issuerUrl.pathname}`;
     const tokenFetch: typeof fetch = Object.assign(
       async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-        expect(String(input)).toBe(slack.tokenEndpoint);
+        if (profile.dialect === github.dialect && String(input) === github.identityEndpoint) {
+          const headers = new Headers(init?.headers);
+          expect(headers.get("authorization")).toBe(`Bearer synthetic-slack-access-${tokenCalls}`);
+          expect(headers.get("user-agent")).toBe(github.userAgent);
+          expect(headers.get("x-github-api-version")).toBe(github.apiVersion);
+          expect(init?.redirect).toBe("error");
+          return Response.json(
+            { id: 12345, login: "not-retained", email: "not-retained@example.invalid" },
+            { headers: { "x-oauth-scopes": github.readScope } },
+          );
+        }
+        expect(String(input)).toBe(profile.tokenEndpoint);
         const form = new URLSearchParams(String(init?.body));
         expect(form.get("client_id")).toBe("owned-fixture-client");
         expect(form.get("client_secret")).toBe("synthetic-private-app-secret");
-        expect(form.get("resource")).toBe(slack.resource);
-        expect(form.get("redirect_uri")).toBe(currentCallback);
-        expect(
-          createHash("sha256")
-            .update(form.get("code_verifier") ?? "")
-            .digest("base64url"),
-        ).toBe(currentChallenge);
+        expect(form.get("resource")).toBe(profile.resource);
+        if (form.get("grant_type") === "authorization_code") {
+          expect(form.get("redirect_uri")).toBe(currentCallback);
+          expect(
+            createHash("sha256")
+              .update(form.get("code_verifier") ?? "")
+              .digest("base64url"),
+          ).toBe(currentChallenge);
+        } else {
+          expect(form.get("grant_type")).toBe("refresh_token");
+          expect(form.has("code_verifier")).toBe(false);
+        }
         tokenCalls++;
         return Response.json({
           ok: true,
           access_token: `synthetic-slack-access-${tokenCalls}`,
-          token_type: "user",
+          token_type: profile.dialect === github.dialect ? "bearer" : "user",
           refresh_token: `synthetic-slack-refresh-${tokenCalls}`,
           expires_in: 3600,
-          team: { id: account.workspaceId },
-          authed_user: { id: account.userId, scope: slack.readScope },
+          ...(profile.dialect === github.dialect
+            ? { scope: profile.readScope }
+            : {
+                team: { id: account.workspaceId },
+                authed_user: { id: account.userId, scope: profile.readScope },
+              }),
         });
       },
       { preconnect: () => undefined },
@@ -121,7 +159,7 @@ describe("registered Slack connector through existing task authority", () => {
       broker = await startCredentialBroker(
         credentials,
         undefined,
-        { fetch: tokenFetch, timeoutMs: 10_000 },
+        { fetch: tokenFetch, timeoutMs: 10_000, now: () => clock },
         undefined,
         undefined,
         undefined,
@@ -131,6 +169,7 @@ describe("registered Slack connector through existing task authority", () => {
       const oauth = createHostOAuthService({
         broker: brokerClient,
         journal: { append: (record) => journal.push(record) },
+        now: () => new Date(clock),
       });
       const registry = new LocalPluginFolderRegistry({
         sourceKind: "user-added",
@@ -142,8 +181,8 @@ describe("registered Slack connector through existing task authority", () => {
       });
       const { source } = await servers.add({
         name: "Slack",
-        connectorId: "slack",
-        server: { type: "streamable-http", url: slack.transportUrl, headers: [] },
+        connectorId,
+        server: { type: "streamable-http", url: profile.transportUrl, headers: [] },
       });
       const registered = registry.get(source.sourceRef);
       if (registered === undefined) throw new Error("Expected host generated connector");
@@ -152,7 +191,7 @@ describe("registered Slack connector through existing task authority", () => {
       );
       const component = manifest.components.find((candidate) => candidate.kind === "mcp-server");
       if (component === undefined) throw new Error("Expected generated MCP component");
-      expect(manifest.slug).toBe("connector-slack");
+      expect(manifest.slug).toBe(`connector-${connectorId}`);
       expect(servers.owns(source.sourceRef)).toBe(true);
       const activation = {
         installed: true,
@@ -223,28 +262,34 @@ describe("registered Slack connector through existing task authority", () => {
         async (input: Parameters<typeof fetch>[0]) => {
           const url = String(input);
           metadataCalls.push(url);
-          if (url === slack.transportUrl)
+          if (url === profile.transportUrl)
             return new Response(null, {
               status: 401,
               headers: {
-                "www-authenticate": `Bearer resource_metadata="${slack.resource}/.well-known/oauth-protected-resource"`,
+                "www-authenticate": `Bearer resource_metadata="${resourceMetadata}"`,
               },
             });
-          if (url === `${slack.resource}/.well-known/oauth-protected-resource`)
+          if (url === resourceMetadata)
             return Response.json({
-              resource: slack.resource,
-              authorization_servers: [slack.issuer],
-              scopes_supported: [slack.readScope],
+              resource: profile.resource,
+              authorization_servers: [profile.issuer],
+              scopes_supported: [profile.readScope],
             });
-          if (url === `${slack.issuer}/.well-known/oauth-authorization-server`)
+          if (url === issuerMetadata)
             return Response.json({
-              issuer: slack.issuer,
-              authorization_endpoint: slack.authorizationEndpoint,
-              token_endpoint: slack.tokenEndpoint,
+              issuer: profile.issuer,
+              authorization_endpoint: profile.authorizationEndpoint,
+              token_endpoint: profile.tokenEndpoint,
               response_types_supported: ["code"],
               grant_types_supported: ["authorization_code", "refresh_token"],
               token_endpoint_auth_methods_supported: ["client_secret_post"],
               code_challenge_methods_supported: ["S256"],
+              ...(profile.dialect === github.dialect
+                ? {
+                    scopes_supported: [github.rotationScope],
+                    authorization_response_iss_parameter_supported: true,
+                  }
+                : {}),
             });
           throw new Error("Unexpected metadata endpoint");
         },
@@ -256,6 +301,7 @@ describe("registered Slack connector through existing task authority", () => {
         access: (ref) => brokerClient.access(ref),
         refresh: (ref) => brokerClient.refresh(ref),
         actorId: "66000000-0000-4000-8000-000000000001",
+        now: () => new Date(clock),
         fetch: metadataFetch,
         serverUrl: (extensionId, componentId) =>
           extensionId === manifest.extensionId && componentId === component.id
@@ -283,7 +329,7 @@ describe("registered Slack connector through existing task authority", () => {
       });
       const mcpFetch: typeof fetch = Object.assign(
         async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-          expect(String(input)).toBe(slack.transportUrl);
+          expect(String(input)).toBe(profile.transportUrl);
           if (init?.method === "DELETE") return new Response(null, { status: 204 });
           const message = JSON.parse(String(init?.body));
           if (message.method === "notifications/initialized")
@@ -301,7 +347,9 @@ describe("registered Slack connector through existing task authority", () => {
                     serverInfo: { name: "fixture", version: "1" },
                   }
                 : message.method === "tools/list"
-                  ? { tools: [{ name: "fixture_public_search", inputSchema: { type: "object" } }] }
+                  ? {
+                      tools: [{ name: "fixture_public_search", inputSchema: { type: "object" } }],
+                    }
                   : { content: [{ type: "text", text: "Synthetic public Slack result" }] },
           });
         },
@@ -407,12 +455,43 @@ describe("registered Slack connector through existing task authority", () => {
         currentChallenge = authorization.searchParams.get("code_challenge") ?? "";
         currentCallback = authorization.searchParams.get("redirect_uri") ?? "";
         expect(currentCallback).toBe(prepared.callback);
-        expect(authorization.searchParams.get("scope")).toBe(slack.readScope);
-        expect(await callback(authorization)).toBe(200);
+        expect(authorization.searchParams.get("scope")).toBe(requestedScopes.join(" "));
+        if (profile.dialect === github.dialect) {
+          expect(await callback(authorization, profile.issuer, { host: "other.example" })).toBe(
+            400,
+          );
+          expect(
+            await callback(authorization, profile.issuer, {
+              target: "/\\other.example/oauth/callback?state=ignored",
+            }),
+          ).toBe(400);
+        }
+        expect(await callback(authorization, profile.issuer)).toBe(200);
         expect(
           await signIn.poll(manifest.extensionId, component.id, started.attemptId, "local-window"),
-        ).toEqual({ kind: "signed-in", issuer: new URL(slack.issuer).host, account });
+        ).toEqual({ kind: "signed-in", issuer: new URL(profile.issuer).host, account });
       };
+      if (profile.dialect === github.dialect) {
+        for (const invalidIssuer of [undefined, "https://other.example"]) {
+          const started = await signIn.begin(manifest.extensionId, component.id, "local-window");
+          if (started.kind !== "awaiting-consent")
+            throw new Error("Expected issuer-check fixture consent");
+          expect(
+            await callback(new URL(started.authorizationUrl), invalidIssuer ?? profile.issuer, {
+              omitIssuer: invalidIssuer === undefined,
+            }),
+          ).toBe(400);
+          expect(
+            await signIn.poll(
+              manifest.extensionId,
+              component.id,
+              started.attemptId,
+              "local-window",
+            ),
+          ).toMatchObject({ kind: "refused" });
+          expect(tokenCalls).toBe(0);
+        }
+      }
       await consent();
       const resolved = await resolver({ phase: "send", thread, selections: [selection] });
       const toolSet = resolved.toolSet;
@@ -428,11 +507,28 @@ describe("registered Slack connector through existing task authority", () => {
       approvals = true;
       expect((await execute()).isError).not.toBe(true);
       expect(calls).toEqual(["Bearer synthetic-slack-access-1"]);
+      if (profile.dialect === github.dialect) {
+        clock += 3_601_000;
+        expect((await execute()).isError).toBe(true);
+        expect(calls).toHaveLength(1); // Refresh cannot send or replay the attempted tool call.
+        const refreshed = await resolver({ phase: "send", thread, selections: [selection] });
+        const currentTool = refreshed.toolSet?.definitions[0];
+        if (refreshed.toolSet === undefined || currentTool === undefined)
+          throw new Error("Expected reconciled fresh task tools");
+        expect(
+          (await refreshed.toolSet.execute({ name: currentTool.name, inputJson: "{}" })).isError,
+        ).not.toBe(true);
+        expect(calls).toEqual([
+          "Bearer synthetic-slack-access-1",
+          "Bearer synthetic-slack-access-2",
+        ]);
+      }
+      const sentBeforeSignOut = calls.length;
       expect(await signIn.signOut(manifest.extensionId, component.id, "local-window")).toEqual({
         kind: "signed-out",
       });
       expect((await execute()).isError).toBe(true);
-      expect(calls).toHaveLength(1);
+      expect(calls).toHaveLength(sentBeforeSignOut);
       expect(credentials.values.size).toBe(0);
       expect(secrets.values.size).toBe(1);
       await consent();
@@ -443,7 +539,8 @@ describe("registered Slack connector through existing task authority", () => {
       expect((await again.toolSet.execute({ name: next.name, inputJson: "{}" })).isError).not.toBe(
         true,
       );
-      expect(calls).toEqual(["Bearer synthetic-slack-access-1", "Bearer synthetic-slack-access-2"]);
+      expect(calls).toHaveLength(sentBeforeSignOut + 1);
+      expect(calls[calls.length - 1]).toBe(`Bearer synthetic-slack-access-${tokenCalls}`);
       expect(JSON.stringify(journal)).not.toContain("synthetic-private-app-secret");
       expect(JSON.stringify(journal)).not.toContain("synthetic-slack-access");
     } finally {

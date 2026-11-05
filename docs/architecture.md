@@ -8916,6 +8916,40 @@ ordinary Settings status reads only retained facts. Actual tools and capabilitie
 are discovered and approved through the normal authorized task lifecycle, never
 a Settings probe.
 
+The separate GitHub OAuth App catalog entry keeps the existing GitHub PAT
+entry and its generated package and credential ownership unchanged, even at the
+same server address. It uses only the reviewed GitHub.com transport/resource
+`https://api.githubcopilot.com/mcp/`, issuer `https://github.com/login/oauth`,
+GitHub's exact authorize/access-token endpoints, S256 and a retained exact
+127.0.0.1 loopback callback. The callback must include the advertised issuer.
+This read profile requires a person-owned registered confidential OAuth App,
+with its linked-store secret sent by the broker as `client_secret_post`.
+Current GitHub metadata omits token authentication methods; this closed dialect
+uses the documented form-body method and refuses contradictory metadata.
+Generic method defaults and existing DCR remain unchanged. Resource metadata
+must advertise `read:user`; issuer metadata must advertise `offline_access`.
+These two selected values never expand to the advertised permission union.
+Private repositories, private email, writes, GitHub App installation permissions
+and device authorization are outside this profile.
+
+GitHub tokens must include positive bounded access expiry and replacement refresh
+material. After every code exchange or rotation, the broker makes one bounded,
+redirect-refusing GET to the fixed `https://api.github.com/user` endpoint, with
+the newly issued bearer, the required application User-Agent and a documented
+REST API version. Only a positive safe integer user ID and bounded reported
+permissions survive; login, email, repository and organization data are discarded.
+A changed known ID, missing `read:user`, broader reported permissions or failed
+post-rotation identity verification requires explicit reconnection without the
+old bearer. GitHub's `bad_refresh_token` answer to a refresh also ends the grant
+and asks for sign-in again rather than retrying. Omitted refresh permission
+fields retain only last-reported facts.
+This identity read is part of the authentication transaction, never a Settings
+tool probe. The same captured-grant refresh/retirement and task approval fences
+apply. OAuth profile success does not prove the MCP server offers useful tools
+under these scopes: actual GitHub eligibility, rotation and an approved MCP read
+remain separate live acceptance gates, and unsupported tools retain normal
+permission/reconnect errors. No application is registered by this entry.
+
 Scopes
 follow the RFC 6749 scope-token grammar, so a URL-shaped scope survives. An
 issuer may grant an access token without a refresh token; such a grant lasts

@@ -1,3 +1,4 @@
+import type { McpOAuthAccount } from "./mcpOAuthAccount";
 /** The dedicated user-token response labels its identity "user", not its HTTP auth scheme. */
 export const SLACK_MCP_USER_OAUTH = {
   dialect: "slack-mcp-user",
@@ -79,11 +80,7 @@ export function isSlackMcpCallbackUri(value: string): boolean {
 }
 
 /** Last account facts reported by the dedicated token endpoint, never JWT-derived names. */
-export interface SlackMcpAccount {
-  readonly workspaceId?: string;
-  readonly userId?: string;
-  readonly grantedScopes?: readonly string[];
-}
+export type SlackMcpAccount = McpOAuthAccount;
 
 export function decodeSlackMcpAccount(value: unknown): SlackMcpAccount | undefined {
   if (

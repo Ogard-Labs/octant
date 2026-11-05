@@ -428,6 +428,24 @@ server and the task's usual tool permissions still apply. Turn off or remove
 the package in **Installed** to stop offering its tools. See
 [Paper's current setup instructions](https://paper.design/docs/mcp).
 
+### GitHub with your OAuth App
+
+**GitHub** keeps its personal access token connection. **GitHub OAuth App** is a
+separate setup path for an OAuth App you own. Connect it, copy the exact callback
+address into that app, and save its Client ID and a linked-store client secret
+reference before choosing **Sign in**. Octant does not register an app for you.
+This profile requests `read:user` and `offline_access`, for profile read access
+and expiring token rotation. It requests no private repository, private email or
+write access. Available MCP tools still depend on what GitHub permits with that
+connection; signing in alone does not prove repository tool availability.
+
+The connected row shows only a reported numeric user ID and last-reported
+permissions; organization and repository reach are unknown. A changed account,
+missing required permission, broader inherited permission or failed account
+verification asks you to review the app permissions and sign in again. Restore
+your linked secret store if rotation cannot access the app secret. Sign-out
+retains app setup and leaves an independently added PAT connection intact.
+
 ### Sign in to a hosted server
 
 A server you added by its address can ask you to sign in instead of taking a

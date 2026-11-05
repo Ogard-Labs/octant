@@ -9,6 +9,55 @@ import {
 } from "./hostOAuth";
 
 describe("host OAuth contracts", () => {
+  it("accepts only the closed GitHub OAuth App read descriptor and actionable reconnect reasons", () => {
+    const descriptor = {
+      descriptorId: "github-read",
+      clientId: "owned-app",
+      dialect: "github-mcp-oauth-app",
+      flow: "authorization-code-pkce",
+      authorizationEndpoint: "https://github.com/login/oauth/authorize",
+      tokenEndpoint: "https://github.com/login/oauth/access_token",
+      resource: "https://api.githubcopilot.com/mcp/",
+      mcpTransportUrl: "https://api.githubcopilot.com/mcp/",
+      mcpIssuer: "https://github.com/login/oauth",
+      redirectPort: 43125,
+      scopes: ["read:user", "offline_access"],
+      termsId: "github-read-1",
+      clientAuthentication: {
+        method: "client_secret_post",
+        secretRef: "55000000-0000-4000-8000-000000000001",
+        tokenEndpoint: "https://github.com/login/oauth/access_token",
+      },
+    };
+    expect(decodeHostOAuthDescriptor(descriptor)).toEqual(descriptor);
+    for (const change of [
+      { scopes: ["repo", "offline_access"] },
+      { redirectHostname: "localhost" },
+      { dialect: "mcp-authorization" },
+      { resource: "https://api.githubcopilot.com/" },
+      { mcpIssuer: "https://other.example" },
+      { tokenEndpoint: "https://other.example/token" },
+      { clientAuthentication: undefined },
+      {
+        clientAuthentication: { ...descriptor.clientAuthentication, method: "client_secret_basic" },
+      },
+    ]) {
+      expect(() => decodeHostOAuthDescriptor({ ...descriptor, ...change })).toThrow();
+    }
+    for (const reason of ["permission-mismatch", "identity-unavailable"])
+      expect(
+        decodeHostOAuthSignInState({
+          kind: "sign-in-again",
+          credentialRef: "55000000-0000-4000-8000-000000000001",
+          reason,
+        }),
+      ).toEqual({
+        kind: "sign-in-again",
+        credentialRef: "55000000-0000-4000-8000-000000000001",
+        reason,
+      });
+  });
+
   it("accepts reusable registration metadata and refuses raw secrets or unbound confidential clients", () => {
     const registration = {
       kind: "registered",

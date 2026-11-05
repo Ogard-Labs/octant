@@ -336,6 +336,8 @@ export const McpServerSignInView = Schema.Union(
       "refresh-reused",
       "account-changed",
       "permission-missing",
+      "permission-mismatch",
+      "identity-unavailable",
     ),
   }).annotations(strict),
   Schema.Struct({

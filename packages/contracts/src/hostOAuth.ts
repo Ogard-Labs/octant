@@ -131,6 +131,7 @@ export const HostOAuthDialect = Schema.Literal(
   "chatgpt-plan-siwc",
   "mcp-authorization",
   "slack-mcp-user",
+  "github-mcp-oauth-app",
   "directory-oidc",
   "issuer-oidc",
 );
@@ -217,18 +218,23 @@ export const HostOAuthDescriptor = Schema.Struct({
         if (
           descriptor.dialect !== "mcp-authorization" &&
           descriptor.dialect !== "slack-mcp-user" &&
+          descriptor.dialect !== "github-mcp-oauth-app" &&
           (descriptor.clientAuthentication !== undefined ||
             (descriptor.clientId !== undefined && !Schema.is(ClientId)(descriptor.clientId)))
         )
           return false;
         if (
           descriptor.dialect !== "slack-mcp-user" &&
+          descriptor.dialect !== "github-mcp-oauth-app" &&
           (descriptor.redirectHostname !== undefined ||
             descriptor.mcpTransportUrl !== undefined ||
             descriptor.mcpIssuer !== undefined ||
             descriptor.resource === "https://mcp.slack.com" ||
             descriptor.authorizationEndpoint === "https://slack.com/oauth/v2_user/authorize" ||
-            descriptor.tokenEndpoint === "https://slack.com/api/oauth.v2.user.access")
+            descriptor.tokenEndpoint === "https://slack.com/api/oauth.v2.user.access" ||
+            descriptor.resource === "https://api.githubcopilot.com/mcp/" ||
+            descriptor.authorizationEndpoint === "https://github.com/login/oauth/authorize" ||
+            descriptor.tokenEndpoint === "https://github.com/login/oauth/access_token")
         )
           return false;
         // The directory dialect speaks standard device authorization against
@@ -297,7 +303,27 @@ export const HostOAuthDescriptor = Schema.Struct({
         }
         // The MCP authorization dialect registers its client before the flow,
         // so it names a client id; a server may grant without any scope.
-        if (descriptor.dialect === "mcp-authorization" || descriptor.dialect === "slack-mcp-user") {
+        if (
+          descriptor.dialect === "mcp-authorization" ||
+          descriptor.dialect === "slack-mcp-user" ||
+          descriptor.dialect === "github-mcp-oauth-app"
+        ) {
+          if (
+            descriptor.dialect === "github-mcp-oauth-app" &&
+            (!Schema.is(ClientId)(descriptor.clientId) ||
+              descriptor.redirectHostname !== undefined ||
+              descriptor.redirectPort === undefined ||
+              descriptor.resource !== "https://api.githubcopilot.com/mcp/" ||
+              descriptor.mcpTransportUrl !== "https://api.githubcopilot.com/mcp/" ||
+              descriptor.mcpIssuer !== "https://github.com/login/oauth" ||
+              descriptor.authorizationEndpoint !== "https://github.com/login/oauth/authorize" ||
+              descriptor.tokenEndpoint !== "https://github.com/login/oauth/access_token" ||
+              descriptor.clientAuthentication?.method !== "client_secret_post" ||
+              descriptor.scopes.length !== 2 ||
+              !descriptor.scopes.includes("read:user") ||
+              !descriptor.scopes.includes("offline_access"))
+          )
+            return false;
           if (
             descriptor.dialect === "slack-mcp-user" &&
             (descriptor.redirectHostname !== "localhost" ||
@@ -363,6 +389,8 @@ export const HostOAuthSignInAgainReason = Schema.Literal(
   "interaction-required",
   "account-changed",
   "permission-missing",
+  "permission-mismatch",
+  "identity-unavailable",
 );
 export type HostOAuthSignInAgainReason = typeof HostOAuthSignInAgainReason.Type;
 

@@ -17,6 +17,9 @@ import type {
 } from "@octant/contracts/host-oauth";
 import {
   SLACK_MCP_USER_OAUTH,
+  GITHUB_MCP_OAUTH_APP,
+  isGithubMcpDescriptorBinding,
+  decodeGithubMcpAccount,
   mcpOAuthResourceForTransport,
   isSlackMcpUserDescriptorBinding,
 } from "@octant/host-runtime";
@@ -89,7 +92,7 @@ type Discovered =
       readonly kind: "discovered";
       readonly resource: string;
       readonly transportUrl: string;
-      readonly mcpDialect: "mcp-authorization" | "slack-mcp-user";
+      readonly mcpDialect: "mcp-authorization" | "slack-mcp-user" | "github-mcp-oauth-app";
       readonly issuer: string;
       readonly authorizationEndpoint: string;
       readonly tokenEndpoint: string;
@@ -582,6 +585,14 @@ export class McpServerSignIn {
         "issuer-unsupported",
         "This server advertises a registered client using client_secret_post; public-client compatibility is not established.",
       );
+    if (
+      transportUrl === GITHUB_MCP_OAUTH_APP.transportUrl &&
+      !githubRegistrationReady(registration)
+    )
+      return refused(
+        "issuer-unsupported",
+        "This read connector requires your registered OAuth App, linked app secret, and exact retained loopback callback.",
+      );
     const result = await this.#configureClient(registration, principalKind, reservedSecretRef);
     if (result.kind !== "configured") return result;
     const key = signInKey(extensionId, componentId);
@@ -784,6 +795,14 @@ export class McpServerSignIn {
         kind: "client-setup-required",
         message: "Set up your registered app before signing in.",
       };
+    if (
+      canonicalResource(url) === GITHUB_MCP_OAUTH_APP.transportUrl &&
+      !githubRegistrationReady(this.#registrations.get(GITHUB_MCP_OAUTH_APP.resource))
+    )
+      return {
+        kind: "client-setup-required",
+        message: "Set up your registered OAuth App before signing in.",
+      };
     return { kind: "signed-out" };
   }
 
@@ -858,6 +877,11 @@ export class McpServerSignIn {
           "Update this app setup with its exact retained localhost callback before signing in.",
         );
     }
+    if (discovered.mcpDialect === GITHUB_MCP_OAUTH_APP.dialect && !githubRegistrationReady(setup))
+      return refused(
+        "issuer-unsupported",
+        "Use your registered OAuth App with its retained loopback callback and linked app secret.",
+      );
     let port: number;
     try {
       port = setup?.redirectPort ?? (await (this.#options.pickPort ?? pickFreePort)());
@@ -892,7 +916,9 @@ export class McpServerSignIn {
             mcpIssuer: discovered.issuerUrl,
             mcpTransportUrl: discovered.transportUrl,
           }
-        : {}),
+        : discovered.mcpDialect === GITHUB_MCP_OAUTH_APP.dialect
+          ? { mcpIssuer: discovered.issuerUrl, mcpTransportUrl: discovered.transportUrl }
+          : {}),
       ...(setup?.clientAuthentication === undefined
         ? {}
         : { clientAuthentication: setup.clientAuthentication }),
@@ -1035,7 +1061,10 @@ export class McpServerSignIn {
         key.slice(key.indexOf(":") + 1),
       );
       const record = this.#signIns.get(key);
-      if (record?.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect) {
+      if (
+        record?.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect ||
+        record?.descriptor.dialect === GITHUB_MCP_OAUTH_APP.dialect
+      ) {
         try {
           const answer = await this.#credentialStage(() =>
             this.#options.access(record.credentialRef),
@@ -1270,7 +1299,8 @@ export class McpServerSignIn {
           return "unavailable";
         const tokenType = typeof answer.tokenType === "string" ? answer.tokenType : "Bearer";
         if (
-          record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect &&
+          (record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect ||
+            record.descriptor.dialect === GITHUB_MCP_OAUTH_APP.dialect) &&
           tokenType.toLowerCase() !== "bearer"
         )
           return "unavailable";
@@ -1376,13 +1406,23 @@ export class McpServerSignIn {
     answer: Record<string, unknown>,
   ): Promise<unknown> {
     if (
-      record.descriptor.dialect !== SLACK_MCP_USER_OAUTH.dialect ||
+      record.descriptor.dialect === GITHUB_MCP_OAUTH_APP.dialect &&
+      answer.mcpAccount === undefined
+    )
+      return { kind: "unavailable" };
+    if (
+      (record.descriptor.dialect !== SLACK_MCP_USER_OAUTH.dialect &&
+        record.descriptor.dialect !== GITHUB_MCP_OAUTH_APP.dialect) ||
       answer.mcpAccount === undefined
     )
       return answer;
     const current = this.#signIns.get(key);
     if (!this.#currentGrant(key, record) || current === undefined) return { kind: "unavailable" };
-    const initial = inspectReportedAccount(current.account, answer.mcpAccount);
+    const initial = inspectReportedAccount(
+      current.account,
+      answer.mcpAccount,
+      record.descriptor.dialect,
+    );
     if (initial.kind !== "valid")
       return initial.kind === "invalid"
         ? { kind: "unavailable" }
@@ -1392,7 +1432,11 @@ export class McpServerSignIn {
       if (!this.#currentGrant(key, record)) return { kind: "unavailable" };
       const owner = this.#signIns.get(key);
       if (owner === undefined) return { kind: "unavailable" };
-      const observed = inspectReportedAccount(owner.account, answer.mcpAccount);
+      const observed = inspectReportedAccount(
+        owner.account,
+        answer.mcpAccount,
+        record.descriptor.dialect,
+      );
       if (observed.kind !== "valid")
         return observed.kind === "invalid"
           ? { kind: "unavailable" }
@@ -1460,7 +1504,8 @@ export class McpServerSignIn {
     if (answer.kind !== "granted" || typeof answer.accessToken !== "string") return launch;
     const tokenType = typeof answer.tokenType === "string" ? answer.tokenType : "Bearer";
     if (
-      record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect &&
+      (record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect ||
+        record.descriptor.dialect === GITHUB_MCP_OAUTH_APP.dialect) &&
       tokenType.toLowerCase() !== "bearer"
     )
       return launch;
@@ -1603,34 +1648,73 @@ export class McpServerSignIn {
         kind: "issuer-unsupported",
         message: "The server does not advertise the selected read permission.",
       };
+    const github = transportUrl === GITHUB_MCP_OAUTH_APP.transportUrl;
+    const githubReserved =
+      github ||
+      new URL(transportUrl).hostname === "api.githubcopilot.com" ||
+      issuer === GITHUB_MCP_OAUTH_APP.issuer ||
+      authorizationEndpoint === GITHUB_MCP_OAUTH_APP.authorizationEndpoint ||
+      tokenEndpoint === GITHUB_MCP_OAUTH_APP.tokenEndpoint;
+    if (
+      githubReserved &&
+      (!github ||
+        resource !== GITHUB_MCP_OAUTH_APP.resource ||
+        issuer !== GITHUB_MCP_OAUTH_APP.issuer ||
+        authorizationEndpoint !== GITHUB_MCP_OAUTH_APP.authorizationEndpoint ||
+        tokenEndpoint !== GITHUB_MCP_OAUTH_APP.tokenEndpoint ||
+        !Array.isArray(methods) ||
+        !methods.includes("S256") ||
+        issuerMetadata.authorization_response_iss_parameter_supported !== true ||
+        !Array.isArray(metadata.scopes_supported) ||
+        !metadata.scopes_supported.includes(GITHUB_MCP_OAUTH_APP.readScope) ||
+        !Array.isArray(issuerMetadata.scopes_supported) ||
+        !issuerMetadata.scopes_supported.includes(GITHUB_MCP_OAUTH_APP.rotationScope) ||
+        (issuerMetadata.token_endpoint_auth_methods_supported !== undefined &&
+          (!Array.isArray(issuerMetadata.token_endpoint_auth_methods_supported) ||
+            !issuerMetadata.token_endpoint_auth_methods_supported.includes("client_secret_post"))))
+    )
+      return {
+        kind: "issuer-unsupported",
+        message:
+          "GitHub authorization metadata does not support the reviewed OAuth App read profile.",
+      };
     const registration = issuerMetadata.registration_endpoint;
-    const scopes = slack
-      ? [SLACK_MCP_USER_OAUTH.readScope]
-      : Array.isArray(metadata.scopes_supported)
-        ? metadata.scopes_supported
-            .filter((entry): entry is string => typeof entry === "string")
-            .filter((entry) => SCOPE_TOKEN_PATTERN.test(entry))
-            .slice(0, 16)
-        : [];
+    const scopes = github
+      ? [GITHUB_MCP_OAUTH_APP.readScope, GITHUB_MCP_OAUTH_APP.rotationScope]
+      : slack
+        ? [SLACK_MCP_USER_OAUTH.readScope]
+        : Array.isArray(metadata.scopes_supported)
+          ? metadata.scopes_supported
+              .filter((entry): entry is string => typeof entry === "string")
+              .filter((entry) => SCOPE_TOKEN_PATTERN.test(entry))
+              .slice(0, 16)
+          : [];
     return {
       kind: "discovered",
       resource,
       transportUrl,
-      mcpDialect: slack ? SLACK_MCP_USER_OAUTH.dialect : "mcp-authorization",
+      mcpDialect: github
+        ? GITHUB_MCP_OAUTH_APP.dialect
+        : slack
+          ? SLACK_MCP_USER_OAUTH.dialect
+          : "mcp-authorization",
       issuer: issuerUrl.host,
       issuerUrl: issuer,
-      metadataClientSupported: issuerMetadata.client_id_metadata_document_supported === true,
-      tokenAuthenticationMethods: Array.isArray(
-        issuerMetadata.token_endpoint_auth_methods_supported,
-      )
-        ? issuerMetadata.token_endpoint_auth_methods_supported.filter(
-            (entry): entry is string => typeof entry === "string",
-          )
-        : ["client_secret_basic"],
+      metadataClientSupported:
+        !github && issuerMetadata.client_id_metadata_document_supported === true,
+      tokenAuthenticationMethods: github
+        ? ["client_secret_post"]
+        : Array.isArray(issuerMetadata.token_endpoint_auth_methods_supported)
+          ? issuerMetadata.token_endpoint_auth_methods_supported.filter(
+              (entry): entry is string => typeof entry === "string",
+            )
+          : ["client_secret_basic"],
       authorizationEndpoint,
       tokenEndpoint,
       registrationEndpoint:
-        typeof registration === "string" && isHttps(registration) ? registration : undefined,
+        !github && typeof registration === "string" && isHttps(registration)
+          ? registration
+          : undefined,
       scopes,
     };
   }
@@ -1733,19 +1817,22 @@ export class McpServerSignIn {
           const stored = record as McpServerSignInRecord;
           const { account: supplied, ...owner } = stored;
           if (
-            stored.descriptor?.dialect === SLACK_MCP_USER_OAUTH.dialect &&
+            (stored.descriptor?.dialect === SLACK_MCP_USER_OAUTH.dialect ||
+              stored.descriptor?.dialect === GITHUB_MCP_OAUTH_APP.dialect) &&
             supplied !== undefined
           ) {
             try {
-              const account = decodeMcpReportedAccount(supplied);
-              this.#signIns.set(key, {
-                ...owner,
-                account,
-                ...(account.grantedScopes !== undefined &&
-                !account.grantedScopes.includes(SLACK_MCP_USER_OAUTH.readScope)
-                  ? { signInAgain: "permission-missing" as const }
-                  : {}),
-              });
+              const observed = inspectReportedAccount(
+                undefined,
+                supplied,
+                stored.descriptor.dialect,
+              );
+              if (observed.kind !== "valid") {
+                this.#signIns.set(key, {
+                  ...owner,
+                  signInAgain: observed.kind === "invalid" ? "account-changed" : observed.kind,
+                });
+              } else this.#signIns.set(key, { ...owner, account: observed.account });
             } catch {
               this.#signIns.set(key, { ...owner, signInAgain: "account-changed" });
             }
@@ -1814,7 +1901,9 @@ function signInAgainReason(value: unknown): McpSignInAgainReason | undefined {
     value === "expired" ||
     value === "refresh-reused" ||
     value === "account-changed" ||
-    value === "permission-missing"
+    value === "permission-missing" ||
+    value === "permission-mismatch" ||
+    value === "identity-unavailable"
     ? value
     : undefined;
 }
@@ -1971,11 +2060,15 @@ function accessExpiry(answer: Record<string, unknown>): number | "invalid" | und
 }
 function recordAdmitsTransport(record: McpServerSignInRecord, url: string): boolean {
   const transportUrl = canonicalResource(url);
-  return record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect
-    ? isSlackMcpUserDescriptorBinding(record.descriptor) &&
+  return record.descriptor.dialect === GITHUB_MCP_OAUTH_APP.dialect
+    ? isGithubMcpDescriptorBinding(record.descriptor) &&
+        transportUrl === GITHUB_MCP_OAUTH_APP.transportUrl
+    : record.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect
+      ? isSlackMcpUserDescriptorBinding(record.descriptor) &&
         transportUrl === SLACK_MCP_USER_OAUTH.transportUrl
-    : record.descriptor.resource === transportUrl &&
-        transportUrl !== SLACK_MCP_USER_OAUTH.transportUrl;
+      : record.descriptor.resource === transportUrl &&
+        transportUrl !== SLACK_MCP_USER_OAUTH.transportUrl &&
+        transportUrl !== GITHUB_MCP_OAUTH_APP.transportUrl;
 }
 
 function slackRegistrationReady(registration: McpOAuthClientRegistration | undefined): boolean {
@@ -1988,17 +2081,46 @@ function slackRegistrationReady(registration: McpOAuthClientRegistration | undef
     registration.clientAuthentication.tokenEndpoint === SLACK_MCP_USER_OAUTH.tokenEndpoint
   );
 }
+function githubRegistrationReady(registration: McpOAuthClientRegistration | undefined): boolean {
+  return (
+    registration?.kind === "registered" &&
+    registration.resource === GITHUB_MCP_OAUTH_APP.resource &&
+    registration.issuer === GITHUB_MCP_OAUTH_APP.issuer &&
+    registration.redirectHostname === undefined &&
+    registration.clientAuthentication?.method === "client_secret_post" &&
+    registration.clientAuthentication.tokenEndpoint === GITHUB_MCP_OAUTH_APP.tokenEndpoint
+  );
+}
 function inspectReportedAccount(
   previous: McpReportedAccount | undefined,
   value: unknown,
+  dialect: HostOAuthDescriptor["dialect"],
 ):
   | { readonly kind: "valid"; readonly account: McpReportedAccount }
-  | { readonly kind: "invalid" | "account-changed" | "permission-missing" } {
+  | {
+      readonly kind: "invalid" | "account-changed" | "permission-missing" | "permission-mismatch";
+    } {
   let reported: McpReportedAccount;
   try {
     reported = decodeMcpReportedAccount(value);
   } catch {
     return { kind: "invalid" };
+  }
+  if (dialect === GITHUB_MCP_OAUTH_APP.dialect) {
+    if (reported.workspaceId !== undefined || reported.userId === undefined)
+      return { kind: "invalid" };
+    if (reported.grantedScopes?.some((scope) => scope !== GITHUB_MCP_OAUTH_APP.readScope))
+      return { kind: "permission-mismatch" };
+    if (
+      reported.grantedScopes !== undefined &&
+      !reported.grantedScopes.includes(GITHUB_MCP_OAUTH_APP.readScope)
+    )
+      return { kind: "permission-missing" };
+    const account = decodeGithubMcpAccount({ ...previous, ...reported });
+    if (account === undefined) return { kind: "invalid" };
+    if (previous?.userId !== undefined && previous.userId !== account.userId)
+      return { kind: "account-changed" };
+    return { kind: "valid", account: decodeMcpReportedAccount(account) };
   }
   if (
     (previous?.workspaceId !== undefined &&

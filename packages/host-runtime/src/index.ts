@@ -242,3 +242,11 @@ export type { BrowserCredentialItemPin, BrowserItemMetadata } from "./onePasswor
 export { onePasswordCommandCredentials } from "./onePasswordCommandCredentials";
 
 export { resolveOnePasswordExecutable } from "./linkedSecretStores";
+
+export {
+  GITHUB_MCP_OAUTH_APP,
+  isGithubMcpGrantBinding,
+  isGithubMcpDescriptorBinding,
+  isGithubMcpCallbackUri,
+  decodeGithubMcpAccount,
+} from "./githubMcpOAuth";

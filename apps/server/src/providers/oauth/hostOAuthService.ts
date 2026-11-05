@@ -408,7 +408,8 @@ export function createHostOAuthService(options: {
           }
         } else if (
           input.descriptor.dialect === "mcp-authorization" ||
-          input.descriptor.dialect === "slack-mcp-user"
+          input.descriptor.dialect === "slack-mcp-user" ||
+          input.descriptor.dialect === "github-mcp-oauth-app"
         ) {
           // The runtime joins an in-flight refresh/write before deleting this MCP grant.
           const retired = await options.broker.revoke(input.credentialRef);
