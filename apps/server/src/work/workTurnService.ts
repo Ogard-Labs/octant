@@ -1132,17 +1132,17 @@ export class WorkTurnService {
       uuid: this.#uuid,
       createdAt: this.#clock(),
       safeInputBudget: this.#safeInputBudgetTokens,
+      leading: harnessContext.map(
+        (block, index): WorkTurnContextContribution => ({
+          text: block.text,
+          sourceKind: "instruction",
+          referenceId: `native-harness:${index}`,
+          category: "octant-policy",
+          posture: "required",
+          block,
+        }),
+      ),
       contributions: [
-        ...harnessContext.map(
-          (block, index): WorkTurnContextContribution => ({
-            text: block.text,
-            sourceKind: "instruction",
-            referenceId: `native-harness:${index}`,
-            category: "octant-policy",
-            posture: "required",
-            block,
-          }),
-        ),
         ...skillContext.map(
           (block, index): WorkTurnContextContribution => ({
             text: block.text,

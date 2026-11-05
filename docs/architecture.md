@@ -5999,6 +5999,19 @@ prompt is therefore built to be appended, never rewritten:
   again behind a fixed note that it replaces all earlier Octant context, so a
   stale copy never stands alone. The rule is `providerTurnContextDelta` in
   `@octant/provider-sdk/chat-conformance`.
+- **Orientation and order.** Every mode on every provider opens Octant's
+  instructions with one fixed orientation block per mode
+  (`apps/server/src/orientation/octantOrientation.ts`). It says the model runs
+  inside Octant and the person reads rendered replies in its window, what the
+  mode is for, that Octant's tools describe themselves and that refusals are
+  reported rather than worked around, and how decision and follow-up blocks
+  appear. It names no tool, folder, provider, date or person, and leaves what a
+  mode may touch to the runtime's tools and Octant Harness's mode line. Codex
+  and Claude Code bring prompts written for a terminal, and before this nothing
+  told the model it was inside Octant. The instructions then follow one order
+  in every mode: orientation, the reply formats it introduces, the mode's own
+  rules (Work's folder rule, document delivery, the status file), tool notes,
+  and finally anything for the current turn alone.
 - **Standing text stays fixed.** Anything that varies from turn to turn is a
   `turn-instructions` block or a keyed block, never a change to a standing
   instruction's text. Changing that text withdraws the held block, which
@@ -6006,7 +6019,9 @@ prompt is therefore built to be appended, never rewritten:
   the system prompt, it invalidates the provider's cached prefix for the whole
   conversation. The status file's take-stock request once lived inside its
   standing rule and changed it whenever the status crossed a staleness or date
-  threshold.
+  threshold. Octant Harness sends the advisor's redirect and today's date (UTC,
+  which Codex and Claude Code supply themselves) the same way, as one-turn
+  instructions outside its system prompt.
 - **When a block counts as held.** The server keeps one record per provider
   session id (`apps/server/src/providers/heldTurnContext.ts`), which the Chat,
   Work, and Code turn runners consult before sending. A block counts as held only
