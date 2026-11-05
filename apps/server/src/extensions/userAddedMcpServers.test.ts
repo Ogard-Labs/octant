@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -35,16 +35,26 @@ function secretsStore(): ProviderCredentialStore & { readonly values: Map<string
   };
 }
 
-async function store(options: { readonly secrets?: ProviderCredentialStore } = {}) {
+async function store(
+  options: { readonly secrets?: ProviderCredentialStore; readonly ancestorAlias?: boolean } = {},
+) {
   const directory = await mkdtemp(join(tmpdir(), "octant-user-added-"));
   directories.push(directory);
+  let generatedDirectory = join(directory, "user-added");
+  if (options.ancestorAlias === true) {
+    const canonical = join(directory, "canonical");
+    await mkdir(canonical);
+    const alias = join(directory, "alias");
+    await symlink(canonical, alias, "dir");
+    generatedDirectory = join(alias, "user-added");
+  }
   let counter = 0;
   const registry = new LocalPluginFolderRegistry({ sourceKind: "user-added" });
   return {
     directory,
     registry,
     store: new UserAddedMcpServerStore({
-      directory: join(directory, "user-added"),
+      directory: generatedDirectory,
       registry,
       ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
       uuid: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`,
@@ -138,6 +148,137 @@ describe("MCP servers added by hand", () => {
     ).rejects.toMatchObject({ category: "invalid" });
   });
 
+  it.each([false, true])(
+    "derives repository policy from the owned reserved folder and verified configuration, never a copied label or same URL (ancestor alias: %s)",
+    async (ancestorAlias) => {
+      const { store: servers, registry } = await store({ ancestorAlias });
+      const url = "https://api.githubcopilot.com/mcp/";
+      const prepare = async (connectorId: string) => {
+        const { source } = await servers.add({
+          name: "GitHub",
+          connectorId,
+          server: { type: "streamable-http", url, headers: [] },
+        });
+        const registered = registry.get(source.sourceRef);
+        if (registered === undefined) throw new Error("Missing generated source");
+        const manifest = inspectExtensionPackage(
+          normalizeAgentPluginPackage(registered.packageInput),
+        ).manifest;
+        const component = manifest.components.find((candidate) => candidate.kind === "mcp-server");
+        if (component === undefined) throw new Error("Missing generated component");
+        const installed = { source: manifest.source, components: [{ component }] };
+        return {
+          source,
+          installed,
+          componentId: String(component.id),
+          read: () => readFile(join(registered.absolutePath, "mcp.json"), "utf8"),
+        };
+      };
+      const repository = await prepare("github-repositories");
+      const profile = await prepare("github-oauth");
+      const proof = await servers.signInPolicy(
+        repository.installed,
+        repository.componentId,
+        repository.read,
+      );
+      expect(proof?.mcpPermissionProfile).toBe("github-repositories-read-write");
+      expect(proof?.current()).toBe(true);
+      expect(
+        (await servers.signInPolicy(profile.installed, profile.componentId, profile.read))
+          ?.mcpPermissionProfile,
+      ).toBeUndefined();
+      const forged = { ...repository.installed, source: profile.installed.source };
+      expect(
+        (await servers.signInPolicy(forged, repository.componentId, repository.read))
+          ?.mcpPermissionProfile,
+      ).toBeUndefined();
+      const actual = JSON.parse(await repository.read()) as {
+        readonly mcpServers: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+      };
+      const originalServer = actual.mcpServers.GitHub;
+      if (originalServer === undefined) throw new Error("Missing generated HTTP config");
+      for (const change of [
+        { url: "https://other.example/mcp" },
+        { headers: { Authorization: "synthetic-foreign-token" } },
+      ]) {
+        const modified = JSON.stringify({
+          ...actual,
+          mcpServers: { ...actual.mcpServers, GitHub: { ...originalServer, ...change } },
+        });
+        expect(
+          await servers.signInPolicy(
+            repository.installed,
+            repository.componentId,
+            async () => modified,
+          ),
+        ).toBeUndefined();
+      }
+      await servers.remove(repository.source.sourceRef);
+      expect(proof?.current()).toBe(false);
+    },
+  );
+
+  it.each([
+    "package-symlink",
+    "package-replacement",
+    "ancestor-replacement",
+    "registration-replaced",
+    "revoked",
+  ] as const)(
+    "retires repository policy when its captured owner changes during configuration read: %s",
+    async (change) => {
+      const { store: servers, registry, directory } = await store({ ancestorAlias: true });
+      const { source } = await servers.add({
+        name: "GitHub",
+        connectorId: "github-repositories",
+        server: { type: "streamable-http", url: "https://api.githubcopilot.com/mcp/", headers: [] },
+      });
+      const registered = registry.get(source.sourceRef);
+      if (registered === undefined) throw new Error("Missing generated source");
+      const manifest = inspectExtensionPackage(
+        normalizeAgentPluginPackage(registered.packageInput),
+      ).manifest;
+      const component = manifest.components.find((candidate) => candidate.kind === "mcp-server");
+      if (component === undefined) throw new Error("Missing generated component");
+      const installed = { source: manifest.source, components: [{ component }] };
+      const configuration = await readFile(join(registered.absolutePath, "mcp.json"), "utf8");
+      const read = async () => configuration;
+      const proof = await servers.signInPolicy(installed, String(component.id), read);
+      expect(proof?.mcpPermissionProfile).toBe("github-repositories-read-write");
+      const result = await servers.signInPolicy(installed, String(component.id), async () => {
+        if (change === "package-symlink" || change === "package-replacement") {
+          const previous = `${registered.absolutePath}-previous`;
+          await rename(registered.absolutePath, previous);
+          if (change === "package-symlink") await symlink(previous, registered.absolutePath, "dir");
+          else await mkdir(registered.absolutePath);
+        } else if (change === "ancestor-replacement") {
+          await rm(join(directory, "alias"));
+          const replacement = join(directory, "replacement");
+          await mkdir(replacement);
+          await symlink(replacement, join(directory, "alias"), "dir");
+        } else if (change === "registration-replaced") {
+          await registry.register(registered.absolutePath);
+        } else {
+          await registry.unregister(source.sourceRef);
+        }
+        return configuration;
+      });
+      expect(result).toBeUndefined();
+      expect(proof?.current()).toBe(false);
+      if (change === "package-symlink") {
+        const foreign = await registry.register(registered.absolutePath);
+        const foreignManifest = inspectExtensionPackage(
+          normalizeAgentPluginPackage(foreign.packageInput),
+        ).manifest;
+        const foreignInstalled = { source: foreignManifest.source, components: [{ component }] };
+        expect(
+          (await servers.signInPolicy(foreignInstalled, String(component.id), read))
+            ?.mcpPermissionProfile,
+        ).toBeUndefined();
+      }
+    },
+  );
+
   it("keeps an existing PAT package and secret when the same GitHub URL is added and removed as an OAuth App connector", async () => {
     const secrets = secretsStore();
     const { store: servers, registry } = await store({ secrets });
@@ -160,6 +301,20 @@ describe("MCP servers added by hand", () => {
       connectorId: "github-oauth",
       server: { type: "streamable-http", url, headers: [] },
     });
+    const repository = await servers.add({
+      name: "GitHub",
+      connectorId: "github-repositories",
+      server: { type: "streamable-http", url, headers: [] },
+    });
+    expect(
+      new Set([repository.source.sourceRef, oauth.source.sourceRef, pat.source.sourceRef]).size,
+    ).toBe(3);
+    const readFolder = registry.get(oauth.source.sourceRef)?.absolutePath;
+    if (readFolder === undefined) throw new Error("Missing read connector source");
+    const readConfig = await readFile(join(readFolder, "mcp.json"), "utf8");
+    await servers.remove(repository.source.sourceRef);
+    expect(registry.get(oauth.source.sourceRef)).toBeDefined();
+    expect(await readFile(join(readFolder, "mcp.json"), "utf8")).toBe(readConfig);
     expect(oauth.source.sourceRef).not.toBe(pat.source.sourceRef);
     expect(registry.get(oauth.source.sourceRef)?.absolutePath).not.toBe(patFolder);
     expect(await readFile(join(patFolder, "mcp.json"), "utf8")).toBe(original);

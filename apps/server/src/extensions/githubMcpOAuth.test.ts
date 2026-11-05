@@ -9,7 +9,7 @@ import {
 } from "@octant/contracts/host-oauth";
 import { makeHostOAuthBrokerClient } from "../providers/oauth/hostOAuthBrokerClient";
 import { createHostOAuthService } from "../providers/oauth/hostOAuthService";
-import { McpServerSignIn } from "./mcpServerSignIn";
+import { McpServerSignIn, type McpServerSignInOptions } from "./mcpServerSignIn";
 
 const extension = "44000000-0000-4000-8000-000000000002";
 const component = "github-fixture";
@@ -56,6 +56,14 @@ async function fixture(
     readonly issuer?: Record<string, unknown>;
     readonly accessAccount?: unknown;
     readonly complete?: boolean;
+    readonly profile?: "github-repositories-read-write";
+    readonly accessProfile?: "github-repositories-read-write" | "legacy";
+    readonly policyOwner?: () => number;
+    readonly policyCurrent?: () => boolean;
+    readonly policyUnavailable?: boolean;
+    readonly holdMetadata?: { readonly entered: () => void; readonly held: Promise<void> };
+    readonly linkedSecrets?: McpServerSignInOptions["linkedSecrets"];
+    readonly replaceState?: McpServerSignInOptions["replaceState"];
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "octant-github-profile-"));
@@ -113,7 +121,9 @@ async function fixture(
           scopes_supported: ["repo", "user:email", github.readScope],
           ...options.resource,
         });
-      if (url === issuerMetadata)
+      if (url === issuerMetadata) {
+        options.holdMetadata?.entered();
+        await options.holdMetadata?.held;
         return Response.json({
           issuer: github.issuer,
           authorization_endpoint: github.authorizationEndpoint,
@@ -123,6 +133,7 @@ async function fixture(
           authorization_response_iss_parameter_supported: true,
           ...options.issuer,
         });
+      }
       throw new Error(`Unexpected fixture address ${url}`);
     },
   });
@@ -133,11 +144,29 @@ async function fixture(
     fetch: fetchPort,
     pickPort: async () => 43125,
     serverUrl: async () => github.transportUrl,
+    serverPolicy: async () => {
+      if (options.policyUnavailable) return undefined;
+      const owner = options.policyOwner?.();
+      return {
+        url: github.transportUrl,
+        ...(options.profile === undefined ? {} : { mcpPermissionProfile: options.profile }),
+        current: () => owner === options.policyOwner?.() && options.policyCurrent?.() !== false,
+      };
+    },
+    ...(options.linkedSecrets === undefined ? {} : { linkedSecrets: options.linkedSecrets }),
+    ...(options.replaceState === undefined ? {} : { replaceState: options.replaceState }),
     access: async () => ({
+      ...(options.accessProfile === "legacy" ||
+      (options.accessProfile === undefined && options.profile === undefined)
+        ? {}
+        : { mcpPermissionProfile: options.accessProfile ?? options.profile }),
       kind: "granted",
       accessToken: "synthetic-bearer",
       tokenType: "Bearer",
-      mcpAccount: options.accessAccount ?? { userId: "12345", grantedScopes: [github.readScope] },
+      mcpAccount: options.accessAccount ?? {
+        userId: "12345",
+        grantedScopes: [github.readScope, ...(options.profile === undefined ? [] : ["repo"])],
+      },
     }),
   });
   return { service, statePath, metadataCalls, brokerCalls, journal, oauth };
@@ -299,4 +328,226 @@ describe("registered GitHub OAuth App read setup", () => {
       expect(await readFile(statePath, "utf8")).not.toContain("synthetic-bearer");
     },
   );
+});
+
+const repositoryProfile = "github-repositories-read-write" as const;
+function repositoryDescriptor() {
+  return decodeHostOAuthDescriptor({
+    ...descriptor,
+    mcpPermissionProfile: repositoryProfile,
+    scopes: [github.readScope, "repo", github.rotationScope],
+  });
+}
+function heldStage() {
+  let release: () => void = () => undefined;
+  let entered: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  return { held, started, release: () => release(), entered: () => entered() };
+}
+describe("host-selected GitHub repository consent", () => {
+  it("refuses a renderer-selected repository policy without the matching host receipt", async () => {
+    const { service, brokerCalls } = await fixture();
+    const prepared = await service.prepareClient(extension, component, "local-window");
+    if (prepared.kind !== "client-setup") throw new Error("Expected setup");
+    expect(
+      await service.saveClient(
+        extension,
+        component,
+        {
+          binding: {
+            resource: prepared.resource,
+            issuer: prepared.issuer,
+            tokenEndpoint: prepared.tokenEndpoint,
+            callback: prepared.callback,
+            mcpPermissionProfile: repositoryProfile,
+          },
+          kind: "registered",
+          clientId: "owned-fixture-client",
+          authentication: "none",
+        },
+        "local-window",
+      ),
+    ).toMatchObject({ kind: "refused", reason: "invalid" });
+    expect(brokerCalls).toEqual([]);
+  });
+  it("carries the exact catalog policy and scopes through production service and client serializers", async () => {
+    const { service, brokerCalls } = await fixture({ profile: repositoryProfile });
+    const prepared = await service.prepareClient(extension, component, "local-window");
+    expect(prepared).toMatchObject({
+      kind: "client-setup",
+      mcpPermissionProfile: repositoryProfile,
+    });
+    await service.configureForServer(extension, component, registration, "local-window");
+    expect(await service.begin(extension, component, "local-window")).toMatchObject({
+      kind: "awaiting-consent",
+    });
+    expect(brokerCalls.find((call) => call.path.endsWith("/begin"))?.body.descriptor).toMatchObject(
+      {
+        mcpPermissionProfile: repositoryProfile,
+        scopes: [github.readScope, "repo", github.rotationScope],
+      },
+    );
+  });
+  it("refuses a repository preset when the server does not advertise repo instead of borrowing another scope", async () => {
+    const { service, brokerCalls } = await fixture({
+      profile: repositoryProfile,
+      resource: { scopes_supported: [github.readScope] },
+    });
+    expect(await service.prepareClient(extension, component, "local-window")).toMatchObject({
+      kind: "refused",
+      reason: "issuer-unsupported",
+    });
+    expect(brokerCalls).toEqual([]);
+  });
+  it("refuses consent if the captured catalog owner changes during discovery", async () => {
+    const stage = heldStage();
+    let owner = 1;
+    const { service, brokerCalls } = await fixture({
+      profile: repositoryProfile,
+      policyOwner: () => owner,
+      holdMetadata: stage,
+    });
+    await service.configureForServer(extension, component, registration, "local-window");
+    const beginning = service.begin(extension, component, "local-window");
+    await stage.started;
+    owner++;
+    stage.release();
+    expect(await beginning).toMatchObject({ kind: "refused", reason: "unavailable" });
+    expect(brokerCalls).toEqual([]);
+  });
+  it("retains the original catalog owner through a held secret point and refuses a current replacement", async () => {
+    const stage = heldStage();
+    let owner = 1;
+    const forgotten: string[] = [];
+    const pointed: string[] = [];
+    const { service, statePath } = await fixture({
+      profile: repositoryProfile,
+      policyOwner: () => owner,
+      linkedSecrets: {
+        point: async (ref) => {
+          pointed.push(ref);
+          stage.entered();
+          await stage.held;
+          return { status: "pointed" };
+        },
+        forget: async (ref) => {
+          forgotten.push(ref);
+        },
+      },
+    });
+    const prepared = await service.prepareClient(extension, component, "local-window");
+    if (prepared.kind !== "client-setup") throw new Error("Expected setup");
+    const saving = service.saveClient(
+      extension,
+      component,
+      {
+        binding: {
+          resource: prepared.resource,
+          issuer: prepared.issuer,
+          tokenEndpoint: prepared.tokenEndpoint,
+          callback: prepared.callback,
+          mcpPermissionProfile: repositoryProfile,
+        },
+        kind: "registered",
+        clientId: "owned-fixture-client",
+        authentication: "client_secret_post",
+        secret: { store: "onepassword", reference: "op://Private/GitHub/client secret" },
+      },
+      "local-window",
+    );
+    await stage.started;
+    owner++;
+    stage.release();
+    expect(await saving).toMatchObject({ kind: "refused" });
+    expect(forgotten).toEqual(pointed);
+    expect(pointed).toHaveLength(1);
+    expect(
+      Object.keys(
+        (JSON.parse(await readFile(statePath, "utf8")) as { registrations?: object })
+          .registrations ?? {},
+      ),
+    ).toEqual([]);
+  });
+  it.each(["read-descriptor", "repository-descriptor"] as const)(
+    "refuses a mismatched broker grant before bearer use and retains reconnect after restart: %s",
+    async (selection) => {
+      const repo = selection === "repository-descriptor";
+      const { service, statePath, oauth } = await fixture({
+        ...(repo
+          ? { profile: repositoryProfile, accessProfile: "legacy" as const }
+          : { accessProfile: repositoryProfile }),
+        accessAccount: {
+          userId: "12345",
+          grantedScopes: repo ? [github.readScope] : [github.readScope, "repo"],
+        },
+      });
+      await writeFile(
+        statePath,
+        JSON.stringify({
+          schemaVersion: 1,
+          signIns: {
+            [`${extension}:${component}`]: {
+              credentialRef,
+              descriptor: repo ? repositoryDescriptor() : descriptor,
+              issuer: github.issuer,
+              account: {
+                userId: "12345",
+                grantedScopes: repo ? [github.readScope, "repo"] : [github.readScope],
+              },
+            },
+          },
+        }),
+      );
+      const launch = {
+        transport: "streamable-http" as const,
+        name: "GitHub",
+        url: github.transportUrl,
+        headers: {},
+      };
+      expect(await service.attachBearer(extension, component, launch)).toEqual(launch);
+      expect(await service.status(extension, component, "local-window")).toEqual({
+        kind: "sign-in-again",
+        reason: "permission-mismatch",
+      });
+      const restarted = new McpServerSignIn({
+        statePath,
+        oauth,
+        actorId: credentialRef,
+        serverUrl: async () => github.transportUrl,
+        access: async () => {
+          throw new Error("Status cannot use bearer");
+        },
+      });
+      expect(await restarted.status(extension, component, "local-window")).toEqual({
+        kind: "sign-in-again",
+        reason: "permission-mismatch",
+      });
+    },
+  );
+  it("hydrates an absent legacy descriptor profile as profile-read and refuses repository scopes", async () => {
+    const { service, statePath } = await fixture();
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        signIns: {
+          [`${extension}:${component}`]: {
+            credentialRef,
+            descriptor: { ...descriptor, scopes: [github.readScope, "repo", github.rotationScope] },
+            issuer: github.issuer,
+            account: { userId: "12345", grantedScopes: [github.readScope, "repo"] },
+          },
+        },
+      }),
+    );
+    expect(await service.status(extension, component, "local-window")).toEqual({
+      kind: "sign-in-again",
+      reason: "permission-mismatch",
+    });
+  });
 });

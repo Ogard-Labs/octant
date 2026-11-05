@@ -18,6 +18,7 @@ export interface McpServerSignInControlProps {
   readonly registration?: {
     readonly guideUrl: string;
     readonly requestedScopes: readonly string[];
+    readonly permissionNotice?: string;
   };
 }
 
@@ -158,6 +159,9 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
           App registration guide
         </a>
         <span>Requested permission: {props.registration.requestedScopes.join(", ")}</span>
+        {props.registration.permissionNotice === undefined ? null : (
+          <span>{props.registration.permissionNotice}</span>
+        )}
       </span>
     );
   if (view.kind === "client-setup-required")

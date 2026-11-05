@@ -14,17 +14,19 @@ import type {
   HostOAuthDescriptor,
   HostOAuthSignInAgainReason,
   HostOAuthSignInState,
+  GithubMcpPermissionProfile,
 } from "@octant/contracts/host-oauth";
 import {
   SLACK_MCP_USER_OAUTH,
   GITHUB_MCP_OAUTH_APP,
+  githubMcpRequiredScopes,
   isGithubMcpDescriptorBinding,
   decodeGithubMcpAccount,
   mcpOAuthResourceForTransport,
   isSlackMcpUserDescriptorBinding,
 } from "@octant/host-runtime";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
-import type { LinkedSecretPointers } from "./userAddedMcpServers";
+import type { GeneratedMcpSignInPolicy, LinkedSecretPointers } from "./userAddedMcpServers";
 import type { HostOAuthService } from "../providers/oauth/hostOAuthService";
 
 const TERMS_ID = "mcp-sign-in-terms-1";
@@ -71,6 +73,11 @@ export interface McpServerSignInOptions {
   readonly refresh?: (credentialRef: string) => Promise<unknown>;
   /** The address the component's package names, or undefined for a command server. */
   readonly serverUrl: (extensionId: string, componentId: string) => Promise<string | undefined>;
+  /** Host-generated catalog ownership; never a package-supplied policy field. */
+  readonly serverPolicy?: (
+    extensionId: string,
+    componentId: string,
+  ) => Promise<GeneratedMcpSignInPolicy | undefined>;
   readonly fetch?: typeof fetch;
   readonly actorId: string;
   readonly now?: () => Date;
@@ -333,12 +340,24 @@ export class McpServerSignIn {
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
+    retainPolicy?: (policy: GeneratedMcpSignInPolicy) => void,
   ): Promise<McpServerSignInView> {
     if (principalKind !== "local-window")
       return refused("local-host-required", "Set up the client on this host.");
     const url = await this.#options.serverUrl(extensionId, componentId);
     if (url === undefined) return { kind: "not-applicable" };
-    const discovered = await this.#discover(url);
+    const policy = await this.#readServerPolicy(extensionId, componentId, url);
+    if (policy === undefined)
+      return refused(
+        "unavailable",
+        "The server's app permission policy is no longer current. Reopen this connection.",
+      );
+    const discovered = await this.#discover(url, policy.mcpPermissionProfile);
+    if (!policy.current())
+      return refused(
+        "unavailable",
+        "The server changed while preparing sign-in. Reopen this connection.",
+      );
     if (discovered.kind === "no-sign-in-offered")
       return refused("no-sign-in-offered", "This server does not offer browser sign-in.");
     if (discovered.kind !== "discovered") return refused(discovered.kind, discovered.message);
@@ -362,8 +381,17 @@ export class McpServerSignIn {
         return refused("unavailable", "The sign-in callback could not be prepared. Try again.");
       }
     }
+    if (!policy.current())
+      return refused(
+        "unavailable",
+        "The server changed while preparing app setup. Reopen this connection.",
+      );
+    retainPolicy?.(policy);
     return {
       kind: "client-setup",
+      ...(policy.mcpPermissionProfile === undefined
+        ? {}
+        : { mcpPermissionProfile: policy.mcpPermissionProfile }),
       resource: discovered.resource,
       issuer: discovered.issuerUrl,
       tokenEndpoint: discovered.tokenEndpoint,
@@ -390,8 +418,22 @@ export class McpServerSignIn {
       return refused("local-host-required", "Set up the client on this host.");
     if (this.#attempts.has(signInKey(extensionId, componentId)))
       return refused("unavailable", "Finish the pending sign-in before changing client setup.");
-    const prepared = await this.#prepareClient(extensionId, componentId, principalKind);
+    const preparedOwner: { policy?: GeneratedMcpSignInPolicy } = {};
+    const prepared = await this.#prepareClient(
+      extensionId,
+      componentId,
+      principalKind,
+      (policy) => {
+        preparedOwner.policy = policy;
+      },
+    );
     if (prepared.kind !== "client-setup") return prepared;
+    const retainedPolicy = preparedOwner.policy;
+    if (retainedPolicy === undefined || !retainedPolicy.current())
+      return refused(
+        "unavailable",
+        "The server changed while preparing app setup. Reopen Client setup.",
+      );
     if (
       Array.from(this.#attempts.values()).some(
         (pending) => pending.discovered.resource === prepared.resource,
@@ -405,7 +447,8 @@ export class McpServerSignIn {
       input.binding.resource !== prepared.resource ||
       input.binding.issuer !== prepared.issuer ||
       input.binding.tokenEndpoint !== prepared.tokenEndpoint ||
-      input.binding.callback !== prepared.callback
+      input.binding.callback !== prepared.callback ||
+      input.binding.mcpPermissionProfile !== prepared.mcpPermissionProfile
     )
       return refused(
         "invalid",
@@ -541,6 +584,12 @@ export class McpServerSignIn {
         registration,
         principalKind,
         !reuseSecret ? secretRef : undefined,
+        {
+          current: retainedPolicy.current,
+          ...(prepared.mcpPermissionProfile === undefined
+            ? {}
+            : { mcpPermissionProfile: prepared.mcpPermissionProfile }),
+        },
       );
       if (
         saved.kind !== "signed-out" &&
@@ -565,6 +614,10 @@ export class McpServerSignIn {
     registration: McpOAuthClientRegistration,
     principalKind: PrincipalKind,
     reservedSecretRef?: string,
+    shownPolicy?: {
+      readonly mcpPermissionProfile?: GithubMcpPermissionProfile;
+      readonly current?: () => boolean;
+    },
   ): Promise<McpServerSignInView> {
     if (principalKind !== "local-window")
       return refused("local-host-required", "Set up the client on this host.");
@@ -593,7 +646,24 @@ export class McpServerSignIn {
         "issuer-unsupported",
         "This read connector requires your registered OAuth App, linked app secret, and exact retained loopback callback.",
       );
-    const result = await this.#configureClient(registration, principalKind, reservedSecretRef);
+    const policy = await this.#readServerPolicy(extensionId, componentId, url);
+    if (
+      policy === undefined ||
+      !policy.current() ||
+      shownPolicy?.current?.() === false ||
+      (shownPolicy !== undefined &&
+        shownPolicy.mcpPermissionProfile !== policy.mcpPermissionProfile)
+    )
+      return refused(
+        "invalid",
+        "The server's app permission policy changed. Reopen Client setup before saving.",
+      );
+    const result = await this.#configureClient(
+      registration,
+      principalKind,
+      reservedSecretRef,
+      () => policy.current() && shownPolicy?.current?.() !== false,
+    );
     if (result.kind !== "configured") return result;
     const key = signInKey(extensionId, componentId);
     const pending = this.#attempts.get(key);
@@ -607,6 +677,7 @@ export class McpServerSignIn {
     input: unknown,
     principalKind: PrincipalKind,
     reservedSecretRef?: string,
+    current?: () => boolean,
   ): Promise<{ readonly kind: "configured" } | Extract<McpServerSignInView, { kind: "refused" }>> {
     if (principalKind !== "local-window")
       return {
@@ -633,6 +704,11 @@ export class McpServerSignIn {
     await this.#load();
     let superseded: string | undefined;
     const result = await this.#commit(async () => {
+      if (current?.() === false)
+        return refused(
+          "unavailable",
+          "The server changed before app setup could be saved. Reopen Client setup.",
+        );
       const key = canonicalResource(registration.resource);
       if (
         Array.from(this.#attempts.values()).some((pending) => pending.discovered.resource === key)
@@ -834,7 +910,18 @@ export class McpServerSignIn {
           : existing.view;
     const url = await this.#options.serverUrl(extensionId, componentId);
     if (url === undefined) return { kind: "not-applicable" };
-    const discovered = await this.#discover(url);
+    const policy = await this.#readServerPolicy(extensionId, componentId, url);
+    if (policy === undefined)
+      return refused(
+        "unavailable",
+        "The server's app permission policy is no longer current. Reopen this connection.",
+      );
+    const discovered = await this.#discover(url, policy.mcpPermissionProfile);
+    if (!policy.current())
+      return refused(
+        "unavailable",
+        "The server changed while preparing sign-in. Reopen this connection.",
+      );
     if (discovered.kind === "no-sign-in-offered") {
       return refused("no-sign-in-offered", "This server answered without asking for a sign-in.");
     }
@@ -902,6 +989,9 @@ export class McpServerSignIn {
       descriptorId: `mcp-${digest(key)}` as HostOAuthDescriptor["descriptorId"],
       clientId: registered.clientId as HostOAuthDescriptor["clientId"],
       dialect: discovered.mcpDialect,
+      ...(policy.mcpPermissionProfile === undefined
+        ? {}
+        : { mcpPermissionProfile: policy.mcpPermissionProfile }),
       flow: "authorization-code-pkce",
       authorizationEndpoint:
         discovered.authorizationEndpoint as HostOAuthDescriptor["authorizationEndpoint"],
@@ -931,6 +1021,11 @@ export class McpServerSignIn {
       descriptor,
     });
     if (acknowledged.kind === "refused") return fromRefusal(acknowledged.reason);
+    if (!policy.current() || this.#removals.has(extensionId))
+      return refused(
+        "unavailable",
+        "The server changed before sign-in could start. Reopen this connection.",
+      );
     const state = await this.#boundedBegin(principalKind, descriptor);
     if (state === "timed-out")
       return refused("unavailable", "The credential broker did not start the sign-in. Try again.");
@@ -1407,6 +1502,11 @@ export class McpServerSignIn {
   ): Promise<unknown> {
     if (
       record.descriptor.dialect === GITHUB_MCP_OAUTH_APP.dialect &&
+      answer.mcpPermissionProfile !== record.descriptor.mcpPermissionProfile
+    )
+      return { kind: "sign-in-again", reason: "permission-mismatch" };
+    if (
+      record.descriptor.dialect === GITHUB_MCP_OAUTH_APP.dialect &&
       answer.mcpAccount === undefined
     )
       return { kind: "unavailable" };
@@ -1418,11 +1518,7 @@ export class McpServerSignIn {
       return answer;
     const current = this.#signIns.get(key);
     if (!this.#currentGrant(key, record) || current === undefined) return { kind: "unavailable" };
-    const initial = inspectReportedAccount(
-      current.account,
-      answer.mcpAccount,
-      record.descriptor.dialect,
-    );
+    const initial = inspectReportedAccount(current.account, answer.mcpAccount, record.descriptor);
     if (initial.kind !== "valid")
       return initial.kind === "invalid"
         ? { kind: "unavailable" }
@@ -1432,11 +1528,7 @@ export class McpServerSignIn {
       if (!this.#currentGrant(key, record)) return { kind: "unavailable" };
       const owner = this.#signIns.get(key);
       if (owner === undefined) return { kind: "unavailable" };
-      const observed = inspectReportedAccount(
-        owner.account,
-        answer.mcpAccount,
-        record.descriptor.dialect,
-      );
+      const observed = inspectReportedAccount(owner.account, answer.mcpAccount, record.descriptor);
       if (observed.kind !== "valid")
         return observed.kind === "invalid"
           ? { kind: "unavailable" }
@@ -1515,7 +1607,32 @@ export class McpServerSignIn {
     };
   }
 
-  async #discover(serverUrl: string): Promise<Discovered> {
+  async #readServerPolicy(
+    extensionId: string,
+    componentId: string,
+    url: string,
+  ): Promise<GeneratedMcpSignInPolicy | undefined> {
+    if (this.#options.serverPolicy === undefined) return { url, current: () => true };
+    try {
+      const policy = await this.#credentialStage(
+        () => this.#options.serverPolicy?.(extensionId, componentId) ?? Promise.resolve(undefined),
+      );
+      return policy !== undefined &&
+        policy.current() &&
+        canonicalResource(policy.url) === canonicalResource(url) &&
+        (policy.mcpPermissionProfile === undefined ||
+          canonicalResource(url) === GITHUB_MCP_OAUTH_APP.transportUrl)
+        ? policy
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #discover(
+    serverUrl: string,
+    mcpPermissionProfile?: GithubMcpPermissionProfile,
+  ): Promise<Discovered> {
     let probe: Response;
     try {
       probe = await this.#request(serverUrl, {
@@ -1655,6 +1772,7 @@ export class McpServerSignIn {
       issuer === GITHUB_MCP_OAUTH_APP.issuer ||
       authorizationEndpoint === GITHUB_MCP_OAUTH_APP.authorizationEndpoint ||
       tokenEndpoint === GITHUB_MCP_OAUTH_APP.tokenEndpoint;
+    const resourceScopes = metadata.scopes_supported;
     if (
       githubReserved &&
       (!github ||
@@ -1665,8 +1783,10 @@ export class McpServerSignIn {
         !Array.isArray(methods) ||
         !methods.includes("S256") ||
         issuerMetadata.authorization_response_iss_parameter_supported !== true ||
-        !Array.isArray(metadata.scopes_supported) ||
-        !metadata.scopes_supported.includes(GITHUB_MCP_OAUTH_APP.readScope) ||
+        !Array.isArray(resourceScopes) ||
+        !githubMcpRequiredScopes(mcpPermissionProfile).every((scope) =>
+          resourceScopes.includes(scope),
+        ) ||
         !Array.isArray(issuerMetadata.scopes_supported) ||
         !issuerMetadata.scopes_supported.includes(GITHUB_MCP_OAUTH_APP.rotationScope) ||
         (issuerMetadata.token_endpoint_auth_methods_supported !== undefined &&
@@ -1676,11 +1796,11 @@ export class McpServerSignIn {
       return {
         kind: "issuer-unsupported",
         message:
-          "GitHub authorization metadata does not support the reviewed OAuth App read profile.",
+          "GitHub authorization metadata does not support the selected OAuth App permission profile.",
       };
     const registration = issuerMetadata.registration_endpoint;
     const scopes = github
-      ? [GITHUB_MCP_OAUTH_APP.readScope, GITHUB_MCP_OAUTH_APP.rotationScope]
+      ? [...githubMcpRequiredScopes(mcpPermissionProfile), GITHUB_MCP_OAUTH_APP.rotationScope]
       : slack
         ? [SLACK_MCP_USER_OAUTH.readScope]
         : Array.isArray(metadata.scopes_supported)
@@ -1817,16 +1937,19 @@ export class McpServerSignIn {
           const stored = record as McpServerSignInRecord;
           const { account: supplied, ...owner } = stored;
           if (
+            stored.descriptor?.dialect === GITHUB_MCP_OAUTH_APP.dialect &&
+            !isGithubMcpDescriptorBinding(stored.descriptor)
+          ) {
+            this.#signIns.set(key, { ...owner, signInAgain: "permission-mismatch" });
+            continue;
+          }
+          if (
             (stored.descriptor?.dialect === SLACK_MCP_USER_OAUTH.dialect ||
               stored.descriptor?.dialect === GITHUB_MCP_OAUTH_APP.dialect) &&
             supplied !== undefined
           ) {
             try {
-              const observed = inspectReportedAccount(
-                undefined,
-                supplied,
-                stored.descriptor.dialect,
-              );
+              const observed = inspectReportedAccount(undefined, supplied, stored.descriptor);
               if (observed.kind !== "valid") {
                 this.#signIns.set(key, {
                   ...owner,
@@ -2094,7 +2217,7 @@ function githubRegistrationReady(registration: McpOAuthClientRegistration | unde
 function inspectReportedAccount(
   previous: McpReportedAccount | undefined,
   value: unknown,
-  dialect: HostOAuthDescriptor["dialect"],
+  descriptor: Pick<HostOAuthDescriptor, "dialect" | "mcpPermissionProfile">,
 ):
   | { readonly kind: "valid"; readonly account: McpReportedAccount }
   | {
@@ -2106,17 +2229,19 @@ function inspectReportedAccount(
   } catch {
     return { kind: "invalid" };
   }
-  if (dialect === GITHUB_MCP_OAUTH_APP.dialect) {
+  if (descriptor.dialect === GITHUB_MCP_OAUTH_APP.dialect) {
+    const expected = githubMcpRequiredScopes(descriptor.mcpPermissionProfile);
+    const reportedScopes = reported.grantedScopes;
     if (reported.workspaceId !== undefined || reported.userId === undefined)
       return { kind: "invalid" };
-    if (reported.grantedScopes?.some((scope) => scope !== GITHUB_MCP_OAUTH_APP.readScope))
+    if (reportedScopes?.some((scope) => !expected.includes(scope)))
       return { kind: "permission-mismatch" };
-    if (
-      reported.grantedScopes !== undefined &&
-      !reported.grantedScopes.includes(GITHUB_MCP_OAUTH_APP.readScope)
-    )
+    if (reportedScopes !== undefined && !expected.every((scope) => reportedScopes.includes(scope)))
       return { kind: "permission-missing" };
-    const account = decodeGithubMcpAccount({ ...previous, ...reported });
+    const account = decodeGithubMcpAccount(
+      { ...previous, ...reported },
+      descriptor.mcpPermissionProfile,
+    );
     if (account === undefined) return { kind: "invalid" };
     if (previous?.userId !== undefined && previous.userId !== account.userId)
       return { kind: "account-changed" };

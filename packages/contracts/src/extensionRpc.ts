@@ -1,4 +1,4 @@
-import { McpOAuthClientRegistration } from "./hostOAuth";
+import { GithubMcpPermissionProfile, McpOAuthClientRegistration } from "./hostOAuth";
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { SkillFolderPath } from "./shell";
 import { personDecides } from "./hostAnswer";
@@ -235,6 +235,7 @@ export const McpClientSetupInput = Schema.Struct({
     issuer: boundedText(2048),
     tokenEndpoint: boundedText(2048),
     callback: boundedText(256),
+    mcpPermissionProfile: Schema.optional(GithubMcpPermissionProfile),
   }).annotations(strict),
   kind: Schema.Literal("registered", "metadata-document"),
   clientId: boundedText(2048),
@@ -287,6 +288,7 @@ export const McpServerSignInView = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("client-configured") }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("client-setup"),
+    mcpPermissionProfile: Schema.optional(GithubMcpPermissionProfile),
     resource: boundedText(2048),
     issuer: boundedText(2048),
     tokenEndpoint: boundedText(2048),

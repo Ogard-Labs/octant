@@ -427,3 +427,72 @@ describe("GitHub read-profile binding and rotation", () => {
     },
   );
 });
+
+describe("explicit GitHub repository permission preset", () => {
+  it("retains the explicitly selected repository policy across authenticated rotation without upgrading a profile-read grant", async () => {
+    const repositoryProfile = "github-repositories-read-write" as const;
+    const fixture = protocol({
+      token: { ...goodToken, scope: "read:user,repo" },
+      headers: { "x-oauth-scopes": "repo,read:user" },
+    });
+    const exchanged = await exchangeAuthorizationCode({
+      ...fixture.input,
+      mcpPermissionProfile: repositoryProfile,
+    });
+    expect(exchanged).toMatchObject({
+      kind: "tokens",
+      grant: {
+        mcpPermissionProfile: repositoryProfile,
+        mcpAccount: { userId: "12345", grantedScopes: ["read:user", "repo"] },
+      },
+    });
+    if (exchanged.kind !== "tokens")
+      throw new Error("Expected explicitly consented repository grant");
+    const store = memoryStore();
+    await store.set(credentialRef, JSON.stringify(exchanged.grant));
+    const legacyRef = "55000000-0000-4000-8000-000000000009";
+    const { mcpPermissionProfile: _selectedProfile, ...legacy } = exchanged.grant;
+    await store.set(legacyRef, JSON.stringify(legacy));
+    const rotating = protocol({
+      token: {
+        ...goodToken,
+        access_token: "synthetic-repository-rotated",
+        scope: "repo,read:user",
+      },
+      headers: { "x-oauth-scopes": "read:user,repo" },
+    });
+    const runtime = createHostOAuthRuntime({
+      store,
+      fetch: rotating.fetchPort,
+      resolveClientSecret: async () => "synthetic-app-secret",
+      now: () => 1_000_000,
+    });
+    try {
+      expect(await runtime.access(legacyRef)).not.toMatchObject({ kind: "granted" });
+      expect(await runtime.refresh(credentialRef)).toEqual({ kind: "refreshed" });
+      expect(await runtime.access(credentialRef)).toMatchObject({
+        kind: "granted",
+        mcpPermissionProfile: repositoryProfile,
+        accessToken: "synthetic-repository-rotated",
+        mcpAccount: { grantedScopes: ["read:user", "repo"] },
+      });
+      expect(JSON.parse(store.values.get(credentialRef) ?? "{}").mcpPermissionProfile).toBe(
+        repositoryProfile,
+      );
+      expect((await exchangeAuthorizationCode(fixture.input)).kind).toBe("refused");
+    } finally {
+      await runtime.close();
+    }
+  });
+  it("refuses repository consent that returned only profile permission", async () => {
+    const fixture = protocol();
+    expect(
+      (
+        await exchangeAuthorizationCode({
+          ...fixture.input,
+          mcpPermissionProfile: "github-repositories-read-write",
+        })
+      ).kind,
+    ).toBe("refused");
+  });
+});

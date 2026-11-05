@@ -31,6 +31,7 @@ export interface HostOAuthBrokerDescriptor {
   readonly resource?: string;
   readonly mcpTransportUrl?: string;
   readonly mcpIssuer?: string;
+  readonly mcpPermissionProfile?: "github-repositories-read-write";
   readonly redirectPort?: number;
   readonly redirectHostname?: "localhost";
   /** Directory dialect: the tenant, the one audience, and the endpoint origin the grant binds. */
@@ -161,6 +162,9 @@ export function makeHostOAuthBrokerClient(options: {
           ...(input.descriptor.mcpIssuer === undefined
             ? {}
             : { mcpIssuer: input.descriptor.mcpIssuer }),
+          ...(input.descriptor.mcpPermissionProfile === undefined
+            ? {}
+            : { mcpPermissionProfile: input.descriptor.mcpPermissionProfile }),
           ...(input.descriptor.redirectHostname === undefined
             ? {}
             : { redirectHostname: input.descriptor.redirectHostname }),

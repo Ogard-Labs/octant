@@ -1,3 +1,4 @@
+import { GITHUB_REPOSITORY_PERMISSION_NOTICE } from "@octant/domain";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { McpClientSetupInput, McpServerSignInView } from "@octant/contracts/extension-rpc";
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
@@ -164,6 +165,9 @@ function McpClientSetupDialog(
             issuer: props.setup.issuer,
             tokenEndpoint: props.setup.tokenEndpoint,
             callback: props.setup.callback,
+            ...(props.setup.mcpPermissionProfile === undefined
+              ? {}
+              : { mcpPermissionProfile: props.setup.mcpPermissionProfile }),
           },
           clientId: clientId.trim(),
           authentication,
@@ -220,6 +224,9 @@ function McpClientSetupDialog(
           Use the app identity you registered for this server. Saving does not sign in to an
           account.
         </p>
+        {props.setup.mcpPermissionProfile === "github-repositories-read-write" ? (
+          <p className="endpoint-flow__hint">{GITHUB_REPOSITORY_PERMISSION_NOTICE}</p>
+        ) : null}
         <div className="endpoint-flow__field">
           <label htmlFor={`${ids}-server`}>Server</label>
           <OctantInput id={`${ids}-server`} readOnly value={props.setup.resource} />

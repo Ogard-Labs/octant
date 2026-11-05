@@ -30,6 +30,20 @@ describe("host OAuth contracts", () => {
       },
     };
     expect(decodeHostOAuthDescriptor(descriptor)).toEqual(descriptor);
+    const repositories = {
+      ...descriptor,
+      mcpPermissionProfile: "github-repositories-read-write",
+      scopes: ["read:user", "repo", "offline_access"],
+    };
+    expect(decodeHostOAuthDescriptor(repositories)).toEqual(repositories);
+    for (const change of [
+      { mcpPermissionProfile: undefined },
+      { mcpPermissionProfile: "public_repo" },
+      { scopes: ["read:user", "offline_access"] },
+      { dialect: "mcp-authorization" },
+    ]) {
+      expect(() => decodeHostOAuthDescriptor({ ...repositories, ...change })).toThrow();
+    }
     for (const change of [
       { scopes: ["repo", "offline_access"] },
       { redirectHostname: "localhost" },
