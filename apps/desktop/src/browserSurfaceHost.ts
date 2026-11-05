@@ -10,6 +10,8 @@ import type {
   BrowserPageScriptNativeCommand,
   BrowserPageScriptPreparation,
 } from "@octant/contracts/browser-page-script";
+import { BrowserTextComposition, type BrowserTextSource } from "./browserTextComposition";
+import { readBrowserEditableTarget } from "./browserEditableTarget";
 import { BrowserPresentation, type HumanBrowserSource } from "./browserPresentation";
 import {
   type HumanBrowserRequest,
@@ -289,6 +291,7 @@ interface OwnedTab {
 
 interface OwnedSurface {
   readonly presentation: BrowserPresentation;
+  readonly textComposition: BrowserTextComposition;
   readonly owner: BrowserSurfaceOwner;
   readonly policy: BrowserContextPolicy;
   /** Every open tab, in the order the person opened them. */
@@ -329,6 +332,12 @@ interface OwnedSurface {
    */
   extensionLoads: number;
   actionTail: Promise<void>;
+  /**
+   * The person's embedded input in arrival order. It is separate from the
+   * agent's action queue so the person's keys and releases never wait behind
+   * an agent action.
+   */
+  humanInputTail: Promise<void>;
   control: BrowserSurfaceState["control"];
   /** Remote owner input never turns delayed page navigation into a local person's origin grant. */
   ownerNavigationRestricted: boolean;
@@ -901,6 +910,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (surfaces.get(contextId) !== owned) return;
     credentialFill.forget(owned);
     surfaces.delete(contextId);
+    void owned.textComposition.close();
     owned.presentation.close();
     // Emptied before anything is closed: closing a page can report the page
     // gone, and a report that arrives while this list is still being walked
@@ -939,6 +949,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tab.view.setVisible(false);
       owned.shellWindow?.contentView.removeChildView(tab.view);
     }
+    void owned.textComposition.close();
     owned.presentation.close();
     owned.activeTabId = incoming.tabId;
     if (owned.shellWindow === undefined || owned.shellWindow.isDestroyed()) return;
@@ -1037,7 +1048,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     ]) {
       view.webContents.on(event, () => {
         // A displayed frame belongs to this document, not its navigation successor.
-        if (event === "did-start-loading") owned.presentation.close();
+        if (event === "did-start-loading") {
+          void owned.textComposition.close();
+          owned.presentation.close();
+        }
         publish(contextId, owned);
       });
     }
@@ -1175,6 +1189,73 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const firstTabId = `${String(input.contextId)}:1`;
       const owned: OwnedSurface = {
         presentation: new BrowserPresentation(),
+        textComposition: new BrowserTextComposition({
+          current: () =>
+            surfaces.get(input.contextId) === owned &&
+            options.isEmbeddedOwner?.(owned.owner.windowId) === true &&
+            owned.presentation.visible,
+          source: () => {
+            const view = contentsView(owned);
+            const source: BrowserTextSource = {
+              editor: () => view.human?.editor?.() ?? Promise.resolve(undefined),
+              apply: async (editorId, edit, authorized) => {
+                if (view.webContents.isDestroyed()) return false;
+                const target = await readBrowserEditableTarget((world, scripts) =>
+                  view.webContents.executeJavaScriptInIsolatedWorld(world, scripts),
+                );
+                if (target?.id !== editorId || view.webContents.isDestroyed() || !authorized())
+                  return false;
+                return withDebugger(view, async (send) => {
+                  const latest = await readBrowserEditableTarget((world, scripts) =>
+                    view.webContents.executeJavaScriptInIsolatedWorld(world, scripts),
+                  );
+                  if (latest?.id !== editorId || view.webContents.isDestroyed() || !authorized())
+                    return false;
+                  // Only cancellation may outlive visibility. The captured view
+                  // and document-start field incarnation still have to match.
+                  // An agent action that began while this edit awaited its field
+                  // owns the surface now; only cancellation still reaches it.
+                  if (
+                    edit.phase !== "cancel" &&
+                    (owned.control === "agent" ||
+                      surfaces.get(input.contextId) !== owned ||
+                      !owned.presentation.visible ||
+                      options.isEmbeddedOwner?.(owned.owner.windowId) !== true ||
+                      contentsView(owned) !== view)
+                  )
+                    return false;
+                  if (edit.phase !== "cancel") {
+                    owned.control = "user";
+                    owned.personInputs++;
+                    for (const listener of personInputListeners) {
+                      try {
+                        listener(input.contextId);
+                      } catch {
+                        /* Isolate observers. */
+                      }
+                    }
+                  }
+                  if (edit.phase === "update")
+                    await send("Input.imeSetComposition", {
+                      text: edit.text,
+                      selectionStart: edit.selectionStart,
+                      selectionEnd: edit.selectionEnd,
+                    });
+                  else if (edit.phase === "commit")
+                    await send("Input.insertText", { text: edit.text });
+                  else
+                    await send("Input.imeSetComposition", {
+                      text: "",
+                      selectionStart: 0,
+                      selectionEnd: 0,
+                    });
+                  return true;
+                });
+              },
+            };
+            return source;
+          },
+        }),
         owner: input.owner,
         policy: input.policy,
         tabs: [],
@@ -1185,6 +1266,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         credentialSubmitOrigins: undefined,
         extensionLoads: 0,
         actionTail: Promise.resolve(),
+        humanInputTail: Promise.resolve(),
         control: "idle",
         ownerNavigationRestricted: false,
         shellWindow: undefined,
@@ -1219,6 +1301,9 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const human = view.human;
       if (human === undefined) return { status: "refused" };
       if (request.kind === "attach") {
+        await owned.textComposition.close();
+        if (!current() || contentsView(owned) !== view || signal?.aborted)
+          return { status: "refused" };
         const presentationId = owned.presentation.attach(
           {
             ...human,
@@ -1243,33 +1328,68 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         );
         return { status: "attached", presentationId };
       }
-      if (request.kind === "detach")
+      if (request.kind === "detach") {
+        if (!owned.presentation.current(request.presentationId)) return { status: "refused" };
+        await owned.textComposition.close();
         return {
           status: owned.presentation.detach(request.presentationId) ? "accepted" : "refused",
         };
+      }
       if (!owned.presentation.current(request.presentationId)) return { status: "refused" };
-      if (request.kind === "layout")
+      if (request.kind === "editor") {
+        const editor = await owned.textComposition.editor();
+        if (!current() || signal?.aborted || !owned.presentation.current(request.presentationId))
+          return { status: "refused" };
+        return editor === undefined
+          ? { status: "editor-unavailable" }
+          : { status: "editor", editor };
+      }
+      if (request.kind === "composition") {
+        if (owned.control === "agent") return { status: "refused" };
+        const result = await owned.textComposition.execute(
+          request.composition,
+          () => current() && !signal?.aborted && owned.presentation.current(request.presentationId),
+        );
+        if (!current() || signal?.aborted || !owned.presentation.current(request.presentationId))
+          return { status: "refused" };
+        return result;
+      }
+      if (request.kind === "layout") {
+        await owned.textComposition.close();
+        if (!current() || signal?.aborted) return { status: "refused" };
         return {
           status: owned.presentation.layout(request.presentationId, request.layout)
             ? "accepted"
             : "refused",
         };
+      }
       if (request.kind === "frame")
         return owned.presentation.frame(request.presentationId, request.acknowledgement);
       // The person's embedded input is delivered, never dropped, while the
-      // agent works: refusing a release would strand a key held in the page,
+      // agent works, so it does not wait behind the agent's action queue:
+      // refusing or stalling a release would strand a key held in the page,
       // and the person-input count above already makes the agent re-read it.
-      if (request.kind === "input")
-        return {
-          status: owned.presentation.input(
-            request.presentationId,
-            request.input,
-            request.frameSequence,
-          )
-            ? "accepted"
-            : "refused",
-        };
+      if (request.kind === "input") {
+        const accepted = await queueSurfaceAction(
+          owned,
+          async () => {
+            if (!current() || signal?.aborted) return false;
+            const dispatch = owned.presentation.reserveInput(
+              request.presentationId,
+              request.input,
+              request.frameSequence,
+            );
+            if (dispatch === undefined) return false;
+            if (request.input.type === "mouseDown") await owned.textComposition.close();
+            if (!current() || signal?.aborted || contentsView(owned) !== view) return false;
+            return dispatch();
+          },
+          "humanInputTail",
+        );
+        return { status: accepted ? "accepted" : "refused" };
+      }
       if (request.kind === "command" || request.kind === "tab") {
+        await owned.textComposition.close();
         const applied = await queueSurfaceAction(owned, async () => {
           if (signal?.aborted || !current() || !owned.presentation.current(request.presentationId))
             return false;
@@ -2012,6 +2132,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     ownerControls.reclaim(owned);
     credentialFill.forget(owned);
     surfaces.delete(contextId);
+    void owned.textComposition.close();
     owned.presentation.close();
     const closing = owned.tabs;
     owned.tabs = [];
@@ -2031,13 +2152,17 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw signal.reason ?? new Error("Browser action was interrupted.");
 }
 
-async function queueSurfaceAction<T>(owned: OwnedSurface, action: () => Promise<T>): Promise<T> {
-  const previous = owned.actionTail;
+async function queueSurfaceAction<T>(
+  owned: OwnedSurface,
+  action: () => Promise<T>,
+  lane: "actionTail" | "humanInputTail" = "actionTail",
+): Promise<T> {
+  const previous = owned[lane];
   let release!: () => void;
   const completed = new Promise<void>((resolve) => {
     release = resolve;
   });
-  owned.actionTail = previous.catch(() => undefined).then(() => completed);
+  owned[lane] = previous.catch(() => undefined).then(() => completed);
   await previous.catch(() => undefined);
   try {
     return await action();

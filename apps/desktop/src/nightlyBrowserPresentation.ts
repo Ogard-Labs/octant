@@ -3,6 +3,7 @@ import {
   type HumanBrowserRequest,
   type HumanBrowserResult,
   type HumanBrowserLayout,
+  type BrowserCompositionId,
 } from "@octant/contracts/browser-presentation";
 
 interface Presentation {
@@ -37,6 +38,14 @@ export class NightlyBrowserPresentation {
   readonly #lifetime = new AbortController();
   readonly #queue: Pending[] = [];
   readonly #held = new Map<string, Extract<HumanBrowserRequest, { kind: "input" }>>();
+  readonly #compositions = new Map<
+    string,
+    {
+      readonly owner: Extract<HumanBrowserRequest, { kind: "composition" }>;
+      readonly id: BrowserCompositionId;
+      terminal: boolean;
+    }
+  >();
   #active: Pending | undefined;
   #running: Promise<void> | undefined;
   #hide: Promise<void> | undefined;
@@ -81,6 +90,42 @@ export class NightlyBrowserPresentation {
 
   #enqueue(request: HumanBrowserRequest, internal: boolean): Promise<HumanBrowserResult> {
     if (this.#lifetime.signal.aborted) return Promise.resolve(refused());
+    const composition = request.kind === "composition" ? request.composition : undefined;
+    const activeComposition = this.#compositions.get(String(request.contextId));
+    const terminal = composition?.phase === "commit" || composition?.phase === "cancel";
+    if (composition !== undefined && request.kind === "composition") {
+      if (composition.phase === "begin") {
+        if (activeComposition !== undefined) return Promise.resolve(refused());
+      } else {
+        if (
+          activeComposition?.id !== composition.compositionId ||
+          activeComposition.owner.presentationId !== request.presentationId
+        )
+          return Promise.resolve(refused());
+        if (activeComposition.terminal) {
+          const queued = this.#queue.find(
+            (entry) =>
+              entry.request.kind === "composition" &&
+              entry.request.composition.phase !== "begin" &&
+              entry.request.composition.compositionId === activeComposition.id &&
+              ["commit", "cancel"].includes(entry.request.composition.phase),
+          );
+          if (internal && composition.phase === "cancel") {
+            if (
+              queued !== undefined &&
+              queued.request.kind === "composition" &&
+              queued.request.composition.phase === "cancel"
+            )
+              return queued.promise;
+            if (queued !== undefined) {
+              this.#queue.splice(this.#queue.indexOf(queued), 1);
+              queued.resolve(refused());
+            }
+            activeComposition.terminal = false;
+          } else return Promise.resolve(refused());
+        }
+      }
+    }
     const replaceable = replaceableKey(request);
     const existing =
       replaceable === undefined
@@ -109,6 +154,7 @@ export class NightlyBrowserPresentation {
     if (
       !internal &&
       release === undefined &&
+      !terminal &&
       this.#queue.filter(
         (pending) =>
           !pending.internal &&
@@ -117,6 +163,7 @@ export class NightlyBrowserPresentation {
       ).length >= (discrete ? MAX_QUEUED_DISCRETE_INPUTS : MAX_QUEUED_REQUESTS)
     )
       return Promise.resolve(refused());
+    if (terminal && activeComposition !== undefined) activeComposition.terminal = true;
     let resolve: Pending["resolve"] = () => {};
     const promise = new Promise<HumanBrowserResult>((done) => {
       resolve = done;
@@ -163,9 +210,19 @@ export class NightlyBrowserPresentation {
     if (!hiding && request.kind !== "detach" && (this.#hidden || !this.#options.visible()))
       return refused();
     if (
-      request.kind === "input" &&
+      (request.kind === "input" || request.kind === "editor" || request.kind === "composition") &&
       !this.#options.focused() &&
-      !(internal && releaseKey(request) !== undefined)
+      !(
+        internal &&
+        (releaseKey(request) !== undefined ||
+          (request.kind === "composition" && request.composition.phase === "cancel"))
+      )
+    )
+      return refused();
+    if (
+      request.kind === "composition" &&
+      request.composition.phase !== "begin" &&
+      this.#compositions.get(String(request.contextId))?.id !== request.composition.compositionId
     )
       return refused();
     if (request.kind === "attach" && this.#presentations.size >= 16 && owned === undefined)
@@ -200,7 +257,22 @@ export class NightlyBrowserPresentation {
       });
     if (request.kind === "layout" && owned !== undefined && result.status === "accepted")
       owned.layout = request.layout;
-    if (request.kind === "detach") this.#presentations.delete(String(request.contextId));
+    if (request.kind === "detach") {
+      this.#presentations.delete(String(request.contextId));
+      this.#compositions.delete(String(request.contextId));
+    }
+    if (request.kind === "attach" && result.status === "attached")
+      this.#compositions.delete(String(request.contextId));
+    if (request.kind === "composition") {
+      if (request.composition.phase === "begin" && result.status === "composition-started")
+        this.#compositions.set(String(request.contextId), {
+          owner: request,
+          id: result.compositionId,
+          terminal: false,
+        });
+      else if (request.composition.phase === "cancel" || request.composition.phase === "commit")
+        this.#compositions.delete(String(request.contextId));
+    }
     if (request.kind === "input" && result.status === "accepted") {
       const down = downKey(request);
       const up = releaseKey(request);
@@ -220,6 +292,12 @@ export class NightlyBrowserPresentation {
   }
 
   async releaseInputs(): Promise<void> {
+    for (const owned of [...this.#compositions.values()]) {
+      await this.#enqueue(
+        { ...owned.owner, composition: { phase: "cancel", compositionId: owned.id } },
+        true,
+      );
+    }
     for (const request of [...this.#held.values()]) {
       if (request.input.type !== "keyDown" && request.input.type !== "mouseDown") continue;
       const event = request.input;
@@ -260,7 +338,10 @@ export class NightlyBrowserPresentation {
         if (result.status !== "accepted")
           console.warn("Octant could not confirm hidden Browser presentation cleanup.");
       }
-      if (epoch === this.#visibilityEpoch && this.#hidden) this.#held.clear();
+      if (epoch === this.#visibilityEpoch && this.#hidden) {
+        this.#held.clear();
+        this.#compositions.clear();
+      }
     })().finally(() => {
       this.#hide = undefined;
     });
@@ -270,6 +351,7 @@ export class NightlyBrowserPresentation {
   async close(): Promise<void> {
     this.#lifetime.abort();
     this.#presentations.clear();
+    this.#compositions.clear();
     this.#held.clear();
     await this.#running;
     await this.#hide;
@@ -277,6 +359,8 @@ export class NightlyBrowserPresentation {
 }
 
 function replaceableKey(request: HumanBrowserRequest): string | undefined {
+  if (request.kind === "composition" && request.composition.phase === "update")
+    return `composition:${request.contextId}:${request.presentationId}:${request.composition.compositionId}`;
   if (request.kind === "frame" || (request.kind === "input" && request.input.type === "mouseMove"))
     return `${request.kind}:${request.contextId}:${request.presentationId}`;
   return undefined;

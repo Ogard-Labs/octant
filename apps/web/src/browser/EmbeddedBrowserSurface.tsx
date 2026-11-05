@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { EmbeddedBrowserTextInput } from "./EmbeddedBrowserTextInput";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   decodeHumanBrowserRequest,
   type HumanBrowserInput,
   type HumanBrowserResult,
+  type HumanBrowserEditor,
+  type HumanBrowserComposition,
   MAX_HUMAN_FRAME_WIDTH,
   MAX_HUMAN_FRAME_HEIGHT,
 } from "@octant/contracts/browser-presentation";
@@ -22,6 +25,10 @@ export function EmbeddedBrowserSurface(props: {
     Extract<HumanBrowserResult, { status: "frame" }> & { readonly presentationId: string }
   >();
   const currentPresentation = useRef<string | undefined>(undefined);
+  const [editor, setEditor] = useState<HumanBrowserEditor | undefined>(undefined);
+  const compose = useRef<(composition: HumanBrowserComposition) => Promise<HumanBrowserResult>>(
+    async () => ({ status: "refused" }),
+  );
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const displayed = useRef(0);
@@ -53,10 +60,21 @@ export function EmbeddedBrowserSurface(props: {
     let lastStateAt = 0;
     setFailed(false);
     setFrame(undefined);
+    setEditor(undefined);
     displayed.current = 0;
     const identity = { contextId: props.contextId, threadId: props.threadId };
     const execute = (request: Readonly<Record<string, unknown>>) =>
       present(decodeHumanBrowserRequest({ ...identity, ...request }));
+    compose.current = async (composition) => {
+      if (
+        disposed ||
+        !visible ||
+        presentationId === undefined ||
+        !element.contains(document.activeElement)
+      )
+        return { status: "refused" };
+      return execute({ kind: "composition", presentationId, composition });
+    };
     releaseInput.current = () => {
       heldKeys.current.clear();
       heldPointers.current.clear();
@@ -66,6 +84,7 @@ export function EmbeddedBrowserSurface(props: {
       currentPresentation.current = undefined;
       displayed.current = 0;
       setFrame(undefined);
+      setEditor(undefined);
       void execute({ kind: "detach", presentationId: previous }).catch(() => {});
     };
     sendInput.current = (input) => {
@@ -74,7 +93,7 @@ export function EmbeddedBrowserSurface(props: {
         !visible ||
         displayed.current === 0 ||
         presentationId === undefined ||
-        document.activeElement !== element ||
+        !element.contains(document.activeElement) ||
         document.querySelector(props.overlaySelector) !== null
       )
         return;
@@ -117,6 +136,7 @@ export function EmbeddedBrowserSurface(props: {
         if (serialized !== lastLayout) {
           displayed.current = 0;
           setFrame(undefined);
+          setEditor(undefined);
           const result = await execute({ kind: "layout", presentationId, layout });
           if (result.status !== "accepted") throw new Error("Browser layout refused.");
           lastLayout = serialized;
@@ -138,9 +158,15 @@ export function EmbeddedBrowserSurface(props: {
             presentationId = undefined;
             currentPresentation.current = undefined;
             setFrame(undefined);
+            setEditor(undefined);
             displayed.current = 0;
             throw new Error("Browser presentation ended.");
           } else if (next.status === "frame") setFrame({ ...next, presentationId: frameOwner });
+          if (presentationId !== undefined && element.contains(document.activeElement)) {
+            const target = await execute({ kind: "editor", presentationId });
+            if (!disposed && presentationId === frameOwner)
+              setEditor(target.status === "editor" ? target.editor : undefined);
+          } else setEditor(undefined);
           if (presentationId !== undefined && performance.now() - lastStateAt > 500) {
             const state = await execute({ kind: "state", presentationId });
             if (!disposed && presentationId === frameOwner && state.status === "state")
@@ -152,6 +178,7 @@ export function EmbeddedBrowserSurface(props: {
       } catch {
         errors += 1;
         if (errors >= 3 && !disposed) {
+          releaseInput.current();
           setFailed(true);
           return;
         }
@@ -165,6 +192,7 @@ export function EmbeddedBrowserSurface(props: {
       heldPointers.current.clear();
       currentPresentation.current = undefined;
       visible = false;
+      compose.current = async () => ({ status: "refused" });
       sendInput.current = () => {};
       releaseInput.current = () => {};
       if (timer !== undefined) clearTimeout(timer);
@@ -276,11 +304,18 @@ export function EmbeddedBrowserSurface(props: {
       onKeyDown={(event) => {
         if (event.ctrlKey && event.key === "Escape") {
           event.preventDefault();
-          event.currentTarget.blur();
+          // A supported page field moves focus into the text input child, so
+          // blurring the group alone would leave the page focused.
+          const focused = document.activeElement;
+          if (focused instanceof HTMLElement && event.currentTarget.contains(focused))
+            focused.blur();
+          else event.currentTarget.blur();
           return;
         }
         if (
           event.nativeEvent.isComposing ||
+          event.key === "Dead" ||
+          event.key === "Process" ||
           (event.metaKey && ["q", "w"].includes(event.key.toLowerCase()))
         )
           return;
@@ -294,15 +329,13 @@ export function EmbeddedBrowserSurface(props: {
           sendInput.current({ type: "char", keyCode: event.key });
       }}
       onKeyUp={(event) => {
-        if (
-          event.nativeEvent.isComposing ||
-          (event.metaKey && ["q", "w"].includes(event.key.toLowerCase()))
-        )
-          return;
-        event.preventDefault();
+        if (event.metaKey && ["q", "w"].includes(event.key.toLowerCase())) return;
         const physical = event.code || event.key;
         const keyCode = heldKeys.current.get(physical);
+        // A modifier may have gone down before native composition began.
+        // Its matching release still belongs to that original physical key.
         if (keyCode === undefined) return;
+        event.preventDefault();
         heldKeys.current.delete(physical);
         sendInput.current({ type: "keyUp", keyCode, modifiers: modifiers(event) });
       }}
@@ -321,6 +354,26 @@ export function EmbeddedBrowserSurface(props: {
           style={{ width: "100%", height: "100%", display: "block" }}
         />
       )}
+      <EmbeddedBrowserTextInput
+        editor={
+          frame !== undefined && frame.presentationId === currentPresentation.current
+            ? editor
+            : undefined
+        }
+        group={mount}
+        pointerHeld={() => heldPointers.current.size > 0}
+        scaleX={
+          frame === undefined
+            ? 1
+            : (mount.current?.getBoundingClientRect().width ?? frame.width) / frame.width
+        }
+        scaleY={
+          frame === undefined
+            ? 1
+            : (mount.current?.getBoundingClientRect().height ?? frame.height) / frame.height
+        }
+        compose={(composition) => compose.current(composition)}
+      />
       {failed ? (
         <OctantButton onClick={() => setAttempt((value) => value + 1)}>
           Retry Browser presentation

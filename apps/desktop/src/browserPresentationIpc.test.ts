@@ -43,6 +43,37 @@ describe("sandboxed human Browser protocol", () => {
       { ...owner, presentationId, kind: "tab", command: { kind: "open" } },
       { ...owner, presentationId, kind: "state" },
       { ...owner, presentationId, kind: "detach" },
+      { ...owner, presentationId, kind: "editor" },
+      {
+        ...owner,
+        presentationId,
+        kind: "composition",
+        composition: { phase: "begin", editorId: presentationId },
+      },
+      {
+        ...owner,
+        presentationId,
+        kind: "composition",
+        composition: {
+          phase: "update",
+          compositionId: presentationId,
+          text: "😀",
+          selectionStart: 2,
+          selectionEnd: 2,
+        },
+      },
+      {
+        ...owner,
+        presentationId,
+        kind: "composition",
+        composition: { phase: "commit", compositionId: presentationId, text: "é" },
+      },
+      {
+        ...owner,
+        presentationId,
+        kind: "composition",
+        composition: { phase: "cancel", compositionId: presentationId },
+      },
     ];
     for (const request of requests)
       expect(decodeHumanBrowserIpcRequest(request)).toEqual(decodeHumanBrowserRequest(request));
@@ -52,6 +83,17 @@ describe("sandboxed human Browser protocol", () => {
       { status: "accepted" },
       { status: "idle" },
       { status: "refused" },
+      { status: "editor-unavailable" },
+      { status: "composition-started", compositionId: presentationId },
+      {
+        status: "editor",
+        editor: {
+          id: presentationId,
+          selectionStart: 3,
+          selectionEnd: 3,
+          caret: { x: 87, y: 119, width: 0, height: 28 },
+        },
+      },
     ])
       expect(decodeHumanBrowserIpcResult(result)).toEqual(decodeHumanBrowserResult(result));
   });
@@ -59,6 +101,30 @@ describe("sandboxed human Browser protocol", () => {
   it("refuses caller authority, unknown input fields and invalid frame boundaries at both hops", () => {
     for (const request of [
       { ...owner, kind: "attach", windowId: owner.contextId },
+      {
+        ...owner,
+        presentationId,
+        kind: "composition",
+        composition: {
+          phase: "update",
+          compositionId: presentationId,
+          text: "😀",
+          selectionStart: 1,
+          selectionEnd: 1,
+        },
+      },
+      {
+        ...owner,
+        presentationId,
+        kind: "composition",
+        composition: { phase: "commit", compositionId: presentationId, text: "\uD800" },
+      },
+      {
+        ...owner,
+        presentationId,
+        kind: "composition",
+        composition: { phase: "commit", compositionId: presentationId, text: "a".repeat(257) },
+      },
       {
         ...owner,
         presentationId,

@@ -2,7 +2,10 @@ import { EventEmitter } from "node:events";
 import { createContext, runInContext } from "node:vm";
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
 import { decodeOwnerBrowserNativeCommand } from "@octant/contracts/owner-browser";
-import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
+import {
+  decodeBrowserEditorId,
+  decodeHumanBrowserRequest,
+} from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 import {
   BrowserTargetStaleError,
@@ -778,6 +781,218 @@ describe("BrowserSurfaceHost", () => {
 
     vi.mocked(created.webContents.capturePage).mockResolvedValue(image);
     await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+  });
+
+  it("keeps an admitted pointer down ahead of its release while composition cleanup awaits", async () => {
+    let receive:
+      | ((image: {
+          getSize: () => { width: number; height: number };
+          toJPEG: () => Uint8Array;
+        }) => void)
+      | undefined;
+    const editorId = "60000000-0000-4000-8000-000000000019";
+    const base = view();
+    const input = vi.fn();
+    const target = { id: editorId, selectionStart: 0, selectionEnd: 0 };
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(target);
+    let finish: (() => void) | undefined;
+    const cancellation = new Promise<void>((done) => {
+      finish = done;
+    });
+    let cancelling = false;
+    vi.mocked(base.webContents.debugger.sendCommand).mockImplementation(
+      async (method, parameters) => {
+        if (method === "Input.imeSetComposition" && parameters?.text === "") {
+          cancelling = true;
+          await cancellation;
+        }
+      },
+    );
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView: () => ({
+        ...base,
+        human: {
+          input,
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener) => {
+            receive = listener;
+            return () => {};
+          },
+          editor: async () => ({
+            ...target,
+            id: decodeBrowserEditorId(editorId),
+            caret: { x: 20, y: 30, width: 0, height: 24 },
+          }),
+        },
+      }),
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const send = (value: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        request({ presentationId: attached.presentationId, ...value }),
+        "window-a",
+      );
+    await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await send({ kind: "frame", acknowledgement: 0 });
+    const started = await send({ kind: "composition", composition: { phase: "begin", editorId } });
+    if (started.status !== "composition-started") throw new Error("Composition refused");
+    const down = send({
+      kind: "input",
+      frameSequence: 1,
+      input: { type: "mouseDown", x: 10, y: 20, button: "left", clickCount: 1 },
+    });
+    await vi.waitFor(() => expect(cancelling).toBe(true));
+    const up = send({
+      kind: "input",
+      frameSequence: 1,
+      input: { type: "mouseUp", x: 10, y: 20, button: "left", clickCount: 1 },
+    });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([2]) });
+    expect(await send({ kind: "frame", acknowledgement: 1 })).toMatchObject({
+      status: "frame",
+      sequence: 2,
+    });
+    expect(input).not.toHaveBeenCalled();
+    finish?.();
+    expect(await down).toEqual({ status: "accepted" });
+    expect(await up).toEqual({ status: "accepted" });
+    expect(input.mock.calls.map((call) => call[0])).toEqual([
+      { type: "mouseDown", x: 10, y: 20, button: "left", clickCount: 1 },
+      { type: "mouseUp", x: -1, y: -1, button: "left", clickCount: 1 },
+    ]);
+    expect(
+      await send({
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "mouseDown", x: 10, y: 20, button: "left", clickCount: 1 },
+      }),
+    ).toEqual({ status: "refused" });
+    host.closeContext(contextId);
+  });
+  it("refuses a composition edit when an agent action takes the surface while the edit awaits its field", async () => {
+    let receive:
+      | ((image: {
+          getSize: () => { width: number; height: number };
+          toJPEG: () => Uint8Array;
+        }) => void)
+      | undefined;
+    const editorId = "60000000-0000-4000-8000-000000000029";
+    const base = view();
+    const target = { id: editorId, selectionStart: 0, selectionEnd: 0 };
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(target);
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView: () => ({
+        ...base,
+        human: {
+          input: vi.fn(),
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener) => {
+            receive = listener;
+            return () => {};
+          },
+          editor: async () => ({
+            ...target,
+            id: decodeBrowserEditorId(editorId),
+            caret: { x: 20, y: 30, width: 0, height: 24 },
+          }),
+        },
+      }),
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const send = (value: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        request({ presentationId: attached.presentationId, ...value }),
+        "window-a",
+      );
+    await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await send({ kind: "frame", acknowledgement: 0 });
+    const started = await send({ kind: "composition", composition: { phase: "begin", editorId } });
+    if (started.status !== "composition-started") throw new Error("Composition refused");
+
+    let fieldFound = () => {};
+    let agentRead = () => {};
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            fieldFound = () => resolve(target);
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            agentRead = () => resolve(undefined);
+          }),
+      );
+    const calls = vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mock.calls.length;
+    const update = send({
+      kind: "composition",
+      composition: {
+        phase: "update",
+        compositionId: started.compositionId,
+        text: "é",
+        selectionStart: 1,
+        selectionEnd: 1,
+      },
+    });
+    await vi.waitFor(() =>
+      expect(vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mock.calls.length).toBe(
+        calls + 1,
+      ),
+    );
+    const agentAction = host.act(contextId, { kind: "snapshot" });
+    await vi.waitFor(() =>
+      expect(vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mock.calls.length).toBe(
+        calls + 2,
+      ),
+    );
+    fieldFound();
+    expect(await update).toEqual({ status: "refused" });
+    expect(base.webContents.debugger.sendCommand).not.toHaveBeenCalledWith(
+      "Input.imeSetComposition",
+      expect.objectContaining({ text: "é" }),
+    );
+    agentRead();
+    await agentAction.catch(() => undefined);
+    host.closeContext(contextId);
   });
 
   it("hides expired embedded profiles and isolates listeners while closing owned views", async () => {

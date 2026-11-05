@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeHumanBrowserRequest,
   decodeBrowserPresentationId,
+  decodeBrowserCompositionId,
   type HumanBrowserRequest,
   type HumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
@@ -46,6 +47,17 @@ describe("Nightly main human window ownership", () => {
     visible = true;
     current = false;
     expect(await main.invoke(input("char"))).toEqual({ status: "refused" });
+    current = true;
+    visible = true;
+    focused = false;
+    expect(
+      await main.invoke({
+        ...owner,
+        kind: "composition",
+        presentationId: id,
+        composition: { phase: "begin", editorId: "00000000-0000-4000-8000-000000000805" },
+      }),
+    ).toEqual({ status: "refused" });
     expect(calls).toHaveLength(1);
     await main.close();
   });
@@ -93,6 +105,80 @@ describe("Nightly main human window ownership", () => {
         .filter((request) => request.kind === "input")
         .map((request) => (request.kind === "input" ? request.input.type : "")),
     ).toEqual(["mouseMove", "keyDown", "char", "keyUp"]);
+    await main.close();
+  });
+
+  it("keeps a composition terminal operation ordered after its newest update during a pointer flood", async () => {
+    const calls: HumanBrowserRequest[] = [];
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((done) => {
+      release = done;
+    });
+    const compositionId = decodeBrowserCompositionId("00000000-0000-4000-8000-000000000804");
+    const editorId = "00000000-0000-4000-8000-000000000805";
+    const main = new NightlyBrowserPresentation({
+      current: () => true,
+      visible: () => true,
+      focused: () => true,
+      execute: async (request) => {
+        calls.push(request);
+        if (request.kind === "attach") return { status: "attached", presentationId: id };
+        if (request.kind === "composition" && request.composition.phase === "begin")
+          return { status: "composition-started", compositionId };
+        if (request.kind === "frame") await held;
+        return { status: "accepted" };
+      },
+    });
+    await main.invoke({ ...owner, kind: "attach" });
+    expect(
+      await main.invoke({
+        ...owner,
+        kind: "composition",
+        presentationId: id,
+        composition: { phase: "begin", editorId },
+      }),
+    ).toEqual({ status: "composition-started", compositionId });
+    const frame = main.invoke({ ...owner, kind: "frame", presentationId: id, acknowledgement: 0 });
+    await Promise.resolve();
+    const pending = Array.from({ length: 40 }, (_, n) =>
+      main.invoke({
+        ...owner,
+        kind: "input",
+        presentationId: id,
+        frameSequence: 1,
+        input: { type: "mouseMove", x: n, y: 1, button: "left", clickCount: 0 },
+      }),
+    );
+    pending.push(main.invoke({ ...owner, kind: "editor", presentationId: id }));
+    pending.push(main.invoke({ ...owner, kind: "state", presentationId: id }));
+    const update = main.invoke({
+      ...owner,
+      kind: "composition",
+      presentationId: id,
+      composition: {
+        phase: "update",
+        compositionId,
+        text: "é",
+        selectionStart: 1,
+        selectionEnd: 1,
+      },
+    });
+    const committed = main.invoke({
+      ...owner,
+      kind: "composition",
+      presentationId: id,
+      composition: { phase: "commit", compositionId, text: "é" },
+    });
+    release?.();
+    expect(await update).toEqual({ status: "accepted" });
+    expect(await committed).toEqual({ status: "accepted" });
+    await frame;
+    await Promise.all(pending);
+    expect(
+      calls
+        .filter((request) => request.kind === "composition")
+        .map((request) => request.composition.phase),
+    ).toEqual(["begin", "update", "commit"]);
     await main.close();
   });
 

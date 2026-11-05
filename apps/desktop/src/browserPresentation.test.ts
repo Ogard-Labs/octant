@@ -38,6 +38,44 @@ function setup() {
 }
 
 describe("embedded human presentation", () => {
+  it("admits current input before asynchronous cleanup without accepting initially stale coordinates", () => {
+    const s = setup();
+    s.offer(s.image(1));
+    s.presentation.frame(s.id, 0);
+    const down = { type: "mouseDown", x: 10, y: 20, button: "left", clickCount: 1 } as const;
+    const admitted = s.presentation.reserveInput(s.id, down, 1);
+    s.offer(s.image(2));
+    s.presentation.frame(s.id, 1);
+    expect(s.presentation.reserveInput(s.id, down, 1)).toBeUndefined();
+    expect(admitted?.()).toBe(true);
+    expect(admitted?.()).toBe(false);
+    const retired = s.presentation.reserveInput(s.id, down, 2);
+    s.presentation.layout(s.id, { width: 700, height: 600, visible: true });
+    expect(retired?.()).toBe(false);
+    s.offer(s.image(3, 700));
+    s.presentation.frame(s.id, 2);
+    const expired = s.presentation.reserveInput(s.id, down, 3);
+    s.expire();
+    expect(expired?.()).toBe(false);
+    expect(s.source.input).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the displayed frame current when the hidden page capture is unchanged", () => {
+    const s = setup();
+    s.offer(s.image(1));
+    s.presentation.frame(s.id, 0);
+    s.offer(s.image(1));
+    expect(s.presentation.frame(s.id, 1)).toEqual({ status: "idle" });
+    expect(
+      s.presentation.input(
+        s.id,
+        { type: "mouseDown", x: 10, y: 20, button: "left", clickCount: 1 },
+        1,
+      ),
+    ).toBe(true);
+    s.offer(s.image(2));
+    expect(s.presentation.frame(s.id, 1)).toMatchObject({ status: "frame", sequence: 2 });
+  });
   it("retains only the newest pending image and requires the exact frame acknowledgement", () => {
     const s = setup();
     const first = s.image(1);

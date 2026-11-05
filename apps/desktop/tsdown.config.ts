@@ -45,6 +45,12 @@ export default defineConfig([
   {
     ...shared,
     clean: false,
+    entry: ["src/browserEditablePreload.ts"],
+    format: [DESKTOP_PRELOAD_FORMAT],
+  },
+  {
+    ...shared,
+    clean: false,
     entry: ["src/extensionBridgePreload.ts"],
     format: [DESKTOP_PRELOAD_FORMAT],
   },

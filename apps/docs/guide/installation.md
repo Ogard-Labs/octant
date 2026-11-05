@@ -109,8 +109,11 @@ issues only that window's short-lived capability; Nightly loads its own screens
 without owning host data or credentials. Its renderer closes when it cannot
 renew the lease. A connected Browser can display Stable-owned page images and
 forward ordinary pointer, text and keyboard input inside the Nightly window.
-Control-Escape leaves the page; Tab moves among its controls. IME composition,
-page accessibility, native popups, other native brokers and host retention remain
+Control-Escape leaves the page; Tab moves among its controls. Standard text
+inputs and textareas support native composition with a caret anchored to the
+Stable-owned field. Password, custom editors, embedded frames and full IME
+reconversion are not supported by that path. Page accessibility, native popups,
+other native brokers and host retention remain
 unfinished, so this is not a usable Nightly release. Installation and
 publication remain pending.
 

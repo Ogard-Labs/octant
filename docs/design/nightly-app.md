@@ -119,7 +119,9 @@ and authority checks.
 
 The current implementation routes an authenticated native window's human
 presentation through the host's existing Browser ownership. Stable alone creates
-the offscreen window and opens its profile partition. A pure current-context
+a hidden ordinary Browser window and opens its profile partition. It captures
+at most one CSS-sized image at a time without showing or activating that window.
+Unchanged image bytes do not advance the displayed frame sequence. A pure current-context
 check requires the same window, thread or Project, native backend, active
 binding and unexpired context before any presentation operation and after an
 await. Creating a presentation never creates a Browser context or grants an
@@ -158,7 +160,48 @@ inside the page; Control-Escape moves focus out and retires the presentation to
 release held inputs. Normal pointer-capture completion keeps the presentation
 attached; unexpected capture loss or blur retires it.
 
-The current foundation remains publication-gated while IME, accessibility,
+### Standard text composition
+
+The human input path supports native composition in main-frame standard text,
+search, URL and telephone inputs and textareas. Stable's sandboxed document-start
+preload installs the first window-capture focus observers before page scripts.
+It exposes a read-only bridge only in isolated world 1002, separate from agent
+scripts. The bridge returns a fresh field incarnation and bounded UTF16 selection
+offsets, never field contents or surrounding text. A document replacement that
+removes those observers refuses until a real navigation installs the preload
+again. Password, custom editable and nested-frame targets remain unsupported.
+
+Stable binds its own hidden window once to an opaque main-only native object.
+The public requested-range text-input API returns caret geometry for the observed
+selection offset. Native cached selection and marked-text flags can lag hidden
+Chromium documents, so they do not establish the field or its selection. The
+host rechecks the same field and selection after geometry lookup. No native
+pointer crosses the presentation protocol.
+
+Nightly positions its local native input context at that caret. It holds only
+the person's current candidate, at most 256 well-formed UTF16 code units. Closed
+begin, update, commit and cancel operations bind an issued composition identity
+to the current view, document, field and presentation. An old cancellation cannot
+act on a successor field. Focus, layout, navigation, hide and lease loss retire
+the transaction; cleanup precedes a successor acquisition. A queued terminal
+operation is not treated as a completed commit. A real operating-system commit
+that precedes blur cannot be undone by later cancellation. Native event trust
+flags are not authority; the owned main, current native lease and server checks
+remain authoritative.
+
+Pointer input is admitted against the exact current displayed frame before
+awaiting composition cleanup, then dispatched once only within the same current
+layout and lease. Paired releases stay ordered behind their down. A frame that
+was already stale at admission still refuses. The person's input has its own
+ordered lane and never waits behind an agent action. Composition is the
+exception to delivery during agent work: begin, update and commit refuse while an
+agent action holds the surface, rechecked immediately before each edit is sent,
+so an agent action that starts while an edit awaits its field never has its text
+changed mid-action; cancellation still reaches the field. Control-Escape blurs
+whichever element inside the page holds focus, including the text input.
+
+The current foundation remains publication-gated while full IME reconversion,
+accessibility,
 native-popup parity, other native brokers and the remaining lifecycle behavior
 need implementation and evidence. An isolated synthetic fixture is feasibility evidence only; it is not
 packaged coexistence, signed-in browsing, or native identity verification.
