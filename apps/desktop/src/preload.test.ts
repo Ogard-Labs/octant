@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { nightlyClientChannelClass } from "./nightlyClientChannels";
 
 vi.mock("electron", () => ({ contextBridge: {}, ipcRenderer: {} }));
 
 import {
   HOST_BRIDGE_KEY,
   IPC_CHANNELS,
+  OCTANT_ONLY_BRIDGE_MEMBERS,
   createHostBridge,
   decodeInitialProjectTarget,
   decodeProjectWindowCapability,
@@ -20,6 +22,72 @@ const projectWindowCapability = "C".repeat(43);
 const projectId = "00000000-0000-4000-8000-000000000203";
 
 describe("desktop preload bridge", () => {
+  it("leaves Octant-only administration out of a Nightly client bridge so its screens hide", async () => {
+    const reached: string[] = [];
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(async (channel: string) => {
+        reached.push(channel);
+        return undefined;
+      }),
+      on: vi.fn((channel: string) => {
+        reached.push(channel);
+      }),
+      removeListener: vi.fn(),
+    };
+    const octant = createHostBridge(ipc, projectWindowCapability, undefined, "darwin");
+    for (const member of OCTANT_ONLY_BRIDGE_MEMBERS) expect(member in octant).toBe(true);
+    expect(octant.managedInOctant).toBeUndefined();
+
+    const client = createHostBridge(
+      ipc,
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
+      { flavor: "nightly", productName: "Octant Nightly", data: "octant" },
+      true,
+    );
+    for (const member of OCTANT_ONLY_BRIDGE_MEMBERS) expect(member in client).toBe(false);
+    expect(client.managedInOctant).toBe(true);
+    expect(client.readNightlyData).toBeTypeOf("function");
+    for (const value of Object.values(client)) {
+      if (typeof value !== "function") continue;
+      try {
+        await (value as () => unknown)();
+      } catch {
+        // Argument validation refuses before any channel; only reached channels matter.
+      }
+    }
+    expect(reached.length).toBeGreaterThan(0);
+    expect(
+      reached.filter((channel) => nightlyClientChannelClass(channel) === "octant-only"),
+    ).toEqual([]);
+  });
+
+  it("builds the Nightly client bridge only from its fixed launch argument", () => {
+    const argv = process.argv;
+    try {
+      for (const [arguments_, expected] of [
+        [["--octant-nightly-client"], true],
+        [[], undefined],
+      ] as const) {
+        process.argv = ["fixture", ...arguments_];
+        const exposeInMainWorld = vi.fn();
+        installHostBridge(
+          { exposeInMainWorld },
+          { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() },
+          projectWindowCapability,
+        );
+        const bridge = exposeInMainWorld.mock.calls[0]?.[1];
+        expect(bridge?.managedInOctant).toBe(expected);
+        expect("hubAdministrationRequest" in bridge).toBe(expected !== true);
+      }
+    } finally {
+      process.argv = argv;
+    }
+  });
+
   it("offers Nightly's Data requests only with a Data role and sends only the fixed choice", async () => {
     const invoke = vi.fn(
       async (channel: string): Promise<unknown> =>
@@ -172,12 +240,13 @@ describe("desktop preload bridge", () => {
       on: vi.fn(),
       removeListener: vi.fn(),
     };
-    const surfaced = await createHostBridge(wrappedIpc, projectWindowCapability)
-      .getRemoteDeviceInventory()
-      .then(
-        () => "resolved",
-        (error: unknown) => (error instanceof Error ? error.message : String(error)),
-      );
+    const surfaced = await (
+      createHostBridge(wrappedIpc, projectWindowCapability).getRemoteDeviceInventory?.() ??
+      Promise.reject(new Error("absent"))
+    ).then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
     expect(surfaced).toBe(known);
 
     const unknownIpc: IpcRendererPort = {
@@ -187,12 +256,13 @@ describe("desktop preload bridge", () => {
       on: vi.fn(),
       removeListener: vi.fn(),
     };
-    const refused = await createHostBridge(unknownIpc, projectWindowCapability)
-      .getRemoteDeviceInventory()
-      .then(
-        () => "resolved",
-        (error: unknown) => (error instanceof Error ? error.message : String(error)),
-      );
+    const refused = await (
+      createHostBridge(unknownIpc, projectWindowCapability).getRemoteDeviceInventory?.() ??
+      Promise.reject(new Error("absent"))
+    ).then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
     expect(refused).toBe("Octant could not apply the local device controls.");
   });
 
@@ -1394,9 +1464,9 @@ describe("desktop preload bridge", () => {
       projectWindowCapability,
     );
 
-    await expect(bridge.getPrivateListenerStatus()).resolves.toEqual(disabled);
+    await expect(bridge.getPrivateListenerStatus?.()).resolves.toEqual(disabled);
     await expect(
-      bridge.enablePrivateListener({
+      bridge.enablePrivateListener?.({
         hostname: "192.168.1.20",
         port: 9443,
         origin: "https://192.168.1.20:9443",
@@ -1405,7 +1475,7 @@ describe("desktop preload bridge", () => {
         localConfirmation: true,
       }),
     ).resolves.toEqual(ready);
-    await expect(bridge.disablePrivateListener()).resolves.toEqual(disabled);
+    await expect(bridge.disablePrivateListener?.()).resolves.toEqual(disabled);
 
     expect(invoke.mock.calls).toEqual([
       [IPC_CHANNELS.privateListenerStatus],
@@ -1448,8 +1518,8 @@ describe("desktop preload bridge", () => {
       projectWindowCapability,
     );
 
-    await expect(bridge.getPrivateListenerStatus()).resolves.toEqual(selfMade);
-    await expect(bridge.getPrivateListenerStatus()).rejects.toThrow();
+    await expect(bridge.getPrivateListenerStatus?.()).resolves.toEqual(selfMade);
+    await expect(bridge.getPrivateListenerStatus?.()).rejects.toThrow();
   });
 
   it("rejects invalid private listener enable requests before IPC and sanitizes failures", async () => {
@@ -1460,7 +1530,7 @@ describe("desktop preload bridge", () => {
     );
 
     await expect(
-      bridge.enablePrivateListener({
+      bridge.enablePrivateListener?.({
         hostname: "192.168.1.20",
         port: 9443,
         origin: "https://192.168.1.20:9443",
@@ -1472,7 +1542,7 @@ describe("desktop preload bridge", () => {
     expect(invoke).not.toHaveBeenCalled();
 
     const failure = await bridge
-      .enablePrivateListener({
+      .enablePrivateListener?.({
         hostname: "192.168.1.20",
         port: 9443,
         origin: "https://192.168.1.20:9443",
@@ -1525,23 +1595,25 @@ describe("desktop preload bridge", () => {
       projectWindowCapability,
     );
 
-    await expect(bridge.mintRemotePairingTicket("lan-private")).resolves.toMatchObject({
+    await expect(bridge.mintRemotePairingTicket?.("lan-private")).resolves.toMatchObject({
       ticketId,
       sourceClass: "lan-private",
     });
-    await expect(bridge.listRemotePairingRequests()).resolves.toEqual([]);
-    await expect(bridge.approveRemotePairingRequest(ticketId)).resolves.toMatchObject({
+    await expect(bridge.listRemotePairingRequests?.()).resolves.toEqual([]);
+    await expect(bridge.approveRemotePairingRequest?.(ticketId)).resolves.toMatchObject({
       decision: "approved",
       device: { deviceId },
     });
-    await expect(bridge.denyRemotePairingRequest(ticketId, "user-denied")).resolves.toEqual({
+    await expect(bridge.denyRemotePairingRequest?.(ticketId, "user-denied")).resolves.toEqual({
       decision: "denied",
     });
-    await expect(bridge.getRemoteDeviceInventory()).resolves.toEqual([device]);
-    await expect(bridge.renameRemoteDevice(deviceId, "Living Room")).resolves.toEqual(device);
-    await expect(bridge.revokeRemoteDevice(deviceId)).resolves.toMatchObject({ result: "applied" });
-    await expect(bridge.revokeAllRemoteDevices()).resolves.toMatchObject({ result: "applied" });
-    await expect(bridge.reconcileExpiredRemoteDevices()).resolves.toMatchObject({
+    await expect(bridge.getRemoteDeviceInventory?.()).resolves.toEqual([device]);
+    await expect(bridge.renameRemoteDevice?.(deviceId, "Living Room")).resolves.toEqual(device);
+    await expect(bridge.revokeRemoteDevice?.(deviceId)).resolves.toMatchObject({
+      result: "applied",
+    });
+    await expect(bridge.revokeAllRemoteDevices?.()).resolves.toMatchObject({ result: "applied" });
+    await expect(bridge.reconcileExpiredRemoteDevices?.()).resolves.toMatchObject({
       result: "applied",
     });
     expect(invoke.mock.calls.slice(0, 9)).toEqual([
@@ -1575,12 +1647,12 @@ describe("desktop preload bridge", () => {
       { invoke, on: vi.fn(), removeListener: vi.fn() },
       projectWindowCapability,
     );
-    await expect(bridge.getRemoteHostIdentityRecovery()).resolves.toEqual(recovery);
-    await expect(bridge.rotateRemoteHostIdentity()).resolves.toEqual({
+    await expect(bridge.getRemoteHostIdentityRecovery?.()).resolves.toEqual(recovery);
+    await expect(bridge.rotateRemoteHostIdentity?.()).resolves.toEqual({
       status: "rotated",
       fingerprint: "b".repeat(64),
     });
-    await expect(bridge.recoverRemoteHostIdentity()).resolves.toEqual(recovery);
+    await expect(bridge.recoverRemoteHostIdentity?.()).resolves.toEqual(recovery);
     expect(invoke.mock.calls).toEqual([
       [IPC_CHANNELS.remoteHostIdentityStatus],
       [IPC_CHANNELS.remoteHostIdentityRotate],

@@ -431,6 +431,12 @@ export interface OctantHostBridge
   readonly checkForAppUpdate?: () => Promise<AppUpdateState>;
   /** This application's native process persists its own update preferences. */
   readonly appUpdatePreferenceScope?: "local";
+  /**
+   * Set only in an Octant Nightly client window. Its bridge omits Octant-only
+   * administration (remote access, pairing, hubs, owner unlock, host
+   * identity), so Settings shows one line saying it is managed in Octant.
+   */
+  readonly managedInOctant?: true;
   /** Local application display only; never a host or capability identity. */
   readonly applicationIdentity?: Readonly<{
     readonly flavor: "nightly";

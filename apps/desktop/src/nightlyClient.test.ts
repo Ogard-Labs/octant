@@ -164,3 +164,32 @@ it("refuses a late selected item after its owning window has retired", async () 
   finish?.({ kind: "selected", id: "0" });
   expect(await selected).toEqual({ kind: "refused" });
 });
+it("refuses unanswered channels by their class instead of asking for a newer Octant", async () => {
+  const f = await open();
+  const refusal = async (channel: string) => {
+    const handler = fixture.handlers.get(channel);
+    if (handler === undefined) throw new Error(`No handler for ${channel}`);
+    return Promise.resolve()
+      .then(() => handler(f.event))
+      .then(
+        () => "answered",
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+  };
+  expect(await refusal(DESKTOP_IPC_CHANNELS.hubAdministrationRequest)).toMatch(
+    /^Managed in Octant\./,
+  );
+  expect(await refusal(DESKTOP_IPC_CHANNELS.pairedComputerPair)).toMatch(/^Managed in Octant\./);
+  expect(await refusal(DESKTOP_IPC_CHANNELS.listProviderApiKeys)).toBe(
+    "Not available in Octant Nightly yet.",
+  );
+  expect(await refusal(DESKTOP_IPC_CHANNELS.browserSurfaceAttach)).toMatch(/Browser presentation/);
+  for (const channel of Object.values(DESKTOP_IPC_CHANNELS))
+    expect(fixture.handlers.has(channel)).toBe(true);
+  for (const channel of [
+    DESKTOP_IPC_CHANNELS.hubAdministrationRequest,
+    DESKTOP_IPC_CHANNELS.listProviderApiKeys,
+    DESKTOP_IPC_CHANNELS.browserSurfaceAttach,
+  ])
+    expect(await refusal(channel)).not.toMatch(/newer Octant/);
+});
