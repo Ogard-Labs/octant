@@ -1,4 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+
+// Password and owner-secret hashing is intentionally slow, and the password
+// tests pay several of those hashes each; slow CI runners pass bun's 5 s
+// default test timeout because of that, not because anything is wrong.
+setDefaultTimeout(30_000);
 import {
   existsSync,
   mkdtempSync,
@@ -13,6 +18,7 @@ import { join } from "node:path";
 import { CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES, CANVAS_SHARE_SCHEMA_VERSION } from "./shareKit.ts";
 import { readShareConfig, type ShareConfig } from "./config.ts";
 import { startShareService, type ShareService } from "./server.ts";
+import { ShareStore } from "./store.ts";
 import { runTakedown } from "./takedown.ts";
 
 const DAY_MS = 86_400_000;
@@ -592,16 +598,19 @@ describe("share service", () => {
     expect((await fetch(created.url)).status).toBe(200);
   });
 
-  test("writes no view or update over a link that has a tombstone", async () => {
+  test("a tombstone beside a surviving payload does not reopen the link", async () => {
     start();
     const created = await create();
     const payload = join(dataDir, "shares", `${created.shareId}.json`);
-    const before = readFileSync(payload, "utf8");
+    const content = readFileSync(payload, "utf8");
+    // A stop between the tombstone write and the payload delete leaves both files.
     writeFileSync(
       join(dataDir, "tombstones", `${created.shareId}.json`),
       JSON.stringify({ goneAt: new Date(now).toISOString(), reason: "taken-down" }),
     );
-    await fetch(created.url);
+    expect((await fetch(created.url)).status).toBe(410);
+    // The tombstone is final: the surviving payload is reconciled away, not served.
+    expect(existsSync(payload)).toBe(false);
     const update = await fetch(`${service?.publicUrl}/api/v1/shares/${created.shareId}`, {
       method: "PUT",
       headers: owner(created.ownerSecret),
@@ -613,7 +622,11 @@ describe("share service", () => {
       }),
     });
     expect(update.status).not.toBe(200);
-    expect(readFileSync(payload, "utf8")).toBe(before);
+    // The same crash state is reconciled on restart, before any request.
+    writeFileSync(payload, content);
+    const restarted = new ShareStore(dataDir, { clock: () => now, maxTotalBytes: 1_000_000_000 });
+    expect(restarted.lookup(created.shareId).status).toBe("gone");
+    expect(existsSync(payload)).toBe(false);
   });
 
   test("answers the health check with ok and nothing else", async () => {

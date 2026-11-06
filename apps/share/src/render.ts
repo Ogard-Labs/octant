@@ -213,9 +213,11 @@ function design(block: Extract<Block, { readonly kind: "design" }>, ctx: RenderC
     viewport?.height ?? 900,
   )}"`;
   const frame = (mode: FrameMode, sandbox: string): string =>
+    // Eager, not lazy: the frame address is signed for FRAME_TOKEN_TTL_MS, and a
+    // deferred first load would find the token already expired and answer 403.
     `<iframe class="design-frame" title="${e(block.title)}" src="${e(
       ctx.frameAddress(id, mode),
-    )}" sandbox="${sandbox}" referrerpolicy="no-referrer" loading="lazy"${dimensions}></iframe>`;
+    )}" sandbox="${sandbox}" referrerpolicy="no-referrer"${dimensions}></iframe>`;
   const titles = list(
     block.frames.map((entry) => e(entry.title)),
     true,

@@ -159,7 +159,13 @@ export class ShareStore {
     mkdirSync(this.#directory("reports"), { recursive: true, mode: 0o700 });
     for (const name of readdirSync(this.#directory("shares"))) {
       if (!name.endsWith(".json")) continue;
-      const share = this.#readShare(name.slice(0, -".json".length));
+      const id = name.slice(0, -".json".length);
+      // Reconcile a crash that left a payload beside its tombstone.
+      if (this.#hasTombstone(id)) {
+        rmSync(this.#sharePath(id), { force: true });
+        continue;
+      }
+      const share = this.#readShare(id);
       if (share !== undefined) this.#totalBytes += share.byteLength;
     }
   }
@@ -196,6 +202,12 @@ export class ShareStore {
 
   lookup(id: string): ShareLookup {
     if (!isShareId(id)) return { status: "missing" };
+    if (this.#hasTombstone(id)) {
+      // A stop between the tombstone write and the payload delete can leave
+      // both files; the tombstone is final, so a surviving payload goes now.
+      rmSync(this.#sharePath(id), { force: true });
+      return this.#lookupTombstone(id);
+    }
     const share = this.#readShare(id);
     if (share !== undefined) {
       if (share.expiresAt !== null && Date.parse(share.expiresAt) <= this.#clock()) {
