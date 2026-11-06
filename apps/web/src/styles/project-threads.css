@@ -1840,7 +1840,3 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
-.worktree-preparation__tabs [role="tab"]:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
