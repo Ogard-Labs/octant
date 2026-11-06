@@ -7415,7 +7415,11 @@ the model at another size.
   calls one. The `verify-model-tools` command sends one forced
   `octant_capability_echo` request through the same sender a turn uses, for one
   model; an Anthropic-compatible endpoint sends it in its own wire shape, with
-  `tool_choice` `any`. Ollama has no forced tool choice: its check first reads
+  `tool_choice` `any`. GPT-6 Luna requests offering function tools through
+  Chat Completions set `reasoning_effort` to `none`, the mode that endpoint
+  supports for function calls. This applies to both Verify tools and ordinary
+  tool turns; plain-text Luna requests and other models keep their defaults.
+  Ollama has no forced tool choice: its check first reads
   the model's `/api/show` capability list, answers "unsupported" without a
   generating request for a model that does not list `tools` (Ollama itself
   refuses tools to such a model), and otherwise sends one local `/api/chat`
