@@ -143,15 +143,18 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
     resolved.kind === "builtin" && printedBuiltinUrl === null ? resolved.backgroundUrl : null;
   // Both pictures ride as custom properties and the stylesheet picks one by
   // the window's resolved scheme, so a theme switch swaps the ground without
-  // a render. An inline background-image would outrank that choice.
+  // a render. Resolve them against the document before CSS consumes them:
+  // the built stylesheet lives under assets/, away from the public pictures.
   const builtinStyle =
     builtinUrl === null
       ? undefined
       : ({
-          "--app-backdrop-image": `url("${builtinUrl}")`,
+          "--app-backdrop-image": `url("${new URL(builtinUrl, document.baseURI).href}")`,
           ...(resolved.backgroundLightUrl === null
             ? {}
-            : { "--app-backdrop-image-light": `url("${resolved.backgroundLightUrl}")` }),
+            : {
+                "--app-backdrop-image-light": `url("${new URL(resolved.backgroundLightUrl, document.baseURI).href}")`,
+              }),
         } as CSSProperties);
 
   return (

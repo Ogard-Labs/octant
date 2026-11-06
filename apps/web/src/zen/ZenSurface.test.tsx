@@ -344,7 +344,7 @@ describe("ZenSurface", () => {
       container
         .querySelector<HTMLElement>(".app-backdrop__builtin")
         ?.style.getPropertyValue("--app-backdrop-image"),
-    ).toBe('url("zen-backgrounds/perspective-dot-plane.jpg")');
+    ).toBe(`url("${new URL("zen-backgrounds/perspective-dot-plane.jpg", document.baseURI).href}")`);
     vi.restoreAllMocks();
   });
 
