@@ -72,7 +72,9 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
     props.onDefer !== undefined &&
     request.deferredUntil !== undefined &&
     Date.parse(request.deferredUntil) > props.now;
-  const [wakeTime, setWakeTime] = useState<string>();
+  const [presetId, setPresetId] = useState<string>();
+  const presets = resolveSnoozePresets(new Date(props.now));
+  const selectedPreset = presets.find((preset) => preset.id === presetId);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const mounted = useRef(true);
@@ -113,7 +115,9 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
     setBusy(true);
     setNotice(undefined);
     try {
-      if (!(await props.onDefer(request, until)))
+      if (await props.onDefer(request, until)) {
+        if (mounted.current) setPresetId(undefined);
+      } else
         setNotice("This question changed or is no longer available. Refresh before trying again.");
     } catch {
       setNotice("The attention change could not be confirmed. Refresh before trying again.");
@@ -212,19 +216,26 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
             <>
               <OctantSelectField
                 aria-label="Defer question until"
-                value={wakeTime ?? ""}
+                value={selectedPreset?.id ?? ""}
                 disabled={busy}
                 placeholder="Remind me…"
-                onValueChange={setWakeTime}
-                options={resolveSnoozePresets(new Date(props.now)).map((preset) => ({
-                  id: preset.until,
+                onValueChange={setPresetId}
+                options={presets.map((preset) => ({
+                  id: preset.id,
                   label: preset.label,
                 }))}
               />
               <OctantButton
                 size="sm"
-                disabled={busy || wakeTime === undefined}
-                onClick={() => void defer(wakeTime ?? null)}
+                disabled={busy || selectedPreset === undefined}
+                onClick={() => {
+                  // Relative times start at submission, not when the menu was opened.
+                  const preset = resolveSnoozePresets(new Date(Date.now())).find(
+                    (candidate) => candidate.id === presetId,
+                  );
+                  if (preset === undefined) setPresetId(undefined);
+                  else void defer(preset.until);
+                }}
               >
                 Defer question
               </OctantButton>

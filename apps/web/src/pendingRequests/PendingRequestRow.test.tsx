@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
   codeChildQuestion,
+  codeQuestion,
   codeDecision,
   workChildApproval,
   workLeadApproval,
@@ -261,4 +262,32 @@ it("brings a deferred question back without answering it and restores choices wh
     />,
   );
   expect(screen.getByRole("button", { name: /First/ })).toBeInTheDocument();
+});
+
+it("keeps the chosen reminder across clock ticks and clears it after deferral", async () => {
+  const user = userEvent.setup();
+  const request = { ...codeQuestion(), deferralKey: "a".repeat(64) };
+  const onDefer = vi.fn(async () => true);
+  const onAnswer = vi.fn();
+  const props = { request, onDefer, onAnswer, onOpenThread: vi.fn() };
+  const view = render(<PendingRequestRow {...props} now={NOW} />);
+  await user.click(screen.getByRole("combobox", { name: "Defer question until" }));
+  await user.click(screen.getByRole("option", { name: "In 1 hour" }));
+  const later = NOW + 60_000;
+  view.rerender(<PendingRequestRow {...props} now={later} />);
+  expect(screen.getByRole("combobox")).toHaveTextContent("In 1 hour");
+  const clock = vi.spyOn(Date, "now").mockReturnValue(later + 10_000);
+  try {
+    await user.click(screen.getByRole("button", { name: "Defer question" }));
+    expect(onDefer).toHaveBeenCalledExactlyOnceWith(
+      request,
+      new Date(later + 10_000 + 3_600_000).toISOString(),
+    );
+    view.rerender(<PendingRequestRow {...props} now={later + 3_600_000 + 20_000} />);
+    expect(screen.getByRole("combobox")).toHaveTextContent("Remind me…");
+    expect(screen.getByRole("button", { name: "Defer question" })).toBeDisabled();
+    expect(onAnswer).not.toHaveBeenCalled();
+  } finally {
+    clock.mockRestore();
+  }
 });
