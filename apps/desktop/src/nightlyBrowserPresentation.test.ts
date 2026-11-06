@@ -4,6 +4,7 @@ import {
   decodeBrowserPresentationId,
   decodeBrowserCompositionId,
   decodeBrowserEditMenuId,
+  decodeBrowserPagePopupId,
   type HumanBrowserRequest,
   type HumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
@@ -657,6 +658,206 @@ describe("Nightly main human window ownership", () => {
     await Promise.all([main.hide(), main.hide()]);
     expect(new Set(hidden).size).toBe(8);
     expect(await main.invoke(input("char"))).toEqual({ status: "refused" });
+    await main.close();
+  });
+});
+
+describe("page popups in Nightly's embedded Browser", () => {
+  const popupId = decodeBrowserPagePopupId("00000000-0000-4000-8000-000000000901");
+  async function presented(
+    present: NonNullable<ConstructorParameters<typeof NightlyBrowserPresentation>[0]["pagePopup"]>,
+    popup: HumanBrowserResult = {
+      status: "popup",
+      popup: { kind: "dialog", id: popupId, dialog: "confirm", message: "Leave?" },
+    },
+    stable: {
+      readonly focused?: () => boolean;
+      readonly watch?: () => Promise<HumanBrowserResult>;
+      readonly offerAgain?: boolean;
+      /** Held before Stable answers a popup poll, as its bounded wait is. */
+      readonly beforePopup?: () => Promise<void>;
+    } = {},
+  ) {
+    const calls: HumanBrowserRequest[] = [];
+    let offered = false;
+    const main = new NightlyBrowserPresentation({
+      current: () => true,
+      visible: () => true,
+      focused: stable.focused ?? (() => true),
+      pagePopup: present,
+      execute: async (request) => {
+        calls.push(request);
+        if (request.kind === "attach") return { status: "attached", presentationId: id };
+        if (request.kind === "popup-watch" && stable.watch !== undefined) return stable.watch();
+        if (request.kind === "popup") {
+          await stable.beforePopup?.();
+          if (offered && stable.offerAgain !== true) {
+            await new Promise((done) => setTimeout(done, 20));
+            return { status: "idle" };
+          }
+          offered = true;
+          return popup;
+        }
+        return { status: "accepted" };
+      },
+    });
+    await main.invoke({ ...owner, kind: "attach" });
+    await main.invoke({
+      ...owner,
+      presentationId: id,
+      kind: "layout",
+      layout: { width: 800, height: 600, visible: true },
+    });
+    return { main, calls };
+  }
+
+  it("shows a captured dialog natively and returns the person's answer once", async () => {
+    const shown = vi.fn(async () => ({ kind: "dialog" as const, accept: true }));
+    const { main, calls } = await presented(shown);
+    await vi.waitFor(() =>
+      expect(calls.filter((request) => request.kind === "popup-answer")).toHaveLength(1),
+    );
+    expect(shown).toHaveBeenCalledTimes(1);
+    expect(calls.find((request) => request.kind === "popup-answer")).toMatchObject({
+      popupId,
+      answer: { kind: "dialog", accept: true },
+    });
+    await main.close();
+  });
+
+  it("dismisses a popup the person closed without choosing", async () => {
+    const { main, calls } = await presented(async () => undefined);
+    await vi.waitFor(() =>
+      expect(calls.some((request) => request.kind === "popup-dismiss")).toBe(true),
+    );
+    expect(calls.some((request) => request.kind === "popup-answer")).toBe(false);
+    await main.close();
+  });
+
+  it("keeps the person's new presses out of the page while a popup is open", async () => {
+    let close: (answer: undefined) => void = () => {};
+    const { main, calls } = await presented(
+      (_popup, _placement, signal) =>
+        new Promise((done) => {
+          close = done;
+          signal.addEventListener("abort", () => done(undefined), { once: true });
+        }),
+    );
+    await vi.waitFor(() => expect(calls.some((request) => request.kind === "popup")).toBe(true));
+    await new Promise((done) => setTimeout(done, 10));
+    expect(await main.invoke(input("keyDown"))).toEqual({ status: "refused" });
+    close(undefined);
+    await vi.waitFor(() =>
+      expect(calls.some((request) => request.kind === "popup-dismiss")).toBe(true),
+    );
+    expect(await main.invoke(input("keyDown"))).toEqual({ status: "accepted" });
+    await main.close();
+  });
+
+  it("closes an open popup when its presentation detaches and answers nothing", async () => {
+    const shown = vi.fn(
+      (_popup: unknown, _placement: unknown, signal: AbortSignal) =>
+        new Promise<undefined>((done) => {
+          signal.addEventListener("abort", () => done(undefined), { once: true });
+        }),
+    );
+    const { main, calls } = await presented(shown);
+    await vi.waitFor(() => expect(shown).toHaveBeenCalled());
+    await main.invoke({ ...owner, presentationId: id, kind: "detach" });
+    await vi.waitFor(() =>
+      expect(calls.some((request) => request.kind === "popup-dismiss")).toBe(true),
+    );
+    expect(calls.some((request) => request.kind === "popup-answer")).toBe(false);
+    await main.close();
+  });
+
+  it("refuses popup requests from the renderer", async () => {
+    const { main, calls } = await presented(async () => undefined);
+    for (const raw of [
+      { ...owner, presentationId: id, kind: "popup" },
+      { ...owner, presentationId: id, kind: "popup-dismiss", popupId },
+      {
+        ...owner,
+        presentationId: id,
+        kind: "popup-answer",
+        popupId,
+        answer: { kind: "dialog", accept: true },
+      },
+    ])
+      expect(await main.invoke(decodeHumanBrowserRequest(raw))).toEqual({ status: "refused" });
+    expect(calls.filter((request) => request.kind === "popup-answer")).toHaveLength(0);
+    await main.close();
+  });
+
+  it("closes its own sheet when Stable retires the popup", async () => {
+    let retire: (result: HumanBrowserResult) => void = () => {};
+    const shown = vi.fn(
+      (_popup: unknown, _placement: unknown, signal: AbortSignal) =>
+        new Promise<{ kind: "dialog"; accept: boolean } | undefined>((done) => {
+          signal.addEventListener("abort", () => done({ kind: "dialog", accept: true }), {
+            once: true,
+          });
+        }),
+    );
+    const { main, calls } = await presented(shown, undefined, {
+      watch: () =>
+        new Promise((done) => {
+          retire = done;
+        }),
+    });
+    await vi.waitFor(() => expect(shown).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(calls.some((request) => request.kind === "popup-watch")).toBe(true),
+    );
+    retire({ status: "refused" });
+    // The sheet closed because the page closed its dialog: nothing is answered.
+    await vi.waitFor(() =>
+      expect(calls.some((request) => request.kind === "popup-dismiss")).toBe(true),
+    );
+    expect(calls.some((request) => request.kind === "popup-answer")).toBe(false);
+    await main.close();
+  });
+
+  it("never shows the same pending popup twice", async () => {
+    const shown = vi.fn(async () => undefined);
+    const { main, calls } = await presented(shown, undefined, { offerAgain: true });
+    await vi.waitFor(() =>
+      expect(calls.filter((request) => request.kind === "popup").length).toBeGreaterThan(2),
+    );
+    expect(shown).toHaveBeenCalledTimes(1);
+    await main.close();
+  });
+
+  it("asks Stable for nothing while its window is not focused", async () => {
+    const shown = vi.fn(async () => undefined);
+    const { main, calls } = await presented(shown, undefined, { focused: () => false });
+    await new Promise((done) => setTimeout(done, 300));
+    expect(calls.some((request) => request.kind === "popup")).toBe(false);
+    expect(shown).not.toHaveBeenCalled();
+    await main.close();
+  });
+
+  it("leaves a popup pending when the window lost focus while the poll waited", async () => {
+    let focused = true;
+    let answerPoll: () => void = () => {};
+    const held = new Promise<void>((done) => {
+      answerPoll = done;
+    });
+    const shown = vi.fn(async () => undefined);
+    const { main, calls } = await presented(shown, undefined, {
+      focused: () => focused,
+      offerAgain: true,
+      beforePopup: () => held,
+    });
+    await vi.waitFor(() => expect(calls.some((request) => request.kind === "popup")).toBe(true));
+    // The held poll resolves after focus moved away.
+    focused = false;
+    answerPoll();
+    await new Promise((done) => setTimeout(done, 100));
+    expect(shown).not.toHaveBeenCalled();
+    expect(calls.some((request) => request.kind === "popup-dismiss")).toBe(false);
+    focused = true;
+    await vi.waitFor(() => expect(shown).toHaveBeenCalledTimes(1));
     await main.close();
   });
 });

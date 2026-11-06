@@ -7,7 +7,17 @@ import {
 } from "@octant/contracts/browser-presentation";
 
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
-import type { BrowserEditAction, BrowserEditMenuId } from "@octant/contracts/browser-presentation";
+import type {
+  BrowserEditAction,
+  BrowserEditMenuId,
+  HumanBrowserPagePopup,
+  HumanBrowserPopupAnswer,
+} from "@octant/contracts/browser-presentation";
+
+/** Where the person last pressed in the Browser image, in its page coordinates. */
+export interface NightlyPagePopupPlacement {
+  readonly pointer: { readonly x: number; readonly y: number } | undefined;
+}
 
 interface Presentation {
   readonly contextId: HumanBrowserRequest["contextId"];
@@ -21,6 +31,15 @@ interface NightlyBrowserPresentationOptions {
     request: NativeMenuRequest,
     signal: AbortSignal,
   ) => Promise<NativeMenuOutcome>;
+  /**
+   * Shows a page popup Stable captured as Nightly's own native menu, sheet or
+   * open panel, and returns the person's answer; undefined dismisses it.
+   */
+  readonly pagePopup?: (
+    popup: HumanBrowserPagePopup,
+    placement: NightlyPagePopupPlacement,
+    signal: AbortSignal,
+  ) => Promise<HumanBrowserPopupAnswer | undefined>;
   readonly current: () => boolean;
   readonly visible: () => boolean;
   readonly focused: () => boolean;
@@ -62,6 +81,10 @@ export class NightlyBrowserPresentation {
       terminal: boolean;
     }
   >();
+  readonly #popupWatches = new Map<string, AbortController>();
+  readonly #popupTasks = new Set<Promise<void>>();
+  readonly #popupOpen = new Set<string>();
+  readonly #pointers = new Map<string, { readonly x: number; readonly y: number }>();
   #pageMenu: AbortController | undefined;
   #pageMenuPresentation: Presentation | undefined;
   readonly #pageMenuTasks = new Set<Promise<void>>();
@@ -86,6 +109,10 @@ export class NightlyBrowserPresentation {
           "edit-menu-action",
           "edit-menu-dismiss",
           "edit-menu-keyboard",
+          "popup",
+          "popup-answer",
+          "popup-dismiss",
+          "popup-watch",
         ].includes(request.kind)
       )
         return Promise.resolve(refused());
@@ -276,6 +303,14 @@ export class NightlyBrowserPresentation {
       return refused();
     }
     if (
+      !internal &&
+      request.kind === "input" &&
+      ["keyDown", "char", "mouseDown"].includes(request.input.type) &&
+      owned !== undefined &&
+      this.#popupOpen.has(String(owned.presentationId))
+    )
+      return refused();
+    if (
       ["attach", "layout", "detach", "command", "tab"].includes(request.kind) ||
       (request.kind === "input" &&
         (request.input.type === "mouseDown" || menuKeyDown(request.input)))
@@ -339,17 +374,22 @@ export class NightlyBrowserPresentation {
       for (const [key, held] of this.#held)
         if (String(held.contextId) === String(request.contextId)) this.#held.delete(key);
     }
-    if (result.status === "attached" && request.kind === "attach")
-      this.#presentations.set(String(request.contextId), {
+    if (result.status === "attached" && request.kind === "attach") {
+      if (owned !== undefined) this.#stopPopupWatch(owned);
+      const attached: Presentation = {
         contextId: request.contextId,
         threadId: request.threadId,
         presentationId: result.presentationId,
         layout: { width: 800, height: 600, visible: false },
         menuEpoch: 0,
-      });
+      };
+      this.#presentations.set(String(request.contextId), attached);
+      this.#startPopupWatch(attached);
+    }
     if (request.kind === "layout" && owned !== undefined && result.status === "accepted")
       owned.layout = request.layout;
     if (request.kind === "detach") {
+      if (owned !== undefined) this.#stopPopupWatch(owned);
       this.#presentations.delete(String(request.contextId));
       this.#compositions.delete(String(request.contextId));
     }
@@ -366,6 +406,11 @@ export class NightlyBrowserPresentation {
         this.#compositions.delete(String(request.contextId));
     }
     if (request.kind === "input" && result.status === "accepted") {
+      if (request.input.type === "mouseDown")
+        this.#pointers.set(String(request.presentationId), {
+          x: request.input.x,
+          y: request.input.y,
+        });
       const down = downKey(request);
       const up = releaseKey(request);
       if (down !== undefined) this.#held.set(down, request);
@@ -568,6 +613,149 @@ export class NightlyBrowserPresentation {
     }
   }
 
+  #startPopupWatch(presentation: Presentation): void {
+    if (this.#options.pagePopup === undefined || this.#lifetime.signal.aborted) return;
+    const owned = new AbortController();
+    this.#popupWatches.set(String(presentation.presentationId), owned);
+    const task = this.#watchPopups(
+      presentation,
+      AbortSignal.any([owned.signal, this.#lifetime.signal]),
+    ).catch(() => undefined);
+    this.#popupTasks.add(task);
+    void task.finally(() => this.#popupTasks.delete(task));
+  }
+
+  #stopPopupWatch(presentation: Presentation): void {
+    const key = String(presentation.presentationId);
+    this.#popupWatches.get(key)?.abort();
+    this.#popupWatches.delete(key);
+    this.#pointers.delete(key);
+  }
+
+  /**
+   * Ask Stable for the next page popup of one presentation and show it locally.
+   * Stable holds the request open briefly, so an idle page costs one bounded
+   * request at a time; a hidden or unfocused window asks for nothing.
+   */
+  async #watchPopups(presentation: Presentation, signal: AbortSignal): Promise<void> {
+    const present = this.#options.pagePopup;
+    if (present === undefined) return;
+    const base = {
+      contextId: presentation.contextId,
+      threadId: presentation.threadId,
+      presentationId: presentation.presentationId,
+    };
+    const key = String(presentation.presentationId);
+    const current = () =>
+      !signal.aborted &&
+      this.#options.current() &&
+      this.#presentations.get(String(presentation.contextId)) === presentation;
+    const pause = (ms: number) =>
+      new Promise<void>((done) => {
+        const timer = setTimeout(finish, ms);
+        function finish() {
+          clearTimeout(timer);
+          signal.removeEventListener("abort", finish);
+          done();
+        }
+        signal.addEventListener("abort", finish, { once: true });
+      });
+    let shownId: string | undefined;
+    const presentable = () =>
+      !this.#hidden &&
+      this.#options.visible() &&
+      this.#options.focused() &&
+      presentation.layout.visible;
+    while (current()) {
+      if (!presentable()) {
+        await pause(250);
+        continue;
+      }
+      const next = await this.#options
+        .execute({ ...base, kind: "popup" }, AbortSignal.any([signal, AbortSignal.timeout(2_000)]))
+        .catch(refused);
+      if (!current()) return;
+      if (next.status !== "popup") {
+        if (next.status !== "idle") await pause(250);
+        continue;
+      }
+      // The poll is held open; the window may have lost focus or hidden while
+      // it waited. The popup stays pending in Stable for the next focused poll.
+      if (!presentable()) continue;
+      const popup = next.popup;
+      // A popup already shown and still pending is never shown again; Stable
+      // retires or replaces it.
+      if (String(popup.id) === shownId) {
+        await pause(250);
+        continue;
+      }
+      shownId = String(popup.id);
+      const shown = new AbortController();
+      const popupSignal = AbortSignal.any([signal, shown.signal]);
+      // Close Nightly's own sheet or menu as soon as Stable retires the popup,
+      // as when the page closed its own dialog.
+      const retired = (async () => {
+        while (!popupSignal.aborted) {
+          const started = Date.now();
+          const watched = await this.#options
+            .execute(
+              { ...base, kind: "popup-watch", popupId: popup.id },
+              AbortSignal.any([popupSignal, AbortSignal.timeout(2_000)]),
+            )
+            .catch(refused);
+          if (popupSignal.aborted) return;
+          if (watched.status !== "accepted") {
+            shown.abort();
+            return;
+          }
+          // Stable holds a watch open; one that returns at once must not spin.
+          if (Date.now() - started < 50) await pause(250);
+        }
+      })();
+      this.#popupOpen.add(key);
+      presentation.menuEpoch++;
+      let answer: HumanBrowserPopupAnswer | undefined;
+      try {
+        // AppKit can consume the physical releases of keys and buttons held
+        // when a native popup opens; release them in the page first.
+        for (const request of [...this.#held.values()]) {
+          if (request.presentationId !== presentation.presentationId) continue;
+          const event = request.input;
+          if (event.type === "keyDown")
+            await this.#enqueue({ ...request, input: { ...event, type: "keyUp" } }, true);
+          else if (event.type === "mouseDown")
+            await this.#enqueue({ ...request, input: { ...event, type: "mouseUp" } }, true);
+        }
+        if (!current()) return;
+        answer = await present(popup, { pointer: this.#pointers.get(key) }, popupSignal).catch(
+          () => undefined,
+        );
+      } finally {
+        const retiredByStable = shown.signal.aborted;
+        shown.abort();
+        await retired;
+        this.#popupOpen.delete(key);
+        presentation.menuEpoch++;
+        if (retiredByStable) answer = undefined;
+      }
+      // An answer needs the same live presentation; Stable refuses a stale one.
+      if (answer !== undefined && current())
+        await this.#options
+          .execute(
+            { ...base, kind: "popup-answer", popupId: popup.id, answer },
+            AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(2_000)]),
+          )
+          .catch(refused);
+      else
+        await this.#options
+          .execute(
+            { ...base, kind: "popup-dismiss", popupId: popup.id },
+            AbortSignal.timeout(1_000),
+          )
+          .catch(refused);
+    }
+  }
+
   #retireKeyboard(owned: KeyboardMenu): Promise<void> {
     if (this.#keyboardMenus.get(String(owned.owner.contextId)) === owned)
       this.#keyboardMenus.delete(String(owned.owner.contextId));
@@ -670,6 +858,7 @@ export class NightlyBrowserPresentation {
     await this.#running;
     await this.#hide;
     await Promise.all(this.#pageMenuTasks);
+    await Promise.all(this.#popupTasks);
     await Promise.all(keyboardCleanup);
   }
 }

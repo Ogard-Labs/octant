@@ -479,12 +479,111 @@ context-menu key uses the same policy but has no separate hardware acceptance.
 Clipboard actions are wired through the same closed commands but have no live
 clipboard acceptance evidence. Keyboard navigation within an open menu is
 separate from invoking it. Password,
-custom-editor and iframe menus, link/media menus, HTML select popups, spelling and
-page accessibility remain separate parity work.
+custom-editor and iframe menus, spelling and page accessibility remain separate
+parity work; link and image menus and select lists follow below.
+
+### Page popups
+
+A page popup in Stable's hidden window would draw over a window nobody sees, so
+Stable holds it and offers it over the same authenticated presentation route.
+Nightly shows it in its own window. No new route, token or admission is
+involved: the popup requests carry the presentation's existing lease, main-only
+renderer identity and current-context checks, and the ordinary renderer IPC
+refuses them.
+
+- **Select lists.** The hidden window's sandboxed document-start preload, in the
+  same private isolated world as the editable observer, holds a trusted press
+  that would open a single-choice main-frame `<select>` (button press, Space,
+  F4, Alt+arrow, and the plain arrows on macOS) and keeps Chromium's popup
+  closed. Any other trusted press ends the hold. Stable offers a hold only when
+  it is at most 1.5 seconds old, no older than the person's own press through
+  the presentation, and made while no agent action held the page and none has
+  run since; an agent's click on a list is held but never offered. The offer
+  carries at most 512 options, each label at most 256 UTF16 units, their
+  optgroup labels, disabled flags, the selected index and the field's
+  rectangle. A list whose options, group headings and separators exceed 1,024
+  native menu entries is refused as too many rather than cut short. Nightly shows the options as radio items in a native menu, with
+  group headings, and places the selected item at the field (the press point and
+  the cursor give the Browser image's origin). The chosen index returns to
+  Stable, which sets it on the same held field and fires `input` then `change`,
+  as Chromium's own popup does. A list box (`multiple` or `size` above one) draws
+  inside the page and needs no popup.
+- **Page dialogs.** Stable's own protocol attachment on the hidden window holds
+  `alert`, `confirm` and `beforeunload` dialogs while no agent action runs; while
+  one runs, the agent's fixed dialog policy answers instead, and a debugger
+  someone else attached leaves dialogs alone. A dialog's message is bounded to
+  2,048 UTF16 units. Nightly shows it as a sheet on its window under the fixed
+  heading "This page says", never with page text as the heading;
+  `beforeunload` uses fixed Leave and Stay copy. Electron offers no page
+  `prompt`, so Stable answers one as cancelled, as its own Browser does. One
+  dialog is held at a time; a second opening while one is held is dismissed.
+  When an agent action starts while a dialog is held for the person, the
+  page is blocked behind it, so the action's fixed policy answers that dialog,
+  reports it to the agent and retires the person's popup. After three dialogs
+  within 10 seconds in one page load, Stable answers every further dialog of
+  that load by the same fixed policy, however long the page waits, until a new
+  document loads, and tells the person once with a system
+  notification instead of a sheet. Electron has no sheet scoped to part of a
+  window, so a held dialog stays window-modal; that limit keeps a page from
+  holding the window with dialog after dialog.
+- **Link and image menus.** A right-click on a link or image right after the
+  person's own press offers a menu with Open Link in New Tab, Copy Link
+  Address, Copy Image and Copy Image Address, as they apply. The page's
+  addresses stay in Stable: the menu carries only whether a link and an image
+  are present, and Stable performs the chosen action with its own clipboard or
+  opens the link as a new tab of the same Browser context under the person's
+  ordinary navigation admission and tab limit. Saving an image is not offered,
+  because the person's Browser blocks downloads.
+- **File choosers.** Stable intercepts the hidden window's file chooser through
+  the same protocol attachment, so Chromium opens no panel there, and offers it
+  only right after the person's press. Nightly shows its own open panel,
+  allowing several files only for a `multiple` field. Electron's open panel
+  takes no abort and has no call that closes it, so when Stable retires the
+  chooser (an agent navigates, say) the panel stays until the person closes
+  it; its choice then reaches nothing, and Nightly shows that window's next
+  popup only after the panel has closed. At most 8 absolute paths
+  of at most 1,024 UTF16 units each return, under the route's body bound; Stable
+  hands the field only paths that are existing regular files, through
+  Chromium's file-input command for the same chooser node and document. That
+  command waits behind any agent action and is refused while one holds the
+  page. A chooser in a frame on the page's own site is held like the page's; a
+  frame on another site is its own protocol target, so its chooser is not held
+  yet and belongs to the nested-frame parity work.
+- **New windows.** `window.open` and `target="_blank"` follow Stable's existing
+  Browser policy: the page's own popup is refused, and no free window opens in
+  either app.
+
+Every popup has a fresh single-use identity issued by Stable. An answer is
+refused after the page navigated, the tab changed, the presentation retired or
+an agent action took the page, for a stale or spent identity, for a disabled
+option, and for a kind that does not match the popup. While a popup is open,
+Nightly releases the presentation's held keys and buttons, keeps new presses out
+of the page, and sends Stable a dismissal when the person closes it without a
+choice or the presentation retires. Nightly shows a popup only while its
+window is visible and focused, never shows the same pending popup twice, and
+holds a bounded watch on the shown popup so its sheet or menu closes as soon as
+Stable retires it, as when the page closed its own dialog. Page text in a popup is display copy and
+grants nothing. Select lists and dialogs in nested frames are part of the
+nested-frame parity work.
+
+Evidence: contract tests for the bounds; Stable surface tests for dialog,
+select, link-menu and file-chooser capture and their negatives (two dialogs,
+stale and spent identities, an answer after navigation, an oversized option
+list or one too long for a native menu, a missing file, a file answer behind an
+agent action, a hold older than the person's press or made during an agent
+action, a dialog handed to an agent action, a dialog burst, another debugger);
+real-page tests in Chromium that hold a select list and an `alert`, refuse a
+disabled option, apply an enabled one and answer the dialog, hand a timer
+dialog to an agent action that then completes, never offer a list an agent's
+click opened, and hold a same-site frame's file chooser but not a cross-site
+frame's; and Nightly presentation tests for showing, answering, dismissing,
+detaching, closing on retirement, not reshowing, not asking while unfocused and
+refusing renderer popup requests. No packaged Electron run has yet confirmed that Electron's own
+message box stays out of sight while the hidden window's dialog is held.
 
 The current foundation remains publication-gated while full IME reconversion,
 accessibility,
-remaining native-popup parity, other native brokers and the remaining lifecycle behavior
+nested-frame popups, other native brokers and the remaining lifecycle behavior
 need implementation and evidence. An isolated synthetic fixture validates only the exercised components; it does not establish
 packaged coexistence, signed-in browsing, or native identity verification.
 
@@ -573,10 +672,12 @@ evidence; the preflight that replaces the early gate checks them:
 - [x] Pickers and file handoffs, provider credentials and API keys, and Code
       operation approvals through that admission.
 - [ ] "Needs a newer Octant" driven by the host's feature list.
-- [ ] Complete embedded Browser parity: select and other native popups,
-      dialogs, link and media menus, file chooser, `window.open`, password and
-      other secure input, nested frames, custom editors, multiline caret and
-      accessibility (decision 2).
+- [x] Embedded Browser page popups: select lists, page dialogs, link and
+      image menus, file chooser and `window.open` (see
+      [page popups](#page-popups)).
+- [ ] The rest of embedded Browser parity: password and other secure input,
+      nested frames, custom editors, multiline caret and accessibility
+      (decision 2).
 - [ ] Lifecycle and coexistence evidence: quit-one, quit-last, reconnect and
       an unsigned packaged Nightly smoke.
 - [ ] The full `octant-nightly` command.

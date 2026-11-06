@@ -157,6 +157,132 @@ export const HumanBrowserState = Schema.Struct({
   ).pipe(Schema.maxItems(32)),
   activeTabId: Schema.String.pipe(Schema.maxLength(64)),
 }).annotations(strict);
+/**
+ * A page popup Stable's hidden Browser window captured instead of showing:
+ * a select list, a page dialog, a link or image menu, or a file chooser. Its
+ * text is the page's own display copy and grants nothing; the identity is a
+ * single-use ticket for one answer from the person.
+ */
+export const BrowserPagePopupId = Schema.UUID.pipe(Schema.brand("BrowserPagePopupId"));
+export type BrowserPagePopupId = typeof BrowserPagePopupId.Type;
+export const decodeBrowserPagePopupId = Schema.decodeUnknownSync(BrowserPagePopupId);
+export const MAX_BROWSER_SELECT_OPTIONS = 512;
+export const MAX_BROWSER_SELECT_LABEL = 256;
+export const MAX_BROWSER_DIALOG_TEXT = 2_048;
+/** The native menu bound a select list must fit, counting group headings and separators. */
+export const MAX_BROWSER_SELECT_MENU_ENTRIES = 1_024;
+
+/** Entries Nightly's native menu needs for these options: each group adds a separator and heading. */
+export function browserSelectMenuEntries(
+  options: ReadonlyArray<{ readonly group?: string | undefined }>,
+): number {
+  let entries = 0;
+  let group: string | undefined;
+  options.forEach((option, index) => {
+    if (index === 0 ? option.group !== undefined : option.group !== group) {
+      if (index > 0) entries += 1;
+      if (option.group !== undefined && option.group.trim() !== "") entries += 1;
+    }
+    group = option.group;
+    entries += 1;
+  });
+  return entries;
+}
+export const MAX_BROWSER_CHOSEN_FILES = 8;
+export const MAX_BROWSER_CHOSEN_PATH = 1_024;
+const PopupText = (maximum: number) =>
+  Schema.String.pipe(
+    Schema.maxLength(maximum),
+    Schema.filter((text) => text.isWellFormed()),
+  );
+const PageRect = Schema.Struct({
+  x: Schema.Number.pipe(Schema.between(-MAX_HUMAN_FRAME_WIDTH, MAX_HUMAN_FRAME_WIDTH)),
+  y: Schema.Number.pipe(Schema.between(-MAX_HUMAN_FRAME_HEIGHT, MAX_HUMAN_FRAME_HEIGHT)),
+  width: Schema.Number.pipe(Schema.between(0, MAX_HUMAN_FRAME_WIDTH * 2)),
+  height: Schema.Number.pipe(Schema.between(0, MAX_HUMAN_FRAME_HEIGHT * 2)),
+}).annotations(strict);
+export const HumanBrowserPagePopup = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("select"),
+    id: BrowserPagePopupId,
+    anchor: PageRect,
+    options: Schema.Array(
+      Schema.Struct({
+        label: PopupText(MAX_BROWSER_SELECT_LABEL),
+        disabled: Schema.Boolean,
+        group: Schema.optional(PopupText(MAX_BROWSER_SELECT_LABEL)),
+      }).annotations(strict),
+    ).pipe(Schema.minItems(1), Schema.maxItems(MAX_BROWSER_SELECT_OPTIONS)),
+    selectedIndex: Schema.Number.pipe(
+      Schema.int(),
+      Schema.between(-1, MAX_BROWSER_SELECT_OPTIONS - 1),
+    ),
+  })
+    .pipe(
+      Schema.filter(
+        (value) =>
+          value.selectedIndex < value.options.length &&
+          browserSelectMenuEntries(value.options) <= MAX_BROWSER_SELECT_MENU_ENTRIES,
+      ),
+    )
+    .annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("dialog"),
+    id: BrowserPagePopupId,
+    dialog: Schema.Literal("alert", "confirm", "beforeunload"),
+    message: PopupText(MAX_BROWSER_DIALOG_TEXT),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("context"),
+    id: BrowserPagePopupId,
+    link: Schema.Boolean,
+    image: Schema.Boolean,
+  })
+    .pipe(Schema.filter((value) => value.link || value.image))
+    .annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("file"),
+    id: BrowserPagePopupId,
+    multiple: Schema.Boolean,
+  }).annotations(strict),
+  // Told once, without a modal, when Stable answered a page's further dialogs itself.
+  Schema.Struct({
+    kind: Schema.Literal("notice"),
+    id: BrowserPagePopupId,
+    notice: Schema.Literal("dialogs-answered"),
+  }).annotations(strict),
+);
+export type HumanBrowserPagePopup = typeof HumanBrowserPagePopup.Type;
+export const BrowserContextAction = Schema.Literal(
+  "open-link",
+  "copy-link",
+  "copy-image",
+  "copy-image-address",
+);
+export type BrowserContextAction = typeof BrowserContextAction.Type;
+const ChosenPath = Schema.String.pipe(
+  Schema.minLength(2),
+  Schema.maxLength(MAX_BROWSER_CHOSEN_PATH),
+  Schema.filter((path) => path.isWellFormed() && path.startsWith("/") && !path.includes("\0")),
+);
+export const HumanBrowserPopupAnswer = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("select"),
+    index: Schema.Number.pipe(Schema.int(), Schema.between(0, MAX_BROWSER_SELECT_OPTIONS - 1)),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("dialog"), accept: Schema.Boolean }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("context"), action: BrowserContextAction }).annotations(
+    strict,
+  ),
+  Schema.Struct({
+    kind: Schema.Literal("file"),
+    paths: Schema.Array(ChosenPath).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_BROWSER_CHOSEN_FILES),
+    ),
+  }).annotations(strict),
+);
+export type HumanBrowserPopupAnswer = typeof HumanBrowserPopupAnswer.Type;
 const Owner = { contextId: BrowserContextId, threadId: BrowserThreadId };
 export const HumanBrowserRequest = Schema.Union(
   Schema.Struct({
@@ -176,6 +302,24 @@ export const HumanBrowserRequest = Schema.Union(
     presentationId: BrowserPresentationId,
     menuId: BrowserEditMenuId,
     action: BrowserEditAction,
+  }).annotations(strict),
+  Schema.Struct({
+    ...Owner,
+    kind: Schema.Literal("popup"),
+    presentationId: BrowserPresentationId,
+  }).annotations(strict),
+  Schema.Struct({
+    ...Owner,
+    kind: Schema.Literal("popup-answer"),
+    presentationId: BrowserPresentationId,
+    popupId: BrowserPagePopupId,
+    answer: HumanBrowserPopupAnswer,
+  }).annotations(strict),
+  Schema.Struct({
+    ...Owner,
+    kind: Schema.Literal("popup-dismiss", "popup-watch"),
+    presentationId: BrowserPresentationId,
+    popupId: BrowserPagePopupId,
   }).annotations(strict),
   Schema.Struct({ ...Owner, kind: Schema.Literal("attach") }).annotations(strict),
   Schema.Struct({
@@ -242,6 +386,9 @@ export const HumanBrowserResult = Schema.Union(
     menuId: BrowserEditMenuId,
     flags: BrowserEditFlags,
   }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("popup"), popup: HumanBrowserPagePopup }).annotations(
+    strict,
+  ),
   Schema.Struct({ status: Schema.Literal("editor"), editor: HumanBrowserEditor }).annotations(
     strict,
   ),

@@ -59,6 +59,7 @@ import {
   app,
   autoUpdater as electronAutoUpdater,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -1743,6 +1744,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       isOwnerWindowAvailable: (windowId) =>
         desktopWindows.hasWindowId(windowId) || nightlyWindowLeases?.hasWindow(windowId) === true,
       isEmbeddedOwner: (windowId) => nightlyWindowLeases?.hasWindow(windowId) === true,
+      clipboard: { writeText: (text) => clipboard.writeText(text) },
       createView: (options) => {
         if (nightlyWindowLeases?.hasWindow(options.owner.windowId) === true)
           return createOffscreenBrowserSurface(options);
