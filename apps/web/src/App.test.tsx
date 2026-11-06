@@ -237,6 +237,9 @@ describe("App", () => {
       await waitFor(() => {
         expect(paneBoundary.latest?.chatController.status).toBe("ready");
         expect(paneBoundary.latest?.codeController.status).toBe("ready");
+        // Bootstrap readiness precedes its follow-up batch. Include that real
+        // data arrival before measuring an otherwise quiet parent update.
+        expect(paneBoundary.latest?.codeController.followUps.has(String(codeThreadId))).toBe(true);
       });
       const previous = paneBoundary.latest;
       if (previous === undefined) throw new Error("The pane must be mounted");
