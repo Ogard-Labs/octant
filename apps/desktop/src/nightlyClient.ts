@@ -1,5 +1,6 @@
 import { createBrowserPresentationClient } from "@octant/client-runtime";
 import { NightlyBrowserPresentation } from "./nightlyBrowserPresentation";
+import { presentNightlyPagePopup } from "./nightlyPagePopups";
 import {
   app,
   autoUpdater as electronAutoUpdater,
@@ -388,6 +389,8 @@ export async function runNightlyClient(
                   signal,
                 );
               },
+              pagePopup: (popup, placement, signal) =>
+                presentNightlyPagePopup(window, popup, placement, signal),
               execute: browserClient.execute,
             });
             presentations.set(id, presentation);

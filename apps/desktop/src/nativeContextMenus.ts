@@ -17,7 +17,18 @@ function keys(value: Record<string, unknown>, expected: ReadonlyArray<string>): 
   return Object.keys(value).length === expected.length && expected.every((key) => key in value);
 }
 
-export function decodeNativeMenuRequest(value: unknown): NativeMenuRequest | undefined {
+/** What only Nightly's main may add to a popup it builds itself, never a renderer. */
+export interface NativeMenuPresentation {
+  /** A page select list may list more entries than a renderer menu. */
+  readonly maxEntries?: number;
+  /** macOS places this item under the point, as a select list does. */
+  readonly positioningItem?: number;
+}
+
+export function decodeNativeMenuRequest(
+  value: unknown,
+  maxEntries = 160,
+): NativeMenuRequest | undefined {
   if (
     !record(value) ||
     !keys(value, ["x", "y", "items", ...(value.placement === undefined ? [] : ["placement"])]) ||
@@ -33,10 +44,11 @@ export function decodeNativeMenuRequest(value: unknown): NativeMenuRequest | und
   let count = 0;
   const ids = new Set<string>();
   function entries(raw: unknown, depth: number): ReadonlyArray<NativeMenuEntry> | undefined {
-    if (!Array.isArray(raw) || raw.length === 0 || raw.length > 160 || depth > 4) return undefined;
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > maxEntries || depth > 4)
+      return undefined;
     const result: NativeMenuEntry[] = [];
     for (const item of raw) {
-      if (++count > 160 || !record(item)) return undefined;
+      if (++count > maxEntries || !record(item)) return undefined;
       if (item.kind === "separator" && keys(item, ["kind"])) {
         result.push({ kind: "separator" });
         continue;
@@ -135,8 +147,9 @@ export function popupNativeMenu(
   window: BrowserWindow,
   value: unknown,
   signal?: AbortSignal,
+  presentation: NativeMenuPresentation = {},
 ): Promise<NativeMenuOutcome> {
-  const request = decodeNativeMenuRequest(value);
+  const request = decodeNativeMenuRequest(value, Math.min(presentation.maxEntries ?? 160, 1_024));
   if (request === undefined || window.isDestroyed() || signal?.aborted)
     return Promise.resolve({ kind: "refused" });
   // BrowserWindow.webContents throws once the window's closed event fires.
@@ -190,6 +203,9 @@ export function popupNativeMenu(
       x: Math.round(request.x * zoom),
       y: Math.round(request.y * zoom),
       ...(request.placement === "above" ? { positioningItem: menu.items.length - 1 } : {}),
+      ...(presentation.positioningItem === undefined
+        ? {}
+        : { positioningItem: presentation.positioningItem }),
       // Electron's close callback can precede the selected item's click on some
       // platforms. Settle after that native dispatch has returned.
       callback: () => {
