@@ -2260,6 +2260,7 @@ Diagram and flow boards are editable by a local person, and comments are journal
 
 - A drag or nudge is journaled as a new immutable version with the host's own actor; a stale drag is refused.
 - Only a window on this host edits boards or comments. A paired browser reads them.
+- Inline diagrams follow their drawing's proportions without gaining layout-editing authority; document workspaces keep the fixed board frame. Retry loops use visible return lanes with shape-aware ports and space before neighbouring automatic-layout nodes. [Canvas visuals: Inline diagram proportions and retry loops](canvas-visuals.md#inline-diagram-proportions-and-retry-loops) owns the layout rule.
 - Send to agent queues a turn under the thread's own authority and creates no new authority.
 
 Status: Built. Since: —. Detail: [Canvas: Diagram boards and comments](canvas.md#diagram-boards-and-comments).

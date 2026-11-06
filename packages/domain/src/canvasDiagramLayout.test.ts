@@ -69,6 +69,138 @@ describe("layoutCanvasDiagram", () => {
     },
   );
 
+  it.each(["down", "right"] as const)(
+    "keeps a retry lane and its label clear of the next sibling when flowing %s",
+    (flow) => {
+      const block = decodeCanvasBlock({
+        schemaVersion: 21,
+        blockId: "siblings",
+        kind: "diagram",
+        flow,
+        nodes: [
+          { nodeId: "check", label: "Check address" },
+          { nodeId: "other", label: "Other step" },
+        ],
+        edges: [
+          {
+            edgeId: "retry",
+            source: "check",
+            target: "check",
+            label: "Try again",
+            style: "dashed",
+          },
+        ],
+      });
+      if (block.kind !== "diagram") throw new Error("Expected diagram");
+      const layout = layoutCanvasDiagram(block);
+      const other = layout.nodes.find((node) => node.nodeId === "other");
+      const edge = layout.edges[0];
+      if (other === undefined || edge === undefined) throw new Error("Missing diagram parts");
+      const furthest = Math.max(
+        ...edge.points.map((point) => (flow === "down" ? point.x : point.y)),
+      );
+      const labelEnd = flow === "down" ? edge.labelX + "Try again".length * 6 : edge.labelY + 8;
+      expect(Math.max(furthest, labelEnd)).toBeLessThan(flow === "down" ? other.x : other.y);
+    },
+  );
+
+  it.each(["down", "right"] as const)(
+    "uses a clear opposite retry lane without rearranging authored neighbours when flowing %s",
+    (flow) => {
+      const block = decodeCanvasBlock({
+        schemaVersion: 21,
+        blockId: "placed",
+        kind: "diagram",
+        layout: "manual",
+        flow,
+        nodes: [
+          { nodeId: "check", label: "Check address", x: 24, y: 24 },
+          {
+            nodeId: "other",
+            label: "Other step",
+            x: flow === "down" ? 208 : 24,
+            y: flow === "down" ? 24 : 96,
+          },
+        ],
+        edges: [
+          {
+            edgeId: "retry",
+            source: "check",
+            target: "check",
+            label: "Try again",
+            style: "dashed",
+          },
+        ],
+      });
+      if (block.kind !== "diagram") throw new Error("Expected diagram");
+      const layout = layoutCanvasDiagram(block);
+      const node = layout.nodes[0];
+      const other = layout.nodes[1];
+      const edge = layout.edges[0];
+      if (node === undefined || other === undefined || edge === undefined)
+        throw new Error("Missing diagram parts");
+      expect(other.x - node.x).toBe(flow === "down" ? 184 : 0);
+      expect(other.y - node.y).toBe(flow === "down" ? 0 : 72);
+      expect(flow === "down" ? edge.labelX < node.x : edge.labelY < node.y).toBe(true);
+      expect(
+        Math.min(...edge.points.map((point) => point.x), edge.labelX - "Try again".length * 6),
+      ).toBeGreaterThanOrEqual(0);
+      expect(
+        Math.min(...edge.points.map((point) => point.y), edge.labelY - 8),
+      ).toBeGreaterThanOrEqual(0);
+    },
+  );
+
+  it.each(["down", "right"] as const)(
+    "connects both retry ports to the decision diamond when flowing %s",
+    (flow) => {
+      const block = decodeCanvasBlock({
+        schemaVersion: 21,
+        blockId: "diamond",
+        kind: "diagram",
+        flow,
+        nodes: [{ nodeId: "check", label: "Valid?", role: "decision" }],
+        edges: [
+          {
+            edgeId: "retry",
+            source: "check",
+            target: "check",
+            label: "Try again",
+            style: "dashed",
+          },
+        ],
+      });
+      if (block.kind !== "diagram") throw new Error("Expected diagram");
+      const layout = layoutCanvasDiagram(block);
+      const node = layout.nodes[0];
+      const edge = layout.edges[0];
+      if (node === undefined || edge === undefined) throw new Error("Missing diagram parts");
+      for (const point of [edge.points[0], edge.points.at(-1)]) {
+        if (point === undefined) throw new Error("Missing port");
+        expect(
+          Math.abs(point.x - node.x - node.width / 2) / (node.width / 2) +
+            Math.abs(point.y - node.y - node.height / 2) / (node.height / 2),
+        ).toBeCloseTo(1);
+      }
+    },
+  );
+
+  it("keeps a long retry label inside the drawing's bounds", () => {
+    const label = "Check this address again before sending";
+    const block = decodeCanvasBlock({
+      schemaVersion: 21,
+      blockId: "long-retry",
+      kind: "diagram",
+      nodes: [{ nodeId: "check", label: "Check address" }],
+      edges: [{ edgeId: "retry", source: "check", target: "check", label, style: "dashed" }],
+    });
+    if (block.kind !== "diagram") throw new Error("Expected diagram");
+    const layout = layoutCanvasDiagram(block);
+    const edge = layout.edges[0];
+    if (edge === undefined) throw new Error("Missing retry");
+    expect(layout.width).toBeGreaterThan(edge.labelX + label.length * 6);
+  });
+
   it("reads across the page when the author says the diagram flows that way", () => {
     const layout = layoutCanvasDiagram(diagram({ flow: "right" }));
 

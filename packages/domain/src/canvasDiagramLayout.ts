@@ -417,6 +417,16 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
   const ranks = rankNodes(block);
   const forest = groupForest(block);
   const across = acrossFlowSlots(block, ranks, forest);
+  // A loop's return lane and label occupy space after its column. Reserve it
+  // across ranks so the next sibling cannot paint over the retry.
+  const loopGaps = new Map<number, number>();
+  for (const edge of block.edges) {
+    if (String(edge.source) !== String(edge.target)) continue;
+    const slot = across.get(String(edge.source))?.slot;
+    if (slot === undefined) continue;
+    const labelRoom = flow === "down" ? (edge.label?.length ?? 0) * 6 : 8;
+    loopGaps.set(slot, Math.max(loopGaps.get(slot) ?? 0, DETOUR_GAP * 3 + labelRoom - SIBLING_GAP));
+  }
   // Groups need room above their nodes for a frame and a name, so a grouped
   // diagram starts that much further in, once per level of nesting, rather
   // than drawing its first frame above the picture's edge.
@@ -432,7 +442,10 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
     const placement = across.get(nodeId) ?? { slot: 0, offset: 0 };
     const alongFlow = origin + rank * (rankExtent(flow) + RANK_GAP);
     const acrossFlow =
-      origin + placement.slot * (siblingExtent(flow) + SIBLING_GAP) + placement.offset;
+      origin +
+      placement.slot * (siblingExtent(flow) + SIBLING_GAP) +
+      placement.offset +
+      [...loopGaps].reduce((room, [slot, extra]) => room + (slot < placement.slot ? extra : 0), 0);
     const authoredX = autoLayout ? undefined : node.x;
     const authoredY = autoLayout ? undefined : node.y;
     return {
@@ -517,41 +530,60 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
     // A retry returns to the same box. Centre-to-centre routing would draw
     // no line, so give it two distinct ports and a lane outside the node.
     if (source === target) {
-      const points =
-        flow === "down"
-          ? [
-              { x: source.x + source.width, y: source.y + source.height / 4 },
-              { x: source.x + source.width + DETOUR_GAP * 2, y: source.y + source.height / 4 },
-              {
-                x: source.x + source.width + DETOUR_GAP * 2,
-                y: source.y + (source.height * 3) / 4,
-              },
-              { x: source.x + source.width, y: source.y + (source.height * 3) / 4 },
-            ]
-          : [
-              { x: source.x + source.width / 4, y: source.y + source.height },
-              { x: source.x + source.width / 4, y: source.y + source.height + DETOUR_GAP * 2 },
-              {
-                x: source.x + (source.width * 3) / 4,
-                y: source.y + source.height + DETOUR_GAP * 2,
-              },
-              { x: source.x + (source.width * 3) / 4, y: source.y + source.height },
-            ];
-      const first = points[0];
-      const last = points.at(-1);
-      if (first === undefined || last === undefined) return [];
-      return [
-        {
+      const candidates = [1, -1].map((side) => {
+        const lane =
+          flow === "down"
+            ? from.x + side * (source.width / 2 + DETOUR_GAP * 2)
+            : from.y + side * (source.height / 2 + DETOUR_GAP * 2);
+        const first = borderPoint(
+          source,
+          from,
+          flow === "down"
+            ? { x: from.x + (side * source.width) / 2, y: source.y + source.height / 4 }
+            : { x: source.x + source.width / 4, y: from.y + (side * source.height) / 2 },
+        );
+        const last = borderPoint(
+          source,
+          from,
+          flow === "down"
+            ? { x: from.x + (side * source.width) / 2, y: source.y + (source.height * 3) / 4 }
+            : { x: source.x + (source.width * 3) / 4, y: from.y + (side * source.height) / 2 },
+        );
+        const points =
+          flow === "down"
+            ? [first, { x: lane, y: first.y }, { x: lane, y: last.y }, last]
+            : [first, { x: first.x, y: lane }, { x: last.x, y: lane }, last];
+        return {
           ...common,
           points,
           x1: first.x,
           y1: first.y,
           x2: last.x,
           y2: last.y,
-          labelX: flow === "down" ? source.x + source.width + DETOUR_GAP * 2 : from.x,
-          labelY: flow === "down" ? from.y : source.y + source.height + DETOUR_GAP * 2,
-        },
-      ];
+          labelX: flow === "down" ? lane : from.x,
+          labelY: flow === "down" ? from.y : lane,
+        };
+      });
+      // Authored positions are never moved to make room. Prefer the other side
+      // when a fixed neighbour blocks the usual return lane.
+      const clear = candidates.find(
+        (candidate) =>
+          !boxes.some(
+            (box) =>
+              box !== source &&
+              candidate.points.some((point, index) => {
+                const next = candidate.points[index + 1];
+                return (
+                  next !== undefined &&
+                  Math.max(point.x, next.x) > box.x &&
+                  Math.min(point.x, next.x) < box.x + box.width &&
+                  Math.max(point.y, next.y) > box.y &&
+                  Math.min(point.y, next.y) < box.y + box.height
+                );
+              }),
+          ),
+      );
+      return clear === undefined ? candidates.slice(0, 1) : [clear];
     }
     const blockers = boxes.filter(
       (box) => box !== source && box !== target && crosses(box, from, to),
@@ -618,8 +650,26 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
   // a renderer's viewport clips its label. Slide the whole picture right and
   // down by that overshoot. Every part moves by the same amount, so
   // hand-placed nodes keep their positions relative to each other.
-  const shiftX = Math.max(0, -Math.min(...boxes.map((box) => box.x), ...groups.map((g) => g.x)));
-  const shiftY = Math.max(0, -Math.min(...boxes.map((box) => box.y), ...groups.map((g) => g.y)));
+  const shiftX = Math.max(
+    0,
+    -Math.min(
+      ...boxes.map((box) => box.x),
+      ...groups.map((g) => g.x),
+      ...edges.flatMap((edge) => edge.points.map((point) => point.x)),
+      ...edges
+        .filter((edge) => edge.label !== undefined)
+        .map((edge) => edge.labelX - (edge.label?.length ?? 0) * 6),
+    ),
+  );
+  const shiftY = Math.max(
+    0,
+    -Math.min(
+      ...boxes.map((box) => box.y),
+      ...groups.map((g) => g.y),
+      ...edges.flatMap((edge) => edge.points.map((point) => point.y)),
+      ...edges.filter((edge) => edge.label !== undefined).map((edge) => edge.labelY - 8),
+    ),
+  );
   const moved = shiftX !== 0 || shiftY !== 0;
   const slide = <T extends { readonly x: number; readonly y: number }>(item: T): T =>
     moved ? { ...item, x: item.x + shiftX, y: item.y + shiftY } : item;
@@ -642,6 +692,12 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
     ...routes.flatMap((edge) =>
       edge.points.map((point) => ({ right: point.x + DETOUR_GAP, bottom: point.y + DETOUR_GAP })),
     ),
+    ...routes
+      .filter((edge) => edge.label !== undefined)
+      .map((edge) => ({
+        right: edge.labelX + (edge.label?.length ?? 0) * 6,
+        bottom: edge.labelY + 8,
+      })),
     ...nodes.map((box) => ({ right: box.x + box.width, bottom: box.y + box.height })),
     ...frames.map((group) => ({ right: group.x + group.width, bottom: group.y + group.height })),
   ];

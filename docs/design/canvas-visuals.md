@@ -479,6 +479,10 @@ layout-editing authority. The document workspace keeps its fixed board frame.
 
 A self-loop uses two distinct ports on the same node and a return lane outside
 that node, to the right for a downward flow or below for a rightward flow.
-Its label sits on the outside lane. Solid and dashed arrows retain their
+Automatic layout reserves space for the lane and its label before the next
+sibling. Ports meet the actual node shape, including a decision diamond.
+Authored relative positions stay fixed; when a neighbour blocks the usual lane, the
+loop uses the opposite side where clear. Its label sits on the outside lane.
+Solid and dashed arrows retain their
 meaning, and the shared layout gives previews and exports the same visible
 loop. Centre-to-centre routing would collapse a retry into an invisible line.
