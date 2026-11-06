@@ -12164,8 +12164,15 @@ access` agree); a thread's own change is journaled as
     tool. A future credential-bearing command needs a separate consumer and
     its ordinary execution approval; it cannot reuse this card's grant.
     Administrator passwords and arbitrary command/file delivery are not
-    supported. Linked-store selection is a separate follow-up; this card does
-    not widen the existing linked-store or provider-credential interfaces.
+    supported. The person may instead submit a field reference from an already
+    linked 1Password store. The authenticated broker reads that exact reference
+    once, checks its link revision before and after lookup, and returns transient
+    material only to the host's already claimed card operation. The host rechecks
+    expiry and authority after lookup and before network dispatch. No reusable
+    slot or reference is saved. Lookup failures consume the card and show a
+    bounded actionable cause; a new card requires new consent. There is no
+    automatic linking, unlocking, fallback or retry. Item references resolve at
+    use, including rotated values, under the existing linked-store rules.
 
 <a id="linked-secret-stores"></a>
 

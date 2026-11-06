@@ -1848,13 +1848,13 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Host-d
 
 ### One-use credential cards
 
-A local person can enter a token in a conversation card for one fixed integration operation without sending it to the model or saving a sign-in.
+A local person can enter a token or select a linked 1Password field reference in a conversation card for one fixed integration operation without sending it to the model or saving a sign-in.
 
 - Integrations register fixed operations through the public host port. The host supplies their purpose, destination and action; an agent cannot choose an arbitrary URL or command.
 - Submission consumes the request once, checks current thread and window authority, and sends no response content or raw error to the agent.
 - The compact card shows the destination and one-use scope, with masked input, an explicit reveal control and right-aligned actions. Accepted submissions stay disabled until the host settles them.
 - Expiry, decline, cancellation and restart prevent future use. The host cannot recall a token already transmitted.
-- The first card consumer is a read-only Linear account check in Code. Linked-store selection and administrator authentication remain separate work.
+- The first card consumer is a read-only Linear account check in Code. Linked-store selection resolves only the submitted reference, refuses a changed store link, and retains no reusable credential slot. Administrator authentication remains separate work.
 - Agents reach cards and saved commands through one Code tool, `octant_credential` (`help`, `list`, `request`, `run-saved`). Each operation keeps its own authority, approval, Plan and local-window rules; `list` returns names and descriptions only; the tool is offered only when a registered operation or a command saved for the Project exists when the turn's tools are composed. It is not a general command runner.
 - Separate named command bindings are built for normal local Code tasks: Settings fixes the Project, recipient/CLI digests, arguments, directory, account and immutable references; the person approves every run through the same service used by the provider tool. Ask for approvals and Auto-accept edits retain ordinary command approvals/Shield and confine the recipient while the credential tool authenticates outside. Plan refuses; Full access remains unrestricted.
 - Command approval IDs are one-use and never restored. Preparation replay is memory-scoped; a newly prepared request always needs fresh approval and cannot establish that an earlier process stopped. Below Full access the recipient's OS and per-command network rules remain enforced; vendor output concealment is not protection from disclosure to allowed destinations. See the owning linked-store rules for custody, invalidation and cancellation limits.
