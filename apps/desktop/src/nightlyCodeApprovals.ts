@@ -55,15 +55,34 @@ export interface NightlyCodeApprovalOptions<TWindow extends ApprovalHostWindow> 
 export function installNightlyCodeApprovals<TWindow extends ApprovalHostWindow>(
   options: NightlyCodeApprovalOptions<TWindow>,
 ) {
-  const senderByWindow = new Map<string, number>();
+  /**
+   * Each window's host and headers, taken when it asks for an approval. A
+   * closed window keeps them until its last challenge still being prepared
+   * is cancelled on the host: the controller cancels such a challenge only
+   * once its prepare returns, after the window may already be gone.
+   */
+  const sessions = new Map<
+    string,
+    {
+      serverUrl: string;
+      brokerHeaders: Readonly<Record<string, string>>;
+      preparing: number;
+      closed: boolean;
+    }
+  >();
   const palettes = new Map<string, CodeOperationApprovalPalette>();
+  const session = (windowId: string) => {
+    const current = sessions.get(windowId);
+    if (current === undefined) throw new Error("Octant Code approval is unavailable.");
+    return current;
+  };
   const host = (windowId: string) => {
-    const id = senderByWindow.get(windowId);
-    const bootstrap = id === undefined ? undefined : options.bootstrap(id);
-    const headers = id === undefined ? undefined : options.nativeMain.headers(id);
-    if (bootstrap === undefined || headers === undefined)
-      throw new Error("Octant Code approval is unavailable.");
-    return { serverUrl: bootstrap.hostOrigin, brokerHeaders: headers };
+    const { serverUrl, brokerHeaders } = session(windowId);
+    return { serverUrl, brokerHeaders };
+  };
+  const release = (windowId: string) => {
+    const current = sessions.get(windowId);
+    if (current?.closed === true && current.preparing === 0) sessions.delete(windowId);
   };
   const controller = createCodeOperationApprovalViewController<TWindow>({
     host: {
@@ -73,25 +92,47 @@ export function installNightlyCodeApprovals<TWindow extends ApprovalHostWindow>(
       approvalPalette: (windowId) => palettes.get(windowId),
       isWindowDestroyed: (window) => window.isDestroyed(),
     },
-    prepare: ({ request, windowId }) =>
-      prepareCodeOperationApprovalChallengeFromServer({
-        ...host(windowId),
-        request,
-        fetch: options.fetch,
-      }),
-    confirm: ({ challengeId, windowId }) =>
-      confirmCodeOperationApprovalFromServer({
-        ...host(windowId),
-        challengeId,
-        fetch: options.fetch,
-      }),
-    cancel: async ({ challengeId, windowId }) => {
-      if (!senderByWindow.has(windowId)) return;
-      await cancelCodeOperationApprovalFromServer({
+    prepare: async ({ request, windowId }) => {
+      const current = session(windowId);
+      current.preparing += 1;
+      let challenge: Awaited<ReturnType<typeof prepareCodeOperationApprovalChallengeFromServer>>;
+      try {
+        challenge = await prepareCodeOperationApprovalChallengeFromServer({
+          serverUrl: current.serverUrl,
+          brokerHeaders: current.brokerHeaders,
+          request,
+          fetch: options.fetch,
+        });
+      } catch (error) {
+        current.preparing -= 1;
+        release(windowId);
+        throw error;
+      }
+      // A closed window is released by the cancel of this stale challenge.
+      current.preparing -= 1;
+      return challenge;
+    },
+    confirm: ({ challengeId, windowId }) => {
+      if (session(windowId).closed) throw new Error("Octant Code approval is unavailable.");
+      return confirmCodeOperationApprovalFromServer({
         ...host(windowId),
         challengeId,
         fetch: options.fetch,
       });
+    },
+    cancel: async ({ challengeId, windowId }) => {
+      const current = sessions.get(windowId);
+      if (current === undefined) return;
+      try {
+        await cancelCodeOperationApprovalFromServer({
+          serverUrl: current.serverUrl,
+          brokerHeaders: current.brokerHeaders,
+          challengeId,
+          fetch: options.fetch,
+        });
+      } finally {
+        release(windowId);
+      }
     },
   });
   const windowOf = (event: Electron.IpcMainInvokeEvent) => {
@@ -111,7 +152,21 @@ export function installNightlyCodeApprovals<TWindow extends ApprovalHostWindow>(
         requestPresentation === undefined
           ? undefined
           : decodeCodeOperationApprovalPresentation(requestPresentation);
-      senderByWindow.set(windowId, event.sender.id);
+      const brokerHeaders = options.nativeMain.headers(event.sender.id);
+      if (brokerHeaders === undefined) throw new Error(NEEDS_NEWER_OCTANT);
+      const open = sessions.get(windowId);
+      if (open === undefined)
+        sessions.set(windowId, {
+          serverUrl: bootstrap.hostOrigin,
+          brokerHeaders,
+          preparing: 0,
+          closed: false,
+        });
+      else {
+        open.serverUrl = bootstrap.hostOrigin;
+        open.brokerHeaders = brokerHeaders;
+        open.closed = false;
+      }
       return await controller.request({
         window,
         windowId,
@@ -144,9 +199,11 @@ export function installNightlyCodeApprovals<TWindow extends ApprovalHostWindow>(
   return Object.freeze({
     /** Ends the window's approvals, cancelling any challenge it still holds. */
     closeWindow: (windowId: string): void => {
+      const current = sessions.get(windowId);
+      if (current !== undefined) current.closed = true;
       controller.closeWindow(windowId);
       palettes.delete(windowId);
-      senderByWindow.delete(windowId);
+      release(windowId);
     },
     viewDestroyed: (id: number): void => controller.viewDestroyed(id),
   });

@@ -47,7 +47,7 @@ const anchor = {
   bounds: { x: 80, y: 600, width: 640, height: 96 },
 };
 
-function harness(features: ReadonlyArray<string>) {
+function harness(features: ReadonlyArray<string>, challengeAnswer?: Promise<void>) {
   const nativeMainToken = token();
   const bootstrap = decodeNightlyWindowBootstrap({
     kind: "registered",
@@ -83,12 +83,12 @@ function harness(features: ReadonlyArray<string>) {
   };
   const fetch = vi.fn(async (url: URL | string) =>
     String(url).endsWith("/code-operation-approval-challenges")
-      ? Response.json(challenge)
+      ? (await challengeAnswer, Response.json(challenge))
       : String(url).endsWith("/code-operation-approval-confirmations")
         ? Response.json({ approvalId: ids.approval })
         : new Response(null, { status: 204 }),
   );
-  installNightlyCodeApprovals({
+  const approvals = installNightlyCodeApprovals({
     register: (channel, handler) => handlers.set(channel, handler as never),
     handleViewDecision: (channel, handler) => handlers.set(channel, handler as never),
     owns: (event) => {
@@ -114,7 +114,7 @@ function harness(features: ReadonlyArray<string>) {
     return handler(from(sender), ...values);
   };
   const routes = () => fetch.mock.calls.map(([url]) => new URL(String(url)).pathname);
-  return { bootstrap, nativeMainToken, fetch, call, routes, viewTokens };
+  return { bootstrap, nativeMainToken, fetch, call, routes, viewTokens, approvals };
 }
 
 describe("Code operation approvals in a Nightly window", () => {
@@ -147,6 +147,35 @@ describe("Code operation approvals in a Nightly window", () => {
     await h.call(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.decision, 41, decision);
     await expect(approval).resolves.toBe(ids.approval);
     expect(h.routes()).toContain("/api/desktop/code-operation-approval-confirmations");
+  });
+
+  it("still cancels on the host a challenge that was being prepared when its window closed", async () => {
+    let answer: () => void = () => undefined;
+    const h = harness(
+      ["code-operation-approval"],
+      new Promise<void>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const approval = h.call(DESKTOP_IPC_CHANNELS.requestCodeOperationApproval, 7, request);
+    await h.call(DESKTOP_IPC_CHANNELS.updateCodeOperationApprovalAnchor, 7, anchor);
+    await vi.waitFor(() =>
+      expect(h.routes()).toContain("/api/desktop/code-operation-approval-challenges"),
+    );
+    h.approvals.closeWindow(ids.window);
+    await expect(approval).resolves.toBeUndefined();
+    answer();
+    await vi.waitFor(() =>
+      expect(h.routes()).toContain("/api/desktop/code-operation-approval-cancellations"),
+    );
+    const cancel = h.fetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/code-operation-approval-cancellations"),
+    ) as unknown as [URL, RequestInit];
+    expect(cancel[1].headers).toMatchObject({
+      "x-octant-native-main-authority": h.nativeMainToken,
+    });
+    expect(JSON.parse(String(cancel[1].body))).toEqual({ challengeId: ids.challenge });
+    expect(h.viewTokens).toEqual([]);
   });
 
   it("says it needs a newer Octant when the host does not broker approvals, without asking it", async () => {
