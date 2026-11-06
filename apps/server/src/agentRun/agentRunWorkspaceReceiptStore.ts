@@ -1,3 +1,5 @@
+import { ChildWorktreeSnapshot } from "@octant/contracts";
+import { Schema } from "effect";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -64,6 +66,9 @@ function decodeStored(value: unknown): StoredAgentRunWorkspaceReceipt | undefine
     confirmed: value.confirmed,
     expiresAt: value.expiresAt,
     issuedAt: value.issuedAt,
+    ...(value.source === undefined
+      ? {}
+      : { source: Schema.decodeUnknownSync(ChildWorktreeSnapshot)(value.source) }),
     ...(projectId === undefined ? {} : { projectId }),
     ...(bindingRevisionId === undefined ? {} : { bindingRevisionId }),
     ...(canonicalRoot === undefined ? {} : { canonicalRoot }),
@@ -111,6 +116,7 @@ export class AgentRunWorkspaceReceiptStore {
       confirmed: input.confirmed,
       expiresAt: input.now + AGENT_RUN_WORKSPACE_RECEIPT_TTL_MS,
       issuedAt: this.#clock(),
+      ...(input.source === undefined ? {} : { source: input.source }),
       ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
       ...(input.bindingRevisionId === undefined
         ? {}

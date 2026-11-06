@@ -7,6 +7,7 @@ import {
   ReplayCursor,
   decodeBindingRevisionId,
   decodeCodeTerminalId,
+  decodeProjectTerminalCommand,
   decodeProject,
   decodeProjectId,
   decodeWindowId,
@@ -80,6 +81,7 @@ function project(
       readonly name: string;
       readonly command: string;
       readonly directory: string;
+      readonly preparesWorktrees?: true;
     }>;
   } = {},
 ): Project {
@@ -1175,4 +1177,54 @@ describe("a server Project's terminal", () => {
 
     expect(terminals.terminated).toEqual([]);
   });
+});
+
+it("runs a preparation recipe through its once-only setup lifecycle in a managed checkout", async () => {
+  const actionId = "93000000-0000-4000-8000-000000000001";
+  const f = harness({
+    projects: new Map([
+      [
+        ids.project,
+        project({
+          actions: [
+            {
+              id: actionId,
+              name: "Prepare",
+              command: "printf ready",
+              directory: ".",
+              preparesWorktrees: true,
+            },
+          ],
+        }),
+      ],
+    ]),
+    resolveActionCheckout: async () => ({
+      root: "/worktrees/child",
+      receiptId: ids.terminal,
+      executionPolicy: "approval-gated",
+      current: () => true,
+    }),
+  });
+  const result = await f.service.execute(
+    windowId,
+    "local-window",
+    decodeProjectTerminalCommand({
+      kind: "start-action",
+      projectId,
+      actionId,
+      terminalId: ids.secondTerminal,
+      columns: 80,
+      rows: 24,
+      thread: {
+        threadId: "94000000-0000-4000-8000-000000000001",
+        checkoutId: "94000000-0000-4000-8000-000000000002",
+      },
+    }),
+  );
+  expect(result).toMatchObject({
+    kind: "project-terminal-refused",
+    message: expect.stringContaining("Worktrees"),
+  });
+  expect(f.terminals.launches).toHaveLength(0);
+  f.connection.close();
 });

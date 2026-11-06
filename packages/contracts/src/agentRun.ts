@@ -1,3 +1,4 @@
+import { ChildWorktreeSnapshot } from "./childWorktreeSources";
 import { Schema } from "effect";
 import { CodeThreadId } from "./code";
 import { AggregateVersion, UtcTimestamp } from "./events";
@@ -154,6 +155,7 @@ export const AgentRunWorkspaceReceipt = Schema.Union(
     projectId: ProjectId,
     checkoutRoot: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
     worktreeRoot: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
+    source: Schema.optional(ChildWorktreeSnapshot),
     verified: Schema.Boolean,
   }).annotations(strict),
 );
@@ -759,6 +761,7 @@ export const AgentRunCenterSummary = Schema.Struct({
   executionKind: AgentRunExecutionKind,
   authority: AgentRunAuthority,
   workspaceKind: AgentRunCenterWorkspaceKind,
+  source: Schema.optional(ChildWorktreeSnapshot),
   usageQuality: AgentRunUsageQuality,
   route: AgentRunCenterRoute,
   resultAcknowledgement: AgentRunResultAcknowledgement,

@@ -1195,9 +1195,17 @@ authenticated, thread-scoped answer routes and one-use request identity.
 Provider-native question formats keep their existing adapter contracts; the
 questionnaire capability uses the provider-neutral app tool boundary.
 
-A Code task's **Worktree setup** header control opens preparation status beside
+A Code task's **Worktrees** header control opens its Setup tab beside
 that task, including a selector for its child checkouts. It shows the reviewed
 command and relative folder, bounded output, exit result, Retry, Cancel and
 explicit Skip. The Project overview's Actions list lets the person review and
 designate one automatic worktree setup recipe. See the owning
 [worktree setup rule](../architecture.md#security-and-authority).
+
+The same dialog's **Child source** tab controls the parent task's source for
+future children. **Committed revision** is the default. **Review current edits**
+captures a preview with base revision, snapshot identity, tracked changes and
+eligible untracked paths; **Use this snapshot** is the separate enabling
+choice. It shows the selected source and an actionable stale-source refusal.
+Existing children retain their recorded source. The rule belongs to
+[Code child workspaces](../architecture.md#modes-chat-work-and-code).

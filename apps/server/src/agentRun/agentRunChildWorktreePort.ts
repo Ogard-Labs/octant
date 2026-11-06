@@ -10,6 +10,8 @@ import {
   type CodeCheckoutIdentity,
   type CodeThreadId,
   type ProviderExecutionPolicy,
+  type ChildWorktreeSnapshotData,
+  type ChildWorktreeSnapshot,
 } from "@octant/contracts";
 import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
 import type {
@@ -159,7 +161,13 @@ function toPrepared(receipt: ManagedWorktreeReceipt): AgentRunChildWorktreePrepa
     checkoutRoot: receipt.canonicalRepositoryPath,
     worktreeRoot: receipt.canonicalWorktreePath,
     state: receipt.state === "ready" ? "ready" : "creating",
+    ...(receipt.seed === undefined ? {} : { source: sourceOf(receipt.seed) }),
   };
+}
+
+function sourceOf(seed: ChildWorktreeSnapshotData): ChildWorktreeSnapshot {
+  const { worktree: _worktree, index: _index, ...source } = seed;
+  return source;
 }
 
 /**
@@ -167,11 +175,21 @@ function toPrepared(receipt: ManagedWorktreeReceipt): AgentRunChildWorktreePrepa
  * parent checkout. Confirmation re-checks isolation before admission.
  */
 export function createAgentRunChildWorktreePort(input: {
+  readonly sourceSnapshot?: (
+    request: AgentRunChildWorktreePrepareInput,
+  ) => Promise<
+    | { readonly status: "selected"; readonly snapshot?: ChildWorktreeSnapshotData }
+    | { readonly status: "refused"; readonly message: string }
+  >;
+  readonly applySourceSnapshot?: (receipt: ManagedWorktreeReceipt) => Promise<boolean>;
+  readonly sourceSnapshotApplied?: (receipt: ManagedWorktreeReceipt) => boolean;
   readonly prepareForExecution?: (
     receipt: ManagedWorktreeReceipt,
     request: {
       readonly parentThreadId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
+      readonly commandAccess: boolean;
+      readonly networkAllowed: boolean;
       readonly signal: AbortSignal;
     },
   ) => Promise<string | undefined>;
@@ -208,6 +226,8 @@ export function createAgentRunChildWorktreePort(input: {
     readonly worktreeRoot: string;
     readonly signal: AbortSignal;
     readonly executionPolicy?: ProviderExecutionPolicy;
+    readonly commandAccess?: boolean;
+    readonly networkAllowed?: boolean;
   }) => Promise<
     | { readonly status: "verified"; readonly identity: string }
     | { readonly status: "refused"; readonly reason: string }
@@ -281,7 +301,11 @@ export function createAgentRunChildWorktreePort(input: {
         )
           return refused;
         const receipt = await input.findActive(lookup);
-        if (receipt?.state !== "ready") return refused;
+        if (
+          receipt?.state !== "ready" ||
+          (receipt.seed !== undefined && input.sourceSnapshotApplied?.(receipt) !== true)
+        )
+          return refused;
         const observation = await input.repository.observe(request.repositoryRoot, request.signal);
         const child = await input.repository.observe(expectedPath, request.signal);
         if (
@@ -326,6 +350,8 @@ export function createAgentRunChildWorktreePort(input: {
           const refusal = await input.prepareForExecution(receipt, {
             parentThreadId: request.parentThreadId,
             executionPolicy: request.executionPolicy,
+            commandAccess: request.commandAccess ?? false,
+            networkAllowed: request.networkAllowed ?? false,
             signal: request.signal,
           });
           if (refusal !== undefined) return { status: "refused", reason: refusal };
@@ -390,13 +416,19 @@ export function createAgentRunChildWorktreePort(input: {
         }
         if (existing.state !== "ready" || !(await available(existing)))
           return { status: "refused", reason: "unavailable" };
+        if (existing.seed !== undefined && input.sourceSnapshotApplied?.(existing) !== true)
+          return { status: "refused", reason: "stale" };
         return toPrepared(existing);
       }
+      const source = await input.sourceSnapshot?.(request);
+      if (source?.status === "refused") return { status: "refused", reason: "stale" };
+      const seed = source?.snapshot;
+      const seededCreation = { ...creationInput, ...(seed === undefined ? {} : { seed }) };
       const signal = new AbortController().signal;
-      const plan = await input.service.planCreation(creationInput, signal);
+      const plan = await input.service.planCreation(seededCreation, signal);
       if (plan.status !== "planned") return { status: "refused", reason: "unavailable" };
       const created = await input.service.create(
-        { ...creationInput, grantId: plan.grant.grantId },
+        { ...seededCreation, grantId: plan.grant.grantId },
         signal,
       );
       if (created.status !== "ready" || !("receipt" in created) || created.receipt === undefined) {
@@ -405,6 +437,11 @@ export function createAgentRunChildWorktreePort(input: {
       if (!isolated(created.receipt, request.parentCheckoutRoot)) {
         return { status: "refused", reason: "parent-checkout" };
       }
+      if (
+        created.receipt.seed !== undefined &&
+        (await input.applySourceSnapshot?.(created.receipt)) !== true
+      )
+        return { status: "refused", reason: "stale" };
       return toPrepared(created.receipt);
     },
     confirm: async (request) => {
@@ -439,7 +476,11 @@ export function createAgentRunChildWorktreePort(input: {
           managedTargetPath(request.repositoryRoot, request.repositoryId, childThreadId)
       )
         return { status: "refused", reason: "stale" };
-      if (receipt.state !== "ready") return { status: "refused", reason: "unconfirmed" };
+      if (
+        receipt.state !== "ready" ||
+        (receipt.seed !== undefined && input.sourceSnapshotApplied?.(receipt) !== true)
+      )
+        return { status: "refused", reason: "unconfirmed" };
       if (!isolated(receipt, request.parentCheckoutRoot)) {
         return { status: "refused", reason: "parent-checkout" };
       }

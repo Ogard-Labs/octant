@@ -6,6 +6,7 @@ import {
   decodeCodeOperationId,
   decodeUtcTimestamp,
   decodeWorktreePreparationUpdated,
+  type CodeOperationId,
   type EventActor,
   type ProviderExecutionPolicy,
   type WorktreePreparation,
@@ -16,6 +17,8 @@ import type { ManagedWorktreeReceipt } from "./managedWorktreeReceiptStore";
 import type { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 
 export interface WorktreePreparationContext {
+  readonly commandAccess?: boolean;
+  readonly networkAllowed?: boolean;
   readonly receiptId: string;
   readonly root: string;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -23,7 +26,11 @@ export interface WorktreePreparationContext {
   readonly recipeCurrent: () => boolean;
 }
 export interface WorktreePreparationOptions {
-  readonly journal: Pick<Journal, "append" | "latestAggregateEvent">;
+  readonly processRecovery: "ready" | "uncertain";
+  readonly journal: Pick<
+    Journal,
+    "append" | "latestAggregateEvent" | "hasEventIdentity" | "headSequence"
+  >;
   readonly loadReceipt: (id: string) => Promise<ManagedWorktreeReceipt | undefined>;
   readonly execute: RepositoryTestProcessPort["executeReviewedAction"];
   readonly actor: EventActor;
@@ -31,6 +38,16 @@ export interface WorktreePreparationOptions {
   readonly uuid: () => string;
   readonly readRecipe?: (projectId: string) => ProjectAction | undefined;
 }
+export interface WorktreePreparationView {
+  readonly receiptId: string;
+  readonly preparation?: WorktreePreparation;
+  readonly output: string;
+  readonly outputTruncated: boolean;
+}
+export type WorktreePreparationRead =
+  | { readonly status: "available"; readonly view: WorktreePreparationView }
+  | { readonly status: "refused"; readonly message: string };
+const refuses = (message: string): WorktreePreparationRead => ({ status: "refused", message });
 const aggregateType = "worktree-preparation";
 const outputLimit = 64 * 1024;
 
@@ -43,12 +60,14 @@ export class WorktreePreparationService {
     { readonly abort: AbortController; readonly done: Promise<void> }
   >();
   readonly #output = new Map<string, { text: string; truncated: boolean }>();
-  #reconciled = false;
+  #reconciledThroughSequence: number | undefined;
   constructor(options: WorktreePreparationOptions) {
     this.#options = options;
   }
 
   async context(input: {
+    readonly commandAccess?: boolean;
+    readonly networkAllowed?: boolean;
     readonly receiptId: string;
     readonly threadId: string;
     readonly checkoutId: string;
@@ -69,6 +88,8 @@ export class WorktreePreparationService {
     if (identity === undefined || !identity.isDirectory() || identity.isSymbolicLink())
       return undefined;
     return {
+      commandAccess: input.commandAccess ?? true,
+      networkAllowed: input.networkAllowed ?? true,
       receiptId: input.receiptId,
       root: input.root,
       executionPolicy: input.executionPolicy,
@@ -94,10 +115,10 @@ export class WorktreePreparationService {
 
   /** Called only after owned-process reconciliation has finished. No recipe is replayed. */
   reconciled(): void {
-    this.#reconciled = true;
+    this.#reconciledThroughSequence = this.#options.journal.headSequence();
   }
 
-  async inspect(context: WorktreePreparationContext) {
+  async inspect(context: WorktreePreparationContext): Promise<WorktreePreparationRead> {
     const receipt = await this.#options.loadReceipt(context.receiptId);
     if (
       receipt === undefined ||
@@ -105,7 +126,7 @@ export class WorktreePreparationService {
       receipt.canonicalWorktreePath !== context.root ||
       !context.current()
     )
-      throw new Error("Worktree preparation authority is unavailable.");
+      return refuses("Worktree preparation authority is unavailable.");
     const latest = this.#options.journal.latestAggregateEvent({
       aggregateType,
       aggregateId: receipt.receiptId,
@@ -117,27 +138,36 @@ export class WorktreePreparationService {
           : { recipe: receipt.setupRecipe, state: "pending" as const }
         : decodeWorktreePreparationUpdated(latest.payload).preparation;
     if (preparation?.state === "running" && !this.#active.has(receipt.receiptId)) {
+      const reconciled =
+        latest !== undefined &&
+        this.#reconciledThroughSequence !== undefined &&
+        latest.globalSequence <= this.#reconciledThroughSequence;
       preparation = {
         ...preparation,
-        state: this.#reconciled ? "interrupted" : "cleanup-uncertain",
+        state: reconciled ? "interrupted" : "cleanup-uncertain",
         completedAt: decodeUtcTimestamp(this.#options.clock()),
-        reason: this.#reconciled
+        reason: reconciled
           ? "The host restarted. Choose Retry or Skip; setup was not replayed."
           : "Owned process cleanup has not been confirmed.",
       };
-      if (this.#reconciled) this.#record(receipt, preparation);
+      if (reconciled) this.#record(receipt, preparation);
     }
     const output = this.#output.get(receipt.receiptId);
     return {
-      receiptId: receipt.receiptId,
-      ...(preparation === undefined ? {} : { preparation }),
-      output: output?.text ?? "",
-      outputTruncated: output?.truncated ?? false,
+      status: "available",
+      view: {
+        receiptId: receipt.receiptId,
+        ...(preparation === undefined ? {} : { preparation }),
+        output: output?.text ?? "",
+        outputTruncated: output?.truncated ?? false,
+      },
     };
   }
 
   async ensure(context: WorktreePreparationContext): Promise<string | undefined> {
-    const view = await this.inspect(context);
+    const read = await this.inspect(context);
+    if (read.status === "refused") return read.message;
+    const view = read.view;
     if (
       view.preparation === undefined ||
       view.preparation.state === "succeeded" ||
@@ -150,18 +180,27 @@ export class WorktreePreparationService {
       await this.#start(context);
     } else if (view.preparation.state === "running")
       await this.#active.get(context.receiptId)?.done;
-    const final = await this.inspect(context);
+    const finalRead = await this.inspect(context);
+    if (finalRead.status === "refused") return finalRead.message;
+    const final = finalRead.view;
     return final.preparation?.state === "succeeded" || final.preparation?.state === "skipped"
       ? undefined
-      : `Worktree setup is ${final.preparation?.state ?? "unavailable"}. Open Worktree setup to review output, Retry, or Skip before starting the task.`;
+      : `Worktree setup is ${final.preparation?.state ?? "unavailable"}. Open Worktrees to review output, Retry, or Skip before starting the task.`;
   }
 
   async command(
     context: WorktreePreparationContext,
     action: "inspect" | "retry" | "cancel" | "skip",
+    attemptId?: CodeOperationId,
   ) {
-    const view = await this.inspect(context);
-    if (view.preparation === undefined || action === "inspect") return view;
+    const read = await this.inspect(context);
+    if (read.status === "refused") return read;
+    const view = read.view;
+    if (view.preparation === undefined || action === "inspect") return read;
+    if (this.#options.processRecovery === "uncertain")
+      return refuses(
+        "Setup process recovery is uncertain. Restart the host after confirming cleanup.",
+      );
     const active = this.#active.get(context.receiptId);
     if (action === "cancel") {
       active?.abort.abort();
@@ -169,10 +208,10 @@ export class WorktreePreparationService {
     }
     if (action === "skip") {
       if (active !== undefined || view.preparation.state === "cleanup-uncertain")
-        throw new Error("Cancel setup and confirm cleanup before skipping it.");
+        return refuses("Cancel setup and confirm cleanup before skipping it.");
       const receipt = await this.#options.loadReceipt(context.receiptId);
       if (receipt === undefined || !context.current())
-        throw new Error("Worktree authority changed.");
+        return refuses("Worktree authority changed.");
       this.#record(receipt, {
         ...view.preparation,
         state: "skipped",
@@ -181,15 +220,18 @@ export class WorktreePreparationService {
       });
     }
     if (action === "retry") {
+      if (attemptId === undefined)
+        return refuses("A retry needs its own recorded decision identity.");
+      if (this.#options.journal.hasEventIdentity(String(attemptId))) return read;
       const refusal = this.#refuses(context);
-      if (refusal !== undefined) throw new Error(refusal);
+      if (refusal !== undefined) return refuses(refusal);
       if (active !== undefined || view.preparation.state === "cleanup-uncertain")
-        throw new Error(
+        return refuses(
           "A preparation process may still be running. Confirm cleanup before retrying.",
         );
       // Start returns immediately to inspection; the owned promise is bounded by
       // process timeout and is joined by ensure, cancellation, and shutdown.
-      void this.#start(context).catch(() => undefined);
+      void this.#start(context, attemptId).catch(() => undefined);
     }
     return this.inspect(context);
   }
@@ -201,7 +243,11 @@ export class WorktreePreparationService {
   }
 
   #refuses(context: WorktreePreparationContext): string | undefined {
+    if (this.#options.processRecovery === "uncertain")
+      return "Setup process recovery is uncertain. Restart the host after confirming cleanup.";
     if (!context.current()) return "Worktree authority changed. Review the checkout again.";
+    if (context.commandAccess === false)
+      return "This task does not authorize setup commands. Skip preparation before starting it.";
     if (context.executionPolicy === "plan")
       return "Plan cannot run setup. Choose Skip or change task access before Retry.";
     if (!context.recipeCurrent())
@@ -209,19 +255,23 @@ export class WorktreePreparationService {
     return undefined;
   }
 
-  async #start(context: WorktreePreparationContext): Promise<void> {
+  async #start(context: WorktreePreparationContext, attemptId?: CodeOperationId): Promise<void> {
     const existing = this.#active.get(context.receiptId);
     if (existing !== undefined) return existing.done;
     const abort = new AbortController();
     // Install the reservation synchronously, before receipt or filesystem reads.
     const done = Promise.resolve()
-      .then(() => this.#run(context, abort))
+      .then(() => this.#run(context, abort, attemptId))
       .finally(() => this.#active.delete(context.receiptId));
     this.#active.set(context.receiptId, { abort, done });
     return done;
   }
 
-  async #run(context: WorktreePreparationContext, abort: AbortController): Promise<void> {
+  async #run(
+    context: WorktreePreparationContext,
+    abort: AbortController,
+    attemptId?: CodeOperationId,
+  ): Promise<void> {
     const signal = abort.signal;
     const receipt = await this.#options.loadReceipt(context.receiptId);
     if (
@@ -235,21 +285,50 @@ export class WorktreePreparationService {
     const running: WorktreePreparation = {
       recipe,
       state: "running",
-      attemptId: decodeCodeOperationId(this.#options.uuid()),
+      attemptId: attemptId ?? decodeCodeOperationId(this.#options.uuid()),
       startedAt: decodeUtcTimestamp(this.#options.clock()),
     };
     this.#record(receipt, running);
+    if (this.#output.size >= 64) {
+      const oldest = this.#output.keys().next().value;
+      if (oldest !== undefined) this.#output.delete(oldest);
+    }
     this.#output.set(receipt.receiptId, { text: "", truncated: false });
+    const outputDecoder = new TextDecoder();
     let final: WorktreePreparation;
     let attempted = false;
     try {
-      const root = await realpath(context.root);
-      const cwd = await realpath(resolve(root, recipe.directory));
-      const delta = relative(root, cwd);
-      if (root !== context.root || delta === ".." || delta.startsWith(`..${sep}`))
-        throw new Error("Setup folder is unavailable or leaves the checkout.");
-      if (this.#refuses(context) !== undefined || signal.aborted)
-        throw new Error("Setup authority changed before launch.");
+      const root = await realpath(context.root).catch(() => undefined);
+      const cwd =
+        root === undefined
+          ? undefined
+          : await realpath(resolve(root, recipe.directory)).catch(() => undefined);
+      const delta = root === undefined || cwd === undefined ? undefined : relative(root, cwd);
+      if (
+        root === undefined ||
+        cwd === undefined ||
+        delta === undefined ||
+        root !== context.root ||
+        delta === ".." ||
+        delta.startsWith(`..${sep}`)
+      ) {
+        this.#record(receipt, {
+          ...running,
+          state: "failed",
+          completedAt: decodeUtcTimestamp(this.#options.clock()),
+          reason: "Setup folder is unavailable or leaves the checkout.",
+        });
+        return;
+      }
+      if (this.#refuses(context) !== undefined || signal.aborted) {
+        this.#record(receipt, {
+          ...running,
+          state: "cancelled",
+          completedAt: decodeUtcTimestamp(this.#options.clock()),
+          reason: "Setup authority changed before launch.",
+        });
+        return;
+      }
       const authorityTimer = setInterval(() => {
         if (this.#refuses(context) !== undefined) abort.abort();
       }, 200);
@@ -263,13 +342,14 @@ export class WorktreePreparationService {
             checkoutRoot: root,
             executionPolicy: context.executionPolicy,
             environment: {},
+            ...(context.networkAllowed === false ? { networkAccess: "none" as const } : {}),
             timeoutMs: 10 * 60 * 1000,
             beforeLaunch: () => this.#refuses(context) === undefined,
             admitStart: () => this.#refuses(context) === undefined,
             onOutput: (chunk) => {
               const output = this.#output.get(receipt.receiptId);
               if (output === undefined) return;
-              const text = output.text + new TextDecoder().decode(chunk);
+              const text = output.text + outputDecoder.decode(chunk, { stream: true });
               output.truncated ||= text.length > outputLimit;
               output.text = text.slice(-outputLimit);
             },
@@ -325,7 +405,10 @@ export class WorktreePreparationService {
       expectedVersion: previous?.aggregateVersion ?? 0,
       events: [
         {
-          eventId: this.#options.uuid(),
+          eventId:
+            preparation.state === "running" && preparation.attemptId !== undefined
+              ? String(preparation.attemptId)
+              : this.#options.uuid(),
           eventName: WORKTREE_PREPARATION_UPDATED,
           eventVersion: 1,
           correlationId: this.#options.uuid(),

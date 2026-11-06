@@ -638,10 +638,25 @@ In the Project overview's Actions list, write a setup command and a folder
 relative to each new worktree. Check the review statement on that action and
 save to enable it for future worktrees. Only one action can prepare worktrees.
 
-**Worktree setup** in the task header shows the recorded recipe and its result;
+**Worktrees → Setup** in the task header shows the recorded recipe and its result;
 choose a child checkout there to inspect its preparation. The first agent task
 waits for setup. You can Cancel a running setup, explicitly Retry a failed or
 interrupted one, or Skip it. Plan cannot run setup. A host restart never repeats
 a potentially non-idempotent recipe automatically. Output is retained only for
 the current host session. Setup uses task access and does not copy secret files
 or the parent environment.
+
+### Giving a child current edits
+
+Children normally start from committed revision. To delegate unfinished edits,
+open **Worktrees → Child source** on the parent task and choose **Review current
+edits**. Inspect the base revision and every included path, then choose **Use
+this snapshot**. Capturing a preview alone does not change the source.
+
+Children prepared from that task now receive independent copies of that stable
+snapshot, including its staging state. Later parent edits and sibling edits do
+not change their files. The child details record the snapshot and committed
+base. Choose **Committed revision** to return to the default for future children.
+Ignored files are excluded; protected or incomplete captures are refused. A
+stale revision needs a new capture or the committed choice. An interrupted copy
+never starts a child or overwrites one on retry; prepare a new child instead.

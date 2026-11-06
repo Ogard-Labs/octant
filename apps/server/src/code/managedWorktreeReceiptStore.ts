@@ -1,4 +1,9 @@
-import { decodeProjectAction, type ProjectAction } from "@octant/contracts";
+import {
+  decodeChildWorktreeSnapshotData,
+  type ChildWorktreeSnapshotData,
+  decodeProjectAction,
+  type ProjectAction,
+} from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
@@ -41,6 +46,7 @@ export interface CreateManagedWorktreeReceiptInput {
   readonly expectedHead: string;
   readonly source?: ManagedWorktreeSourceProvenance;
   readonly setupRecipe?: ProjectAction;
+  readonly seed?: ChildWorktreeSnapshotData;
 }
 
 export type ManagedWorktreeReceiptLookup = Omit<CreateManagedWorktreeReceiptInput, "expectedHead">;
@@ -137,13 +143,14 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
   if (
     !isRecord(value) ||
     Object.keys(value).length < requiredReceiptFields.length ||
-    Object.keys(value).length > requiredReceiptFields.length + 2 ||
+    Object.keys(value).length > requiredReceiptFields.length + 3 ||
     requiredReceiptFields.some((field) => !(field in value)) ||
     Object.keys(value).some(
       (field) =>
         !requiredReceiptFields.includes(field as (typeof requiredReceiptFields)[number]) &&
         field !== "source" &&
-        field !== "setupRecipe",
+        field !== "setupRecipe" &&
+        field !== "seed",
     ) ||
     value.version !== RECEIPT_VERSION ||
     !isUuid(value.receiptId) ||
@@ -179,6 +186,7 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
     state: value.state,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
+    ...(value.seed === undefined ? {} : { seed: decodeChildWorktreeSnapshotData(value.seed) }),
     ...(value.setupRecipe === undefined
       ? {}
       : { setupRecipe: decodeProjectAction(value.setupRecipe) }),

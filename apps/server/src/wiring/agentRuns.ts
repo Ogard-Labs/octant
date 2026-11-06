@@ -71,6 +71,7 @@ import {
   type AgentRunSessionRuntimeOptions,
   createAgentRunSessionRuntime,
   createRecordedAgentRunContextSnapshotPort,
+  clampAgentRunSessionAuthority,
 } from "../agentRun/agentRunSessionRuntime";
 import { AgentRunSessionSupervisor } from "../agentRun/agentRunSessionSupervisor";
 import { recordAgentRunTurnUsage } from "../agentRun/agentRunUsageLedger";
@@ -720,6 +721,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           threadId: String(run.parentThreadId),
         });
         if (code === undefined) return refused;
+        const preparationAuthority = clampAgentRunSessionAuthority(run);
         return agentRunChildWorktree.current.verifyExecution({
           requestId: String(run.requestId),
           parentThreadId: String(run.parentThreadId),
@@ -727,7 +729,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           repositoryRoot: code.repositoryRoot,
           parentCheckoutRoot: code.parentCheckoutRoot,
           worktreeRoot: workspace.worktreeRoot,
-          executionPolicy: run.authority.executionPolicy,
+          executionPolicy: preparationAuthority.executionPolicy,
+          commandAccess: preparationAuthority.shell && preparationAuthority.filesystem,
+          networkAllowed: preparationAuthority.network,
           signal,
         });
       },

@@ -1,3 +1,4 @@
+import { ChildWorktreeSnapshotId, ChildWorktreeSourceReview } from "./childWorktreeSources";
 import { Schema } from "effect";
 import { CodeTerminalId, CodeThreadId, CodeCheckoutId, WorktreeReceiptId } from "./code";
 import { CodeOperationId, MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES } from "./codeOperations";
@@ -112,12 +113,22 @@ export const decodeWorktreePreparationUpdated = Schema.decodeUnknownSync(
 
 export const ProjectTerminalCommand = Schema.Union(
   Schema.Struct({
+    kind: Schema.Literal("child-worktree-source"),
+    projectId: ProjectId,
+    thread: ActionThread,
+    action: Schema.Literal("inspect", "capture", "use-committed", "use-snapshot"),
+    snapshotId: Schema.optional(ChildWorktreeSnapshotId),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("worktree-preparation"),
     projectId: ProjectId,
     thread: ActionThread,
     childRequestId: Schema.optional(AgentRunRequestId),
+    attemptId: Schema.optional(CodeOperationId),
     action: Schema.Literal("inspect", "retry", "cancel", "skip"),
-  }).annotations(strict),
+  })
+    .pipe(Schema.filter((command) => command.action !== "retry" || command.attemptId !== undefined))
+    .annotations(strict),
 
   Schema.Struct({
     kind: Schema.Literal("preview-action"),
@@ -236,6 +247,10 @@ export const ProjectActionSuggestion = Schema.Struct({
 export type ProjectActionSuggestion = typeof ProjectActionSuggestion.Type;
 
 export const ProjectTerminalResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("child-worktree-source"),
+    review: ChildWorktreeSourceReview,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("worktree-preparation"),
     receiptId: WorktreeReceiptId,

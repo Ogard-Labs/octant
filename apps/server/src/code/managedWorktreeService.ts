@@ -1,3 +1,4 @@
+import type { ChildWorktreeSnapshotData } from "@octant/contracts";
 import { dirname, join } from "node:path";
 import type {
   BindingRevisionId,
@@ -148,6 +149,7 @@ type ManagedWorktreeDeferred = Readonly<{
 }>;
 
 export interface ManagedWorktreeCreationInput {
+  readonly seed?: ChildWorktreeSnapshotData;
   readonly authenticatedWindowId: WindowId;
   readonly projectId: ProjectId;
   readonly bindingRevisionId: BindingRevisionId;
@@ -362,6 +364,7 @@ export class ManagedWorktreeService {
         expectedHead: input.startPoint,
         source: fresh.state.source,
         ...(setupRecipe === undefined ? {} : { setupRecipe }),
+        ...(input.seed === undefined ? {} : { seed: input.seed }),
       });
     } catch {
       return { status: "interrupted" };

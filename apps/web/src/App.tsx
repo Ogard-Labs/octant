@@ -1637,6 +1637,11 @@ function LaunchedShell(
   // The row menu closes before this operation finishes. Keep its progress or
   // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
+  const [preparationTarget, setPreparationTarget] = useState<PreparationTarget>();
+  const [projectActionRun, setProjectActionRun] = useState<{
+    readonly target: ProjectActionTarget;
+    readonly open: boolean;
+  }>();
   const [quitHintVisible, setQuitHintVisible] = useState(false);
   // The palette opens on what is waiting for the person. It reads the host's
   // list each time it opens, and only where the host lists it at all.
@@ -6784,17 +6789,29 @@ function LaunchedShell(
     return undefined;
   }
 
-  const [preparationTarget, setPreparationTarget] = useState<PreparationTarget>();
-  const [projectActionRun, setProjectActionRun] = useState<{
-    readonly target: ProjectActionTarget;
-    readonly open: boolean;
-  }>();
   async function runProjectAction(
     projectId: ProjectId,
     action: ProjectAction,
     folder?: string,
   ): Promise<void> {
     const view = activeCodeThreadView;
+    if (
+      action.preparesWorktrees === true &&
+      folder === undefined &&
+      activeMode === "code" &&
+      view?.checkout.kind === "managed-worktree" &&
+      String(view.thread.projectId) === String(projectId)
+    ) {
+      setPreparationTarget({
+        projectId,
+        thread: {
+          threadId: view.thread.id,
+          checkoutId: view.checkout.id,
+          ...(view.checkout.head.kind === "none" ? {} : { head: view.checkout.head.oid }),
+        },
+      });
+      return;
+    }
     setProjectActionRun({
       open: true,
       target: {
@@ -7649,7 +7666,7 @@ function LaunchedShell(
                 <WorktreePreparationDialog
                   key={JSON.stringify(preparationTarget)}
                   client={projectTerminalClient}
-                  children={agentRunClient}
+                  runs={agentRunClient}
                   target={preparationTarget}
                   onClose={() => setPreparationTarget(undefined)}
                 />

@@ -160,6 +160,7 @@ export interface HarnessShellScriptInput {
 }
 
 export interface RepositoryTestProcessInput {
+  readonly networkAccess?: "none";
   readonly executionPolicy?: ProviderExecutionPolicy;
   readonly checkoutRoot?: string;
   readonly beforeLaunch?: () => boolean;
@@ -649,7 +650,8 @@ export class RepositoryTestProcessPort {
         args: validated.args,
         boundRoot: checkoutRoot,
         temporaryDirectory: this.#temporaryDirectory,
-        networkEgress: proxied?.networkEgress ?? this.#networkEgress,
+        networkEgress:
+          input.networkAccess === "none" ? "none" : (proxied?.networkEgress ?? this.#networkEgress),
         allowFileReadStar: true,
         allowSimulatorControl: this.#allowSimulatorControl,
         readRoots: [

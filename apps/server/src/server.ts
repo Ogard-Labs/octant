@@ -451,6 +451,7 @@ export function startOctantServer(
       managedCodeThreadCreation,
       managedWorktreeRefsList,
       worktreePreparation,
+      childWorktreeSources,
       resolveChildWorktree,
       managedWorktreeSourcePreview,
       nativeHarnessLeadFallback,
@@ -824,7 +825,9 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      agentRunPersistence,
       worktreePreparation,
+      childWorktreeSources,
       resolveChildWorktree,
       browserAuthority,
       serverConnection,

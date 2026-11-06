@@ -5,6 +5,7 @@ import { mkdtempSync, realpathSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  decodeCodeOperationId,
   decodeProjectAction,
   ActorId,
   WORKTREE_PREPARATION_UPDATED,
@@ -16,7 +17,10 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
-import { WorktreePreparationService } from "./worktreePreparationService";
+import {
+  type WorktreePreparationContext,
+  WorktreePreparationService,
+} from "./worktreePreparationService";
 import type { RepositoryTestProcessResult } from "./repositoryTestRunner";
 import type { ManagedWorktreeReceipt } from "./managedWorktreeReceiptStore";
 
@@ -33,6 +37,11 @@ const result = (exitCode = 0): RepositoryTestProcessResult => ({
   parserFailed: false,
   cleanupUncertain: false,
 });
+async function view(service: WorktreePreparationService, context: WorktreePreparationContext) {
+  const read = await service.inspect(context);
+  if (read.status !== "available") throw new Error(read.message);
+  return read.view;
+}
 function fixture(command = "printf ready") {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-prepare-")));
   roots.push(root);
@@ -74,6 +83,7 @@ function fixture(command = "printf ready") {
   };
   const execute = vi.fn<RepositoryTestProcessPort["executeReviewedAction"]>(async () => result());
   const options = {
+    processRecovery: "ready" as const,
     journal,
     loadReceipt: async () => receipt,
     execute,
@@ -93,9 +103,9 @@ function fixture(command = "printf ready") {
 }
 it("prepares once before admitting the first task and preserves the decision across restart", async () => {
   const f = fixture();
-  expect((await f.service.inspect(f.context)).preparation?.state).toBe("pending");
+  expect((await view(f.service, f.context)).preparation?.state).toBe("pending");
   expect(await f.service.ensure(f.context)).toBeUndefined();
-  expect((await f.service.inspect(f.context)).preparation?.state).toBe("succeeded");
+  expect((await view(f.service, f.context)).preparation?.state).toBe("succeeded");
   await new WorktreePreparationService(f.options).ensure(f.context);
   expect(f.execute).toHaveBeenCalledTimes(1);
   f.connection.close();
@@ -107,7 +117,7 @@ it("requires an explicit retry after failure and allows a visible deliberate ski
   expect(await f.service.ensure(f.context)).toContain("failed");
   expect(f.execute).toHaveBeenCalledTimes(1);
   await f.service.command(f.context, "skip");
-  expect((await f.service.inspect(f.context)).preparation?.state).toBe("skipped");
+  expect((await view(f.service, f.context)).preparation?.state).toBe("skipped");
   expect(await f.service.ensure(f.context)).toBeUndefined();
   f.connection.close();
 });
@@ -144,9 +154,9 @@ it("exposes interruption after process reconciliation and waits for an explicit 
   f.service.reconciled();
   expect(await f.service.ensure(f.context)).toContain("interrupted");
   expect(f.execute).not.toHaveBeenCalled();
-  await f.service.command(f.context, "retry");
+  await f.service.command(f.context, "retry", decodeCodeOperationId(randomUUID()));
   await vi.waitFor(async () =>
-    expect((await f.service.inspect(f.context)).preparation?.state).toBe("succeeded"),
+    expect((await view(f.service, f.context)).preparation?.state).toBe("succeeded"),
   );
   expect(f.execute).toHaveBeenCalledOnce();
   f.connection.close();
@@ -175,7 +185,7 @@ it("joins a concurrent first task to the same setup and cancels its owned proces
   const first = f.service.ensure(f.context);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
   const second = f.service.ensure(f.context);
-  expect((await f.service.inspect(f.context)).output).toBe("preparing");
+  expect((await view(f.service, f.context)).output).toBe("preparing");
   await f.service.command(f.context, "cancel");
   expect(await first).toContain("cancelled");
   expect(await second).toContain("cancelled");
@@ -187,8 +197,13 @@ it("does not retry a setup whose descendant cleanup is uncertain", async () => {
   const f = fixture();
   f.execute.mockResolvedValueOnce({ ...result(7), cleanupUncertain: true });
   expect(await f.service.ensure(f.context)).toContain("cleanup-uncertain");
-  await expect(f.service.command(f.context, "retry")).rejects.toThrow("cleanup");
-  await expect(f.service.command(f.context, "skip")).rejects.toThrow("cleanup");
+  expect(
+    await f.service.command(f.context, "retry", decodeCodeOperationId(randomUUID())),
+  ).toMatchObject({ status: "refused", message: expect.stringContaining("cleanup") });
+  expect(await f.service.command(f.context, "skip")).toMatchObject({
+    status: "refused",
+    message: expect.stringContaining("cleanup"),
+  });
   expect(f.execute).toHaveBeenCalledTimes(1);
   f.connection.close();
 });
@@ -223,3 +238,71 @@ it.runIf(process.platform === "darwin")(
     f.connection.close();
   },
 );
+
+it("does not repeat a replayed retry after another attempt has already finished", async () => {
+  const f = fixture();
+  f.execute.mockResolvedValue(result(7));
+  const first = decodeCodeOperationId(randomUUID()),
+    second = decodeCodeOperationId(randomUUID());
+  await f.service.command(f.context, "retry", first);
+  await f.service.ensure(f.context);
+  await f.service.command(f.context, "retry", second);
+  await f.service.ensure(f.context);
+  await f.service.command(f.context, "retry", first);
+  await f.service.ensure(f.context);
+  expect(f.execute).toHaveBeenCalledTimes(2);
+  f.connection.close();
+});
+
+it("does not let a completed startup reconciliation clear a later lost completion record", async () => {
+  const f = fixture();
+  f.service.reconciled();
+  let writes = 0;
+  const append = f.options.journal.append.bind(f.options.journal);
+  vi.spyOn(f.options.journal, "append").mockImplementation((...args) => {
+    writes++;
+    if (writes > 1) throw new Error("Fixture journal unavailable");
+    return append(...args);
+  });
+  await f.service.command(f.context, "retry", decodeCodeOperationId(randomUUID()));
+  await vi.waitFor(async () =>
+    expect((await view(f.service, f.context)).preparation?.state).toBe("cleanup-uncertain"),
+  );
+  expect(
+    await f.service.command(f.context, "retry", decodeCodeOperationId(randomUUID())),
+  ).toMatchObject({ status: "refused" });
+  expect(f.execute).toHaveBeenCalledOnce();
+  f.connection.close();
+});
+it("keeps setup inside a child's command and network authority", async () => {
+  const refused = fixture();
+  expect(await refused.service.ensure({ ...refused.context, commandAccess: false })).toContain(
+    "does not authorize",
+  );
+  expect(refused.execute).not.toHaveBeenCalled();
+  refused.connection.close();
+  const limited = fixture();
+  expect(
+    await limited.service.ensure({ ...limited.context, networkAllowed: false }),
+  ).toBeUndefined();
+  expect(limited.execute).toHaveBeenCalledWith(
+    expect.objectContaining({ networkAccess: "none", environment: {} }),
+    expect.any(AbortSignal),
+  );
+  limited.connection.close();
+});
+it("refuses setup launches and skip while owned process recovery is uncertain", async () => {
+  const f = fixture();
+  const service = new WorktreePreparationService({ ...f.options, processRecovery: "uncertain" });
+  expect((await view(service, f.context)).preparation?.state).toBe("pending");
+  expect(await service.ensure(f.context)).toContain("recovery is uncertain");
+  for (const action of ["retry", "skip"] as const)
+    expect(
+      await service.command(f.context, action, decodeCodeOperationId(randomUUID())),
+    ).toMatchObject({
+      status: "refused",
+      message: expect.stringContaining("recovery is uncertain"),
+    });
+  expect(f.execute).not.toHaveBeenCalled();
+  f.connection.close();
+});

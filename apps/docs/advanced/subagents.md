@@ -189,7 +189,7 @@ thread. See [Privacy and security](/advanced/privacy-and-security).
 - **Code** children get **isolated worktrees** by default; the worktree must
   be verified before the child starts, and failure prevents running in the
   parent checkout. Concurrent children use separate worktrees, starting from
-  the parent's committed revision. Uncommitted parent edits are not copied.
+  the parent's committed revision by default. To include unfinished edits, the person reviews and selects a stable snapshot in the parent task's **Worktrees → Child source**. Each child records that source and receives an independent copy with staging preserved; stale or incomplete copies refuse before admission.
 
 ## Lifecycle, cancellation, and recovery
 

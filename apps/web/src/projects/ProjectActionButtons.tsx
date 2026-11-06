@@ -59,7 +59,7 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
     >
       {props.onSetup === undefined ? null : (
         <OctantButton onClick={props.onSetup} size="sm" type="button" variant="ghost">
-          Worktree setup
+          Worktrees
         </OctantButton>
       )}
       {inline.map((action) => (

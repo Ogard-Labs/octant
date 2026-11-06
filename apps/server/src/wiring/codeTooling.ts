@@ -1,3 +1,4 @@
+import { clampAgentRunSessionAuthority } from "../agentRun/agentRunSessionRuntime";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, realpath, rm } from "node:fs/promises";
@@ -83,7 +84,7 @@ import type { ProvidersWiring } from "./providers";
 import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
-  Pick<AuthorityWiring, "codeSessionAuthority" | "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
@@ -102,18 +103,21 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     | "extensionLifecycleService"
     | "extensionPackageStore"
     | "worktreePreparation"
+    | "childWorktreeSources"
     | "resolveChildWorktree"
   >;
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
   const {
     browserAuthority,
+    agentRunPersistence,
     canAccessCodeProject,
     serverConnection,
     serverProjectStore,
     codeFileWatch,
     codeOperationRuntime,
     worktreePreparation,
+    childWorktreeSources,
     resolveChildWorktree,
     codeSessionAuthority,
     contributeCodeTools,
@@ -163,6 +167,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         : new ProjectTerminalService({
             terminals: sharedTerminals,
             worktreePreparation,
+            childWorktreeSources,
             readProject: persistence.readProject,
             canAccessProject: (scopeId, projectId) => {
               const project = persistence.readProject(projectId);
@@ -251,13 +256,41 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                   parentCheckoutRoot: rooted.rootPath,
                 });
                 if (receipt === undefined || !current()) return undefined;
+                const run = agentRunPersistence.getByRequestId(childRequestId);
+                if (
+                  run === undefined ||
+                  String(run.parentThreadId) !== String(thread.id) ||
+                  run.workspaceReceipt.kind !== "code-worktree" ||
+                  run.workspaceReceipt.worktreeRoot !== receipt.canonicalWorktreePath
+                )
+                  return undefined;
+                let preparationAuthority;
+                try {
+                  preparationAuthority = clampAgentRunSessionAuthority(run);
+                } catch {
+                  return undefined;
+                }
+                const childActive = () => {
+                  const fresh = agentRunPersistence.getById(run.id);
+                  return (
+                    active() &&
+                    fresh !== undefined &&
+                    JSON.stringify(fresh.authority) === JSON.stringify(run.authority) &&
+                    JSON.stringify(fresh.routingReceipt.executionResolution) ===
+                      JSON.stringify(run.routingReceipt.executionResolution)
+                  );
+                };
                 return {
                   root: receipt.canonicalWorktreePath,
                   receiptId: receipt.receiptId,
                   preparationThread: { threadId: receipt.threadId, checkoutId: receipt.checkoutId },
-                  executionPolicy: thread.executionPolicy,
-                  current,
-                  active,
+                  preparationAccess: {
+                    commands: preparationAuthority.shell && preparationAuthority.filesystem,
+                    network: preparationAuthority.network,
+                  },
+                  executionPolicy: preparationAuthority.executionPolicy,
+                  current: () => current() && childActive(),
+                  active: childActive,
                 };
               }
               return {

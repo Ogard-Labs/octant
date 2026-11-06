@@ -1,5 +1,11 @@
+import { OctantTabs, OctantTabsList, OctantTabsTab, OctantTabsPanel } from "../ui/base/OctantTabs";
+import { ChildWorktreeSourceSection } from "./ChildWorktreeSourceSection";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { decodeAgentRunParentThreadId, decodeAgentRunRequestId } from "@octant/contracts";
+import {
+  decodeAgentRunParentThreadId,
+  decodeCodeOperationId,
+  decodeAgentRunRequestId,
+} from "@octant/contracts";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type {
@@ -17,7 +23,7 @@ export type PreparationTarget = Omit<
 >;
 type View = Extract<ProjectTerminalResult, { kind: "worktree-preparation" }>;
 export function WorktreePreparationDialog(props: {
-  readonly children?: Pick<AgentRunClient, "parentSummary"> | undefined;
+  readonly runs?: Pick<AgentRunClient, "parentSummary"> | undefined;
   readonly client: ProjectTerminalClient;
   readonly target: PreparationTarget;
   readonly onClose: () => void;
@@ -28,7 +34,7 @@ export function WorktreePreparationDialog(props: {
   >([]);
   useEffect(() => {
     let current = true;
-    void props.children
+    void props.runs
       ?.parentSummary(decodeAgentRunParentThreadId(String(props.target.thread.threadId)))
       .then((result) => {
         if (current) setChildren(result.entries.slice(-20));
@@ -37,7 +43,7 @@ export function WorktreePreparationDialog(props: {
     return () => {
       current = false;
     };
-  }, [props.children, props.target]);
+  }, [props.runs, props.target]);
   const target = useMemo(
     () => ({
       ...props.target,
@@ -85,6 +91,7 @@ export function WorktreePreparationDialog(props: {
         kind: "worktree-preparation",
         ...props.target,
         action,
+        ...(action === "retry" ? { attemptId: decodeCodeOperationId(crypto.randomUUID()) } : {}),
       });
       if (result.kind === "worktree-preparation") {
         setView(result);
@@ -107,84 +114,100 @@ export function WorktreePreparationDialog(props: {
   return (
     <OctantDialog
       className="project-dialog project-action-run"
-      label="Worktree setup"
+      label="Worktrees"
       open
       onClose={props.onClose}
     >
-      <h1>Worktree setup</h1>
-      {children.length === 0 ? null : (
-        <OctantSelectField
-          aria-label="Checkout to prepare"
-          value={childRequestId}
-          onValueChange={(value) => {
-            setChildRequestId(value);
-            setView(undefined);
-          }}
-          options={[
-            { id: "", label: "This task's checkout" },
-            ...children.map((child) => ({
-              id: child.requestId,
-              label: `Child: ${child.task.slice(0, 80)}`,
-            })),
-          ]}
-        />
-      )}
-      <p role="status">
-        {preparation === undefined
-          ? view === undefined
-            ? "Checking setup…"
-            : "No setup recipe was recorded for this worktree."
-          : `Setup ${preparation.state}${preparation.exitCode === undefined ? "" : ` (exit ${preparation.exitCode})`}`}
-      </p>
-      {preparation === undefined ? null : (
-        <>
-          <p>
-            Reviewed command: <code>{preparation.recipe.command}</code>
-          </p>
-          <p>
-            Folder within checkout: <code>{preparation.recipe.directory}</code>
-          </p>
-          <p>{preparation.reason}</p>
-          <p>
-            The first agent task waits for setup or your explicit Skip. Setup uses task access, has
-            a ten minute limit, and never replays after restart.
-          </p>
-        </>
-      )}
-      {failure === undefined ? null : <OctantAlert tone="danger">{failure}</OctantAlert>}
-      {view?.outputTruncated === true ? <p>Earlier output was truncated.</p> : null}
-      {preparation === undefined ? null : (
-        <pre className="project-action-run__output">
-          {view?.output || "No output retained on this host."}
-        </pre>
-      )}
-      <div className="project-dialog__actions">
-        <OctantButton onClick={props.onClose} type="button">
-          Close
-        </OctantButton>
-        {preparation === undefined ? null : running ? (
-          <OctantButton disabled={busy} onClick={() => void command("cancel")} type="button">
-            Cancel setup
-          </OctantButton>
-        ) : (
-          <>
-            <OctantButton
-              disabled={busy || preparation.state === "cleanup-uncertain"}
-              onClick={() => void command("retry")}
-              type="button"
-            >
-              {preparation.state === "pending" ? "Start setup" : "Retry setup"}
+      <h1>Worktrees</h1>
+      <OctantTabs defaultValue="setup">
+        <OctantTabsList className="worktree-preparation__tabs" aria-label="Worktree options">
+          <OctantTabsTab value="setup">Setup</OctantTabsTab>
+          <OctantTabsTab value="source">Child source</OctantTabsTab>
+        </OctantTabsList>
+        <OctantTabsPanel value="source">
+          <ChildWorktreeSourceSection client={props.client} target={props.target} />
+          <div className="project-dialog__actions">
+            <OctantButton onClick={props.onClose} type="button">
+              Close
             </OctantButton>
-            <OctantButton
-              disabled={busy || preparation.state === "cleanup-uncertain"}
-              onClick={() => void command("skip")}
-              type="button"
-            >
-              Skip setup
+          </div>
+        </OctantTabsPanel>
+        <OctantTabsPanel value="setup">
+          {children.length === 0 ? null : (
+            <OctantSelectField
+              aria-label="Checkout to prepare"
+              value={childRequestId}
+              onValueChange={(value) => {
+                setChildRequestId(value);
+                setView(undefined);
+              }}
+              options={[
+                { id: "", label: "This task's checkout" },
+                ...children.map((child) => ({
+                  id: child.requestId,
+                  label: `Child: ${child.task.slice(0, 80)}`,
+                })),
+              ]}
+            />
+          )}
+          <p role="status">
+            {preparation === undefined
+              ? view === undefined
+                ? "Checking setup…"
+                : "No setup recipe was recorded for this worktree."
+              : `Setup ${preparation.state}${preparation.exitCode === undefined ? "" : ` (exit ${preparation.exitCode})`}`}
+          </p>
+          {preparation === undefined ? null : (
+            <>
+              <p>
+                Reviewed command: <code>{preparation.recipe.command}</code>
+              </p>
+              <p>
+                Folder within checkout: <code>{preparation.recipe.directory}</code>
+              </p>
+              <p>{preparation.reason}</p>
+              <p>
+                The first agent task waits for setup or your explicit Skip. Setup uses task access,
+                has a ten minute limit, and never replays after restart.
+              </p>
+            </>
+          )}
+          {failure === undefined ? null : <OctantAlert tone="danger">{failure}</OctantAlert>}
+          {view?.outputTruncated === true ? <p>Earlier output was truncated.</p> : null}
+          {preparation === undefined ? null : (
+            <pre className="project-action-run__output">
+              {view?.output || "No output retained on this host."}
+            </pre>
+          )}
+          <div className="project-dialog__actions">
+            <OctantButton onClick={props.onClose} type="button">
+              Close
             </OctantButton>
-          </>
-        )}
-      </div>
+            {preparation === undefined ? null : running ? (
+              <OctantButton disabled={busy} onClick={() => void command("cancel")} type="button">
+                Cancel setup
+              </OctantButton>
+            ) : (
+              <>
+                <OctantButton
+                  disabled={busy || preparation.state === "cleanup-uncertain"}
+                  onClick={() => void command("retry")}
+                  type="button"
+                >
+                  {preparation.state === "pending" ? "Start setup" : "Retry setup"}
+                </OctantButton>
+                <OctantButton
+                  disabled={busy || preparation.state === "cleanup-uncertain"}
+                  onClick={() => void command("skip")}
+                  type="button"
+                >
+                  Skip setup
+                </OctantButton>
+              </>
+            )}
+          </div>
+        </OctantTabsPanel>
+      </OctantTabs>
     </OctantDialog>
   );
 }

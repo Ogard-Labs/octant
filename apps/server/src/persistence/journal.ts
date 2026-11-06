@@ -1018,6 +1018,10 @@ export class Journal {
     return row === undefined ? undefined : this.#decodeRow(row);
   }
 
+  hasEventIdentity(eventId: string): boolean {
+    return this.#selectEventIdentity.get(eventId) !== undefined;
+  }
+
   latestAggregateEvent(input: {
     readonly aggregateType: string;
     readonly aggregateId: string;

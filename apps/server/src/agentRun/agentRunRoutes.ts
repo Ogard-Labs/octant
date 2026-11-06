@@ -942,6 +942,9 @@ function serializeCenterSummary(
     executionKind: run.executionKind,
     authority: run.authority,
     workspaceKind: workspaceKindForRun(run),
+    ...(run.workspaceReceipt.kind !== "code-worktree" || run.workspaceReceipt.source === undefined
+      ? {}
+      : { source: run.workspaceReceipt.source }),
     usageQuality: run.routingReceipt.usageQuality,
     route,
     resultAcknowledgement: run.resultAcknowledgement,

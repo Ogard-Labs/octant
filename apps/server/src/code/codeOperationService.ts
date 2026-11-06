@@ -5509,13 +5509,6 @@ export class CodeOperationService {
     rootIdentity?: { readonly device: string; readonly inode: string },
     routineRun?: AutomationRunReference,
   ): Promise<CodeOperationResult> {
-    const preparationRefusal = await this.#options.prepareWorktree?.(
-      thread,
-      checkoutRoot,
-      () => admissionCurrent?.() !== false,
-    );
-    if (preparationRefusal !== undefined)
-      return this.#failed(command.operationId, "unavailable", preparationRefusal, "refused");
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
       return this.#failed(
@@ -5524,6 +5517,13 @@ export class CodeOperationService {
         "Provider prompt evidence is unavailable.",
         "refused",
       );
+    const preparationRefusal = await this.#options.prepareWorktree?.(
+      thread,
+      checkoutRoot,
+      () => admissionCurrent?.() !== false,
+    );
+    if (preparationRefusal !== undefined)
+      return this.#failed(command.operationId, "unavailable", preparationRefusal, "refused");
     const selections =
       command.extensionSelections?.filter(
         (selection) => !isBrowserUseSelection(selection) && !isComputerUseSelection(selection),

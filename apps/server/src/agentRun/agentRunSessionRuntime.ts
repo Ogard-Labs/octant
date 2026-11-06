@@ -490,16 +490,30 @@ export function createAgentRunSessionRuntime(
       );
     }
     const projectRoot = resolveProjectRoot(run, options.scratchRoot);
-    const context = options.context.resolve({
+    const resolvedContext = options.context.resolve({
       runId: run.id,
       contextSnapshotId: run.routingReceipt.contextSnapshotId,
     });
-    if (context === undefined) {
+    if (resolvedContext === undefined) {
       throw new AgentRunSessionError(
         "context-unavailable",
         "The AgentRun context snapshot could not be resolved for execution.",
       );
     }
+
+    const source =
+      run.workspaceReceipt.kind === "code-worktree" ? run.workspaceReceipt.source : undefined;
+    const context: ReadonlyArray<ProviderContextBlock> = [
+      ...resolvedContext,
+      ...(source === undefined
+        ? []
+        : [
+            {
+              kind: "instructions" as const,
+              text: `Workspace source: current edits snapshot ${source.id}, committed base ${source.baseRevision}. Its ${source.files.length} changed files were copied into this isolated checkout with staging preserved. Later parent edits are separate.`,
+            },
+          ]),
+    ];
 
     const appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
     if (appManagedTools !== undefined && appManagedTools.definitions.length > 0) {

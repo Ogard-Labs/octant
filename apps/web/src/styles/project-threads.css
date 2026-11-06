@@ -1779,6 +1779,7 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
   --octant-dialog-width: 720px;
   width: min(720px, calc(100vw - 48px));
   max-width: min(720px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
 }
 .project-action-run code {
   overflow-wrap: anywhere;
@@ -1799,4 +1800,47 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
   display: flex;
   align-items: start;
   gap: var(--oct-space-2);
+}
+
+.worktree-child-source {
+  display: grid;
+  gap: var(--oct-space-3);
+}
+.worktree-child-source :is(h2, h3, p, pre) {
+  margin: 0;
+}
+.worktree-child-source h2 {
+  font-size: var(--oct-text-base);
+  font-weight: 600;
+}
+.worktree-child-source h3 {
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+.worktree-child-source p {
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-snug);
+}
+.worktree-child-source > button {
+  justify-self: start;
+}
+.worktree-child-source .project-dialog__actions {
+  margin: 0;
+}
+.worktree-preparation__tabs {
+  display: flex;
+  gap: var(--oct-space-2);
+  margin-block: var(--oct-space-2);
+}
+.worktree-preparation__tabs [role="tab"] {
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+}
+.worktree-preparation__tabs [role="tab"][aria-selected="true"] {
+  background: var(--oct-fg-soft);
+  color: var(--oct-fg);
+}
+.worktree-preparation__tabs [role="tab"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }

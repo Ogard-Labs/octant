@@ -1,3 +1,4 @@
+import type { ChildWorktreeSourceService } from "./childWorktreeSourceService";
 import {
   ActorId,
   AggregateId,
@@ -55,6 +56,7 @@ export const PROJECT_TERMINAL_AGGREGATE = "project-terminal";
 export type ProjectTerminalCaller = "local-window" | "remote-device";
 
 interface ActionCheckout {
+  readonly preparationAccess?: { readonly commands: boolean; readonly network: boolean };
   readonly receiptId?: string;
   readonly preparationThread?: { readonly threadId: string; readonly checkoutId: string };
   readonly root: string;
@@ -70,6 +72,7 @@ type ActionReceipt = NonNullable<
 
 export interface ProjectTerminalServiceOptions {
   readonly worktreePreparation?: WorktreePreparationService;
+  readonly childWorktreeSources?: ChildWorktreeSourceService;
   readonly resolveActionCheckout?: (
     windowId: WindowId,
     projectId: ProjectId,
@@ -209,6 +212,7 @@ export class ProjectTerminalService {
     if (command.kind === "start") return this.#start(windowId, command);
     if (command.kind === "preview-action") return this.#previewAction(windowId, command);
     if (command.kind === "start-action") return this.#startAction(windowId, command);
+    if (command.kind === "child-worktree-source") return this.#childSource(windowId, command);
     if (command.kind === "worktree-preparation") return this.#preparation(windowId, command);
     if (command.kind === "suggest-actions") return this.#suggest(windowId, command.projectId);
 
@@ -264,6 +268,47 @@ export class ProjectTerminalService {
     }
   }
 
+  async #childSource(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { kind: "child-worktree-source" }>,
+  ): Promise<ProjectTerminalResult> {
+    const authority = this.#authority(windowId, command.projectId);
+    if (authority.kind !== "allowed" || authority.project.type !== "code")
+      return refused(
+        "unauthorized",
+        "Child source review requires this Code Project's local window.",
+      );
+    const checkout = await this.#options
+      .resolveActionCheckout?.(windowId, command.projectId, command.thread)
+      .catch(() => undefined);
+    const service = this.#options.childWorktreeSources;
+    if (service === undefined || checkout?.head === undefined || !checkout.current())
+      return refused("unavailable", "This checkout cannot capture an authorized committed base.");
+    try {
+      const result = await service.command(
+        {
+          threadId: String(command.thread.threadId),
+          checkoutId: String(command.thread.checkoutId),
+          bindingRevisionId: String(authority.bindingRevisionId),
+          root: checkout.root,
+          head: checkout.head,
+          executionPolicy: checkout.executionPolicy,
+          current: checkout.current,
+        },
+        command.action,
+        command.snapshotId,
+      );
+      return result.status === "refused"
+        ? refused("unavailable", result.message)
+        : decodeProjectTerminalResult({ kind: "child-worktree-source", review: result.review });
+    } catch {
+      return refused(
+        "unavailable",
+        "Child source could not be recorded. Inspect the checkout and review the source again.",
+      );
+    }
+  }
+
   async #preparation(
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { kind: "worktree-preparation" }>,
@@ -278,6 +323,8 @@ export class ProjectTerminalService {
     if (service === undefined || checkout?.receiptId === undefined || !checkout.current())
       return refused("unavailable", "This checkout has no available managed preparation.");
     const context = await service.context({
+      commandAccess: checkout.preparationAccess?.commands ?? true,
+      networkAllowed: checkout.preparationAccess?.network ?? true,
       receiptId: checkout.receiptId,
       root: checkout.root,
       executionPolicy: checkout.executionPolicy,
@@ -289,10 +336,10 @@ export class ProjectTerminalService {
     if (context === undefined)
       return refused("authority-revoked", "Worktree preparation ownership changed.");
     try {
-      return decodeProjectTerminalResult({
-        kind: "worktree-preparation",
-        ...(await service.command(context, command.action)),
-      });
+      const result = await service.command(context, command.action, command.attemptId);
+      return result.status === "refused"
+        ? refused("unavailable", result.message)
+        : decodeProjectTerminalResult({ kind: "worktree-preparation", ...result.view });
     } catch {
       return refused(
         "unavailable",
@@ -483,6 +530,15 @@ export class ProjectTerminalService {
   ): Promise<ProjectTerminalResult> {
     const placed = await this.#placeAction(windowId, command);
     if (placed.kind === "project-terminal-refused") return placed;
+    if (
+      placed.action.preparesWorktrees === true &&
+      placed.checkout?.receiptId !== undefined &&
+      command.folder === undefined
+    )
+      return refused(
+        "unavailable",
+        "Open Worktrees → Setup to run this recipe through its recorded preparation lifecycle.",
+      );
     if (
       command.projectVersion !== undefined &&
       String(command.projectVersion) !== String(placed.project.version)

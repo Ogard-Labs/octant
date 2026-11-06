@@ -2059,10 +2059,33 @@ choice reads as off.
 Each Code child allocation is keyed by its parent and delegation request. Two
 sibling requests receive distinct managed worktrees; only the same request can
 reuse its verified receipt. The host checks the actual Git worktree inventory
-and records the starting commit. Children start from committed source only; the
-parent checkout's uncommitted edits are not copied into a child worktree, and
-there is no opt-in to seed one from the parent's working tree. A child that
-must see an edit starts after the parent commits it.
+and records the starting commit. Committed revision is the default source.
+The person can instead open the parent task's **Worktrees → Child source**,
+capture **Current edits snapshot**, inspect the included paths, then explicitly
+select it for children prepared from that task. Capturing alone does not enable
+it. Selecting **Committed revision** clears the selection. Existing children
+never change when this selection or the parent's files change.
+
+A current-edits source reuses Git checkpoints, with a separate worktree tree and
+index tree, without committing to or changing the parent's branch, files or
+staging. Capture enumerates tracked changes and eligible untracked files,
+including nested untracked files; ignored files are excluded. Protected changes,
+truncated or oversized manifests (over 256 paths), unreadable objects, and an
+unstable capture refuse rather than silently copying a subset. A capture has a
+thirty second bound and is checked against a second capture and observation.
+The selected snapshot is bound to the parent thread, checkout, binding and base
+revision; a stale selection must be replaced or explicitly cleared before a
+child can start.
+
+Each child records its committed base, snapshot identity and included paths in
+its managed receipt and admitted workspace. The parent's child details and the
+child's provider context identify the source. Copying preserves staging in that
+child's independent checkout. The host journals applying and completed copy
+states before admission; an incomplete, failed or interrupted copy refuses
+confirmation and execution. It is never automatically reapplied over a child's
+files, including after a lost reply or restart. Prepare a new child to recover
+an incomplete copy. The checkpoint anchors follow existing checkout retention.
+This source choice transfers files, not model attachments.
 
 Provider-owned child reports are read-only observations through the existing
 `child-agent-activity` SDK event. Chat attempts, Work turn updates, Code operation
@@ -11414,21 +11437,23 @@ access` agree); a thread's own change is journaled as
   relative folder before enabling automatic use. Each new managed worktree
   records the reviewed recipe separately from its Git readiness. The first
   agent task waits for preparation; child runs use their admitted task access.
-  Plan cannot execute setup. Enabling a recipe does not grant wider access.
+  Plan and tasks without shell/write authority cannot execute setup. A child’s admitted network ceiling remains enforced. Enabling a recipe does not grant wider access.
   The shared confined process runner owns the recipe's shell, bounded output,
-  ten minute timeout, cancellation and descendant cleanup. Its environment is
+  ten minute timeout, cancellation and descendant cleanup; an existing task startup ceiling may end automatic child preparation earlier. Its environment is
   allowlisted; no secret files, arbitrary credentials or parent environment are
   copied. The recipe folder resolves inside the new checkout. A changed recipe
   or revoked task authority refuses launch and cancels an active preparation.
 
   Pending, running, succeeded, failed, cancelled, interrupted, skipped and
   uncertain cleanup are separate recorded states. Running is journaled before
-  spawn. Failure needs an explicit Retry or Skip in **Worktree setup**, beside
+  spawn. Retry carries a durable decision identity; replay never starts it again, even after another attempt or host restart. Failure needs an explicit Retry or Skip in **Worktrees → Setup**, beside
   the task; child checkouts are selectable there. A skipped preparation stays
   visible. Restart first reconciles owned processes, then exposes interrupted
   setup without replaying it. Unconfirmed descendant cleanup blocks Retry and
-  Skip. Output is a bounded host-lifetime tail, not journal content, and is
-  unavailable after restart. A new recipe does not retroactively alter an
+  Skip. Failed startup reconciliation leaves the host usable and refuses setup
+  launches and Skip until cleanup is confirmed and the host restarts.
+  Output is a bounded host-lifetime tail, not journal content, and is
+  unavailable after restart. The recipe’s ordinary action button opens this same lifecycle for a managed checkout, avoiding an independent second preparation. A new recipe does not retroactively alter an
   existing worktree's recorded recipe.
 
 - **Terminal Browser grant.** A person may start a Code thread

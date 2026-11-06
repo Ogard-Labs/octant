@@ -713,7 +713,7 @@ A child run starts only when the thread's agent delegates through `octant_agents
 - The harness's retired `delegate` tool name stays readable in journaled turn records and approvals, so old journals replay.
 - Subagent creation is one setting with two values, Off and Automatic. Only the thread's agent starts a child, and the parent and child hierarchy is the only subagent surface. _Here only._
 - The host prepares the child's workspace (research-only for Chat, the Project root for Work, an isolated managed worktree for Code); no client supplies a path, and wider-than-parent grants are refused.
-- Children start from committed source only, and provider-owned hidden subagents stay disabled.
+- Children default to committed revision. The person may explicitly review and select a stable current-edits checkpoint for children from a parent task; each child records its base/snapshot and preserves staging independently. Incomplete or stale snapshots refuse before admission; copies are never silently reapplied. Provider-owned hidden subagents stay disabled.
 - Concurrency is the person's setting (defaults 4 per thread and 8 per host, at most 16); a turn defaults to 30 working minutes, person-selectable from 1–240 before the next attempt. Retry/Resume start fresh; approval and answer waits pause the clock, and independent two-minute acquisition/startup bounds remain. Recorded attempt and cumulative working time use the existing result evidence and label gaps.
 - Cancelling a child tree proceeds leaves-up and completes only after each process is confirmed stopped; an ambiguous outcome becomes waiting, failed or interrupted, never completed. _Here only._
 
@@ -1734,7 +1734,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Projec
 - A Code Project can mark one reviewed saved action as its optional preparation recipe. New managed worktrees record that recipe separately from Git readiness.
 - The first task waits for setup or the person's explicit Skip. Setup uses admitted task access and the existing confined process lifecycle, with bounded output, a ten minute timeout, cancellation and no parent environment or secret copying. Plan refuses execution.
 - Failure needs an explicit Retry or Skip. Host restart reconciles owned processes and exposes interruption without replay; uncertain cleanup refuses a new execution.
-- Worktree setup stays beside the task and can inspect its child checkouts. Existing worktrees keep their recorded recipe when Project actions change.
+- Worktrees → Setup stays beside the task and can inspect its child checkouts. Existing worktrees keep their recorded recipe when Project actions change.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Worktree setup](../architecture.md#security-and-authority).
 
