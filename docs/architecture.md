@@ -2918,7 +2918,7 @@ thread it creates could not do. The one exception is a follow-up (target
 policy `same-thread`, below), which creates no thread and sends one turn into
 the thread it came from.
 
-- **File arrivals.** A person configures the existing main Work Project root,
+- **File arrivals.** A person configures the existing main Work or Code Project root,
   a relative existing input directory, included suffixes, excluded directories,
   a settling interval of 2–60 seconds and at most 1–32 automatic starts per
   explicit arm (default 8). Configuration and reviewed re-arm are local-window
@@ -2984,9 +2984,82 @@ the thread it came from.
   runs makes quiescence unknown rather than dropping older ownership: finish and
   review the Project's tasks and cleanup, then archive that routine and explicitly
   configure a new one; neither Resume nor Save clears this hold. Existing timed/manual
-  routines retain their behavior. Code input transfer is a separate remaining
-  implementation gate, since its managed checkout does not inherit uncommitted
-  Work input files.
+  routines retain their behavior. A Code run copies only its selected batch
+  into `octant-routine-inputs/<run-id>` in its new managed checkout before its
+  first turn. Confined reads must match every observed digest and size; a
+  changed or unavailable source refuses admission. Confined exclusive writes
+  never overwrite a different existing file or follow a linked destination.
+  An identical partial copy may be reused after a crash. The framed input names
+  these copied paths, and the ordinary Code evidence store retains the exact
+  task and framed metadata. A recorded start recovers that input before any
+  fresh source read or copy. These are ordinary checkout files: review them
+  before committing or pushing. The copy changes neither the main checkout nor
+  ignore rules and grants no authority beyond the selected batch and child checkout.
+- **Integration events.** A person at a local window selects a connected source,
+  its filters, fixed task, profile, effective authority and new-thread delivery
+  before enabling a Work or Code routine. The host binds an immutable account
+  and repository/workspace identity through a read-only contribution in
+  `@octant/plugin-api/integration`; discovery grants no authority. The scheduler
+  consumes the normalized source port, never credentials or vendor clients.
+  GitHub contributes recent completed workflow runs for a selected repository,
+  with optional workflow number, branch and conclusions. Its selected OAuth
+  repository reader observes the latest 100 completed runs and their latest
+  known attempts; the identity is repository/run/attempt. Unseen attempts and
+  older runs outside that window are not history the host can reconstruct.
+  Linear contributes the complete current set assigned to the connected person,
+  optionally filtered by team key and project identifier, bounded at 256 issues
+  and three pages. Its identity binds the viewer and workspace, and ordinary
+  issue updates do not repeat an assignment: an issue must be observed absent
+  and then present to produce another assignment occurrence.
+  The existing host scheduler polls at the person's 1–60 minute interval,
+  with at most two source observations in flight and a 20-second observation
+  stage bound. Rate-limited sources preserve their cursor and honor a bounded
+  retry delay. Incomplete, malformed, over-limit or revoked observations never
+  replace the baseline. The first complete observation is a quiet baseline.
+  The journal retains at most 256 seen identities and 32 pending events. Loss
+  of the entire full CI window requires explicit review, rather than assuming
+  every visible old run is new. The source supplies bounded window identities
+  before conclusion filtering, so an unmatched run can prove overlap and a
+  filtered subset cannot hide a lost full window. The journal retains that
+  coverage receipt independently from matching-event deduplication. Failed
+  observations preserve the last complete observation time, so recovery still
+  applies the selected offline policy to the whole gap. Exhausted cursor bounds
+  also require review.
+  Each automatic claim first commits its deterministic ordinary run, then its
+  source/occurrence ledger; recovery completes the same claim and allowance
+  debit. The finite allowance is 1–32 starts per explicit arm, default 8.
+  Events arriving while a run is active, and CI from the routine's reserved
+  `automation/` branches, are held for review. This conservative attribution
+  and the finite allowance bound feedback without claiming to identify every
+  outside writer. The activity check retains at most 64 owned runs, including
+  cancelled runs whose ordinary turn or children remain active. Missing or
+  overflowing evidence is unknown and blocks automatic admission and re-arm;
+  finish and review tasks and children, then archive and explicitly configure a
+  new routine when its history is full. Code completion is observed from the
+  exact recorded operation, session, prompt, checkout and provider, never from
+  the thread's latest unrelated turn. Pause, restart, quiet time and ordinary Save reset no budget.
+  Explicit Review/Re-arm requires current local-window/source/Project authority,
+  no active run, and the displayed definition version. It skips held events,
+  restores the allowance and establishes a fresh quiet baseline. A lost response
+  remains unconfirmed and is never automatically resent.
+  After host absence or restart, Skip records surviving observations without a
+  run; Run once retains only the newest surviving unobserved event. Coverage
+  gaps remain visible. No policy reconstructs intermediate offline assignment
+  changes or unseen CI attempts. Event metadata enters the ordinary Work or
+  Code turn as framed external data and is recorded for exact-input recovery;
+  it cannot edit the task or grant permissions. Cancellation, history, run
+  authority and first-turn idempotency stay with the existing routine path.
+  The CI failures Start-screen card remains a read-only draft producer and adds
+  no CI poll. Its bounded routine-history read shows existing routine work and
+  the source CI link for the same Project/repository/branch before another fix
+  is drafted. The older check rollup has no workflow-attempt identity, so the
+  card labels this as branch correlation, never proof that one job is repaired.
+- **Run Retry.** A person may retry a failed, interrupted or cancelled run of
+  an unchanged enabled routine. This creates a new ordinary manual run linked
+  to the original and retains its file/event receipt. It never resets the
+  automatic source allowance, revives an ambiguous active launch, adopts newer
+  input or silently widens authority. Changed definitions require a new manual
+  decision through Run now; one-shot same-thread follow-ups are not retried.
 - **Authority ceiling.** A definition captures an execution profile (an existing
   agent profile: provider, model, policy, permission persistence) and an
   authority snapshot whose effective authority never widens the requested one

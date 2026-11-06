@@ -7,6 +7,13 @@ import {
   AutomationSourceDigest,
 } from "./automationFileArrival";
 export * from "./automationFileArrival";
+import {
+  AutomationIntegrationEventTrigger,
+  AutomationIntegrationEventReceipt,
+  AutomationEventSourceCheckpoint,
+  AutomationIntegrationEvent,
+} from "./automationEvents";
+export * from "./automationEvents";
 import { Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AgentRunAuthority } from "./agentRun";
@@ -97,6 +104,7 @@ export const AutomationTriggerKind = Schema.Literal(
   "interval",
   "weekly-local",
   "file-arrival",
+  "integration-event",
 );
 export type AutomationTriggerKind = typeof AutomationTriggerKind.Type;
 
@@ -267,6 +275,7 @@ export type AutomationScheduledTrigger = typeof AutomationScheduledTrigger.Type;
 export const AutomationTrigger = Schema.Union(
   AutomationScheduledTrigger,
   AutomationFileArrivalTrigger,
+  AutomationIntegrationEventTrigger,
 );
 export type AutomationTrigger = typeof AutomationTrigger.Type;
 
@@ -583,8 +592,9 @@ function automationAuthorityIsChat(authority: AgentRunAuthority): boolean {
 
 function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinitionDraft): boolean {
   if (
-    (definition.trigger.kind === "file-arrival" &&
-      (definition.mode !== "work" || definition.targetPolicy !== "new-thread")) ||
+    ((definition.trigger.kind === "file-arrival" ||
+      definition.trigger.kind === "integration-event") &&
+      (definition.mode === "chat" || definition.targetPolicy !== "new-thread")) ||
     definition.mode !== definition.binding.kind ||
     definition.binding.hostId !== definition.hostId ||
     definition.binding.projectId !== definition.projectId ||
@@ -651,7 +661,8 @@ function automationPersistedDefinitionMatchesPolicy(definition: AutomationDefini
   const dueEvidenceMatches =
     definition.nextDueAt === null
       ? definition.nextDueResolution === undefined
-      : definition.trigger.kind === "file-arrival"
+      : definition.trigger.kind === "file-arrival" ||
+          definition.trigger.kind === "integration-event"
         ? false
         : definition.trigger.kind === "once"
           ? definition.nextDueAt === definition.trigger.scheduledAt &&
@@ -666,13 +677,16 @@ function automationPersistedDefinitionMatchesPolicy(definition: AutomationDefini
               );
   const enabledDueMatches =
     definition.lifecycle !== "enabled" ||
-    (definition.trigger.kind === "file-arrival"
+    (definition.trigger.kind === "file-arrival" || definition.trigger.kind === "integration-event"
       ? definition.nextDueAt === null
       : definition.trigger.kind === "once"
         ? definition.nextDueAt === definition.trigger.scheduledAt
         : definition.nextDueAt !== null);
   return (
     automationDefinitionDraftMatchesPolicy(definition) &&
+    (definition.trigger.kind !== "integration-event" ||
+      (definition.trigger.sourceIdentity !== undefined &&
+        definition.trigger.sourceLabel !== undefined)) &&
     (definition.targetPolicy !== "same-thread" || definition.originThreadId !== undefined) &&
     dueEvidenceMatches &&
     enabledDueMatches &&
@@ -720,7 +734,18 @@ export const AutomationManualOccurrence = Schema.Struct({
   automationId: AutomationId,
   definitionRevision: AutomationDefinitionRevision,
   runNowRequestId: AutomationRunNowRequestId,
-}).annotations(strict);
+  retryOfRunId: Schema.optional(AutomationRunId),
+  fileSource: Schema.optional(AutomationFileArrivalReceipt),
+  eventSource: Schema.optional(AutomationIntegrationEventReceipt),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (occurrence) =>
+        (occurrence.fileSource === undefined && occurrence.eventSource === undefined) ||
+        occurrence.retryOfRunId !== undefined,
+    ),
+  );
 export type AutomationManualOccurrence = typeof AutomationManualOccurrence.Type;
 
 export const AutomationFileArrivalOccurrence = Schema.Struct({
@@ -731,10 +756,19 @@ export const AutomationFileArrivalOccurrence = Schema.Struct({
 }).annotations(strict);
 export type AutomationFileArrivalOccurrence = typeof AutomationFileArrivalOccurrence.Type;
 
+export const AutomationIntegrationEventOccurrence = Schema.Struct({
+  kind: Schema.Literal("integration-event"),
+  automationId: AutomationId,
+  definitionRevision: AutomationDefinitionRevision,
+  source: AutomationIntegrationEventReceipt,
+}).annotations(strict);
+export type AutomationIntegrationEventOccurrence = typeof AutomationIntegrationEventOccurrence.Type;
+
 export const AutomationOccurrence = Schema.Union(
   AutomationScheduledOccurrence,
   AutomationManualOccurrence,
   AutomationFileArrivalOccurrence,
+  AutomationIntegrationEventOccurrence,
 );
 export type AutomationOccurrence = typeof AutomationOccurrence.Type;
 
@@ -761,6 +795,10 @@ export function deriveAutomationOccurrenceKey(
     return decodeAutomationOccurrenceKeyText(
       `file:${occurrence.automationId}:${occurrence.definitionRevision}:${occurrence.source.checkpoint.armGeneration}:${occurrence.source.checkpoint.observationRevision}:${occurrence.source.checkpoint.baselineDigest}`,
     );
+  if (occurrence.kind === "integration-event")
+    return decodeAutomationOccurrenceKeyText(
+      `event:${occurrence.automationId}:${occurrence.definitionRevision}:${occurrence.source.checkpoint.sourceIdentity}:${occurrence.source.checkpoint.observationRevision}:${occurrence.source.event.id}`,
+    );
   return decodeAutomationOccurrenceKeyText(
     `manual:${String(occurrence.automationId)}:${occurrence.definitionRevision}:${String(occurrence.runNowRequestId)}`,
   );
@@ -781,6 +819,7 @@ function automationScheduledAtMatchesTrigger(
 ): boolean {
   switch (trigger.kind) {
     case "file-arrival":
+    case "integration-event":
       return false;
     case "once":
       return scheduledAt === trigger.scheduledAt;
@@ -995,7 +1034,31 @@ export const AutomationRun = Schema.Struct({
   .annotations(strict)
   .pipe(
     Schema.filter((run) => {
+      const fileSource =
+        run.occurrence.kind === "file-arrival"
+          ? run.occurrence.source
+          : run.occurrence.kind === "manual"
+            ? run.occurrence.fileSource
+            : undefined;
+      const eventSource =
+        run.occurrence.kind === "integration-event"
+          ? run.occurrence.source
+          : run.occurrence.kind === "manual"
+            ? run.occurrence.eventSource
+            : undefined;
       const occurrenceIdentityMatches =
+        !(fileSource !== undefined && eventSource !== undefined) &&
+        (fileSource === undefined ||
+          (run.definitionSnapshot.trigger.kind === "file-arrival" &&
+            fileSource.automaticStartOrdinal <=
+              run.definitionSnapshot.trigger.automaticStartLimit)) &&
+        (eventSource === undefined ||
+          (run.definitionSnapshot.trigger.kind === "integration-event" &&
+            eventSource.checkpoint.sourceIdentity ===
+              run.definitionSnapshot.trigger.sourceIdentity &&
+            eventSource.checkpoint.automaticStarts > 0 &&
+            eventSource.checkpoint.automaticStarts <=
+              run.definitionSnapshot.trigger.automaticStartLimit)) &&
         run.automationId === run.occurrence.automationId &&
         run.definitionSnapshot.automationId === run.occurrence.automationId &&
         run.definitionSnapshot.definitionRevision === run.occurrence.definitionRevision &&
@@ -1102,6 +1165,7 @@ export const AutomationCommand = Schema.Union(
     kind: Schema.Literal("update-automation"),
     ...AutomationCommandFields,
     definition: AutomationDefinitionDraft,
+    rearmEvents: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pause-automation"),
@@ -1119,6 +1183,7 @@ export const AutomationCommand = Schema.Union(
     kind: Schema.Literal("run-now-automation"),
     ...AutomationCommandFields,
     runNowRequestId: AutomationRunNowRequestId,
+    retryRunId: Schema.optional(AutomationRunId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("cancel-current-automation-run"),
@@ -1190,6 +1255,14 @@ export const AutomationCommandResult = Schema.Union(
 export type AutomationCommandResult = typeof AutomationCommandResult.Type;
 
 export const AutomationSummary = Schema.Struct({
+  latestEventRun: Schema.optional(
+    Schema.Struct({
+      event: AutomationIntegrationEvent,
+      runId: AutomationRunId,
+      lifecycle: AutomationRunLifecycle,
+    }).annotations(strict),
+  ),
+  eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   id: AutomationId,
   displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
   hostId: HostId,
@@ -1391,6 +1464,7 @@ export const AutomationListResponse = Schema.Struct({
 export type AutomationListResponse = typeof AutomationListResponse.Type;
 
 export const AutomationDetailResponse = Schema.Struct({
+  eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   fileSource: Schema.optional(AutomationFileSourceSummary),
   kind: Schema.Literal("automation-detail"),
   automation: AutomationDefinition,
@@ -1420,6 +1494,7 @@ export type AutomationQueryResult = AutomationQueryResponse;
 // ── Journal event payload contracts ─────────────────────────────────────────
 
 export const AutomationDefinitionCreated = Schema.Struct({
+  eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   automation: AutomationPersistedDefinition,
   fileSource: Schema.optional(AutomationFileSourceCheckpoint),
 })
@@ -1427,16 +1502,22 @@ export const AutomationDefinitionCreated = Schema.Struct({
   .pipe(
     Schema.filter(
       (event) =>
-        event.fileSource === undefined ||
-        (event.automation.trigger.kind === "file-arrival" &&
-          !event.fileSource.baselineReady &&
-          event.fileSource.observationRevision === 1 &&
-          event.fileSource.armGeneration === 1),
+        (event.eventSource === undefined ||
+          (event.automation.trigger.kind === "integration-event" &&
+            event.eventSource.sourceIdentity === event.automation.trigger.sourceIdentity &&
+            !event.eventSource.baselineReady &&
+            event.eventSource.automaticStarts === 0)) &&
+        (event.fileSource === undefined ||
+          (event.automation.trigger.kind === "file-arrival" &&
+            !event.fileSource.baselineReady &&
+            event.fileSource.observationRevision === 1 &&
+            event.fileSource.armGeneration === 1)),
     ),
   );
 export type AutomationDefinitionCreated = typeof AutomationDefinitionCreated.Type;
 
 export const AutomationDefinitionUpdated = Schema.Struct({
+  eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   automation: AutomationPersistedDefinition,
   fileSource: Schema.optional(AutomationFileSourceCheckpoint),
   previousDefinitionRevision: AutomationDefinitionRevision,
@@ -1444,7 +1525,13 @@ export const AutomationDefinitionUpdated = Schema.Struct({
   .annotations(strict)
   .pipe(
     Schema.filter(
-      (event) => event.fileSource === undefined || event.automation.trigger.kind === "file-arrival",
+      (event) =>
+        (event.fileSource === undefined || event.automation.trigger.kind === "file-arrival") &&
+        (event.eventSource === undefined ||
+          (event.automation.trigger.kind === "integration-event" &&
+            event.eventSource.sourceIdentity === event.automation.trigger.sourceIdentity &&
+            !event.eventSource.baselineReady &&
+            event.eventSource.automaticStarts === 0)),
     ),
   );
 export type AutomationDefinitionUpdated = typeof AutomationDefinitionUpdated.Type;
@@ -1486,6 +1573,14 @@ export const AutomationFileSourceObserved = Schema.Struct({
   recordedAt: UtcTimestamp,
 }).annotations(strict);
 export type AutomationFileSourceObserved = typeof AutomationFileSourceObserved.Type;
+
+export const AutomationEventSourceObserved = Schema.Struct({
+  automationId: AutomationId,
+  definitionRevision: AutomationDefinitionRevision,
+  checkpoint: AutomationEventSourceCheckpoint,
+  recordedAt: UtcTimestamp,
+}).annotations(strict);
+export type AutomationEventSourceObserved = typeof AutomationEventSourceObserved.Type;
 
 export const AutomationDefinitionExhausted = Schema.Struct({
   automationId: AutomationId,
@@ -1608,6 +1703,7 @@ export const AutomationRunResultReported = Schema.Struct({
 export type AutomationRunResultReported = typeof AutomationRunResultReported.Type;
 
 export const AUTOMATION_EVENT_NAMES = [
+  "automation-event-source-observed@1",
   "automation-file-source-observed@1",
   "automation-definition-created@1",
   "automation-definition-updated@1",
@@ -1628,6 +1724,10 @@ export const AUTOMATION_EVENT_NAMES = [
 export type AutomationEventName = (typeof AUTOMATION_EVENT_NAMES)[number];
 
 export const AutomationEvent = Schema.Union(
+  Schema.Struct({
+    eventName: Schema.Literal("automation-event-source-observed@1"),
+    payload: AutomationEventSourceObserved,
+  }).annotations(strict),
   Schema.Struct({
     eventName: Schema.Literal("automation-file-source-observed@1"),
     payload: AutomationFileSourceObserved,

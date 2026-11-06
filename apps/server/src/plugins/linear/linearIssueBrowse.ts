@@ -14,6 +14,10 @@ import {
 } from "@octant/contracts/linear-issues";
 import type { IntegrationHostPort } from "@octant/plugin-api/integration";
 import {
+  LINEAR_ASSIGNMENT_SOURCE_OPERATION,
+  executeLinearAssignmentSource,
+} from "./linearAssignmentSource";
+import {
   boundUtf8,
   isRecord,
   LINEAR_ISSUE_FORBIDDEN,
@@ -76,6 +80,8 @@ export async function executeLinearIssueOperation(
   input: unknown,
   signal?: AbortSignal,
 ): Promise<IntegrationExecutionResult> {
+  if (operationId === LINEAR_ASSIGNMENT_SOURCE_OPERATION)
+    return executeLinearAssignmentSource(hostPort, input, signal);
   if (operationId === LINEAR_ISSUE_LIST_OPERATION) {
     return listIssues(hostPort, input, signal);
   }
@@ -419,6 +425,7 @@ export function linearIssueBrowseCapabilities(): ReadonlyArray<{
   readonly available: boolean;
 }> {
   return [
+    { operationId: LINEAR_ASSIGNMENT_SOURCE_OPERATION, available: true },
     { operationId: LINEAR_ISSUE_LIST_OPERATION, available: true },
     { operationId: LINEAR_ISSUE_GET_OPERATION, available: true },
     { operationId: LINEAR_ISSUE_FILTERS_OPERATION, available: true },

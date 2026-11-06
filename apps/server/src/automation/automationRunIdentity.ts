@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   decodeAutomationRun,
+  decodeCodeOperationId,
   deriveAutomationOccurrenceKey,
   type AutomationDefinition,
   type AutomationDefinitionSnapshot,
@@ -24,6 +25,12 @@ export function deterministicAutomationUuid(seed: string): string {
   bytes[8] = ((bytes[8] as number) & 0x3f) | 0x80;
   const hex = bytes.subarray(0, 16).toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+export function automationCodeOperationId(run: AutomationRun) {
+  return decodeCodeOperationId(
+    deterministicAutomationUuid(`automation-code-op:${String(run.occurrenceKey)}`),
+  );
 }
 
 /** The durable one-run-per-occurrence claim identity. */

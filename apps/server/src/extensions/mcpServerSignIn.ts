@@ -1397,6 +1397,33 @@ export class McpServerSignIn {
       if (key.startsWith(prefix)) this.#serverResources.delete(key);
   }
 
+  async githubActionsConnections(): Promise<
+    ReadonlyArray<{
+      readonly extensionId: string;
+      readonly componentId: string;
+      readonly label: string;
+    }>
+  > {
+    await this.#load();
+    const choices = [];
+    for (const [key, record] of this.#signIns) {
+      if (
+        record.descriptor.dialect !== GITHUB_MCP_OAUTH_APP.dialect ||
+        record.descriptor.mcpPermissionProfile !== GITHUB_MCP_REPOSITORY_PROFILE ||
+        !this.#currentGrant(key, record)
+      )
+        continue;
+      const separator = key.indexOf(":");
+      if (separator < 1) continue;
+      choices.push({
+        extensionId: key.slice(0, separator),
+        componentId: key.slice(separator + 1),
+        label: `GitHub recent completed CI (latest 100; account ${record.account?.userId ?? "connected"})`,
+      });
+    }
+    return choices.slice(0, 64);
+  }
+
   /** Host-only source capture; the renderer cannot select a credential reference. */
   async bindGithubActionsSource(
     extensionId: string,

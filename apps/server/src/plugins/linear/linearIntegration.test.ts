@@ -120,6 +120,7 @@ describe("Linear integration plugin", () => {
       state: "ready",
       account: { login: "ogard-labs", source: "oauth", scopes: ["read"] },
       capabilities: [
+        { operationId: "linear.assignment-source", available: true },
         { operationId: "list-issues", available: true },
         { operationId: "get-issue", available: true },
         { operationId: "list-issue-filters", available: true },

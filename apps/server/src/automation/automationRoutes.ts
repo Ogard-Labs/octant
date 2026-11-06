@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
+  AutomationEventSourceChoices,
+  type AutomationEventSourceChoice,
   decodeAutomationCommandResult,
   decodeAutomationCommand,
   decodeAutomationFollowUpRequest,
@@ -26,6 +28,8 @@ import {
   type RoutineProposal,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { Schema } from "effect";
+import type { AutomationEventSourcePreparation } from "./automationEventSources";
 import { resolveNextAutomationOccurrence } from "@octant/domain";
 import { ClientPrincipalError, WINDOW_CAPABILITY_HEADER } from "../clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "../principalRouteContext";
@@ -49,6 +53,15 @@ const DEFAULT_PAGE_LIMIT = 50;
 const DETAIL_RUNS_LIMIT = 50;
 
 export interface AutomationRouteDependencies {
+  readonly eventSourceChoices?: () => Promise<ReadonlyArray<AutomationEventSourceChoice>>;
+  readonly prepareEventSource?: (input: {
+    readonly command: Extract<
+      AutomationCommand,
+      { readonly kind: "create-automation" | "update-automation" }
+    >;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<AutomationEventSourcePreparation | undefined>;
   readonly projection: AutomationProjection;
   readonly commands: Pick<AutomationCommandService, "execute">;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -161,6 +174,20 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
     try {
       if (route === "list" && request.method === "GET") {
         return await handleList(dependencies, context, url, origin);
+      }
+      if (route === "event-sources" && request.method === "GET") {
+        if (context.principal.kind !== "local-window")
+          return failureResponse(
+            "Configure event sources from a window on this host.",
+            403,
+            origin,
+          );
+        const choices = (await dependencies.eventSourceChoices?.()) ?? [];
+        return jsonResponse(
+          Schema.decodeUnknownSync(AutomationEventSourceChoices)(choices),
+          200,
+          origin,
+        );
       }
       if (route === "get" && request.method === "GET") {
         return await handleGet(dependencies, context, url, origin);
@@ -312,10 +339,12 @@ async function handleGet(
   }
   const runs = dependencies.projection.listRuns({ automationId, limit: DETAIL_RUNS_LIMIT });
   const fileSource = dependencies.projection.getFileSourceSummary(automationId);
+  const eventSource = dependencies.projection.getEventSource(automationId);
   return jsonResponse(
     decodeAutomationQueryResponse({
       kind: "automation-detail",
       ...(fileSource === undefined ? {} : { fileSource }),
+      ...(eventSource === undefined ? {} : { eventSource }),
       automation: definition,
       runs: runs.runs,
     }),
@@ -459,7 +488,7 @@ async function handleCommand(
     return jsonResponse(decodeAutomationCommandResult(denial), 200, origin);
   }
 
-  const command = {
+  let command = {
     ...body,
     principal: context.principal,
     origin: { kind: "interactive" },
@@ -468,6 +497,55 @@ async function handleCommand(
     | AutomationFileSourcePreparation
     | AutomationFileSourceRearmPreparation
     | undefined;
+  let eventPreparation: AutomationEventSourcePreparation | undefined;
+  if (
+    (command.kind === "create-automation" || command.kind === "update-automation") &&
+    isRecord(body.definition) &&
+    isRecord(body.definition.trigger) &&
+    body.definition.trigger.kind === "integration-event"
+  ) {
+    if (context.principal.kind !== "local-window")
+      return jsonResponse(
+        commandFailure("unauthorized", "Configure an event routine from a window on this host."),
+        200,
+        origin,
+      );
+    const checked = decodeAutomationCommand(command);
+    if (checked.kind !== "create-automation" && checked.kind !== "update-automation")
+      return jsonResponse(commandFailure("invalid", "The event routine is invalid."), 200, origin);
+    const current = () =>
+      !signal.aborted &&
+      context.abortSignal?.aborted !== true &&
+      localAuthorityCurrent() &&
+      (checked.kind === "create-automation"
+        ? dependencies.projection.getDefinition(checked.automationId) === undefined
+        : dependencies.projection.getDefinition(checked.automationId)?.version ===
+          checked.expectedVersion);
+    eventPreparation = await dependencies.prepareEventSource?.({
+      command: checked,
+      current,
+      signal,
+    });
+    if (
+      eventPreparation === undefined ||
+      !eventPreparation.current() ||
+      authorizeCommandProject(
+        dependencies,
+        body,
+        await accessibleProjects(dependencies, context),
+      ) !== undefined ||
+      !current()
+    )
+      return jsonResponse(
+        commandFailure(
+          "blocked",
+          "The selected event source is unavailable or changed. Check its connection and filters. Source changes require explicit re-arm.",
+        ),
+        200,
+        origin,
+      );
+    command = { ...checked, definition: eventPreparation.definition };
+  }
   if (command.kind === "rearm-file-automation") {
     if (context.principal.kind !== "local-window")
       return jsonResponse(
@@ -597,7 +675,10 @@ async function handleCommand(
       );
     }
   }
-  const result = dependencies.commands.execute(command, undefined, preparation);
+  const result =
+    eventPreparation === undefined
+      ? dependencies.commands.execute(command, undefined, preparation)
+      : dependencies.commands.execute(command, undefined, preparation, eventPreparation);
   return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
 }
 

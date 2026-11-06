@@ -1,4 +1,5 @@
 import type {
+  AutomationEventSourceChoice,
   AutomationDefinition,
   AutomationDefinitionDraft,
   AutomationNotificationDeliveryQueryResponse,
@@ -44,6 +45,7 @@ import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { AutomationFileSourceStatus } from "./AutomationFileSourceStatus";
+import { AutomationEventSourceStatus } from "./AutomationEventSourceStatus";
 import { routineFileSourceLabel } from "./routineFileSourcePresentation";
 import { AutomationDefinitionEditor } from "./AutomationDefinitionEditor";
 import {
@@ -124,6 +126,20 @@ const FILTERS: readonly { readonly value: AutomationCenterFilter; readonly label
 export function AutomationCenter(props: AutomationCenterProps) {
   const controller = useAutomationCenterController({ client: props.client });
   const [editor, setEditor] = useState<EditorState>({ kind: "closed" });
+  const [eventSources, setEventSources] = useState<ReadonlyArray<AutomationEventSourceChoice>>([]);
+  useEffect(() => {
+    if (editor.kind === "closed" || props.client.eventSources === undefined) return;
+    const controller = new AbortController();
+    void props.client
+      .eventSources(controller.signal)
+      .then((choices) => {
+        if (!controller.signal.aborted) setEventSources(choices);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setEventSources([]);
+      });
+    return () => controller.abort();
+  }, [editor.kind, props.client]);
   const [describeRequest, setDescribeRequest] = useState<string>();
   const [pendingFocusId, setPendingFocusId] = useState<string | undefined>(undefined);
   const [deliveryStatus, setDeliveryStatus] = useState<
@@ -484,7 +500,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
         {editor.kind === "create" ? (
           <div className="automation-center__detail-pane">
             <AutomationDefinitionEditor
-              catalog={props.catalog}
+              catalog={{ ...props.catalog, eventSources }}
               {...(editor.requestDraft === undefined
                 ? {}
                 : { initialRequestDraft: editor.requestDraft })}
@@ -498,7 +514,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
         ) : editor.kind === "edit" && controller.detail.status === "ready" ? (
           <div className="automation-center__detail-pane">
             <AutomationDefinitionEditor
-              catalog={props.catalog}
+              catalog={{ ...props.catalog, eventSources }}
               {...(props.localHostId === undefined ? {} : { localHostId: props.localHostId })}
               initial={controller.detail.automation}
               onCancel={() => setEditor({ kind: "closed" })}
@@ -1041,6 +1057,15 @@ function AutomationDetail(props: {
         />
       ) : null}
 
+      {automation.trigger.kind === "integration-event" ? (
+        <AutomationEventSourceStatus
+          automation={automation}
+          source={controller.detail.eventSource}
+          execute={controller.execute}
+          refresh={controller.retryDetail}
+        />
+      ) : null}
+
       <dl className="automation-detail__facts">
         <div>
           <dt>Schedule</dt>
@@ -1135,6 +1160,7 @@ function AutomationDetail(props: {
           automation={automation}
           automationName={automation.displayName}
           controller={controller}
+          generateId={props.generateId}
           format={props.format}
           {...(props.notificationClient === undefined
             ? {}
@@ -1151,6 +1177,7 @@ function AutomationHistoryBody(props: {
   readonly automationName: string;
   readonly controller: AutomationCenterController;
   readonly format: AutomationFormatOptions;
+  readonly generateId: () => string;
   readonly notificationClient?: AutomationNotificationClient;
   readonly onOpenThread?: (target: AutomationThreadTarget & { readonly title: string }) => void;
 }) {
@@ -1226,7 +1253,13 @@ function AutomationHistoryBody(props: {
                 {formatAutomationInstant(run.claimedAt, props.format)}
               </span>
               <span className="automation-history__occurrence">
-                {run.occurrence.kind === "manual" ? "Manual run" : "Scheduled run"}
+                {run.occurrence.kind === "manual"
+                  ? run.occurrence.retryOfRunId === undefined
+                    ? "Manual run"
+                    : "Retry"
+                  : run.occurrence.kind === "file-arrival"
+                    ? "File arrival"
+                    : "Scheduled run"}
               </span>
               {run.failure === undefined ? null : (
                 <span className="automation-history__failure">{run.failure.message}</span>
@@ -1252,6 +1285,29 @@ function AutomationHistoryBody(props: {
                 {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
                 run={run}
               />
+              {props.automation.lifecycle === "enabled" &&
+              props.automation.targetPolicy === "new-thread" &&
+              ["failed", "interrupted", "cancelled"].includes(run.lifecycle) &&
+              run.definitionSnapshot.definitionRevision === props.automation.definitionRevision ? (
+                <OctantButton
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    void controller.execute(
+                      {
+                        kind: "run-now-automation",
+                        automationId: props.automation.id,
+                        expectedVersion: props.automation.version,
+                        retryRunId: run.id,
+                        runNowRequestId: props.generateId(),
+                      } as AutomationClientCommand,
+                      "Retry requested as a new run.",
+                    )
+                  }
+                >
+                  Retry run
+                </OctantButton>
+              ) : null}
             </li>
           );
         })}

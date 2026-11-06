@@ -1,4 +1,6 @@
 import {
+  AutomationEventSourceChoices,
+  type AutomationEventSourceChoice,
   type AutomationCommand,
   AutomationCommandResult,
   type AutomationDetailResponse,
@@ -54,6 +56,9 @@ export interface AutomationClientOptions {
 }
 
 export interface AutomationClient {
+  readonly eventSources?: (
+    signal?: AbortSignal,
+  ) => Promise<ReadonlyArray<AutomationEventSourceChoice>>;
   list(input?: AutomationListInput, signal?: AbortSignal): Promise<AutomationListResponse>;
   get(
     automationId: AutomationId,
@@ -120,6 +125,16 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
   const maxAttempts = Math.max(1, options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
 
   return {
+    eventSources(signal) {
+      return request(
+        options.fetch,
+        new URL("/api/automations/event-sources", options.baseUrl).toString(),
+        { method: "GET", headers },
+        decodeHostAnswer(AutomationEventSourceChoices),
+        maxAttempts,
+        signal,
+      );
+    },
     list(input = {}, signal) {
       const url = new URL("/api/automations/list", options.baseUrl);
       url.searchParams.set("mode", input.mode ?? "all");
@@ -190,7 +205,8 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
       if (
         command.kind === "rearm-file-automation" ||
         ((command.kind === "create-automation" || command.kind === "update-automation") &&
-          command.definition.trigger.kind === "file-arrival")
+          (command.definition.trigger.kind === "file-arrival" ||
+            command.definition.trigger.kind === "integration-event"))
       ) {
         return fileRoutineRequest(
           (boundedSignal) =>
@@ -207,7 +223,7 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
               boundedSignal,
             ),
           signal,
-          "The host has not confirmed this file-routine change. Refresh its details and history before trying again.",
+          "The host has not confirmed this input-routine change. Refresh its details and history before trying again.",
         );
       }
       return request(

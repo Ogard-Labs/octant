@@ -21,6 +21,7 @@ import {
 } from "./automationFileSourceScan";
 import { initialAutomationFileCheckpoint } from "./automationFileSourceState";
 import type { AutomationFileSourceAuthority } from "./automationFileSources";
+import { automationRunFileSource } from "./automationFileContext";
 
 /** A transient protected-route proof; never accepted from or returned to the renderer. */
 export interface AutomationFileSourcePreparation {
@@ -49,8 +50,8 @@ export function resolveAutomationFileSourceAuthority(
   at: UtcTimestamp,
 ): AutomationFileSourceAuthority | undefined {
   if (
-    snapshot.mode !== "work" ||
-    snapshot.binding.kind !== "work" ||
+    (snapshot.mode !== "work" && snapshot.mode !== "code") ||
+    (snapshot.binding.kind !== "work" && snapshot.binding.kind !== "code") ||
     snapshot.trigger.kind !== "file-arrival" ||
     snapshot.targetPolicy !== "new-thread"
   )
@@ -71,7 +72,7 @@ export function resolveAutomationFileSourceAuthority(
   const initial = facts();
   const project = initial.project;
   if (
-    project?.type !== "work" ||
+    (project?.type !== "work" && project?.type !== "code") ||
     !project.binding.canonicalRoot.startsWith("/") ||
     revalidateAutomationAuthority({ definition, run: owner, facts: initial }).kind !== "ok"
   )
@@ -88,7 +89,7 @@ export function resolveAutomationFileSourceAuthority(
     current: () => {
       const current = facts();
       return (
-        current.project?.type === "work" &&
+        (current.project?.type === "work" || current.project?.type === "code") &&
         current.project.binding.canonicalRoot === root &&
         revalidateAutomationAuthority({ definition, run: owner, facts: current }).kind === "ok"
       );
@@ -142,10 +143,8 @@ export async function prepareAutomationFileRunAdmission(input: {
   readonly signal: AbortSignal;
 }): Promise<(() => boolean) | undefined> {
   const { run } = input;
-  if (
-    run.occurrence.kind !== "file-arrival" ||
-    run.definitionSnapshot.trigger.kind !== "file-arrival"
-  )
+  const receipt = automationRunFileSource(run);
+  if (receipt === undefined || run.definitionSnapshot.trigger.kind !== "file-arrival")
     return undefined;
   const protectedChoice = currentProtectedFilesChoice();
   const current = () =>
@@ -161,8 +160,7 @@ export async function prepareAutomationFileRunAdmission(input: {
     current,
     signal: input.signal,
   });
-  if (root.sourceIdentity !== run.occurrence.source.checkpoint.sourceIdentity || !current())
-    return undefined;
+  if (root.sourceIdentity !== receipt.checkpoint.sourceIdentity || !current()) return undefined;
   const retained = () =>
     current() && automationFileSourceCurrent(input.filesystem, root) && current();
   return retained() ? retained : undefined;

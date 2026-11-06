@@ -1,4 +1,6 @@
 import {
+  AutomationEventSourceObserved,
+  type AutomationEventSourceCheckpoint,
   AutomationFileSourceObserved,
   type AutomationFileSourceCheckpoint,
   AutomationBlocked,
@@ -44,6 +46,7 @@ import type { Projection } from "../persistence/projection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import type { AutomationEventStore } from "./automationEventStore";
 import {
+  AUTOMATION_EVENT_SOURCE_OBSERVED,
   AUTOMATION_FILE_SOURCE_OBSERVED,
   AUTOMATION_BLOCKED,
   AUTOMATION_DEFINITION_CREATED,
@@ -132,6 +135,7 @@ export class AutomationProjection implements Projection {
   readonly name = "automations";
   readonly dependencies: ReadonlyArray<string> = [];
   readonly #fileSources = new Map<AutomationId, AutomationFileSourceCheckpoint>();
+  readonly #eventSources = new Map<AutomationId, AutomationEventSourceCheckpoint>();
   readonly #definitions = new Map<AutomationId, AutomationDefinition>();
   readonly #runs = new Map<AutomationRunId, AutomationRun>();
   readonly #runsByAutomation = new Map<AutomationId, Set<AutomationRunId>>();
@@ -143,6 +147,7 @@ export class AutomationProjection implements Projection {
 
   clear(): void {
     this.#fileSources.clear();
+    this.#eventSources.clear();
     this.#definitions.clear();
     this.#runs.clear();
     this.#runsByAutomation.clear();
@@ -156,8 +161,33 @@ export class AutomationProjection implements Projection {
   applyEnvelope(event: EventEnvelope): void {
     if (event.eventVersion !== 1) return;
     switch (event.eventName) {
+      case AUTOMATION_EVENT_SOURCE_OBSERVED: {
+        const payload = Schema.decodeUnknownSync(AutomationEventSourceObserved)(event.payload);
+        const definition = this.#definitions.get(payload.automationId);
+        if (definition === undefined || definition.version >= event.aggregateVersion) return;
+        const previous = this.#eventSources.get(payload.automationId);
+        if (
+          definition.trigger.kind !== "integration-event" ||
+          definition.definitionRevision !== payload.definitionRevision ||
+          definition.trigger.sourceIdentity !== payload.checkpoint.sourceIdentity ||
+          (previous !== undefined &&
+            (payload.checkpoint.observationRevision !== previous.observationRevision + 1 ||
+              payload.checkpoint.automaticStarts < previous.automaticStarts ||
+              payload.checkpoint.automaticStarts > previous.automaticStarts + 1))
+        )
+          throw invalidFileSourceFrame(event);
+        this.#eventSources.set(payload.automationId, payload.checkpoint);
+        this.#definitions.set(payload.automationId, {
+          ...definition,
+          version: event.aggregateVersion,
+          updatedAt: payload.recordedAt,
+        });
+        return;
+      }
       case AUTOMATION_DEFINITION_CREATED: {
         const payload = decodeDefinitionCreated(event.payload);
+        if (!this.#definitions.has(payload.automation.id) && payload.eventSource !== undefined)
+          this.#eventSources.set(payload.automation.id, payload.eventSource);
         if (!this.#definitions.has(payload.automation.id) && payload.fileSource !== undefined) {
           validateFileSourceFrame(payload.fileSource, event);
           this.#fileSources.set(payload.automation.id, payload.fileSource);
@@ -172,6 +202,8 @@ export class AutomationProjection implements Projection {
         const payload = decodeDefinitionUpdated(event.payload);
         const existing = this.#definitions.get(payload.automation.id);
         if (existing !== undefined && existing.version >= payload.automation.version) return;
+        if (payload.eventSource !== undefined)
+          this.#eventSources.set(payload.automation.id, payload.eventSource);
         const previous = this.#fileSources.get(payload.automation.id);
         if (payload.fileSource !== undefined) {
           validateFileSourceFrame(payload.fileSource, event);
@@ -271,6 +303,10 @@ export class AutomationProjection implements Projection {
     return this.#fileSources.get(automationId);
   }
 
+  getEventSource(automationId: AutomationId): AutomationEventSourceCheckpoint | undefined {
+    return this.#eventSources.get(automationId);
+  }
+
   getDefinition(automationId: AutomationId): AutomationDefinition | undefined {
     return this.#definitions.get(automationId);
   }
@@ -365,8 +401,32 @@ export class AutomationProjection implements Projection {
 
   #summarize(definition: AutomationDefinition): AutomationSummary {
     const latest = this.latestRun(definition.id);
+    const latestEventRun = this.#runsNewestFirst(definition.id).find(
+      (run) =>
+        run.occurrence.kind === "integration-event" ||
+        (run.occurrence.kind === "manual" && run.occurrence.eventSource !== undefined),
+    );
+    const eventReceipt =
+      latestEventRun?.occurrence.kind === "integration-event"
+        ? latestEventRun.occurrence.source
+        : latestEventRun?.occurrence.kind === "manual"
+          ? latestEventRun.occurrence.eventSource
+          : undefined;
     const source = this.#fileSources.get(definition.id);
+    const eventSource = this.#eventSources.get(definition.id);
     return {
+      ...(latestEventRun === undefined || eventReceipt === undefined
+        ? {}
+        : {
+            latestEventRun: {
+              event: eventReceipt.event,
+              runId: latestEventRun.id,
+              lifecycle: latestEventRun.lifecycle,
+            },
+          }),
+      ...(definition.trigger.kind !== "integration-event" || eventSource === undefined
+        ? {}
+        : { eventSource }),
       id: definition.id,
       displayName: definition.displayName,
       hostId: definition.hostId,

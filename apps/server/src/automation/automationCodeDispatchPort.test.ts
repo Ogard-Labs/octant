@@ -8,6 +8,8 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import { createAutomationCodeDispatchPort } from "./automationCodeDispatchPort";
+import { automationPromptDigest } from "./automationAuthorityRevalidation";
+import { automationDispatchPromptText } from "./automationFileContext";
 import {
   AUTOMATION_TEST_IDS,
   automationDefinitionFixture,
@@ -73,7 +75,7 @@ function codeRun(overrides: Partial<AutomationDefinition> = {}): AutomationRun {
   );
 }
 
-function port(projectLevel: PermissionMode = "full-access") {
+function port(projectLevel: PermissionMode = "full-access", sourceBranch = "development") {
   const execute = vi.fn(async (_scope: WindowId, _command: unknown) => ({
     kind: "managed-thread-created",
     thread: { id: threadId },
@@ -85,11 +87,25 @@ function port(projectLevel: PermissionMode = "full-access") {
     clock: () => "2026-08-10T12:00:00.000Z" as UtcTimestamp,
     uuid: () => "aa000000-0000-4000-8000-0000000000fa",
     projectLevel: () => projectLevel,
+    sourceBranchForRun: () => sourceBranch,
   });
   return { dispatch, execute };
 }
 
 describe("Code routine threads", () => {
+  it("creates a managed run from the bound Project's current branch", async () => {
+    const subject = port("ask-first", "main");
+    await subject.dispatch.createApprovalGatedThread({
+      run: codeRun(),
+      threadId,
+      title: "Check completed CI",
+      scopeId,
+    });
+    expect(subject.execute.mock.calls[0]?.[1]).toMatchObject({
+      sourceBranch: "main",
+      deliveryTarget: { proposedBaseBranch: "main" },
+    });
+  });
   it("creates a routine's thread asking first unless the person opted it into its Project's level", async () => {
     const asked = port();
     await asked.dispatch.createApprovalGatedThread({
@@ -141,7 +157,7 @@ describe("Code routine threads", () => {
         run,
         threadId,
         firstTurnRequestId: run.firstTurnRequestId,
-        promptDigest: "unused" as never,
+        promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
         scopeId,
       });
       return (
@@ -173,7 +189,7 @@ describe("Code routine threads", () => {
       run,
       threadId,
       firstTurnRequestId: run.firstTurnRequestId,
-      promptDigest: "unused" as never,
+      promptDigest: automationPromptDigest(automationDispatchPromptText(run)),
       scopeId,
     });
     const [, command, options] = operations.execute.mock.calls[0] as unknown as [
@@ -183,6 +199,15 @@ describe("Code routine threads", () => {
     ];
     expect(options).toEqual({ routineRun: { automationId: run.automationId, runId: run.id } });
     expect(command).not.toHaveProperty("routineRun");
+    const refused = await dispatch.startOrRecoverFirstTurn({
+      run,
+      threadId,
+      firstTurnRequestId: run.firstTurnRequestId,
+      promptDigest: automationPromptDigest("different retained input"),
+      scopeId,
+    });
+    expect(refused).toMatchObject({ kind: "failed", reason: "recovery-failed" });
+    expect(operations.execute).toHaveBeenCalledOnce();
   });
 
   it("creates a run at the level picked on the routine, never above the Project's", async () => {

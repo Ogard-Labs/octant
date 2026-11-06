@@ -302,9 +302,48 @@ describe("AutomationDefinitionEditor creation", () => {
     expect(screen.getByLabelText("Automatic runs per arm")).toHaveValue(8);
   });
 
-  it.each(["Code", "Chat"])("does not offer file arrivals for %s", async (mode) => {
+  it("saves the selected contributed event source and filters beside the person's fixed task", async () => {
+    const props = editorProps({
+      catalog: catalog({
+        eventSources: [
+          {
+            integrationId: "selected-connection",
+            sourceId: "completed-ci",
+            label: "Connected completed CI",
+            fields: [{ id: "repository", label: "Repository", required: true }],
+          },
+        ],
+      }),
+    });
+    render(<AutomationDefinitionEditor {...props} />);
+    await fillWorkRoutine();
+    await chooseLabeledOption("Schedule", "When an integration event arrives");
+    await chooseLabeledOption("Event source", "Connected completed CI");
+    fireEvent.change(screen.getByLabelText("Repository"), { target: { value: "example/project" } });
+    fireEvent.change(screen.getByLabelText("Check every (minutes)"), { target: { value: "5" } });
+    const draft = await savedDraft(props);
+    expect(draft.trigger).toEqual({
+      kind: "integration-event",
+      integrationId: "selected-connection",
+      sourceId: "completed-ci",
+      sourceLabel: "Connected completed CI",
+      filters: { repository: "example/project" },
+      pollMinutes: 5,
+      automaticStartLimit: 8,
+    });
+    expect(draft.taskPrompt).toBe("Summarize open work.");
+    expect(draft.runLevel).toBe("ask-first");
+  });
+
+  it("offers file arrivals for Code and refuses them for Chat", async () => {
     render(<AutomationDefinitionEditor {...editorProps()} />);
-    await userEvent.click(screen.getByRole("button", { name: mode }));
+    await userEvent.click(screen.getByRole("button", { name: "Code" }));
+    await userEvent.click(screen.getByLabelText("Schedule"));
+    expect(
+      await screen.findByRole("option", { name: "When files arrive or change" }),
+    ).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Chat" }));
     await userEvent.click(screen.getByLabelText("Schedule"));
     expect(
       screen.queryByRole("option", { name: "When files arrive or change" }),

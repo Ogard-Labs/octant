@@ -16,6 +16,7 @@ import { GithubCapabilityService } from "../github/githubCapabilityService";
 import { GithubCatalogueService } from "../github/githubCatalogueService";
 import { GithubIssueContextService } from "../github/githubIssueContextService";
 import { LinearIssueContextService } from "../plugins/linear/linearIssueContextService";
+import { linearRoutineEventSources } from "../plugins/linear/linearRoutineEventSources";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "../github/githubReadToolService";
 import { TerminalSessionImports } from "../terminalSessions/terminalSessionImports";
@@ -457,6 +458,10 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       integrationRoutes,
       credentialOperations: () => integrationService.credentialOperations?.() ?? [],
       linearIssueContextService,
+      linearRoutineEventSources: linearRoutineEventSources(
+        integrationService,
+        linearIntegrationIsEffective,
+      ),
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
       siblingThreadsService,

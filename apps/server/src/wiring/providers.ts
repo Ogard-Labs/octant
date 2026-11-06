@@ -185,6 +185,7 @@ import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegist
 import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
 import { AgentToolingDiscovery } from "../extensions/agentToolingDiscovery";
 import { McpServerSignIn } from "../extensions/mcpServerSignIn";
+import { githubRoutineEventSources } from "../extensions/githubRoutineEventSources";
 import { ExtensionProjectPinStore } from "../extensions/extensionProjectPinStore";
 import type {
   ExtensionProjectPinListing,
@@ -1942,6 +1943,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     return {
       agentPluginMcpSessionManager,
+      githubRoutineEventSources: githubRoutineEventSources(() => mcpServerSignInHolder.current),
       chatAttachmentStore,
       chatDataDirectory,
       claudeResumeIdentityStore,
