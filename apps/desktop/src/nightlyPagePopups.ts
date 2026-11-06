@@ -1,4 +1,4 @@
-import { dialog, screen, type BrowserWindow } from "electron";
+import { dialog, Notification, screen, type BrowserWindow } from "electron";
 import {
   MAX_BROWSER_CHOSEN_FILES,
   MAX_BROWSER_CHOSEN_PATH,
@@ -9,6 +9,9 @@ import {
 import type { NativeMenuEntry } from "@octant/contracts/shell";
 import { popupNativeMenu } from "./nativeContextMenus";
 import type { NightlyPagePopupPlacement } from "./nightlyBrowserPresentation";
+
+export const NIGHTLY_DIALOGS_ANSWERED_NOTICE =
+  "A page kept opening dialogs, so Octant answered the rest for this page.";
 
 /** The presentation route body bound; a longer file answer is refused before it is sent. */
 const MAX_ANSWER_BYTES = 15_360;
@@ -160,6 +163,9 @@ export async function presentNightlyPagePopup(
     return outcome.kind === "selected" ? menu.answer(outcome.id) : undefined;
   }
   if (popup.kind === "dialog") {
+    // Electron has no sheet scoped to part of a window, so a page dialog is
+    // window-modal; Stable's per-load dialog limit keeps a page from
+    // holding the window this way.
     const shown = nightlyPageDialog(popup);
     const { response } = await dialog.showMessageBox(window, {
       type: "none",
@@ -173,6 +179,12 @@ export async function presentNightlyPagePopup(
     });
     if (signal.aborted) return undefined;
     return { kind: "dialog", accept: response === 0 };
+  }
+  if (popup.kind === "notice") {
+    // Told once and without a modal, so the page cannot hold the window this way.
+    if (Notification.isSupported())
+      new Notification({ title: "Octant Nightly", body: NIGHTLY_DIALOGS_ANSWERED_NOTICE }).show();
+    return undefined;
   }
   const chosen = await dialog.showOpenDialog(window, {
     properties: popup.multiple ? ["openFile", "multiSelections"] : ["openFile"],

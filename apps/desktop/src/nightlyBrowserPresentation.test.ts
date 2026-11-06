@@ -670,19 +670,25 @@ describe("page popups in Nightly's embedded Browser", () => {
       status: "popup",
       popup: { kind: "dialog", id: popupId, dialog: "confirm", message: "Leave?" },
     },
+    stable: {
+      readonly focused?: () => boolean;
+      readonly watch?: () => Promise<HumanBrowserResult>;
+      readonly offerAgain?: boolean;
+    } = {},
   ) {
     const calls: HumanBrowserRequest[] = [];
     let offered = false;
     const main = new NightlyBrowserPresentation({
       current: () => true,
       visible: () => true,
-      focused: () => true,
+      focused: stable.focused ?? (() => true),
       pagePopup: present,
       execute: async (request) => {
         calls.push(request);
         if (request.kind === "attach") return { status: "attached", presentationId: id };
+        if (request.kind === "popup-watch" && stable.watch !== undefined) return stable.watch();
         if (request.kind === "popup") {
-          if (offered) {
+          if (offered && stable.offerAgain !== true) {
             await new Promise((done) => setTimeout(done, 20));
             return { status: "idle" };
           }
@@ -777,6 +783,54 @@ describe("page popups in Nightly's embedded Browser", () => {
     ])
       expect(await main.invoke(decodeHumanBrowserRequest(raw))).toEqual({ status: "refused" });
     expect(calls.filter((request) => request.kind === "popup-answer")).toHaveLength(0);
+    await main.close();
+  });
+
+  it("closes its own sheet when Stable retires the popup", async () => {
+    let retire: (result: HumanBrowserResult) => void = () => {};
+    const shown = vi.fn(
+      (_popup: unknown, _placement: unknown, signal: AbortSignal) =>
+        new Promise<{ kind: "dialog"; accept: boolean } | undefined>((done) => {
+          signal.addEventListener("abort", () => done({ kind: "dialog", accept: true }), {
+            once: true,
+          });
+        }),
+    );
+    const { main, calls } = await presented(shown, undefined, {
+      watch: () =>
+        new Promise((done) => {
+          retire = done;
+        }),
+    });
+    await vi.waitFor(() => expect(shown).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(calls.some((request) => request.kind === "popup-watch")).toBe(true),
+    );
+    retire({ status: "refused" });
+    // The sheet closed because the page closed its dialog: nothing is answered.
+    await vi.waitFor(() =>
+      expect(calls.some((request) => request.kind === "popup-dismiss")).toBe(true),
+    );
+    expect(calls.some((request) => request.kind === "popup-answer")).toBe(false);
+    await main.close();
+  });
+
+  it("never shows the same pending popup twice", async () => {
+    const shown = vi.fn(async () => undefined);
+    const { main, calls } = await presented(shown, undefined, { offerAgain: true });
+    await vi.waitFor(() =>
+      expect(calls.filter((request) => request.kind === "popup").length).toBeGreaterThan(2),
+    );
+    expect(shown).toHaveBeenCalledTimes(1);
+    await main.close();
+  });
+
+  it("asks Stable for nothing while its window is not focused", async () => {
+    const shown = vi.fn(async () => undefined);
+    const { main, calls } = await presented(shown, undefined, { focused: () => false });
+    await new Promise((done) => setTimeout(done, 300));
+    expect(calls.some((request) => request.kind === "popup")).toBe(false);
+    expect(shown).not.toHaveBeenCalled();
     await main.close();
   });
 });

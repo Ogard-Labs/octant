@@ -55,10 +55,16 @@ const pages: Record<string, string> = {
     <form onsubmit="event.preventDefault(); document.title = 'Submitted'"><input id="keys" aria-label="Keys" onkeydown="if (event.ctrlKey) document.title = 'Chord ' + event.key"></form>
     <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">`,
   "/popups": `<!doctype html><title>Popups</title>
-    <select id="size" style="width:160px" oninput="window.inputs = (window.inputs ?? 0) + 1" onchange="document.title = 'Size ' + this.value">
+    <select id="size" aria-label="Size" style="width:160px" oninput="window.inputs = (window.inputs ?? 0) + 1" onchange="document.title = 'Size ' + this.value">
       <option value="s">Small</option><optgroup label="Big"><option value="l">Large</option><option value="x" disabled>Huge</option></optgroup>
     </select>
-    <button id="hello" style="display:block;margin-top:40px;width:120px;height:30px" onclick="alert('Hello from the page'); document.title = 'Greeted'">Hello</button>`,
+    <button id="hello" style="display:block;margin-top:40px;width:120px;height:30px" onclick="alert('Hello from the page'); document.title = 'Greeted'">Hello</button>
+    <button id="tick" style="display:block;margin-top:20px;width:120px;height:30px" onclick="setTimeout(() => alert('Tick'), 50)">Tick</button>
+    <button id="mark" style="display:block;margin-top:20px;width:120px;height:30px" onclick="document.title = 'Marked'">Mark</button>`,
+  "/framed-file": `<!doctype html><title>Framed file</title>
+    <iframe id="near" title="Near" src="/inner-file" width="400" height="80"></iframe>
+    <iframe id="far" title="Far" src="{{other}}/inner-file" width="400" height="80"></iframe>`,
+  "/inner-file": `<!doctype html><input id="pick" type="file" style="width:300px;height:40px">`,
   "/greets": `<!doctype html><title>Greeting</title><script>alert("Welcome"); document.title = "Greeted";</script>`,
   "/slow": `<!doctype html><title>Slow</title>
     <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
@@ -186,9 +192,14 @@ async function pageView(): Promise<{
     const opened = await opening.finally(() => {
       opening = undefined;
     });
-    opened.on("Page.javascriptDialogOpening", (params) => {
-      for (const listener of messageListeners) listener({}, "Page.javascriptDialogOpening", params);
-    });
+    for (const method of [
+      "Page.javascriptDialogOpening",
+      "Page.javascriptDialogClosed",
+      "Page.fileChooserOpened",
+    ] as const)
+      opened.on(method, (params) => {
+        for (const listener of messageListeners) listener({}, method, params);
+      });
     session = opened;
     return opened;
   };
@@ -463,6 +474,103 @@ function entry(
   };
 }
 
+/**
+ * A real page in Stable's hidden window for a native client, attached to a
+ * human presentation whose presses arrive as trusted Chromium input.
+ */
+async function presentedPage(path: string) {
+  const { view, page } = await pageView();
+  let receive:
+    | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
+    | undefined;
+  await page.addInitScript(
+    `globalThis.octantBrowserSelect = (${observeBrowserSelectPopup.toString()})();`,
+  );
+  await page.goto(origin + path);
+  let pointer: Promise<void> = Promise.resolve();
+  const host = createBrowserSurfaceHost({
+    isEmbeddedOwner: () => true,
+    isOwnerWindowAvailable: () => true,
+    createView: () => ({
+      ...view,
+      human: {
+        visible: () => undefined,
+        bounds: () => undefined,
+        frames: (listener) => {
+          receive = listener;
+          return () => undefined;
+        },
+        // The person's press arrives as trusted Chromium input, as
+        // Electron's sendInputEvent delivers it.
+        input: (input) => {
+          if (input.type === "mouseDown")
+            pointer = pointer
+              .then(() => page.mouse.move(input.x, input.y))
+              .then(() => page.mouse.down());
+          // A release that opens a page dialog settles only once it is answered.
+          if (input.type === "mouseUp") pointer = pointer.then(() => void page.mouse.up());
+        },
+      },
+    }),
+  });
+  const contextId = crypto.randomUUID();
+  const threadId = crypto.randomUUID();
+  await host.createContext({
+    contextId,
+    owner: { windowId: "window-a", threadId },
+    policy: {
+      profileMode: "isolated",
+      allowedOrigins: [origin],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 2,
+      sessionTimeoutMs: 300_000,
+    },
+  });
+  const attached = await host.humanPresentation(
+    decodeHumanBrowserRequest({ contextId, threadId, kind: "attach" }),
+    "window-a",
+  );
+  if (attached.status !== "attached") throw new Error("Expected a presentation");
+  const send = (raw: Readonly<Record<string, unknown>>): Promise<HumanBrowserResult> =>
+    host.humanPresentation(
+      decodeHumanBrowserRequest({
+        contextId,
+        threadId,
+        presentationId: attached.presentationId,
+        ...raw,
+      }),
+      "window-a",
+    );
+  await send({ kind: "layout", layout: { width: 1280, height: 720, visible: true } });
+  receive?.({
+    getSize: () => ({ width: 1280, height: 720 }),
+    toJPEG: () => new Uint8Array([1]),
+  });
+  await send({ kind: "frame", acknowledgement: 0 });
+  const click = async (selector: string) => {
+    const box = await page.locator(selector).boundingBox();
+    if (box === null) throw new Error("No element.");
+    const at = { x: Math.round(box.x + 10), y: Math.round(box.y + box.height / 2) };
+    for (const type of ["mouseDown", "mouseUp"])
+      expect(
+        await send({
+          kind: "input",
+          frameSequence: 1,
+          input: { type, ...at, button: "left", clickCount: 1 },
+        }),
+      ).toMatchObject({ status: "accepted" });
+    await pointer;
+  };
+  const popup = async () => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const result = await send({ kind: "popup" });
+      if (result.status === "popup") return result.popup;
+    }
+    throw new Error("No popup.");
+  };
+  return { page, host, contextId, send, click, popup };
+}
+
 // A real browser on a shared CI runner can take longer than the 5 s default.
 describe.skipIf(chrome === undefined)(
   "the desktop Browser on a real page",
@@ -578,97 +686,8 @@ describe.skipIf(chrome === undefined)(
     });
 
     it("offers a person's select list and page alert to the presentation and applies the answers", async () => {
-      const { view, page } = await pageView();
-      let receive:
-        | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
-        | undefined;
+      const { page, host, contextId, send, click, popup } = await presentedPage("/popups");
       try {
-        await page.addInitScript(
-          `globalThis.octantBrowserSelect = (${observeBrowserSelectPopup.toString()})();`,
-        );
-        await page.goto(origin + "/popups");
-        let pointer: Promise<void> = Promise.resolve();
-        const host = createBrowserSurfaceHost({
-          isEmbeddedOwner: () => true,
-          isOwnerWindowAvailable: () => true,
-          createView: () => ({
-            ...view,
-            human: {
-              visible: () => undefined,
-              bounds: () => undefined,
-              frames: (listener) => {
-                receive = listener;
-                return () => undefined;
-              },
-              // The person's press arrives as trusted Chromium input, as
-              // Electron's sendInputEvent delivers it.
-              input: (input) => {
-                if (input.type === "mouseDown")
-                  pointer = pointer
-                    .then(() => page.mouse.move(input.x, input.y))
-                    .then(() => page.mouse.down());
-                // A release that opens a page dialog settles only once it is answered.
-                if (input.type === "mouseUp") pointer = pointer.then(() => void page.mouse.up());
-              },
-            },
-          }),
-        });
-        const contextId = crypto.randomUUID();
-        const threadId = crypto.randomUUID();
-        await host.createContext({
-          contextId,
-          owner: { windowId: "window-a", threadId },
-          policy: {
-            profileMode: "isolated",
-            allowedOrigins: [origin],
-            credentialFieldProtection: true,
-            maxConcurrentTabs: 2,
-            sessionTimeoutMs: 300_000,
-          },
-        });
-        const attached = await host.humanPresentation(
-          decodeHumanBrowserRequest({ contextId, threadId, kind: "attach" }),
-          "window-a",
-        );
-        if (attached.status !== "attached") throw new Error("Expected a presentation");
-        const send = (raw: Readonly<Record<string, unknown>>): Promise<HumanBrowserResult> =>
-          host.humanPresentation(
-            decodeHumanBrowserRequest({
-              contextId,
-              threadId,
-              presentationId: attached.presentationId,
-              ...raw,
-            }),
-            "window-a",
-          );
-        await send({ kind: "layout", layout: { width: 1280, height: 720, visible: true } });
-        receive?.({
-          getSize: () => ({ width: 1280, height: 720 }),
-          toJPEG: () => new Uint8Array([1]),
-        });
-        await send({ kind: "frame", acknowledgement: 0 });
-        const click = async (selector: string) => {
-          const box = await page.locator(selector).boundingBox();
-          if (box === null) throw new Error("No element.");
-          const at = { x: Math.round(box.x + 10), y: Math.round(box.y + box.height / 2) };
-          for (const type of ["mouseDown", "mouseUp"])
-            expect(
-              await send({
-                kind: "input",
-                frameSequence: 1,
-                input: { type, ...at, button: "left", clickCount: 1 },
-              }),
-            ).toMatchObject({ status: "accepted" });
-          await pointer;
-        };
-        const popup = async () => {
-          for (let attempt = 0; attempt < 10; attempt += 1) {
-            const result = await send({ kind: "popup" });
-            if (result.status === "popup") return result.popup;
-          }
-          throw new Error("No popup.");
-        };
-
         await click("#size");
         const list = await popup();
         expect(list).toMatchObject({
@@ -714,6 +733,93 @@ describe.skipIf(chrome === undefined)(
           }),
         ).toEqual({ status: "accepted" });
         await expect.poll(() => page.evaluate(() => document.title)).toBe("Greeted");
+        host.closeContext(contextId);
+      } finally {
+        await page.context().close();
+      }
+    });
+
+    it("answers a person's timer dialog by policy when an agent action starts, and the action completes", async () => {
+      const { page, host, contextId, send, click, popup } = await presentedPage("/popups");
+      try {
+        await click("#tick");
+        const tick = await popup();
+        expect(tick).toMatchObject({ kind: "dialog", dialog: "alert", message: "Tick" });
+        const observed = await host.act(contextId, { kind: "snapshot" });
+        expect(observed.dialogs).toEqual([{ type: "alert", message: "Tick", answer: "accepted" }]);
+        const mark = entry(observed.snapshotRefs, "Mark");
+        const clicked = await host.act(contextId, {
+          kind: "click",
+          target: mark.selector,
+          expected: { role: mark.role, name: mark.name, url: `${origin}/popups` },
+        });
+        expect(clicked.title).toBe("Marked");
+        expect(await send({ kind: "popup" })).toEqual({ status: "idle" });
+        expect(
+          await send({
+            kind: "popup-answer",
+            popupId: tick.id,
+            answer: { kind: "dialog", accept: true },
+          }),
+        ).toEqual({ status: "refused" });
+        host.closeContext(contextId);
+      } finally {
+        await page.context().close();
+      }
+    });
+
+    it("never offers the person a select list an agent's click opened", async () => {
+      const { page, host, contextId, send, click, popup } = await presentedPage("/popups");
+      try {
+        // The person pressed just now, elsewhere on the page.
+        await click("#mark");
+        const observed = await host.act(contextId, { kind: "snapshot" });
+        const size = entry(observed.snapshotRefs, "Size");
+        await host.act(contextId, {
+          kind: "click",
+          target: size.selector,
+          expected: { role: size.role, name: size.name, url: `${origin}/popups` },
+        });
+        expect(await send({ kind: "popup" })).toEqual({ status: "idle" });
+        // The person's own press on the same list still opens it.
+        await click("#size");
+        expect(await popup()).toMatchObject({ kind: "select" });
+        host.closeContext(contextId);
+      } finally {
+        await page.context().close();
+      }
+    });
+
+    it("holds a file chooser in a frame on the page's own site but not in a frame on another site", async () => {
+      const { page, host, contextId, send, popup } = await presentedPage("/framed-file");
+      try {
+        await page.waitForFunction(() => document.querySelectorAll("iframe").length === 2);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const press = async (frame: "#near" | "#far") => {
+          const box = await page.locator(frame).boundingBox();
+          if (box === null) throw new Error("No frame.");
+          for (const type of ["mouseDown", "mouseUp"])
+            await send({
+              kind: "input",
+              frameSequence: 1,
+              input: {
+                type,
+                x: Math.round(box.x + 40),
+                y: Math.round(box.y + 25),
+                button: "left",
+                clickCount: 1,
+              },
+            });
+        };
+        await press("#near");
+        const chooser = await popup();
+        expect(chooser).toMatchObject({ kind: "file", multiple: false });
+        await send({ kind: "popup-dismiss", popupId: chooser.id });
+        // A frame on another site is its own protocol target; its chooser is
+        // part of the nested-frame parity work and is not offered here.
+        await press("#far");
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(await send({ kind: "popup" })).toEqual({ status: "idle" });
         host.closeContext(contextId);
       } finally {
         await page.context().close();

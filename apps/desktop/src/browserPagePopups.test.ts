@@ -84,3 +84,23 @@ describe("captured page popups", () => {
     expect(await popups.answer(id, { kind: "file", paths: ["/a", "/b"] })).toBe(false);
   });
 });
+
+describe("watching a captured page popup", () => {
+  it("ends a watch as soon as the page retires its popup", async () => {
+    const popups = new BrowserPagePopups();
+    const id = popups.offer({ kind: "dialog", dialog: "alert", message: "Hi" }, source());
+    if (id === undefined) throw new Error("Expected an offered popup");
+    expect(await popups.watch(id, undefined, 10)).toBe(true);
+    const watching = popups.watch(id, undefined, 5_000);
+    popups.retire("dialog");
+    expect(await watching).toBe(false);
+  });
+
+  it("refuses any answer to a notice", async () => {
+    const popups = new BrowserPagePopups();
+    const id = popups.offer({ kind: "notice", notice: "dialogs-answered" }, source());
+    if (id === undefined) throw new Error("Expected an offered popup");
+    expect(await popups.answer(id, { kind: "dialog", accept: true })).toBe(false);
+    expect(popups.dismiss(id)).toBe(true);
+  });
+});

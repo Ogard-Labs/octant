@@ -1360,9 +1360,34 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       !view.webContents.isDestroyed() &&
       client.isAttached() &&
       humanDebuggers.has(client);
+    let heldDialog:
+      | {
+          readonly type: DialogReport["type"];
+          readonly message: string;
+          readonly handle: (accept: boolean) => Promise<boolean>;
+        }
+      | undefined;
+    let dialogLoad: { generation: number | undefined; times: number[]; noticed: boolean } = {
+      generation: undefined,
+      times: [],
+      noticed: false,
+    };
+    humanDialogHandoffs.set(client, (reports) => {
+      const held = heldDialog;
+      heldDialog = undefined;
+      if (held === undefined || popups.read()?.kind !== "dialog") return;
+      const answer = BROWSER_DIALOG_POLICY[held.type];
+      if (reports.length < 8)
+        reports.push({ type: held.type, message: held.message.slice(0, 512), answer });
+      popups.retire("dialog");
+      void held.handle(answer === "accepted");
+    });
     const listener: SurfaceProtocolListener = (_event, method, params, sessionId) => {
       if (sessionId !== undefined) return;
-      if (method === "Page.javascriptDialogClosed") return popups.retire("dialog");
+      if (method === "Page.javascriptDialogClosed") {
+        heldDialog = undefined;
+        return popups.retire("dialog");
+      }
       if ((agentDialogGuards.get(client) ?? 0) > 0) return;
       const opened = (params ?? {}) as {
         readonly type?: unknown;
@@ -1383,21 +1408,45 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         };
         // Electron offers no page prompt, so Stable's own Browser answers none.
         if (type === "prompt") return void handle(false);
-        popups.offer(
-          {
-            kind: "dialog",
-            dialog: type,
-            message: boundedPageText(
-              typeof opened.message === "string" ? opened.message : "",
-              MAX_BROWSER_DIALOG_TEXT,
-            ),
-          },
+        // A page that opens dialog after dialog would hold the person's window
+        // in sheets; past the burst, this load's dialogs get the fixed policy
+        // and the person is told once, without a modal.
+        const generation = scriptGenerations.get(view);
+        if (dialogLoad.generation !== generation)
+          dialogLoad = { generation, times: [], noticed: false };
+        const now = Date.now();
+        dialogLoad.times = [
+          ...dialogLoad.times.filter((at) => now - at < HUMAN_DIALOG_BURST_MS),
+          now,
+        ];
+        if (dialogLoad.times.length > HUMAN_DIALOG_BURST) {
+          void handle(BROWSER_DIALOG_POLICY[type] === "accepted");
+          if (!dialogLoad.noticed) {
+            dialogLoad.noticed = true;
+            popups.offer(
+              { kind: "notice", notice: "dialogs-answered" },
+              {
+                current: () => live() && scriptGenerations.get(view) === generation,
+                answer: async () => false,
+                dismiss: () => undefined,
+              },
+            );
+          }
+          return;
+        }
+        const message = boundedPageText(
+          typeof opened.message === "string" ? opened.message : "",
+          MAX_BROWSER_DIALOG_TEXT,
+        );
+        const offered = popups.offer(
+          { kind: "dialog", dialog: type, message },
           {
             current: live,
             answer: async (answer) => answer.kind === "dialog" && handle(answer.accept),
             dismiss: () => void handle(false),
           },
         );
+        if (offered !== undefined) heldDialog = { type, message, handle };
         return;
       }
       if (method !== "Page.fileChooserOpened") return;
@@ -1417,14 +1466,23 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               const info = await lstat(path).catch(() => undefined);
               if (info?.isFile() !== true) return false;
             }
-            if (!live() || scriptGenerations.get(view) !== generation) return false;
-            owned.control = "user";
-            owned.personInputs += 1;
-            await client.sendCommand("DOM.setFileInputFiles", {
-              files: [...answer.paths],
-              backendNodeId: node,
+            // Behind any agent action, and never into a page an agent holds.
+            return queueSurfaceAction(owned, async () => {
+              if (
+                !live() ||
+                scriptGenerations.get(view) !== generation ||
+                owned.control === "agent" ||
+                (agentDialogGuards.get(client) ?? 0) > 0
+              )
+                return false;
+              owned.control = "user";
+              owned.personInputs += 1;
+              await client.sendCommand("DOM.setFileInputFiles", {
+                files: [...answer.paths],
+                backendNodeId: node,
+              });
+              return true;
             });
-            return true;
           },
         },
       );
@@ -1438,6 +1496,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     return () => {
       popups.close();
       client.removeListener?.("message", listener);
+      humanDialogHandoffs.delete(client);
       if (!humanDebuggers.delete(client) || view.webContents.isDestroyed()) return;
       void client
         .sendCommand("Page.setInterceptFileChooserDialog", { enabled: false })
@@ -1472,8 +1531,19 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     )
       return;
     if (held.status === "too-many") return void dismissBrowserHeldSelect(evaluate, held.token);
+    // The hold must come from the person's own recent press: none older than
+    // that press, and none made while or before an agent action held the page.
+    const client = view.webContents.debugger;
+    const heldAt = Date.now() - held.age;
+    if (
+      held.age > HUMAN_POPUP_PRESS_MS ||
+      heldAt < owned.lastHumanPress - HUMAN_PRESS_SLACK_MS ||
+      (agentDialogGuards.get(client) ?? 0) > 0 ||
+      (agentGuardEnded.get(client) ?? 0) >= heldAt
+    )
+      return void dismissBrowserHeldSelect(evaluate, held.token);
     const generation = scriptGenerations.get(view);
-    const { status: _status, token, ...popup } = held;
+    const { status: _status, token, age: _age, ...popup } = held;
     heldSelectTokens.set(popups, token);
     popups.offer(
       { kind: "select", ...popup },
@@ -1693,7 +1763,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (
         request.kind === "popup" ||
         request.kind === "popup-answer" ||
-        request.kind === "popup-dismiss"
+        request.kind === "popup-dismiss" ||
+        request.kind === "popup-watch"
       ) {
         const tab = activeTab(owned);
         const stillCurrent = () =>
@@ -1703,6 +1774,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           owned.presentation.current(request.presentationId);
         if (request.kind === "popup-dismiss")
           return { status: tab.popups.dismiss(request.popupId) ? "accepted" : "refused" };
+        if (request.kind === "popup-watch") {
+          const pending = await tab.popups.watch(request.popupId, signal, 1_000);
+          return { status: pending && stillCurrent() ? "accepted" : "refused" };
+        }
         if (request.kind === "popup-answer") {
           if (owned.control === "agent") return { status: "refused" };
           const applied = await tab.popups.answer(
@@ -3669,8 +3744,20 @@ const agentDebuggers = new WeakSet<object>();
 const humanDebuggers = new WeakSet<object>();
 /** Agent actions whose fixed dialog policy is answering on an attachment now. */
 const agentDialogGuards = new WeakMap<object, number>();
+/** When the last agent action on an attachment ended, so an older page hold is not the person's. */
+const agentGuardEnded = new WeakMap<object, number>();
+/**
+ * Hands a dialog held for the person to an agent action that starts while it is
+ * open: the page is blocked behind it, so the action's fixed policy answers it.
+ */
+const humanDialogHandoffs = new WeakMap<object, (reports: DialogReport[]) => void>();
+/** A page that opens more dialogs than this within the window has the rest answered by policy. */
+const HUMAN_DIALOG_BURST = 3;
+const HUMAN_DIALOG_BURST_MS = 10_000;
 /** How soon after a person's press a select list, link menu or file chooser counts as theirs. */
 const HUMAN_POPUP_PRESS_MS = 1_500;
+/** The page records a press a moment before or after Stable notes dispatching it. */
+const HUMAN_PRESS_SLACK_MS = 250;
 
 function webAddress(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > 8_192 || !URL.canParse(value)) return undefined;
@@ -3764,6 +3851,7 @@ async function guardDialogs(
   };
   client.on("message", listener);
   agentDialogGuards.set(client, (agentDialogGuards.get(client) ?? 0) + 1);
+  humanDialogHandoffs.get(client)?.(reports);
   // Bounded: a view with no document yet may answer late, and the guard must
   // never hold the action it exists to keep moving.
   await Promise.race([
@@ -3773,6 +3861,7 @@ async function guardDialogs(
   return async () => {
     client.removeListener?.("message", listener);
     agentDialogGuards.set(client, Math.max(0, (agentDialogGuards.get(client) ?? 1) - 1));
+    agentGuardEnded.set(client, Date.now());
     // The attachment holds the page's touch or color scheme, or the person's
     // popup watch: it outlives the action.
     if (emulation.held || humanDebuggers.has(client)) return;

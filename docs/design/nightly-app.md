@@ -484,12 +484,14 @@ refuses them.
   same private isolated world as the editable observer, holds a trusted press
   that would open a single-choice main-frame `<select>` (button press, Space,
   F4, Alt+arrow, and the plain arrows on macOS) and keeps Chromium's popup
-  closed. Stable offers it only within 1.5 seconds of the person's own press
-  through the presentation and while no agent action holds the page, so an
-  agent's click never opens a menu in front of the person. The offer carries at
-  most 512 options, each label at most 256 UTF16 units, their optgroup labels,
-  disabled flags, the selected index and the field's rectangle; a longer list is
-  refused. Nightly shows the options as radio items in a native menu, with
+  closed. Any other trusted press ends the hold. Stable offers a hold only when
+  it is at most 1.5 seconds old, no older than the person's own press through
+  the presentation, and made while no agent action held the page and none has
+  run since; an agent's click on a list is held but never offered. The offer
+  carries at most 512 options, each label at most 256 UTF16 units, their
+  optgroup labels, disabled flags, the selected index and the field's
+  rectangle. A list whose options, group headings and separators exceed 1,024
+  native menu entries is refused as too many rather than cut short. Nightly shows the options as radio items in a native menu, with
   group headings, and places the selected item at the field (the press point and
   the cursor give the Browser image's origin). The chosen index returns to
   Stable, which sets it on the same held field and fires `input` then `change`,
@@ -504,6 +506,14 @@ refuses them.
   `beforeunload` uses fixed Leave and Stay copy. Electron offers no page
   `prompt`, so Stable answers one as cancelled, as its own Browser does. One
   dialog is held at a time; a second opening while one is held is dismissed.
+  When an agent action starts while a dialog is held for the person, the
+  page is blocked behind it, so the action's fixed policy answers that dialog,
+  reports it to the agent and retires the person's popup. After three dialogs
+  within 10 seconds in one page load, Stable answers that load's further
+  dialogs by the same fixed policy and tells the person once with a system
+  notification instead of a sheet. Electron has no sheet scoped to part of a
+  window, so a held dialog stays window-modal; that limit keeps a page from
+  holding the window with dialog after dialog.
 - **Link and image menus.** A right-click on a link or image right after the
   person's own press offers a menu with Open Link in New Tab, Copy Link
   Address, Copy Image and Copy Image Address, as they apply. The page's
@@ -518,7 +528,11 @@ refuses them.
   allowing several files only for a `multiple` field. At most 8 absolute paths
   of at most 1,024 UTF16 units each return, under the route's body bound; Stable
   hands the field only paths that are existing regular files, through
-  Chromium's file-input command for the same chooser node and document.
+  Chromium's file-input command for the same chooser node and document. That
+  command waits behind any agent action and is refused while one holds the
+  page. A chooser in a frame on the page's own site is held like the page's; a
+  frame on another site is its own protocol target, so its chooser is not held
+  yet and belongs to the nested-frame parity work.
 - **New windows.** `window.open` and `target="_blank"` follow Stable's existing
   Browser policy: the page's own popup is refused, and no free window opens in
   either app.
@@ -529,18 +543,26 @@ an agent action took the page, for a stale or spent identity, for a disabled
 option, and for a kind that does not match the popup. While a popup is open,
 Nightly releases the presentation's held keys and buttons, keeps new presses out
 of the page, and sends Stable a dismissal when the person closes it without a
-choice or the presentation retires. Page text in a popup is display copy and
+choice or the presentation retires. Nightly shows a popup only while its
+window is visible and focused, never shows the same pending popup twice, and
+holds a bounded watch on the shown popup so its sheet or menu closes as soon as
+Stable retires it, as when the page closed its own dialog. Page text in a popup is display copy and
 grants nothing. Select lists and dialogs in nested frames are part of the
 nested-frame parity work.
 
 Evidence: contract tests for the bounds; Stable surface tests for dialog,
 select, link-menu and file-chooser capture and their negatives (two dialogs,
 stale and spent identities, an answer after navigation, an oversized option
-list, a missing file, an agent-held press, another debugger); a real-page test
-in Chromium that holds a select list and an `alert`, refuses a disabled option,
-applies an enabled one and answers the dialog; and Nightly presentation tests
-for showing, answering, dismissing, detaching and refusing renderer popup
-requests. No packaged Electron run has yet confirmed that Electron's own
+list or one too long for a native menu, a missing file, a file answer behind an
+agent action, a hold older than the person's press or made during an agent
+action, a dialog handed to an agent action, a dialog burst, another debugger);
+real-page tests in Chromium that hold a select list and an `alert`, refuse a
+disabled option, apply an enabled one and answer the dialog, hand a timer
+dialog to an agent action that then completes, never offer a list an agent's
+click opened, and hold a same-site frame's file chooser but not a cross-site
+frame's; and Nightly presentation tests for showing, answering, dismissing,
+detaching, closing on retirement, not reshowing, not asking while unfocused and
+refusing renderer popup requests. No packaged Electron run has yet confirmed that Electron's own
 message box stays out of sight while the hidden window's dialog is held.
 
 The current foundation remains publication-gated while full IME reconversion,

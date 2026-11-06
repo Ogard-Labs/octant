@@ -11,6 +11,10 @@
 export function observeBrowserSelectPopup() {
   const MAX_OPTIONS = 512;
   const MAX_LABEL = 256;
+  // Stable offers a hold only this soon after the person's own press; keep in step.
+  const HOLD_MS = 1_500;
+  // The person may take a while to choose from the menu once it is offered.
+  const ANSWER_MS = 60_000;
   const fresh = (): string => {
     const bytes = crypto.getRandomValues(new Uint8Array(16));
     bytes[6] = ((bytes[6] ?? 0) & 15) | 64;
@@ -46,9 +50,12 @@ export function observeBrowserSelectPopup() {
   window.addEventListener(
     "mousedown",
     (event) => {
-      if (!event.isTrusted || event.button !== 0) return;
-      const select = owner(event);
-      if (select !== null) hold(event, select);
+      if (!event.isTrusted) return;
+      const select = event.button === 0 ? owner(event) : null;
+      // Any other press ends an earlier hold, so a later press elsewhere never
+      // revives a list someone else opened.
+      if (select === null) held = null;
+      else hold(event, select);
     },
     true,
   );
@@ -57,10 +64,13 @@ export function observeBrowserSelectPopup() {
     (event) => {
       if (!event.isTrusted) return;
       const select = owner(event);
-      if (select === null) return;
       const arrow = event.key === "ArrowDown" || event.key === "ArrowUp";
-      if (event.key === " " || event.key === "F4" || (arrow && (event.altKey || mac)))
+      if (
+        select !== null &&
+        (event.key === " " || event.key === "F4" || (arrow && (event.altKey || mac)))
+      )
         hold(event, select);
+      else held = null;
     },
     true,
   );
@@ -69,7 +79,7 @@ export function observeBrowserSelectPopup() {
     held.token === token &&
     held.select.isConnected &&
     !held.select.disabled &&
-    performance.now() - held.at < 60_000;
+    performance.now() - held.at <= ANSWER_MS;
   const text = (value: string) => {
     const trimmed = value.replace(/\s+/g, " ").trim();
     let end = Math.min(trimmed.length, MAX_LABEL);
@@ -79,7 +89,7 @@ export function observeBrowserSelectPopup() {
   };
   return Object.freeze({
     read: () => {
-      if (held === null || !live(held.token)) return null;
+      if (held === null || !live(held.token) || performance.now() - held.at > HOLD_MS) return null;
       const { select, token } = held;
       const options = Array.from(select.options);
       if (options.length === 0) return null;
@@ -87,6 +97,7 @@ export function observeBrowserSelectPopup() {
       const rect = select.getBoundingClientRect();
       return Object.freeze({
         token,
+        age: Math.max(0, performance.now() - held.at),
         anchor: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         selectedIndex: select.selectedIndex,
         options: options.map((option) => {

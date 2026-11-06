@@ -112,6 +112,7 @@ export class NightlyBrowserPresentation {
           "popup",
           "popup-answer",
           "popup-dismiss",
+          "popup-watch",
         ].includes(request.kind)
       )
         return Promise.resolve(refused());
@@ -659,8 +660,14 @@ export class NightlyBrowserPresentation {
         }
         signal.addEventListener("abort", finish, { once: true });
       });
+    let shownId: string | undefined;
     while (current()) {
-      if (this.#hidden || !this.#options.visible() || !presentation.layout.visible) {
+      if (
+        this.#hidden ||
+        !this.#options.visible() ||
+        !this.#options.focused() ||
+        !presentation.layout.visible
+      ) {
         await pause(250);
         continue;
       }
@@ -673,8 +680,35 @@ export class NightlyBrowserPresentation {
         continue;
       }
       const popup = next.popup;
+      // A popup already shown and still pending is never shown again; Stable
+      // retires or replaces it.
+      if (String(popup.id) === shownId) {
+        await pause(250);
+        continue;
+      }
+      shownId = String(popup.id);
       const shown = new AbortController();
       const popupSignal = AbortSignal.any([signal, shown.signal]);
+      // Close Nightly's own sheet or menu as soon as Stable retires the popup,
+      // as when the page closed its own dialog.
+      const retired = (async () => {
+        while (!popupSignal.aborted) {
+          const started = Date.now();
+          const watched = await this.#options
+            .execute(
+              { ...base, kind: "popup-watch", popupId: popup.id },
+              AbortSignal.any([popupSignal, AbortSignal.timeout(2_000)]),
+            )
+            .catch(refused);
+          if (popupSignal.aborted) return;
+          if (watched.status !== "accepted") {
+            shown.abort();
+            return;
+          }
+          // Stable holds a watch open; one that returns at once must not spin.
+          if (Date.now() - started < 50) await pause(250);
+        }
+      })();
       this.#popupOpen.add(key);
       presentation.menuEpoch++;
       let answer: HumanBrowserPopupAnswer | undefined;
@@ -694,9 +728,12 @@ export class NightlyBrowserPresentation {
           () => undefined,
         );
       } finally {
+        const retiredByStable = shown.signal.aborted;
         shown.abort();
+        await retired;
         this.#popupOpen.delete(key);
         presentation.menuEpoch++;
+        if (retiredByStable) answer = undefined;
       }
       // An answer needs the same live presentation; Stable refuses a stale one.
       if (answer !== undefined && current())

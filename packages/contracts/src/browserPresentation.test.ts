@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_BROWSER_CHOSEN_FILES,
   MAX_BROWSER_DIALOG_TEXT,
+  MAX_BROWSER_SELECT_MENU_ENTRIES,
   MAX_BROWSER_SELECT_OPTIONS,
+  browserSelectMenuEntries,
   decodeHumanBrowserRequest,
   decodeHumanBrowserResult,
 } from "./browserPresentation";
@@ -96,6 +98,48 @@ describe("page popups on the human Browser presentation", () => {
     ).toThrow();
     expect(decodeHumanBrowserRequest({ ...owner, kind: "popup-dismiss", popupId })).toMatchObject({
       kind: "popup-dismiss",
+    });
+  });
+
+  it("counts a select's group headings and separators against the native menu bound", () => {
+    expect(
+      browserSelectMenuEntries([{}, { group: "Big" }, { group: "Big" }, { group: "" }, {}]),
+    ).toBe(9);
+    const alternating = Array.from({ length: 400 }, (_, index) => ({
+      label: "x",
+      disabled: false,
+      group: index % 2 === 0 ? "A" : "B",
+    }));
+    expect(browserSelectMenuEntries(alternating)).toBeGreaterThan(MAX_BROWSER_SELECT_MENU_ENTRIES);
+    expect(() =>
+      decodeHumanBrowserResult({
+        status: "popup",
+        popup: {
+          kind: "select",
+          id: popupId,
+          anchor: { x: 0, y: 0, width: 1, height: 1 },
+          options: alternating,
+          selectedIndex: 0,
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("carries a burst notice and a watch with nothing the page wrote", () => {
+    expect(
+      decodeHumanBrowserResult({
+        status: "popup",
+        popup: { kind: "notice", id: popupId, notice: "dialogs-answered" },
+      }),
+    ).toMatchObject({ status: "popup" });
+    expect(() =>
+      decodeHumanBrowserResult({
+        status: "popup",
+        popup: { kind: "notice", id: popupId, notice: "dialogs-answered", message: "x" },
+      }),
+    ).toThrow();
+    expect(decodeHumanBrowserRequest({ ...owner, kind: "popup-watch", popupId })).toMatchObject({
+      kind: "popup-watch",
     });
   });
 });

@@ -169,6 +169,25 @@ export const decodeBrowserPagePopupId = Schema.decodeUnknownSync(BrowserPagePopu
 export const MAX_BROWSER_SELECT_OPTIONS = 512;
 export const MAX_BROWSER_SELECT_LABEL = 256;
 export const MAX_BROWSER_DIALOG_TEXT = 2_048;
+/** The native menu bound a select list must fit, counting group headings and separators. */
+export const MAX_BROWSER_SELECT_MENU_ENTRIES = 1_024;
+
+/** Entries Nightly's native menu needs for these options: each group adds a separator and heading. */
+export function browserSelectMenuEntries(
+  options: ReadonlyArray<{ readonly group?: string | undefined }>,
+): number {
+  let entries = 0;
+  let group: string | undefined;
+  options.forEach((option, index) => {
+    if (index === 0 ? option.group !== undefined : option.group !== group) {
+      if (index > 0) entries += 1;
+      if (option.group !== undefined && option.group.trim() !== "") entries += 1;
+    }
+    group = option.group;
+    entries += 1;
+  });
+  return entries;
+}
 export const MAX_BROWSER_CHOSEN_FILES = 8;
 export const MAX_BROWSER_CHOSEN_PATH = 1_024;
 const PopupText = (maximum: number) =>
@@ -199,7 +218,13 @@ export const HumanBrowserPagePopup = Schema.Union(
       Schema.between(-1, MAX_BROWSER_SELECT_OPTIONS - 1),
     ),
   })
-    .pipe(Schema.filter((value) => value.selectedIndex < value.options.length))
+    .pipe(
+      Schema.filter(
+        (value) =>
+          value.selectedIndex < value.options.length &&
+          browserSelectMenuEntries(value.options) <= MAX_BROWSER_SELECT_MENU_ENTRIES,
+      ),
+    )
     .annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("dialog"),
@@ -219,6 +244,12 @@ export const HumanBrowserPagePopup = Schema.Union(
     kind: Schema.Literal("file"),
     id: BrowserPagePopupId,
     multiple: Schema.Boolean,
+  }).annotations(strict),
+  // Told once, without a modal, when Stable answered a page's further dialogs itself.
+  Schema.Struct({
+    kind: Schema.Literal("notice"),
+    id: BrowserPagePopupId,
+    notice: Schema.Literal("dialogs-answered"),
   }).annotations(strict),
 );
 export type HumanBrowserPagePopup = typeof HumanBrowserPagePopup.Type;
@@ -286,7 +317,7 @@ export const HumanBrowserRequest = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     ...Owner,
-    kind: Schema.Literal("popup-dismiss"),
+    kind: Schema.Literal("popup-dismiss", "popup-watch"),
     presentationId: BrowserPresentationId,
     popupId: BrowserPagePopupId,
   }).annotations(strict),

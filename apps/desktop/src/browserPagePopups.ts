@@ -21,6 +21,8 @@ export interface BrowserPagePopupSource {
 interface Owned {
   readonly popup: HumanBrowserPagePopup;
   readonly source: BrowserPagePopupSource;
+  /** Aborted once the popup is answered, dismissed, replaced or retired. */
+  readonly retired: AbortController;
 }
 
 /**
@@ -44,7 +46,11 @@ export class BrowserPagePopups {
     }
     this.close();
     const id = decodeBrowserPagePopupId(randomUUID());
-    this.#owned = { popup: { ...draft, id } as HumanBrowserPagePopup, source };
+    this.#owned = {
+      popup: { ...draft, id } as HumanBrowserPagePopup,
+      source,
+      retired: new AbortController(),
+    };
     for (const wake of this.#waiters) wake();
     return id;
   }
@@ -96,7 +102,7 @@ export class BrowserPagePopups {
     )
       return false;
     // Single use: the ticket is spent before the page sees the answer.
-    this.#owned = undefined;
+    this.#take();
     try {
       return await owned.source.answer(answer);
     } catch {
@@ -112,12 +118,44 @@ export class BrowserPagePopups {
 
   /** Retire the pending popup of one kind, as when the page closed its own dialog. */
   retire(kind: HumanBrowserPagePopup["kind"]): void {
-    if (this.#owned?.popup.kind === kind) this.#owned = undefined;
+    if (this.#owned?.popup.kind === kind) this.#take();
+  }
+
+  /**
+   * Hold a bounded time while this popup is still pending, so Nightly can close
+   * its own sheet or menu as soon as Stable retires the popup.
+   */
+  async watch(
+    id: BrowserPagePopupId,
+    signal: AbortSignal | undefined,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    const owned = this.#owned;
+    if (owned === undefined || owned.popup.id !== id || this.read() !== owned.popup) return false;
+    await new Promise<void>((done) => {
+      const finish = () => {
+        clearTimeout(timer);
+        owned.retired.signal.removeEventListener("abort", finish);
+        signal?.removeEventListener("abort", finish);
+        done();
+      };
+      const timer = setTimeout(finish, timeoutMs);
+      owned.retired.signal.addEventListener("abort", finish, { once: true });
+      signal?.addEventListener("abort", finish, { once: true });
+      if (owned.retired.signal.aborted || signal?.aborted) finish();
+    });
+    return signal?.aborted !== true && this.read() === owned.popup;
+  }
+
+  #take(): Owned | undefined {
+    const owned = this.#owned;
+    this.#owned = undefined;
+    owned?.retired.abort();
+    return owned;
   }
 
   close(): void {
-    const owned = this.#owned;
-    this.#owned = undefined;
+    const owned = this.#take();
     try {
       owned?.source.dismiss();
     } catch {
@@ -135,5 +173,6 @@ function answerFits(popup: HumanBrowserPagePopup, answer: HumanBrowserPopupAnswe
       : popup.image;
   if (popup.kind === "file" && answer.kind === "file")
     return popup.multiple || answer.paths.length === 1;
+  if (popup.kind === "notice") return false;
   return popup.kind === "dialog" && answer.kind === "dialog";
 }

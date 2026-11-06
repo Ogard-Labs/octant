@@ -19,6 +19,8 @@ async function presentedSurface(options: { readonly agentAttached?: boolean } = 
   let attached = options.agentAttached === true;
   let heldSelect: unknown = null;
   const answered: Array<{ token: string; index: number }> = [];
+  const dismissedSelects: string[] = [];
+  let finishLoad: () => void = () => {};
   const commands: Array<{ method: string; params: unknown }> = [];
   const writeText = vi.fn();
   const webContents: BrowserSurfaceViewPort["webContents"] = {
@@ -44,6 +46,12 @@ async function presentedSurface(options: { readonly agentAttached?: boolean } = 
     executeJavaScriptInIsolatedWorld: vi.fn(async (_world, scripts) => {
       const code = scripts[0]?.code ?? "";
       if (code.includes("bridge.read()") && code.includes("octantBrowserSelect")) return heldSelect;
+      const dismissed = /dismiss\("([^"]+)"\)/.exec(code);
+      if (dismissed !== null) {
+        dismissedSelects.push(dismissed[1] ?? "");
+        heldSelect = null;
+        return true;
+      }
       const answer = /answer\("([^"]+)", (\d+)\)/.exec(code);
       if (answer !== null) {
         answered.push({ token: answer[1] ?? "", index: Number(answer[2]) });
@@ -56,7 +64,13 @@ async function presentedSurface(options: { readonly agentAttached?: boolean } = 
     getURL: () => "https://example.com/",
     isDestroyed: () => false,
     isLoading: () => false,
-    loadURL: vi.fn(async () => undefined),
+    // An agent's navigation holds the page until the test lets it finish.
+    loadURL: vi.fn(
+      () =>
+        new Promise<undefined>((done) => {
+          finishLoad = () => done(undefined);
+        }),
+    ),
     mainFrame: { framesInSubtree: [] },
     navigationHistory: {
       canGoBack: () => false,
@@ -141,7 +155,22 @@ async function presentedSurface(options: { readonly agentAttached?: boolean } = 
     send,
     commands,
     answered,
+    dismissedSelects,
     writeText,
+    /** Start an agent action that holds the page until `finish` is called. */
+    agentNavigation: () => {
+      const action = host
+        .act(contextId, { kind: "navigate", target: "https://example.com/next" })
+        .catch(() => undefined);
+      return {
+        action,
+        finish: async () => {
+          await vi.waitFor(() => expect(webContents.loadURL).toHaveBeenCalled());
+          finishLoad();
+          await action;
+        },
+      };
+    },
     webContents,
     attached: () => attached,
     holdSelect: (value: unknown) => {
@@ -232,6 +261,7 @@ describe("page popups in Stable's hidden Browser window", () => {
     const surface = await presentedSurface();
     const held = {
       token: "90000000-0000-4000-8000-000000000001",
+      age: 0,
       anchor: { x: 10, y: 10, width: 120, height: 24 },
       selectedIndex: 0,
       options: [
@@ -261,6 +291,7 @@ describe("page popups in Stable's hidden Browser window", () => {
     const surface = await presentedSurface();
     surface.holdSelect({
       token: "90000000-0000-4000-8000-000000000002",
+      age: 0,
       anchor: { x: 0, y: 0, width: 10, height: 10 },
       selectedIndex: 0,
       options: Array.from({ length: 513 }, () => ({ label: "x", disabled: false })),
@@ -336,6 +367,122 @@ describe("page popups in Stable's hidden Browser window", () => {
         method: "DOM.setFileInputFiles",
         params: { files: [file], backendNodeId: 7 },
       });
+    } finally {
+      surface.host.closeContext(contextId);
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("never offers a select an agent's press held, nor one older than the person's press", async () => {
+    const surface = await presentedSurface();
+    const select = (age: number) => ({
+      token: "90000000-0000-4000-8000-000000000003",
+      age,
+      anchor: { x: 0, y: 0, width: 10, height: 10 },
+      selectedIndex: 0,
+      options: [{ label: "Small", disabled: false }],
+    });
+    await surface.press();
+    // A hold from long before the person's press is not theirs.
+    surface.holdSelect(select(5_000));
+    expect(await surface.send({ kind: "popup" })).toEqual({ status: "idle" });
+    expect(surface.dismissedSelects).toEqual(["90000000-0000-4000-8000-000000000003"]);
+    // A hold made while an agent action held the page is not theirs either.
+    await surface.press();
+    const started = Date.now();
+    const agent = surface.agentNavigation();
+    await agent.finish();
+    surface.holdSelect(select(Date.now() - started + 1));
+    expect(await surface.send({ kind: "popup" })).toEqual({ status: "idle" });
+    surface.host.closeContext(contextId);
+  });
+
+  it("refuses a select whose groups would not fit one native menu", async () => {
+    const surface = await presentedSurface();
+    surface.holdSelect({
+      token: "90000000-0000-4000-8000-000000000004",
+      age: 0,
+      anchor: { x: 0, y: 0, width: 10, height: 10 },
+      selectedIndex: 0,
+      // 400 options alternating between two groups need 1,199 menu entries.
+      options: Array.from({ length: 400 }, (_, index) => ({
+        label: "x",
+        disabled: false,
+        group: index % 2 === 0 ? "A" : "B",
+      })),
+    });
+    await surface.press();
+    expect(await surface.send({ kind: "popup" })).toEqual({ status: "idle" });
+    expect(surface.dismissedSelects).toEqual(["90000000-0000-4000-8000-000000000004"]);
+    surface.host.closeContext(contextId);
+  });
+
+  it("hands a person's open dialog to an agent action that starts, so the action is not stalled", async () => {
+    const surface = await presentedSurface();
+    surface.emit("Page.javascriptDialogOpening", { type: "confirm", message: "Delete?" });
+    const popup = popupOf(await surface.send({ kind: "popup" }));
+    const watching = surface.send({ kind: "popup-watch", popupId: popup.id });
+    const agent = surface.agentNavigation();
+    expect(await watching).toEqual({ status: "refused" });
+    expect(surface.commands).toContainEqual({
+      method: "Page.handleJavaScriptDialog",
+      params: { accept: false },
+    });
+    await agent.finish();
+    expect(await surface.send({ kind: "popup" })).toEqual({ status: "idle" });
+    surface.host.closeContext(contextId);
+  });
+
+  it("answers a burst of page dialogs by policy and tells the person once", async () => {
+    const surface = await presentedSurface();
+    for (let index = 0; index < 3; index += 1) {
+      surface.emit("Page.javascriptDialogOpening", { type: "alert", message: String(index) });
+      const popup = popupOf(await surface.send({ kind: "popup" }));
+      await surface.send({
+        kind: "popup-answer",
+        popupId: popup.id,
+        answer: { kind: "dialog", accept: true },
+      });
+    }
+    surface.emit("Page.javascriptDialogOpening", { type: "confirm", message: "again" });
+    const notice = popupOf(await surface.send({ kind: "popup" }));
+    expect(notice).toMatchObject({ kind: "notice", notice: "dialogs-answered" });
+    expect(await surface.send({ kind: "popup-dismiss", popupId: notice.id })).toEqual({
+      status: "accepted",
+    });
+    surface.emit("Page.javascriptDialogOpening", { type: "alert", message: "more" });
+    expect(await surface.send({ kind: "popup" })).toEqual({ status: "idle" });
+    const answers = surface.commands.filter(
+      ({ method }) => method === "Page.handleJavaScriptDialog",
+    );
+    // Three answered by the person, then confirm dismissed and alert accepted by policy.
+    expect(answers.slice(3).map(({ params }) => params)).toEqual([
+      { accept: false },
+      { accept: true },
+    ]);
+    surface.host.closeContext(contextId);
+  });
+
+  it("does not hand chosen files to a page while an agent action holds it", async () => {
+    const surface = await presentedSurface();
+    const folder = await mkdtemp(join(tmpdir(), "octant-chooser-"));
+    try {
+      const file = join(folder, "report.txt");
+      await writeFile(file, "fixture");
+      await surface.press();
+      surface.emit("Page.fileChooserOpened", { mode: "selectSingle", backendNodeId: 9 });
+      const popup = popupOf(await surface.send({ kind: "popup" }));
+      const answering = surface.send({
+        kind: "popup-answer",
+        popupId: popup.id,
+        answer: { kind: "file", paths: [file] },
+      });
+      const agent = surface.agentNavigation();
+      await vi.waitFor(() => expect(surface.webContents.loadURL).toHaveBeenCalled());
+      await new Promise((done) => setTimeout(done, 50));
+      expect(surface.commands.some(({ method }) => method === "DOM.setFileInputFiles")).toBe(false);
+      await agent.finish();
+      await answering;
     } finally {
       surface.host.closeContext(contextId);
       await rm(folder, { recursive: true, force: true });
