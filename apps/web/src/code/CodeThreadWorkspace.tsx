@@ -28,6 +28,7 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
@@ -276,6 +277,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       ? props.controller.activeView
       : undefined;
   const profileName = useAgentProfileName(view?.thread.profileId);
+  const forceStop = useDelayedForceStop(
+    props.controller.turnStatus === "running" &&
+      props.controller.latestProviderTurnOperationId !== undefined
+      ? String(props.controller.latestProviderTurnOperationId)
+      : undefined,
+    (props.providerGroups ?? []).find(
+      (group) => String(group.instance.id) === String(view?.thread.providerInstanceId),
+    )?.forceStop === "supported",
+  );
   // A thread whose checkout is a folder on a server. The host runs only its
   // Octant Harness turns; every control below that would act on a folder of
   // this host (checkpoints, rewind, forks, changed files, path mentions,
@@ -705,6 +715,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     messageQueue.snapshot?.paused === true ||
     messageQueue.snapshot?.holdReason !== undefined;
   const providerTurnOperationId = props.controller.latestProviderTurnOperationId;
+
   // A waiting turn tells its error in its own status row. A terminal turn is
   // already in the transcript with its reason, so a second notice above it said
   // the same thing louder; the callout stays for a history the host cannot
@@ -2538,7 +2549,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 ...(props.controller.turnStatus === "sending"
                   ? { disabledReason: "Stopping is available once the turn has started." }
                   : {}),
-                onStop: () => void props.controller.cancelTurn(),
+                onStop: () => {
+                  forceStop.requestStop();
+                  void props.controller.cancelTurn();
+                },
+                ...(forceStop.offered
+                  ? { forceStop: { onForceStop: () => void props.controller.forceStopTurn() } }
+                  : {}),
               },
             },
           }}

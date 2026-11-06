@@ -84,6 +84,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -1043,7 +1044,29 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     String(runningTurn.threadId) === String(props.threadId)
       ? runningTurn
       : undefined;
+  const forceStop = useDelayedForceStop(
+    stoppableTurn === undefined ? undefined : String(stoppableTurn.requestId),
+    (props.providerGroups ?? []).find(
+      (group) => String(group.instance.id) === String(stoppableTurn?.authority.providerInstanceId),
+    )?.forceStop === "supported",
+  );
+  const onForceStop = async () => {
+    if (props.turnClient === undefined || stoppableTurn === undefined) return;
+    try {
+      await props.turnClient.cancelFirstTurn({
+        kind: "force-stop-work-turn",
+        requestId: stoppableTurn.requestId,
+        threadId: stoppableTurn.threadId,
+        turnId: stoppableTurn.turnId,
+      });
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "The owned attempt could not be force-stopped.",
+      );
+    }
+  };
   const onStop = useCallback(async () => {
+    forceStop.requestStop();
     const turnClient = props.turnClient;
     const turn = stoppableTurn;
     if (turnClient === undefined || turn === undefined) return;
@@ -1063,7 +1086,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           : "The Work turn could not be stopped. Try again.",
       );
     }
-  }, [props.threadId, props.turnClient, stoppableTurn]);
+  }, [props.threadId, props.turnClient, stoppableTurn, forceStop.requestStop]);
   const answerWorkRequest = useCallback(
     async (
       request: WorkRequest,
@@ -2845,6 +2868,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   ? { disabledReason: "Stopping is available once the turn has started." }
                   : {}),
                 onStop: () => void onStop(),
+                ...(forceStop.offered
+                  ? { forceStop: { onForceStop: () => void onForceStop() } }
+                  : {}),
               },
             },
           }}

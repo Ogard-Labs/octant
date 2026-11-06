@@ -3028,6 +3028,34 @@ export function useCodeController(options: CodeControllerOptions) {
     [activeView, client],
   );
 
+  const forceStopTurn = useCallback(async (): Promise<boolean> => {
+    const view = activeView;
+    if (view === undefined || latestProviderTurnOperationId === undefined) return false;
+    const owner = String(view.thread.id);
+    try {
+      const result = await client.executeOperation({
+        kind: "force-stop-provider-turn",
+        operationId: decodeCodeOperationId(globalThis.crypto.randomUUID()),
+        threadId: view.thread.id,
+        checkoutId: view.checkout.id,
+        turnOperationId: latestProviderTurnOperationId,
+      });
+      if (result.kind === "provider-turn-state" && result.state === "interrupted") return true;
+      if (mounted.current && String(activeThreadId.current) === owner)
+        setTurnError(
+          result.kind === "operation-failed"
+            ? result.failure.message
+            : result.kind === "provider-turn-state"
+              ? (result.failure?.message ?? "The attempt could not be force-stopped.")
+              : "The host refused Force stop.",
+        );
+    } catch (error) {
+      if (mounted.current && String(activeThreadId.current) === owner)
+        setTurnError(codeFailure(error).message);
+    }
+    return false;
+  }, [activeView, client, latestProviderTurnOperationId]);
+
   const cancelTurn = useCallback(async (): Promise<boolean> => {
     const view = activeView;
     if (view === undefined || turnStatus !== "running") {
@@ -3108,6 +3136,7 @@ export function useCodeController(options: CodeControllerOptions) {
     announceFirstPrompt,
     answerProviderRequest,
     cancelTurn,
+    forceStopTurn,
     archiveThread,
     completeThread,
     reopenThread,

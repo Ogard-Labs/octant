@@ -4256,6 +4256,41 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return true;
   }
 
+  async forceStop(input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly turnOperationId: CodeOperationId;
+  }) {
+    const active = this.#owned(input.thread, input.checkoutRoot);
+    if (
+      active === undefined ||
+      String(active.operationId) !== String(input.turnOperationId) ||
+      !active.abort.signal.aborted ||
+      active.connection?.forceStop === undefined
+    )
+      return turnState("failed", {
+        category: "failed",
+        message:
+          "Only this host's exact stopped attempt on a supported runtime can be force-stopped.",
+      });
+    const connection = active.connection;
+    const kill = connection.forceStop;
+    if (kill === undefined) return turnState("failed");
+    try {
+      await Effect.runPromise(kill(decodeProviderSessionId(active.sessionId)));
+    } catch {
+      return turnState("failed", {
+        category: "failed",
+        message: "The owned runtime process could not be force-stopped.",
+      });
+    }
+    if (this.#owned(input.thread, input.checkoutRoot) !== active) return turnState("interrupted");
+    active.interruptMessage = "The provider attempt was stopped by force.";
+    active.state = "interrupted";
+    this.#persistRuntimeWork(active, "interrupted");
+    return turnState("interrupted");
+  }
+
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");

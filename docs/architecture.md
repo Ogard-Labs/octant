@@ -1218,14 +1218,21 @@ person with its time, and replays like any other thread update.
 Stop asks the runtime to end a turn. When the runtime does not end it, a
 provider whose sessions each own a process (reported as the `forceStop`
 capability, Claude today) lets the person **Force stop** the turn ten seconds
-after pressing Stop in Chat. The server's `force-stop-chat-turn` command kills
+after pressing Stop in Chat, Work or Code. The server commands kill
 that attempt's own runtime process tree and nothing else, journals the attempt
 `cancelled`, and leaves the thread usable and its session resumable. A runtime
 that serves several threads from one process (Codex, OpenCode) reports
 `forceStop` unsupported: the command is refused, the UI never offers it, and
 Stop settles the attempt at once as before. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
-did not take stays visible. Work and Code do not offer Force stop yet.
+did not take stays visible. Work returns `stop-requested` while its exact
+request-owned supported runtime is still ending. Its force command requires the
+same request/thread/turn and an already-aborted owned controller. Code's force
+command additionally names the original turn operation, rejects replacement
+operations and requires that Stop already reached that controller. Neither path
+accepts a PID or kills a shared runtime; the provider owns process verification.
+The normal turn lifecycle records completion/cancellation, preserving queued
+messages and history. A kill failure leaves an explicit recovery error.
 
 **One authority model, two focuses** (maintainer decision, 2026-10-31: "Work
 and Code should essentially be able to do the same, but Work is more for

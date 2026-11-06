@@ -349,7 +349,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
 export type StartWorkThreadTurnCommand = typeof StartWorkThreadTurnCommand.Type;
 
 export const CancelWorkTurnCommand = Schema.Struct({
-  kind: Schema.Literal("cancel-work-turn"),
+  kind: Schema.Literal("cancel-work-turn", "force-stop-work-turn"),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
@@ -381,7 +381,7 @@ export const WorkTurnLookupResult = Schema.Union(
 export type WorkTurnLookupResult = typeof WorkTurnLookupResult.Type;
 
 export const WorkTurnCancelResult = Schema.Struct({
-  kind: Schema.Literal("turn-cancelled", "turn-already-terminal"),
+  kind: Schema.Literal("turn-cancelled", "turn-already-terminal", "stop-requested"),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,

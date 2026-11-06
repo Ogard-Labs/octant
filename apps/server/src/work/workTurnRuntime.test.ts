@@ -12,7 +12,7 @@ import {
   CorrelationId,
   UtcTimestamp,
 } from "@octant/contracts";
-import { Effect, Queue, Schema, Stream } from "effect";
+import { Deferred, Effect, Queue, Schema, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
@@ -34,6 +34,81 @@ const ids = {
 } as const;
 
 describe("WorkTurnRuntime", () => {
+  it("keeps an owned force-stop available while ordinary interruption is stuck", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const gate = Effect.runSync(Deferred.make<void>());
+    const runtime = new WorkTurnRuntime({ timeoutMs: 5000 });
+    const controller = new AbortController();
+    const send = vi.fn(() => Effect.void);
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: () => Effect.die("unused"),
+      send,
+      interrupt: () => Deferred.await(gate),
+      stop: () => Deferred.succeed(gate, undefined).pipe(Effect.asVoid),
+      forceStop: () =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(gate, undefined);
+          yield* Queue.offer(
+            queue,
+            decodeProviderRuntimeEvent({
+              kind: "interrupted",
+              instanceId: ids.provider,
+              sequence: 1,
+              correlationId: ids.project,
+              occurredAt: "2026-11-06T12:00:00.000Z",
+              sessionId: ids.session,
+              message: "Stopped by force",
+            }),
+          );
+        }),
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const command = decodeStartWorkThreadTurnCommand({
+      kind: "start-work-thread-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      prompt: "Summarize the brief",
+      authority: {
+        hostId: "local",
+        projectId: ids.project,
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: ids.provider,
+        modelId: "model",
+      },
+    });
+    const running = runtime.run({
+      command,
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver: {
+        kind: "claude",
+        probe: () => Effect.die("unused"),
+        acquire: () => Effect.succeed(connection),
+      },
+      signal: controller.signal,
+    });
+    try {
+      await vi.waitFor(() => expect(send).toHaveBeenCalled());
+      controller.abort();
+      expect(runtime.canForceStop(String(ids.request))).toBe(true);
+      expect(await runtime.forceStop("other-request")).toBe(false);
+      expect(await runtime.forceStop(String(ids.request))).toBe(true);
+      expect(await running).toMatchObject({ kind: "cancelled" });
+      expect(runtime.canForceStop(String(ids.request))).toBe(false);
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await Effect.runPromise(Queue.shutdown(queue));
+      await running;
+    }
+  });
+
   it("acquires Work project-backed authority with request projection context and streams a reply", async () => {
     const acquireInputs: unknown[] = [];
     const start = vi.fn((_input: Parameters<ProviderConnection["start"]>[0]) => Effect.void);

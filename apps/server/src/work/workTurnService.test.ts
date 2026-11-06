@@ -2738,6 +2738,50 @@ describe("WorkTurnService", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("keeps a supported stopped Work attempt addressable and force-stops only its exact identity", async () => {
+    const gate = deferred<void>();
+    const forced = vi.fn(async () => true);
+    const runtime = {
+      run: vi.fn(async () => {
+        await gate.promise;
+        return { kind: "cancelled" as const };
+      }),
+      canForceStop: (requestId: string) => requestId === String(ids.request),
+      forceStop: forced,
+    };
+    const fixture = serviceFixture({ turnRuntime: runtime });
+    const command = {
+      kind: "force-stop-work-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+    };
+    try {
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await vi.waitFor(() => expect(runtime.run).toHaveBeenCalled());
+      await expect(fixture.service.cancelFirstTurn(ids.window, command)).rejects.toMatchObject({
+        failure: { category: "invalid" },
+      });
+      expect(forced).not.toHaveBeenCalled();
+      expect(
+        await fixture.service.cancelFirstTurn(ids.window, { ...command, kind: "cancel-work-turn" }),
+      ).toMatchObject({ kind: "stop-requested" });
+      await expect(
+        fixture.service.cancelFirstTurn(ids.window, {
+          ...command,
+          turnId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid" } });
+      expect(await fixture.service.cancelFirstTurn(ids.window, command)).toMatchObject({
+        kind: "turn-cancelled",
+      });
+      expect(forced).toHaveBeenCalledWith(String(ids.request));
+    } finally {
+      gate.resolve();
+      await fixture.waitForIdle();
+    }
+  });
+
   it("releases the spend reservation when a Work turn is cancelled", async () => {
     const gate = deferred<void>();
     const settle = vi.fn();

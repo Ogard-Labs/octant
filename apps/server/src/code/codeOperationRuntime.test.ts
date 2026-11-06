@@ -64,7 +64,7 @@ import {
   type ProviderRuntimeEvent,
   type WindowId,
 } from "@octant/contracts";
-import { Effect, Queue, Schema, Stream } from "effect";
+import { Deferred, Effect, Queue, Schema, Stream } from "effect";
 import type {
   ProviderConnection,
   ProviderDriver,
@@ -3127,6 +3127,63 @@ describe("CodeOperationRuntime", () => {
       await fixture.runtime.close();
       fixture.close();
     });
+  });
+
+  it("force-stops only the stopped exact provider attempt and refuses a replaced attempt", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const gate = Effect.runSync(Deferred.make<void>());
+    const connection = {
+      ...providerConnection(queue),
+      interrupt: vi.fn(() => Deferred.await(gate)),
+      forceStop: vi.fn(() => Deferred.succeed(gate, undefined).pipe(Effect.asVoid)),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(710),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      const stopping = fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(711),
+        threadId,
+        checkoutId,
+      });
+      await vi.waitFor(() => expect(connection.interrupt).toHaveBeenCalled());
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "force-stop-provider-turn",
+          operationId: operationId(712),
+          turnOperationId: operationId(709),
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+      expect(connection.forceStop).not.toHaveBeenCalled();
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "force-stop-provider-turn",
+          operationId: operationId(713),
+          turnOperationId: operationId(710),
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      await stopping;
+      expect(connection.forceStop).toHaveBeenCalledWith(sessionId);
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await fixture.runtime.close();
+      fixture.close();
+    }
   });
 
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {

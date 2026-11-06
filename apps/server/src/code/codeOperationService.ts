@@ -1024,6 +1024,11 @@ export interface CodeOperationTurnPort {
     readonly approvalId: string;
     readonly decision: "approved" | "denied";
   }) => Promise<CodeOperationTurnResult>;
+  readonly forceStop?: (input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly turnOperationId: CodeOperationId;
+  }) => Promise<CodeOperationTurnResult>;
   readonly cancel: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
@@ -4079,6 +4084,23 @@ export class CodeOperationService {
             decision: command.decision,
           }),
         );
+      case "force-stop-provider-turn":
+        return this.#providerResult(
+          command.operationId,
+          this.#options.turns.forceStop === undefined
+            ? {
+                state: "failed",
+                failure: {
+                  category: "failed",
+                  message: "This runtime does not support force-stopping an owned attempt.",
+                },
+              }
+            : await this.#options.turns.forceStop({
+                thread,
+                checkoutRoot: root.checkoutRoot,
+                turnOperationId: command.turnOperationId,
+              }),
+        );
       case "cancel-provider-turn": {
         // A turn still preparing is not the runtime's yet, so the runtime
         // cannot stop it; releasing it here is what lets a refused restore
@@ -6316,6 +6338,7 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
     case "answer-provider-input":
     case "answer-provider-approval":
     case "cancel-provider-turn":
+    case "force-stop-provider-turn":
     case "attach-terminal":
       return "read";
     case "start-terminal":

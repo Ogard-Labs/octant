@@ -1621,6 +1621,45 @@ export class WorkTurnService {
         status: turn.status,
       });
     }
+    const requestKey = String(command.requestId);
+    const controller = this.#controllers.get(requestKey);
+    if (command.kind === "force-stop-work-turn") {
+      if (
+        controller === undefined ||
+        !controller.signal.aborted ||
+        this.#turnRuntime.canForceStop?.(requestKey) !== true ||
+        this.#turnRuntime.forceStop === undefined
+      )
+        throw this.#failure(
+          "invalid",
+          "Only the exact stopped attempt of a supported runtime can be force-stopped.",
+        );
+      if (!(await this.#turnRuntime.forceStop(requestKey)))
+        throw this.#failure("unavailable", "The owned runtime process could not be force-stopped.");
+      const current = this.#projection.lookup(command.requestId);
+      if (
+        current !== undefined &&
+        (current.status === "completed" ||
+          current.status === "failed" ||
+          current.status === "cancelled")
+      )
+        return decodeWorkTurnCancelResult({
+          kind: "turn-already-terminal",
+          requestId: current.requestId,
+          threadId: current.threadId,
+          turnId: current.turnId,
+          status: current.status,
+        });
+    } else if (controller !== undefined && this.#turnRuntime.canForceStop?.(requestKey) === true) {
+      controller.abort();
+      return decodeWorkTurnCancelResult({
+        kind: "stop-requested",
+        requestId: turn.requestId,
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+        status: turn.status,
+      });
+    }
     this.#controllers.get(String(command.requestId))?.abort();
     this.#settleSpendReservation(command.requestId);
     this.#persistUpdate(turn, {

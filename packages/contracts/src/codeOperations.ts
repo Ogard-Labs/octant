@@ -1046,6 +1046,11 @@ const AnswerProviderApproval = Schema.Struct({
   approvalId: CodeApprovalId,
   decision: Schema.Literal("approved", "denied"),
 }).annotations(strict);
+const ForceStopProviderTurn = Schema.Struct({
+  kind: Schema.Literal("force-stop-provider-turn"),
+  ...OperationScope,
+  turnOperationId: CodeOperationId,
+}).annotations(strict);
 const CancelProviderTurn = Schema.Struct({
   kind: Schema.Literal("cancel-provider-turn"),
   ...OperationScope,
@@ -1084,6 +1089,7 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "answer-provider-input",
   "answer-provider-approval",
   "cancel-provider-turn",
+  "force-stop-provider-turn",
 ] as const;
 
 export const CodeOperationCommand = Schema.Union(
@@ -1127,6 +1133,7 @@ export const CodeOperationCommand = Schema.Union(
   AnswerProviderInput,
   AnswerProviderApproval,
   CancelProviderTurn,
+  ForceStopProviderTurn,
 );
 export type CodeOperationCommand = typeof CodeOperationCommand.Type;
 

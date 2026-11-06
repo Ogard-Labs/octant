@@ -304,14 +304,22 @@ need a stable answer identity before this control can apply to them.
 
 The central workspace is one persistent recursive
 split tree. A leaf holds exactly one surface — a thread, a draft, a Project
-overview, a utility surface, or a mode welcome. A pane retains renderer-session
-navigation tabs for conversations, files, previews, and canvases; selecting a
+overview, a utility surface, or a mode welcome. A pane retains navigation references for conversations, files, previews, and canvases; selecting a
 tab reopens that surface through the authoritative command path. Image creation
 and revision occupy pane-owned tabs whose drafts remain mounted while switching
 back to the conversation. Opening the same content selects its existing entry; closing active content
 selects its neighbor. A refused host open does not activate a successful tab.
-References are cleared when the pane or its authority context changes; reload
-restores only the authoritative visible surface. Closing image creation stops
+Kept references and their order are saved in device-local storage per execution
+endpoint and client window, with exact host/mode/Project/root context and pane
+identity. Reload restores those references only when the current authorized
+workspace has the same context and pane. The authoritative workspace alone
+chooses the visible surface and selected tab; restoring references never opens
+another surface, starts a process, sends a draft or reapplies an approval.
+Temporary single-click thread previews are omitted, closed references stay
+closed, and selecting a missing or revoked reference shows the ordinary host
+refusal without opening a substitute. A pane/context change drops old references.
+Storage is bounded to 128 references per pane, 64 panes and 512 KiB on read;
+malformed or unavailable storage falls back to the current visible surface. Closing image creation stops
 observation, while only Cancel job cancels generation on the host. Editor drafts
 remain in the thread draft store; approval requests keep their explicit controls.
 Thread titles appear once in the title row, and the row shows the thread's

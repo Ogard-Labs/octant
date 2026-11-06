@@ -906,7 +906,7 @@ A turn stopped by an explicit provider usage-limit signal carries a provider-neu
 - The reset timer is an in-process host timer that continues through the ordinary turn-admission path, with no cloud wake and no billing automation.
 - A stale recovery settles as invalidated rather than firing against newer state.
 - Chat, Work and Code each cut a turn off after five minutes without a provider event, because a long tool call can leave a provider silent. _Here only._
-- A provider whose sessions each own a process offers Force stop in Chat ten seconds after a Stop that did not end the turn. It kills that attempt's process and nothing else, leaves the thread usable and resumable, and is refused for a provider that shares one process across threads (built for Claude; Work and Code turns not built yet).
+- A provider whose sessions each own a process offers Force stop in Chat, Work and Code ten seconds after a Stop that did not end the turn. It kills that attempt's process and nothing else, leaves the thread usable and resumable, and is refused for a provider that shares one process across threads (built for Claude). Work requires the exact stopped request/thread/turn; Code requires the original stopped turn operation. Neither accepts a PID or kills a replacement attempt.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -2122,7 +2122,7 @@ Status: Built. Since: —. Detail: [Workspace: Thread visibility and completion]
 The central workspace is one recursive split tree with one surface per leaf, and all layout operations are server-authoritative.
 
 - One visible tree belongs to one authority context. A cross-Project, cross-mode or cross-host placement is refused or offered in a new window.
-- Tabs add no persisted layout or authority. Dropping a sidebar thread on a composer attaches it as bounded context; nothing is sent and the source is not moved.
+- Kept content references and order persist locally per endpoint/window/pane and exact authority context; temporary thread previews are omitted. Restoration reuses the authoritative selected surface and performs no open or side effect; every later activation is authorized by the host. Tabs add no persisted layout or authority. Dropping a sidebar thread on a composer attaches it as bounded context; nothing is sent and the source is not moved.
 - Layout persists per client window, mode and Project context and restores after restart. A mode preset applies only when no saved layout exists or the person restores it. _Here only._
 - File and artifact previews are host-authorized and read-only. The renderer never receives a host path, every open is re-authorized, scripts, remote resources, macros and formulas are disabled, and a missing source restores as a placeholder, never another file. _Here only._
 
