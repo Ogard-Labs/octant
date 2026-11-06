@@ -16,6 +16,7 @@ export type FirstPartyPluginComponentId =
   | "board"
   | "github-integration"
   | "linear-integration"
+  | "azure-arm-integration"
   | "appearance-pack"
   | "preview-viewers";
 
@@ -327,10 +328,37 @@ const previewPlugin = firstPartyManifest({
   ],
 });
 
+const azurePlugin = firstPartyManifest({
+  manifestVersion: 1,
+  extensionId: "10000000-0000-4000-8000-0000000000f1",
+  packageId: "20000000-0000-4000-8000-0000000000f1",
+  slug: "azure-arm",
+  displayName: "Azure Resource Manager reads",
+  version: "1.0.0",
+  digest: digest("f"),
+  source: { kind: "bundled", sourceRef: "app:azure-arm" },
+  provenance: { publisher: "Octant", reviewed: true },
+  license: { kind: "spdx", identifier: "MIT" },
+  compatibility: { platforms: ["macos", "linux"], modes: ["code"], providerFamilies: [] },
+  declaredCapabilities: ["network", "credentials"],
+  primaryComponentId: "azure-arm-integration",
+  components: [
+    {
+      id: "azure-arm-integration",
+      kind: "integration",
+      displayName: "Azure Resource Manager reads",
+      declaredCapabilities: ["network", "credentials"],
+      entryPoint: "builtin:azure-arm",
+    },
+  ],
+  contributions: [],
+});
+
 export const FIRST_PARTY_PLUGIN_CATALOG: ReadonlyArray<ExtensionPackageManifest> = [
   boardPlugin,
   githubPlugin,
   linearPlugin,
+  azurePlugin,
   appearancePlugin,
   previewPlugin,
 ];
@@ -346,6 +374,7 @@ export const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponen
     ["board", true],
     ["github-integration", true],
     ["linear-integration", true],
+    ["azure-arm-integration", true],
     ["appearance-pack", true],
     ["preview-viewers", true],
   ]);
@@ -359,6 +388,7 @@ export function isFirstPartyPluginComponentId(value: string): value is FirstPart
     value === "board" ||
     value === "github-integration" ||
     value === "linear-integration" ||
+    value === "azure-arm-integration" ||
     value === "appearance-pack" ||
     value === "preview-viewers"
   );
