@@ -95,19 +95,102 @@ export type PackagedDesktopLaunch =
   | { readonly kind: "terminal"; readonly args: ReadonlyArray<string> }
   | { readonly kind: "refused"; readonly message: string };
 
+/**
+ * The Chromium features a Linux desktop may name in `--enable-features` or
+ * `--disable-features`: Wayland windowing, text input and fractional scaling,
+ * and hardware video decoding. Nothing here weakens a sandbox or opens a
+ * debugging or loader path.
+ */
+export const LINUX_DISPLAY_FEATURES = [
+  "UseOzonePlatform",
+  "WaylandWindowDecorations",
+  "WaylandTextInputV3",
+  "WaylandFractionalScaleV1",
+  "VaapiVideoDecoder",
+] as const;
+
+const OZONE_PLATFORMS = new Set(["wayland", "x11", "auto"]);
+
+/**
+ * One closed display flag a Linux desktop entry or launcher may add, by its
+ * exact name and a small set of values. `--use-gl` is not listed: current
+ * Chromium chooses GL through ANGLE, and its values could not be confirmed
+ * for the pinned Electron.
+ */
+function linuxDisplayFlagName(arg: string): string | undefined {
+  const [name, ...rest] = arg.split("=");
+  const value = rest.length === 0 ? undefined : rest.join("=");
+  switch (name) {
+    case "--ozone-platform":
+    case "--ozone-platform-hint":
+      return value !== undefined && OZONE_PLATFORMS.has(value) ? name : undefined;
+    case "--enable-features":
+    case "--disable-features": {
+      if (value === undefined || value === "") return undefined;
+      const features = value.split(",");
+      return new Set(features).size === features.length &&
+        features.every((feature) =>
+          (LINUX_DISPLAY_FEATURES as ReadonlyArray<string>).includes(feature),
+        )
+        ? name
+        : undefined;
+    }
+    case "--wayland-text-input-version":
+      return value === "1" || value === "3" ? name : undefined;
+    case "--force-device-scale-factor": {
+      if (value === undefined || !/^[0-9](?:\.[0-9]{1,3})?$/.test(value)) return undefined;
+      const factor = Number(value);
+      return factor > 0 && factor <= 4 ? name : undefined;
+    }
+    case "--enable-wayland-ime":
+    case "--disable-gpu":
+    case "--disable-gpu-compositing":
+      return value === undefined ? name : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Splits a Linux launch into its closed display flags and the rest, each
+ * flag at most once. Undefined when a display-like flag is malformed or
+ * repeated; anything unknown stays in the rest and refuses there.
+ */
+export function separateLinuxDisplayFlags(
+  args: ReadonlyArray<string>,
+): ReadonlyArray<string> | undefined {
+  const seen = new Set<string>();
+  const rest: string[] = [];
+  for (const arg of args) {
+    const name = linuxDisplayFlagName(arg);
+    if (name === undefined) {
+      rest.push(arg);
+      continue;
+    }
+    if (seen.has(name)) return undefined;
+    seen.add(name);
+  }
+  return rest;
+}
+
 /** Packaged Nightly never interprets a caller's script path or runtime options. */
 export function resolvePackagedDesktopLaunch(
   identity: DesktopIdentity,
-  args: ReadonlyArray<string>,
+  launchArgs: ReadonlyArray<string>,
   /** Nightly's role from its stored Data choice; Octant's is always its own host. */
   hostRole: DesktopHostRole = { kind: "octant-host" },
+  platform: NodeJS.Platform = process.platform,
 ): PackagedDesktopLaunch {
   const refused: PackagedDesktopLaunch = {
     kind: "refused",
     message: `${identity.productName} refused unsupported launch arguments.`,
   };
-  if (args.length > 64 || args.some((arg) => arg.length > 16_384 || arg.includes("\0")))
+  if (launchArgs.length > 64 || launchArgs.some((arg) => arg.length > 16_384 || arg.includes("\0")))
     return refused;
+  // Linux desktops may add display flags to the launch; nothing else passes.
+  const separated = platform === "linux" ? separateLinuxDisplayFlags(launchArgs) : launchArgs;
+  if (separated === undefined) return refused;
+  const args = separated;
   if (
     identity.flavor === "stable" &&
     args.includes(DESKTOP_HOST_ONLY_SWITCH) &&

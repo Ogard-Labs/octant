@@ -608,7 +608,23 @@ makes it its own test host, because only the host-owning desktop starts that chi
 The host-only role cannot be combined with a Code link or another role. It
 refuses unknown positional entries, loader options and
 Chromium remote-debugging options before importing host or client-registration
-code. Refusal in JavaScript alone does not establish that Chromium exposed no
+code.
+
+Packaged Linux Octant and Nightly apply the same check, and beside any role
+also accept a closed list of display flags a desktop entry may add, each at
+most once and with its value checked (maintainer decision, 2026-11-06):
+`--ozone-platform=` and `--ozone-platform-hint=` (`wayland`, `x11`, `auto`),
+`--enable-features=` and `--disable-features=` naming only
+`UseOzonePlatform`, `WaylandWindowDecorations`, `WaylandTextInputV3`,
+`WaylandFractionalScaleV1` and `VaapiVideoDecoder`, `--enable-wayland-ime`,
+`--wayland-text-input-version=` (`1`, `3`), `--disable-gpu`,
+`--disable-gpu-compositing` and `--force-device-scale-factor=` (above 0, at
+most 4). The list lives in one place in the desktop launch module. Sandbox
+switches (`--no-sandbox`, `--disable-seccomp-filter-sandbox`,
+`--disable-setuid-sandbox`), inspector and remote-debugging options,
+`--js-flags`, loader and script options and every unknown flag still refuse.
+`--use-gl` is not listed: current Chromium chooses GL through ANGLE, and its
+values were not confirmed for the pinned Electron. Refusal in JavaScript alone does not establish that Chromium exposed no
 debugging endpoint during startup; native startup checks cover that separately.
 
 Nightly's bundled `octant mcp` and help entry remains a fixed role, without
@@ -868,7 +884,8 @@ the same as on macOS; only the transport and the peer check differ.
   launch-argument check as packaged macOS (ordinary startup, one Code link,
   the fixed terminal, Canvas and host-only roles) before it imports any host
   code, so it accepts `--octant-host-only` and refuses anything else,
-  `--no-sandbox` included. Chromium can rewrite a Linux process's command
+  `--no-sandbox` included, apart from the closed Linux display flags in
+  [Fixed packaged entry](#fixed-packaged-entry). Chromium can rewrite a Linux process's command
   line, so the native binding does not re-read it; the JavaScript entry check
   is the gate.
 - **The renderer sandbox.** Nightly registers no window, and never starts

@@ -31,6 +31,24 @@ A supported installation must be checked with a real sandboxed launch before
 claiming packaged desktop acceptance. Octant does not install or relax host
 security policy automatically.
 
+### Launch flags
+
+The Linux AppImages accept only a short list of display flags, so a desktop
+entry or a launcher can pick Wayland or X11 and work around graphics trouble:
+
+- `--ozone-platform=` or `--ozone-platform-hint=`, with `wayland`, `x11` or
+  `auto`
+- `--enable-features=` or `--disable-features=`, naming only
+  `UseOzonePlatform`, `WaylandWindowDecorations`, `WaylandTextInputV3`,
+  `WaylandFractionalScaleV1` or `VaapiVideoDecoder` (comma-separated)
+- `--enable-wayland-ime` and `--wayland-text-input-version=1` or `=3`
+- `--disable-gpu` and `--disable-gpu-compositing`
+- `--force-device-scale-factor=` with a number above 0 and at most 4
+
+Each flag may appear once. Octant and Octant Nightly refuse to start with any
+other flag, including `--no-sandbox`, other sandbox switches, debugging and
+inspector options and `--js-flags`.
+
 ### An AppArmor profile for Octant
 
 Ubuntu 23.10 and later stop unconfined programs from creating the user
