@@ -23,7 +23,23 @@ const identity = app.isPackaged
   : desktopIdentity("stable");
 
 if (identity.flavor === "nightly" || (app.isPackaged && process.platform === "darwin")) {
-  const role = resolvePackagedDesktopLaunch(identity, process.argv.slice(1));
+  const role = resolvePackagedDesktopLaunch(
+    identity,
+    process.argv.slice(1),
+    identity.flavor === "nightly"
+      ? resolveStartupHostRole({
+          identity,
+          windowStorageDirectory: desktopWindowStorageDirectory(
+            identity,
+            "",
+            app.getPath("appData"),
+          ),
+          appDataDirectory: app.getPath("appData"),
+          platform: process.platform,
+          env: process.env,
+        })
+      : undefined,
+  );
   if (role.kind === "refused") {
     process.stderr.write(`${role.message}\n`);
     app.exit(1);

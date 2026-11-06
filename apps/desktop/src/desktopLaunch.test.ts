@@ -130,6 +130,30 @@ it("accepts only Stable's fixed packaged roles and refuses a caller-selected scr
   }
 });
 
+it("starts Nightly's Canvas prototype host only while Nightly is its own test host", () => {
+  const nightly = desktopIdentity("nightly");
+  const testHost = {
+    kind: "test-host" as const,
+    dataDirectory: "/Users/test/Library/Application Support/Octant Nightly/Test Data",
+    serverPort: 13_774,
+    keychainServiceFamily: "octant-nightly-test-data" as const,
+  };
+  expect(
+    resolvePackagedDesktopLaunch(nightly, ["--octant-canvas-prototype-host"], testHost),
+  ).toEqual({ kind: "canvas" });
+  expect(
+    resolvePackagedDesktopLaunch(nightly, ["--octant-canvas-prototype-host"], {
+      kind: "octant-client",
+    }).kind,
+  ).toBe("refused");
+  for (const args of [
+    ["--octant-canvas-prototype-host", "/tmp/arbitrary.mjs"],
+    [DESKTOP_HOST_ONLY_SWITCH],
+    ["/tmp/arbitrary.mjs"],
+  ])
+    expect(resolvePackagedDesktopLaunch(nightly, args, testHost).kind).toBe("refused");
+});
+
 it("accepts a host-only role only for Stable without mixed entries or runtime options", () => {
   for (const args of [[DESKTOP_HOST_ONLY_SWITCH], ["-psn_0_123", DESKTOP_HOST_ONLY_SWITCH]]) {
     expect(resolvePackagedDesktopLaunch(desktopIdentity("stable"), args)).toEqual({

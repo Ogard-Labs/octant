@@ -1263,8 +1263,10 @@ const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
 );
 const desktopDataDirectory = desktopHostRuntimePaths.dataDirectory;
 const desktopKeychainServiceFamily = desktopHostStartup.keychainServiceFamily;
+// The relaunch quits through the same interactive path as Quit in the menu, so
+// running work is confirmed first and a cancelled confirmation cancels it.
 const nightlyRelaunch = createRelaunchIntent({
-  quit: () => app.quit(),
+  quit: requestInteractiveQuit,
   relaunch: () => app.relaunch(),
 });
 const nightlyDataControl =
@@ -3050,8 +3052,7 @@ async function runMenuBarAction(
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
       });
     } else if (action === "fully-quit") {
-      quitCanPrompt = true;
-      app.quit();
+      requestInteractiveQuit();
     }
   } catch {
     dialog.showErrorBox(
@@ -4727,11 +4728,14 @@ const quitShortcutGuard = createQuitShortcutGuard({
     window.webContents.send(IPC_CHANNELS.quitShortcutHint);
     return true;
   },
-  quit: () => {
-    quitCanPrompt = true;
-    app.quit();
-  },
+  quit: requestInteractiveQuit,
 });
+
+/** A person's quit: it may close only local windows, and asks before stopping running work. */
+function requestInteractiveQuit(): void {
+  quitCanPrompt = true;
+  app.quit();
+}
 
 function installApplicationMenu(): void {
   if (process.platform !== "darwin") return;

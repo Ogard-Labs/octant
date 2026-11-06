@@ -452,7 +452,9 @@ and Node inspection entry paths. It requires ASAR-only loading and embedded ASAR
 validation, with fuse readback on the artifact before signing. Its application
 entry accepts a bounded set of launch arguments: ordinary startup, one macOS
 Launch Services process token, its own valid Code link, or the fixed scoped
-terminal role. Stable also accepts its fixed Canvas prototype-host and host-only roles.
+terminal role. Stable also accepts its fixed Canvas prototype-host and host-only roles;
+Nightly accepts the Canvas prototype-host role only while its stored Data choice
+makes it its own test host, because only the host-owning desktop starts that child.
 The host-only role cannot be combined with a Code link or another role. It
 refuses unknown positional entries, loader options and
 Chromium remote-debugging options before importing host or client-registration
