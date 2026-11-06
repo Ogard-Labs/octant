@@ -256,7 +256,8 @@ name, the schedule and time zone, the first run, what happens to runs missed
 while the computer is off, and the prompt each run starts with. Nothing exists
 until you click **Create routine**; dismissing it, or no answer within ten
 minutes, creates nothing. The agent can never create one on its own, even in a
-thread with Full access.
+thread with Full access. A Code thread in Plan mode can propose one too; the
+routine you create from it asks first like any other and never runs in Plan.
 
 You can also create one yourself: open **Routines** in the thread's
 Environment and choose **New routine**. Give it a name, the task for each run,

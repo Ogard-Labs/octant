@@ -3,6 +3,7 @@ import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
 import {
   browserDownloadSavedResult,
+  browserOperationRefusedInPlan,
   browserToolAction,
   browserToolResult,
   browserToolWantsScreenshot,
@@ -83,6 +84,8 @@ export interface BrowserAppManagedToolsOptions {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
       readonly activityBy?: "agent";
+      /** On a `record-stop`: end the recording and keep nothing; see the service. */
+      readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
@@ -194,7 +197,11 @@ export function createBrowserAppManagedTools(
       );
     }
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
-    if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
+    // Plan admits the reads of the page already open; every other gate below
+    // still applies to them.
+    if (options.executionPolicy === "plan" && browserOperationRefusedInPlan(input.operation)) {
+      return failure("plan-mode-read-only");
+    }
     let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
     // While the person signs in, the page is theirs: no other agent action
     // reaches it until they press Continue or the ask ends.
@@ -489,6 +496,9 @@ export function createBrowserAppManagedTools(
       threadId: options.threadId,
       request,
       capturedBy: "agent",
+      ...(input.operation === "record-stop" && input.discard === true
+        ? { discardRecording: true }
+        : {}),
       refuseStaleRevision: true,
       // Downloads are held only for a turn at this computer with a workspace to
       // save into, where the question about saving one can be answered.
@@ -556,7 +566,9 @@ export function createBrowserAppManagedTools(
       return failure("browser-authority-stale");
     }
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
-    if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
+    if (options.executionPolicy === "plan" && browserOperationRefusedInPlan(input.operation)) {
+      return failure("plan-mode-read-only");
+    }
     return runBrowserFlowOperation(input, {
       flows,
       projectId: authority.projectId,
@@ -577,9 +589,15 @@ export function createBrowserAppManagedTools(
       const input = parseBrowserToolInput(inputJson, { allowProfile: true });
       if (input === undefined) return failure("invalid-browser-input");
       // The stop runs without the turn's signal, so a turn that ends mid-call
-      // still ends its recording and keeps what was recorded.
-      const record = (operation: BrowserToolRecordingOperation) =>
-        runOne({ operation }, operation === "record-stop" ? undefined : signal);
+      // still ends its recording and keeps what was recorded. It runs in Plan
+      // too, keeping nothing, so a recording started before Plan never runs
+      // on to its own bound.
+      const record = async (operation: BrowserToolRecordingOperation) => {
+        if (operation === "record-start") return runOne({ operation }, signal);
+        if (options.executionPolicy !== "plan") return runOne({ operation }, undefined);
+        const stopped = await runOne({ operation, discard: true }, undefined);
+        return stopped.isError ? stopped : failure("plan-mode-read-only");
+      };
       if (isBrowserToolFlowInput(input)) {
         return input.operation === "flow-run" && input.record === true
           ? runRecordedBrowserCall(() => runFlow(input, signal), record)

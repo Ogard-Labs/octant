@@ -42,6 +42,15 @@ page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
 no observation or evidence.
 
+In Plan mode the agent can still look at the page already open in its thread's
+Browser: take a snapshot, read its text, take a screenshot, read what it
+logged and failed to load, audit its accessibility or performance, list its
+tabs, wait for it to reach a state, list the Project's saved flows, and stop
+the Browser. It cannot open a page or tab, click, type, scroll, resize, switch
+or close a tab, upload, save a download, sign in, run a script, record, or save
+or run a flow. You are still asked about a site
+or a model you have not allowed, even for a read.
+
 ### Recovering the agent's page
 
 If the agent's Browser reaches a site the page has not approved, the tool's
@@ -126,8 +135,8 @@ cannot open a signed-in page, and neither can a paired phone or browser, which
 sees only "Signed-in page — open it on this Mac." If a turn you started from
 your phone needs such a site, its question waits for a window on this Mac. While
 the agent drives a signed-in page, the Browser's status label and the floating
-preview name the profile. Plan mode refuses the Browser as it always did, and
-fixed readers keep password and one-time-code values protected.
+preview name the profile. Plan mode allows only reads of the page already open,
+as above, and fixed readers keep password and one-time-code values protected.
 
 ### Synchronous page scripts
 
@@ -252,7 +261,8 @@ records on its own.
   recording, nothing of what you do is kept.
 - Recordings follow every capture rule above: they stay on this computer, count
   toward the thread's 32 captures, are not sent anywhere, and a paired device
-  cannot see them. The agent cannot record in Plan.
+  cannot see them. The agent cannot record in Plan, and a recording already
+  running when Plan begins is stopped and not kept.
 - A thread keeps at most 8 recordings. A newer one replaces the oldest
   recording; your screenshots are never dropped to make room.
 
@@ -380,8 +390,8 @@ largest paint, layout shift, and blocking time, each rated good, needs
 improvement, or poor, with the requests by type and the largest files (their
 addresses with secrets removed). An audit only reads the page: it never
 reloads it, so to measure a fresh load the agent opens the page again first.
-Audits run on this computer and send nothing anywhere, and Plan mode refuses
-them like every other Browser step.
+Audits run on this computer and send nothing anywhere, and Plan mode allows
+them, since an audit only reads the page already open.
 
 When a page needs you to sign in, the agent can hand it to you instead of
 giving up. A card in the thread says which site and why, with **Continue** and

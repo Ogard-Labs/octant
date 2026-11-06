@@ -9,6 +9,9 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { BrowserFlowRecorder } from "../browser/browserFlows";
+import { BROWSER_OPERATION_EFFECT } from "../browser/browserToolOperations";
+import { BROWSER_CALL_OF_EACH_OPERATION } from "../browser/browserToolPlanCalls.test-support";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { PullRequestWatchOutcome } from "./pullRequestWatchPort";
 import {
@@ -1237,33 +1240,166 @@ describe("Code app-managed tools", () => {
     expect(result.result).toMatchObject({ note: expect.stringMatching(/person used the page/) });
   });
 
-  it("refuses browser actions after the thread switches to Plan", async () => {
-    let current = thread();
-    const act = vi.fn(async () => browserSnapshot(browserAuthority()));
-    const tools = createCodeAppManagedTools({
-      windowId,
-      thread: current,
-      readThread: () => current,
-      uuid: uuidFactory(),
-      executeOperation: vi.fn(),
-      terminal: { read: vi.fn() },
-      browser: {
-        resolveAuthority: () => browserAuthority(),
-        inspectThread: () => browserSnapshot(browserAuthority()),
-        create: vi.fn(),
-        act,
-        releaseThread: vi.fn(),
+  describe("the Browser in Plan mode", () => {
+    const page: BrowserAutomationSnapshot = {
+      ...browserSnapshot(browserAuthority()),
+      observation: { revision: 4, screenshotDataUrl: "data:image/png;base64,aGVsbG8=" } as never,
+    };
+
+    /** A Plan thread whose page is already open and approved for this thread. */
+    function planTools(
+      options: {
+        readonly approved?: boolean;
+        readonly startsAt?: CodeThread["executionPolicy"];
+      } = {},
+    ) {
+      let current = thread({ executionPolicy: options.startsAt ?? "plan" });
+      const act = vi.fn(async (_input: { readonly request: { readonly kind: string } }) => page);
+      const create = vi.fn(async () => page);
+      const releaseThread = vi.fn(async () => page);
+      const saveDownload = vi.fn();
+      const ask = vi.fn(async () => "denied" as const);
+      const save = vi.fn();
+      const tools = createCodeAppManagedTools({
+        windowId,
+        thread: current,
+        readThread: () => current,
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browserApproval: {
+          isApproved: () => options.approved ?? true,
+          request: ask,
+          remember: vi.fn(),
+          forget: vi.fn(),
+        },
+        browserUpload: { root: "/checkout", request: ask },
+        browserDownload: { root: "/checkout", request: ask },
+        browserSignIn: { refusal: () => undefined, request: ask as never },
+        browserFlows: {
+          service: { list: () => [], get: () => undefined, save: save as never },
+          recorder: new BrowserFlowRecorder(),
+          caller: () => "person",
+        },
+        browser: {
+          resolveAuthority: () => browserAuthority(),
+          inspectThread: () => page,
+          create,
+          act,
+          saveDownload: saveDownload as never,
+          releaseThread,
+          snapshotRefs: () => [],
+          runScript: vi.fn(),
+        },
+      });
+      const switchTo = (executionPolicy: CodeThread["executionPolicy"]) => {
+        current = thread({ executionPolicy });
+      };
+      return { tools, act, create, releaseThread, saveDownload, ask, save, switchTo };
+    }
+    const call = (tools: ReturnType<typeof planTools>["tools"], input: unknown) =>
+      tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson: JSON.stringify(input) });
+    const operations = Object.keys(BROWSER_OPERATION_EFFECT) as ReadonlyArray<
+      keyof typeof BROWSER_OPERATION_EFFECT
+    >;
+    const withEffect = (effect: string) =>
+      operations.filter((operation) => BROWSER_OPERATION_EFFECT[operation] === effect);
+
+    it.each(withEffect("reads"))(
+      "admits %s in Plan, which only reads, and asks no one",
+      async (operation) => {
+        const { tools, act, create, ask } = planTools();
+        const answer = await call(tools, BROWSER_CALL_OF_EACH_OPERATION[operation]);
+        expect(answer.isError).toBe(false);
+        // help and flow-list touch no page; every other read reaches it once.
+        expect(act).toHaveBeenCalledTimes(
+          operation === "help" || operation === "flow-list" ? 0 : 1,
+        );
+        expect(create).not.toHaveBeenCalled();
+        expect(ask).not.toHaveBeenCalled();
       },
-    });
-    current = thread({ executionPolicy: "plan" });
+    );
 
-    const result = await tools.execute({
-      name: CODE_BROWSER_TOOL_NAME,
-      inputJson: JSON.stringify({ operation: "read-page" }),
+    it.each(withEffect("changes"))(
+      "refuses %s before anything reaches the page, the checkout, or the person",
+      async (operation) => {
+        const { tools, act, create, ask, saveDownload, save } = planTools();
+        const answer = await call(tools, BROWSER_CALL_OF_EACH_OPERATION[operation]);
+        // A recorded batch is refused at the recording's start, so the batch
+        // never runs; a recorded flow-run is refused as a flow-run before its
+        // recording would start.
+        const refusal = { error: "plan-mode-read-only" };
+        expect(answer).toEqual({
+          result:
+            operation === "record-start"
+              ? { error: "recording-refused", answer: refusal }
+              : refusal,
+          isError: true,
+        });
+        expect(act).not.toHaveBeenCalled();
+        expect(create).not.toHaveBeenCalled();
+        expect(ask).not.toHaveBeenCalled();
+        expect(saveDownload).not.toHaveBeenCalled();
+        expect(save).not.toHaveBeenCalled();
+      },
+    );
+
+    it("still lets stop release the thread's own Browser", async () => {
+      const { tools, releaseThread } = planTools();
+      expect((await call(tools, BROWSER_CALL_OF_EACH_OPERATION.stop)).isError).toBe(false);
+      expect(releaseThread).toHaveBeenCalledOnce();
     });
 
-    expect(result).toEqual({ result: { error: "plan-mode-read-only" }, isError: true });
-    expect(act).not.toHaveBeenCalled();
+    it("still asks before reading a page this thread was not approved for, and reads nothing declined", async () => {
+      const { tools, act, ask } = planTools({ approved: false });
+      expect(await call(tools, { operation: "snapshot" })).toEqual({
+        result: { error: "browser-approval-denied" },
+        isError: true,
+      });
+      expect(ask).toHaveBeenCalledOnce();
+      expect(act).not.toHaveBeenCalled();
+    });
+
+    it("stops a recording that began before Plan and keeps nothing when the thread moves into Plan mid-batch", async () => {
+      const { tools, act, switchTo, releaseThread } = planTools({ startsAt: "approval-gated" });
+      act.mockImplementation(async (input) => {
+        // The thread moves into Plan while a read of the recorded batch waits.
+        if (input.request.kind === "wait") switchTo("plan");
+        return page;
+      });
+      const answer = await call(tools, {
+        operation: "steps",
+        record: true,
+        steps: [
+          { operation: "wait", selector: "main" },
+          { operation: "click", ref: "e1" },
+        ],
+      });
+      const acted = act.mock.calls.map(([input]) => input);
+      expect(acted.map((input) => input.request.kind)).toEqual([
+        "record-start",
+        "wait",
+        "record-stop",
+      ]);
+      expect(acted[2]).toMatchObject({ discardRecording: true });
+      expect(answer).toMatchObject({
+        isError: true,
+        result: { failedStep: { step: 2 }, recordingNotKept: "plan-mode-read-only" },
+      });
+      expect(answer.result).not.toHaveProperty("recording");
+      expect(releaseThread).not.toHaveBeenCalled();
+    });
+
+    it("reads after the thread switches to Plan, and refuses what would change the page", async () => {
+      const { tools, act, switchTo } = planTools({ startsAt: "full-access" });
+      switchTo("plan");
+      expect((await call(tools, { operation: "read-page" })).isError).toBe(false);
+      expect(await call(tools, { operation: "click", ref: "e1" })).toEqual({
+        result: { error: "plan-mode-read-only" },
+        isError: true,
+      });
+      expect(act).toHaveBeenCalledOnce();
+    });
   });
 
   describe("saving a download", () => {

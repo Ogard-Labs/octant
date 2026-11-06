@@ -150,6 +150,20 @@ and is not deleted or deleting; otherwise the pane shows the welcome surface,
 because a tab restored past that rule opened to a refusal once the thread was
 deleted but not yet purged.
 
+A turn in Plan keeps the whole tool, `create` and `revise` included. Plan may
+look and propose but changes nothing in the workspace, on the host, or in the
+outside world ([Architecture: principles](../architecture.md#overview-and-principles)),
+and a Canvas changes none of those: it is the thread's own document, holding
+no file, shell, Git, or network authority, and the plan a Plan turn writes is
+exactly the kind of document the delivery rule below asks for. What would
+carry a Plan thread's Canvas beyond the thread stays refused: the tool offers
+no publish, share, or export (a person's share, link, and export are their
+own routes), the artifact mirror writes no file for a version a Plan thread
+authored, and replica sync makes no store call for it
+([Artifact replica sync](artifact-replica-sync.md)).
+`codeOperationRuntime.test.ts` shows a Plan turn creating and revising its
+Canvas and the tool refusing a publish or a share.
+
 The delivery rule also reaches the model as an instruction, not only as the
 tool description. Every turn that offers `octant_canvas` (Work, Code, and
 every Chat thread) carries one short, provider-neutral,

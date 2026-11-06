@@ -114,7 +114,6 @@ function harness(options: { readonly mode?: "work" | "code" } = {}) {
       modelId: "model-small",
       ...(mode === "code"
         ? {
-            executionPolicy: "auto-accept-edits" as ProviderExecutionPolicy,
             permissionPersistence: "current-session" as const,
             checkout: { repositoryId: REPOSITORY, checkoutId: CHECKOUT },
           }
@@ -291,18 +290,19 @@ describe("routine proposals from a thread", () => {
     expect(await listed(h.handler)).toEqual([]);
   });
 
-  it("refuses a Code turn in Plan mode", async () => {
-    const proposals = new RoutineProposalService({ uuid, now: () => NOW_MS });
-    const plan = createRoutineProposalTools({
-      windowId,
-      thread: { id: THREAD, mode: "code", projectId: PROJECT },
-      readPosture: () => "plan",
-      isAutomationOrigin: false,
-      proposals,
-      now: () => NOW_MS,
-    });
-    const outcome = await plan.execute({ name: "octant_propose_routine", inputJson: weeklyInput });
-    expect(outcome).toMatchObject({ isError: true, result: { reason: "plan-read-only" } });
+  it("lets a Code turn in Plan propose, and the routine the person confirms asks first", async () => {
+    // The tool and the confirm read no posture, so a thread in Plan proposes
+    // and confirms exactly as any other; Plan reaches none of the routine.
+    const h = harness({ mode: "code" });
+    const { call, proposal } = await propose(h);
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
+    const answer = await decide(h.handler, String(proposal.proposalId), "confirm");
+    expect(await call).toMatchObject({ result: { status: "confirmed" } });
+    if (answer.kind !== "routine-proposal-confirmed") throw new Error(JSON.stringify(answer));
+    expect(answer.automation.executionProfile.executionPolicy).toBe("approval-gated");
+    expect(answer.automation.authorityProfile.effective.executionPolicy).toBe("approval-gated");
   });
 
   it("creates nothing while the proposal waits, and shows it only to the window that raised it", async () => {

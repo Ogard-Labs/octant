@@ -27,8 +27,9 @@ the Browser pane
 - A CLI the person types into a thread terminal that holds a Browser grant keeps
   nothing: no journal actor describes it, so it names no one
   ([Terminal Browser grant](terminal-browser-grant.md)).
-- Keeping writes only under the data directory, never a Project. Plan mode still
-  refuses the agent's Browser operations as the architecture states.
+- Keeping writes only under the data directory, never a Project. A screenshot
+  in Plan mode is kept like any other, as the thread's own capture
+  ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode)).
 
 ## Storage
 
@@ -365,10 +366,13 @@ attached the same way.
   duration bound at the latest. A turn that is stopped still ends the
   recording it started and keeps what was recorded.
 - **Who may.** Recording is a read of a page the agent already drives, the same
-  class as `screenshot`, so it is allowed exactly where a screenshot is: every
+  class as `screenshot`, so it is allowed where a screenshot is, outside Plan: every
   admission a screenshot passes (the thread's authority, the model binding, the
-  origin approval, the person's hold) applies to starting and ending it, and
-  Plan refuses it, as it refuses every Browser operation but `stop`. The
+  origin approval, the person's hold) applies to starting and ending it. Plan
+  admits a screenshot but refuses a recording, because the thread keeps the
+  recording as an artifact and Plan only reads; a recorded call in Plan runs
+  nothing, and a recording already running when Plan begins is stopped and
+  discarded ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode)). The
   recorded observation marks the thread as having read outside content, as a
   screenshot's does. Only the agent tool records: the service refuses a
   recording from the pane, a paired device, a terminal CLI, and any caller that

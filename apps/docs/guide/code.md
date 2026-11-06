@@ -157,7 +157,11 @@ in the composer changes it in one click, for new and existing threads alike:
   Claude in Plan can run read-only commands such as `git log`, `git diff`,
   `rg`, `ls`, and `cat` without asking: the sandbox lets it start only a
   short list of reading tools, refuses every write they try outside a
-  scratch folder of its own, and gives them no network.
+  scratch folder of its own, and gives them no network. The agent may still
+  look at the page already open in the thread's Browser, propose a side task
+  or a routine for you to confirm, and write the plan as the thread's own
+  Canvas; it cannot publish or share that Canvas, and nothing in the checkout
+  changes.
 - **Full access**: no sandbox and no prompts, as in the providers' own apps.
   Agents can change any file and run any command without asking.
   [Protected files](../advanced/privacy-and-security.md#protected-files),
