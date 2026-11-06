@@ -3290,4 +3290,30 @@ describe("useShellController", () => {
     );
     expect(result.current.status).toBe("ready");
   });
+
+  it("picks up a reply detail level another window chose when this window regains focus", async () => {
+    const server = statefulClient();
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    const journaled = server.read();
+    server.write({
+      ...journaled,
+      settings: {
+        ...journaled.settings,
+        replyDetail: "medium",
+        threadReplyDetail: [{ mode: "work", threadId: "thread-1", level: "high" }],
+      },
+      settingsVersion: (journaled.settingsVersion + 1) as ShellBootstrap["settingsVersion"],
+    });
+
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(result.current.settings?.replyDetail).toBe("medium"));
+    expect(result.current.settings?.threadReplyDetail).toEqual([
+      { mode: "work", threadId: "thread-1", level: "high" },
+    ]);
+    expect(result.current.status).toBe("ready");
+  });
 });

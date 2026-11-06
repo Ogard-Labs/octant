@@ -113,6 +113,52 @@ const point = (id = instanceId, namespace = "provider", reference = REFERENCE) =
 
 // Each case starts real child processes, which are slow on a busy machine.
 describe("credential broker linked secret stores", { timeout: 30_000 }, () => {
+  it("resolves a card reference privately without storing a reusable credential", async () => {
+    const h = await harness();
+    const path = "/v1/secret-stores/request-card-read";
+    const reference = { store: "onepassword", reference: REFERENCE };
+    const unauthenticated = await h.broker.fetchForTest(
+      new Request(new URL(path, h.broker.url), { method: "POST", body: JSON.stringify(reference) }),
+    );
+    expect(unauthenticated.status).toBe(401);
+    expect(JSON.parse((await h.post(path, reference)).text)).toEqual({ status: "not-linked" });
+    await h.post("/v1/secret-stores/link", { store: "onepassword" });
+    expect(JSON.parse((await h.post(path, reference)).text)).toEqual({
+      status: "read",
+      value: VALUE,
+    });
+    expect(h.provider.entries.size + h.connectors.entries.size + h.others.entries.size).toBe(0);
+    expect(
+      (await h.post(path, { ...reference, destination: "https://evil.test" })).text,
+    ).not.toContain(VALUE);
+    await h.post("/v1/secret-stores/unlink", { store: "onepassword" });
+    expect(JSON.parse((await h.post(path, reference)).text)).toEqual({ status: "not-linked" });
+  });
+  it("discards a late card lookup after the store is unlinked and linked again", async () => {
+    const read = Promise.withResolvers<{ status: "read"; value: string }>();
+    const started = Promise.withResolvers<void>();
+    const h = await harness({
+      kind: "onepassword",
+      label: "Fixture",
+      probe: async () => "ready",
+      isValidReference: () => true,
+      read: () => {
+        started.resolve();
+        return read.promise;
+      },
+    });
+    await h.post("/v1/secret-stores/link", { store: "onepassword" });
+    const pending = h.post("/v1/secret-stores/request-card-read", {
+      store: "onepassword",
+      reference: REFERENCE,
+    });
+    await started.promise;
+    await h.post("/v1/secret-stores/unlink", { store: "onepassword" });
+    await h.post("/v1/secret-stores/link", { store: "onepassword" });
+    read.resolve({ status: "read", value: VALUE });
+    expect(JSON.parse((await pending).text)).toEqual({ status: "changed" });
+  });
+
   it("authenticates fixed fill commands and refuses secret-bearing requests and responses", async () => {
     const ready = decodeBrowserCredentialHostResult({ status: "ready", custodyId: randomUUID() });
     const execute = vi.fn(async () => ready);

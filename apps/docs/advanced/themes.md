@@ -16,9 +16,37 @@ The **Appearance** page covers the color scheme and presets, UI/editor/terminal
 typography, theme accessibility, and theme import and export, then **Window**
 (Glass), **Background**, **Sidebar** (width, destinations, the More row, the
 mode switcher, provider icons), **Sidebar thread rows**, and **Reading**
-(transcript text size and width, the stats line, and how the composer's usage
-bars are drawn). **Reset to default**, at the right of the page
+(transcript text size and width, **Reply detail**, the stats line, and how the
+composer's usage bars are drawn). **Reset to default**, at the right of the page
 title, returns every appearance setting to its default.
+
+**Reply detail** chooses how much of an agent's work a thread shows open, the
+same in Chat, Work, and Code. The setting here is the default every thread
+starts at:
+
+- **Low** (the default): thinking stays folded, and a finished turn's tool
+  calls fold behind one line such as "3 tool calls".
+- **Medium**: thinking stays folded but shows its first line, and a finished
+  turn's tool calls stay listed.
+- **High**: thinking, the tool calls, and each call's recorded result stay
+  open, also while a reply is still arriving.
+
+A thread can keep a level of its own: open the **Reply detail** menu (the
+list icon in a Chat thread's header, or among the controls under a Work or
+Code thread's message box) and choose a level, or **Use default** to follow
+this setting again. A thread's own level stays with it after a reload and on
+your other windows, your phone and a paired browser, and changing the default
+does not move it. Another open window shows the change when you switch back to
+it, and deleting a thread for good removes its level too. **⌘/Ctrl+Shift+D** steps the thread in front through the
+levels, and the command palette can set either the thread's level or the
+default.
+
+It only changes what is open on screen: the model is asked for nothing more,
+and a tool call shows only the summary Octant already recorded. **Stream
+replies** still decides whether a reply's answer shows while it arrives. You
+can still open or close any single disclosure; it stays that way until the
+thread's level changes. Your phone and a paired browser follow the same levels
+but change them only from the computer.
 
 Every Settings page is laid out the same way: an icon tile, the page title and
 a one-line description, then sections. A page with three or more sections adds

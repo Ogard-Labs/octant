@@ -6,6 +6,7 @@ import {
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
 import type { BrowserCapture, BrowserStep, BrowserThreadId } from "@octant/contracts";
+import { encodeBrowserRecordingApng, parseBrowserRecordingPng } from "@octant/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceContentViewContext } from "../shell/WorkspaceContentView";
 import { ThreadActivityRevisionsContext } from "../polling/ThreadActivityRevisions";
@@ -236,6 +237,110 @@ describe("BrowserCaptureList", () => {
     view.rerender(revisions(1));
     await waitFor(() => expect(listCaptures).toHaveBeenCalledTimes(3));
     expect(screen.getByTestId("browser-capture-list")).toBeVisible();
+  });
+});
+
+describe("a kept recording", () => {
+  /** A real 1x1 PNG, made into a two-frame animation the way a recording is. */
+  const pixel = parseBrowserRecordingPng(
+    Uint8Array.from(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    ),
+  );
+  if (pixel === undefined) throw new Error("fixture is not a PNG");
+  const animated = `data:image/png;base64,${Buffer.from(
+    encodeBrowserRecordingApng([
+      { frame: pixel, delayMs: 1_000 },
+      { frame: pixel, delayMs: 1_500 },
+    ]),
+  ).toString("base64")}`;
+  const recorded = capture(1, {
+    size: 4_096,
+    recording: { frames: 2, durationMs: 2_500, truncated: "size-limit" },
+  });
+
+  function recordingClient() {
+    const listCaptures = vi.fn(async () => ({ captures: [recorded] }));
+    const readCapture = vi.fn(async (input: { readonly captureId: string }) => ({
+      captureId: input.captureId,
+      dataUrl: animated,
+    }));
+    return { listCaptures, readCapture } as unknown as BrowserAutomationClient;
+  }
+
+  const isAnimated = (image: HTMLElement) =>
+    Buffer.from(
+      (image.getAttribute("src") ?? "").slice("data:image/png;base64,".length),
+      "base64",
+    ).includes("acTL");
+
+  afterEach(() => {
+    delete document.documentElement.dataset.octantReducedMotion;
+  });
+
+  it("marks a recording with a play badge and its length, and keeps its picture still", async () => {
+    render(<BrowserCaptureList client={recordingClient()} threadId={threadId} />);
+    const play = await screen.findByRole("button", {
+      name: "Play recording of Page 1, 2.5 s",
+    });
+    expect(play).toBeVisible();
+    expect(screen.getByRole("listitem")).toHaveTextContent("2.5 s");
+    const thumbnail = await screen.findByRole("img", { name: "Recording of Page 1" });
+    await waitFor(() => expect(thumbnail.getAttribute("src")).toMatch(/^data:image\/png/));
+    expect(isAnimated(thumbnail)).toBe(false);
+  });
+
+  it("plays a recording once opened, says how it ended, and stops on request", async () => {
+    render(<BrowserCaptureList client={recordingClient()} threadId={threadId} />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Play recording of Page 1, 2.5 s" }),
+    );
+    const view = await screen.findByTestId("browser-capture-view");
+    expect(view).toHaveTextContent("Recording · 2.5 s · 2 frames · stopped at its size limit");
+    const image = within(view).getByRole("img", { name: "Recording of Page 1" });
+    await waitFor(() => expect(isAnimated(image)).toBe(true));
+    await userEvent.click(within(view).getByRole("button", { name: "Stop" }));
+    expect(isAnimated(within(view).getByRole("img", { name: "Recording of Page 1" }))).toBe(false);
+    await userEvent.click(within(view).getByRole("button", { name: "Play" }));
+    expect(isAnimated(within(view).getByRole("img", { name: "Recording of Page 1" }))).toBe(true);
+  });
+
+  it("waits on the first frame for Play when the person asked for less motion", async () => {
+    document.documentElement.dataset.octantReducedMotion = "true";
+    render(<BrowserCaptureList client={recordingClient()} threadId={threadId} />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Play recording of Page 1, 2.5 s" }),
+    );
+    const view = await screen.findByTestId("browser-capture-view");
+    const image = await within(view).findByRole("img", { name: "Recording of Page 1" });
+    await waitFor(() => expect(image.getAttribute("src")).toMatch(/^data:image\/png/));
+    expect(isAnimated(image)).toBe(false);
+    expect(within(view).getByRole("button", { name: "Play" })).toBeVisible();
+  });
+
+  it("offers to save screenshots and recordings together", async () => {
+    render(
+      <BrowserProofPanel
+        captures={[recorded]}
+        client={recordingClient()}
+        hostBridge={
+          {
+            saveBrowserProofScreenshots: vi.fn(async () => ({
+              kind: "saved" as const,
+              count: 1,
+              folderName: "pr-12",
+            })),
+          } as unknown as OctantHostBridge
+        }
+        steps={[step(1)]}
+        threadId={threadId}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save screenshots and recordings…" }));
+    expect(await screen.findByText("Saved 1 file to “pr-12”.")).toBeVisible();
   });
 });
 

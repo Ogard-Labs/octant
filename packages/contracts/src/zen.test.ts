@@ -1513,15 +1513,24 @@ describe("Zen Assistant typed actions", () => {
     expect(() => decodeAssistantAppearance({ expectedVersion: 2 })).toThrow();
   });
 
-  it("decodes structured conflict results for provider continuation", () => {
+  it("decodes a conflict only when it names the space's current version", () => {
     expect(
+      decodeAssistantToolResult({
+        action: "pin-thread",
+        status: "conflict",
+        code: "stale-version",
+        version: 5,
+        message: "Zen changed elsewhere.",
+      }),
+    ).toMatchObject({ status: "conflict", code: "stale-version", version: 5 });
+    expect(() =>
       decodeAssistantToolResult({
         action: "pin-thread",
         status: "conflict",
         code: "stale-version",
         message: "Zen changed elsewhere.",
       }),
-    ).toMatchObject({ status: "conflict", code: "stale-version" });
+    ).toThrow();
   });
 
   it("decodes a bounded Timer creation request and success result", () => {

@@ -192,13 +192,7 @@ export function nightlyClientChannelClass(channel: string): NightlyChannelClass 
   return CLASS_BY_CHANNEL.get(channel) ?? "octant-only";
 }
 
-/**
- * What Nightly says when its matching Octant does not broker a flow the window
- * asks for: the host's feature list lacks it, or the window has no main-only
- * token. Nightly refuses before any dialog opens or any host route is called.
- */
-export const NEEDS_NEWER_OCTANT =
-  "Needs a newer Octant. Update Octant to use this in Octant Nightly.";
+export { NEEDS_NEWER_OCTANT } from "./ipcChannels";
 
 /**
  * What a Nightly client says when it refuses a channel it does not answer.

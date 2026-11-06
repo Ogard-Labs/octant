@@ -158,7 +158,7 @@ describe("authoritative extension Chat resolver", () => {
   it("composes selected verified material from the effective projection", async () => {
     const state = snapshots({ kind: "effective" });
     const load = vi.fn<ExtensionMaterialLoaderPort["load"]>(async () => ({
-      context: { kind: "instructions", text: "Use verified review guidance." },
+      context: { kind: "skill-instructions", text: "Use verified review guidance." },
       tools: [],
     }));
     const resolver = createExtensionChatResolver({
@@ -173,7 +173,7 @@ describe("authoritative extension Chat resolver", () => {
 
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0]?.providerContext).toEqual({
-      kind: "instructions",
+      kind: "skill-instructions",
       text: "Use verified review guidance.",
     });
     expect(load).toHaveBeenCalledOnce();
@@ -487,7 +487,7 @@ describe("authoritative extension Chat resolver", () => {
           entry.componentKind === "mcp-tool"
             ? { tools: [] }
             : {
-                context: { kind: "instructions", text: "Use verified review guidance." },
+                context: { kind: "skill-instructions", text: "Use verified review guidance." },
                 tools: [],
               },
       },
@@ -503,7 +503,7 @@ describe("authoritative extension Chat resolver", () => {
     expect(result.entries).toHaveLength(2);
     expect(result.entries[0]).not.toHaveProperty("providerContext");
     expect(result.entries[1]?.providerContext).toEqual({
-      kind: "instructions",
+      kind: "skill-instructions",
       text: "Use verified review guidance.",
     });
   });
@@ -628,7 +628,7 @@ describe("standalone skill material", () => {
       ],
     });
     expect(result.entries.map((entry) => entry.providerContext)).toEqual([
-      { kind: "instructions", text: "Use the synthetic checklist." },
+      { kind: "skill-instructions", text: "Use the synthetic checklist." },
     ]);
   });
 });

@@ -14,6 +14,11 @@ import {
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, Scope, Stream } from "effect";
+import {
+  PROVIDER_CONTEXT_RESTATED,
+  renderProviderContextSections,
+  renderProviderTurnPrompt,
+} from "@octant/provider-sdk/chat-conformance";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   codexAppServerArgs,
@@ -42,6 +47,7 @@ import {
   type CodexDriverOptions,
   type CodexThreadResumeInput,
   type CodexThreadStartInput,
+  type CodexTurnStartInput,
 } from "./codexDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -86,9 +92,23 @@ function processPids(root: string): number[] {
 function processIsRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+  // A signal probe also reaches a zombie. The fixture's descendant is
+  // reparented to PID 1 when the runtime exits, and a container init was seen
+  // reaping it about 1.5 seconds later, past the tests' one-second waits,
+  // though it had already exited.
+  if (process.platform !== "linux") return true;
+  try {
+    const processStat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const state = processStat
+      .slice(processStat.lastIndexOf(")") + 1)
+      .trim()
+      .split(/\s+/)[0];
+    return state !== "Z" && state !== "X";
+  } catch {
+    return false;
   }
 }
 
@@ -1239,6 +1259,7 @@ describe("Codex thread and turn lifecycle", () => {
     expect(handle.resumeCursor).toEqual({
       driverKind: "codex",
       value: "thread-1",
+      tools: [],
       binding: { instanceId, sessionId, projectRoot, mode: "code", modelId: "gpt-5.4" },
     });
     expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
@@ -1480,6 +1501,201 @@ describe("Codex thread and turn lifecycle", () => {
       sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
       approvalsReviewer: "user",
     });
+    await acquired.close();
+  });
+
+  it("sends Octant's rules as developer context and other material as user context, leaving the typed request alone", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await startSession(acquired.connection);
+
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "hei",
+        context: [
+          { kind: "instructions", text: "Offer follow-ups only when useful." },
+          { kind: "skill-instructions", text: "Review as a skeptic." },
+          { kind: "project-memory", key: "work-status-file", text: "Draft sent." },
+          { kind: "turn-instructions", text: "Take stock first." },
+        ],
+        attachments: [],
+        tools: [],
+      }),
+    );
+
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      input: [{ type: "text", text: "hei" }],
+      additionalContext: {
+        octant_instructions: {
+          kind: "application",
+          value: "Offer follow-ups only when useful.\n\nTake stock first.",
+        },
+        octant_context: {
+          kind: "untrusted",
+          value: renderProviderContextSections([
+            { kind: "skill-instructions", text: "Review as a skeptic." },
+            { kind: "project-memory", key: "work-status-file", text: "Draft sent." },
+          ]),
+        },
+      },
+    });
+    await acquired.close();
+  });
+
+  it("delivers a skill selected again after a turn that withdrew it", async () => {
+    const f = fixture();
+    const driver = makeCodexDriver(f.options());
+    const rule = { kind: "instructions", text: "Offer follow-ups only when useful." } as const;
+    const skill = { kind: "skill-instructions", text: "Review as a skeptic." } as const;
+    // The contexts the held record gives three turns: the skill is selected,
+    // deselected (so everything is restated), then selected again.
+    const turns = [
+      [rule, skill],
+      [{ kind: "instructions", text: PROVIDER_CONTEXT_RESTATED }, rule],
+      [skill],
+    ] as const;
+    // Each turn resumes the same Codex thread, as a held session's turns do.
+    for (const context of turns) {
+      const acquired = await acquireConnection(driver);
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: { driverKind: "codex", value: "thread-existing" },
+          executionPolicy: "approval-gated",
+          modelId: "gpt-5.4" as never,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
+      );
+      await acquired.close();
+    }
+
+    // Codex records an entry only when its value differs from the last one
+    // under its key. Were the withdrawing turn to send no material entry, the
+    // skill's value on the third turn would match the first and be dropped,
+    // leaving the skill withdrawn.
+    const last = new Map<string, string>();
+    const recorded = f.calls
+      .filter(({ method }) => method === "turn/start")
+      .map(({ input }) => {
+        const entries = (input as CodexTurnStartInput).additionalContext ?? {};
+        return Object.entries(entries).flatMap(([key, entry]) => {
+          if (last.get(key) === entry.value) return [];
+          last.set(key, entry.value);
+          return [{ key, value: entry.value }];
+        });
+      });
+    expect(recorded[2]).toEqual([
+      { key: "octant_context", value: renderProviderContextSections([skill]) },
+    ]);
+    // The withdrawing turn replaced the material entry, naming the skill nowhere.
+    const withdrawn = recorded[1]?.find(({ key }) => key === "octant_context");
+    expect(withdrawn?.value).not.toContain(skill.text);
+  });
+
+  describe("rules about Octant tools on a Codex thread", () => {
+    const canvasRule = {
+      kind: "instructions",
+      tool: "octant_canvas",
+      text: "Deliver kept work as a Canvas.",
+    } as const;
+    const browserNote = {
+      kind: "instructions",
+      tool: "octant_browser",
+      text: "octant_browser opens web pages.",
+    } as const;
+    const plainRule = { kind: "instructions", text: "Offer follow-ups only when useful." } as const;
+    const sentInstructions = (f: ReturnType<typeof fixture>) =>
+      (
+        f.calls.filter(({ method }) => method === "turn/start").at(-1)?.input as {
+          readonly additionalContext?: Record<string, { readonly value: string }>;
+        }
+      ).additionalContext?.octant_instructions?.value;
+    const canvasTool = { name: "octant_canvas", inputSchema: { type: "object" } } as const;
+    const browserTool = { name: "octant_browser", inputSchema: { type: "object" } } as const;
+
+    it("leaves out a rule for a tool the thread did not start with, since Codex cannot add it later", async () => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()));
+      const handle = await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "approval-gated",
+          tools: [canvasTool],
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "hei",
+          context: [plainRule, canvasRule, browserNote],
+          attachments: [],
+          tools: [canvasTool, browserTool],
+        }),
+      );
+      expect(sentInstructions(f)).toBe(`${plainRule.text}\n\n${canvasRule.text}`);
+      expect(handle.resumeCursor).toMatchObject({ tools: ["octant_canvas"] });
+      await acquired.close();
+    });
+
+    it("remembers the thread's tools across a resume, and keeps every rule when the cursor does not say", async () => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()));
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: {
+            driverKind: "codex",
+            value: "thread-existing",
+            tools: ["octant_browser"],
+          },
+          executionPolicy: "approval-gated",
+          modelId: "gpt-5.4" as never,
+        }),
+      );
+      const context = [canvasRule, browserNote];
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
+      );
+      expect(sentInstructions(f)).toBe(browserNote.text);
+
+      const legacy = fixture();
+      const older = await acquireConnection(makeCodexDriver(legacy.options()));
+      await Effect.runPromise(
+        older.connection.resume({
+          sessionId,
+          resumeCursor: { driverKind: "codex", value: "thread-existing" },
+          executionPolicy: "approval-gated",
+          modelId: "gpt-5.4" as never,
+        }),
+      );
+      await Effect.runPromise(
+        older.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
+      );
+      expect(sentInstructions(legacy)).toBe(`${canvasRule.text}\n\n${browserNote.text}`);
+      await acquired.close();
+      await older.close();
+    });
+  });
+
+  it("frames context inside the request on a Codex too old to take it separately", async () => {
+    const f = fixture({ version: "0.130.0" });
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await startSession(acquired.connection);
+    const context = [{ kind: "instructions", text: "Offer follow-ups only when useful." }] as const;
+
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
+    );
+
+    const turn = f.calls.find(({ method }) => method === "turn/start")?.input;
+    expect(turn).toMatchObject({
+      input: [{ type: "text", text: renderProviderTurnPrompt({ prompt: "hei", context }) }],
+    });
+    expect(turn).not.toHaveProperty("additionalContext");
     await acquired.close();
   });
 

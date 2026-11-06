@@ -15,9 +15,12 @@ import {
   buildScheduledAutomationOccurrenceKey,
   canExhaustOnceAutomation,
   decideAutomationFollowUp,
+  decideRoutineChangeRequest,
+  decideRoutineRunResultReport,
   intersectAutomationAuthority,
   isAutomationMutationAllowed,
   isAutomationRunLifecycleActive,
+  isRoutineVisibleToTurn,
   reconcileMissedAutomationOccurrences,
   resolveNextAutomationOccurrence,
   resolveWeeklyLocalOccurrence,
@@ -677,5 +680,141 @@ describe("follow-up fire-time decision", () => {
     expect(decide({}, "2026-11-02T09:01:00.000Z")).toMatchObject({
       reason: "follow-up-missed",
     });
+  });
+});
+
+describe("what a thread's agent may do with routines", () => {
+  const thread = "00000000-0000-4000-8000-000000000901";
+  const otherThread = "00000000-0000-4000-8000-000000000902";
+  const project = "00000000-0000-4000-8000-000000000903";
+  const turn = {
+    threadId: thread,
+    mode: "work" as const,
+    projectId: project,
+    hostStarted: false,
+    plan: false,
+  };
+  const routine = {
+    id: ids.automation,
+    mode: "work",
+    projectId: project,
+    lifecycle: "enabled" as const,
+    originThreadId: thread,
+  };
+
+  it("lets a thread ask the person to pause or archive the routine it proposed", () => {
+    expect(decideRoutineChangeRequest({ turn, routine, change: "pause" })).toEqual({
+      kind: "allowed",
+    });
+    expect(decideRoutineChangeRequest({ turn, routine, change: "archive" })).toEqual({
+      kind: "allowed",
+    });
+  });
+
+  it("lets a person's turn in a routine's run thread ask about that routine", () => {
+    expect(
+      decideRoutineChangeRequest({
+        turn,
+        routine: { ...routine, originThreadId: otherThread },
+        threadStartedByRoutineId: ids.automation,
+        change: "archive",
+      }),
+    ).toEqual({ kind: "allowed" });
+  });
+
+  it("refuses to ask about a same-Project routine that is not this thread's own", () => {
+    expect(
+      decideRoutineChangeRequest({
+        turn,
+        routine: { ...routine, originThreadId: otherThread },
+        change: "pause",
+      }),
+    ).toMatchObject({ kind: "refused", reason: "not-this-threads-routine" });
+  });
+
+  it("treats a routine in another Project or mode as absent", () => {
+    for (const elsewhere of [
+      { ...routine, projectId: "00000000-0000-4000-8000-000000000904" },
+      { ...routine, mode: "code" },
+    ]) {
+      expect(isRoutineVisibleToTurn(elsewhere, turn)).toBe(false);
+      expect(
+        decideRoutineChangeRequest({ turn, routine: elsewhere, change: "pause" }),
+      ).toMatchObject({ kind: "refused", reason: "routine-unavailable" });
+    }
+  });
+
+  it("refuses every change request from a turn the host runs, even for the routine's own run", () => {
+    expect(
+      decideRoutineChangeRequest({
+        turn: { ...turn, hostStarted: true },
+        routine,
+        threadStartedByRoutineId: ids.automation,
+        change: "pause",
+      }),
+    ).toMatchObject({ kind: "refused", reason: "host-started-turn" });
+  });
+
+  it("refuses change requests in Plan", () => {
+    expect(
+      decideRoutineChangeRequest({ turn: { ...turn, plan: true }, routine, change: "archive" }),
+    ).toMatchObject({ kind: "refused", reason: "plan-read-only" });
+  });
+
+  it("refuses to ask for a change the routine already has or can no longer take", () => {
+    const withLifecycle = (lifecycle: "paused" | "archived" | "exhausted") => ({
+      ...routine,
+      lifecycle,
+    });
+    expect(
+      decideRoutineChangeRequest({ turn, routine: withLifecycle("paused"), change: "pause" }),
+    ).toMatchObject({ reason: "already-paused" });
+    expect(
+      decideRoutineChangeRequest({ turn, routine: withLifecycle("archived"), change: "archive" }),
+    ).toMatchObject({ reason: "already-archived" });
+    expect(
+      decideRoutineChangeRequest({ turn, routine: withLifecycle("exhausted"), change: "pause" }),
+    ).toMatchObject({ reason: "routine-finished" });
+    expect(
+      decideRoutineChangeRequest({ turn, routine: withLifecycle("paused"), change: "archive" }),
+    ).toEqual({ kind: "allowed" });
+  });
+
+  const dispatchedRun = { automationId: ids.automation, runId: ids.request };
+  const run = { id: ids.request, automationId: ids.automation, threadId: thread, reported: false };
+
+  it("lets the turn a run started report that run's result once", () => {
+    expect(decideRoutineRunResultReport({ threadId: thread, dispatchedRun, run })).toEqual({
+      kind: "allowed",
+    });
+    expect(
+      decideRoutineRunResultReport({
+        threadId: thread,
+        dispatchedRun,
+        run: { ...run, reported: true },
+      }),
+    ).toMatchObject({ kind: "refused", reason: "already-reported" });
+  });
+
+  it("refuses a result from a turn no run started, even in a run's own thread", () => {
+    expect(
+      decideRoutineRunResultReport({ threadId: thread, dispatchedRun: undefined, run }),
+    ).toMatchObject({ kind: "refused", reason: "not-a-routine-run" });
+  });
+
+  it("refuses a result for a run that is not this turn's or not in this thread", () => {
+    expect(
+      decideRoutineRunResultReport({ threadId: otherThread, dispatchedRun, run }),
+    ).toMatchObject({ reason: "run-unavailable" });
+    expect(
+      decideRoutineRunResultReport({
+        threadId: thread,
+        dispatchedRun: { ...dispatchedRun, runId: ids.actor },
+        run,
+      }),
+    ).toMatchObject({ reason: "run-unavailable" });
+    expect(
+      decideRoutineRunResultReport({ threadId: thread, dispatchedRun, run: undefined }),
+    ).toMatchObject({ reason: "run-unavailable" });
   });
 });

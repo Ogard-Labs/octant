@@ -56,6 +56,7 @@ import {
 import {
   authorizeToolAction,
   browserCaptureTaker,
+  browserPageAuditResult,
   canRequestToolCancellation,
   browserProfileKey,
   browserContextExpiresAt,
@@ -80,11 +81,13 @@ import { saveBrowserDownload, type BrowserDownloadFacts } from "./browserDownloa
 import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
+  BrowserRecordingUnavailableError,
   BrowserTargetStaleError,
   BrowserWaitTimedOutError,
   type BrowserPointObservation,
   type BrowserRuntimeAction,
   type BrowserRuntimePort,
+  type BrowserRuntimeRecording,
 } from "./browserRuntimePort";
 
 export interface BrowserAuthorityResolver {
@@ -312,6 +315,16 @@ const PERSON_GUARDED_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Se
   "select",
   "drag",
   "upload",
+]);
+/**
+ * The actions that start and end an agent's recording. They read the page as
+ * a screenshot does and change nothing on it, so they leave the observation
+ * revision where it was: a call recorded around a batch must not make the
+ * batch's first step stale, nor the revision the batch answered with.
+ */
+const RECORDING_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
+  "record-start",
+  "record-stop",
 ]);
 /** The person's pane actions that change what the page shows or holds. */
 const PERSON_PAGE_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
@@ -971,6 +984,13 @@ export class BrowserAutomationService {
     /** Trusted caller attribution for admission/idle only; never keeps a capture. */
     readonly activityBy?: BrowserCaptureTaker;
     /**
+     * On the agent's `record-stop`: end the recording and keep nothing. The
+     * agent tool asks for it when its thread moved into Plan while the
+     * recorded call ran, because Plan keeps no artifact; the stop still has
+     * to reach the runtime, or the screencast runs on to its own bound.
+     */
+    readonly discardRecording?: true;
+    /**
      * For an upload: the absolute paths of the files the request names, as the
      * agent tool resolved them inside the thread's workspace after the person
      * approved. Nothing else supplies a path to a runtime.
@@ -1043,7 +1063,10 @@ export class BrowserAutomationService {
             owned.status,
           );
         const result = await this.#actOwned(owned, input);
-        if (input.capturedBy === "agent") {
+        // Starting and stopping a recording are not steps of the check: the
+        // recording is a capture, and the proof shows it after the steps it
+        // covered, as it shows a screenshot no step names.
+        if (input.capturedBy === "agent" && !RECORDING_ACTIONS.has(input.request.kind)) {
           this.#recordStep(owned, input.request, element, before, result);
         }
         return result;
@@ -1091,6 +1114,7 @@ export class BrowserAutomationService {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
       readonly activityBy?: BrowserCaptureTaker;
+      readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
@@ -1201,6 +1225,16 @@ export class BrowserAutomationService {
       return this.#failure(
         owned,
         { category: "policy-denied", message: "An upload needs the agent's approved files." },
+        "failed",
+      );
+    }
+    // A recording happens only because the agent tool asked for one around a
+    // call of its own. The pane, a paired device, and an unnamed caller reach
+    // this service through the ordinary action route, which names no one.
+    if (RECORDING_ACTIONS.has(input.request.kind) && input.capturedBy !== "agent") {
+      return this.#failure(
+        owned,
+        { category: "policy-denied", message: "Only the agent's own call can record the page." },
         "failed",
       );
     }
@@ -1324,6 +1358,15 @@ export class BrowserAutomationService {
           "interrupted",
         );
       }
+      // A runtime that cannot audit (an older desktop app's Browser) answers
+      // the action without one; that is a refusal, not a clean page.
+      if (input.request.kind === "audit" && observed.audit === undefined) {
+        return this.#failure(
+          owned,
+          { category: "unavailable", message: "This Browser cannot audit pages." },
+          owned.status,
+        );
+      }
       const change = describeChange(
         input.request.kind,
         {
@@ -1371,7 +1414,24 @@ export class BrowserAutomationService {
         ...(observed.diagnosticsCursor === undefined
           ? {}
           : { diagnosticsCursor: observed.diagnosticsCursor }),
-        revision: ++owned.observationRevision,
+        // Shaped here, so both Browsers answer with the same bounds and words,
+        // and a finding is named by the ref the latest snapshot of this page
+        // gave its element.
+        ...(observed.audit === undefined
+          ? {}
+          : {
+              audit: browserPageAuditResult(
+                observed.audit,
+                new Map(
+                  owned.refs !== undefined && owned.refs.url === observed.url
+                    ? [...owned.refs.byRef.values()].map((entry) => [entry.selector, entry.ref])
+                    : [],
+                ),
+              ),
+            }),
+        revision: RECORDING_ACTIONS.has(input.request.kind)
+          ? owned.observationRevision
+          : ++owned.observationRevision,
         observedAt: this.#clock() as BrowserObservation["observedAt"],
         stale: false,
       };
@@ -1469,6 +1529,9 @@ export class BrowserAutomationService {
       }
       if (!interrupted && error instanceof BrowserNavigationBlockedError) {
         return this.#failure(owned, browserOriginRefusal(new URL(error.url).origin), "failed");
+      }
+      if (!interrupted && error instanceof BrowserRecordingUnavailableError) {
+        return this.#failure(owned, { category: "unavailable", message: error.message }, "failed");
       }
       return this.#failure(
         owned,
@@ -1658,26 +1721,45 @@ export class BrowserAutomationService {
     input: {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
+      readonly discardRecording?: true;
     },
     observed: {
       readonly screenshotDataUrl?: string;
+      readonly recording?: BrowserRuntimeRecording;
       readonly url?: string;
       readonly title?: string;
     },
   ): Promise<BrowserCaptureOutcome | undefined> {
     const takenBy = browserCaptureTaker(input.request.kind, input.capturedBy);
     if (takenBy === undefined || this.#captures === undefined) return undefined;
-    // Someone asked for a capture and the runtime withheld the picture. Saying
+    const stopping = input.request.kind === "record-stop";
+    if (stopping && input.discardRecording === true) return undefined;
+    const recording =
+      stopping && observed.recording?.status === "recorded" ? observed.recording : undefined;
+    const dataUrl = stopping ? recording?.dataUrl : observed.screenshotDataUrl;
+    // Someone asked for a capture and the runtime withheld the picture (or a
+    // recording's page painted nothing, or showed a credential field). Saying
     // nothing here left the pane looking as if the capture had been kept.
-    if (observed.screenshotDataUrl === undefined) {
+    if (dataUrl === undefined) {
       return { status: "not-kept", reason: "no-picture" };
     }
     try {
       return await this.#captures.keep({
         threadId: owned.threadId,
-        dataUrl: observed.screenshotDataUrl,
-        url: observed.url,
-        title: observed.title,
+        dataUrl,
+        ...(recording !== undefined
+          ? {
+              recording: {
+                frames: recording.frames,
+                durationMs: recording.durationMs,
+                ...(recording.truncated === undefined ? {} : { truncated: recording.truncated }),
+              },
+            }
+          : {}),
+        // A recording is of the tab it started on, which need not be the tab
+        // the call left in front: it is kept under that tab's address only.
+        url: stopping ? recording?.url : observed.url,
+        title: stopping ? recording?.title : observed.title,
         takenBy,
         ...(storedBrowserProfile(owned.record.policy.profile) === undefined
           ? {}
@@ -3216,7 +3298,9 @@ function describeChange(
     kind === "extract-text" ||
     kind === "snapshot" ||
     kind === "screenshot" ||
-    kind === "observe-diagnostics"
+    kind === "observe-diagnostics" ||
+    kind === "audit" ||
+    RECORDING_ACTIONS.has(kind)
   ) {
     return undefined;
   }

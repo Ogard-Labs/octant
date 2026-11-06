@@ -22,10 +22,11 @@ import type {
   BrowserContextPolicy,
   BrowserEmulationReport,
   BrowserPresentationKind,
+  BrowserRecordingTruncation,
   BrowserThreadId,
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
-import type { BrowserPageSnapshotRef } from "@octant/domain";
+import type { BrowserPageAuditReading, BrowserPageSnapshotRef } from "@octant/domain";
 import type {
   BrowserCredentialFillPreparation,
   BrowserCredentialNativeResult,
@@ -80,8 +81,45 @@ export interface BrowserRuntimeObservation {
     readonly seq?: number;
   }>;
   readonly diagnosticsCursor?: number;
+  /** Only an audit action fills this: what the fixed reader measured, before the server shapes it. */
+  readonly audit?: BrowserPageAuditReading;
   /** Downloads the page started while an action that allowed them ran. */
   readonly downloads?: ReadonlyArray<BrowserDownloadReport>;
+  /** Only a `record-stop` fills this: the recording that ended; see the contract. */
+  readonly recording?: BrowserRuntimeRecording;
+}
+
+/**
+ * What a `record-stop` hands back. A recorded animation is an animated PNG as
+ * a data URL, the same transport a screenshot takes; it is kept as a thread
+ * capture and never handed to the model. `withheld` is a recording whose every
+ * frame showed a page that held a credential field (or could not be checked),
+ * and `empty` a page that painted nothing. A recording belongs to the tab it
+ * started on: `url` and `title` are that tab's when the recording stopped,
+ * whichever tab is in front now, and are absent where it had none.
+ */
+export type BrowserRuntimeRecording =
+  | {
+      readonly status: "recorded";
+      readonly dataUrl: string;
+      readonly frames: number;
+      readonly durationMs: number;
+      readonly truncated?: BrowserRecordingTruncation;
+      readonly url?: string;
+      readonly title?: string;
+    }
+  | { readonly status: "withheld" }
+  | { readonly status: "empty" };
+
+/**
+ * This Browser cannot record its page: it has no screencast to take frames
+ * from. The action did not run, and the agent is told so in words.
+ */
+export class BrowserRecordingUnavailableError extends Error {
+  constructor() {
+    super("This Browser cannot record the page.");
+    this.name = "BrowserRecordingUnavailableError";
+  }
 }
 
 export interface BrowserTargetInspection {
@@ -223,6 +261,7 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
       | "colorScheme"
       | "diagnosticsSince"
       | "diagnosticsWarnings"
+      | "auditKind"
     >
   > & {
     /**

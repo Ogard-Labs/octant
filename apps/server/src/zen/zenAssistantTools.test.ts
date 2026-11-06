@@ -9,12 +9,14 @@ import {
   type ChatThread,
   type ChatThreadView,
   type WindowId,
+  type ZenElementId,
   type ZenFocusZone,
   type ZenSpace,
 } from "@octant/contracts";
 import { createZenSpace } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { ZenAssistantTools } from "./zenAssistantTools";
+import { zenLayoutOf, type ZenLayoutSnapshot } from "./zenLayoutReadPort";
 import { ZenService } from "./zenService";
 
 /** Each window's focus zone, held only for the life of one test. */
@@ -58,7 +60,9 @@ function fixture(isAssistant = true) {
       elementId: "00000000-0000-4000-8000-000000000008",
       space: { version: 3 },
     })),
-    bootstrap: vi.fn(() => ({ space: { spaceId }, windowId })),
+    // create-widget still reads the space id through the host; the layout
+    // read goes through the bounded port below, never through this.
+    bootstrap: vi.fn(() => ({ space: { spaceId, version: 4 }, windowId })),
     handleCommand: vi.fn(() => ({
       result: "mutation",
       space: {
@@ -67,7 +71,31 @@ function fixture(isAssistant = true) {
       },
     })),
   };
-  return { service, tools: new ZenAssistantTools({ zenService: service as never }) };
+  const zenLayout = {
+    layout: vi.fn(
+      (): ZenLayoutSnapshot => ({
+        status: "ok",
+        version: 4 as ZenSpace["version"],
+        dimming: 20,
+        elementOpacity: 0.9,
+        elements: [
+          {
+            elementId: elementId as ZenElementId,
+            kind: "notes",
+            title: "Release notes",
+            geometry: { x: 10, y: 20, width: 400, height: 300 },
+            zIndex: 1,
+            minimized: false,
+          },
+        ],
+      }),
+    ),
+  };
+  return {
+    service,
+    zenLayout,
+    tools: new ZenAssistantTools({ zenService: service as never, zenLayout }),
+  };
 }
 
 /**
@@ -130,11 +158,22 @@ async function boundAssistantFixture() {
 }
 
 describe("ZenAssistantTools", () => {
-  it("offers the bounded Zen vocabulary only to the exact bound assistant thread", () => {
+  it("offers one octant_zen tool, and only to the exact bound assistant thread", () => {
     const exact = fixture(true);
     const ordinary = fixture(false);
 
-    expect(exact.tools.forThread(windowId, thread)?.definitions.map(({ name }) => name)).toEqual([
+    const definitions = exact.tools.forThread(windowId, thread)?.definitions ?? [];
+    expect(definitions.map(({ name }) => name)).toEqual(["octant_zen"]);
+    expect(definitions[0]?.description).toMatch(/get-space/);
+    expect(ordinary.tools.forThread(windowId, thread)).toBeUndefined();
+  });
+
+  it("no longer offers the seven separate Zen tool names", async () => {
+    const { service, tools } = fixture(true);
+    const toolSet = tools.forThread(windowId, thread)!;
+    const names = toolSet.definitions.map(({ name }) => name);
+
+    for (const retired of [
       "octant_zen_search_threads",
       "octant_zen_pin_thread",
       "octant_zen_list_widgets",
@@ -142,22 +181,127 @@ describe("ZenAssistantTools", () => {
       "octant_zen_preview_recipe",
       "octant_zen_place_element",
       "octant_zen_update_appearance",
-    ]);
-    expect(ordinary.tools.forThread(windowId, thread)).toBeUndefined();
+    ]) {
+      expect(names).not.toContain(retired);
+      expect(
+        await toolSet.execute({ name: retired, inputJson: JSON.stringify({ query: "x" }) }),
+      ).toMatchObject({ isError: true, result: { status: "unsupported" } });
+    }
+    expect(service.searchThreads).not.toHaveBeenCalled();
   });
 
-  it("reports Notes, Checklist, and Timer as available across the integrated Zen D slices", async () => {
-    const { tools } = fixture(true);
-    const result = await tools.forThread(windowId, thread)!.execute({
-      name: "octant_zen_list_widgets",
-      inputJson: "{}",
+  it("offers only the widget kinds it can create, with no unavailable kinds or kind listing", async () => {
+    const { service, tools } = fixture(true);
+    const toolSet = tools.forThread(windowId, thread)!;
+    const schema = toolSet.definitions[0]?.inputSchema as {
+      readonly properties: {
+        readonly operation: { readonly enum: ReadonlyArray<string> };
+        readonly kind: { readonly enum: ReadonlyArray<string> };
+      };
+    };
+
+    expect(schema.properties.kind.enum).toEqual(["notes", "checklist", "timer"]);
+    expect(schema.properties.operation.enum).not.toContain("list-widgets");
+    for (const kind of ["reference", "recipe"]) {
+      const refused = await toolSet.execute({
+        name: "octant_zen",
+        inputJson: JSON.stringify({ operation: "create-widget", kind, expectedVersion: 3 }),
+      });
+      expect(refused).toMatchObject({
+        isError: true,
+        result: { action: "create-widget", status: "failed", code: "invalid-input" },
+      });
+    }
+    expect(
+      await toolSet.execute({
+        name: "octant_zen",
+        inputJson: JSON.stringify({ operation: "list-widgets" }),
+      }),
+    ).toMatchObject({ isError: true, result: { status: "unsupported" } });
+    expect(service.handleCommand).not.toHaveBeenCalled();
+  });
+
+  it("reads the space's version and element ids through the layout port alone", async () => {
+    const { service, zenLayout, tools } = fixture(true);
+
+    const read = await tools.forThread(windowId, thread)!.execute({
+      name: "octant_zen",
+      inputJson: JSON.stringify({ operation: "get-space" }),
     });
 
-    expect(result.result).toMatchObject({
-      action: "list-widgets",
-      status: "ok",
-      widgets: expect.arrayContaining([{ kind: "timer", available: true }]),
+    expect(read).toEqual({
+      result: {
+        action: "get-space",
+        status: "ok",
+        version: 4,
+        dimming: 20,
+        elementOpacity: 0.9,
+        elements: [
+          {
+            elementId: "00000000-0000-4000-8000-000000000005",
+            kind: "notes",
+            title: "Release notes",
+            geometry: { x: 10, y: 20, width: 400, height: 300 },
+            zIndex: 1,
+            minimized: false,
+          },
+        ],
+      },
     });
+    expect(zenLayout.layout).toHaveBeenCalledWith(windowId);
+    expect(service.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it("refuses get-space when the window has no Zen space", async () => {
+    const { zenLayout, tools } = fixture(true);
+    zenLayout.layout.mockReturnValueOnce({ status: "refused", reason: "unknown-space" });
+
+    const read = await tools.forThread(windowId, thread)!.execute({
+      name: "octant_zen",
+      inputJson: JSON.stringify({ operation: "get-space" }),
+    });
+
+    expect(read).toMatchObject({
+      isError: true,
+      result: { action: "get-space", status: "failed", code: "unknown-space" },
+    });
+  });
+
+  it("projects a space's layout without what any element says", () => {
+    const space = {
+      ...createZenSpace(windowId, decodeHostId(LOCAL_HOST_ID)),
+      elements: [
+        {
+          elementId: "00000000-0000-4000-8000-000000000005",
+          kind: "notes",
+          title: "Release notes",
+          geometry: { x: 10, y: 20, width: 400, height: 300 },
+          zIndex: 1,
+          minimized: false,
+          body: "Private draft the layout read must not carry.",
+        },
+      ],
+    } as unknown as ZenSpace;
+
+    const snapshot = zenLayoutOf(space);
+
+    expect(snapshot).toMatchObject({ status: "ok", elements: [{ title: "Release notes" }] });
+    expect(JSON.stringify(snapshot)).not.toMatch(/Private draft/);
+    expect(zenLayoutOf(null)).toEqual({ status: "refused", reason: "unknown-space" });
+  });
+
+  it("answers help with full usage without touching the space", async () => {
+    const { service, zenLayout, tools } = fixture(true);
+
+    const help = await tools.forThread(windowId, thread)!.execute({
+      name: "octant_zen",
+      inputJson: JSON.stringify({ operation: "help" }),
+    });
+
+    expect(help).toMatchObject({ isError: false, result: { tool: "octant_zen" } });
+    expect(JSON.stringify(help.result)).toMatch(/conflict/);
+    expect(service.bootstrap).not.toHaveBeenCalled();
+    expect(zenLayout.layout).not.toHaveBeenCalled();
   });
 
   it("rejects forged authority fields before catalog search", async () => {
@@ -165,8 +309,13 @@ describe("ZenAssistantTools", () => {
     const toolSet = tools.forThread(windowId, thread)!;
 
     const result = await toolSet.execute({
-      name: "octant_zen_search_threads",
-      inputJson: JSON.stringify({ query: "release", windowId, spaceId: "forged" }),
+      name: "octant_zen",
+      inputJson: JSON.stringify({
+        operation: "search-threads",
+        query: "release",
+        windowId,
+        spaceId: "forged",
+      }),
     });
 
     expect(result).toMatchObject({
@@ -176,28 +325,29 @@ describe("ZenAssistantTools", () => {
     expect(service.searchThreads).not.toHaveBeenCalled();
   });
 
-  it("returns structured conflict, Timer success, and sibling-widget unavailability", async () => {
+  it("returns a conflict that names the space's current version, and Timer success", async () => {
     const { service, tools } = fixture(true);
     service.pinThread.mockRejectedValueOnce(new ZenError({ reason: "stale-version" }));
     const toolSet = tools.forThread(windowId, thread)!;
     const catalogRef = decodeZenThreadCatalogRef(`chat:${threadId}`);
 
     const conflict = await toolSet.execute({
-      name: "octant_zen_pin_thread",
-      inputJson: JSON.stringify({ catalogRef, expectedVersion: 2 }),
+      name: "octant_zen",
+      inputJson: JSON.stringify({ operation: "pin-thread", catalogRef, expectedVersion: 2 }),
     });
     const created = await toolSet.execute({
-      name: "octant_zen_create_widget",
-      inputJson: JSON.stringify({ kind: "timer", durationMs: 40 * 60 * 1000, expectedVersion: 2 }),
-    });
-    const unsupported = await toolSet.execute({
-      name: "octant_zen_create_widget",
-      inputJson: JSON.stringify({ kind: "reference", expectedVersion: 3 }),
+      name: "octant_zen",
+      inputJson: JSON.stringify({
+        operation: "create-widget",
+        kind: "timer",
+        durationMs: 40 * 60 * 1000,
+        expectedVersion: 2,
+      }),
     });
 
     expect(conflict).toMatchObject({
       isError: true,
-      result: { action: "pin-thread", status: "conflict", code: "stale-version" },
+      result: { action: "pin-thread", status: "conflict", code: "stale-version", version: 4 },
     });
     expect(created).toMatchObject({
       result: {
@@ -209,33 +359,19 @@ describe("ZenAssistantTools", () => {
       },
     });
     expect(service.createTimerWidget).toHaveBeenCalledWith(windowId, 40 * 60 * 1000, 2);
-    expect(unsupported).toMatchObject({
-      isError: true,
-      result: { action: "create-widget", status: "unavailable", kind: "reference" },
-    });
+    // The conflict's current version comes from the layout read, not the host's bootstrap.
+    expect(service.bootstrap).not.toHaveBeenCalled();
   });
 
-  it("lists and creates the available D1 widgets without widening authority", async () => {
+  it("creates a Notes widget in the window's own space without widening authority", async () => {
     const { service, tools } = fixture(true);
     const toolSet = tools.forThread(windowId, thread)!;
 
-    const listed = await toolSet.execute({
-      name: "octant_zen_list_widgets",
-      inputJson: "{}",
-    });
     const created = await toolSet.execute({
-      name: "octant_zen_create_widget",
-      inputJson: JSON.stringify({ kind: "notes", expectedVersion: 2 }),
+      name: "octant_zen",
+      inputJson: JSON.stringify({ operation: "create-widget", kind: "notes", expectedVersion: 2 }),
     });
 
-    expect(listed.result).toMatchObject({
-      status: "ok",
-      widgets: expect.arrayContaining([
-        { kind: "notes", available: true },
-        { kind: "checklist", available: true },
-        { kind: "timer", available: true },
-      ]),
-    });
     expect(created).toMatchObject({
       result: {
         action: "create-widget",
@@ -259,11 +395,15 @@ describe("ZenAssistantTools", () => {
 
   it("proposes a recipe on the window's own assistant surface and on nothing else", async () => {
     const { zenService, conversation, otherConversation, version } = await boundAssistantFixture();
-    const tools = new ZenAssistantTools({ zenService });
+    const tools = new ZenAssistantTools({
+      zenService,
+      zenLayout: { layout: (id) => zenLayoutOf(zenService.bootstrap(id).space) },
+    });
 
     const proposal = await tools.forThread(windowId, conversation)!.execute({
-      name: "octant_zen_preview_recipe",
+      name: "octant_zen",
       inputJson: JSON.stringify({
+        operation: "preview-recipe",
         expectedVersion: version(windowId),
         recipe: {
           recipeId: "00000000-0000-4000-8000-000000000031",
@@ -299,7 +439,10 @@ describe("ZenAssistantTools", () => {
 
   it("gives no Zen vocabulary to a window that never opened a Zen assistant", async () => {
     const { zenService, conversation, unboundWindowId, version } = await boundAssistantFixture();
-    const tools = new ZenAssistantTools({ zenService });
+    const tools = new ZenAssistantTools({
+      zenService,
+      zenLayout: { layout: (id) => zenLayoutOf(zenService.bootstrap(id).space) },
+    });
 
     expect(tools.forThread(unboundWindowId, conversation)).toBeUndefined();
     expect(() =>
@@ -321,8 +464,8 @@ describe("ZenAssistantTools", () => {
     controller.abort();
 
     const result = await tools.forThread(windowId, thread)!.execute({
-      name: "octant_zen_search_threads",
-      inputJson: JSON.stringify({ query: "release" }),
+      name: "octant_zen",
+      inputJson: JSON.stringify({ operation: "search-threads", query: "release" }),
       signal: controller.signal,
     });
 
@@ -337,8 +480,8 @@ describe("ZenAssistantTools", () => {
     const catalogRef = decodeZenThreadCatalogRef(`chat:${threadId}`);
 
     const result = await tools.forThread(windowId, thread)!.execute({
-      name: "octant_zen_pin_thread",
-      inputJson: JSON.stringify({ catalogRef, expectedVersion: 2 }),
+      name: "octant_zen",
+      inputJson: JSON.stringify({ operation: "pin-thread", catalogRef, expectedVersion: 2 }),
       signal: controller.signal,
     });
 

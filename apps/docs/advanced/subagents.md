@@ -9,9 +9,11 @@ research, implementation, or review. They are one durable **AgentRun** each and
 run under the parent thread's authority ceiling. Their provider and model can
 come from the parent, a configured role slot, or an explicit eligible target.
 
-Only the thread's agent starts a subagent. Octant's harness and supported
-provider harnesses both hand bounded tasks to the same host-managed child
-runtime, and both can collect results and continue a completed child. An
+Only the thread's agent starts a subagent, through one tool, `octant_agents`,
+whether the thread runs on Octant's harness or on a supported provider
+runtime. Its operations are `capabilities`, `delegate`, `status`, `wait`,
+`cancel`, and `follow-up`, so the agent can read a finished child's reply,
+stop a child, and continue a completed one. An
 Octant-harness parent can use a provider-harness child and the reverse. You watch and control subagents from the composer and
 the **Agents** dock tool, but you do not start them there; a subagent a person
 started by hand would have no agent to hand its result back to.
@@ -240,11 +242,11 @@ delivering the same result twice.
 
 Open a completed managed child and choose **Follow up** to send another
 instruction in its existing conversation. The parent agent can do the same
-through either delegation tool. The provider must support genuine resume; if
+through `octant_agents` `follow-up`. The provider must support genuine resume; if
 it cannot, start a new delegation from the parent. Cancelled children cannot
 continue. The earlier conversation stays available, and the new reply needs
 its own acknowledgement. The previous reply must reach the parent or be
-collected before a follow-up starts. Checking status does not collect it; an
+read with `wait` before a follow-up starts. Checking status does not read it; an
 oversized reply remains available when a tool cannot return it completely.
 A follow-up also requires the child's provider, model, and reasoning choice to
 remain available under the parent's current Project policy.

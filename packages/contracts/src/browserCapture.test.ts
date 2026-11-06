@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { decodeBrowserObservation } from "./browserAutomation";
+import {
+  decodeBrowserObservation,
+  MAX_BROWSER_RECORDING_BYTES,
+  MAX_BROWSER_RECORDING_FRAMES,
+  MAX_BROWSER_RECORDING_MS,
+} from "./browserAutomation";
 import {
   decodeBrowserCapture,
   decodeBrowserCaptureImage,
@@ -39,6 +44,29 @@ describe("BrowserCapture", () => {
     expect(decodeBrowserCapture({ ...capture, size: MAX_BROWSER_CAPTURE_BYTES }).size).toBe(
       MAX_BROWSER_CAPTURE_BYTES,
     );
+  });
+
+  it("lets only a recording, always an animated PNG, pass the screenshot envelope", () => {
+    const recording = { frames: 24, durationMs: 6_000 };
+    expect(
+      decodeBrowserCapture({ ...capture, size: MAX_BROWSER_RECORDING_BYTES, recording }).recording,
+    ).toEqual(recording);
+    expect(() =>
+      decodeBrowserCapture({ ...capture, size: MAX_BROWSER_RECORDING_BYTES + 1, recording }),
+    ).toThrow();
+    expect(() => decodeBrowserCapture({ ...capture, mime: "image/jpeg", recording })).toThrow();
+    expect(() =>
+      decodeBrowserCapture({
+        ...capture,
+        recording: { frames: MAX_BROWSER_RECORDING_FRAMES + 1, durationMs: 1_000 },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeBrowserCapture({
+        ...capture,
+        recording: { frames: 2, durationMs: MAX_BROWSER_RECORDING_MS + 1 },
+      }),
+    ).toThrow();
   });
 
   it("refuses more captures than a thread keeps in one listing", () => {

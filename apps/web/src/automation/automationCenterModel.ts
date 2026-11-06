@@ -13,6 +13,7 @@ import {
   type AutomationRun,
   type AutomationRunLevel,
   type AutomationRunLifecycle,
+  type AutomationRunResultOutcome,
   type AutomationTrigger,
 } from "@octant/contracts";
 
@@ -51,6 +52,21 @@ const runStatusLabels: Record<AutomationRunLifecycle, string> = {
 
 export function automationRunStatusLabel(lifecycle: AutomationRunLifecycle): string {
   return runStatusLabels[lifecycle];
+}
+
+const runResultLabels: Record<AutomationRunResultOutcome, string> = {
+  succeeded: "Succeeded",
+  "nothing-to-do": "Nothing to do",
+  "needs-attention": "Needs attention",
+  failed: "Did not succeed",
+};
+
+/**
+ * What the run's own agent said, kept apart from the run's status: a run can
+ * complete while its agent reports that the work did not succeed.
+ */
+export function automationRunResultLabel(outcome: AutomationRunResultOutcome): string {
+  return `Agent reported: ${runResultLabels[outcome]}`;
 }
 
 export function automationModeLabel(mode: AutomationMode): string {

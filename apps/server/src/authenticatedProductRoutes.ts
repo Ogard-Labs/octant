@@ -220,6 +220,11 @@ export function classifyProductAction(request: Request): string | undefined {
     }
     return undefined;
   }
+  // The Reply detail default and the threads' own levels: a presentation read,
+  // never a write. Changing either is the shell route's, which a device never reaches.
+  if (path === "/api/reply-detail") {
+    return method === "GET" ? "settings.read-non-secret" : undefined;
+  }
   if (path.startsWith("/api/speech/")) {
     // A paired device reads whether dictation is ready and sends a clip; the
     // route holds it to its own budget. Read-aloud is the computer's own and

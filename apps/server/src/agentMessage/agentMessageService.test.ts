@@ -14,11 +14,7 @@ import {
   hydrateAgentMessageProjectionFromJournal,
 } from "./agentMessageProjection";
 import { AgentMessageBodyStore } from "./agentMessageBodyStore";
-import {
-  AGENT_MESSAGE_TOOL_NAME,
-  MAX_JOURNALED_REFUSALS_PER_TURN,
-  createAgentMessageTools,
-} from "./agentMessageTools";
+import { MAX_JOURNALED_REFUSALS_PER_TURN, createAgentMessageOperations } from "./agentMessageTools";
 import {
   AgentMessageService,
   type AgentMessageEndpointFacts,
@@ -31,9 +27,11 @@ const actor = decodeActor({
   actorId: "00000000-0000-4000-8000-000000000001",
 });
 
-const senderThreadId = decodeEndpoint("code-0000-0000-4000-8000-00000000000a");
-const recipientThreadId = decodeEndpoint("code-0000-0000-4000-8000-00000000000b");
-const otherProjectThreadId = decodeEndpoint("work-0000-0000-4000-8000-00000000000c");
+const PROJECT_A = "a0000000-0000-4000-8000-0000000000aa";
+const PROJECT_B = "b0000000-0000-4000-8000-0000000000bb";
+const senderThreadId = decodeEndpoint("c0000000-0000-4000-8000-00000000000a");
+const recipientThreadId = decodeEndpoint("c0000000-0000-4000-8000-00000000000b");
+const otherProjectThreadId = decodeEndpoint("f0000000-0000-4000-8000-00000000000c");
 
 const inProject = (projectId: string): AgentMessageEndpointFacts => ({
   mode: "code",
@@ -91,9 +89,9 @@ function fixture(options: FixtureOptions = {}) {
   // The sender and the recipient share a Project; a third thread sits in
   // another one. A test moves or closes a thread by replacing its entry.
   const endpoints = new Map<string, AgentMessageEndpointFacts>([
-    [String(senderThreadId), inProject("project-a")],
-    [String(recipientThreadId), inProject("project-a")],
-    [String(otherProjectThreadId), { mode: "work", projectId: "project-b", terminal: false }],
+    [String(senderThreadId), inProject(PROJECT_A)],
+    [String(recipientThreadId), inProject(PROJECT_A)],
+    [String(otherProjectThreadId), { mode: "work", projectId: PROJECT_B, terminal: false }],
   ]);
   const bodyStore = new AgentMessageBodyStore(root);
   const service = new AgentMessageService({
@@ -237,7 +235,7 @@ describe("the agent message delivery service", () => {
 
   it("refuses a thread of another Project, an unknown id, and the sender itself in the same words, storing and tainting nothing", async () => {
     const { service, names, ingested, projection } = fixture();
-    const unknownThreadId = decodeEndpoint("code-0000-0000-4000-8000-0000000000ff");
+    const unknownThreadId = decodeEndpoint("c0000000-0000-4000-8000-0000000000ff");
     const outcomes = await service.send({
       senderThreadId,
       recipients: [
@@ -294,7 +292,7 @@ describe("the agent message delivery service", () => {
       bodyStore: new AgentMessageBodyStore(
         join("/tmp", `octant-agent-message-test-${randomUUID()}`),
       ),
-      resolveEndpoint: () => inProject("project-a"),
+      resolveEndpoint: () => inProject(PROJECT_A),
       recordExternalContentIngestion: () => ({
         kind: "recorded",
         taint: { externalContentIngested: true, ingestedSources: [] },
@@ -320,7 +318,7 @@ describe("the agent message delivery service", () => {
       body: handoff,
     });
     const record = projection.lookup(String(outcome!.messageId))!;
-    endpoints.set(String(senderThreadId), { ...inProject("project-a"), terminal: true });
+    endpoints.set(String(senderThreadId), { ...inProject(PROJECT_A), terminal: true });
 
     expect(await service.carryIntoTurn(String(recipientThreadId))).toEqual([]);
 
@@ -340,7 +338,7 @@ describe("the agent message delivery service", () => {
       recipients: [{ threadId: recipientThreadId }],
       body: handoff,
     });
-    endpoints.set(String(recipientThreadId), inProject("project-b"));
+    endpoints.set(String(recipientThreadId), inProject(PROJECT_B));
 
     expect(await service.carryIntoTurn(String(recipientThreadId))).toEqual([]);
     expect(projection.lookup(String(outcome!.messageId))).toMatchObject({
@@ -366,9 +364,9 @@ describe("the agent message delivery service", () => {
   });
 
   it("gives each recipient of one send its own message, delivered on its own", async () => {
-    const secondRecipientThreadId = decodeEndpoint("code-0000-0000-4000-8000-00000000000d");
+    const secondRecipientThreadId = decodeEndpoint("c0000000-0000-4000-8000-00000000000d");
     const { service, projection, endpoints } = fixture();
-    endpoints.set(String(secondRecipientThreadId), inProject("project-a"));
+    endpoints.set(String(secondRecipientThreadId), inProject(PROJECT_A));
     const outcomes = await service.send({
       senderThreadId,
       recipients: [{ threadId: recipientThreadId }, { threadId: secondRecipientThreadId }],
@@ -424,9 +422,9 @@ describe("the agent message delivery service", () => {
     expect(await send()).toMatchObject({ status: "refused", reason: "policy" });
 
     // The recipient is archived with eight messages no turn will ever carry.
-    endpoints.set(String(recipientThreadId), { ...inProject("project-a"), terminal: true });
-    const secondRecipientThreadId = decodeEndpoint("code-0000-0000-4000-8000-00000000000d");
-    endpoints.set(String(secondRecipientThreadId), inProject("project-a"));
+    endpoints.set(String(recipientThreadId), { ...inProject(PROJECT_A), terminal: true });
+    const secondRecipientThreadId = decodeEndpoint("c0000000-0000-4000-8000-00000000000d");
+    endpoints.set(String(secondRecipientThreadId), inProject(PROJECT_A));
     const [outcome] = await service.send({
       senderThreadId,
       recipients: [{ threadId: secondRecipientThreadId }],
@@ -545,34 +543,23 @@ describe("the agent message delivery service", () => {
   it("carries an identified message, records only provider delivery, then reads an explicit recipient receipt at its sender", async () => {
     const { service, events, projection, bodyStore, root } = fixture();
     const toolsFor = (threadId: string) =>
-      createAgentMessageTools({
+      createAgentMessageOperations({
         service,
         senderThreadId: threadId,
-        toolConstraints: [],
-        profileDisplayName: "Worker",
-        readPosture: () => "approval-gated",
+        senderProjectId: () => PROJECT_A,
       });
     const sender = toolsFor(String(senderThreadId));
     const recipient = toolsFor(String(recipientThreadId));
-    const sent = await sender.execute({
-      name: AGENT_MESSAGE_TOOL_NAME,
-      inputJson: JSON.stringify({
-        recipients: [{ threadId: recipientThreadId }],
-        message: handoff,
-      }),
+    const sent = await sender.send({
+      operation: "send",
+      recipients: [`${String(recipientThreadId)}@${PROJECT_A}`],
+      message: handoff,
     });
     const messageId = (sent.result as ReadonlyArray<{ readonly messageId: string }>)[0]?.messageId;
     if (messageId === undefined) throw new Error("Expected a durable message id");
-    const read = () =>
-      sender.execute({
-        name: AGENT_MESSAGE_TOOL_NAME,
-        inputJson: JSON.stringify({ action: "status", messageIds: [messageId] }),
-      });
+    const read = () => sender.receipts({ operation: "receipts", messageIds: [messageId] });
     const acknowledge = () =>
-      recipient.execute({
-        name: AGENT_MESSAGE_TOOL_NAME,
-        inputJson: JSON.stringify({ action: "acknowledge", messageIds: [messageId] }),
-      });
+      recipient.acknowledge({ operation: "acknowledge", messageIds: [messageId] }, () => true);
     expect(await read()).toMatchObject({
       result: [{ status: "ok", receipt: { state: "in-flight" } }],
     });
@@ -672,7 +659,7 @@ describe("the agent message delivery service", () => {
       if (change === "missing") endpoints.delete(String(recipientThreadId));
       else
         endpoints.set(String(recipientThreadId), {
-          ...inProject(change === "moved" ? "project-b" : "project-a"),
+          ...inProject(change === "moved" ? PROJECT_B : PROJECT_A),
           terminal: change === "closed",
           mode: change === "non-code" ? "work" : "code",
         });
@@ -749,7 +736,7 @@ describe("the agent message delivery service", () => {
   it("refuses a petition naming too many recipients as a refusal, journaling the first few", async () => {
     const { service, names, projection } = fixture();
     const recipients = Array.from({ length: 5 }, (_unused, index) => ({
-      threadId: decodeEndpoint(`code-0000-0000-4000-8000-${String(index).padStart(12, "0")}`),
+      threadId: decodeEndpoint(`c0000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
     }));
     const outcomes = await service.send({ senderThreadId, recipients, body: "Any body." });
 
@@ -776,24 +763,16 @@ describe("the agent message delivery service", () => {
 
   it("journals no more refusals than a turn's cap when the model loops on refused and malformed calls", async () => {
     const { service, names } = fixture();
-    const tools = createAgentMessageTools({
+    const operations = createAgentMessageOperations({
       service,
       senderThreadId: String(senderThreadId),
-      toolConstraints: [],
-      profileDisplayName: "Reviewer",
-      readPosture: () => "approval-gated",
+      senderProjectId: () => PROJECT_A,
     });
     for (let attempt = 0; attempt < 200; attempt += 1) {
-      const unknown = `code-0000-0000-4000-8000-${String(attempt).padStart(12, "0")}`;
-      await tools.execute({
-        name: AGENT_MESSAGE_TOOL_NAME,
-        inputJson: JSON.stringify({ recipients: [{ threadId: unknown }], message: handoff }),
-      });
+      const unknown = `c0000000-0000-4000-8000-${String(attempt).padStart(12, "0")}@${PROJECT_A}`;
+      await operations.send({ operation: "send", recipients: [unknown], message: handoff });
       // A call that names a recipient but carries no message.
-      await tools.execute({
-        name: AGENT_MESSAGE_TOOL_NAME,
-        inputJson: JSON.stringify({ recipients: [{ threadId: unknown }] }),
-      });
+      await operations.send({ operation: "send", recipients: [unknown] });
     }
     expect(names().length).toBe(MAX_JOURNALED_REFUSALS_PER_TURN);
   });

@@ -2904,6 +2904,78 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it.each(["resumed", "sent"] as const)(
+    "keeps the same reply metadata on a %s operation stream",
+    async (path) => {
+      const operationId = "70000000-0000-4000-8000-000000000030";
+      const promptId = "60000000-0000-4000-8000-000000000030";
+      const changedFiles = { files: [], total: 0, truncated: false };
+      const preview = { status: "unavailable", explanation: "No readable capture." };
+      async function* frames(signal: AbortSignal) {
+        for (const [index, event] of [
+          { kind: "conversation-turn-changed-files", changedFiles },
+          { kind: "conversation-turn-review-preview", preview },
+          {
+            kind: "context-handoff-attached",
+            reason: "fork-native-session",
+            forkedFrom: { threadId: ids.thread, throughOperationId: operationId },
+          },
+        ].entries()) {
+          yield {
+            threadId: ids.thread,
+            operationId,
+            cursor: index + 2,
+            occurredAt: now,
+            event,
+          } as never;
+        }
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      }
+      const api = fakeClient({
+        conversation: vi.fn(async () => ({
+          version: 3,
+          threadId: ids.thread,
+          turns:
+            path === "resumed"
+              ? [{ ...conversationTurn(operationId, promptId), status: "incomplete" }]
+              : [],
+          nextCursor: 1,
+          hasMore: false,
+        })) as never,
+        subscribeOperation: vi.fn((_thread, _operation, _cursor, signal) => frames(signal)),
+        putEvidence: vi.fn(async () => ({
+          contentId: promptId,
+          digest: "a".repeat(64),
+          byteLength: 4,
+        })) as never,
+        executeOperation: vi.fn(async () => ({
+          kind: "provider-turn-state",
+          operationId,
+          state: "running",
+        })) as never,
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({ activeThreadId: ids.thread, client: api }),
+      );
+      await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+      if (path === "sent")
+        act(() => {
+          void result.current.sendFollowUp("Continue");
+        });
+      await waitFor(() =>
+        expect(result.current.conversation.at(-1)).toMatchObject({
+          role: "assistant",
+          changedFiles,
+          reviewPreview: preview,
+          handoff: { reason: "fork-native-session" },
+        }),
+      );
+      unmount();
+    },
+  );
+
   it("streams visible content from an already-running first provider turn", async () => {
     const promptId = "60000000-0000-4000-8000-000000000030";
     const liveId = "60000000-0000-4000-8000-000000000031";
