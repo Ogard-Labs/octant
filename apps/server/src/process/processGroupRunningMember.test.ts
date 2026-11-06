@@ -6,10 +6,52 @@ import {
   type ProcessGroupObservation,
 } from "./processGroupRunningMember";
 
-const parents: ChildProcess[] = [];
+interface GroupFixture {
+  readonly parent: ChildProcess;
+  group?: number;
+}
 
-afterEach(() => {
-  for (const parent of parents.splice(0)) parent.kill("SIGKILL");
+const fixtures: GroupFixture[] = [];
+
+function signalIgnoringGone(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
+function groupReachable(group: number): boolean {
+  try {
+    process.kill(-group, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function stopFixture(fixture: GroupFixture): Promise<void> {
+  // Closing stdin ends both fixture processes even when the child's group was
+  // never learned; the signals end them now.
+  fixture.parent.stdin?.destroy();
+  if (fixture.parent.pid !== undefined) signalIgnoringGone(fixture.parent.pid, "SIGKILL");
+  const group = fixture.group;
+  if (group !== undefined) signalIgnoringGone(-group, "SIGKILL");
+  const deadline = Date.now() + 5_000;
+  const stopped = async () =>
+    (fixture.parent.exitCode !== null || fixture.parent.signalCode !== null) &&
+    (group === undefined || !groupReachable(group) || !(await processGroupHasRunningMember(group)));
+  while (!(await stopped())) {
+    if (Date.now() > deadline) {
+      throw new Error(`Fixture parent ${fixture.parent.pid} or group ${group} outlived teardown.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+afterEach(async () => {
+  const stopping = fixtures.splice(0);
+  for (const fixture of stopping) await stopFixture(fixture);
 });
 
 const statLine = (pid: number, state: string, pgid: number) =>
@@ -47,22 +89,26 @@ function fakeProc(
  * Starts a parent that forks one child into a process group of its own and
  * never reaps it, so the child's exit leaves a zombie that a signal probe of
  * the group still reaches: the state an orphaned provider descendant is in
- * until PID 1 reaps it.
+ * until PID 1 reaps it. Both processes end when their stdin closes, which
+ * happens when this test process exits however it exits, and after ten
+ * seconds at most.
  */
 async function groupLedByChild(childExits: boolean): Promise<number> {
   const parent = spawn(
     "/usr/bin/perl",
     [
       "-e",
-      `use POSIX; $| = 1; my $p = fork; if (!$p) { setpgid(0, 0); ${childExits ? "POSIX::_exit(0)" : "sleep 30; POSIX::_exit(0)"} } print "$p\\n"; sleep 30`,
+      `use POSIX; $| = 1; alarm 10; my $p = fork; if (!$p) { setpgid(0, 0); ${childExits ? "" : "<STDIN>;"} POSIX::_exit(0) } print "$p\n"; <STDIN>; POSIX::_exit(0)`,
     ],
-    { stdio: ["ignore", "pipe", "ignore"] },
+    { stdio: ["pipe", "pipe", "ignore"] },
   );
-  parents.push(parent);
+  const fixture: GroupFixture = { parent };
+  fixtures.push(fixture);
   const pid = await new Promise<number>((resolve, reject) => {
     parent.stdout?.once("data", (chunk: Buffer) => resolve(Number(chunk.toString().trim())));
     parent.once("error", reject);
   });
+  fixture.group = pid;
   await expect
     .poll(() => {
       const processStat = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -110,10 +156,6 @@ describe.skipIf(process.platform !== "linux")("process group running member", ()
 
   it("reports a group with a member that can still run as running", async () => {
     const group = await groupLedByChild(false);
-    try {
-      await expect(processGroupHasRunningMember(group)).resolves.toBe(true);
-    } finally {
-      process.kill(-group, "SIGKILL");
-    }
+    await expect(processGroupHasRunningMember(group)).resolves.toBe(true);
   });
 });
