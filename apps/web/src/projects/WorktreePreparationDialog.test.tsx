@@ -62,11 +62,9 @@ it.each(["retry", "skip", "cancel"] as const)(
         client={{ execute }}
         target={decoded}
         runs={{
-          parentSummary: vi
-            .fn()
-            .mockResolvedValue({
-              entries: [{ requestId: childRequestId, task: "Selected child" }],
-            }),
+          parentSummary: vi.fn().mockResolvedValue({
+            entries: [{ requestId: childRequestId, task: "Selected child" }],
+          }),
         }}
         onClose={vi.fn()}
       />,
