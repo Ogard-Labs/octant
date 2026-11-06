@@ -1,8 +1,17 @@
 import type { ChatMessagePart } from "@octant/contracts/chat";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import { ChevronRight } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ToggleEvent,
+} from "react";
 import { ChatRichText } from "../chat/ChatRichText";
+import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
 import { SelectionThreadSurface } from "./SelectionThread";
 
 export const StreamRepliesContext = createContext(true);
@@ -81,9 +90,19 @@ export function AssistantMessageBody(props: {
 
 function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
   const part = props.part;
+  // Hooks run for prose parts too, so a part keeps its hook order if a
+  // streaming parse turns it from one kind into another.
+  const disclosures = useReplyDisclosures();
+  const openByLevel =
+    part.kind === "tool"
+      ? disclosures.opening.toolDetail
+      : part.kind === "reasoning" && disclosures.opening.thinking;
+  const open = disclosures.isOpen("part", openByLevel);
+  const onToggle = (event: ToggleEvent<HTMLDetailsElement>) =>
+    disclosures.choose("part", event.currentTarget.open);
   if (part.kind === "tool") {
     return (
-      <details className="thinking">
+      <details className="thinking" onToggle={onToggle} open={open}>
         <summary aria-label={`Tool · ${part.name} · ${part.status}`}>
           <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
           <span>{`Tool · ${part.name}`}</span>
@@ -94,11 +113,21 @@ function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
     );
   }
   if (part.kind === "reasoning") {
+    const preview =
+      disclosures.opening.thinkingPreview && !open ? thinkingPreviewLine(part.text) : "";
     return (
-      <details className="thinking">
+      <details className="thinking" onToggle={onToggle} open={open}>
         <summary aria-label="Thinking">
           <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
           <span>Thinking</span>
+          {/* Hidden from assistive technology: the summary's name stays
+              "Thinking", and the same words are read from the body once it
+              opens. */}
+          {preview === "" ? null : (
+            <span aria-hidden="true" className="thinking-preview">
+              {preview}
+            </span>
+          )}
         </summary>
         <div className="thinking-body">
           <ChatRichText body={part.text} />

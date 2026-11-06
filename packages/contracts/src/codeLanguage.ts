@@ -253,76 +253,78 @@ export const CodeLanguageDocumentResult = Schema.Union(
 export type CodeLanguageDocumentResult = typeof CodeLanguageDocumentResult.Type;
 
 /**
- * The agent-facing reads (`code-diagnostics` and `code-definition` in the
+ * The agent-facing language reads: one tool, `octant_code`, with an
+ * operation, as every Octant capability family is (`code-language` in the
  * closed tool catalog). An agent names a file by its checkout-relative path,
  * as its other file tools do, and never by a file reference: it holds no
  * editor document. Lines and columns are one-based, as the agent's file reads
  * and searches number them; the host converts them to the zero-based
  * positions above. A column counts UTF-16 code units, as the editor does.
  */
-export const CODE_DIAGNOSTICS_TOOL_NAME = "octant_code_diagnostics";
-export const CODE_DEFINITION_TOOL_NAME = "octant_code_definition";
+export const CODE_LANGUAGE_TOOL_NAME = "octant_code";
+
+/**
+ * The most places one agent `references` read returns. The editor's bound is
+ * larger, but a tool result has to fit the provider's result budget whole,
+ * and a name used more often than this is better narrowed by a search.
+ */
+export const MAX_CODE_LANGUAGE_AGENT_REFERENCES = 200;
 
 const OneBased = Schema.Int.pipe(Schema.between(1, MAX_POSITION));
 
-export const CodeDiagnosticsToolArguments = Schema.Struct({
-  path: CodeProjectFilePath,
-}).annotations(strict);
-export type CodeDiagnosticsToolArguments = typeof CodeDiagnosticsToolArguments.Type;
-
-export const CodeDefinitionToolArguments = Schema.Struct({
-  path: CodeProjectFilePath,
-  line: OneBased,
-  column: OneBased,
-}).annotations(strict);
-export type CodeDefinitionToolArguments = typeof CodeDefinitionToolArguments.Type;
-
-export const decodeCodeDiagnosticsToolArguments = Schema.decodeUnknownSync(
-  CodeDiagnosticsToolArguments,
+export const CodeLanguageToolArguments = Schema.Union(
+  Schema.Struct({
+    operation: Schema.Literal("diagnostics"),
+    path: CodeProjectFilePath,
+  }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("definition"),
+    path: CodeProjectFilePath,
+    line: OneBased,
+    column: OneBased,
+  }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("references"),
+    path: CodeProjectFilePath,
+    line: OneBased,
+    column: OneBased,
+    includeDeclaration: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
 );
-export const decodeCodeDefinitionToolArguments = Schema.decodeUnknownSync(
-  CodeDefinitionToolArguments,
-);
+export type CodeLanguageToolArguments = typeof CodeLanguageToolArguments.Type;
 
-const checkoutPathProperty = {
-  type: "string",
-  description: "A file of this thread's checkout, relative to its root, such as src/index.ts.",
-} as const;
+export const decodeCodeLanguageToolArguments = Schema.decodeUnknownSync(CodeLanguageToolArguments);
 
 /**
- * Both reads answer for the file as saved on disk, so their lines match what
- * the agent's own file reads show. They read; they never change a file.
+ * Every operation answers for the file as saved on disk, so its lines match
+ * what the agent's own file reads show. It reads; it never changes a file.
  */
-export const CODE_LANGUAGE_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
-  {
-    name: CODE_DIAGNOSTICS_TOOL_NAME,
-    description:
-      "The language server's errors and warnings for one saved file of the checkout, read with the Project's own configuration and the other files. Lines and columns are one-based. Read-only.",
-    inputSchema: {
-      type: "object",
-      properties: { path: checkoutPathProperty },
-      required: ["path"],
-    },
-  },
-  {
-    name: CODE_DEFINITION_TOOL_NAME,
-    description:
-      "Where the name at a one-based line and column of a saved checkout file is defined, as checkout locations. A definition outside the checkout is named only by a label. Read-only.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: checkoutPathProperty,
-        line: { type: "integer", minimum: 1 },
-        column: {
-          type: "integer",
-          minimum: 1,
-          description: "UTF-16 code units, as editors count.",
-        },
+export const CODE_LANGUAGE_TOOL_DEFINITION: ProviderToolDefinition = {
+  name: CODE_LANGUAGE_TOOL_NAME,
+  description: `Ask the language server about a saved file of this checkout. It reads the file with the Project's own configuration and the checkout's other files. diagnostics: the file's errors and warnings. definition: where the name at line and column is defined. references: every place the name at line and column is used across the checkout, at most ${MAX_CODE_LANGUAGE_AGENT_REFERENCES}; truncated says when there are more. Lines and columns are one-based. A place outside the checkout is named only by a label. Read-only, and allowed in Plan.`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      operation: { type: "string", enum: ["diagnostics", "definition", "references"] },
+      path: {
+        type: "string",
+        description:
+          "A file of this thread's checkout, relative to its root, such as src/index.ts.",
       },
-      required: ["path", "line", "column"],
+      line: { type: "integer", minimum: 1, description: "For definition and references." },
+      column: {
+        type: "integer",
+        minimum: 1,
+        description: "For definition and references, in UTF-16 code units, as editors count.",
+      },
+      includeDeclaration: {
+        type: "boolean",
+        description: "For references: also list the declaration itself. Off by default.",
+      },
     },
+    required: ["operation", "path"],
   },
-];
+};
 
 /**
  * How far a person's approval of a `repo-tooling` server reaches: the one

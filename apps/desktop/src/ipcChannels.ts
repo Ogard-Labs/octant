@@ -143,6 +143,16 @@ export const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
  */
 export const KEYRING_ADVICE_MARKER = "keyring-advice: ";
 
+/**
+ * What Nightly says when its matching Octant does not broker a flow the window
+ * asks for: the host's feature list lacks it, or the window has no main-only
+ * token. Nightly refuses before any dialog opens or any host route is called.
+ * The preload passes exactly this sentence to the window, never another
+ * main-process message.
+ */
+export const NEEDS_NEWER_OCTANT =
+  "Needs a newer Octant. Update Octant to use this in Octant Nightly.";
+
 /** Provider instance ids as the bridge accepts them: a plain UUID, any version bits. */
 export const PROVIDER_INSTANCE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

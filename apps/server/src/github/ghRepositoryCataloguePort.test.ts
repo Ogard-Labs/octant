@@ -105,6 +105,129 @@ describe("readRepository", () => {
   });
 });
 
+describe("readIssue", () => {
+  function issueItem(overrides: Record<string, unknown> = {}) {
+    return {
+      number: 12,
+      title: "Confine Plan git per call",
+      state: "open",
+      user: { login: "octocat" },
+      created_at: "2026-08-27T10:00:00Z",
+      updated_at: "2026-08-28T10:00:00Z",
+      html_url: "https://github.com/octant/octant/pull/12",
+      labels: [{ name: "bug" }],
+      body: "Body",
+      comments: 15,
+      ...overrides,
+    };
+  }
+
+  function commentItem(index: number) {
+    return {
+      user: { login: "reviewer" },
+      created_at: "2026-08-28T10:00:00Z",
+      body: `Comment ${index}`,
+    };
+  }
+
+  function portFor(item: unknown, comments: readonly unknown[]) {
+    const run = vi.fn(async (arguments_: readonly string[]) => ({
+      exitCode: 0,
+      stdout: JSON.stringify(String(arguments_[1]).includes("/comments") ? comments : item),
+    }));
+    return { port: new GhRepositoryCataloguePort({ command: { run } }), run };
+  }
+
+  it("cuts the body and comments to their bounds and counts the comments it leaves out", async () => {
+    const { port } = portFor(
+      issueItem({ body: "é".repeat(8 * 1024) }),
+      Array.from({ length: 15 }, (_, index) => commentItem(index)),
+    );
+
+    const result = await port.readIssue(
+      { owner: "octant", name: "octant", number: 12 },
+      new AbortController().signal,
+    );
+
+    if (result.kind !== "ok") throw new Error(`expected an issue, got ${result.kind}`);
+    expect(Buffer.byteLength(result.value.body, "utf8")).toBeLessThanOrEqual(8 * 1024);
+    expect(result.value.bodyTruncated).toBe(true);
+    expect(result.value.comments.map((comment) => comment.body)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `Comment ${index + 5}`),
+    );
+    expect(result.value.commentsOmitted).toBe(5);
+    expect(result.value.pullRequest).toBeUndefined();
+  });
+
+  it("reads a pull request by number only when the caller asked for one", async () => {
+    const pullRequest = issueItem({ pull_request: { merged_at: null }, comments: 0 });
+
+    const refused = await portFor(pullRequest, []).port.readIssue(
+      { owner: "octant", name: "octant", number: 12 },
+      new AbortController().signal,
+    );
+    const read = await portFor(pullRequest, []).port.readIssue(
+      { owner: "octant", name: "octant", number: 12, includePullRequest: true },
+      new AbortController().signal,
+    );
+
+    expect(refused).toEqual({ kind: "unavailable" });
+    expect(read).toMatchObject({
+      kind: "ok",
+      value: { number: 12, pullRequest: true, commentsOmitted: 0 },
+    });
+  });
+});
+
+describe("searchIssuesAndPullRequests", () => {
+  it("searches only the named repository and drops qualifiers that would leave it", async () => {
+    const { port, run } = portReturning([
+      [
+        searchItem({ pull_request: { merged_at: "2026-08-28T11:00:00Z" } }),
+        searchItem({ number: 7, html_url: "https://github.com/octant/octant/issues/7" }),
+      ],
+    ]);
+
+    const result = await port.searchIssuesAndPullRequests(
+      {
+        owner: "octant",
+        name: "octant",
+        query: "flaky repo:attacker/secrets org:attacker is:private login",
+        pageSize: 20,
+        state: "all",
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({
+      kind: "ok",
+      value: {
+        rows: [
+          { kind: "pull-request", number: 12, state: "merged" },
+          { kind: "issue", number: 7, state: "open" },
+        ],
+      },
+    });
+    // The arguments are gh's: `api` and the request path.
+    const path = decodeURIComponent(String(run.mock.calls.at(0)));
+    expect(path).toContain('q=repo:octant/octant "flaky login" in:title,body');
+    expect(path).not.toContain("attacker");
+    expect(path).not.toContain("type:issue");
+  });
+
+  it("refuses a repository it cannot name safely before spawning gh", async () => {
+    const { port, run } = portReturning([[]]);
+
+    const result = await port.searchIssuesAndPullRequests(
+      { owner: "../escape", name: "octant", query: "flaky", pageSize: 20, state: "open" },
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual({ kind: "unavailable" });
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
 describe("listAssignedWork", () => {
   it("merges the four viewer searches, own pull requests included, and keeps one row per item", async () => {
     const { port, run } = portReturning([

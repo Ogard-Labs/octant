@@ -43,8 +43,8 @@ here is merged or being hardened for it.
   with clamped authority, isolated worktrees, hierarchy panel, and durable
   results.
 - **Agent-to-agent messaging** — a Code thread's agent can leave a bounded
-  message for another thread of the same Project through
-  `octant_agent_message`; the host delivers it as framed, untrusted data at
+  message for another thread of the same Project through `send` on
+  `octant_threads`; the host delivers it as framed, untrusted data at
   the start of that thread's next turn, and the Agents center shows the
   bounds. Design and
   [threat model](security/agent-to-agent-messaging-threat-model.md) approved

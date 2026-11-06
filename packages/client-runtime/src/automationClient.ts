@@ -9,7 +9,7 @@ import {
   decodeHostAnswer,
   type AutomationFollowUpRequest,
   type AutomationThreadRoutineRequest,
-  type RoutineProposal,
+  type RoutineAgentRequest,
   type RoutineProposalDecision,
   RoutineProposalDecisionResult,
   RoutineProposalList,
@@ -78,9 +78,15 @@ export interface AutomationClient {
     request: AutomationThreadRoutineRequest,
     signal?: AbortSignal,
   ): Promise<AutomationCommandResult>;
-  /** Routines this window's thread agents proposed, waiting for the person. */
-  listProposals(signal?: AbortSignal): Promise<ReadonlyArray<RoutineProposal>>;
-  /** Confirm or decline one proposal. A confirm creates the routine as this window. */
+  /**
+   * Routines this window's thread agents proposed, and pauses or archives
+   * they asked for, waiting for the person.
+   */
+  listProposals(signal?: AbortSignal): Promise<ReadonlyArray<RoutineAgentRequest>>;
+  /**
+   * Confirm or decline one proposal or change request. A confirm creates the
+   * routine, or pauses or archives it, as this window.
+   */
   decideProposal(
     decision: RoutineProposalDecision,
     signal?: AbortSignal,

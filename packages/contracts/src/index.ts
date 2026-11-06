@@ -1,3 +1,4 @@
+export * from "./questionnaire";
 export * from "./chat";
 export * from "./code";
 export * from "./codePlanner";

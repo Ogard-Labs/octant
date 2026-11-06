@@ -18,6 +18,13 @@ import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import type { RemoteProductClients } from "./remoteProductClients";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import type { ReplyDetailClient } from "@octant/client-runtime/reply-detail-client";
+import type { ReplyDetailReading } from "@octant/contracts/shell";
+import {
+  ReplyDetailContext,
+  ReplyDetailSourceContext,
+  type ReplyDetailSource,
+} from "../transcript/replyDetail";
 
 export interface RemoteWorkspaceProps {
   readonly clients: RemoteProductClients;
@@ -33,6 +40,43 @@ export interface RemoteWorkspaceProps {
  * desktop's sidebar is bound to a window the browser does not have.
  */
 export function RemoteWorkspace(props: RemoteWorkspaceProps) {
+  const replyDetail = useRemoteReplyDetail(props.clients.replyDetail, props.mode);
+  return (
+    <ReplyDetailSourceContext.Provider value={replyDetail}>
+      <ReplyDetailContext.Provider value={replyDetail.reading.defaultLevel}>
+        <RemoteModeSurface {...props} />
+      </ReplyDetailContext.Provider>
+    </ReplyDetailSourceContext.Provider>
+  );
+}
+
+const QUIET_READING: ReplyDetailReading = { defaultLevel: "low", threads: [] };
+
+/**
+ * The host's Reply detail, read over the session: when the workspace opens, on
+ * a change of mode, and when the window comes back into focus, so a level set
+ * on the computer reaches this browser without a reload. It carries no setter:
+ * changing a level is a window's act on the host, so no menu offers it here.
+ */
+function useRemoteReplyDetail(client: ReplyDetailClient, mode: OctantMode): ReplyDetailSource {
+  const [reading, setReading] = useState<ReplyDetailReading>(QUIET_READING);
+  useEffect(() => {
+    const controller = new AbortController();
+    const read = () =>
+      void client.read(controller.signal).then((answer) => {
+        if (answer !== undefined && !controller.signal.aborted) setReading(answer);
+      });
+    read();
+    window.addEventListener("focus", read);
+    return () => {
+      controller.abort();
+      window.removeEventListener("focus", read);
+    };
+  }, [client, mode]);
+  return useMemo(() => ({ reading }), [reading]);
+}
+
+function RemoteModeSurface(props: RemoteWorkspaceProps) {
   const providerController = useProviderController({ client: props.clients.provider });
   const providerGroups = useMemo(
     () =>

@@ -387,7 +387,11 @@ describe("createAutomationWorkDispatchPort", () => {
           modelId: run.definitionSnapshot.executionProfile.modelId,
         }),
       }),
-      { accessCeiling: "ask-first" },
+      // The run this turn is for travels only in the host-side start options.
+      {
+        accessCeiling: "ask-first",
+        routineRun: { automationId: run.automationId, runId: run.id },
+      },
     );
   });
 
@@ -450,7 +454,9 @@ describe("createAutomationWorkDispatchPort", () => {
 
     // No ceiling: the turn runs at the thread's level, which a routine thread
     // takes from Settings › Work, the level a Work Project's threads start at.
-    expect(vi.mocked(turns.startFirstTurn).mock.calls[0]?.[2]).toEqual({});
+    expect(vi.mocked(turns.startFirstTurn).mock.calls[0]?.[2]).toEqual({
+      routineRun: { automationId: optedIn.automationId, runId: optedIn.id },
+    });
   });
 
   it("caps a run at the level picked on the routine", async () => {
@@ -476,7 +482,10 @@ describe("createAutomationWorkDispatchPort", () => {
     });
 
     // The turn still runs at the thread's own level when that is lower.
-    expect(vi.mocked(turns.startFirstTurn).mock.calls[0]?.[2]).toEqual({ accessCeiling: "auto" });
+    expect(vi.mocked(turns.startFirstTurn).mock.calls[0]?.[2]).toEqual({
+      accessCeiling: "auto",
+      routineRun: { automationId: picked.automationId, runId: picked.id },
+    });
   });
 
   it("is idempotent on firstTurnRequestId by returning the existing accepted turn", async () => {

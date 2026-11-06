@@ -2489,7 +2489,8 @@ describe("CodeOperationService", () => {
     });
     expect(fixture.turns.start.mock.calls[0]![0].context).toEqual([
       { kind: "instructions", text: "Review as a skeptic." },
-      { kind: "instructions", text: "Review diffs in isolation." },
+      // The admitted skill is third-party text, sent apart from the profile's.
+      { kind: "skill-instructions", text: "Review diffs in isolation." },
     ]);
   });
 

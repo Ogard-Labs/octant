@@ -168,6 +168,25 @@ describe("evaluateBrowserAction", () => {
       ).kind,
     ).toBe("denied");
   });
+
+  it("runs an audit only when it names which audit, and takes that name on no other action", () => {
+    const audit = (overrides: Partial<BrowserActionRequest>) =>
+      evaluateBrowserAction(
+        makeRequest({ kind: "audit", target: undefined, ...overrides }),
+        activeContext,
+        authority,
+      ).kind;
+    expect(audit({ auditKind: "accessibility" })).toBe("allowed");
+    expect(audit({ auditKind: "performance" })).toBe("allowed");
+    expect(audit({})).toBe("denied");
+    expect(
+      evaluateBrowserAction(
+        makeRequest({ kind: "snapshot", target: undefined, auditKind: "performance" }),
+        activeContext,
+        authority,
+      ).kind,
+    ).toBe("denied");
+  });
 });
 
 describe("canRecordBrowserObservation", () => {
@@ -256,6 +275,7 @@ describe("what a paired device may do in the host's browser", () => {
       "screenshot",
       "extract-text",
       "wait",
+      "audit",
     ] as const) {
       expect(remoteBrowserActionReach(kind)).toEqual({ kind: "allowed" });
     }
@@ -286,6 +306,11 @@ describe("what a paired device may do in the host's browser", () => {
     }
     expect(remoteBrowserActionReach("hover").kind).toBe("allowed");
     expect(remoteBrowserActionReach("tab-list").kind).toBe("allowed");
+  });
+
+  it("keeps recording the page with the host's agent", () => {
+    expect(remoteBrowserActionReach("record-start").kind).toBe("denied");
+    expect(remoteBrowserActionReach("record-stop").kind).toBe("denied");
   });
 });
 

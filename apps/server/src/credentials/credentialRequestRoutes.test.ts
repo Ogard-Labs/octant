@@ -21,7 +21,10 @@ function setup() {
   const fetch = vi.fn(
     async (_request: Request) => new Response('{"data":{"viewer":{"id":"account"}}}'),
   );
-  const service = new CredentialRequests({ fetch });
+  const service = new CredentialRequests({
+    fetch,
+    resolveLinked: async () => ({ status: "read", value: "fixture-linked-token" }),
+  });
   services.push(service);
   const pending = service.request({
     windowId: String(windowId),
@@ -85,4 +88,21 @@ describe("credential request routes", () => {
     );
     expect(h.fetch).not.toHaveBeenCalled();
   });
+});
+
+it("accepts a local linked-field submission without returning its resolved token", async () => {
+  const h = setup();
+  const answer = {
+    id: h.id,
+    action: "allow-linked",
+    store: "onepassword",
+    reference: "op://Private/Linear/credential",
+  };
+  expect((await h.route(h.request(answer, "wrong")))?.status).toBe(401);
+  expect((await h.route(h.request({ ...answer, secret: "not-allowed" })))?.status).toBe(400);
+  expect(await (await h.route(h.request(answer)))?.json()).toEqual({ status: "accepted" });
+  expect(await h.pending).toEqual({ status: "used" });
+  expect(h.fetch.mock.calls[0]?.[0].headers.get("authorization")).toBe("fixture-linked-token");
+  expect(await (await h.route(h.request(answer)))?.json()).toEqual({ status: "refused" });
+  expect(await (await h.route(h.request()))?.text()).not.toContain("fixture-linked-token");
 });

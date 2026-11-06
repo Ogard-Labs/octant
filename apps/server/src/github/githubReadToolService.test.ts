@@ -132,6 +132,151 @@ function execute(toolSet: ReturnType<GithubReadToolService["createToolSet"]>, in
 }
 
 describe("GithubReadToolService", () => {
+  it("tells the model what the read covers and that it changes nothing on GitHub", () => {
+    const { toolSet } = setup();
+    expect(toolSet.definitions[0]?.description).toMatch(/issue reads one issue or pull request/);
+    expect(toolSet.definitions[0]?.description).toMatch(/search finds issues and pull requests/);
+    expect(toolSet.definitions[0]?.description).toMatch(/changes nothing on GitHub/);
+  });
+
+  it("answers help with full usage without reading GitHub", async () => {
+    const { toolSet, read } = setup();
+    const outcome = await execute(toolSet, { operation: "help" });
+    expect(outcome).toMatchObject({ isError: false, result: { tool: "octant_github" } });
+    expect(JSON.stringify(outcome.result)).toMatch(/commentsOmitted/);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("reads one issue or pull request in detail, with every cut stated", async () => {
+    const record = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["github-pull-request"] },
+    }));
+    const read = vi.fn(async () => ({
+      kind: "issue" as const,
+      issue: {
+        number: 12,
+        title: "Confine Plan git per call",
+        state: "open" as const,
+        author: "octocat",
+        createdAt: "2026-08-10T10:00:00Z",
+        updatedAt: "2026-08-11T10:00:00Z",
+        url: "https://github.com/octant/octant/pull/12",
+        labels: ["bug"],
+        body: "Cut here",
+        bodyTruncated: true,
+        comments: [
+          {
+            author: "reviewer",
+            createdAt: "2026-08-11T09:00:00Z",
+            body: "Looks right",
+            truncated: false,
+          },
+        ],
+        commentsOmitted: 14,
+        pullRequest: true as const,
+      },
+      freshness: { status: "fresh" as const },
+    }));
+    const { toolSet } = setup({ read, ingestion: { record } });
+
+    const outcome = await execute(toolSet, { operation: "issue", number: 12 });
+
+    expect(read).toHaveBeenCalledWith(
+      { kind: "issue", owner: "octant", name: "octant", number: 12, includePullRequest: true },
+      expect.anything(),
+    );
+    expect(outcome).toMatchObject({
+      isError: false,
+      result: {
+        operation: "issue",
+        repository: "octant/octant",
+        issue: {
+          kind: "pull-request",
+          number: 12,
+          body: "Cut here",
+          bodyTruncated: true,
+          comments: [{ body: "Looks right", truncated: false }],
+          commentsOmitted: 14,
+        },
+      },
+    });
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provenance: { origin: "tool-result", sourceLabel: "github-pull-request" },
+        contentReference: "github-pull-request-octant-octant-12",
+      }),
+    );
+    for (const input of [
+      { operation: "issue" },
+      { operation: "issue", number: 0 },
+      { operation: "issue", number: "12" },
+      { operation: "issue", number: 12, owner: "attacker" },
+    ]) {
+      expect((await execute(toolSet, input)).isError).toBe(true);
+    }
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("searches only the delivery repository, whatever the query names", async () => {
+    const read = vi.fn(async () => ({
+      kind: "search" as const,
+      page: {
+        rows: [
+          {
+            kind: "pull-request" as const,
+            number: 12,
+            title: "Flaky login",
+            state: "open" as const,
+            author: "octocat",
+            updatedAt: "2026-08-11T10:00:00Z",
+            url: "https://github.com/octant/octant/pull/12",
+          },
+        ],
+        sort: "updated-desc" as const,
+        hasNextPage: false,
+        freshness: { status: "fresh" as const },
+      },
+    }));
+    const { toolSet } = setup({ read });
+
+    const outcome = await execute(toolSet, {
+      operation: "search",
+      query: "flaky repo:attacker/secrets",
+      state: "all",
+    });
+
+    expect(outcome).toMatchObject({
+      isError: false,
+      result: {
+        operation: "search",
+        repository: "octant/octant",
+        page: { rows: [{ kind: "pull-request", number: 12 }] },
+      },
+    });
+    expect(read).toHaveBeenCalledWith(
+      {
+        kind: "search",
+        owner: "octant",
+        name: "octant",
+        query: "flaky repo:attacker/secrets",
+        pageSize: 20,
+        state: "all",
+      },
+      expect.anything(),
+    );
+    for (const input of [
+      { operation: "search" },
+      { operation: "search", query: "   " },
+      { operation: "search", query: "x".repeat(161) },
+      { operation: "search", query: "flaky", repository: "attacker/secrets" },
+      { operation: "search", query: "flaky", owner: "attacker" },
+    ]) {
+      expect((await execute(toolSet, input)).isError).toBe(true);
+    }
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
   it("serves a bounded issues read fixed to the current Code Project repository", async () => {
     const { toolSet, read } = setup();
     const outcome = await execute(toolSet, { operation: "issues" });
@@ -259,9 +404,17 @@ describe("GithubReadToolService", () => {
     expect(read).not.toHaveBeenCalled();
   });
 
-  it("clamps the agent page size to the bounded window", async () => {
+  it("refuses a page size outside 1 to 30, as its schema says, rather than clamping it", async () => {
     const { toolSet, read } = setup();
-    await execute(toolSet, { operation: "pull-requests", pageSize: 100 });
+    expect(toolSet.definitions[0]?.inputSchema).toMatchObject({
+      properties: { pageSize: { type: "integer", minimum: 1, maximum: 30 } },
+    });
+    for (const pageSize of [0, 31, 100, 2.5]) {
+      const outcome = await execute(toolSet, { operation: "pull-requests", pageSize });
+      expect(outcome).toMatchObject({ isError: true, result: { error: "invalid-github-input" } });
+    }
+    expect(read).not.toHaveBeenCalled();
+    await execute(toolSet, { operation: "pull-requests", pageSize: 30 });
     expect(read).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "pull-requests", pageSize: 30 }),
       expect.anything(),
