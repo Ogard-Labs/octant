@@ -1,4 +1,4 @@
-import type { DesktopIdentity } from "@octant/host-runtime";
+import type { DesktopHostRole, DesktopIdentity } from "@octant/host-runtime";
 import type { DesktopPeerPreflight } from "./desktopPeerStatus";
 import { parseCodeDeepLink } from "./codeDeepLinks";
 
@@ -91,6 +91,8 @@ export type PackagedDesktopLaunch =
 export function resolvePackagedDesktopLaunch(
   identity: DesktopIdentity,
   args: ReadonlyArray<string>,
+  /** Nightly's role from its stored Data choice; Octant's is always its own host. */
+  hostRole: DesktopHostRole = { kind: "octant-host" },
 ): PackagedDesktopLaunch {
   const refused: PackagedDesktopLaunch = {
     kind: "refused",
@@ -106,8 +108,10 @@ export function resolvePackagedDesktopLaunch(
     args.every((arg) => arg === DESKTOP_HOST_ONLY_SWITCH || /^-psn_[0-9]+_[0-9]+$/.test(arg))
   )
     return { kind: "host-only" };
+  // The Canvas prototype host is a child the host-owning desktop starts. Nightly
+  // runs that desktop only as its own test host, never as a client of Octant.
   if (
-    identity.flavor === "stable" &&
+    (identity.flavor === "stable" || hostRole.kind === "test-host") &&
     args.length === 1 &&
     args[0] === "--octant-canvas-prototype-host"
   )

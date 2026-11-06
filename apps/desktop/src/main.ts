@@ -125,6 +125,12 @@ import type {
 import { createAppUpdateService } from "./appUpdateService";
 import { createNightlyInstaller } from "./nightlyInstaller";
 import {
+  createNightlyDataControl,
+  createRelaunchIntent,
+  resolveHostOwningStartup,
+  resolveStartupHostRole,
+} from "./nightlyTestData";
+import {
   createPortableImagePort,
   defaultProcessIsAlive,
   REPLACED_PROCESS_POLL_MS,
@@ -1184,6 +1190,7 @@ function resolveDesktopHostRuntimePaths(
       XDG_DATA_HOME: env.XDG_DATA_HOME,
       XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
       XDG_STATE_HOME: env.XDG_STATE_HOME,
+      OCTANT_LOGS_DIR: env.OCTANT_LOGS_DIR,
     },
     platform,
     home,
@@ -1222,11 +1229,72 @@ const applicationIdentity = app.isPackaged
   : desktopIdentity("stable");
 app.setName(applicationIdentity.productName);
 isolateEachCanvasFrameDocument(app.commandLine);
+// Decided once here from Nightly's stored Data choice, never from a renderer.
+const desktopHostRole = resolveStartupHostRole({
+  identity: applicationIdentity,
+  windowStorageDirectory: desktopWindowStorageDirectory(
+    applicationIdentity,
+    "",
+    app.getPath("appData"),
+  ),
+  appDataDirectory: app.getPath("appData"),
+  platform: process.platform,
+  env: process.env,
+});
+const resolvedHostStartup = resolveHostOwningStartup({
+  identity: applicationIdentity,
+  role: desktopHostRole,
+  platform: process.platform,
+  appDataDirectory: app.getPath("appData"),
+  env: process.env,
+});
+// Refuses before any host path is resolved or created.
+if (resolvedHostStartup.kind === "refused") throw new Error(resolvedHostStartup.message);
+const desktopHostStartup = resolvedHostStartup;
+const desktopMayStartHost =
+  applicationIdentity.mayStartHost || desktopHostRole.kind === "test-host";
 const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
-  process.env.OCTANT_DATA_DIR,
+  desktopHostStartup.configuredDataDirectory,
   app.getPath("appData"),
+  process.platform,
+  desktopHostStartup.logsDirectory === undefined
+    ? process.env
+    : { ...process.env, OCTANT_LOGS_DIR: desktopHostStartup.logsDirectory },
 );
 const desktopDataDirectory = desktopHostRuntimePaths.dataDirectory;
+const desktopKeychainServiceFamily = desktopHostStartup.keychainServiceFamily;
+// The relaunch quits through the same interactive path as Quit in the menu, so
+// running work is confirmed first and a cancelled confirmation cancels it.
+const nightlyRelaunch = createRelaunchIntent({
+  quit: requestInteractiveQuit,
+  relaunch: () => app.relaunch(),
+});
+const nightlyDataControl =
+  desktopHostRole.kind === "test-host"
+    ? createNightlyDataControl({
+        identity: applicationIdentity,
+        role: desktopHostRole,
+        platform: process.platform,
+        appDataDirectory: app.getPath("appData"),
+        windowStorageDirectory: desktopWindowStorageDirectory(
+          applicationIdentity,
+          "",
+          app.getPath("appData"),
+        ),
+        env: process.env,
+        trashItem: (path) => shell.trashItem(path),
+        requestRelaunch: () => nightlyRelaunch.request(),
+      })
+    : undefined;
+/** The Nightly label and its "Test data" label for the test host's windows. */
+const nightlyWindowIdentity =
+  desktopHostRole.kind === "test-host"
+    ? {
+        applicationFlavor: "nightly" as const,
+        productName: applicationIdentity.productName,
+        applicationData: "test-data" as const,
+      }
+    : {};
 const desktopHostId = deriveHostRuntimeHostId(desktopDataDirectory);
 app.setPath(
   "userData",
@@ -1555,6 +1623,7 @@ function getCredentialBackend(): Promise<DesktopCredentialBackend> {
       moduleUrl: import.meta.url,
     }),
     storeScope: desktopHostId,
+    serviceFamily: desktopKeychainServiceFamily,
   }).then((backend) => {
     return backend;
   });
@@ -1632,7 +1701,7 @@ async function resolveExistingHostAttachment() {
 }
 
 async function attachExistingLocalHost(): Promise<LocalHostDescriptor | undefined> {
-  if (!applicationIdentity.mayStartHost) {
+  if (!desktopMayStartHost) {
     throw new Error(
       "Needs a newer Octant. The stable desktop client bridge is not available in this build of Octant Nightly.",
     );
@@ -1696,7 +1765,7 @@ function browserProfilesDirectory(): string {
 }
 
 async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
-  if (!applicationIdentity.mayStartHost) {
+  if (!desktopMayStartHost) {
     throw new Error("Octant Nightly cannot start a host or migrate shared data.");
   }
   if (desktopHostLaunch !== undefined && desktopHostLaunch.state !== "closed") {
@@ -1715,7 +1784,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   );
   await prepareHostRuntimePaths(desktopHostRuntimePaths);
   const root = repositoryRoot();
-  const portReservation = await reserveLoopbackPort(resolveConfiguredServerPort());
+  const portReservation = await reserveLoopbackPort(
+    resolveConfiguredServerPort(process.env, desktopHostStartup.serverPort),
+  );
   const serverUrl = resolveManagedServerUrl({
     needsServerStart: true,
     activeServerUrl: undefined,
@@ -1892,7 +1963,11 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
             resourcesPath: process.resourcesPath,
             execPath: process.execPath,
           }),
-          env: { ...process.env, OCTANT_DATA_DIR: desktopDataDirectory },
+          env: {
+            ...process.env,
+            OCTANT_DATA_DIR: desktopDataDirectory,
+            ...desktopHostStartup.hostEnvironment,
+          },
         });
         return spawn(spec.command, spec.args, {
           env: spec.env,
@@ -2171,6 +2246,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
           bounds: state.bounds,
           capability,
           windowId: state.windowId,
+          ...nightlyWindowIdentity,
           preloadPath: resolve(dirname(fileURLToPath(import.meta.url)), DESKTOP_PRELOAD_FILENAME),
           browserWindow: presentation.browserWindow,
         }),
@@ -2464,6 +2540,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
             ...(target.kind === "project-thread"
               ? { initialThreadMode: target.mode, initialThreadId: target.threadId }
               : {}),
+            ...nightlyWindowIdentity,
             preloadPath: resolve(dirname(fileURLToPath(import.meta.url)), DESKTOP_PRELOAD_FILENAME),
             browserWindow: presentation.browserWindow,
           }),
@@ -2975,8 +3052,7 @@ async function runMenuBarAction(
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
       });
     } else if (action === "fully-quit") {
-      quitCanPrompt = true;
-      app.quit();
+      requestInteractiveQuit();
     }
   } catch {
     dialog.showErrorBox(
@@ -2988,9 +3064,10 @@ async function runMenuBarAction(
 
 export function resolveConfiguredServerPort(
   environment: Readonly<Record<string, string | undefined>> = process.env,
+  defaultPort = 13_773,
 ): number {
   const value = environment.OCTANT_SERVER_PORT;
-  if (value === undefined) return 13_773;
+  if (value === undefined) return defaultPort;
   const port = Number(value);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
     throw new Error("OCTANT_SERVER_PORT must be an integer between 1 and 65535");
@@ -3032,7 +3109,7 @@ function getOwnerUnlockKeyService(): OwnerUnlockKeyService | undefined {
       resourcesPath: process.resourcesPath,
       moduleUrl: import.meta.url,
     }),
-    { storeScope: desktopHostId },
+    { storeScope: desktopHostId, serviceFamily: desktopKeychainServiceFamily },
   );
   return ownerUnlockKeyService;
 }
@@ -3046,6 +3123,7 @@ function getHostIdentitySigningService(): HostIdentitySigningService {
     }),
     {
       storeScope: desktopHostId,
+      serviceFamily: desktopKeychainServiceFamily,
       expectedLegacyFingerprint: readPersistedHostIdentityFingerprint,
     },
   );
@@ -3618,6 +3696,26 @@ function installIpcHandlers(): void {
       ownedTopLevelWindowContext(event);
       if (rest.length !== 0) throw new Error("Octant rejected an Octant Nightly request.");
       return request();
+    });
+  }
+  // Nightly's test host keeps its Data setting here; the choice, relaunch and
+  // removal requests carry nothing but the fixed choice values.
+  if (nightlyDataControl !== undefined) {
+    const data = nightlyDataControl;
+    for (const [channel, request] of [
+      [IPC_CHANNELS.nightlyDataState, () => data.state()],
+      [IPC_CHANNELS.nightlyDataRemove, () => data.remove()],
+      [IPC_CHANNELS.nightlyDataRelaunch, () => data.relaunch()],
+    ] as const) {
+      ipcMain.handle(channel, (event, ...rest: ReadonlyArray<unknown>) => {
+        ownedTopLevelWindowContext(event);
+        if (rest.length !== 0) throw new Error("Octant Nightly rejected a Data request.");
+        return request();
+      });
+    }
+    ipcMain.handle(IPC_CHANNELS.nightlyDataChoose, (event, value: unknown) => {
+      ownedTopLevelWindowContext(event);
+      return data.choose(value);
     });
   }
   ipcMain.handle(IPC_CHANNELS.appUpdateWhatsNew, async (event) => {
@@ -4539,9 +4637,11 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
   }
   if (!accepted || stillRequested?.() === false) {
     preparingQuit = false;
+    nightlyRelaunch.quitCancelled();
     return;
   }
   desktopQuitAccepted = true;
+  nightlyRelaunch.quitAccepted();
   hostLifecycle.acceptQuit();
   desktopBackendSupervisor.release();
   // Closing admission here fences a client arriving during the later flush.
@@ -4628,11 +4728,14 @@ const quitShortcutGuard = createQuitShortcutGuard({
     window.webContents.send(IPC_CHANNELS.quitShortcutHint);
     return true;
   },
-  quit: () => {
-    quitCanPrompt = true;
-    app.quit();
-  },
+  quit: requestInteractiveQuit,
 });
+
+/** A person's quit: it may close only local windows, and asks before stopping running work. */
+function requestInteractiveQuit(): void {
+  quitCanPrompt = true;
+  app.quit();
+}
 
 function installApplicationMenu(): void {
   if (process.platform !== "darwin") return;
@@ -4762,6 +4865,8 @@ app.on("before-quit", (event) => {
     quitCanPrompt = false;
     void desktopClientLifetime.requestLocalQuit().then((result) => {
       if (result === "quit-required") return quitHostAfterLastClient();
+      // Only the windows closed; the app keeps running, so no relaunch.
+      nightlyRelaunch.quitCancelled();
       if (result === "failed") logQuitProblem("Octant could not finish closing its local windows.");
     });
     return;

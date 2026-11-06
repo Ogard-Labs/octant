@@ -212,4 +212,14 @@ describe("composeHostDataMap", () => {
     if (decoded.projects.kind !== "known") throw new Error("expected known projects");
     expect(decoded.projects.projects[0]?.boundRoot).toEqual({ kind: "unknown" });
   });
+
+  it("names Octant Nightly's test-host Keychain services, not Octant's", () => {
+    const store = desktopCredentialStore("octant-nightly-test-data");
+    expect(store.entries).toHaveLength(desktopCredentialStore().entries.length);
+    for (const { service } of store.entries)
+      expect(service.startsWith("app.octant.desktop.nightly.test-data.")).toBe(true);
+    expect(store.entries).toContainEqual({
+      service: "app.octant.desktop.nightly.test-data.provider-credentials",
+    });
+  });
 });

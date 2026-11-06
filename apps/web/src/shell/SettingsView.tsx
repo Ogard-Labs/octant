@@ -600,7 +600,10 @@ export function SettingsView(props: SettingsViewProps) {
           ) : null}
           {props.hostBridge?.applicationIdentity !== undefined ? (
             <div className="sidebar__application-identity">
-              <ApplicationIdentity productName={props.hostBridge.applicationIdentity.productName} />
+              <ApplicationIdentity
+                productName={props.hostBridge.applicationIdentity.productName}
+                testData={props.hostBridge.applicationIdentity.data === "test-data"}
+              />
             </div>
           ) : null}
           <div className="settings-view__sidebar-content">
@@ -661,6 +664,7 @@ export function SettingsView(props: SettingsViewProps) {
                     </span>
                     <ApplicationIdentity
                       productName={props.hostBridge.applicationIdentity.productName}
+                      testData={props.hostBridge.applicationIdentity.data === "test-data"}
                     />
                   </>
                 ) : (

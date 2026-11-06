@@ -102,6 +102,11 @@ describe("canonical local host endpoint", () => {
     expect(resolveConfiguredServerPort({})).toBe(13_773);
     expect(resolveConfiguredServerPort({ OCTANT_SERVER_PORT: "14000" })).toBe(14_000);
   });
+
+  it("starts Nightly's test host on its own port unless OCTANT_SERVER_PORT overrides it", () => {
+    expect(resolveConfiguredServerPort({}, 13_774)).toBe(13_774);
+    expect(resolveConfiguredServerPort({ OCTANT_SERVER_PORT: "14000" }, 13_774)).toBe(14_000);
+  });
 });
 
 describe("packaged desktop host capabilities", () => {
@@ -243,6 +248,18 @@ describe("Project window BrowserWindow construction", () => {
     expect(createMainBrowserWindowOptions(input).webPreferences?.additionalArguments).not.toContain(
       "--octant-application-flavor=nightly",
     );
+    expect(
+      createMainBrowserWindowOptions({
+        ...input,
+        applicationFlavor: "nightly",
+        productName: DESKTOP_FLAVOR_IDENTITIES.nightly.productName,
+        applicationData: "test-data",
+      }).webPreferences?.additionalArguments,
+    ).toContain("--octant-application-data=test-data");
+    expect(
+      createMainBrowserWindowOptions({ ...input, applicationData: "test-data" }).webPreferences
+        ?.additionalArguments,
+    ).not.toContain("--octant-application-data=test-data");
   });
 
   it("consumes the resolved native presentation without overriding the frameless contract", () => {

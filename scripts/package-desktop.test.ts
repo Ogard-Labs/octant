@@ -1,3 +1,4 @@
+import { packagedNativePath } from "./desktop-client-runtime";
 import { execFileSync } from "node:child_process";
 import { readFile, mkdtemp, mkdir, writeFile, access, rm, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -72,7 +73,7 @@ import {
   stageBundledLanguageServer,
   stageExternalRuntimePackages,
   stageLinuxAppDir,
-  stageStableHostPayload,
+  stageHostPayload,
 } from "./package-desktop";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -200,7 +201,7 @@ describe("desktop packaging boundary", () => {
     });
   });
 
-  it("seals both desktop entries while keeping the Stable host physical", () => {
+  it("seals both desktop entries while keeping each app's worker host tree physical", () => {
     const nightly = createPackagerOptions(
       "/tmp/stage",
       "/tmp/out",
@@ -214,9 +215,18 @@ describe("desktop packaging boundary", () => {
       ),
     });
     expect(nightly.asar).toEqual({ unpack: expect.not.stringContaining("*.js") });
-    expect(createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0").asar).toEqual({
+    expect(nightly.asar).toEqual({ unpack: expect.not.stringContaining("apps/server/") });
+    expect(nightly.ignore).toEqual(/^\/apps\/server(?:\/|$)/);
+    const stable = createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0");
+    expect(stable.asar).toEqual({
       unpack: expect.stringContaining("cua_driver_node_runtime.node"),
     });
+    expect(stable.ignore).toEqual(nightly.ignore);
+    expect(
+      packagedNativePath(
+        "Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
+      ),
+    ).toBe("Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node");
   });
 
   it("resolves packaging targets from the host or an explicit override", () => {
@@ -1437,7 +1447,7 @@ it("keeps the worker server physical without copying a loose desktop entry", asy
       await writeFile(resolve(stage, "apps", name, "dist/main.mjs"), name);
     }
     await writeFile(resolve(stage, "package.json"), "{}");
-    await stageStableHostPayload(stage, app);
+    await stageHostPayload(stage, app);
     expect(
       await readFile(resolve(app, "Contents/Resources/app/apps/server/dist/main.mjs"), "utf8"),
     ).toBe("server");

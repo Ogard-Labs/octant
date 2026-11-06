@@ -80,6 +80,27 @@ describe("host runtime paths", () => {
     expect(Buffer.byteLength(paths.socketPath)).toBeLessThanOrEqual(103);
   });
 
+  it("writes the service log to its own folder when OCTANT_LOGS_DIR names one", () => {
+    const paths = resolveHostRuntimePaths({
+      env: { OCTANT_LOGS_DIR: "/Users/example/Library/Logs/Octant Nightly" },
+      platform: "darwin",
+      home: "/Users/example",
+      temporaryDirectory: "/private/var/folders/runtime",
+      uid: 501,
+    });
+    expect(paths.logsDirectory).toBe("/Users/example/Library/Logs/Octant Nightly");
+    expect(paths.serviceLogPath).toBe("/Users/example/Library/Logs/Octant Nightly/service.log");
+    expect(() =>
+      resolveHostRuntimePaths({
+        env: { OCTANT_LOGS_DIR: "relative/logs" },
+        platform: "darwin",
+        home: "/Users/example",
+        temporaryDirectory: "/private/var/folders/runtime",
+        uid: 501,
+      }),
+    ).toThrow();
+  });
+
   it("uses safe Linux XDG defaults without requiring OCTANT_DATA_DIR", () => {
     const paths = resolveHostRuntimePaths({
       env: {},

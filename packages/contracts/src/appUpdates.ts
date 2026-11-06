@@ -270,6 +270,31 @@ export const NightlyInstallState = Schema.Struct({
 export type NightlyInstallState = typeof NightlyInstallState.Type;
 
 /**
+ * Octant Nightly's Data setting: Octant's data through Octant's host, or a
+ * host of its own on separate test data. `running` is the role this launch
+ * started with; `chosen` applies on the next launch. `removal` reports the
+ * last request to move the test data to the Trash.
+ */
+export const NightlyDataChoice = Schema.Literal("octant", "test-data");
+export type NightlyDataChoice = typeof NightlyDataChoice.Type;
+export const NightlyDataState = Schema.Struct({
+  running: NightlyDataChoice,
+  chosen: NightlyDataChoice,
+  testDataPresent: Schema.Boolean,
+  removal: Schema.optional(
+    Schema.Literal(
+      "removed",
+      "absent",
+      "test-host-running",
+      "unsafe-folder",
+      "not-nightly",
+      "failed",
+    ),
+  ),
+}).annotations(strict);
+export type NightlyDataState = typeof NightlyDataState.Type;
+
+/**
  * Everything an update check discloses, in the words the user guide uses.
  *
  * Kept in the contract rather than only in prose so the claim and the code

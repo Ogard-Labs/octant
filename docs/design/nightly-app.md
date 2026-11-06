@@ -37,7 +37,11 @@ release workflow stamp the flavor from the ring, and the scheduled Nightly run
 alone is held by the functional-client preflight. The Octant Nightly row in
 Octant's Settings › Updates is built for packaged macOS Octant, including its
 three checks; a signed install from a published Nightly build has not yet been
-exercised. Nightly cannot yet run its own test-data host.
+exercised. Nightly's own host on separate test data is built for macOS: the
+Data choice in Settings › Updates with its relaunch offer and removal, the
+Test data label, startup on its own folder, port, logs and Keychain service
+names, and the host payload and worker runtime in packaged Nightly. A signed
+Nightly running its test host has not yet been exercised.
 
 ## Two apps, one set of data
 
@@ -109,10 +113,12 @@ never Octant's:
   locks or migrates Octant's data folder, never connects to Octant's host, and
   never asks Octant to start one. Octant and Nightly can both run, each with
   its own host.
-- Credentials stay apart: the test host's credential broker stores its items
-  under Nightly's own Keychain service names, so a sign-in made for test data
-  never replaces or reads one of Octant's. A person signs in again for test
-  data.
+- Credentials Octant keeps in the Keychain stay apart: the test host's
+  credential broker stores its items under Nightly's own Keychain service
+  names, so a key or secret saved for test data never replaces or reads one of
+  Octant's, and a person enters them again for test data. Provider command-line
+  tools keep their own sign-ins in the home folder (`~/.claude`, `~/.codex` and
+  the like), and those are shared with Octant.
 - New host behavior (agents, providers, tools, persistence) from `main` runs
   here, which the client mode cannot test. The test data is disposable:
   Nightly's Settings can remove it (moved to the Trash) when its host is
@@ -126,6 +132,41 @@ never Octant's:
 - `OCTANT_DATA_DIR` and `OCTANT_SERVER_PORT` still override either app, as for
   a development build. Pointing Nightly's own host at Octant's folder that way
   is the developer's explicit choice and is not a supported configuration.
+- The choice is `data-choice.json` in Nightly's window storage. Only an exact
+  `{"data":"test-data"}` selects test data; a missing, oversized, linked or
+  malformed file means Octant's data. The main process reads it once at launch
+  and no renderer request changes the running role.
+- Separate test data is macOS only for now. Linux Secret Service items carry no
+  store scope, so a Linux test host would share Octant's credentials; Nightly
+  does not offer the choice there, and a stored choice refuses with a message
+  instead of starting a host.
+- Nightly refuses to start its test host when its folder is, or lies inside,
+  Octant's data folder, or contains it, unless `OCTANT_DATA_DIR` set the folder
+  explicitly. A Nightly process that reaches the host-owning desktop without a
+  test-host role (its choice changed or became unreadable during launch)
+  refuses and quits; it never falls back to Octant's folder or port `13773`.
+- The test host's service log is `~/Library/Logs/Octant Nightly/service.log`,
+  passed to its host as `OCTANT_LOGS_DIR`, so it never shares Octant's log.
+- Its default folder is `~/Octant Nightly` rather than `~/Octant`, passed as
+  `OCTANT_DEFAULT_FOLDER`, so Work and Code without a Project, the artifact
+  mirror and managed repository clones never touch Octant's files. Its Keychain
+  family reaches the host as `OCTANT_KEYCHAIN_SERVICE_FAMILY`, so the data map
+  names the services it really uses; any other value refuses host startup.
+- Still shared with Octant, as for any second host on the same account:
+  provider command-line configuration and sign-ins in the home folder, and
+  developer toolchains such as the Android SDK and Xcode.
+- A Nightly client and the test host take the same single-instance lock in
+  Nightly's window storage, so only one runs at a time and a second launch
+  focuses the first. Removal also refuses while the test folder's owner receipt
+  names a live process, and when the folder's real path is not its fixed path.
+- A relaunch asked for from Settings arms only once its quit is accepted; a
+  cancelled quit forgets it.
+- The test host's macOS Keychain services are named
+  `app.octant.desktop.nightly.test-data.*` rather than `app.octant.*`. Because
+  Octant's unscoped legacy items live only under Octant's names, the helper's
+  legacy re-scoping can never claim one for test data.
+- Removal moves only the fixed test folder to the Trash, refuses while the test
+  host runs, and refuses a linked folder.
 
 ## Starting a closed Stable host
 
@@ -417,7 +458,9 @@ and Node inspection entry paths. It requires ASAR-only loading and embedded ASAR
 validation, with fuse readback on the artifact before signing. Its application
 entry accepts a bounded set of launch arguments: ordinary startup, one macOS
 Launch Services process token, its own valid Code link, or the fixed scoped
-terminal role. Stable also accepts its fixed Canvas prototype-host and host-only roles.
+terminal role. Stable also accepts its fixed Canvas prototype-host and host-only roles;
+Nightly accepts the Canvas prototype-host role only while its stored Data choice
+makes it its own test host, because only the host-owning desktop starts that child.
 The host-only role cannot be combined with a Code link or another role. It
 refuses unknown positional entries, loader options and
 Chromium remote-debugging options before importing host or client-registration
@@ -433,10 +476,11 @@ the sealed GUI role aborts during LaunchServices/WindowServer registration; the
 Node command preserves confinement without granting GUI services. Its script is
 an ordinary signed bundle resource, never trusted desktop code for peer admission.
 
-Stable retains a separate, same-version `Octant Runtime.app` inside its Frameworks
-folder for its host, managed tools and approved executable extensions. Its bundle
-id is `app.octant.desktop.runtime`, distinct from both desktop mains and their
-helpers, and it must never be admitted as a desktop peer. This runtime keeps
+Each app retains a separate, same-version `Octant Runtime.app` inside its
+Frameworks folder for its host, managed tools and approved executable extensions;
+Nightly's runs only its test host. Its bundle id is `app.octant.desktop.runtime`
+in both apps, distinct from both desktop mains and their helpers, and it must
+never be admitted as a desktop peer. This runtime keeps
 standalone Node behavior and current stdin supervision and confinement contracts.
 Node consumers use the physical server/web payload under `Resources/app`, which
 contains no loose desktop module; trusted desktop code stays in ASAR. Development
