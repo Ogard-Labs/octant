@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { ProjectId } from "./projects";
 import { WorkThreadId } from "./workThreads";
-import { ThreadWorkingDirectory } from "./workingDirectory";
+import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
 import { EventActor, UtcTimestamp } from "./events";
 import { PreviewSourceVersion, PreviewTarget } from "./previews";
 
@@ -77,6 +77,8 @@ const WorkArtifactDisplayName = Schema.NonEmptyTrimmedString.pipe(
  * basename display name. No host path, no content, no authority token.
  */
 export const WorkArtifactIdentity = Schema.Struct({
+  /** Host-recorded binding/add identity. Absent is a legacy main-folder artifact. */
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
   artifactId: WorkArtifactId,
   projectId: ProjectId,
   format: WorkArtifactFormat,
