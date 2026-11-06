@@ -184,6 +184,66 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 return undefined;
               }
             },
+            resolveActionCheckout: async (windowId, projectId, requested) => {
+              const view = await routeCodeService.read(windowId, requested.threadId);
+              if (
+                view === undefined ||
+                String(view.thread.projectId) !== String(projectId) ||
+                String(view.checkout.id) !== String(requested.checkoutId) ||
+                view.checkout.availability !== "available" ||
+                view.checkout.kind === "remote-root"
+              )
+                return undefined;
+              const { thread, checkout } = view;
+              const head = checkout.head.kind === "none" ? undefined : checkout.head.oid;
+              if (requested.head !== undefined && requested.head !== head) return undefined;
+              const rooted = await roots.resolve(
+                windowId,
+                thread,
+                checkout,
+                codeWorkingDirectoryProbePath,
+              );
+              if (rooted === undefined) return undefined;
+              const active = () => {
+                const fresh = persistence.readCodeThread(thread.id);
+                const present = persistence.readCodeCheckout(checkout.id);
+                return (
+                  fresh !== undefined &&
+                  present !== undefined &&
+                  rooted.current?.() === true &&
+                  fresh.lifecycle === "active" &&
+                  String(fresh.bindingRevisionId) === String(thread.bindingRevisionId) &&
+                  String(fresh.checkoutId) === String(checkout.id) &&
+                  codeSessionAuthority.effectiveThread(windowId, fresh).executionPolicy ===
+                    thread.executionPolicy &&
+                  present.availability === "available" &&
+                  present.head.kind === checkout.head.kind &&
+                  (present.head.kind !== "branch" ||
+                    (checkout.head.kind === "branch" && present.head.name === checkout.head.name))
+                );
+              };
+              const current = () => {
+                const present = persistence.readCodeCheckout(checkout.id);
+                return (
+                  active() &&
+                  canAccessCodeProject(windowId, projectId) &&
+                  present !== undefined &&
+                  (present.head.kind === "none" || present.head.oid === head)
+                );
+              };
+              return {
+                root: rooted.rootPath,
+                executionPolicy: thread.executionPolicy,
+                ...(head === undefined ? {} : { head }),
+                ...(checkout.head.kind === "branch"
+                  ? { branch: checkout.head.name }
+                  : head === undefined
+                    ? {}
+                    : { branch: `Detached at ${head.slice(0, 12)}` }),
+                current,
+                active,
+              };
+            },
             suggestActions: suggestProjectActions,
             serverProject: (projectId) => {
               const project = serverProjectStore.codeProject(String(projectId));
@@ -209,6 +269,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     const unsubscribeProjectTerminalAuthority = persistence.journal.subscribeCommitted((append) => {
       if (projectTerminals === undefined) return;
       for (const event of append.events) {
+        if (event.aggregateType === "code-thread" || event.aggregateType === "code-checkout")
+          void projectTerminals.settleActionAuthorities();
         if (
           event.aggregateType === "project" &&
           (event.eventName === "project.lifecycle-changed@1" ||

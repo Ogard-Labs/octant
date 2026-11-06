@@ -28,11 +28,13 @@ optionally a folder inside the Project. Octant also looks in the Project's
 nothing is saved until you add one and choose **Save actions**.
 
 Each action becomes a button in the window header (the first three, with the
-rest under **More**) and an entry in the command palette. Choosing it types the
-command into the Project terminal and opens that terminal in Zen. It runs with
-the same sandbox and approvals as anything else you type there. If the terminal
-is already running a program, the command goes to that program, so stop it
-first. Actions are set from this computer's window, not from a paired device.
+rest under **More**) and an entry in the command palette. Choosing one previews
+its actual folder and branch. A thread defaults to its active checkout; use
+**Run in** to choose the Project folder or an approved extra folder explicitly.
+**Run action** starts a dedicated process and shows output, exit status and
+**Stop action** beside the task. **Open terminal** is an explicit Zen handoff.
+Closing the dialog leaves the run alone; reopening attaches to it. A lost reply
+is reported as unknown and never automatically launches a second command.
 
 ## Project planner
 

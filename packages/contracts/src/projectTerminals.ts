@@ -1,7 +1,7 @@
 import { Schema } from "effect";
-import { CodeTerminalId } from "./code";
+import { CodeTerminalId, CodeThreadId, CodeCheckoutId } from "./code";
 import { MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES } from "./codeOperations";
-import { UtcTimestamp } from "./events";
+import { UtcTimestamp, AggregateVersion } from "./events";
 import { BindingRevisionId, ProjectActionId, ProjectActionDirectory, ProjectId } from "./projects";
 import { WindowId } from "./shell";
 
@@ -57,7 +57,38 @@ export type ProjectTerminalPosture = typeof ProjectTerminalPosture.Type;
  * resolves the root, the posture, and the owning window itself, so a caller
  * cannot describe its way to a folder, a credential, or someone else's shell.
  */
+const ActionThread = Schema.Struct({
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  head: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/))),
+}).annotations(strict);
+const ActionRun = Schema.Struct({
+  actionId: ProjectActionId,
+  name: Schema.String.pipe(Schema.maxLength(40)),
+  folder: Schema.String.pipe(Schema.maxLength(4608)),
+  branch: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+  thread: Schema.optional(ActionThread),
+}).annotations(strict);
+
 export const ProjectTerminalCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("preview-action"),
+    projectId: ProjectId,
+    actionId: ProjectActionId,
+    ...Folder,
+    thread: Schema.optional(ActionThread),
+  }).annotations(strict),
+
+  Schema.Struct({
+    kind: Schema.Literal("start-action"),
+    ...Target,
+    ...TerminalGeometry,
+    ...Folder,
+    actionId: ProjectActionId,
+    thread: Schema.optional(ActionThread),
+    projectVersion: Schema.optional(AggregateVersion),
+  }).annotations(strict),
+
   Schema.Struct({
     kind: Schema.Literal("start"),
     ...Target,
@@ -83,9 +114,8 @@ export const ProjectTerminalCommand = Schema.Union(
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("stop"), ...Target }).annotations(strict),
   /**
-   * Type one of the Project's saved actions into a running terminal. The
-   * command names the action, never its text: the host reads the line from the
-   * Project record, so a caller cannot send a command the person did not save.
+   * Legacy clients may still name this command; the host refuses it and asks
+   * for a dedicated action run, because an existing shell may be busy.
    */
   Schema.Struct({
     kind: Schema.Literal("run-action"),
@@ -112,6 +142,7 @@ export const ProjectTerminalCommand = Schema.Union(
 export type ProjectTerminalCommand = typeof ProjectTerminalCommand.Type;
 
 export const ProjectTerminalView = Schema.Struct({
+  action: Schema.optional(ActionRun),
   ...Target,
   state: Schema.Literal("running", "exited", "interrupted"),
   exitCode: Schema.optional(Schema.Int),
@@ -158,6 +189,12 @@ export type ProjectActionSuggestion = typeof ProjectActionSuggestion.Type;
 
 export const ProjectTerminalResult = Schema.Union(
   Schema.Struct({
+    kind: Schema.Literal("project-action-preview"),
+    projectId: ProjectId,
+    projectVersion: AggregateVersion,
+    action: ActionRun,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("project-terminal"),
     terminal: ProjectTerminalView,
     output: Schema.optional(ProjectTerminalOutput),
@@ -181,6 +218,7 @@ export type ProjectTerminalResult = typeof ProjectTerminalResult.Type;
  * of any record.
  */
 export const ProjectTerminalStarted = Schema.Struct({
+  action: Schema.optional(ActionRun),
   kind: Schema.Literal("project-terminal-started"),
   ...Target,
   windowId: WindowId,

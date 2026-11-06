@@ -130,8 +130,8 @@ export function ProjectActionsSection(props: ProjectActionsSectionProps) {
           <h2 id={headingId}>Actions</h2>
           <p>
             Named commands such as Run, Test, or Dev. Each appears as a button in this Project's
-            header and in the command palette, and types its command into the Project terminal,
-            under the same sandbox and approvals as anything else you type there.
+            header and in the command palette. Review its folder and branch before starting a
+            dedicated run with output, exit status and Stop beside the task.
           </p>
         </div>
       </div>

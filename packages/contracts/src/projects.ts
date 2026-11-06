@@ -303,10 +303,9 @@ export const ProjectActionDirectory = Schema.String.pipe(
 );
 
 /**
- * A named command the person runs in the Project's terminal: one line they
- * wrote or confirmed, and the folder under the root it runs in. It is typed
- * into the person's own shell, so it runs under the same confinement and
- * approval posture as anything else typed there.
+ * A named command the person runs in a dedicated process: one line they
+ * wrote or confirmed, and the relative folder under the host-resolved root.
+ * The host applies the chosen checkout's current execution authority.
  */
 export const ProjectAction = Schema.Struct({
   id: ProjectActionId,

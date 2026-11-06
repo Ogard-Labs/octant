@@ -3773,10 +3773,12 @@ Git start in the main folder. Built.
   change. A save there is
   journaled like any other save of the thread.
 - **Terminals and Project actions.** A Project terminal starts in the main
-  folder unless the person picks an extra folder, and a saved action runs
-  under the folder they pick (the action's own directory is relative to it).
-  The host accepts only the main folder or a folder the Project record lists,
-  compared as the exact path, and refuses any other. Every Project terminal
+  folder unless the person picks an extra folder. A saved action previews its
+  host-resolved active checkout by default in a Code thread; Project-level
+  actions use the main folder. The action's directory is relative to that
+  folder. Explicit picks accept only the main folder or an extra folder the
+  Project record lists, compared as the exact path. See the Project actions
+  rule under [Security and authority](#security-and-authority). Every Project terminal
   binds all of the Project's folders that exist like the main folder, so the
   shell can move between them; the pick only chooses where it starts. The
   header's action buttons and the start screen's quick tools offer the pick
@@ -11381,33 +11383,32 @@ access` agree); a thread's own change is journaled as
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
 - **Project actions.** A Work or Code Project keeps up to twelve named
-  actions (for example Run, Test, Dev) on its record: a name unique within the
-  Project, a one-line command, and a folder inside the bound root. The person
-  saves the whole list from the Project overview
-  (`project.code-actions-changed@1`, `project.work-actions-changed@1`); a
-  paired device is refused, because a saved line is later typed into the
-  person's own shell. An archived Project has none. A Work Project's actions
-  appear once its Developer tools are on (maintainer decision, 2026-10-31:
-  Work has the shell, so Project actions come to Work Projects too).
-  The host suggests
-  actions from the root `package.json` scripts (with the package manager the
-  lockfile names, leaving out install and publish hooks) and the root
-  `Makefile` targets; it reads them without running anything, and nothing is
-  saved until the person confirms. Running an action is the Project terminal's
-  `run-action` command: the caller names the action, never its text, and the
-  host reads the line from the Project record now, then types it into a
-  terminal the window already owns, entering the action's folder from the root
-  first, grouping the whole command behind that folder change so a folder that
-  has gone away stops every statement of it, and rechecking the window's
-  authority and binding after the root resolves. It therefore runs under that terminal's confinement and posture with
-  the same authority checks as any other write, and typing into a shell that is
-  running another program reaches that program. The header buttons (the first
-  three, with the rest in a menu) and the command palette's Actions group ask
-  the window to run one; the window reuses a Project terminal it already
-  pinned, otherwise opens and pins one, and shows it in Zen, the Project
-  terminal's only surface. A refusal means nothing was typed, so the window may try
-  another terminal; a lost reply leaves the outcome unknown, so it is reported
-  and never retried, since the command may not be safe to run twice.
+  actions on its record: a unique name, a one-line command and a relative
+  directory. The person saves the list from the Project overview through the
+  existing versioned Project events; paired devices cannot save or launch them.
+  Suggestions from package scripts and Makefile targets remain read-only until
+  confirmed. Running first previews the host-resolved folder and branch.
+  A Code thread defaults to its authorized active checkout; the Project folder
+  and approved extra folders remain explicit choices. A selected extra folder
+  is shared, not a child worktree. A Project-level run uses the Project folder.
+  Changed checkout identities, revisions, bindings, task authority or saved
+  commands refuse stale launch. Plan never starts an action. A task-bound run
+  stops when its task, checkout or execution authority is revoked.
+
+  `start-action` launches a fresh command process under the existing terminal
+  confinement and sanitized environment, not input into a running shell. The
+  request names a saved action and checkout identities, never executable text.
+  Its terminal start is journaled before launch; a repeated request identity,
+  including after host restart, never starts another process. The legacy
+  `run-action` command refuses rather than writing into an existing shell.
+  Output, completion, exit status and cancellation use the terminal lifecycle.
+  The action dialog stays beside the task without entering Zen; **Open terminal**
+  is the explicit handoff to that view. Closing the dialog leaves the run alone;
+  the window retains its run identity in session storage and reattaches on
+  reopening, with host authority checked again. A lost response is unknown,
+  never automatically retried. Preparing a new run is an explicit decision;
+  an interrupted run is never restarted by reopening or restarting the host.
+
 - **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per

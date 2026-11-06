@@ -1722,13 +1722,10 @@ Status: Partly built. Since: —. Detail: [Architecture: Security and authority]
 
 ### Project actions
 
-A Work or Code Project keeps up to twelve named actions (such as Run, Test and Dev), each a one-line command and a folder inside the bound root, which the person runs in a Project terminal.
-
-- Only a local window saves the list; a paired device is refused, because a saved line is later typed into the person's own shell.
-- The host suggests actions from the root package scripts and build targets without running anything, and saves nothing until the person confirms.
-- Running one names the action, never its text; the host reads the line from the Project record and types it into a terminal the window owns, under that terminal's confinement and checks.
-- A lost reply is reported and never retried, because the command may not be safe to run twice.
-- A Work Project's actions appear once its Developer tools are on (2026-10-31).
+- Work and Code Projects save up to twelve named one-line commands and relative directories through the existing versioned events. Saving and launching remain local-person actions. Suggestions from root scripts and build targets are read-only until confirmed. A Work Project shows actions only when its Developer tools are on.
+- The host previews the folder and branch. A Code thread defaults to its active checkout; the Project and approved extra folders stay explicit choices. Current binding, checkout, policy and command are rechecked before launch; Plan refuses.
+- Each action gets a fresh tracked command process with output, exit status and cancellation, and never receives input through an existing busy shell. Its journaled identity precedes launch and cannot launch twice after restart.
+- Results stay beside the task; Open terminal is an explicit Zen handoff. The window retains the run identity for reattachment; unknown replies and host restart never automatically repeat side effects.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Project actions](../architecture.md#security-and-authority).
 

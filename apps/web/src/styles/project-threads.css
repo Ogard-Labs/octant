@@ -1774,3 +1774,22 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
   content: "";
   pointer-events: none;
 }
+
+.project-action-run {
+  --octant-dialog-width: 720px;
+  width: min(720px, calc(100vw - 48px));
+  max-width: min(720px, calc(100vw - 48px));
+}
+.project-action-run code {
+  overflow-wrap: anywhere;
+}
+.project-action-run__output {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.project-action-run .project-dialog__actions {
+  flex-wrap: wrap;
+}

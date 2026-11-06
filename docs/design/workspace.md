@@ -1110,8 +1110,11 @@ and the journal record follow the
 Project's saved actions (Run, Test, Dev) are buttons in the window header, three
 inline and the rest under More, and entries in the command palette's Actions
 group; the Project overview's Actions section edits them and offers suggestions
-the person confirms. Choosing one runs it in the window's pinned Project
-terminal, or opens and pins one, and enters Zen to show it (see
+the person confirms. Choosing one previews its actual folder and branch,
+then starts a dedicated run beside the task. A Code thread defaults to its
+active checkout; the Project folder and approved extra folders remain explicit
+choices. Output, exit status and Stop stay in the action dialog; Open terminal
+explicitly opens Zen. A lost reply is never retried automatically (see
 [Project actions](../architecture.md#security-and-authority)). Add browser
 likewise offers the window's Work or Code Project as "This Project": the dock
 names the Project, never a thread, and shows that Project's own page under the

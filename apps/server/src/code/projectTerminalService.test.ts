@@ -28,6 +28,10 @@ import { rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { ProjectTerminalService } from "./projectTerminalService";
+import { TerminalService } from "./terminalService";
+import { TerminalProcessPort } from "./terminalProcessPort";
+import { makeProcessConfinementLive } from "../process/seatbeltProfile";
+import { vi } from "vitest";
 import type {
   TerminalLaunchRequest,
   TerminalOutputEmission,
@@ -185,6 +189,9 @@ function harness(
     readonly access?: (window: string, project: string) => boolean;
     readonly root?: string | undefined;
     readonly resolveRoot?: () => Promise<string | undefined>;
+    readonly resolveActionCheckout?: ConstructorParameters<
+      typeof ProjectTerminalService
+    >[0]["resolveActionCheckout"];
     readonly serverProject?: ConstructorParameters<
       typeof ProjectTerminalService
     >[0]["serverProject"];
@@ -211,6 +218,9 @@ function harness(
       options.access?.(String(window), String(id)) ??
       (String(window) === ids.window && String(id) === ids.project),
     resolveRoot: options.resolveRoot ?? (async () => ("root" in options ? options.root : root)),
+    ...(options.resolveActionCheckout === undefined
+      ? {}
+      : { resolveActionCheckout: options.resolveActionCheckout }),
     suggestActions: async () => [
       { name: "Dev", command: "bun run dev", directory: ".", source: "package.json" as const },
     ],
@@ -242,6 +252,267 @@ function refusal(result: ProjectTerminalResult) {
   return result.kind === "project-terminal-refused" ? result.reason : undefined;
 }
 
+it.runIf(process.platform === "darwin")(
+  "reports a native saved command's output, exit status and journaled completion",
+  async () => {
+    const work = mkdtempSync(join(tmpdir(), "octant-native-action-"));
+    directories.push(work);
+    const actionId = "93000000-0000-4000-8000-000000000001";
+    const f = harness({
+      projects: new Map([
+        [
+          ids.project,
+          project({
+            actions: [
+              {
+                id: actionId,
+                name: "Test",
+                command: "printf native-action; exit 7",
+                directory: ".",
+              },
+            ],
+          }),
+        ],
+      ]),
+    });
+    const terminals = new TerminalService({
+      port: new TerminalProcessPort({
+        confinement: makeProcessConfinementLive(),
+        receiptDirectory: join(work, "receipts"),
+        shellStateDirectory: join(work, "shell-state"),
+      }),
+      inheritedEnvironment: { PATH: "/usr/bin:/bin", HOME: work },
+      credentials: {
+        resolve: async () => {
+          throw new Error("no credentials");
+        },
+      },
+    });
+    const service = new ProjectTerminalService({
+      terminals,
+      readProject: (id) => f.projects.get(String(id)),
+      canAccessProject: () => true,
+      resolveRoot: async () => work,
+      suggestActions: async () => [],
+      readRunning: () => [],
+      journal: f.journal,
+      actor,
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+      shell: "/bin/sh",
+    });
+    try {
+      expect(
+        (
+          await service.execute(windowId, "local-window", {
+            ...start(),
+            kind: "start-action",
+            actionId: actionId as never,
+          })
+        ).kind,
+      ).toBe("project-terminal");
+      await vi.waitFor(async () =>
+        expect(
+          await service.execute(windowId, "local-window", {
+            kind: "attach",
+            projectId,
+            terminalId,
+          }),
+        ).toMatchObject({
+          kind: "project-terminal",
+          terminal: { state: "exited", exitCode: 7 },
+          output: { text: expect.stringContaining("native-action") },
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(f.events().at(-1)).toMatchObject({ payload: { reason: "exited", exitCode: 7 } }),
+      );
+    } finally {
+      await terminals.closeAll();
+      f.connection.close();
+    }
+  },
+);
+
+it("allows a Plan checkout preview but refuses to start its saved command", async () => {
+  const actionId = "93000000-0000-4000-8000-000000000001";
+  const f = harness({
+    projects: new Map([
+      [
+        ids.project,
+        project({
+          actions: [{ id: actionId, name: "Test", command: "printf ready", directory: "." }],
+        }),
+      ],
+    ]),
+    resolveActionCheckout: async () => ({
+      root: "/worktrees/child",
+      executionPolicy: "plan",
+      current: () => true,
+    }),
+  });
+  const thread = {
+    threadId: "94000000-0000-4000-8000-000000000001",
+    checkoutId: "94000000-0000-4000-8000-000000000002",
+  } as const;
+  try {
+    expect(
+      (
+        await f.service.execute(windowId, "local-window", {
+          kind: "preview-action",
+          projectId,
+          actionId: actionId as never,
+          thread: thread as never,
+        })
+      ).kind,
+    ).toBe("project-action-preview");
+    expect(
+      await f.service.execute(windowId, "local-window", {
+        ...start(),
+        kind: "start-action",
+        actionId: actionId as never,
+        thread: thread as never,
+      }),
+    ).toMatchObject({ kind: "project-terminal-refused" });
+    expect(f.terminals.launches).toEqual([]);
+    expect(f.events()).toEqual([]);
+  } finally {
+    f.connection.close();
+  }
+});
+
+it("keeps a child action inside its checkout and stops it when authority is revoked", async () => {
+  const actionId = "93000000-0000-4000-8000-000000000001";
+  let current = true;
+  const f = harness({
+    projects: new Map([
+      [
+        ids.project,
+        project({
+          actions: [{ id: actionId, name: "Test", command: "printf ready", directory: "." }],
+        }),
+      ],
+    ]),
+    resolveActionCheckout: async () => ({
+      root: "/worktrees/child",
+      branch: "feature/child",
+      executionPolicy: "approval-gated",
+      current: () => current,
+      active: () => current,
+    }),
+  });
+  const thread = {
+    threadId: "94000000-0000-4000-8000-000000000001",
+    checkoutId: "94000000-0000-4000-8000-000000000002",
+  } as const;
+  try {
+    expect(
+      await f.service.execute(windowId, "local-window", {
+        kind: "preview-action",
+        projectId,
+        actionId: actionId as never,
+        thread: thread as never,
+      }),
+    ).toMatchObject({
+      kind: "project-action-preview",
+      action: { folder: "/worktrees/child", branch: "feature/child" },
+    });
+    await f.service.execute(windowId, "local-window", {
+      ...start(),
+      kind: "start-action",
+      actionId: actionId as never,
+      thread: thread as never,
+    });
+    const launch = f.terminals.launches[0];
+    expect(launch).toMatchObject({ cwd: "/worktrees/child", executionPolicy: "approval-gated" });
+    expect(launch?.extraFolders).not.toContain(root);
+    expect(launch?.admit?.()).toBe(true);
+    current = false;
+    expect(launch?.admit?.()).toBe(false);
+    await f.service.settleActionAuthorities();
+    expect(f.terminals.terminated).toEqual([ids.terminal]);
+    expect(
+      await f.service.execute(windowId, "local-window", {
+        ...start({ terminalId: ids.secondTerminal }),
+        kind: "start-action",
+        actionId: actionId as never,
+        thread: thread as never,
+      }),
+    ).toMatchObject({ kind: "project-terminal-refused", reason: "authority-revoked" });
+    expect(f.terminals.launches).toHaveLength(1);
+  } finally {
+    f.connection.close();
+  }
+});
+
+it("runs a saved action in a fresh process and never writes into a busy terminal", async () => {
+  const f = harness({
+    projects: new Map([
+      [
+        ids.project,
+        project({
+          actions: [
+            {
+              id: "93000000-0000-4000-8000-000000000001",
+              name: "Test",
+              command: "printf ready",
+              directory: ".",
+            },
+          ],
+        }),
+      ],
+    ]),
+  });
+  await f.service.execute(windowId, "local-window", start());
+  const result = await f.service.execute(windowId, "local-window", {
+    ...start({ terminalId: ids.secondTerminal }),
+    kind: "start-action",
+    actionId: "93000000-0000-4000-8000-000000000001" as never,
+  });
+  expect(result.kind).toBe("project-terminal");
+  expect(f.terminals.launches.at(-1)).toMatchObject({
+    terminalId: ids.secondTerminal,
+    command: expect.stringContaining("printf ready"),
+  });
+  expect(f.terminals.writes).toEqual([]);
+  expect(
+    (
+      await f.service.execute(windowId, "local-window", {
+        kind: "run-action",
+        projectId,
+        terminalId,
+        actionId: "93000000-0000-4000-8000-000000000001" as never,
+      })
+    ).kind,
+  ).toBe("project-terminal-refused");
+  expect(f.terminals.writes).toEqual([]);
+
+  const restarted = new ProjectTerminalService({
+    terminals: f.terminals,
+    readProject: (id) => f.projects.get(String(id)),
+    canAccessProject: () => true,
+    resolveRoot: async () => root,
+    suggestActions: async () => [],
+    readRunning: () => [],
+    journal: f.journal,
+    actor,
+    uuid: () => ids.terminal,
+    clock: () => now,
+  });
+  expect(
+    (
+      await restarted.execute(windowId, "local-window", {
+        ...start({ terminalId: ids.secondTerminal }),
+        kind: "start-action",
+        actionId: "93000000-0000-4000-8000-000000000001" as never,
+      })
+    ).kind,
+  ).toBe("project-terminal-refused");
+  expect(f.terminals.launches).toHaveLength(2);
+
+  f.connection.close();
+});
+
 describe("Project terminal actions", () => {
   const actionId = "92000000-0000-4000-8000-000000000001";
   const withActions = (directory: string) =>
@@ -255,20 +526,23 @@ describe("Project terminal actions", () => {
     ]);
   const run = (id: string = actionId) =>
     ({
-      kind: "run-action",
+      kind: "start-action",
       projectId,
-      terminalId,
+      terminalId: decodeCodeTerminalId(ids.secondTerminal),
+      columns: 100,
+      rows: 30,
       actionId: id,
     }) as ProjectTerminalCommand;
 
-  it("types the saved line into the person's shell from the Project root", async () => {
+  it("runs the saved line in a dedicated process from the Project root", async () => {
     const { service, terminals } = harness({ projects: withActions("apps/web") });
     await service.execute(windowId, "local-window", start());
 
     const result = await service.execute(windowId, "local-window", run());
 
     expect(result).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
-    expect(terminals.writes).toEqual([`\u0015cd '${root}/apps/web' && { bun run dev\r}\r`]);
+    expect(terminals.launches.at(-1)?.command).toBe(`cd '${root}/apps/web' && { bun run dev\n}`);
+    expect(terminals.writes).toEqual([]);
   });
 
   it("runs none of a saved command when its folder cannot be entered", async () => {
@@ -289,7 +563,7 @@ describe("Project terminal actions", () => {
     await service.execute(windowId, "local-window", run());
 
     // The shell reads the typed line as the terminal would: Enter is a newline.
-    const typed = (terminals.writes[0] ?? "").replace("\u0015", "").replaceAll("\r", "\n");
+    const typed = terminals.launches.at(-1)?.command ?? "";
     spawnSync("sh", ["-c", typed], { cwd: work });
 
     expect(existsSync(join(work, "ran"))).toBe(false);
@@ -443,9 +717,11 @@ describe("Project terminals", () => {
       await service.execute(windowId, "local-window", start());
       const run = (folder?: string) =>
         ({
-          kind: "run-action",
+          kind: "start-action",
           projectId,
-          terminalId,
+          terminalId: decodeCodeTerminalId(ids.secondTerminal),
+          columns: 100,
+          rows: 30,
           actionId,
           ...(folder === undefined ? {} : { folder }),
         }) as ProjectTerminalCommand;
@@ -457,7 +733,8 @@ describe("Project terminals", () => {
         run("/Users/person/elsewhere"),
       );
 
-      expect(terminals.writes).toEqual([`\u0015cd '${extra}/web' && { bun run dev\r}\r`]);
+      expect(terminals.launches.at(-1)?.command).toBe(`cd '${extra}/web' && { bun run dev\n}`);
+      expect(terminals.writes).toEqual([]);
       expect(refusal(refused)).toBe("unavailable");
     });
   });
@@ -527,14 +804,17 @@ describe("Project terminals", () => {
     await service.execute(windowId, "local-window", start());
 
     const result = await service.execute(windowId, "local-window", {
-      kind: "run-action",
+      kind: "start-action",
       projectId,
-      terminalId,
+      terminalId: decodeCodeTerminalId(ids.secondTerminal),
+      columns: 100,
+      rows: 30,
       actionId,
     } as ProjectTerminalCommand);
 
     expect(result).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
-    expect(terminals.writes).toEqual([`\u0015cd '${root}' && { make pdf\r}\r`]);
+    expect(terminals.launches.at(-1)?.command).toBe(`cd '${root}' && { make pdf\n}`);
+    expect(terminals.writes).toEqual([]);
   });
 
   it("refuses a Project this window has not opened, and an archived one", async () => {

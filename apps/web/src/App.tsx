@@ -341,7 +341,10 @@ import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
-import { runProjectAction as runSavedProjectAction } from "./projects/runProjectAction";
+import {
+  ProjectActionRunDialog,
+  type ProjectActionTarget,
+} from "./projects/ProjectActionRunDialog";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import {
   ServerCodeProjectsContext,
@@ -6777,36 +6780,35 @@ function LaunchedShell(
     return undefined;
   }
 
-  /**
-   * Types a saved action into the Project's terminal and shows it in Zen. A
-   * terminal this window already pinned for the Project is reused while its
-   * shell runs; otherwise a new one is opened and pinned. The host reads the
-   * line from the Project record and applies the terminal's own confinement
-   * and approval posture, so this only names the action.
-   */
+  const [projectActionRun, setProjectActionRun] = useState<{
+    readonly target: ProjectActionTarget;
+    readonly open: boolean;
+  }>();
   async function runProjectAction(
     projectId: ProjectId,
     action: ProjectAction,
     folder?: string,
   ): Promise<void> {
-    // Zen holds the card, so its space has to be loaded before a shell starts:
-    // a shell with no card to show it would only be stopped again.
-    if (!zen.active) await zen.enterZen();
-    await runSavedProjectAction(
-      {
-        execute: (command) => projectTerminalClient.execute(command),
-        pinnedTerminals: (zen.space?.elements ?? []).flatMap((element) =>
-          element.kind === "project-terminal" && String(element.projectId) === String(projectId)
-            ? [element.terminalId]
-            : [],
-        ),
-        openTerminal: () => addZenProjectTerminal(projectId, folder),
-        notify: setThreadExportNotice,
+    const view = activeCodeThreadView;
+    setProjectActionRun({
+      open: true,
+      target: {
+        projectId,
+        actionId: action.id,
         ...(folder === undefined ? {} : { folder }),
+        ...(activeMode !== "code" ||
+        view === undefined ||
+        String(view.thread.projectId) !== String(projectId)
+          ? {}
+          : {
+              thread: {
+                threadId: view.thread.id,
+                checkoutId: view.checkout.id,
+                ...(view.checkout.head.kind === "none" ? {} : { head: view.checkout.head.oid }),
+              },
+            }),
       },
-      projectId,
-      action,
-    );
+    });
   }
 
   function addZenBrowser(sourceContext: import("@octant/contracts/zen").ZenSourceContext): void {
@@ -7614,9 +7616,38 @@ function LaunchedShell(
             settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
           >
             <OctantCommandProvider commands={octantCommands}>
+              {projectActionRun === undefined ? null : (
+                <ProjectActionRunDialog
+                  key={JSON.stringify(projectActionRun.target)}
+                  client={projectTerminalClient}
+                  target={projectActionRun.target}
+                  storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                  open={projectActionRun.open}
+                  onClose={() =>
+                    setProjectActionRun((current) =>
+                      current === undefined ? undefined : { ...current, open: false },
+                    )
+                  }
+                  onOpenTerminal={(terminalId) => {
+                    void (async () => {
+                      if (!zen.active) await zen.enterZen();
+                      await zen.pinProjectTerminal({
+                        projectId: projectActionRun.target.projectId,
+                        terminalId,
+                      });
+                    })();
+                  }}
+                />
+              )}
+
               {actionsProject === undefined ? null : (
                 <ProjectActionButtons
                   actions={activeProjectActions}
+                  {...(activeMode === "code" &&
+                  activeCodeThreadView !== undefined &&
+                  String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
+                    ? { defaultFolderLabel: "Active checkout" }
+                    : {})}
                   {...(actionsProject.type === "code"
                     ? {
                         mainFolder: actionsProject.binding.canonicalRoot,

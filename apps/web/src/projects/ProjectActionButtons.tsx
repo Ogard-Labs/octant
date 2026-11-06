@@ -12,6 +12,7 @@ export interface ProjectActionButtonsProps {
   readonly actions: ReadonlyArray<ProjectAction>;
   /** The Project's main folder and its extra folders; a choice is offered only with an extra one. */
   readonly mainFolder?: string;
+  readonly defaultFolderLabel?: string;
   readonly extraFolders?: ReadonlyArray<string>;
   /** `folder` is the extra folder the person chose; absent runs in the main folder. */
   readonly onRun: (action: ProjectAction, folder?: string) => void;
@@ -23,8 +24,8 @@ function folderName(path: string): string {
 
 /**
  * The Code Project's saved actions as buttons in the window header. Each one
- * only asks the host to type its saved line into the Project terminal; what
- * the line may do is decided there. Drawn into the header's own slot, and
+ * opens the host-resolved preview before a dedicated run; the host decides
+ * which checkout and authority may run the saved line. Drawn into the header's own slot, and
  * nowhere when that slot is not on screen.
  */
 export function ProjectActionButtons(props: ProjectActionButtonsProps) {
@@ -39,7 +40,11 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
   const extras = props.extraFolders ?? [];
   const [chosen, setChosen] = useState<string>("");
   // A removed folder falls back to the main one rather than staying chosen.
-  const folder = extras.includes(chosen) ? chosen : "";
+  const folder =
+    extras.includes(chosen) ||
+    (props.defaultFolderLabel !== undefined && chosen === props.mainFolder)
+      ? chosen
+      : "";
   const run = (action: ProjectAction) =>
     folder === "" ? props.onRun(action) : props.onRun(action, folder);
   if (host === null || props.actions.length === 0) return null;
@@ -78,14 +83,31 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
           value=""
         />
       )}
-      {extras.length === 0 ? null : (
+      {extras.length === 0 && props.defaultFolderLabel === undefined ? null : (
         <OctantMenu
           items={[
-            { label: `${folderName(props.mainFolder ?? "")} (main)`, value: "" },
+            ...(props.defaultFolderLabel === undefined
+              ? [{ label: `${folderName(props.mainFolder ?? "")} (main)`, value: "" }]
+              : [
+                  { label: props.defaultFolderLabel, value: "" },
+                  ...(props.mainFolder === undefined
+                    ? []
+                    : [
+                        {
+                          label: `${folderName(props.mainFolder)} (Project folder)`,
+                          value: props.mainFolder,
+                        },
+                      ]),
+                ]),
             ...extras.map((path) => ({ label: folderName(path), value: path })),
           ]}
           onValueChange={setChosen}
-          trigger={<span>Run in: {folder === "" ? "main folder" : folderName(folder)}</span>}
+          trigger={
+            <span>
+              Run in:{" "}
+              {folder === "" ? (props.defaultFolderLabel ?? "main folder") : folderName(folder)}
+            </span>
+          }
           triggerClassName="project-action-buttons__more"
           triggerLabel="Folder to run actions in"
           value={folder}
