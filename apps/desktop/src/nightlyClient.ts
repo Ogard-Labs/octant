@@ -20,6 +20,7 @@ import { decodeAppVersion } from "@octant/contracts/app-updates";
 import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
 import { createNativeMainAuthority } from "./nightlyNativeMainAuthority";
 import { installNightlyBrokeredFlows } from "./nightlyBrokeredFlows";
+import { installNightlyProviderCredentials } from "./nightlyProviderCredentials";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
@@ -186,6 +187,12 @@ export async function runNightlyClient(
     homeDirectory: homedir(),
     platform: process.platform,
     ...(process.env.PATH === undefined ? {} : { pathEnv: process.env.PATH }),
+  });
+  installNightlyProviderCredentials({
+    register,
+    bootstrap: (id) => bootstraps.get(id),
+    nativeMain,
+    fetch: globalThis.fetch,
   });
   let updates: Awaited<ReturnType<typeof createNightlyAppUpdates>> | undefined;
   const appUpdates = () => {

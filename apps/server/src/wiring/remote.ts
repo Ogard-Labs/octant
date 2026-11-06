@@ -998,6 +998,22 @@ export function wireRemote(deps: RemoteDependencies) {
         ? undefined
         : { store: credentialResolver, readStored: (id) => credentialBroker.resolve(id) },
     journal: providerKeyChangeJournal,
+    ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+      ? {}
+      : {
+          readKeyReference: (() => {
+            const references = makeSecretStoreBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            });
+            return async (id: string) => {
+              const answer = await references.reference({ namespace: "provider", id });
+              return answer.status === "linked" || answer.status === "none"
+                ? answer.status
+                : "unavailable";
+            };
+          })(),
+        }),
     reprobe: async (windowId, instance) => {
       await providerService.probe(windowId, instance.id, { fresh: true });
     },

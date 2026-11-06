@@ -243,15 +243,17 @@ it("refuses unanswered channels by their class instead of asking for a newer Oct
     /^Managed in Octant\./,
   );
   expect(await refusal(DESKTOP_IPC_CHANNELS.pairedComputerPair)).toMatch(/^Managed in Octant\./);
-  expect(await refusal(DESKTOP_IPC_CHANNELS.listProviderApiKeys)).toBe(
+  expect(await refusal(DESKTOP_IPC_CHANNELS.canvasPrototypeOpen)).toBe(
     "Not available in Octant Nightly yet.",
   );
   expect(await refusal(DESKTOP_IPC_CHANNELS.browserSurfaceAttach)).toMatch(/Browser presentation/);
+  // A brokered flow the host did not grant this window says so, rather than "not yet".
+  expect(await refusal(DESKTOP_IPC_CHANNELS.selectRuntimeBinary)).toMatch(/^Needs a newer Octant\./);
   for (const channel of Object.values(DESKTOP_IPC_CHANNELS))
     expect(fixture.handlers.has(channel)).toBe(true);
   for (const channel of [
     DESKTOP_IPC_CHANNELS.hubAdministrationRequest,
-    DESKTOP_IPC_CHANNELS.listProviderApiKeys,
+    DESKTOP_IPC_CHANNELS.canvasPrototypeOpen,
     DESKTOP_IPC_CHANNELS.browserSurfaceAttach,
   ])
     expect(await refusal(channel)).not.toMatch(/newer Octant/);
