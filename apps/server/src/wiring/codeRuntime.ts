@@ -697,6 +697,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             rootCurrent: () => {
               const latest = persistence.readProject(thread.projectId);
               return (
+                directoryCurrent() &&
                 root.current?.() !== false &&
                 latest?.type === "code" &&
                 approvedWorkingFolderRoot(latest, thread.workingFolderId, root.rootPath) ===
