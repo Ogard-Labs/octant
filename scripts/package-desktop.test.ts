@@ -59,6 +59,7 @@ import {
   validatePackagedRendererPolicy,
   stripNativeDebugMetadata,
   validatePackagedPayload,
+  NIGHTLY_CLIENT_HARNESS_MARKER,
   resolveReleaseVersion,
   validateBundledInternalRuntime,
   validateSandboxedPreloads,
@@ -1252,9 +1253,31 @@ describe("desktop packaging boundary", () => {
     expect(() =>
       validatePackagedPayload([
         ...required,
+        { path: "apps/desktop/dist/nightly-client-harness-nightly.mjs", content: "" },
+      ]),
+    ).toThrow("Nightly client smoke harness");
+    expect(() =>
+      validatePackagedPayload([
+        ...required,
+        {
+          path: "apps/desktop/dist/main.mjs",
+          content: `const m = "${NIGHTLY_CLIENT_HARNESS_MARKER}";`,
+        },
+      ]),
+    ).toThrow("Nightly client smoke harness in apps/desktop/dist/main.mjs");
+    expect(() =>
+      validatePackagedPayload([
+        ...required,
         { path: "apps/web/dist/app.js", content: "OpenOr" + "bit" },
       ]),
     ).toThrow("forbidden product identity");
+  });
+
+  it("finds its marker in every Nightly client smoke harness entry, so packaging refuses them", async () => {
+    for (const entry of ["nightly-client-harness-nightly.ts", "nightly-client-harness-stable.ts"]) {
+      const source = await readFile(resolve(import.meta.dirname, entry), "utf8");
+      expect(source).toContain(`"${NIGHTLY_CLIENT_HARNESS_MARKER}"`);
+    }
   });
 
   it("keeps output ignored and packages without third-party release tooling", async () => {
