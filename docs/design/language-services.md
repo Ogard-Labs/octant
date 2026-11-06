@@ -37,9 +37,9 @@ routes that no window calls until 8c's panel. Monaco editing and the explicit ex
 handoff stay the primary Code editing paths and are unchanged by every slice.
 
 The editor also offers explicit checkout references when its current initialized
-server reports support. References are a read-only snapshot; rename and reviewed
-text-only quick fixes remain follow-on work and are not enabled by a capability
-advertisement. Installed-server and native confinement acceptance is separate
+server reports support. References are a read-only snapshot; explicit rename and
+command-free quick fixes prepare bounded, reviewed text edits through the same
+acknowledged document boundary. Applying uses the existing file-save authority. Installed-server and native confinement acceptance is separate
 from controlled protocol and editor verification.
 
 ## Outcome
@@ -371,6 +371,36 @@ design left a choice open.
   counts under Diagnostics, and removing a cache when its checkout is removed
   or its component uninstalled.
 
+### Reviewed rename and quick fixes
+
+The editor offers **Preview rename** and **Find quick fixes** at the current
+cursor. A request checks the actual initialized capability, confirms the current
+text in memory and names its version and revision. It uses the references read's
+current caller, connection, component, root and deadline checks; it never starts
+a server. Missing support stays explicit and offers the configured external
+editor. Older hosts without these capability fields report unknown.
+
+Only text changes to existing files within the exact current root are accepted.
+The adapter refuses resource operations, commands, annotated edits, symlink
+aliases, overlapping/invalid ranges and mismatched versioned documents. A
+quick fix requiring a command or resolve is not offered. Each candidate is
+bounded to 16 files, 256 edits per file and 256 KiB per file; the complete
+response is bounded to 1 Mi UTF-16 units of before/after text. An open document
+that differs from its saved bytes refuses the preview instead of replacing a
+draft. Targets retain the ordinary checkout-relative or extra-folder identity.
+
+Each candidate shows every affected file with expandable before/after text.
+Source changes invalidate the preview. Plan can prepare changes but cannot
+apply them. Application requires the workspace's draft store and checks every
+affected draft before writing, and again before each file. Each write uses the
+ordinary authoritative file-save command with the preview's digest and physical
+identity, so changed bytes, revoked authority and a replaced checkout refuse
+it. The operation stops at the first failure and reports how many files were
+saved. This is deliberately a sequence of existing atomic per-file saves, not
+a multi-file transaction: earlier successful files remain and are never rolled
+back over concurrent work. An uncertain response never retries automatically.
+No edit is applied through a language-server command or workspace/applyEdit.
+
 ### Explicit checkout references
 
 - The person invokes **Find references in checkout** at the current cursor, from
@@ -379,8 +409,8 @@ design left a choice open.
 - A `capabilities` read reports references as `supported`, `unsupported`, or
   `unknown` from the actual initialized connection and matching dynamic
   registrations. Missing or false declarations are unsupported; unrecognized
-  selector patterns remain unknown. Advertising rename or code actions does
-  not expose them. These new reads require an already-ready exact connection,
+  selector patterns remain unknown. Rename and quick-fix support are reported
+  separately from their initialized capabilities. These reads require an already-ready exact connection,
   document, component, and physical root; they never start or retarget a server.
   Existing document open/sync and diagnostics/definition behavior is unchanged.
 - Before a query the renderer syncs the current draft in memory, without saving.
@@ -2146,3 +2176,5 @@ the editor working when the companion is off or refused.
 Documentation only: formatter, path and decision checks, and `git diff
 --check`. The 2026-10-26 binary smoke above is design evidence, not
 implementation evidence. Slice 2 repeats it as a test.
+
+For reviewed rename and quick fixes, the host takes a bounded confined source listing and retains file metadata revisions before asking the server. A returned target absent from that snapshot, replaced or changed while the request was in flight is refused; the preview never treats post-response bytes as the original baseline. This metadata scan reads no file content. Existing listing depth/entry bounds apply. Quick-fix context uses current pull diagnostics when the server advertises that path, otherwise its current pushed diagnostics.

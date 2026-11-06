@@ -63,6 +63,24 @@ reconnect or use the external editor. Monaco's built-in single-file references
 remain available separately. Rename and reviewed quick fixes are not part of
 this references action.
 
+## Rename and reviewed quick fixes
+
+Put the cursor on a symbol, enter a **New symbol name**, and choose **Preview
+rename**, or choose **Find quick fixes**. The running server must report support;
+otherwise use **Open externally** where configured. Nothing is saved while
+preparing. Open each affected file to review its **Before** and **After** text,
+then choose **Apply reviewed changes**. Plan can preview but cannot apply.
+
+Save unsaved drafts first. Changing the source text hides the preview; changes
+to affected files or their authority block a stale save. A fix that requires
+running a command, creating/deleting/renaming a file, or resolving more data is
+not offered. Large or unsafe edits explain why preparation stopped.
+
+Files save in order through the ordinary editor save checks. If a later save
+fails, the message names the stopped file and how many earlier files were
+saved. Check those files before preparing again. An uncertain answer is never
+retried automatically.
+
 ## What the server can do
 
 The server is part of Octant: the desktop app and the headless host install

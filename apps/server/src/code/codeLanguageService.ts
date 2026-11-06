@@ -34,6 +34,9 @@ import {
   type PrincipalKind,
 } from "@octant/domain";
 import { readConfinedCodeFile } from "./codeConfinedFileRead";
+import { languageEditPreview } from "./languageEditPreview";
+import { CodeFileListingService } from "./codeFileListingService";
+import { boundedDiagnosticMessage } from "./languageServerResults";
 import { foldersHoldCoveredFile } from "./codeLanguageCoverage";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { joinCodePath, resolveContainedPath } from "./codePathConfinement";
@@ -326,6 +329,8 @@ interface ServerRecord {
   connection: LanguageServerConnection | undefined;
   pullsDiagnostics: boolean;
   referencesSupport: CodeLanguageReferenceSupport;
+  renameSupport: CodeLanguageReferenceSupport;
+  quickFixesSupport: CodeLanguageReferenceSupport;
   watch: AbortController | undefined;
   readonly documents: Map<string, OpenDocument>;
   readonly pushed: Map<string, ReadonlyArray<unknown>>;
@@ -443,7 +448,9 @@ export class CodeLanguageService {
       if (admitted.status === "refused" || admitted.status === "unavailable") return admitted;
       if (
         admitted.status !== "capabilities" ||
-        admitted.references !== "supported" ||
+        (admitted.references !== "supported" &&
+          admitted.rename !== "supported" &&
+          admitted.quickFixes !== "supported") ||
         fresh.thread.projectId !== authorized.thread.projectId ||
         fresh.thread.bindingRevisionId !== authorized.thread.bindingRevisionId ||
         this.#documentReference(request) !== reference ||
@@ -520,7 +527,12 @@ export class CodeLanguageService {
     caller: CodeLanguageCaller,
     request: CodeLanguageReadRequest,
   ): Promise<CodeLanguageReadResult> {
-    if (request.kind === "references" || request.kind === "capabilities")
+    if (
+      request.kind === "references" ||
+      request.kind === "capabilities" ||
+      request.kind === "rename" ||
+      request.kind === "quick-fixes"
+    )
       return this.#readFeature(caller, request);
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
     if (authorized.status === "refused") return authorized;
@@ -560,7 +572,10 @@ export class CodeLanguageService {
   /** New companion features retain the acknowledged document and caller through every await. */
   async #readFeature(
     caller: CodeLanguageCaller,
-    request: Extract<CodeLanguageReadRequest, { readonly kind: "references" | "capabilities" }>,
+    request: Extract<
+      CodeLanguageReadRequest,
+      { readonly kind: "references" | "capabilities" | "rename" | "quick-fixes" }
+    >,
   ): Promise<CodeLanguageReadResult> {
     const deadline = performance.now() + this.#requestDeadlineMs;
     const controller = new AbortController();
@@ -580,7 +595,7 @@ export class CodeLanguageService {
       const version = document.version;
       const revision = document.revision;
       if (
-        request.kind === "references" &&
+        request.kind !== "capabilities" &&
         (version !== request.expectedVersion || revision !== request.expectedRevision)
       )
         return { status: "stale" };
@@ -653,6 +668,121 @@ export class CodeLanguageService {
       if (afterStart.status === "refused") return afterStart;
       const support = this.#referencesSupport(record, document);
       let mapped: Awaited<ReturnType<typeof toReferenceTargets>> | undefined;
+      let editPreviews:
+        | Extract<CodeLanguageReadResult, { status: "edit-previews" }>["previews"]
+        | undefined;
+      if (request.kind === "rename" || request.kind === "quick-fixes") {
+        const editSupport =
+          request.kind === "rename" ? record.renameSupport : record.quickFixesSupport;
+        if (editSupport !== "supported")
+          return { status: "unsupported", capability: request.kind, support: editSupport };
+        // A language response can name a previously closed file. Retain bounded
+        // metadata before asking; post-response contents cannot establish its baseline.
+        const listing = await new CodeFileListingService().list({
+          threadId: request.threadId,
+          checkoutId: request.checkoutId,
+          rootPath: record.rootPath,
+          signal: controller.signal,
+        });
+        if (listing.status !== "listed")
+          return { status: "edit-unavailable", reason: "unsafe-edit" };
+        const originalFiles = new Map<string, string>();
+        for (const entry of listing.listing.entries) {
+          if (!current()) return { status: "stale" };
+          if (entry.kind !== "file") continue;
+          const path = join(record.rootPath, String(entry.path));
+          const placed = await resolveContainedPath(this.#files, record.rootPath, path);
+          const facts = placed?.canonical === path ? placed.stat : undefined;
+          if (facts?.changeStamp !== undefined && !facts.isSymbolicLink)
+            originalFiles.set(pathToFileURL(path).href, facts.changeStamp);
+        }
+        let diagnostics = record.pushed.get(document.uri) ?? [];
+        if (request.kind === "quick-fixes" && record.pullsDiagnostics) {
+          const pulled = await connection.request(
+            "textDocument/diagnostic",
+            { textDocument: { uri: document.uri } },
+            Math.max(1, deadline - performance.now()),
+          );
+          if (!current()) return { status: "stale" };
+          if (pulled.status !== "answered") return unavailable(pulled);
+          diagnostics =
+            isRecord(pulled.result) && Array.isArray(pulled.result.items)
+              ? pulled.result.items
+              : [];
+        }
+        const response = await connection.request(
+          request.kind === "rename" ? "textDocument/rename" : "textDocument/codeAction",
+          request.kind === "rename"
+            ? {
+                textDocument: { uri: document.uri },
+                position: request.position,
+                newName: request.newName,
+              }
+            : {
+                textDocument: { uri: document.uri },
+                range: { start: request.position, end: request.position },
+                context: {
+                  diagnostics: diagnostics.slice(0, 1000),
+                  only: ["quickfix"],
+                },
+              },
+          Math.max(1, deadline - performance.now()),
+        );
+        if (expired()) return timeout;
+        if (!current()) return { status: "stale" };
+        if (response.status !== "answered") return unavailable(response);
+        const candidates =
+          request.kind === "rename"
+            ? [{ title: `Rename to ${request.newName}`, edit: response.result }]
+            : Array.isArray(response.result)
+              ? response.result
+              : [];
+        if (candidates.length > 16) return { status: "edit-unavailable", reason: "too-large" };
+        const previews: Array<
+          Extract<CodeLanguageReadResult, { status: "edit-previews" }>["previews"][number]
+        > = [];
+        for (const candidate of candidates) {
+          if (
+            !isRecord(candidate) ||
+            typeof candidate.title !== "string" ||
+            candidate.edit === undefined ||
+            candidate.command !== undefined ||
+            candidate.disabled !== undefined ||
+            (candidate.kind !== undefined &&
+              (typeof candidate.kind !== "string" ||
+                (candidate.kind !== "quickfix" && !candidate.kind.startsWith("quickfix."))))
+          )
+            continue;
+          const preview = await languageEditPreview({
+            result: candidate.edit,
+            root: record.rootPath,
+            extraFolder: record.extraFolder,
+            port: this.#files,
+            threadId: request.threadId,
+            checkoutId: request.checkoutId,
+            current,
+            openText: (uri) => record.documents.get(uri)?.text,
+            openVersion: (uri) => record.documents.get(uri)?.version,
+            originalFiles,
+          });
+          if (preview.status === "refused")
+            return { status: "edit-unavailable", reason: preview.reason };
+          if (
+            previews
+              .flatMap((item) => item.files)
+              .reduce((sum, file) => sum + file.before.length + file.after.length, 0) +
+              preview.files.reduce((sum, file) => sum + file.before.length + file.after.length, 0) >
+            1024 * 1024
+          )
+            return { status: "edit-unavailable", reason: "too-large" };
+          previews.push({
+            title: boundedDiagnosticMessage(candidate.title, record.rootPath).slice(0, 256),
+            files: preview.files,
+          });
+        }
+        if (!current()) return { status: "stale" };
+        editPreviews = previews;
+      }
       if (request.kind === "references" && support === "supported") {
         if (connection === undefined) return { status: "unavailable", reason: "starting" };
         const response = await connection.request(
@@ -723,7 +853,21 @@ export class CodeLanguageService {
       if (!current()) return { status: "stale" };
       const finalSupport = this.#referencesSupport(record, document);
       if (request.kind === "capabilities")
-        return { status: "capabilities", ...scope, references: finalSupport };
+        return {
+          status: "capabilities",
+          ...scope,
+          references: finalSupport,
+          rename: record.renameSupport,
+          quickFixes: record.quickFixesSupport,
+        };
+      if (request.kind === "rename" || request.kind === "quick-fixes")
+        return {
+          status: "edit-previews",
+          ...scope,
+          documentVersion: version,
+          documentRevision: revision,
+          previews: editPreviews ?? [],
+        };
       if (finalSupport !== "supported")
         return { status: "unsupported", capability: "references", support: finalSupport };
       if (mapped === undefined) return { status: "stale" };
@@ -1296,6 +1440,8 @@ export class CodeLanguageService {
         connection: undefined,
         pullsDiagnostics: false,
         referencesSupport: "unknown",
+        renameSupport: "unknown",
+        quickFixesSupport: "unknown",
         watch: undefined,
         documents: new Map(),
         pushed: new Map(),
@@ -1495,6 +1641,8 @@ export class CodeLanguageService {
       isRecord(initialized.result) && isRecord(initialized.result.capabilities)
         ? referenceSupport(capabilities.referencesProvider)
         : "unknown";
+    record.renameSupport = referenceSupport(capabilities.renameProvider);
+    record.quickFixesSupport = quickFixSupport(capabilities.codeActionProvider);
     record.pullsDiagnostics =
       capabilities.diagnosticProvider !== undefined && capabilities.diagnosticProvider !== null;
     connection.notify("initialized", {});
@@ -1727,9 +1875,15 @@ function initializeParams(rootPath: string) {
         publishDiagnostics: {},
         definition: { dynamicRegistration: false, linkSupport: true },
         references: { dynamicRegistration: true },
+        rename: { dynamicRegistration: false },
+        codeAction: {
+          dynamicRegistration: false,
+          codeActionLiteralSupport: { codeActionKind: { valueSet: ["quickfix"] } },
+        },
       },
       workspace: {
         configuration: true,
+        workspaceEdit: { documentChanges: true, resourceOperations: [] },
         didChangeWatchedFiles: { dynamicRegistration: true },
       },
       window: { workDoneProgress: true },
@@ -1759,6 +1913,23 @@ function unavailable(
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function quickFixSupport(value: unknown): CodeLanguageReferenceSupport {
+  if (isRecord(value) && value.codeActionKinds !== undefined) {
+    if (
+      !Array.isArray(value.codeActionKinds) ||
+      !value.codeActionKinds.every((kind) => typeof kind === "string")
+    )
+      return "unknown";
+    if (
+      !value.codeActionKinds.some(
+        (kind) => kind === "" || kind === "quickfix" || kind.startsWith("quickfix."),
+      )
+    )
+      return "unsupported";
+  }
+  return referenceSupport(value);
 }
 
 function referenceSupport(value: unknown): CodeLanguageReferenceSupport {
