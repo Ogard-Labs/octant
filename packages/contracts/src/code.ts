@@ -857,6 +857,7 @@ export type CodeCommand = typeof CodeCommand.Type;
 export const CodeFailure = Schema.Struct({
   category: Schema.Literal(
     "unavailable",
+    "tools-changed",
     "unauthorized",
     "unsupported",
     "waiting",

@@ -1777,6 +1777,9 @@ export class CodeOperationService {
                     expectedCursor: resultCursor,
                     event: {
                       kind: "conversation-turn-started",
+                      ...(command.toolCatalogHandoff === undefined
+                        ? {}
+                        : { toolCatalogHandoff: command.toolCatalogHandoff }),
                       providerInstanceId: scope.thread.providerInstanceId,
                       modelId: scope.thread.modelId,
                       sessionId: command.sessionId,
@@ -6193,6 +6196,7 @@ function sameConversationStart(
     event.providerInstanceId === thread.providerInstanceId &&
     event.modelId === thread.modelId &&
     event.sessionId === command.sessionId &&
+    (event.toolCatalogHandoff === true) === (command.toolCatalogHandoff === true) &&
     (event.checkoutId === undefined || event.checkoutId === command.checkoutId) &&
     event.prompt.contentId === command.prompt.contentId &&
     event.prompt.digest === command.prompt.digest &&

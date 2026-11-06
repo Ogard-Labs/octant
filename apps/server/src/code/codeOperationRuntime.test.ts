@@ -6315,6 +6315,49 @@ describe("provider switch handoff", () => {
     });
   }
 
+  it("uses a new session with a journaled text handoff when the person explicitly updates tools", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({
+      resolveProviderDriver: async (current) => ({
+        ...(await drivers.resolveProviderDriver(current)),
+        toolCatalogContinuation: () => "handoff-required",
+      }),
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      const prompt = storedEvidence(86, "Use the updated tools.");
+      fixture.evidenceValues.set(prompt.contentId, "Use the updated tools.");
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(85),
+        threadId,
+        checkoutId,
+        sessionId: switchSession,
+        prompt,
+        toolCatalogHandoff: true,
+      });
+      await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+      expect(drivers.provider.start).toHaveBeenCalledTimes(2);
+      expect(drivers.provider.resume).not.toHaveBeenCalled();
+      const sent = vi.mocked(drivers.provider.send).mock.calls[1]?.[0];
+      expect(JSON.stringify(sent?.context)).toContain("First reply.");
+      expect(sent?.prompt).toBe("Use the updated tools.");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({
+        reason: "provider-switch",
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      });
+      expect(fixture.conversation(threadId).turns).toHaveLength(2);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([
     {
       direction: "from a provider's session to the Octant Harness",

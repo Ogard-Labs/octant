@@ -98,6 +98,37 @@ describe("CodeTurnRunner", () => {
     expect(connection.send).not.toHaveBeenCalled();
   });
 
+  it("preserves the typed tool refresh choice without sending or replaying a refused turn", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.empty),
+      resume: vi.fn(() =>
+        Effect.fail<ProviderFailure>({
+          category: "stale-resume",
+          toolCatalogHandoffRequired: true,
+          message: "Choose updated tools.",
+        }),
+      ),
+    });
+    const outcome = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              resumeCursor: { driverKind: "codex", value: "saved-session" },
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(outcome).toMatchObject({
+      _tag: "Left",
+      left: { category: "waiting", resumeRefused: true, toolCatalogHandoffRequired: true },
+    });
+    expect(connection.start).not.toHaveBeenCalled();
+    expect(connection.send).not.toHaveBeenCalled();
+  });
+
   it("persists a session-save failure before refusing to send the prompt", async () => {
     const connection = fakeConnection({ subscribe: Effect.succeed(Stream.empty) });
     const outcomes: Array<readonly [CodeTurnOutcome, string | undefined]> = [];

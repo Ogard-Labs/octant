@@ -2171,6 +2171,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly fileMentionPaths?: ReadonlyArray<string>;
       readonly computerUseSelection?: ExtensionSelection;
       readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
+      readonly toolCatalogHandoff?: boolean;
       /**
        * The posture this turn asks to run under. The host clamps it to the
        * thread's grant, so this is an intent, not a grant.
@@ -2186,6 +2187,7 @@ export function useCodeController(options: CodeControllerOptions) {
       const sessionId = decodeProviderSessionId(globalThis.crypto.randomUUID());
       const started = await client.executeOperation({
         kind: "start-provider-turn",
+        ...(input.toolCatalogHandoff === true ? { toolCatalogHandoff: true } : {}),
         operationId,
         threadId: input.threadId,
         checkoutId: input.checkoutId,
@@ -2615,6 +2617,7 @@ export function useCodeController(options: CodeControllerOptions) {
       sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> = [],
       expectedDraftRevision?: number,
       reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>,
+      toolCatalogHandoff = false,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -2681,6 +2684,7 @@ export function useCodeController(options: CodeControllerOptions) {
           threadId: view.thread.id,
           checkoutId: view.checkout.id,
           prompt: trimmed,
+          ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
           threadMentionIds,
           sideChatReturns,
           reviewFindingReferences: reviewReferences,
@@ -2696,7 +2700,7 @@ export function useCodeController(options: CodeControllerOptions) {
         if (controller.signal.aborted) return false;
         if (started.kind === "operation-failed") {
           setTurnStatus("failed");
-          setTurnError(started.failure.message);
+          setTurnError(started.failure.message, { category: started.failure.category });
           setTurnUsageLimit(started.failure.usageLimit);
           setLatestProviderTurnOperationId(undefined);
           restoreFailedPrompt();
@@ -2706,7 +2710,12 @@ export function useCodeController(options: CodeControllerOptions) {
           setTurnStatus("failed");
           const refusal =
             started.kind === "provider-turn-state" ? started.failure?.message : undefined;
-          setTurnError(refusal ?? "The provider turn could not be started.");
+          setTurnError(
+            refusal ?? "The provider turn could not be started.",
+            started.kind === "provider-turn-state" && started.failure !== undefined
+              ? { category: started.failure.category }
+              : undefined,
+          );
           if (started.kind === "provider-turn-state") {
             setTurnUsageLimit(started.failure?.usageLimit);
             setLatestProviderTurnOperationId(

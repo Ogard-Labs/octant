@@ -4296,6 +4296,57 @@ describe("WorkTurnService", () => {
     ).toMatchObject({ reason: "fork", messages: 2 });
   });
 
+  it("refuses a changed tool catalogue before acceptance and preserves the conversation on explicit continuation", async () => {
+    const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+      input.onSessionReady?.({
+        sessionId: input.providerSessionId,
+        resumeCursor: { driverKind: "codex", value: "saved-session" },
+      });
+      return { kind: "completed" as const, response: "A saved answer" };
+    });
+    const fixture = serviceFixture({
+      turnRuntime: { run },
+      resolveDriver: (_id, fallback) => ({
+        ...fallback,
+        conversationOwnership: "provider",
+        toolCatalogContinuation: () => "handoff-required",
+      }),
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    const next = {
+      ...startCommand(),
+      requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+      turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+      prompt: "Use the updated tools",
+    };
+    await expect(fixture.service.startFirstTurn(ids.window, next)).rejects.toThrow(
+      "different tools",
+    );
+    expect(run).toHaveBeenCalledTimes(1);
+    expect((await fixture.service.transcript(ids.window, ids.thread)).turns).toHaveLength(1);
+    await fixture.service.startFirstTurn(ids.window, { ...next, toolCatalogHandoff: true });
+    await fixture.waitForIdle(next.requestId);
+    expect(run).toHaveBeenCalledTimes(2);
+    await expect(fixture.service.startFirstTurn(ids.window, next)).rejects.toThrow(
+      "identity conflict",
+    );
+    expect(run).toHaveBeenCalledTimes(2);
+    const restored = new WorkTurnProjection();
+    for (const [request] of fixture.persistence.journal.append.mock.calls) {
+      for (const event of request.events) {
+        if (event.eventName === "work.turn-accepted@1")
+          restored.apply(decodeWorkTurnAccepted(event.payload));
+      }
+    }
+    expect(restored.lookup(next.requestId)?.toolCatalogHandoff).toBe(true);
+    expect(run.mock.calls[1]?.[0].resumeCursor).toBeUndefined();
+    expect(JSON.stringify(run.mock.calls[1]?.[0].context)).toContain("A saved answer");
+    expect(
+      (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1)?.handoff,
+    ).toMatchObject({ reason: "provider-switch", messages: 2 });
+  });
+
   describe("moving a Work conversation to another provider", () => {
     const nextProvider = decodeProviderInstanceId("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
     const followUpCommand = () => ({

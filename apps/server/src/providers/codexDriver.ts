@@ -986,6 +986,36 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
   };
 }
 
+function canonicalToolValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalToolValue).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalToolValue(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function toolDefinitionDigest(tool: ProviderToolDefinition): string {
+  return createHash("sha256").update(canonicalToolValue(tool)).digest("hex");
+}
+
+function toolCatalogContinuation(input: {
+  readonly resumeCursor: ProviderResumeCursor;
+  readonly tools: ReadonlyArray<ProviderToolDefinition>;
+}): "unchanged" | "handoff-required" {
+  // Withdrawing a tool keeps the cached native session; the host refuses its
+  // later calls. New or changed definitions cannot reach that saved session.
+  const recorded = new Map(
+    input.resumeCursor.toolDefinitions?.map((tool) => [tool.name, tool.digest]),
+  );
+  return input.tools.every((tool) => recorded.get(tool.name) === toolDefinitionDigest(tool))
+    ? "unchanged"
+    : "handoff-required";
+}
+
 export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeCodexClient;
   // Codex's own subagent threads outlive the turn and connection that started them.
@@ -1000,6 +1030,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   return {
     kind: "codex",
     conversationOwnership: "provider",
+    toolCatalogContinuation,
     contextFacts,
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
@@ -2070,6 +2101,10 @@ function makeConnection(
                 driverKind: "codex" as const,
                 value: thread.thread.id,
                 tools: toolNames,
+                toolDefinitions: (input.tools ?? []).map((tool) => ({
+                  name: tool.name,
+                  digest: toolDefinitionDigest(tool),
+                })),
                 binding: providerResumeBinding({
                   instanceId: options.instanceId,
                   sessionId: input.sessionId,
@@ -2101,6 +2136,20 @@ function makeConnection(
         ) {
           return Effect.fail(
             failure("stale-resume", "The saved Codex thread belongs to another task or Project."),
+          );
+        }
+        if (
+          input.tools !== undefined &&
+          toolCatalogContinuation({ resumeCursor: input.resumeCursor, tools: input.tools }) ===
+            "handoff-required"
+        ) {
+          return Effect.fail(
+            decodeProviderFailure({
+              category: "stale-resume",
+              toolCatalogHandoffRequired: true,
+              message:
+                "The saved native session has a different tool catalogue. Choose Continue with updated tools to start a new session with the conversation handed over as text. The saved session and conversation have been preserved.",
+            }),
           );
         }
         return withPendingLifecycle(() =>

@@ -2747,6 +2747,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#active.has(key)
     )
       return failStart();
+    if (command.toolCatalogHandoff === true && input.routineRun !== undefined) {
+      return failStart("Only a person can choose to replace a native session's tools.");
+    }
     const resolvedDriver = await this.#options.resolveProviderDriver(input.thread);
     if (resolvedDriver === undefined) return failStart();
     const recovered = this.#events.providerSessionForThread(input.thread.id, command.operationId);
@@ -2785,6 +2788,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const providerSwitch =
       previous?.kind === "provider-session-ready" &&
       (rewind !== undefined ||
+        (command.toolCatalogHandoff === true &&
+          resolvedDriver.toolCatalogContinuation !== undefined) ||
         String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
         (String(previous.modelId) !== String(input.thread.modelId) &&
           this.#options.supportsModelSwitch?.(input.thread) !== true))
@@ -4952,7 +4957,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                           // transcript's parked-turn recovery keys on it, and
                           // a plain "failed" would make it indistinguishable
                           // from every other provider failure.
-                          category: failure?.resumeRefused === true ? "stale" : "failed",
+                          category:
+                            failure?.toolCatalogHandoffRequired === true
+                              ? "tools-changed"
+                              : failure?.resumeRefused === true
+                                ? "stale"
+                                : "failed",
                           message,
                           ...(failure?.usageLimit === undefined
                             ? {}

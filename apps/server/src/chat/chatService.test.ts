@@ -14,6 +14,7 @@ import {
   MAX_PROVIDER_TOOLS,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
   decodeThreadRetentionThreadId,
+  decodeChatSubmissionId,
 } from "@octant/contracts";
 import {
   mkdtempSync,
@@ -234,6 +235,7 @@ function openFixture(options?: {
   readonly responseFragments?: ReadonlyArray<string>;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly nativeConversation?: boolean;
+  readonly toolCatalogContinuation?: ProviderDriver["toolCatalogContinuation"];
   /** The provider keeps durable sessions the host can always rebuild, as Octant Harness does. */
   readonly resumableHostConversation?: boolean;
   /** The service's clock, for a scenario whose order the journal's timestamps must show. */
@@ -642,6 +644,9 @@ function openFixture(options?: {
             : options?.resumableHostConversation === true
               ? { conversationOwnership: "host-resumable" }
               : {}),
+          ...(options?.toolCatalogContinuation === undefined
+            ? {}
+            : { toolCatalogContinuation: options.toolCatalogContinuation }),
           acquire: (input: ProviderAcquireInput) => {
             acquireInputs.push(input);
             return Effect.succeed(connectionDriver);
@@ -11159,6 +11164,50 @@ describe("handing a Chat conversation to a new provider session", () => {
 
   const lastAttempt = (fixture: ReturnType<typeof openFixture>, threadId: ChatThreadId) =>
     fixture.service.read(threadId).turns.at(-1)?.attempts.at(-1);
+
+  it("keeps the draft unaccepted until the person chooses a text handoff for changed tools", async () => {
+    const fixture = openMoving({
+      nativeConversation: true,
+      toolCatalogContinuation: () => "handoff-required",
+    });
+    const threadId = await answeredThread(fixture);
+    const before = fixture.service.read(threadId);
+    await expect(sendFollowUp(fixture, threadId, "Use the new tools")).rejects.toThrow(
+      "different tools",
+    );
+    expect(fixture.service.read(threadId).turns).toHaveLength(1);
+    expect(fixture.fakeDriver.resumeInputs).toHaveLength(0);
+    expect(fixture.fakeDriver.startedSessionIds).toHaveLength(1);
+    const submissionId = decodeChatSubmissionId("84000000-0000-4000-8000-000000000096");
+    await fixture.service.execute({
+      submissionId,
+      kind: "send-chat-turn",
+      threadId,
+      expectedVersion: before.thread.version,
+      prompt: "Use the new tools",
+      toolCatalogHandoff: true,
+    });
+    expect(fixture.fakeDriver.startedSessionIds).toHaveLength(2);
+    expect(fixture.fakeDriver.resumeInputs).toHaveLength(0);
+    expect(lastAttempt(fixture, threadId)?.handoff).toMatchObject({
+      reason: "provider-switch",
+      messages: 2,
+    });
+    expect(JSON.stringify(fixture.fakeDriver.sentTurns.at(-1)?.context)).toContain(
+      "Remember the walrus",
+    );
+    expect(fixture.service.read(threadId).turns).toHaveLength(2);
+    await expect(
+      fixture.service.execute({
+        kind: "send-chat-turn",
+        submissionId,
+        threadId,
+        expectedVersion: fixture.service.read(threadId).thread.version,
+        prompt: "Use the new tools",
+      }),
+    ).rejects.toThrow("submission identity");
+    expect(fixture.fakeDriver.startedSessionIds).toHaveLength(2);
+  });
 
   it("starts a new session with the earlier conversation when a provider that keeps its own session takes over", async () => {
     const fixture = openMoving({ nativeConversationFor: ownsConversation });

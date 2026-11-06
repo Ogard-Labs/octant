@@ -29,6 +29,31 @@ const authority = decodeWorkTurnAuthority({
 });
 
 describe("createWorkTurnClient", () => {
+  it("retains the host's typed tool continuation refusal without replaying the request", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json(
+        { category: "tools-changed", message: "Choose updated tools." },
+        { status: 409 },
+      ),
+    );
+    const client = createWorkTurnClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch,
+      windowCapability: "cap",
+    });
+    await expect(
+      client.startFirstTurn({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Use the new tool",
+        authority,
+      }),
+    ).rejects.toMatchObject({ category: "tools-changed", message: "Choose updated tools." });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("starts, looks up, cancels, and loads a durable transcript", async () => {
     const fetch = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
       const url = String(input);

@@ -2437,6 +2437,15 @@ export const ProviderResumeCursor = Schema.Struct({
    * means unknown, and every rule is kept.
    */
   tools: Schema.optional(Schema.Array(BoundedProviderToolName).pipe(Schema.maxItems(256))),
+  /** Fingerprints of the immutable starting definitions; schemas and secrets are never retained here. */
+  toolDefinitions: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        name: BoundedProviderToolName,
+        digest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(256)),
+  ),
 }).annotations(strict);
 export type ProviderResumeCursor = typeof ProviderResumeCursor.Type;
 
@@ -2470,6 +2479,7 @@ export const ProviderUsageLimit = Schema.Struct({
 export type ProviderUsageLimit = typeof ProviderUsageLimit.Type;
 
 export const ProviderFailure = Schema.Struct({
+  toolCatalogHandoffRequired: Schema.optional(Schema.Literal(true)),
   category: ProviderFailureCategory,
   message: Schema.NonEmptyTrimmedString,
   reason: Schema.optional(ProviderRefusalReason),

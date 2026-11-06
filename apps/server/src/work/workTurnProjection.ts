@@ -65,6 +65,9 @@ export class WorkTurnProjection {
       const existing = this.#byRequest.get(accepted.requestId);
       if (existing !== undefined && existing.version >= 1) return;
       const turn = decodeWorkTurnState({
+        ...(accepted.toolCatalogHandoff === undefined
+          ? {}
+          : { toolCatalogHandoff: accepted.toolCatalogHandoff }),
         requestId: accepted.requestId,
         threadId: accepted.threadId,
         turnId: accepted.turnId,

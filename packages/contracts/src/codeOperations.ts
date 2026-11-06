@@ -977,6 +977,8 @@ const PrepareReviewCorrection = Schema.Struct({
 }).annotations(strict);
 const StartProviderTurn = Schema.Struct({
   kind: Schema.Literal("start-provider-turn"),
+  /** Explicit consent to a fresh native session with a bounded conversation handoff. */
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   ...OperationScope,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
@@ -1689,6 +1691,7 @@ const OperationStateEvent = Schema.Struct({
   failure: Schema.optional(CodeOperationFailure),
 }).annotations(strict);
 const ConversationTurnStartedEvent = Schema.Struct({
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   kind: Schema.Literal("conversation-turn-started"),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,

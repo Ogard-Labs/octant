@@ -69,6 +69,7 @@ export interface CodeTurnFailure {
    * absence of a request or a limit.
    */
   readonly resumeRefused?: true;
+  readonly toolCatalogHandoffRequired?: true;
 }
 
 export interface CodeProviderAcquireInput extends ProviderAcquireInput {
@@ -335,7 +336,7 @@ export class CodeTurnRunner {
       const fail = (
         next: Exclude<CodeTurnOutcome, "completed">,
         message: string,
-        limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
+        limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
         resumeRefused?: true,
       ) =>
         Effect.gen(function* () {
@@ -1102,20 +1103,24 @@ function failForProvider(
   fail: (
     outcome: Exclude<CodeTurnOutcome, "completed">,
     message: string,
-    limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
+    limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
     resumeRefused?: true,
   ) => Effect.Effect<never, CodeTurnFailure>,
 ): Effect.Effect<never, CodeTurnFailure> {
   if (!isProviderFailure(failure)) return fail("failed", "Provider execution failed.");
-  const limit: Pick<ProviderFailure, "usageLimit" | "retryAfterMs"> = {
-    ...(failure.usageLimit === undefined ? {} : { usageLimit: failure.usageLimit }),
-    ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
-  };
+  const limit: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired"> =
+    {
+      ...(failure.toolCatalogHandoffRequired === undefined
+        ? {}
+        : { toolCatalogHandoffRequired: failure.toolCatalogHandoffRequired }),
+      ...(failure.usageLimit === undefined ? {} : { usageLimit: failure.usageLimit }),
+      ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+    };
   if (failure.category === "rate-limited") return fail("waiting", failure.message, limit);
   // A refused resume parks the turn `waiting` with the provider's sentence,
   // but the fact that no answer can ever restart this session must survive
   // the boundary too, or the transcript can only guess at it.
-  if (failure.category === "stale-resume") return fail("waiting", failure.message, undefined, true);
+  if (failure.category === "stale-resume") return fail("waiting", failure.message, limit, true);
   if (failure.category === "interrupted") return fail("interrupted", failure.message);
   return fail("failed", failure.message, limit);
 }
@@ -1146,7 +1151,7 @@ function isCodeTurnFailure(value: unknown): value is CodeTurnFailure {
 function codeTurnFailure(
   category: Exclude<CodeTurnOutcome, "completed">,
   message: string,
-  limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
+  limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
   resumeRefused?: true,
 ): CodeTurnFailure {
   return {
@@ -1155,6 +1160,9 @@ function codeTurnFailure(
     ...(limit?.usageLimit === undefined ? {} : { usageLimit: limit.usageLimit }),
     ...(limit?.retryAfterMs === undefined ? {} : { retryAfterMs: limit.retryAfterMs }),
     ...(resumeRefused === undefined ? {} : { resumeRefused }),
+    ...(limit?.toolCatalogHandoffRequired === true
+      ? { toolCatalogHandoffRequired: true as const }
+      : {}),
   };
 }
 

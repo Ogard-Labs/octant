@@ -384,6 +384,7 @@ export const ChatTurnRewound = Schema.Struct({
 export type ChatTurnRewound = typeof ChatTurnRewound.Type;
 
 export const ChatTurn = Schema.Struct({
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   id: ChatTurnId,
   threadId: ChatThreadId,
   /** Stable client submission identity used to reconcile an unknown response. */
@@ -636,6 +637,8 @@ export const ChangeChatInstructionsCommand = Schema.Struct({
 
 export const SendChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("send-chat-turn"),
+  /** Explicit consent to a fresh native session with a bounded conversation handoff. */
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   ...ChatThreadCommandFields,
   prompt: PromptText,
   /** Optional for older clients; new clients preserve it across retry after an unknown outcome. */
@@ -943,6 +946,7 @@ export type ChatCommand = typeof ChatCommand.Type;
 
 export const ChatFailureCategory = Schema.Literal(
   "unavailable",
+  "tools-changed",
   "unauthorized",
   "unsupported",
   "waiting",

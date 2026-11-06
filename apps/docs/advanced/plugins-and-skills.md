@@ -917,3 +917,21 @@ optional extension.
 - [Browser and computer use](/advanced/browser-and-computer-use) for related host-owned surfaces
 - [Apple Development Workbench](/advanced/apple-workbench) for the extension-independent core path
 - [Privacy and security](/advanced/privacy-and-security) for quarantine, provenance, and host-initiated network
+
+## When a saved session has different tools
+
+Some providers fix the tool list when a session starts. Reconnecting a connector
+with the same tools keeps that session. If a tool is added or its definition
+changes, Octant preserves your draft and conversation instead of silently
+continuing with tools the provider cannot call.
+
+Choose **Continue with updated tools** to send the current draft in a fresh
+session. Recent conversation carries over as text; the transcript shows any
+omissions. Hidden reasoning and tool activity stay in the old session, and the
+full task history remains available. A failed connector call is never replayed.
+The new session still uses the task's existing mode, folder and approval rules.
+Removing a tool keeps the session, and the host refuses further calls to it.
+
+Older saved sessions without definition fingerprints need this explicit choice
+once before receiving tools. You can leave the draft untouched and defer the
+choice; reconnecting or refreshing status does not send it.

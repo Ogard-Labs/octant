@@ -1,4 +1,5 @@
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
+import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { CommandCredentialRequests } from "../credentials/CommandCredentialRequests";
@@ -691,7 +692,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // Keyed on the journaled failure category, not on the absence of a request
   // or a limit, which a future provider could park without refusing a resume.
   const parkedTurn =
-    props.controller.turnStatus === "waiting" && props.controller.turnErrorCategory === "stale";
+    props.controller.turnStatus === "waiting" &&
+    (props.controller.turnErrorCategory === "stale" ||
+      props.controller.turnErrorCategory === "tools-changed");
   const busy =
     props.controller.turnStatus === "sending" ||
     props.controller.turnStatus === "running" ||
@@ -877,7 +880,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.operationClient !== undefined &&
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
-  async function submitFollowUp() {
+  async function submitFollowUp(toolCatalogHandoff = false) {
     if (props.controller.draftReviewFindingReferencesInvalid) {
       setSendNotice(
         "A saved review reference is unreadable. Clear this draft and prepare the findings again from Review before sending.",
@@ -964,6 +967,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (props.controller.draftRevision !== undefined)
       sendArguments[9] = props.controller.draftRevision;
     if (reviewFindingReferences.length > 0) sendArguments[10] = reviewFindingReferences;
+    if (toolCatalogHandoff) sendArguments[11] = true;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
       attachments.takeForSend();
@@ -1458,6 +1462,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             <p>{props.controller.turnError}</p>
           </OctantAlert>
         )}
+
+        {props.controller.turnErrorCategory === "tools-changed" ? (
+          <ToolCatalogContinuation
+            disabled={!canSend || queueFollowUp}
+            onContinue={() => void submitFollowUp(true)}
+          />
+        ) : null}
 
         {/* The transcript row repeats the failure's own sentence; only this
           notice carries what the provider reported about the limit itself —

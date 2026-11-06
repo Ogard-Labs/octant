@@ -1,4 +1,5 @@
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
+import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -781,6 +782,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   );
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
+  const [toolCatalogHandoffRequired, setToolCatalogHandoffRequired] = useState(false);
   const [creating, setCreating] = useState(false);
   const [providerChanging, setProviderChanging] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -815,6 +817,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (thread === undefined || accessChanging || access === thread.access) return;
     setAccessChanging(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     try {
       const result = await props.threadClient.execute({
         kind: "change-work-thread-access",
@@ -845,6 +848,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (thread === undefined || deliveryChanging) return;
     setDeliveryChanging(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     try {
       const result = await props.threadClient.execute({
         kind: "change-work-thread-document-delivery",
@@ -1090,6 +1094,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   useEffect(() => {
     setPendingRequests([]);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     setStatus(undefined);
     setEarlierState("idle");
     return () => earlierAbort.current?.abort();
@@ -1563,6 +1568,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       }
       setProviderChanging(true);
       setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
       setStatus(undefined);
       try {
         const result = await props.threadClient.execute({
@@ -1682,7 +1688,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   }, [props, thread]);
 
   const sendWorkTurn = useCallback(
-    async (enqueue = false): Promise<boolean> => {
+    async (enqueue = false, toolCatalogHandoff = false): Promise<boolean> => {
       if (
         thread !== undefined &&
         thread.bindingRevisionId === undefined &&
@@ -1727,6 +1733,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       };
       setCreating(true);
       setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
       setStatus(undefined);
       try {
         if (String(props.threadId) !== sendingThreadId) return false;
@@ -1776,6 +1783,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         }
         const started = await props.turnClient.startFirstTurn({
           kind: "start-work-thread-turn",
+          ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
           ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
           requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
           threadId: props.threadId,
@@ -1823,6 +1831,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         return true;
       } catch (error) {
         await discardUploadedAttachments();
+        setToolCatalogHandoffRequired(
+          error instanceof WorkTurnClientFailure && error.category === "tools-changed",
+        );
         setErrorMessage(
           error instanceof WorkTurnClientFailure
             ? error.message
@@ -1869,6 +1880,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (props.mutationClient === undefined) return;
     setCreating(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     setStatus(undefined);
     try {
       const reply = await props.mutationClient.mutate({
@@ -1916,6 +1928,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
     setCompleting(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     setStatus(undefined);
     try {
       const result = await props.threadClient.execute({
@@ -2843,6 +2856,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   {errorMessage}
                 </span>
               )}
+              {toolCatalogHandoffRequired ? (
+                <ToolCatalogContinuation
+                  disabled={!canSubmit || queueFollowUp || creating}
+                  onContinue={() => void sendWorkTurn(false, true)}
+                />
+              ) : null}
               {handoffNotice === undefined || completionLocked || turnRunning ? null : (
                 <span className="composer-status__hint" role="status">
                   {handoffNotice}
