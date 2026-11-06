@@ -44,6 +44,7 @@ export type AutomationDetailState =
       readonly status: "ready";
       readonly automation: AutomationDefinition;
       readonly fileSource?: AutomationDetailResponse["fileSource"];
+      readonly eventSource?: AutomationDetailResponse["eventSource"];
       readonly runs: readonly AutomationRun[];
     }
   | { readonly status: "unavailable"; readonly automationId: string; readonly message: string };
@@ -206,6 +207,7 @@ export function useAutomationCenterController(
           status: "ready",
           automation: response.automation,
           ...(response.fileSource === undefined ? {} : { fileSource: response.fileSource }),
+          ...(response.eventSource === undefined ? {} : { eventSource: response.eventSource }),
           runs: response.runs,
         });
       })

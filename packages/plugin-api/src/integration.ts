@@ -14,6 +14,38 @@ import type {
  */
 export * from "@octant/contracts/integration";
 
+/** Read-only contributed sources. Discovery and event data never grant execution authority. */
+export interface IntegrationEventSourceProvider {
+  readonly choices: () => Promise<
+    ReadonlyArray<import("@octant/contracts").AutomationEventSourceChoice>
+  >;
+  readonly bind: (
+    selection: import("@octant/contracts").AutomationIntegrationEventTrigger,
+    signal: AbortSignal,
+  ) => Promise<IntegrationEventSource | undefined>;
+}
+
+export interface IntegrationEventSource {
+  readonly identity: string;
+  readonly label: string;
+  /** Assignment sets detect absent-to-present transitions; append sources retain seen event ids. */
+  readonly semantics: "assignment-set" | "append";
+  readonly current: () => boolean;
+  readonly read: (
+    signal: AbortSignal,
+  ) => Promise<
+    | {
+        readonly kind: "complete";
+        readonly events: ReadonlyArray<import("@octant/contracts").AutomationIntegrationEvent>;
+      }
+    | {
+        readonly kind: "unavailable";
+        readonly reason: "source-unavailable" | "source-limit";
+        readonly retryAfterSeconds?: number;
+      }
+  >;
+}
+
 /**
  * Request header a plugin uses to ask the host fetch interceptor to attach
  * the named credential reference as an Authorization bearer token. The header

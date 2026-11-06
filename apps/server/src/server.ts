@@ -85,6 +85,7 @@ import { wireContext } from "./wiring/context";
 import { wireWorkFiles } from "./wiring/workFiles";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
+import { integrationEventSources } from "./integration/integrationEventSources";
 import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
@@ -306,6 +307,7 @@ export function startOctantServer(
       githubIntegrationIsEffective,
       githubIssueContextService,
       githubReadToolService,
+      linearRoutineEventSources,
       githubRoutes,
       integrationRoutes,
       credentialOperations,
@@ -426,6 +428,7 @@ export function startOctantServer(
     });
     const {
       agentPluginMcpSessionManager,
+      githubRoutineEventSources,
       chatAttachmentStore,
       chatDataDirectory,
       claudeResumeIdentityStore,
@@ -1101,7 +1104,13 @@ export function startOctantServer(
       pushGatewaySetting,
       pushNotificationTokenStore,
     } = wireAutomation({
+      integrationEventSources: integrationEventSources([
+        githubRoutineEventSources,
+        linearRoutineEventSources,
+      ]),
       automationEventStore,
+      codeEvidence,
+      codeBoardEventStore,
       agentRunOrchestration,
       externalContentIngestionStore,
       readHarnessProcessReceipts,

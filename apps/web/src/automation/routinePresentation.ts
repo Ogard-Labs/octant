@@ -42,6 +42,8 @@ export function routineScheduleLabel(
   options: AutomationFormatOptions = {},
 ): string {
   switch (trigger.kind) {
+    case "integration-event":
+      return trigger.sourceLabel ?? "Integration events";
     case "file-arrival":
       return `File arrivals in ${trigger.directory}`;
     case "once":
@@ -122,7 +124,8 @@ export function routineScheduleLine(
   now: string,
   options: AutomationFormatOptions = {},
 ): string {
-  if (trigger.kind === "file-arrival") return routineScheduleLabel(trigger, options);
+  if (trigger.kind === "file-arrival" || trigger.kind === "integration-event")
+    return routineScheduleLabel(trigger, options);
   return `${routineScheduleLabel(trigger, options)} · ${routineNextRunLabel(nextDueAt, now, options)}`;
 }
 

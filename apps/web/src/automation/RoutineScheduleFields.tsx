@@ -1,5 +1,6 @@
 import {
   DEFAULT_AUTOMATION_FILE_START_LIMIT,
+  type AutomationEventSourceChoice,
   type AutomationMissedRunPolicy,
   type AutomationTrigger,
 } from "@octant/contracts";
@@ -8,6 +9,7 @@ import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { RoutineFileArrivalFields } from "./RoutineFileArrivalFields";
+import { RoutineEventFields } from "./RoutineEventFields";
 import type { AutomationTriggerFormValue } from "./automationCenterModel";
 
 /**
@@ -16,6 +18,12 @@ import type { AutomationTriggerFormValue } from "./automationCenterModel";
  * and validates the same wherever a person sets one.
  */
 export interface RoutineScheduleFormState {
+  readonly integrationId: string;
+  readonly sourceId: string;
+  readonly sourceLabel: string;
+  readonly sourceIdentity: string;
+  readonly eventFilters: Readonly<Record<string, string>>;
+  readonly pollMinutes: string;
   readonly kind: AutomationTriggerFormValue["kind"];
   readonly onceLocal: string;
   readonly anchorLocal: string;
@@ -66,6 +74,12 @@ export function initialRoutineScheduleState(
   defaults: Partial<RoutineScheduleFormState> = {},
 ): RoutineScheduleFormState {
   const base: RoutineScheduleFormState = {
+    integrationId: "",
+    sourceId: "",
+    sourceLabel: "",
+    sourceIdentity: "",
+    eventFilters: {},
+    pollMinutes: "1",
     kind: "once",
     fileDirectory: "",
     fileExtensions: "",
@@ -82,6 +96,18 @@ export function initialRoutineScheduleState(
   };
   if (initial === undefined) return base;
   switch (initial.kind) {
+    case "integration-event":
+      return {
+        ...base,
+        kind: initial.kind,
+        integrationId: initial.integrationId,
+        sourceId: initial.sourceId,
+        sourceLabel: initial.sourceLabel ?? "",
+        sourceIdentity: initial.sourceIdentity ?? "",
+        eventFilters: initial.filters,
+        pollMinutes: String(initial.pollMinutes),
+        automaticStartLimit: String(initial.automaticStartLimit),
+      };
     case "file-arrival":
       return {
         ...base,
@@ -120,6 +146,17 @@ export function routineScheduleFormValue(
   trigger: RoutineScheduleFormState,
 ): AutomationTriggerFormValue {
   switch (trigger.kind) {
+    case "integration-event":
+      return {
+        kind: "integration-event",
+        integrationId: trigger.integrationId,
+        sourceId: trigger.sourceId,
+        filters: trigger.eventFilters,
+        pollMinutes: Number(trigger.pollMinutes),
+        automaticStartLimit: Number(trigger.automaticStartLimit),
+        ...(trigger.sourceIdentity === "" ? {} : { sourceIdentity: trigger.sourceIdentity }),
+        ...(trigger.sourceLabel === "" ? {} : { sourceLabel: trigger.sourceLabel }),
+      };
     case "file-arrival":
       return {
         kind: "file-arrival",
@@ -154,6 +191,9 @@ export function routineScheduleFormValue(
 }
 
 export function RoutineScheduleFields(props: {
+  readonly fileMode?: "work" | "code";
+  readonly allowIntegrationEvents?: boolean;
+  readonly eventSources?: ReadonlyArray<AutomationEventSourceChoice>;
   readonly allowFileArrivals?: boolean;
   readonly trigger: RoutineScheduleFormState;
   readonly onTriggerChange: (
@@ -193,13 +233,28 @@ export function RoutineScheduleFields(props: {
             ...(props.allowFileArrivals
               ? [{ id: "file-arrival", label: "When files arrive or change" }]
               : []),
+            ...(props.allowIntegrationEvents
+              ? [{ id: "integration-event", label: "When an integration event arrives" }]
+              : []),
           ]}
           value={trigger.kind}
         />
       </div>
 
+      {trigger.kind === "integration-event" && props.allowIntegrationEvents ? (
+        <RoutineEventFields
+          trigger={trigger}
+          sources={props.eventSources ?? []}
+          onChange={setTrigger}
+        />
+      ) : null}
+
       {trigger.kind === "file-arrival" && props.allowFileArrivals ? (
-        <RoutineFileArrivalFields trigger={trigger} onChange={setTrigger} />
+        <RoutineFileArrivalFields
+          trigger={trigger}
+          onChange={setTrigger}
+          {...(props.fileMode === undefined ? {} : { mode: props.fileMode })}
+        />
       ) : null}
 
       {trigger.kind === "once" ? (

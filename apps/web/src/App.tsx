@@ -4948,6 +4948,8 @@ function LaunchedShell(
   const pendingRequestFeedRevision =
     machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
   const homeStart = useHomeStart({
+    routineClient: launchedClients.automationClient,
+    onOpenRoutine: openRoutine,
     actions,
     activeMode,
     activePaneId,

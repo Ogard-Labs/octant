@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { HomeDashboard } from "./HomeDashboard";
 import { createCiFailuresCard, type CiFailuresCardSource } from "./CiFailuresCard";
+import { automationSummaryFixture } from "../automation/automationTestFixtures";
 
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
 const NOW = Date.parse("2026-08-22T08:00:00.000Z");
@@ -72,6 +73,54 @@ function source(overrides: Partial<CiFailuresCardSource> = {}): CiFailuresCardSo
 }
 
 describe("the CI failures card", () => {
+  it("shows existing routine work on the branch before another manual fix is drafted", async () => {
+    const onOpenRoutine = vi.fn();
+    const onStartFix = vi.fn();
+    const routine = automationSummaryFixture({
+      projectId,
+      displayName: "Check completed CI",
+      latestEventRun: {
+        runId: "aa000000-0000-4000-8000-000000000010" as never,
+        lifecycle: "running",
+        event: {
+          id: "123:456:1",
+          label: "CI attempt 1",
+          occurredAt: "2026-08-22T07:40:00.000Z" as never,
+          url: "https://github.com/octant/octant/actions/runs/456",
+          routineOutput: false,
+          data: JSON.stringify({ repository: "octant/octant", branch: "feature/list" }),
+        },
+      },
+    });
+    render(
+      <HomeDashboard
+        cards={[
+          createCiFailuresCard(
+            source({
+              onOpenRoutine,
+              onStartFix,
+              routines: {
+                list: async () => ({ kind: "automation-list", items: [routine] }),
+              } as never,
+            }),
+          ),
+        ]}
+        customization={{ order: [], visibility: [] }}
+        onCustomizationChange={vi.fn()}
+      />,
+    );
+    const card = await screen.findByRole("region", { name: "CI failures" });
+    expect(
+      await within(card).findByText(/Routine work exists for CI on this branch/),
+    ).toBeInTheDocument();
+    expect(within(card).getByRole("link", { name: "View CI event" })).toHaveAttribute(
+      "href",
+      routine.latestEventRun?.event.url,
+    );
+    await userEvent.click(within(card).getByRole("button", { name: "Check completed CI" }));
+    expect(onOpenRoutine).toHaveBeenCalledWith(String(routine.id));
+    expect(onStartFix).not.toHaveBeenCalled();
+  });
   it("shows the check, the repository, and how long ago it failed", async () => {
     render(
       <HomeDashboard

@@ -1118,6 +1118,13 @@ export interface CodeOperationExecuteOptions {
   readonly limitRecovery?: boolean;
   /** Host-only revocation check; never grants authority or travels on the wire. */
   readonly admissionCurrent?: () => boolean;
+  /** Host-owned input preparation, only for a fresh start after checkout authority resolves. */
+  readonly prepareTurnInput?: (input: {
+    readonly threadId: CodeThreadId;
+    readonly checkoutRoot: string;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<(() => boolean) | undefined>;
   /**
    * Set by the routine dispatcher for the provider turn it starts for a run,
    * and only there: that turn may report the run's result. Host-only: the
@@ -1679,10 +1686,13 @@ export class CodeOperationService {
             if (startingTurn !== undefined) this.#startingTurns.add(startingTurn);
             // A start stopped while it prepares is refused at its next
             // admission check, at the latest just before the runtime takes it on.
+            let inputCurrent: (() => boolean) | undefined;
+            const preparationCurrent = () =>
+              startingTurn?.cancelled !== true && options.admissionCurrent?.() !== false;
             const admissionCurrent =
               startingTurn === undefined
                 ? options.admissionCurrent
-                : () => !startingTurn.cancelled && options.admissionCurrent?.() !== false;
+                : () => preparationCurrent() && inputCurrent?.() !== false;
             try {
               // Held first, so no restore starts after this; one already
               // overwriting the files finishes before the checkpoint is taken.
@@ -1709,6 +1719,26 @@ export class CodeOperationService {
                 admissionCurrent?.() === false
               ) {
                 turnRefusal = admissionRefusal();
+              }
+              if (
+                command.kind === "start-provider-turn" &&
+                recordedStart === undefined &&
+                turnRefusal === undefined
+              ) {
+                if (options.prepareTurnInput !== undefined) {
+                  try {
+                    inputCurrent = await options.prepareTurnInput({
+                      threadId: command.threadId,
+                      checkoutRoot: root.checkoutRoot,
+                      current: preparationCurrent,
+                      signal: AbortSignal.timeout(10_000),
+                    });
+                  } catch {
+                    inputCurrent = undefined;
+                  }
+                  if (inputCurrent === undefined || admissionCurrent?.() === false)
+                    turnRefusal = admissionRefusal();
+                }
               }
               if (
                 command.kind === "start-provider-turn" &&

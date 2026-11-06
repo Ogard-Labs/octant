@@ -1,4 +1,6 @@
 import {
+  AutomationEventSourceObserved,
+  type AutomationEventSourceCheckpoint,
   AggregateId,
   AggregateVersion,
   AutomationBlocked,
@@ -56,6 +58,7 @@ export const AUTOMATION_DEFINITION_AGGREGATE_TYPE = "automation-definition";
 export const AUTOMATION_RUN_AGGREGATE_TYPE = "automation-run";
 
 export const AUTOMATION_FILE_SOURCE_OBSERVED = "automation-file-source-observed@1";
+export const AUTOMATION_EVENT_SOURCE_OBSERVED = "automation-event-source-observed@1";
 export const AUTOMATION_DEFINITION_CREATED = "automation-definition-created@1";
 export const AUTOMATION_DEFINITION_UPDATED = "automation-definition-updated@1";
 export const AUTOMATION_DEFINITION_LIFECYCLE_CHANGED = "automation-definition-lifecycle-changed@1";
@@ -104,6 +107,7 @@ const decodeRunResultReported = Schema.decodeUnknownSync(AutomationRunResultRepo
  */
 export function registerAutomationEvents(registry: EventRegistry): EventRegistry {
   return registry
+    .register(AUTOMATION_EVENT_SOURCE_OBSERVED, 1, AutomationEventSourceObserved)
     .register(AUTOMATION_FILE_SOURCE_OBSERVED, 1, AutomationFileSourceObserved)
     .register(AUTOMATION_DEFINITION_CREATED, 1, AutomationDefinitionCreated)
     .register(AUTOMATION_DEFINITION_UPDATED, 1, AutomationDefinitionUpdated)
@@ -143,11 +147,13 @@ export interface AutomationEventStoreOptions {
 }
 
 export interface AppendAutomationDefinitionCreatedInput {
+  readonly eventSource?: AutomationEventSourceCheckpoint;
   readonly automation: AutomationDefinition;
   readonly fileSource?: AutomationFileSourceCheckpoint;
 }
 
 export interface AppendAutomationDefinitionUpdatedInput {
+  readonly eventSource?: AutomationEventSourceCheckpoint;
   readonly automation: AutomationDefinition;
   readonly fileSource?: AutomationFileSourceCheckpoint;
   readonly previousDefinitionRevision: number;
@@ -225,6 +231,12 @@ export interface AppendAutomationRunResultReportedInput {
 /** One typed frame of a scheduler occurrence-ledger append batch. */
 export type AutomationOccurrenceLedgerEvent =
   | {
+      readonly kind: "event-source-observed";
+      readonly definitionRevision: number;
+      readonly checkpoint: AutomationEventSourceCheckpoint;
+      readonly at: UtcTimestamp;
+    }
+  | {
       readonly kind: "file-source-rearmed";
       readonly automation: AutomationDefinition;
       readonly previousLifecycle: AutomationLifecycle;
@@ -289,6 +301,7 @@ const AUTOMATION_AGGREGATE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 const DEFINITION_EVENT_NAMES: ReadonlySet<string> = new Set([
+  AUTOMATION_EVENT_SOURCE_OBSERVED,
   AUTOMATION_FILE_SOURCE_OBSERVED,
   AUTOMATION_DEFINITION_CREATED,
   AUTOMATION_DEFINITION_UPDATED,
@@ -340,6 +353,7 @@ export class AutomationEventStore {
     let aggregateId: typeof AggregateId.Type;
     try {
       payload = decodeDefinitionCreated({
+        ...(input.eventSource === undefined ? {} : { eventSource: input.eventSource }),
         automation: input.automation,
         ...(input.fileSource === undefined ? {} : { fileSource: input.fileSource }),
       });
@@ -382,6 +396,7 @@ export class AutomationEventStore {
     try {
       expectedVersion = decodeAggregateVersion(input.expectedVersion);
       payload = decodeDefinitionUpdated({
+        ...(input.eventSource === undefined ? {} : { eventSource: input.eventSource }),
         automation: input.automation,
         ...(input.fileSource === undefined ? {} : { fileSource: input.fileSource }),
         previousDefinitionRevision: input.previousDefinitionRevision,
@@ -487,6 +502,17 @@ export class AutomationEventStore {
                 previousLifecycle: event.previousLifecycle,
                 fileSource: event.checkpoint,
                 fileSourceReview: event.review,
+              }),
+            };
+          case "event-source-observed":
+            return {
+              eventName: AUTOMATION_EVENT_SOURCE_OBSERVED,
+              occurredAt: event.at,
+              payload: Schema.decodeUnknownSync(AutomationEventSourceObserved)({
+                automationId: input.automationId,
+                definitionRevision: event.definitionRevision,
+                checkpoint: event.checkpoint,
+                recordedAt: event.at,
               }),
             };
           case "file-source-observed":
