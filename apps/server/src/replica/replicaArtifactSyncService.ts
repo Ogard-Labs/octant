@@ -704,12 +704,10 @@ export class ReplicaArtifactSyncService {
   restorePublication(canvasId: CanvasId, versionId: CanvasVersionId): void {
     const state = this.#ports.artifactState();
     const deletions =
-      state
-        .artifact(canvasId)
-        ?.tombstones.map((held) => ({
-          instanceId: held.originInstanceId,
-          sequence: held.originSequence,
-        })) ?? [];
+      state.artifact(canvasId)?.tombstones.map((held) => ({
+        instanceId: held.originInstanceId,
+        sequence: held.originSequence,
+      })) ?? [];
     if (deletions.length === 0) return;
     const deletionDigest = this.#deletionDigest(canvasId);
     for (const batch of state.backfills) {
