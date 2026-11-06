@@ -1364,6 +1364,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         threadId,
         questionId: String(question.id),
         prompt: question.prompt,
+        ...(question.questionnaire === undefined ? {} : { questionnaire: question.questionnaire }),
         options: question.options,
       });
     });

@@ -1,3 +1,4 @@
+import { validateQuestionnaireAnswer } from "@octant/domain";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "./sideChatReturn";
 import {
   THREAD_DIALOGUE_TOOL_NAME,
@@ -3879,6 +3880,11 @@ export class ChatService {
         category: "invalid",
         message: "Chat attempt has no open question by that identity.",
       });
+    }
+    if (question.questionnaire !== undefined) {
+      const validation = validateQuestionnaireAnswer(question.questionnaire, command.answer);
+      if (validation.status === "invalid")
+        throw new ChatServiceError({ category: "invalid", message: validation.message });
     }
     const answered = await this.#turnRunner.deliverQuestionAnswer({
       attemptId: String(command.attemptId),

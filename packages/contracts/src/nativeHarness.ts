@@ -15,6 +15,7 @@
  * pointer at durable evidence.
  */
 
+import { Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
@@ -289,6 +290,7 @@ export const MAX_NATIVE_HARNESS_QUESTION_OPTIONS = 8;
  * the model never has to guess what the user meant.
  */
 export const NativeHarnessAskUserArguments = Schema.Struct({
+  questionnaire: Schema.optional(Questionnaire),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
   options: Schema.optional(
     Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(
@@ -527,10 +529,51 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
   {
     name: "ask-user",
     description:
-      "Ask the person a question and wait for the answer. Offer options when there are natural choices; the answer may still be free text.",
+      "Ask the person a question and wait for the answer. Offer options for one simple question. For up to four related decisions use questionnaire with stable question and option IDs, single or multiple selection, descriptions, selection limits and optional written alternatives. The person can add a comment. Never ask for credentials or use this as permission approval.",
     inputSchema: {
       type: "object",
       properties: {
+        questionnaire: {
+          type: "object",
+          additionalProperties: false,
+          required: ["questions"],
+          properties: {
+            questions: {
+              type: "array",
+              minItems: 1,
+              maxItems: 4,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["id", "prompt", "selection", "options"],
+                properties: {
+                  id: { type: "string", minLength: 1, maxLength: 64 },
+                  prompt: { type: "string", minLength: 1, maxLength: 1024 },
+                  selection: { type: "string", enum: ["single", "multiple"] },
+                  options: {
+                    type: "array",
+                    minItems: 1,
+                    maxItems: 8,
+                    items: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["id", "label"],
+                      properties: {
+                        id: { type: "string", minLength: 1, maxLength: 64 },
+                        label: { type: "string", minLength: 1, maxLength: 256 },
+                        description: { type: "string", minLength: 1, maxLength: 512 },
+                        recommended: { type: "boolean" },
+                      },
+                    },
+                  },
+                  minSelections: { type: "integer", minimum: 0, maximum: 8 },
+                  maxSelections: { type: "integer", minimum: 0, maximum: 8 },
+                  allowCustom: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
         prompt: { type: "string" },
         options: {
           type: "array",
@@ -908,13 +951,14 @@ export type NativeHarnessInteractionSource = typeof NativeHarnessInteractionSour
 /** A question the lead or one of its children asked the person. */
 export const NativeHarnessQuestion = Schema.Struct({
   id: NativeHarnessQuestionId,
+  questionnaire: Schema.optional(Questionnaire),
   source: Schema.optional(NativeHarnessInteractionSource),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
   options: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(
     Schema.maxItems(MAX_NATIVE_HARNESS_QUESTION_OPTIONS),
   ),
   status: NativeHarnessQuestionStatus,
-  answer: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096))),
+  answer: Schema.optional(QuestionnaireAnswerText),
   askedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
 })
@@ -1150,7 +1194,7 @@ export type NativeHarnessSteeringTaken = typeof NativeHarnessSteeringTaken.Type;
 
 export const AnswerNativeHarnessQuestion = Schema.Struct({
   questionId: NativeHarnessQuestionId,
-  answer: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
+  answer: QuestionnaireAnswerText,
 }).annotations(strict);
 export type AnswerNativeHarnessQuestion = typeof AnswerNativeHarnessQuestion.Type;
 
@@ -1162,7 +1206,12 @@ export const NativeHarnessQuestionAnswerResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("question-refused"),
     questionId: NativeHarnessQuestionId,
-    reason: Schema.Literal("question-not-found", "already-settled", "not-authorized"),
+    reason: Schema.Literal(
+      "question-not-found",
+      "already-settled",
+      "not-authorized",
+      "invalid-answer",
+    ),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),
 );

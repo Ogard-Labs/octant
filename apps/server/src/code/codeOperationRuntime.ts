@@ -1,3 +1,4 @@
+import { type Questionnaire } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { CodeTurnReviewCaptureScheduler } from "./codeTurnReviewCaptureScheduler";
 import { boundReviewText } from "./codeReviewComparison";
@@ -642,7 +643,11 @@ export interface CodeOperationRuntimeOptions {
     readonly noteRetry?: (scope: NativeHarnessTurnScope, notice: HarnessRetryNotice) => void;
     readonly clearRetry?: (scope: NativeHarnessTurnScope) => void;
     /** Settles a harness question the person answered through the Code question surface. */
-    readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
+    readonly answerQuestion?: (
+      threadId: string,
+      questionId: string,
+      answer: string,
+    ) => void | "answered" | "question-not-found" | "already-settled" | "invalid-answer";
   };
   readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
   /** Marks a thread whose runtime read outside content with its own tools. */
@@ -840,6 +845,7 @@ export interface CodeOperationRuntime {
   raiseHarnessQuestion?(input: {
     readonly threadId: string;
     readonly questionId: string;
+    readonly questionnaire?: Questionnaire;
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
   }): boolean;
@@ -3433,7 +3439,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     };
   }
 
-  async answerInput(input: Parameters<CodeOperationTurnPort["answerInput"]>[0]) {
+  async answerInput(
+    input: Parameters<CodeOperationTurnPort["answerInput"]>[0],
+  ): Promise<Awaited<ReturnType<CodeOperationTurnPort["answerInput"]>>> {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined || !active.questions.has(input.requestId)) {
       return this.#settleDeadTurnRequest(input.thread, "input", String(input.requestId));
@@ -3441,13 +3449,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (active.harnessQuestions.has(input.requestId)) {
       // A harness question is the host's own; the provider never saw it and
       // is waiting on the tool call that asked.
-      active.questions.delete(input.requestId);
-      active.harnessQuestions.delete(input.requestId);
-      this.#options.nativeHarness?.answerQuestion?.(
+      const outcome = this.#options.nativeHarness?.answerQuestion?.(
         String(active.thread.id),
         input.requestId,
         input.response,
       );
+      if (outcome === "invalid-answer")
+        return {
+          state: active.state,
+          failure: {
+            category: "invalid",
+            message: "The questionnaire answer is incomplete or contains invalid choices.",
+          },
+        };
+      if (outcome === "already-settled" || outcome === "question-not-found")
+        return {
+          state: active.state,
+          failure: { category: "stale", message: "That question is no longer pending." },
+        };
+      active.questions.delete(input.requestId);
+      active.harnessQuestions.delete(input.requestId);
       return answeredTurnState(active.state);
     }
     if (active.connection === undefined) return turnState("failed");
@@ -3471,6 +3492,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   raiseHarnessQuestion(input: {
     readonly threadId: string;
     readonly questionId: string;
+    readonly questionnaire?: Questionnaire;
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
   }): boolean {
@@ -3484,6 +3506,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       expectedCursor: active.cursor,
       event: {
         kind: "input-requested",
+        ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
         requestId: input.questionId,
         prompt: input.prompt,
         options: input.options,

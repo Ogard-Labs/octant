@@ -1,3 +1,4 @@
+import { type Questionnaire } from "@octant/contracts";
 import type {
   AgentRun,
   AgentRunAuthority,
@@ -185,6 +186,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
   const ask = async (input: {
     readonly run: AgentRun;
     readonly prompt: string;
+    readonly questionnaire?: Questionnaire;
     readonly options: ReadonlyArray<string>;
     readonly signal?: AbortSignal;
   }) => {
@@ -201,6 +203,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       ...parent,
       lead: parent.lead,
       prompt: input.prompt,
+      ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
       options: input.options,
       signal: input.signal,
     });

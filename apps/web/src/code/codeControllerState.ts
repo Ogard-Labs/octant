@@ -110,7 +110,9 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
       ...(event.localPersonOnly === true ? { localPersonOnly: true } : {}),
     };
   }
-  if (event.kind === "input-requested") {
+  // App questionnaires follow the session read so answers from another window
+  // withdraw the card here too; provider-native questions keep their event path.
+  if (event.kind === "input-requested" && event.questionnaire === undefined) {
     return {
       kind: "input",
       requestId: event.requestId,
